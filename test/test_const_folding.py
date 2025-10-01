@@ -3,6 +3,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import full_rewrite_to_sink
+from tinygrad.helpers import RANGEIFY
 from tinygrad.device import is_dtype_supported
 import numpy as np
 from test.helpers import not_support_multi_device
@@ -155,7 +156,7 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_add_padded_zero(self):
     # TODO: it's 1 now, this might be possible to fold
-    _check_ast_count(1, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(2).pad(((1, 1),)))
+    _check_ast_count(0 if RANGEIFY else 1, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(2).pad(((1, 1),)))
 
   def test_mul_shrunk_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.ones(6).shrink(((1, 5),)))
@@ -244,7 +245,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
         t = Tensor.ones(16, dtype=dt).reshape(4, 4)
         assert t.sum().dtype == t.contiguous().sum().dtype
 
-@unittest.skipIf(not_support_multi_device(), "no multi")
+@unittest.skipIf(not_support_multi_device() or RANGEIFY, "no multi, RANGEIFY doesn't support multi const folding")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))

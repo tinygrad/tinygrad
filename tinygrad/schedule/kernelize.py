@@ -120,7 +120,8 @@ def create_kernel(x:UOp, b:UOp|None=None):
   if b is None: b = UOp.new_buffer(x.device, x.size, x.dtype)
   kernel = UOp(Ops.KERNEL, src=(b,)+x.src, arg=Kernel(x.sink(), m if (m:=x.metadata) else ()))
   buffer = b.base if b.size == b.base.size else UOp(Ops.BUFFER_VIEW, b.dtype, (b.base,), (b.size, b.arg.views[0].offset))
-  return buffer.assign(kernel).shrink(((0, prod(x.shape)),)).reshape(x.shape)
+  # we have to shrink the buffer back to the symbolic shape
+  return buffer.assign(kernel).reshape(tuple(d.vmax if isinstance(d, UOp) else d for d in x.shape)).shrink(tuple((0, d) for d in x.shape))
 
 DONT_PLACE_IN_KERNEL = {Ops.KERNEL, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.MULTI, Ops.BIND}
 def append_to_kernel(x:UOp):
@@ -148,6 +149,16 @@ create_kernels = PatternMatcher([
    lambda ms: UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).reshape(ms.src[0].arg)),
 ])
 
+def add_stores(ctx, sink: UOp):
+  stores = []
+  for i,x in enumerate(sink.src):
+    gbl = UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i)
+    # if this is an assign then we already have a buffer with a view that should be the target of the store
+    if x.op is Ops.ASSIGN: stores.append(UOp.store(gbl.view(unwrap(s.st)), s))
+    # otherwise we have to create the shapetracker and shrink it to the correct symbolic shape
+    else: stores.append(
+      UOp.store(gbl.reshape(tuple(int(d.vmax) if isinstance(d,UOp) else d for d in s.shape)).shrink(tuple((0,d) for d in s.shape)),s))
+  return UOp.sink(*stores, arg=sink.arg)
 # **** fix kernel AST
 
 def unbind_view(x:UOp):
@@ -168,9 +179,7 @@ replace_buffers = PatternMatcher([
   # no SINK for meta ops
   (UPat(Ops.SINK, src=(UPat(Ops.CONTIGUOUS, src=(UPat(GroupOp.Meta, name="x"),),))), lambda x:x),
   # STORE (except for meta ops)
-  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), lambda ctx,sink:
-   UOp.sink(*[UOp.store(UOp(Ops.DEFINE_GLOBAL, (s:=x.base).dtype.ptr(ctx[i].size), (), i).view(s.st), s) for i,x in enumerate(sink.src)],
-            arg=sink.arg)),
+  (UPat(Ops.SINK, src=UPat(GroupOp.All-{Ops.STORE}), name="sink"), add_stores),
   # remove CONTIGUOUS/DEVICE from kernel AST
   (UPat((Ops.CONTIGUOUS, Ops.MSELECT), src=(UPat.var("x"),)), lambda x: x),
   (UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="view"), lambda view: view.replace(src=())),
@@ -294,7 +303,7 @@ def limit_bufs(root:UOp):
   # count number of unique buffers flowing into this op
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
-    if (is_load:=(u.op in {Ops.BUFFER, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.MSTACK})): bufs.add(u)
+    if (is_load:=(u.op in {Ops.BUFFER, Ops.CONTIGUOUS, Ops.ASSIGN, Ops.MSTACK, Ops.DEFINE_VAR})): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
   # NOTE: this -1 is for the output buffer

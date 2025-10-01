@@ -12,7 +12,7 @@ from tinygrad.renderer import Renderer
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.index(UOp.invalid())
-  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx, valid)
+  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid))
 
   # wait for it to be image indexed before running simplification
   if start_idx.dtype.count != 2: return None
@@ -43,7 +43,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
-  return buf.index(idx, new_valid)
+  return buf.index(idx.valid(new_valid) if new_valid is not None else idx)
 
 def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
   if store_gate not in [gate.src[0] for gate in val.toposort() if gate.op is Ops.IF]: return None
@@ -52,14 +52,11 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
 
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("start_idx"), UPat.var("valid"))), simplify_valid_load),
-  # lower turn the invalid into a gate, must come before index dtype lowering
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate,),), lambda buf,x,cond,i: buf.index(x, cond)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
+  # simplify away long after index has been lowered
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x", dtypes.long), UPat.var("c", dtypes.bool))), lambda buf,x,c: simplify_valid_load(buf, x, c)),
   # drop true gate
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x)),
-  # remove hanging cast
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast()),), lambda buf,idx: buf.index(idx)),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.int).cast(), UPat.var("valid"))), lambda buf,idx,valid: buf.index(idx, valid)),
   # delete_redundant_gates (after expand)
   (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
                                   UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
@@ -67,21 +64,21 @@ load_store_indexing = PatternMatcher([
 
 # ***** load/store grouping *****
 
-def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
-  if getenv("UNSAFE_DISABLE_MASK", 0): mask = None
+def expand_index(buf:UOp, vec:UOp):
+  if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
-  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), mask.gep(i) if mask is not None else None) for i in range(vec.dtype.count)]),
+  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i)) for i in range(vec.dtype.count)]),
                        symbolic_flat+load_store_indexing, name=f"index_buf_{buf.arg}")
   # extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
   for i in range(vec.dtype.count):
-    idx: Any = midx.src[i].src[1]
+    idx: Any = midx.src[i].src[1].get_idx()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
     elif idx.op is Ops.CONST and idx.arg is Invalid: root_src, arg = "INVALID", 0
     elif idx.op is Ops.CONST: root_src, arg = "CONST", idx.arg
     else: root_src, arg = idx, 0
-    if len(midx.src[i].src) == 3: root_src = (midx.src[i].src[2], root_src)
+    root_src = (midx.src[i].src[1].get_valid(), root_src)
     offsets_rootsrc[root_src].setdefault(arg, []).append(i)
 
   # then rewrite everything we can into groups
@@ -102,7 +99,7 @@ def expand_index(buf:UOp, vec:UOp, mask:UOp|None=None):
       global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
-  post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace).vec(vec.dtype.count), tuple(ret))
+  post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace).vec(global_offset), tuple(ret))
   return post_cat.gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp, sto:UOp):
@@ -124,8 +121,6 @@ def gep_on_store(gep:UOp, st:UOp, sto:UOp):
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines, name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines, name="buf")), UPat.var("vec"),
-                        UPat.var("mask"))), expand_index),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
@@ -133,7 +128,7 @@ load_store_folding = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(Ops.GEP, name="gep"), UPat.var("st")), allow_any_len=True, name="sto"), gep_on_store),
   # put PTRCAT after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.PTRCAT, name="cat"),), name="ld", allow_any_len=True),
-   lambda cat,ld: UOp(Ops.CAT, ld.dtype, tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
+   lambda cat,ld: UOp(Ops.CAT, cat.dtype.base.vec(cat.dtype.vcount), tuple(ld.replace(dtype=x.dtype.base, src=(x,)+ld.src[1:]) for x in cat.src))),
   # put PTRCAT after STORE
   (UPat(Ops.STORE, src=(UPat(Ops.PTRCAT, name="cat"), UPat(name="data")), allow_any_len=True, name="sto"), cat_after_store),
 ])
@@ -165,7 +160,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
-  if must_divide: lengths = [x for x in lengths if idx.src[1].divides(x) is not None]
+  offset, mask = idx.src[1].get_idx(), idx.src[1].get_valid()
+  if must_divide: lengths = [x for x in lengths if offset.divides(x) is not None]
 
   # split based on the fold lengths
   global_offset = 0
@@ -174,7 +170,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     # with 1 at the end of the lengths list, this will always hit
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
-      lidx = buf.index(idx.src[1] + global_offset, idx.src[2] if len(idx.src) > 2 else None)
+      lidx = buf.index((offset + global_offset).valid(mask))
       if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
@@ -190,19 +186,20 @@ def image_fixup(ls:UOp):
   if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
     idx = ls.src[0].src[0]
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+    oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % image_dtype.shape[1], (x // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx.valid(valid)))
     return ls.replace(src=(idx,)+ls.src[1:])
 
   # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].dtype != dtypes.int.vec(2):
+  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.index.vec(2):
     assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
     idx = ls.src[0]
-    id4 = idx.src[1] % 4
-    oidx = UOp(Ops.VECTORIZE, dtypes.int.vec(2), ((idx.src[1] // 4) % image_dtype.shape[1], (idx.src[1] // (4*image_dtype.shape[1]))))
-    idx = idx.replace(src=(idx.src[0], oidx)+idx.src[2:])
+    x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+    oidx = UOp(Ops.VECTORIZE, dtypes.index.vec(2), ((x // 4) % image_dtype.shape[1], (x // (4*image_dtype.shape[1]))))
+    idx = idx.replace(src=(idx.src[0], oidx.valid(valid)))
     vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
-    return functools.reduce(lambda ret, i: id4.ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
+    return functools.reduce(lambda ret, i: (x % 4).ne(i).where(ret, vec_load.gep(i)), range(4), ls.const_like(float('nan')))
 
   return None
 
@@ -229,6 +226,7 @@ def no_vectorized_wmma(wmma:UOp):
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
+  if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
 
@@ -238,7 +236,7 @@ def no_vectorized_buf(buf:UOp):
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   cnt = cast.dtype.count
   assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
-  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.int.vec(cnt), tuple(range(cnt))))
+  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))))
 
 devectorize = PatternMatcher([
   # no ALU on vectorized dtypes

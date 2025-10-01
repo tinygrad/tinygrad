@@ -5,7 +5,7 @@ from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad, GroupOp
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -70,6 +70,13 @@ class Scheduler:
     local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].ptrdtype.addrspace == AddrSpace.LOCAL) \
                         or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
     for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
+
+    # filter any not in reduces
+    # TODO: enable this
+    """
+    reduce_rngs = [x.ranges for x in self.ast.toposort() if x.op is Ops.REDUCE]
+    for ls in reduce_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
+    """
 
     return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.LOOP] if store_rngs else []
 
@@ -140,6 +147,11 @@ class Scheduler:
         upcast_local_sz = prod([self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.WARP, AxisType.LOCAL, AxisType.GROUP_REDUCE)])
         smem_sz = amt*upcast_local_sz*self.reduceop.dtype.itemsize
         check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
+      if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP}):
+        # We currently dont support a group within another rudece, TODO: fix if-contexts
+        reduce = [u for u in self.ast.parents if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
+        check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
+          "cannot have a GROUP_REDUCE inside another reduce")
 
       if opt.op is OptOps.UNROLL:
         check(amt <= 32, "don't unroll more than 32")
@@ -230,6 +242,9 @@ class Scheduler:
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
 
+          # tag the reduceop
+          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
+
           # do optimizations and save the ranges
           try:
             for i,a in enumerate(axes):
@@ -259,7 +274,7 @@ class Scheduler:
 
           if use_tensor_cores != 2:
             # fix the srcs
-            reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
+            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)

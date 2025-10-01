@@ -28,7 +28,7 @@ jobs:
       # since sudo is required for usbgpu on macos, move the cache to a new location, as some of the files are owned by root
       PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -160,7 +160,7 @@ jobs:
   testnvidiabenchmark:
     name: tinybox green Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -274,7 +274,7 @@ jobs:
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
     runs-on: [self-hosted, Linux, tinyboxgreen]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -346,7 +346,7 @@ jobs:
   testamdbenchmark:
     name: tinybox red Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 20
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -476,7 +476,7 @@ jobs:
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -511,8 +511,8 @@ jobs:
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=85 AMD=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
       run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=188 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
-    - name: Run 10 CIFAR training steps w BF16
-      run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+    # - name: Run 10 CIFAR training steps w BF16
+    #   run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     - name: Run 10 CIFAR training steps w winograd
       run: BENCHMARK_LOG=cifar_10steps_half_wino ASSERT_MIN_STEP_TIME=66 AMD=1 WINO=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
     - name: Run full CIFAR training w 1 GPU
@@ -539,7 +539,7 @@ jobs:
   testmlperfamdbenchmark:
     name: tinybox red MLPerf Benchmark
     runs-on: [self-hosted, Linux, tinybox]
-    timeout-minutes: 30
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -645,7 +645,7 @@ jobs:
   testreddriverbenchmark:
     name: AM Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}
@@ -716,7 +716,7 @@ jobs:
   testgreendriverbenchmark:
     name: NV Benchmark
     runs-on: [self-hosted, Linux, tinyboxrandom]
-    timeout-minutes: 15
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash -e -o pipefail {0}

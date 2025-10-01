@@ -160,8 +160,10 @@ jobs:
       with:
         key: be-minimal
         deps: testing_minimal
-    - name: Test dtype with Python emulator
-      run: DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+    - name: Test dtype with Python emulator (with RANGEIFY)
+      run: |
+        RANGEIFY=0 DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
+        RANGEIFY=1 DEBUG=1 PYTHON=1 python3 -m pytest -n=auto test/test_dtype.py test/test_dtype_alu.py
     - name: Test ops with Python emulator
       run: DEBUG=2 SKIP_SLOW_TEST=1 PYTHON=1 python3 -m pytest -n=auto test/test_ops.py --durations=20
     - name: Test uops with Python emulator
@@ -259,14 +261,18 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: unittest-12
-        pydeps: "pillow"
+        pydeps: "pillow numpy ftfy regex"
         deps: testing_unit
+    - name: Check Device.DEFAULT
+      run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
-      run: python -m pytest -n=auto test/unit/ --durations=20
+      run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run targetted tests on NULL backend
-      run: NULL=1 python3 test/test_multitensor.py TestMultiTensor.test_data_parallel_resnet_train_step
+      run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     - name: Run SDXL on NULL backend
       run: MAX_BUFFER_SIZE=0 NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
+    - name: Run Clip tests for SD MLPerf on NULL backend
+      run: MAX_BUFFER_SIZE=0 NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
     # TODO: support fake weights
     #- name: Run LLaMA 7B on 4 fake devices
     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
@@ -312,7 +318,7 @@ jobs:
   testopenclimage:
     name: CL IMAGE Tests
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -326,6 +332,10 @@ jobs:
         run: |
           CL=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
           CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
+      - name: Test CL IMAGE=2 ops + training (rangeify)
+        run: |
+          RANGEIFY=1 CL=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
+          RANGEIFY=1 CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -370,7 +380,10 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2175 ALLOWED_GATED_READ_IMAGE=16 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+          ALLOWED_KERNEL_COUNT=208 ALLOWED_READ_IMAGE=2160 ALLOWED_GATED_READ_IMAGE=16 RANGEIFY=0 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
+      - name: Test openpilot model with rangeify
+        run: |
+          ALLOWED_KERNEL_COUNT=190 ALLOWED_READ_IMAGE=2041 ALLOWED_GATED_READ_IMAGE=33 RANGEIFY=1 FLOAT16=0 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot alt model correctness (float32)
         run: FLOAT16=0 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/3799fe46b3a629e491d4b8498b8ae83e4c88c304/selfdrive/modeld/models/supercombo.onnx
       - name: Test openpilot fastvits model correctness (float32)
@@ -415,7 +428,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testopencl:
-    name: ONNX (GPU)+Optimization Tests
+    name: ONNX (CL)+Optimization Tests
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -519,24 +532,31 @@ jobs:
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
-      # test_threefry_doesnt_use_long is because there's a contig after the long now
-      # test_embedding issue with jit
-      # test_load_state_dict_sharded_model_dict_same_axis issue with multi
-      # test_instancenorm_3d is very slow
+      # rangeify diamond cycle gives the wrong answer
       run: |
         CPU=1 CPU_LLVM=0 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
-          -k "not test_threefry_doesnt_use_long and not test_embedding and not test_load_state_dict_sharded_model_dict_same_axis and not test_instancenorm_3d" \
-          test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_tensor_variable.py \
-          test/test_outerworld_range.py test/test_sample.py test/test_randomness.py test/test_nn.py
+          -k "not test_assign_diamond_cycle" \
+          test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_tensor_variable.py \
+          test/test_outerworld_range.py test/test_randomness.py test/test_nn.py test/test_arange.py test/test_tensor.py test/test_optim.py \
+          test/test_setitem.py test/test_assign.py test/test_multitensor.py
+    - name: Test CPU=1 DEVECTORIZE=0 (RANGEIFY=1)
+      run: CPU=1 CPU_LLVM=0 RANGEIFY=1 DEVECTORIZE=0 FUSE_ARANGE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+    - name: Test CPU=1 CPU_LLVM=1 RANGEIFY=1
+      run: |
+        CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_edgecases.py
+    - name: Test Docs RANGEIFY=1
+      run: |
+        RANGEIFY=1 python docs/abstractions2.py
     - name: Test const folding
-      run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded and not TestReduceOpsConstFolding and not TestMultiConstFolding"
-    - name: Test multitensor
-      run: CPU=1 RANGEIFY=1 python3 test/test_multitensor.py TestMultiTensor.test_matmul_shard_1_1 TestMultiTensor.test_simple_add_W
-    - name: Test CPU=1 RANGEIFY=2
-      run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
+      run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded"
+    # RANGEIFY=2 isn't supported
+    #- name: Test CPU=1 RANGEIFY=2
+    #  run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
     # slow (and still wrong on beautiful_mnist)
     #- name: Test LLVM RANGEIFY=1 (slow tests)
     #  run: CPU=1 CPU_LLVM=1 RANGEIFY=1 python3 -m pytest -n auto test/models/test_mnist.py --durations 20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testrangeifycl:
     name: Linux (rangeify) CL
@@ -548,14 +568,37 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: rangeify-minimal-llvm
-        deps: testing_minimal
+        key: rangeify-cl
+        deps: testing
         opencl: 'true'
         llvm: "true"
     - name: Test CL=1 RANGEIFY=1
-      run: CL=1 RANGEIFY=1 pytest -n auto test/test_ops.py --durations 20
+      run: CL=1 RANGEIFY=1 pytest -n auto test/test_ops.py test/test_schedule.py test/test_symbolic_ops.py test/test_jit.py test/unit/test_disk_tensor.py test/models/test_mnist.py test/unit/test_mnist_dataset.py test/test_optim.py --durations 20
     - name: Test Fuse
       run: CL=1 RANGEIFY=2 python3 -m pytest --durations 20 test/test_softmax_fusion.py -k "not test_auto_softmax"
+    - name: Test ONNX
+      run: CL=1 RANGEIFY=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+
+  testrangeifymacos:
+    name: MacOS (rangeify)
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: metal
+        deps: testing
+    - name: some unit tests
+      run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/unit/test_winograd.py test/unit/test_linalg.py --durations=20
+    - name: Test METAL=1 RANGEIFY=1
+      run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py test/test_multitensor.py --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
   testdevectorize:
     name: Linux (devectorize)
@@ -998,3 +1041,9 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+      - name: Run pytest (${{ matrix.backend }}) with RANGEIFY
+        if: matrix.backend=='webgpu'
+        env:
+          RANGEIFY: 1
+        shell: bash
+        run: python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20

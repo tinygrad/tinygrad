@@ -48,32 +48,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # make a copy so it does not mutate the input
   k = k.copy()
 
-  # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
-  MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
-  if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-    k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
-    (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    idx0, idx1 = mulop.src[0].src[0].src[1].get_idx(), mulop.src[1].src[0].src[1].get_idx()
-    first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
-    if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
-      for global_idx in k.axes_of(AxisType.GLOBAL):
-        if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
-          if DEBUG >= 3:
-            print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
-          if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
-          if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
-          if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
-          return k
-
-  # are we grouping? (requires local shape support)
-  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
-    for sz in [16]:
-      try:
-        k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
-        break
-      except KernelOptError: pass
-
-  # upcast float4 images
+  # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   for buf_index,buf in enumerate(k.bufs):
     if isinstance(buf.src[0].dtype, ImageDType):
       # part of real_strides
@@ -84,6 +59,32 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
         elif axis in k.unrollable_dims:
           k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+
+  # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
+  MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
+  if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
+    k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
+    (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
+    idx0, idx1 = mulop.src[0].src[0].src[1].get_idx(), mulop.src[1].src[0].src[1].get_idx()
+    if k.ranges_of(AxisType.REDUCE):
+      first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
+      if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
+        for global_idx in k.axes_of(AxisType.GLOBAL):
+          if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
+            if DEBUG >= 3:
+              print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
+            if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+            if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
+            if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
+            return k
+
+  # are we grouping? (requires local shape support)
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
+    for sz in [16]:
+      try:
+        k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+        break
+      except KernelOptError: pass
 
   # no more opt if we are grouping
   if k.group_for_reduces: return k
