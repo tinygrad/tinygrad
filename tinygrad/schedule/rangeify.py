@@ -8,6 +8,7 @@ from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIF
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 from tinygrad.codegen.simplify import pm_flatten_range
+from tinygrad.codegen.opt import Opt
 
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
@@ -564,7 +565,7 @@ class LocalAddBufferContext:
   vars:dict = field(default_factory=dict)
   range:int = 0
   parent_tags:list = field(default_factory=list)
-  opts = None
+  opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
   ret = UOp(Ops.DEFINE_GLOBAL, buf.dtype.ptr(buf.arg), arg=ctx.dg)
@@ -607,7 +608,7 @@ to_define_global = PatternMatcher([
 ])
 
 def get_contiguous(ctx:LocalAddBufferContext, x:UOp):
-  ctx.opts = x.arg
+  if isinstance(x.arg, tuple) and all(isinstance(y, Opt) for y in x.arg): ctx.opts = x.arg
   return x.src[0]
 
 rangeify_codegen = PatternMatcher([
