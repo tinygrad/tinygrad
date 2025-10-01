@@ -140,7 +140,6 @@ def nidx(b:mesa.nir_builder, buf, off, dtype, gate=None) -> mesa.nir_def:
   return if_phi(b, gate, f, lambda: buf) if gate is not None else f()
 
 class NIRRenderer(Renderer):
-  device = "NV"
   suffix = "NAK"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
@@ -160,8 +159,6 @@ class NIRRenderer(Renderer):
      lambda x,buf,off: x.replace(src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.dtype.addrspace != AddrSpace.REG and off.op != Ops.CAST else None),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
   ])
-
-  def param(self, dtype:DType, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
 
   def_rewrite = PatternMatcher([
     (UPat(Ops.CONST, name="x"), lambda ctx,x: nimm(ctx.b, x.arg, x.dtype)),
@@ -186,15 +183,18 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: ensure(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __init__(self, dev, device):
-    self.device, self.dev = device, dev
+  def __init__(self, device):
+    self.device = device
     mesa.glsl_type_singleton_init_or_ref()
 
   def __del__(self):
     try: mesa.glsl_type_singleton_decref()
     except AttributeError: pass
 
-  def prerender(self, uops:list[UOp]): self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, self.dev.compiler.nir_options, None)
+  @property
+  def nir_options(self): raise NotImplementedError("needs nir_options")
+  def param(self, dtype:DType, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
+  def prerender(self, uops:list[UOp]): self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, self.nir_options, None)
 
   def render(self, uops:list[UOp]):
     self.prerender(uops)
@@ -238,7 +238,12 @@ class NIRRenderer(Renderer):
     return ret
 
 class NAKRenderer(NIRRenderer):
-  def __init__(self, dev, device="NV"): super().__init__(dev, device)
+  def __init__(self, dev, device="NV"):
+    self.dev = dev
+    super().__init__(device)
+
+  @property
+  def nir_options(self): return self.dev.compiler.nir_options
 
   def param(self, dtype:DType, sz:int) -> mesa.nir_def:
     intrin = mesa.nir_intrinsic_instr_create(self.b.shader, mesa.nir_intrinsic_ldc_nv)
@@ -255,8 +260,9 @@ class LVPRenderer(NIRRenderer):
   has_local = False
   has_shared = False
   global_max = (1, 0, 0)
+  nir_options = mesa.lvp_nir_options
 
-  def __init__(self, dev, device="CPU"): super().__init__(dev, device)
+  def __init__(self, device="CPU"): super().__init__(device)
 
   def param(self, dtype:DType, sz:int) -> mesa.nir_def:
     intrin = mesa.nir_intrinsic_instr_create(self.b.shader, mesa.nir_intrinsic_load_ubo)

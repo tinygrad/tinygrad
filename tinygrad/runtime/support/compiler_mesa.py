@@ -13,12 +13,10 @@ def deserialize(enc_src, opts):
   return mesa.nir_deserialize(None, ctypes.cast(opts, ctypes.POINTER(mesa.nir_shader_compiler_options)), blobreader)
 
 class LVPCompiler(Compiler):
-  def __init__(self, cache_key="lvp"):
-    self.nir_options = mesa.lvp_nir_options
-    super().__init__(f"compile_{cache_key}")
+  def __init__(self, cache_key="lvp"): super().__init__(f"compile_{cache_key}")
 
   def compile(self, src) -> bytes:
-    shader, ctx = deserialize(src, self.nir_options), llvm.LLVMGetGlobalContext()
+    shader, ctx = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext()
     gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), None)
     module, builder = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
 
