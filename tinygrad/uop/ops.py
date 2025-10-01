@@ -134,8 +134,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
-  # TODO: this can stop early
-  def op_in_parents(self, *ops:Ops) -> bool: return any(x.op in ops for x in self.sparents)
+  def op_in_parents(self, *ops:Ops): return any(x.op in ops for x in self.toposort())
 
   # returns map of UOps to their children in the graph rooted by self
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
