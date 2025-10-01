@@ -7,7 +7,7 @@ from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
-from tinygrad.codegen.simplify import pm_flatten_range
+from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
@@ -690,7 +690,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
-  tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
+  tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
 
