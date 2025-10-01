@@ -6,8 +6,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes
-import tinygrad.runtime.support.mesa as mesa
+import ctypes, gzip, base64, tinygrad.runtime.support.mesa as mesa
 
 
 class AsDictMixin:
@@ -19744,4 +19743,5 @@ __all__ = \
     'union_nir_variable_data_0', 'union_shader_info_0',
     'union_util_format_description_0', 'util_format_colorspace',
     'util_format_layout', 'va_list']
+lvp_nir_options = ctypes.pointer(nir_shader_compiler_options.from_buffer_copy(gzip.decompress(base64.b64decode('H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA'))))
 def __getattr__(nm): raise mesa.error if mesa.error else AttributeError(f'{nm} not found in {mesa.path}' + ('' if 'cpu' in mesa.path else ', you may need to install libtinymesa_cpu.so'))

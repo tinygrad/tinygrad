@@ -496,10 +496,13 @@ generate_mesa() {
     -l $TINYMESA_SO \
     -o $BASE/mesa.py
 
+  LVP_NIR_OPTIONS=$(./extra/mesa/lvp_nir_options.sh $MESA_SRC)
+
   fixup $BASE/mesa.py
+  echo "lvp_nir_options = ctypes.pointer(nir_shader_compiler_options.from_buffer_copy(gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))))" >> $BASE/mesa.py
   sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
   sed -i "s/AttributeError/(AttributeError,FileNotFoundError)/" $BASE/mesa.py
-  sed -i "/import ctypes/a import tinygrad.runtime.support.mesa as mesa" $BASE/mesa.py
+  sed -i "s/import ctypes/import ctypes, gzip, base64, tinygrad.runtime.support.mesa as mesa/" $BASE/mesa.py
   sed -i "s/ctypes.CDLL('.\+')/mesa/g" $BASE/mesa.py
   echo "def __getattr__(nm): raise mesa.error if mesa.error else AttributeError(f'{nm} not found in {mesa.path}' + ('' if 'cpu' in mesa.path else ', you may need to install libtinymesa_cpu.so'))" >> $BASE/mesa.py
   sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/mesa.py

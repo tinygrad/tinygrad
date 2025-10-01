@@ -1,4 +1,4 @@
-import base64, ctypes, gzip, pathlib, tempfile, hashlib, subprocess
+import base64, ctypes, pathlib, tempfile, hashlib, subprocess
 from typing import Tuple
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, round_up
@@ -14,21 +14,13 @@ def deserialize(enc_src, opts):
 
 class LVPCompiler(Compiler):
   def __init__(self, cache_key="lvp"):
-    # FIXME: this is wrong if mesa is compiled using ORCJIT
-    self.ctx = mesa.lp_context_ref(ctypes.cast(llvm.LLVMContextCreate(), ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True)
-    # see extra/mesa/lvp_nir_options.sh
-    self.nir_options = ctypes.pointer(mesa.nir_shader_compiler_options.from_buffer_copy(gzip.decompress(base64.b64decode(
-      "H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA"))))
+    self.nir_options = mesa.lvp_nir_options
     super().__init__(f"compile_{cache_key}")
 
-  def __del__(self): llvm.LLVMContextDispose(ctypes.cast(self.ctx.ref, llvm.LLVMContextRef))
-
   def compile(self, src) -> bytes:
-    shader = deserialize(src, self.nir_options)
-
-    gallivm = mesa.gallivm_create(None, self.ctx, None)
-    module = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef)
-    ctx, builder = ctypes.cast(gallivm.contents.context, llvm.LLVMContextRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
+    shader, ctx = deserialize(src, self.nir_options), llvm.LLVMGetGlobalContext()
+    gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), None)
+    module, builder = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
 
     params = mesa.struct_lp_build_tgsi_params(mesa.struct_lp_type(floating=True, sign=True, width=32, length=4),
       resources_type=mesa.lp_build_jit_resources_type(gallivm), mask=ctypes.pointer(mesa.struct_lp_build_mask_context()))
