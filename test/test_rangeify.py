@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Tensor, nn
 from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.codegen.opt import OptOps, Opt
 
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeifyAssign(unittest.TestCase):
@@ -82,6 +83,20 @@ class TestRangeify(unittest.TestCase):
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     (A@B@C).realize()
+
+  def test_double_gemm_tc(self):
+    with Context(DEBUG=0):
+      A, B, C = [Tensor.randn(N, N) for _ in range(3)]
+      Tensor.realize(A, B, C)
+    #args = (Opt(OptOps.TC, 0, (0,0,1,1))), Opt(OptOps.TC, 0, (0,0,1,0))
+    #args = (Opt(OptOps.TC, 0, (0,0,1,0)),)
+    args = (Opt(OptOps.TC, 0, (0,0,1,1)),)
+    #args = ()
+    tst = (A@B@C).contiguous(arg=args).realize()
+    assert tst.uop.base.op is Ops.BUFFER, "buffer"
+    with Context(RANGEIFY=0, DEBUG=0):
+      mse = ((A@B@C)-tst).square().mean().item()
+      print(mse)
 
   def test_double_gemm_exp(self):
     A = Tensor.empty(N, N)
@@ -192,10 +207,10 @@ class TestRangeify(unittest.TestCase):
     out.realize()
 
   def test_flash_attention(self):
-    #BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
     # bigger
-    BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
+    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
 
     # llama 8B
     #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
@@ -205,11 +220,9 @@ class TestRangeify(unittest.TestCase):
       with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
       return q.scaled_dot_product_attention(k, v)
 
-    from tinygrad.codegen.opt import OptOps, Opt
     with Context(DEBUG=4):
       GlobalCounters.reset()
-      opts = (Opt(OptOps.UPCAST,0,4),)
-      ret = fa().contiguous(arg=opts).realize()
+      ret = fa().realize()
     with Context(RANGEIFY=0):
       with Context(DEBUG=2):
         GlobalCounters.reset()

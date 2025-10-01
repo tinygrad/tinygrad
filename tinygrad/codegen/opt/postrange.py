@@ -5,7 +5,7 @@ from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad, GroupOp
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -173,13 +173,13 @@ class Scheduler:
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
     elif opt.op is OptOps.TC:
-      check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
+      #check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
-      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
+      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) >= 3, "tensor core opts must have valid arg")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.opts.tensor_cores), "tensor core opts must have valid tc_select")
       check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
       check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
-      try: ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
+      try: ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt, opt.arg[3] if len(opt.arg) > 3 else 0)
       except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
@@ -213,10 +213,10 @@ class Scheduler:
     if append_opt: self.applied_opts.append(opt)
     return ret
 
-  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
+  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int, reduce_choice:int) -> None|list[UOp]:
     reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
     if not len(reduceops): raise KernelOptError("no reduce ops for TensorCore")
-    reduceop = reduceops[0]
+    reduceop = reduceops[reduce_choice]
     if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
       if mul.op is not Ops.MUL: return None
@@ -241,6 +241,9 @@ class Scheduler:
           axis_choices = list(itertools.product(in1_ranges, in0_ranges, red_ranges))
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
+
+          # tag the reduceop
+          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
 
           # do optimizations and save the ranges
           try:
@@ -271,7 +274,7 @@ class Scheduler:
 
           if use_tensor_cores != 2:
             # fix the srcs
-            reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
+            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
