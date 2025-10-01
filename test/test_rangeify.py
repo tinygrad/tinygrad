@@ -39,10 +39,10 @@ class TestRangeifyOpt(unittest.TestCase):
     Tensor.realize(Xsel, Ysel)
 
   def test_resnetconv(self):
-    self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
-    self.conv1.weight.replace(self.conv1.weight.empty_like())
+    conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, bias=False, padding=3)
+    conv1.weight.replace(conv1.weight.empty_like())
     x = Tensor.empty(1, 3, 224, 224)
-    x = self.conv1(x).pad([1,1,1,1])+1
+    x = conv1(x).pad([1,1,1,1])+1
     x.realize()
 
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
