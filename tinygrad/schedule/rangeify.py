@@ -105,7 +105,7 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     non_sink_children = [u for u in v if u.op is not Ops.SINK]
     if len(non_sink_children) <= 1: continue
     # NOTE: this gate shouldn't be here
-    if any(x.op is Ops.REDUCE_AXIS for x in k.toposort()) and any(x.op in {Ops.BUFFER, Ops.CONTIGUOUS} for x in k.toposort()):
+    if k.op_in_parents(Ops.REDUCE_AXIS) and k.op_in_parents(Ops.BUFFER, Ops.CONTIGUOUS):
       ctx.children[k] = non_sink_children
 
 def mark_children(ctx:ChildrenContext, x:UOp):
@@ -144,7 +144,7 @@ def map_reshape(idx:UOp, r:UOp):
   for s in r.src[0].shape[::-1]:
     ret.append(mish % s) # NOTE: simplify will turn this to CONST
     mish //= s
-  tret = ret[0].sink(*ret[1:]).simplify().src[::-1] if len(ret) else ()
+  tret = UOp.sink(*ret[::-1]).simplify().src
   return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
 
 def map_pad(idx:UOp, r:UOp):
@@ -301,8 +301,8 @@ def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
 def might_end_axis(idx:UOp):
   if idx.arg is None: return None
   # TODO: write a proper cost function here
-  if all(x.op not in {Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE} for x in idx.toposort()): return None
-  if all(x.op not in {Ops.REDUCE_AXIS} for x in idx.toposort()): return None
+  if not idx.op_in_parents(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE): return None
+  if not idx.op_in_parents(Ops.REDUCE_AXIS): return None
   to_end_axis = []
   for i,a in enumerate(idx.src[1:]):
     # in RANGEIFY=1, always realize
@@ -392,7 +392,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     # if we return None, the bufferize is kept
 
     accessed_buffers = []
-    def red_gate(x):
+    def red_gate(x:UOp):
       if x.op is Ops.INDEX:
         accessed_buffers.append(x)
         return False
@@ -495,7 +495,6 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
-  sym_shape = tuple([ssimplify(r.src[0]) for r in rngs])
   size = prod(shape)
   assert size > 0, f"no zero sized buffers {shape}"
 
@@ -520,7 +519,9 @@ def bufferize_to_store(x:UOp):
     ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
     ret = ret.forced_reshape(shape)
     # TODO: is this right? what if it's offset
-    if shape is not sym_shape: ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
+    if any(r.src[0].op is not Ops.RANGE for r in rngs):
+      sym_shape = tuple([ssimplify(r.src[0]) for r in rngs])
+      ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
     return ret.replace(tag=x.tag)
 
   # handle locals
