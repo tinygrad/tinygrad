@@ -18,7 +18,7 @@ class LVPCompiler(Compiler):
     self.ctx = mesa.lp_context_ref(ctypes.cast(llvm.LLVMContextCreate(), ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True)
     # see extra/mesa/lvp_nir_options.sh
     self.nir_options = ctypes.pointer(mesa.nir_shader_compiler_options.from_buffer_copy(gzip.decompress(base64.b64decode(
-      "H4sIAAAAAAAAA5WMsREAIAwCnw0cwU1czdE9JbHwtJAiEEhAEjCnTGbCxIIUikvLTYmZZcmJi/WCqJfHxQV67K3t8KPbGIq2g3b4AAAA%"))))
+      "H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA"))))
     super().__init__(f"compile_{cache_key}")
 
   def __del__(self): llvm.LLVMContextDispose(ctypes.cast(self.ctx.ref, llvm.LLVMContextRef))
