@@ -1,11 +1,11 @@
 from typing import Callable, cast
-from functools import partial
 from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
+from tinygrad.helpers import DEBUG
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
 import tinygrad.runtime.autogen.mesa as mesa
-import base64, ctypes, struct
+import base64, ctypes, ctypes.util, struct, functools
 
 def g(s:str): return getattr(mesa, s)
 def d(i) -> mesa.nir_def: return getattr(i.contents, "def")
@@ -215,7 +215,7 @@ class NIRRenderer(Renderer):
         self.r[u] = nload(self.b, AddrSpace.REG, i, u.dtype)
       elif u.op == Ops.ENDRANGE:
         nif(self.b, nalu(self.b, "ilt", x:=nalu(self.b, "iadd", self.r[u.src[0]], nimm(self.b, 1, u.src[0].dtype)), self.r[u.src[0].src[0]]),
-            partial(nstore, self.b, AddrSpace.REG, ranges.pop(), x, u.src[0].dtype), lambda: njump(self.b, mesa.nir_jump_break))
+            functools.partial(nstore, self.b, AddrSpace.REG, ranges.pop(), x, u.src[0].dtype), lambda: njump(self.b, mesa.nir_jump_break))
         mesa.nir_pop_loop(self.b, None)
       elif u.op == Ops.INDEX: pass
       else:
@@ -225,6 +225,8 @@ class NIRRenderer(Renderer):
         self.r[u] = cast(mesa.nir_def, d)
 
     mesa.nir_validate_shader(self.b.shader, b"after render")
+    if DEBUG >= 4:
+      mesa.nir_print_shader(self.b.shader, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
     blob = mesa.struct_blob()
     mesa.nir_serialize(blob, self.b.shader, False)
     ret = base64.b64encode(ctypes.string_at(blob.data, blob.size)).decode()
