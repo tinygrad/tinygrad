@@ -149,7 +149,7 @@ def map_reshape(idx:UOp, r:UOp):
   for s in r.src[0].shape[::-1]:
     ret.append(mish % s) # NOTE: simplify will turn this to CONST
     mish //= s
-  tret = ret[0].sink(*ret[1:]).simplify().src[::-1] if len(ret) else ()
+  with Context(TRACK_MATCH_STATS=0): tret = graph_rewrite(ret[0].sink(*ret[1:]), sym).src[::-1] if len(ret) else ()
   return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
 
 def map_pad(idx:UOp, r:UOp):
