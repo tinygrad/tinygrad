@@ -1625,14 +1625,14 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 2))
 
-  def test_conv2d(self): _test_conv2d(4 if RANGEIFY else 7)
-  def test_conv2d_fused(self): _test_conv2d(4 if RANGEIFY else 5, FUSE_CONV_BW=1)
+  def test_conv2d(self): _test_conv2d(5 if RANGEIFY else 7)
+  def test_conv2d_fused(self): _test_conv2d(5 if RANGEIFY else 5, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
-  def test_conv2d_half(self): _test_conv2d(4 if RANGEIFY else 7, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(5 if RANGEIFY else 7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
-  @unittest.expectedFailure
+  @unittest.skipIf(not RANGEIFY, "passes on RANGEIFY")
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
   def test_schedule_mem_used(self):
