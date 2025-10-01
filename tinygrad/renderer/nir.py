@@ -253,6 +253,7 @@ class NAKRenderer(NIRRenderer):
 
 class LVPRenderer(NIRRenderer):
   has_local = False
+  has_shared = False
   global_max = (1, 0, 0)
 
   def __init__(self, dev, device="CPU"): super().__init__(dev, device)
