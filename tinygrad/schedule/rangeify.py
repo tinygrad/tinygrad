@@ -125,7 +125,8 @@ class RangeifyContext:
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
-  def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP): return UOp.range(s, next(self.range_idx), axistype)
+  def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
+    return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
 def map_reshape(idx:UOp, r:UOp):
   acc = 1
@@ -375,7 +376,7 @@ def cleanup_dead_axes(b:UOp):
 def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # see if we can't do it, should this ever hit?
   assert len(buf.src) == len(idx.src), "index on wrong bufferize"
-  assert all(x.op is Ops.RANGE for x in buf.src[1:])
+  assert all(x.op in {Ops.RANGE, Ops.CONST} for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
   if src.op in ALWAYS_RUN_OPS: return None
@@ -405,7 +406,8 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
-  return src.substitute(dict(zip(buf.src[1:], idx.src[1:])))
+  # NOTE: if buf src is a const, we don't replace it
+  return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST})
 
 def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
@@ -513,8 +515,8 @@ def bufferize_to_store(x:UOp):
     ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
     ret = ret.forced_reshape(shape)
     # TODO: is this right? what if it's offset
-    if any(r.src[0].op is not Ops.RANGE for r in rngs):
-      sym_shape = tuple([ssimplify(r.src[0]) for r in rngs])
+    if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
+      sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
       ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
     return ret.replace(tag=x.tag)
 
