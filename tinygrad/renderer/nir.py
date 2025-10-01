@@ -168,7 +168,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx,x: ctx.param(x.dtype, 8)),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x: ctx.param(x.dtype, 4)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, ngid(ctx.b) if x.arg[0] == 'g' else nlid(ctx.b), int(x.arg[-1]))),
-    (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))), UPat.var("val")), allow_any_len=True, name="x"),
+    (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"),UPat.var("off")), allow_any_len=True), UPat.var("val")), allow_any_len=True, name="x"),
      lambda ctx,x,buf,off,val: nstore(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype), ctx.r[val], val.dtype)),
     (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"), UPat.var("gate"))), UPat.var("alt")), allow_any_len=True, name="x"),
      lambda ctx,x,buf,off,alt,gate: if_phi(ctx.b, ctx.r[gate],
