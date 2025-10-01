@@ -46,11 +46,6 @@ earliest_rewrites = PatternMatcher([
    lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if ((t:=target.base).op is not Ops.BUFFER and \
        not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src))) else None),
 
-  # realize before assign if input permutes the target buffer
-  (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"),
-   lambda a,b,assign: assign.replace(src=(a, b.contiguous())) if any(x.base is a.base and x.op not in {Ops.RESHAPE, Ops.EXPAND, Ops.SHRINK, Ops.PAD}
-                                                                     for x in b.toposort(gate=lambda x:x.op not in ALWAYS_CONTIGUOUS)) else None),
-
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
@@ -412,6 +407,21 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
+def pre_assign(a:UOp, b:UOp, assign:UOp):
+  if b.src[0].op is Ops.CONTIGUOUS: return None
+  idxs = [assign.src[0]]  # write index
+  for s in b.src[0].toposort(gate=lambda s:s.op is not Ops.BUFFERIZE):
+    if s.op is Ops.INDEX and s.src[0] is a: idxs.append(s) # read(s) index
+  # TODO: something here that checks if the index doesn't overlap?
+  idxs = dedup(idxs)
+  hit = False
+  for i in idxs: print(i.render())
+  if len(idxs) > 1: hit = True # wrong
+  hit = False
+  if hit:
+    nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
+    return assign.replace(src=(assign.src[0], assign.src[1].replace(src=(nb,)+assign.src[1].src[1:]))+assign.src[2:])
+
 pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
@@ -428,8 +438,12 @@ pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  # bufferize input to COPY
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                        .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  # bufferize input to assign if it's reading a permutation of target
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.INDEX, src=(UPat.var("a"),), allow_any_len=True),
+                         UPat(Ops.INDEX, src=(UPat.var("b"),), allow_any_len=True)), name="assign", allow_any_len=True), pre_assign),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
