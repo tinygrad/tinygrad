@@ -64,7 +64,8 @@ class NAKCompiler(Compiler):
   def compile(self, src) -> bytes:
     shader = deserialize(src, self.nir_options)
     mesa.nak_preprocess_nir(shader, self.cc)
-    ret = mesa.nak_compile_shader(shader, False, self.cc, 0, None).contents
+    ret = bytearray(bytes((out:=mesa.nak_compile_shader(shader, False, self.cc, 0, None).contents).info) + ctypes.string_at(out.code, out.code_size))
+    mesa.nak_shader_bin_destroy(out)
     mesa.ralloc_free(shader)
     return ret
 
@@ -76,7 +77,6 @@ class NAKCompiler(Compiler):
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
 
 def parse_nak_shader(shader:bytes) -> Tuple[memoryview, int, int, int]:
-  sb = mesa.struct_nak_shader_bin.from_buffer(shader)
-  return (memoryview(ctypes.cast(sb.code, ctypes.POINTER(ctypes.c_char * sb.code_size)).contents), sb.info.num_gprs,
-          round_up(sb.info.cs.smem_size, 0x80), round_up(sb.info.slm_size, 0x10))
+  info = mesa.struct_nak_shader_info.from_buffer(shader)
+  return (memoryview(shader[ctypes.sizeof(info):]), info.num_gprs, round_up(info.cs.smem_size, 0x80), round_up(info.slm_size, 0x10))
 
