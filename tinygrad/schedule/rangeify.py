@@ -25,6 +25,7 @@ def find_permutes(a:UOp, b:UOp, assign:UOp):
     if any(s is target for s in p.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})): return assign.replace(src=(a, b.contiguous()))
 
 def split_reduceop(reduce:UOp, x:UOp):
+  if prod(reduce.shape) == 0: return None
   if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
   # if there are few globals, make some reduces into globals by splitting into two kernels
   # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
