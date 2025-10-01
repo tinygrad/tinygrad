@@ -99,7 +99,7 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     non_sink_children = [u for u in v if u.op is not Ops.SINK]
     if len(non_sink_children) <= 1: continue
     # NOTE: this gate shouldn't be here
-    if any(x.op is Ops.REDUCE_AXIS for x in k.toposort()) and any(x.op in {Ops.BUFFER, Ops.CONTIGUOUS} for x in k.toposort()):
+    if k.op_in_parents(Ops.REDUCE_AXIS) and k.op_in_parents(Ops.BUFFER, Ops.CONTIGUOUS):
       ctx.children[k] = non_sink_children
 
 def mark_children(ctx:ChildrenContext, x:UOp):
