@@ -146,7 +146,7 @@ class Transformer:
     kv, state_dict = nn.state.gguf_load(gguf.to(None))
 
     # all state items should be float16, not float32
-    state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
+    state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
