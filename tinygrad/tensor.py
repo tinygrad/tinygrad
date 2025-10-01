@@ -458,7 +458,7 @@ class Tensor(MathTrait):
 
   def empty_like(self, **kwargs) -> Tensor:
     """
-    Creates an emptytensor with the same shape as `self`.
+    Creates an empty tensor with the same shape as `self`.
     If `dtype` is not specified, the dtype of `self` is used.
     """
     return Tensor.empty(self.shape, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
