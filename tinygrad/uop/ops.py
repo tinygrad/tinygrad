@@ -156,7 +156,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
-                                                   Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
+                                                   Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
       return None
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
