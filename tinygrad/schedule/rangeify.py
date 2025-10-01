@@ -361,14 +361,15 @@ def cleanup_dead_axes(b:UOp):
   for s,rng in zip(b.shape, b.src[1:]):
     # skip for symbolic. TODO: fix this
     if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
-    if rng not in b.src[0].sparents and rng.op is Ops.RANGE:
+    # CONSTs are already dead axes
+    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].sparents):
       reshape.append(1)
       hit = True
     else:
       reshape.append(s)
       new_rng.append(rng)
   if hit:
-    # move the tag to the expand
+    # move the tag to the expand. NOTE: this expand tag might not survive
     return b.replace(src=b.src[0:1]+tuple(new_rng), tag=None).reshape(tuple(reshape)).expand(b.shape).replace(tag=b.tag)
 
 # if a buffer is being stored just for permutes or something, remove it
