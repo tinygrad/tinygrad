@@ -298,4 +298,4 @@ runs:
     - name: Install mesa
       if: inputs.mesa == 'true'
       shell: bash
-      run: sudo curl -L https://github.com/sirhcm/tinymesa/releases/download/mesa-25.2.3-3cb1b80/libtinymesa_cpu.so -o /usr/lib/libtinymesa_cpu.so
+      run: sudo curl -L https://github.com/sirhcm/tinymesa/releases/download/mesa-25.2.3-3a5961a/libtinymesa_cpu.so -o /usr/lib/libtinymesa_cpu.so
