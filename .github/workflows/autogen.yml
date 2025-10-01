@@ -89,3 +89,8 @@ jobs:
         cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
         ./autogen_stubs.sh llvm
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
+    - name: Verify mesa autogen
+      run: |
+        cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
+        ./autogen_stubs.sh mesa
+        diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
