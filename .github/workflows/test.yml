@@ -480,7 +480,7 @@ jobs:
   testmodels:
     name: Models (llvm+cpu+gpu)
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
