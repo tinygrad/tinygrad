@@ -456,6 +456,13 @@ class Tensor(MathTrait):
     device = tuple(Device.canonicalize(d) for d in device) if isinstance(device, tuple) else Device.canonicalize(device)
     return Tensor(UOp.new_buffer(device, size, dtype), device, dtype, **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
 
+  def empty_like(self, **kwargs) -> Tensor:
+    """
+    Creates an emptytensor with the same shape as `self`.
+    If `dtype` is not specified, the dtype of `self` is used.
+    """
+    return Tensor.empty(self.shape, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
+
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
     """
