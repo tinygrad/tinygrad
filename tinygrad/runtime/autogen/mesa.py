@@ -19744,4 +19744,4 @@ __all__ = \
     'union_util_format_description_0', 'util_format_colorspace',
     'util_format_layout', 'va_list']
 lvp_nir_options = gzip.decompress(base64.b64decode('H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA'))
-def __getattr__(nm): raise AttributeError() if mesa.found else FileNotFoundError(f'libtinymesa not found (MESA_PATH={mesa.MESA_PATH}). See https://github.com/sirhcm/tinymesa (release: mesa-25.2.3-3a5961a)')
+def __getattr__(nm): raise AttributeError() if mesa.found else FileNotFoundError(f'libtinymesa not found ({mesa.PATH=}). See https://github.com/sirhcm/tinymesa (release: mesa-25.2.3-3a5961a)')
