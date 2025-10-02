@@ -720,6 +720,13 @@ class TestSchedule(unittest.TestCase):
       assert prev_a.uop in a.uop.src, "contiguous usage must run before assign"
     self.assertEqual((prev_a+a*3).item(), 1+2*3)
 
+  def test_kernelize_sym(self):
+    a = Tensor([1])+Tensor([2])
+    a.kernelize()
+    b = a/a
+    check_schedule(b, 0)
+    self.assertEqual(b.item(), 1)
+
   @expect_rangeify_fails
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
