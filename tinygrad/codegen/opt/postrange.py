@@ -173,20 +173,21 @@ class Scheduler:
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
     elif opt.op is OptOps.DEMOTE:
-      #rr = UOp.range(cast(int, opt.arg), -1, 0, AxisType.LOOP)
-      _, rr = self.shift_to(rng, cast(int, opt.arg), AxisType.LOOP) #, input_new_rng=rr)
-      def do_demote(ctx, x:UOp, y:UOp):
-        if y.tag is not None: return
+      _, rr = self.shift_to(rng, cast(int, opt.arg), AxisType.LOOP)
+      def do_demote(ctx, x:UOp):
+        if x.tag is not None: return None
         mr = ctx[0]
         nr = mr.replace(arg=ctx[0].arg[0:-2]+(mr.arg[-2]+1, mr.arg[-1]))
         ctx[0] = nr
-        buf = x.replace(src=x.src+(mr,)).substitute({mr:nr})
-        return UOp(Ops.INDEX, y.dtype, (buf,)+y.src[1:]+(mr,), arg=y.arg, tag=1)
+        buf = x.replace(src=x.src+(mr,), tag=1).substitute({mr:nr})
+        return UOp(Ops.APPENDINDEX, dtypes.void, (buf,mr))
       # do the demotion
       pm_demote = PatternMatcher([
-        (UPat(Ops.INDEX, src=(UPat(Ops.BUFFERIZE, name="x"),), name="y", allow_any_len=True), do_demote),
+        (UPat(Ops.BUFFERIZE, name="x"), do_demote),
+        (UPat(Ops.INDEX, src=(UPat(Ops.APPENDINDEX, name="x"),), name="y", allow_any_len=True),
+         lambda x,y: y.replace(src=(x.src[0],)+y.src[1:]+x.src[1:])),
       ])
-      self.ast = graph_rewrite(self.ast, pm_demote, ctx=[rr])
+      self.ast = graph_rewrite(self.ast, pm_demote, ctx=[rr], bottom_up=True, name="demote")
     elif opt.op is OptOps.TC:
       #check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
@@ -287,7 +288,7 @@ class Scheduler:
             axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
             ne.append(new_range)
 
-          print("ne", [x.arg for x in ne])
+          #print("ne", [x.arg for x in ne])
 
           if use_tensor_cores != 2:
             # fix the srcs
@@ -299,16 +300,16 @@ class Scheduler:
 
             # get reduce/upcast axes for the tensor cores
             tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
-            print(tc.base_upcast_axes())
+            #print(tc.base_upcast_axes())
             base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
             tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
-            print(tc_upcast_axes)
+            #print(tc_upcast_axes)
 
             # axes to range number (was done in lowerer)
             tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
             tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
-            print(tc_upcast_axes)
-            print(tc_reduce_axes)
+            #print(tc_upcast_axes)
+            #print(tc_reduce_axes)
 
             tc_upcast_axes = (((ne[0].arg[0], 2),), ((ne[0].arg[0], 2),), ((ne[0].arg[0], 2),))
 
