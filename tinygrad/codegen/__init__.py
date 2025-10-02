@@ -63,7 +63,8 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
     # split ranges
-    ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
+    if _RANGEIFY:
+      ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
     ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
