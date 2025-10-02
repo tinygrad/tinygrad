@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
 from tinygrad.uop.symbolic import symbolic_flat, sym, invalid_pat
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
@@ -43,20 +43,25 @@ pm_simplify_ranges = PatternMatcher([
 ])
 
 def mark_range_mod(ctx, r:UOp, c:UOp):
-  if (r not in ctx or c < ctx[r]) and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
+  if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
 def do_substitute(ctx, x: UOp):
   subs = {}
   for k,v in ctx.items():
-    # TODO: support hierarchical ranges better
-    subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
+    if v is not None:
+      subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
   if not len(subs): return None
   ret = x.substitute(subs).simplify()
   ctx.clear()
   return ret
 
+def dont_sub_ranges_for_image(ctx, x:UOp):
+  if isinstance(x.src[0].dtype, ImageDType):
+    for s in x.src[1:]: ctx[s] = None
+
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
+  (UPat(Ops.STORE, name="x"), dont_sub_ranges_for_image),
   (UPat(Ops.SINK, name="x"), do_substitute),
 ])
 
