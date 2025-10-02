@@ -257,12 +257,12 @@ class Scheduler:
           except KernelOptError: continue
 
           # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-          warp = UOp.range(tc.threads, -1, AxisType.WARP)
+          #warp = UOp.range(tc.threads, -1, AxisType.WARP)
           ne: list[UOp] = []
           for opt in tc.opts:
             if opt[0] == "l":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
-              warp //= 2
+              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.WARP) #, input_new_rng=warp%2)
+              #warp //= 2
             elif opt[0] == "u":
               axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
             else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")

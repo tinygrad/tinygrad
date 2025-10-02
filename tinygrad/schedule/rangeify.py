@@ -576,6 +576,18 @@ pm_add_buffers = PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 ])+_pm_add_buffers
 
+def fix_bufferize(x:UOp, y:UOp):
+  local_end_ranges = []
+  for r in x.ranges:
+    if r.arg[-1] in {AxisType.LOCAL, AxisType.WARP}:
+      local_end_ranges.append(r)
+  if len(local_end_ranges) == 0: return None
+  return UOp(Ops.INDEX, y.dtype, (x.replace(src=x.src+tuple(local_end_ranges)),)+y.src[1:]+tuple(local_end_ranges), arg=y.arg)
+
+pm_fix_bufferize = PatternMatcher([
+  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFERIZE, name="x"),), name="y", allow_any_len=True), fix_bufferize),
+])
+
 # *****************
 # 5. split into kernels
 

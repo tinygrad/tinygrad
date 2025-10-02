@@ -19,7 +19,7 @@ from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, blo
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
-from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
+from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen, pm_fix_bufferize
 
 @dataclass
 class RewriteStep:
@@ -75,6 +75,9 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
 
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing+pm_group_for_reduce, name="postopt symbolic"))
+
+  # add locals
+  ret.append(RewriteStep(pm_fix_bufferize, name="fix bufferize"))
 
   # add locals
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
