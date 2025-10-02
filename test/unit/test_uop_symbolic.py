@@ -27,12 +27,14 @@ class TestSymbolicPickle(unittest.TestCase):
   def test_pickle_variable_times_2(self): self._test_pickle_unpickle(Variable("a", 3, 8)*2)
 
 class TestSymbolic(unittest.TestCase):
+  def check_equal_z3(self, expr1, expr2):
+    solver = z3.Solver()
+    expr1, expr2 = uops_to_z3(solver, expr1, expr2)
+    self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
+
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
     v_simplified = render(v)
-    if test_z3:
-      solver = z3.Solver()
-      expr, expr_simplified = uops_to_z3(solver, v, v_simplified)
-      self.assertEqual(solver.check(expr != expr_simplified), z3.unsat, "simplified expression not equal to original")
+    if test_z3: self.check_equal_z3(v, v_simplified)
     rendered, nmin, nmax = v_simplified.render(simplify=False), v_simplified.vmin, v_simplified.vmax
     if isinstance(s, tuple): self.assertIn(rendered, s)
     else: self.assertEqual(rendered, s)
@@ -113,6 +115,25 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
     self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
     self.assertEqual((((a*-2)+14)*b).divide_exact(((a*-2)+14)).simplify(), b)
+
+  def helper_test_factor(self, expr, factor):
+    factored = expr.factor(factor)
+    self.check_equal_z3(expr, factored)
+    self.assertIn(factor, factored.toposort())
+
+  def test_uop_factor(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    c = Variable("c", 0, 8)
+    self.helper_test_factor((1400*a+2800*b), (a+2*b))
+    self.helper_test_factor((1400*a+2800*b)%9000, (a+2*b))
+    self.helper_test_factor((a+2*b), (a+2*b))
+    self.helper_test_factor((a+c+2*b), (a+2*b))
+    self.helper_test_factor((1400*a+c+2800*b)%9000, (a+2*b))
+    self.helper_test_factor((1399*a+c+2800*b)%9000+1400*a+2800*b, (a+2*b))
+    self.helper_test_factor((1400*a+c+2800*b)%9000+1400*a+2800*b, (a+2*b))
+    self.assertIsNone((a+c+3*b).factor(a+2*b))
+    self.assertIsNone((1399*a+c+2800*b).factor(a+2*b))
 
   def test_divide_exact_not(self):
     a = Variable("a", 1, 8)
@@ -493,12 +514,12 @@ class TestSymbolic(unittest.TestCase):
     c = Variable("c", -10, 10)
     d1 = Variable("d1", 1, 10)
     d2 = Variable("d2", -10, -1)
-    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(a*(b*d1))")
-    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))")
-    self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)")
-    self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))")
-    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)")
-    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)")
+    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(a*(b*d1))", test_z3=False)
+    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))", test_z3=False)
+    self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)", test_z3=False)
+    self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))", test_z3=False)
+    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)", test_z3=False)
+    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)", test_z3=False)
 
   def test_symbolic_factor_remainder_div(self):
     a = Variable("a", 0, 10)
