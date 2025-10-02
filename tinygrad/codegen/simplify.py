@@ -43,7 +43,7 @@ pm_simplify_ranges = PatternMatcher([
 ])
 
 def mark_range_mod(ctx, r:UOp, c:UOp):
-  if (r not in ctx or c < r[ctx]) and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
+  if (r not in ctx or c < ctx[r]) and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
 def do_substitute(ctx, x: UOp):
   subs = {}
