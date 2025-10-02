@@ -722,6 +722,8 @@ jobs:
         run: |
           VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+      - name: Run pytest (amd) with RANGEIFY
+        run: RANGEIFY=1 python -m pytest test/test_linearizer.py::TestLinearizer::test_where_fold
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 

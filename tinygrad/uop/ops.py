@@ -467,6 +467,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     for x in self.src:
       if x._device is not None: return x._device
+    return None
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
