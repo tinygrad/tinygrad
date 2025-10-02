@@ -4,7 +4,7 @@ from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.uop.decompositions import xexp2, xlog2
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, sint_to_uop
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, sint_to_uop, range_str
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
 
@@ -102,14 +102,14 @@ base_rewrite = PatternMatcher([
 
   # range
   (UPat(Ops.RANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_entry_{x.arg[0]}\nloop_entry_{x.arg[0]}:\n"
-   f"  br label %loop_body_{x.arg[0]}\nloop_body_{x.arg[0]}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{x.arg[0]} ], [ {ctx[x]}phi, %loop_latch_{x.arg[0]} ]"),
+   f"  br label %loop_entry_{range_str(x)}\nloop_entry_{range_str(x)}:\n"
+   f"  br label %loop_body_{range_str(x)}\nloop_body_{range_str(x)}:\n"
+   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{range_str(x)} ], [ {ctx[x]}phi, %loop_latch_{range_str(x)} ]"),
   (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_latch_{x.src[0].arg[0]}\nloop_latch_{x.src[0].arg[0]}:\n"
+   f"  br label %loop_latch_{range_str(x.src[0])}\nloop_latch_{range_str(x.src[0])}:\n"
    f"  {ctx[x.src[0]]}phi = add {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, 1\n"
    f"  {ctx[x]} = icmp ult {ldt(x.src[0].dtype)} {ctx[x.src[0]]}phi, {ctx[x.src[0].src[0]]}\n"
-   f"  br i1 {ctx[x]}, label %loop_body_{x.src[0].arg[0]}, label %loop_exit_{x.src[0].arg[0]}\nloop_exit_{x.src[0].arg[0]}:"),
+   f"  br i1 {ctx[x]}, label %loop_body_{range_str(x.src[0])}, label %loop_exit_{range_str(x.src[0])}\nloop_exit_{range_str(x.src[0])}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
