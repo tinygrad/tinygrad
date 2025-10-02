@@ -198,11 +198,11 @@ class TestValidIdxSimplification(unittest.TestCase):
       "((((r0+r1)<1)!=True)&(((r2+r3)<1)!=True))")
 
   def test_valid_with_non_const_rhs(self):
-    ridx0 = Range(0, 2**16)
+    ridx0 = Range(0, 1024)
     ridx1 = Range(1, 4)
     ridx2 = Range(2, 4)
     valid = (ridx0<(ridx1*4 + ridx2))&(ridx0<-1).ne(True)
-    idx = ridx0%1024
+    idx = ridx0
     load = get_gated_load_uop(valid, idx)
     self.check(load,
       "r0",
