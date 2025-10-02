@@ -1614,7 +1614,7 @@ def train_stable_diffusion():
           f.write(f"wandb.run.id = {wandb.run.id}")
 
     if i % CKPT_STEP_INTERVAL == 0:
-      # https://github.com/mlcommons/training_policies/blob/master/training_rules.adoc#14-appendix-benchmark-specific-rules
+      # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
       # "evaluation is done offline, the time is not counted towards the submission time."
       fn = f"{UNET_CKPTDIR}/{i}.safetensors"
       print(f"saving unet checkpoint at {fn}")
