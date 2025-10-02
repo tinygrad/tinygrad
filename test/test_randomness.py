@@ -361,6 +361,11 @@ class TestRandomness(unittest.TestCase):
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).weight, lambda _: torch.nn.BatchNorm2d(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).bias, lambda _: torch.nn.BatchNorm2d(*params).bias.detach())
 
+  def test_rand_chain(self):
+    # NOTE: this fails if property propagates deeper than stack limit
+    for _ in range(833): Tensor.rand(1)
+    Tensor.rand(1).realize()
+
 # TODO: still fails with MAX_KERNEL_BUFFERS
 @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
 class TestSample(unittest.TestCase):
