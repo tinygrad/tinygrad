@@ -252,6 +252,14 @@ class TestRangeify(unittest.TestCase):
       args += (Opt(OptOps.SWAP, 2, 5),)
       args += (Opt(OptOps.WARP, 4, 32),)
       args += (Opt(OptOps.WARP, 5, 32),)
+      args += (Opt(OptOps.UNROLL, 1, 8),)
+      args += (Opt(OptOps.UNROLL, 2, 8),)
+      args += (Opt(OptOps.UPCAST, 0, 4),)
+      args += (Opt(OptOps.UPCAST, 1, 4),)
+      args += (Opt(OptOps.UPCAST, 2, 4),)
+      args += (Opt(OptOps.UPCAST, 3, 4),)
+      args += (Opt(OptOps.UNROLL, 0, 4),)
+      args += (Opt(OptOps.UNROLL, 3, 4),)
       ret = fa().contiguous(arg=args).realize()
     with Context(RANGEIFY=0):
       with Context(DEBUG=2):
