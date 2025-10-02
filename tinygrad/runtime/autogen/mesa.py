@@ -145,7 +145,7 @@ else:
     c_long_double_t = ctypes.c_ubyte*16
 
 _libraries = {}
-_libraries['libtinymesa_cpu.so'] = ctypes.CDLL(mesa.path)
+_libraries['libtinymesa_cpu.so'] = ctypes.CDLL(mesa.path) if mesa.found else None
 class FunctionFactoryStub:
     def __getattr__(self, _):
       return ctypes.CFUNCTYPE(lambda y:y)
@@ -155,7 +155,7 @@ class FunctionFactoryStub:
 # This is a non-working stub instead.
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
-_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL(mesa.path)
+_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL(mesa.path) if mesa.found else None
 
 
 class struct_blob(Structure):
