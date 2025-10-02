@@ -219,7 +219,10 @@ class TestRangeify(unittest.TestCase):
     out.realize()
 
   def test_flash_attention(self):
-    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+    #BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+
+    # lil bigger
+    BS, HEADS, SEQLEN, EMB = 4, 32, 128, 64
 
     # bigger
     #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
@@ -236,8 +239,8 @@ class TestRangeify(unittest.TestCase):
       GlobalCounters.reset()
       args = ()
       args += (Opt(OptOps.DEMOTE, 5, 8),)
+      args += (Opt(OptOps.TC, 0, (0,0,1,3)),)
       args += (Opt(OptOps.TC, 0, (0,0,1,0)),)
-      #args += (Opt(OptOps.TC, 0, (0,0,1,3)),)
       ret = fa().contiguous(arg=args).realize()
     with Context(RANGEIFY=0):
       with Context(DEBUG=2):
