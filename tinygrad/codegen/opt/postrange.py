@@ -68,7 +68,7 @@ class Scheduler:
 
     # filter any not in local stores
     local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].ptrdtype.addrspace == AddrSpace.LOCAL) \
-                        or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
+                        or (x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.LOCAL)]
     for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
 
     # filter any not in reduces

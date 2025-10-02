@@ -100,8 +100,9 @@ class TestRangeify(unittest.TestCase):
       A, B, C = [Tensor.randn(N, N) for _ in range(3)]
       Tensor.realize(A, B, C)
     #args = (Opt(OptOps.TC, 0, (0,0,1,1))), Opt(OptOps.TC, 0, (0,0,1,0))
-    args = (Opt(OptOps.TC, 0, (0,0,1,0)),)
-    #args = (Opt(OptOps.TC, 0, (0,0,1,1)),)
+    #args = (Opt(OptOps.TC, 0, (0,0,1,0)),)
+    args = (Opt(OptOps.TC, 0, (0,0,1,1)),)
+    #args = ()
     tst = (A@B@C).contiguous(arg=args).realize()
     assert tst.uop.base.op is Ops.BUFFER, "buffer"
     with Context(RANGEIFY=0, DEBUG=0):
