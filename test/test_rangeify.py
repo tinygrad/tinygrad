@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
+from tinygrad.helpers import RANGEIFY, Context, GlobalCounters, getenv
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import OptOps, Opt
 
@@ -19,7 +19,7 @@ class TestRangeifyAssign(unittest.TestCase):
     self.assertListEqual(lst, lst3)
     self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
-N = 256
+N = getenv("N", 256)
 
 class TestRangeifyOpt(unittest.TestCase):
   def test_randperm(self):
@@ -99,10 +99,11 @@ class TestRangeify(unittest.TestCase):
     with Context(DEBUG=0):
       A, B, C = [Tensor.randn(N, N) for _ in range(3)]
       Tensor.realize(A, B, C)
-    #args = (Opt(OptOps.TC, 0, (0,0,1,1))), Opt(OptOps.TC, 0, (0,0,1,0))
-    #args = (Opt(OptOps.TC, 0, (0,0,1,0)),)
-    args = (Opt(OptOps.TC, 0, (0,0,1,1)),)
-    #args = ()
+    args = ()
+    args += (Opt(OptOps.DEMOTE, 2, 8),)
+    # NOTE: these axes are poorly sorted
+    #args += (Opt(OptOps.TC, 0, (0,0,1,1)),)
+    args += (Opt(OptOps.TC, 0, (0,0,1,0)),)
     tst = (A@B@C).contiguous(arg=args).realize()
     assert tst.uop.base.op is Ops.BUFFER, "buffer"
     with Context(RANGEIFY=0, DEBUG=0):

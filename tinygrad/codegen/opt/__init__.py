@@ -7,6 +7,7 @@ from tinygrad.uop.ops import AxisType
 class OptOps(Enum):
   TC = auto(); UPCAST = auto(); UNROLL = auto(); LOCAL = auto(); THREAD = auto() # noqa: E702
   GROUP = auto(); GROUPTOP = auto(); NOLOCALS = auto(); PADTO = auto(); SWAP = auto() # noqa: E702
+  DEMOTE = auto()
   def __lt__(self, x:OptOps): return self.value < x.value
 
 @dataclass(frozen=True, order=True)

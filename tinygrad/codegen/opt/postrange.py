@@ -172,6 +172,21 @@ class Scheduler:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
+    elif opt.op is OptOps.DEMOTE:
+      #rr = UOp.range(cast(int, opt.arg), -1, 0, AxisType.LOOP)
+      _, rr = self.shift_to(rng, cast(int, opt.arg), AxisType.LOOP) #, input_new_rng=rr)
+      def do_demote(ctx, x:UOp, y:UOp):
+        if y.tag is not None: return
+        mr = ctx[0]
+        nr = mr.replace(arg=ctx[0].arg[0:-2]+(mr.arg[-2]+1, mr.arg[-1]))
+        ctx[0] = nr
+        buf = x.replace(src=x.src+(mr,)).substitute({mr:nr})
+        return UOp(Ops.INDEX, y.dtype, (buf,)+y.src[1:]+(mr,), arg=y.arg, tag=1)
+      # do the demotion
+      pm_demote = PatternMatcher([
+        (UPat(Ops.INDEX, src=(UPat(Ops.BUFFERIZE, name="x"),), name="y", allow_any_len=True), do_demote),
+      ])
+      self.ast = graph_rewrite(self.ast, pm_demote, ctx=[rr])
     elif opt.op is OptOps.TC:
       #check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
@@ -257,12 +272,12 @@ class Scheduler:
           except KernelOptError: continue
 
           # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-          #warp = UOp.range(tc.threads, -1, AxisType.WARP)
+          warp = UOp.range(tc.threads, -1, AxisType.WARP)
           ne: list[UOp] = []
           for opt in tc.opts:
             if opt[0] == "l":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.WARP) #, input_new_rng=warp%2)
-              #warp //= 2
+              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.WARP, input_new_rng=warp%2)
+              warp //= 2
             elif opt[0] == "u":
               axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
             else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
