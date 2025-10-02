@@ -172,6 +172,9 @@ class Scheduler:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
+    elif opt.op is OptOps.WARP:
+      warp = UOp.range(cast(int, opt.arg), -1, AxisType.WARP)
+      ret = self.shift_to(rng, cast(int, opt.arg), AxisType.WARP, input_new_rng=warp)
     elif opt.op is OptOps.DEMOTE:
       _, rr = self.shift_to(rng, cast(int, opt.arg), AxisType.LOOP)
       def do_demote(ctx, x:UOp):

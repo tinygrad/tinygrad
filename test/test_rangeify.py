@@ -104,9 +104,16 @@ class TestRangeify(unittest.TestCase):
     # NOTE: these axes are poorly sorted
     args += (Opt(OptOps.TC, 0, (0,0,1,1)),)
     args += (Opt(OptOps.TC, 0, (0,0,1,0)),)
+
+    args += (Opt(OptOps.UPCAST, 0, 2),)
+    args += (Opt(OptOps.UPCAST, 1, 2),)
+    args += (Opt(OptOps.UNROLL, 0, 2),)
+    args += (Opt(OptOps.UNROLL, 1, 2),)
+
     tst = (A@B@C).contiguous(arg=args).realize()
     assert tst.uop.base.op is Ops.BUFFER, "buffer"
-    with Context(RANGEIFY=0, DEBUG=0):
+    with Context(RANGEIFY=0, DEBUG=2):
+      GlobalCounters.reset()
       mse = ((A@B@C)-tst).square().mean().item()
       print(mse)
 
@@ -241,6 +248,8 @@ class TestRangeify(unittest.TestCase):
       args += (Opt(OptOps.DEMOTE, 5, 8),)
       args += (Opt(OptOps.TC, 0, (0,0,1,3)),)
       args += (Opt(OptOps.TC, 0, (0,0,1,0)),)
+      args += (Opt(OptOps.WARP, 1, 32),)
+      args += (Opt(OptOps.WARP, 2, 32),)
       ret = fa().contiguous(arg=args).realize()
     with Context(RANGEIFY=0):
       with Context(DEBUG=2):
