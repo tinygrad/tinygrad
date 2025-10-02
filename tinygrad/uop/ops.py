@@ -44,6 +44,8 @@ def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
+def range_str(u:UOp) -> str: return '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
+
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
   def dfs(x:Any, cache:dict):
@@ -1111,7 +1113,7 @@ syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<"
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
   (UPat((Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg)),
-  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"r{x.arg[0]}" if x.arg[0] >= 0 else f"rm{-x.arg[0]}")),
+  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"r{range_str(x)}")),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
   (UPat(Ops.UNROLL, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UNROLL({x.src[0].arg}, {x.arg})")),
   (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"({str(x.dtype)[7:]})({x.src[0].arg})")),
