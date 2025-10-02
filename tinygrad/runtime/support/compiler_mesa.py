@@ -8,10 +8,17 @@ try: import tinygrad.runtime.autogen.llvm as llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
 def deserialize(enc_src, opts):
-  mesa.blob_reader_init(blobreader:=mesa.struct_blob_reader(), src:=base64.b64decode(enc_src), len(src))
+  blobreader = mesa.struct_blob_reader()
+  mesa.blob_reader_init(blobreader, src:=base64.b64decode(enc_src), len(src))
   return mesa.nir_deserialize(None, ctypes.cast(opts, ctypes.POINTER(mesa.nir_shader_compiler_options)), blobreader)
 
-class LVPCompiler(Compiler):
+class NIRCompiler(Compiler):
+  def __init__(self, cache_key):
+    mesa.glsl_type_singleton_init_or_ref()
+    super().__init__(cache_key)
+  def __del__(self): mesa.glsl_type_singleton_decref()
+
+class LVPCompiler(NIRCompiler):
   def __init__(self, cache_key="lvp"): super().__init__(f"compile_{cache_key}")
 
   def compile(self, src) -> bytes:
@@ -46,15 +53,18 @@ class LVPCompiler(Compiler):
 
   def disassemble(self, lib:bytes): cpu_objdump(lib)
 
-class NAKCompiler(Compiler):
-  def __init__(self, arch, warps, cache_key="nak"):
-    self.arch, self.warps, self.cc = arch, warps, mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=warps))
+class NAKCompiler(NIRCompiler):
+  def __init__(self, arch, warps_per_sm, cache_key="nak"):
+    self.arch, self.warps_per_sm = arch, warps_per_sm
+    self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=warps_per_sm))
     self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
     super().__init__(f"compile_{cache_key}_{arch}")
 
-  def __del__(self): mesa.nak_compiler_destroy(self.cc)
+  def __del__(self):
+    mesa.nak_compiler_destroy(self.cc)
+    super().__del__()
 
-  def __reduce__(self): return NAKCompiler, (self.arch, self.warps)
+  def __reduce__(self): return NAKCompiler, (self.arch, self.warps_per_sm)
 
   def compile(self, src) -> bytes:
     shader = deserialize(src, self.nir_options)
