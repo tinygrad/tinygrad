@@ -572,8 +572,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.ADD:
       self_terms_factors = [(u.divides(f:=u.const_factor()).simplify(),f) for u in self.split_uop(Ops.ADD)]
       to_be_factored, remainders = map(dict, partition(self_terms_factors, lambda t_f: t_f[0] in terms_factors))
-      if any(u not in to_be_factored for u in terms_factors) or any(to_be_factored[u]%terms_factors[u]!=0 for u in terms_factors) or not all_same(factors:=
-        [to_be_factored[u]//terms_factors[u] for u in terms_factors]):return None
+      if any(u not in to_be_factored for u in terms_factors) or any(to_be_factored[u]%terms_factors[u]!=0 for u in terms_factors) or not \
+        all_same(factors:=[to_be_factored[u]//terms_factors[u] for u in terms_factors]):return None
       return sum(((new_k if (new_k:=k.factor(expr)) is not None else k)*v for k,v in remainders.items()), start=expr*factors[0])
     if self.op not in GroupOp.ALU: return None
     new_src = tuple(s.factor(expr) for s in self.src)
