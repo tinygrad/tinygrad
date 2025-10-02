@@ -532,10 +532,8 @@ jobs:
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
-      # rangeify diamond cycle gives the wrong answer
       run: |
         CPU=1 CPU_LLVM=0 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
-          -k "not test_assign_diamond_cycle" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_randomness.py test/test_nn.py test/test_arange.py test/test_tensor.py test/test_optim.py \
           test/test_setitem.py test/test_assign.py test/test_multitensor.py
@@ -596,7 +594,9 @@ jobs:
     - name: some unit tests
       run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/unit/test_winograd.py test/unit/test_linalg.py --durations=20
     - name: Test METAL=1 RANGEIFY=1
-      run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py test/test_multitensor.py --durations=20
+      run: |
+        METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py test/test_multitensor.py --durations=20
+        METAL=1 MAX_KERNEL_BUFFERS=6 RANGEIFY=1 PYTHONPATH=. python test/test_multitensor.py TestBatchNorm.test_batchnorm
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
