@@ -182,13 +182,13 @@ class Scheduler:
         mr = ctx[0]
         nr = mr.replace(arg=ctx[0].arg[0:-2]+(mr.arg[-2]+1, mr.arg[-1]))
         ctx[0] = nr
-        buf = x.replace(src=x.src+(mr,), tag=1).substitute({mr:nr})
+        buf = x.replace(src=(x.src[0], mr)+x.src[1:], tag=1).substitute({mr:nr})
         return UOp(Ops.APPENDINDEX, dtypes.void, (buf,mr))
       # do the demotion
       pm_demote = PatternMatcher([
         (UPat(Ops.BUFFERIZE, name="x"), do_demote),
         (UPat(Ops.INDEX, src=(UPat(Ops.APPENDINDEX, name="x"),), name="y", allow_any_len=True),
-         lambda x,y: y.replace(src=(x.src[0],)+y.src[1:]+x.src[1:])),
+         lambda x,y: y.replace(src=(x.src[0],)+x.src[1:]+y.src[1:])),
       ])
       self.ast = graph_rewrite(self.ast, pm_demote, ctx=[rr], bottom_up=True, name="demote")
     elif opt.op is OptOps.TC:
@@ -222,7 +222,7 @@ class Scheduler:
         altrng = self.rngs[opt.arg]
       except IndexError:
         raise KernelOptError
-      check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
+      check(rng.arg[-1] == AxisType.LOOP and altrng.arg[-1] == AxisType.LOOP, "swap only for globals")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)})
       self.ast = graph_rewrite(self.ast, remove_tags)
