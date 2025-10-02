@@ -1,4 +1,4 @@
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
 from tinygrad.uop.symbolic import symbolic_flat, sym, invalid_pat
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
@@ -40,6 +40,29 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
 
 pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.STORE, Ops.REDUCE), name="u"), simplify_merge_adjacent),
+])
+
+def mark_range_mod(ctx, r:UOp, c:UOp):
+  if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
+
+def do_substitute(ctx, x: UOp):
+  subs = {}
+  for k,v in ctx.items():
+    if v is not None:
+      subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
+  if not len(subs): return None
+  ret = x.substitute(subs).simplify()
+  ctx.clear()
+  return ret
+
+def dont_sub_ranges_for_image(ctx, x:UOp):
+  if isinstance(x.src[0].dtype, ImageDType):
+    for s in x.src[1:]: ctx[s] = None
+
+pm_split_ranges = PatternMatcher([
+  (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
+  (UPat(Ops.STORE, name="x"), dont_sub_ranges_for_image),
+  (UPat(Ops.SINK, name="x"), do_substitute),
 ])
 
 # **** reduce simplification ****
@@ -115,9 +138,12 @@ def reduce_unparented(red:UOp):
     for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
-pm_reduce_simplify = PatternMatcher([
+pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
+])
+
+pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
 ])

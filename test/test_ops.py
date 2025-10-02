@@ -3164,7 +3164,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
 
-  @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "AMD" and RANGEIFY, "very slow on MOCKGPU because reduce does not fold")
+  @unittest.skipIf(RANGEIFY and ((getenv("MOCKGPU") and Device.DEFAULT == "AMD") or Device.DEFAULT == "PYTHON"),
+                   "very slow on MOCKGPU because reduce does not fold")
   def test_masked_select(self):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
