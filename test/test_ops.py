@@ -2231,6 +2231,7 @@ class TestOps(unittest.TestCase):
       # needed to relax tolerance for larger input
       lambda x,w: Tensor.conv2d(x,w,groups=groups), atol=1e-4, grad_atol=3e-4, grad_rtol=1e-4)
 
+  @unittest.skipIf(IMAGE>0, "no group 2 on images")
   def test_simple_grouped_conv2d(self):
     bs = 1
     groups = 2
@@ -2240,6 +2241,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,groups=groups),
       lambda x,w: Tensor.conv2d(x,w,groups=groups), grad_rtol=1e-5)
 
+  @unittest.skipIf(IMAGE>0, "no group 2 on images")
   def test_medium_grouped_conv2d(self):
     bs = 1
     groups = 2
