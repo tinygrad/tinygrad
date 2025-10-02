@@ -106,7 +106,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if sys.platform != 'win32' and LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
+    super().__init__(LVPArgsState if not WIN and LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if not WIN and LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
