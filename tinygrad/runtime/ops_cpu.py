@@ -60,8 +60,7 @@ class CPUComputeQueue(HWQueue):
   def _submit(self, dev): dev.tasks.put(self._q[:])
 
 class LVPArgsState(CLikeArgsState):
-  def __init__(self, buf:HCQBuffer, prg:CPUProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    super().__init__(buf, prg, bufs, vals=vals, prefix=[*data64_le(buf.va_addr + 12), 0xFF])
+  def __init__(self, buf, prg, bufs, vals=()): super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + len(vals)) * 2])
 
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
@@ -72,7 +71,6 @@ class CPUProgram(HCQProgram):
   except OSError: pass
 
   def __init__(self, dev, name:str, lib:bytes):
-    LVP = isinstance(dev.compiler, LVPCompiler)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -88,7 +86,7 @@ class CPUProgram(HCQProgram):
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      if LVP:
+      if (LVP:=isinstance(dev.compiler, LVPCompiler)):
         from tinygrad.runtime.autogen import libc
         (image, _, relocs), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
         for ploc,tgt,r_type,r_addend in relocs:
@@ -112,7 +110,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
+    super().__init__(LVPArgsState if sys.platform != 'win32' and LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
