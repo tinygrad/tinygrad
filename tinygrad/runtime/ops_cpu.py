@@ -87,14 +87,10 @@ class CPUProgram(HCQProgram):
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
       if (LVP:=isinstance(dev.compiler, LVPCompiler)):
-        from tinygrad.runtime.autogen import libc
-        (image, _, relocs), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
-        for ploc,tgt,r_type,r_addend in relocs:
-          assert r_type == libc.R_X86_64_64 and self.rt_lib is not None
-          image[ploc:ploc+8] = struct.pack("<Q", ctypes.cast(getattr(ctypes.CDLL(ctypes.util.find_library('m')), tgt, None) or \
-                                                             self.rt_lib[tgt], ctypes.c_void_p).value if isinstance(tgt, str) else tgt+r_addend+addr)
-        self.mem.write(image)
-      else: self.mem.write(lib)
+        (lib, _, rels), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
+        for loc,tgt,_,add in rels: lib[loc:loc+8] = (bytes(getattr(ctypes.CDLL(ctypes.util.find_library('m')), tgt, None) or unwrap(self.rt_lib)[tgt])
+                                                     if isinstance(tgt, str) else struct.pack("<Q", tgt+add+addr))
+      self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
