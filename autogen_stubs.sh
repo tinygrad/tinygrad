@@ -501,10 +501,10 @@ generate_mesa() {
   fixup $BASE/mesa.py
   echo "lvp_nir_options = gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))" >> $BASE/mesa.py
   sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
-  sed -i "s/AttributeError/(AttributeError,FileNotFoundError)/" $BASE/mesa.py
+  sed -i "s/AttributeError/(AttributeError,ValueError)/" $BASE/mesa.py
   sed -i "s/import ctypes/import ctypes, gzip, base64, tinygrad.runtime.support.mesa as mesa/" $BASE/mesa.py
-  sed -i "s/ctypes.CDLL('.\+')/mesa/g" $BASE/mesa.py
-  echo "def __getattr__(nm): raise mesa.error if mesa.error else AttributeError(f'{nm} not found in {mesa.path}' + ('' if 'cpu' in mesa.path else ', you may need to install libtinymesa_cpu.so'))" >> $BASE/mesa.py
+  sed -i "s/ctypes.CDLL('.\+')/ctypes.CDLL(mesa.path)/g" $BASE/mesa.py
+  echo "def __getattr__(nm): raise AttributeError() if mesa.found else FileNotFoundError(f'libtinymesa not found (MESA_PATH={mesa.MESA_PATH}). See https://github.com/sirhcm/tinymesa (release: $MESA_TAG-$TINYMESA_COMMIT_HASH)')" >> $BASE/mesa.py
   sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/mesa.py
   # bitfield bug in clang2py
   sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/mesa.py
