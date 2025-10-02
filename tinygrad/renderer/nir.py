@@ -179,14 +179,6 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: ensure(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __init__(self, device):
-    self.device = device
-    mesa.glsl_type_singleton_init_or_ref()
-
-  def __del__(self):
-    try: mesa.glsl_type_singleton_decref()
-    except AttributeError: pass
-
   @property
   def nir_options(self): raise NotImplementedError("needs nir_options")
   def param(self, dtype:DType, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
@@ -194,6 +186,7 @@ class NIRRenderer(Renderer):
     self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, mesa.nir_shader_compiler_options.from_buffer_copy(self.nir_options), None)
 
   def render(self, uops:list[UOp]):
+    mesa.glsl_type_singleton_init_or_ref()
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
     self.r, self.param_idx, ranges = {}, 0, []
@@ -231,14 +224,16 @@ class NIRRenderer(Renderer):
     mesa.ralloc_free(self.b.shader)
     ctypes.CDLL(ctypes.util.find_library('c')).free(blob.data)
     del self.b, self.r
+    mesa.glsl_type_singleton_decref()
 
     return ret
 
 class NAKRenderer(NIRRenderer):
-  def __init__(self, dev=None, nir_options=None, device="NV"):
+  device = "NV"
+
+  def __init__(self, dev=None, nir_options=None):
     if dev: self.dev = dev
     else: self.__dict__['nir_options'] = nir_options
-    super().__init__(device)
 
   @classmethod
   def with_opts(cls, opts): return cls(nir_options=opts)
@@ -262,12 +257,11 @@ class NAKRenderer(NIRRenderer):
     return d(intrin)
 
 class LVPRenderer(NIRRenderer):
+  device = "CPU"
   has_local = False
   has_shared = False
   global_max = (1, 0, 0)
   nir_options = mesa.lvp_nir_options
-
-  def __init__(self, device="CPU"): super().__init__(device)
 
   def param(self, dtype:DType, sz:int) -> mesa.nir_def:
     intrin = mesa.nir_intrinsic_instr_create(self.b.shader, mesa.nir_intrinsic_load_ubo)
