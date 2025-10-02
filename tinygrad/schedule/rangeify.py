@@ -4,10 +4,10 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.symbolic import sym, symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
-from tinygrad.codegen.simplify import pm_flatten_range
+from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 
 # *****************
@@ -24,9 +24,30 @@ def find_permutes(a:UOp, b:UOp, assign:UOp):
   for p in permutes:
     if any(s is target for s in p.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})): return assign.replace(src=(a, b.contiguous()))
 
+def split_reduceop(reduce:UOp, x:UOp):
+  if prod(reduce.shape) == 0: return None
+  if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
+  # if there are few globals, make some reduces into globals by splitting into two kernels
+  # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
+  #   ~2**10 should be enough if GROUP is used
+  # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
+  # split is moved to the end to provide maximum locality for the second phase reduce.
+  real_strides = unwrap(x.st).real_strides(ignore_valid=True)
+  if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
+                             if x.shape[i]%d==0 and real_strides[i]!=0]): return None
+  dim_to_split, divisor = split_candidates[0]
+  splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
+  splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
+  if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
+  # reduce original axes, then split
+  return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape).replace(tag=reduce.tag)
+
 earliest_rewrites = PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
+
+  # split_reduceop
+  (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
 
   # preserve tags?
   # reduce of size 0 is the identity element
@@ -485,7 +506,7 @@ def limit_bufs(ctx:RangeifyContext, root:UOp):
       if s.op in GroupOp.Elementwise:
         # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.LOOP
         orig_ranges, end_ranges = s.ranges, [x.replace(arg=(next(ctx.range_idx), AxisType.LOOP)) if x.op is Ops.RANGE else x for x in s.ranges]
-        s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=device)).index(*orig_ranges)
+        s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
     return root.replace(src=tuple(srcs))
 pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs)])
@@ -591,7 +612,14 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   ctx.range += 1
   return ret
 
+def find_bufs(x:UOp):
+  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.ASSIGN) if s.op is Ops.INDEX]
+  read_from: dict[UOp, Ops] = {}
+  if any((buf:=idx.as_buf()).op is Ops.BUFFER and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
+    raise RuntimeError(f"cycle detected while indexing {buf}")
+
 to_define_global = PatternMatcher([
+  (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
   (UPat((Ops.ASSIGN, Ops.MSTACK, Ops.MSELECT), name="assign"), handle_assign),
@@ -708,7 +736,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
-  tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
+  tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
 
