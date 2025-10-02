@@ -287,6 +287,8 @@ class Scheduler:
             axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
             ne.append(new_range)
 
+          print("ne", [x.arg for x in ne])
+
           if use_tensor_cores != 2:
             # fix the srcs
             reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
@@ -297,12 +299,18 @@ class Scheduler:
 
             # get reduce/upcast axes for the tensor cores
             tc_reduce_axes = self.shape_str_to_axis([f"r{i}" for i in range(len(tc.get_reduce_axes()))])
+            print(tc.base_upcast_axes())
             base_upcast_axes = tuple([(s,2) for s in self.shape_str_to_axis(tc.base_upcast_axes())])
             tc_upcast_axes = tuple([base_upcast_axes[:int(math.log2(tc.elements_per_thread[i]))] for i in range(3)])
+            print(tc_upcast_axes)
 
             # axes to range number (was done in lowerer)
             tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
             tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
+            print(tc_upcast_axes)
+            print(tc_reduce_axes)
+
+            tc_upcast_axes = (((ne[0].arg[0], 2),), ((ne[0].arg[0], 2),), ((ne[0].arg[0], 2),))
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg

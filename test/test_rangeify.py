@@ -102,7 +102,7 @@ class TestRangeify(unittest.TestCase):
     args = ()
     args += (Opt(OptOps.DEMOTE, 2, 8),)
     # NOTE: these axes are poorly sorted
-    #args += (Opt(OptOps.TC, 0, (0,0,1,1)),)
+    args += (Opt(OptOps.TC, 0, (0,0,1,1)),)
     args += (Opt(OptOps.TC, 0, (0,0,1,0)),)
     tst = (A@B@C).contiguous(arg=args).realize()
     assert tst.uop.base.op is Ops.BUFFER, "buffer"
