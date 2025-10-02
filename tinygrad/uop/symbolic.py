@@ -283,6 +283,10 @@ commutative = PatternMatcher([
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
+  # ** combine terms (opinionated), can make it harder to substitute valids **
+  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
+  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x").logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
   # ** combine terms **
@@ -371,13 +375,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     x.cast(dtypes.int).alu(u.op, y.cast(dtypes.int)).cast(u.dtype) if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
   ((UPat.var("x", dtypes.index) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
 ])+gep_pushing
-
-symbolic_flat = symbolic+PatternMatcher([
-  # ** combine terms (opinionated) **
-  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
-  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
-])
+symbolic_flat = symbolic
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 
@@ -409,6 +407,10 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
+    # if the expr is an add we try and factorize so its more likely to substitute
+    if expr.op is Ops.ADD:
+      new_uop = uop.factor(expr)
+      if new_uop is not None: uop = new_uop
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
     if v0 > v1: return None
     # whole node became a const
@@ -437,7 +439,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
 def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  try: return sum(-1 if parse_valid(v)[0] in other.toposort() else 0 for other in valids)
+  try: return sum(-1 if other.factor(parse_valid(v)[0]) is not None else 0 for other in valids)
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
