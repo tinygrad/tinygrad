@@ -315,7 +315,7 @@ def eval_stable_diffusion():
   import csv, PIL, sys
   from tqdm import tqdm
   from examples.mlperf.initializers import init_stable_diffusion, gelu_erf
-  from examples.stable_diffusion import AutoencoderKL, Decoder
+  from examples.stable_diffusion import AutoencoderKL
   from extra.models.unet import UNetModel
   from tinygrad.nn.state import load_state_dict, torch_load
   from tinygrad.helpers import BEAM
