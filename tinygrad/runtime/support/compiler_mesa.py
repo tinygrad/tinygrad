@@ -1,7 +1,6 @@
 import base64, ctypes, pathlib, tempfile, hashlib, subprocess
-from typing import Tuple
 from tinygrad.device import Compiler
-from tinygrad.helpers import cpu_objdump, round_up
+from tinygrad.helpers import cpu_objdump
 from tinygrad.runtime.support.compiler_cpu import cerr, expect
 import tinygrad.runtime.autogen.mesa as mesa
 try: import tinygrad.runtime.autogen.llvm as llvm
@@ -77,11 +76,6 @@ class NAKCompiler(NIRCompiler):
   def disassemble(self, lib: bytes):
     try:
       fn = (pathlib.Path(tempfile.gettempdir()) / f"tinynak_{hashlib.md5(lib).hexdigest()}").as_posix()
-      with open(fn, "wb") as f: f.write(parse_nak_shader(lib)[0])
+      with open(fn, "wb") as f: f.write(lib[ctypes.sizeof(mesa.struct_nak_shader_info):])
       print(subprocess.check_output(['nvdisasm', "-b", f"SM{self.arch[3:]}", fn]).decode('utf-8'))
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
-
-def parse_nak_shader(shader:bytes) -> Tuple[memoryview, int, int, int]:
-  info = mesa.struct_nak_shader_info.from_buffer(shader)
-  return (memoryview(shader[ctypes.sizeof(info):]), info.num_gprs, round_up(info.cs.smem_size, 0x80), round_up(info.slm_size, 0x10))
-
