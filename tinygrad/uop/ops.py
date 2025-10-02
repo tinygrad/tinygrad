@@ -236,11 +236,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self, tracked=False):
+  def simplify(self, tracked=False, flat=False):
     # late import!
-    from tinygrad.uop.symbolic import symbolic
+    from tinygrad.uop.symbolic import symbolic, symbolic_flat
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      return graph_rewrite(self, symbolic_flat if flat else symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -575,7 +575,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if any(u not in to_be_factored for u in terms_factors) or any(to_be_factored[u]%terms_factors[u]!=0 for u in terms_factors) or not \
         all_same(factors:=[to_be_factored[u]//terms_factors[u] for u in terms_factors]):return None
       return sum(((new_k if (new_k:=k.factor(expr)) is not None else k)*v for k,v in remainders.items()), start=expr*factors[0])
-    if self.op not in GroupOp.ALU: return None
+    if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return None
     new_src = tuple(s.factor(expr) for s in self.src)
     if all(n is None for n in new_src): return None
     return self.replace(src=tuple((n if n is not None else s) for n,s in zip(new_src, self.src)))
