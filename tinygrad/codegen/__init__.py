@@ -62,11 +62,13 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
     ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
+    # split ranges
+    ret.append(RewriteStep(pm_split_ranges, ctx=lambda _: {}, name="split ranges"))
+
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
     ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
 
     # optimize (schedule) the AST
-    ret.append(RewriteStep(pm_split_ranges, ctx=lambda _: {}, name="split ranges"))
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
     ret.append(RewriteStep(pm_reduce_simplify, name="simplify reduces"))
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
