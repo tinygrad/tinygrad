@@ -51,6 +51,10 @@ class TestRangeifyOpt(unittest.TestCase):
     B = Tensor.empty(N, N)
     (A@B).reshape(N*N).contiguous().realize()
 
+  def test_reduce_reshapes(self):
+    A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
+    A.sum().realize()
+
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):

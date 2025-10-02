@@ -49,8 +49,10 @@ def do_substitute(ctx, x: UOp):
   subs = {}
   for k,v in ctx.items():
     # TODO: support hierarchical ranges better
-    subs[k] = k.replace(src=(k.src[0]//v,), arg=(k.arg[0],0)+k.arg[1:])*v + k.replace(src=(v,), arg=(k.arg[0],1)+k.arg[1:])
-  return x.substitute(subs)
+    subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
+  ret = x.substitute(subs).simplify()
+  ctx.clear()
+  return ret
 
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
