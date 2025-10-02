@@ -59,6 +59,13 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
         elif axis in k.unrollable_dims:
           k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+      else:
+        # TODO: we have to do the other one also
+        unit_stride_axes_mul_2 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
+          c.op is Ops.RANGE and (c.vmax+1)%2 == 0]
+        if len(unit_stride_axes_mul_2):
+          if (axis:=unit_stride_axes_mul_2[0]) in k.upcastable_dims:
+            k.apply_opt(Opt(OptOps.UPCAST, axis, 2))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
