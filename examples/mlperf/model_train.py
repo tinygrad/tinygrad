@@ -1605,9 +1605,9 @@ def train_stable_diffusion():
       
     total_train_time = time.perf_counter() - train_start_time
     if WANDB:
-      wandb_log = {"train/loss": loss_item, "train/lr": lr_item, "train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
+      wandb.log({"train/loss": loss_item, "train/lr": lr_item, "train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
                     "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
-                    "train/train_step_time": t2-t1, "train/total_time": total_train_time}
+                    "train/train_step_time": t2-t1, "train/total_time": total_train_time})
 
       if i == 1 and wandb.run is not None:
         with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
@@ -1625,7 +1625,6 @@ def train_stable_diffusion():
         return saved_checkpoints
 
     t3 = time.perf_counter()
-    if WANDB: wandb.log(wandb_log)
     print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
   loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
   t3-t2: {t3-t2:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}, total_train_time:{total_train_time:.2f}
