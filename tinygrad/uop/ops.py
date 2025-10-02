@@ -563,6 +563,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  def factor(self, expr: UOp) -> UOp|None:
+    # factor out expr from self if possible
+    # (1400*a + 2800*b + c).factor(a+2*b) -> 1400*(a+2*b) + c
+    if expr.op is not Ops.ADD: return self if expr in self.sparents else None
+    # dict of {term: const_factor}, i.e. {a: 1, b: 2}
+    terms_factors = dict((u.divides(f:=u.const_factor()).simplify(),f) for u in expr.split_uop(Ops.ADD))
+    if self.op is Ops.ADD:
+      self_terms_factors = [(u.divides(f:=u.const_factor()).simplify(),f) for u in self.split_uop(Ops.ADD)]
+      to_be_factored, remainders = map(dict, partition(self_terms_factors, lambda t_f: t_f[0] in terms_factors))
+      if any(u not in to_be_factored for u in terms_factors) or any(to_be_factored[u]%terms_factors[u]!=0 for u in terms_factors) or not all_same(factors:=
+        [to_be_factored[u]//terms_factors[u] for u in terms_factors]):return None
+      return sum(((new_k if (new_k:=k.factor(expr)) is not None else k)*v for k,v in remainders.items()), start=expr*factors[0])
+    if self.op not in GroupOp.ALU: return None
+    new_src = tuple(s.factor(expr) for s in self.src)
+    if all(n is None for n in new_src): return None
+    return self.replace(src=tuple((n if n is not None else s) for n,s in zip(new_src, self.src)))
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, ConstType]:
     return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
