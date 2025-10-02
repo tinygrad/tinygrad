@@ -420,7 +420,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_gated_load_fold(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
-    ld = d0.index(ridx0, ridx0<50).load()
+    ld = d0.index(ridx0.valid(ridx0<50)).load()
     w = (ridx0<50).where(ld, 5)
     uops = to_uops_list([w])
     for u in uops:
@@ -430,12 +430,23 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_on_gated_load_folds_swapped_branches(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
-    ld = d0.index(ridx0, (ridx0<50).logical_not()).load()
+    ld = d0.index(ridx0.valid((ridx0<50).logical_not())).load()
     w = (ridx0<50).where(5, ld)
     uops = to_uops_list([w])
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD: assert u.src[1].arg==5
+
+  def test_where_on_gated_load_with_cast(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
+    gate_idx = ridx0.valid((ridx0<50))
+    ld = d0.index(gate_idx).load().cast(dtypes.float)
+    w = (ridx0<50).where(ld, 5.0)
+    uops = to_uops_list([w])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+      if u.op is Ops.LOAD: assert u.src[1].arg == 5
 
   def test_where_in_store_becomes_gate(self):
     ridx0 = UOp.range(100, 0)
@@ -581,11 +592,19 @@ class TestUOpGraph(unittest.TestCase):
       glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 0)
       gidx0 = UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, 42),), "gidx0")
       ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<8),)).cast(dtypes.index)
-      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<32)),)).cast(dtypes.index)
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<32)),))
       to_uops_list([ld1])
 
       ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<64)),))
       with self.assertRaises(RuntimeError): to_uops_list([ld1])
+
+  def test_bounds_with_loaded_bool(self):
+    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
+    glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(8), (), 0)
+    gidx0 = UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, 16),), "gidx0")
+    ld0 = glbl0.index(gidx0).load()
+    ld1 = glbl1.index(gidx0.valid(ld0)).load()
+    with self.assertRaises(RuntimeError): to_uops_list([ld1])
 
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)

@@ -43,6 +43,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   return sched
 
 def expect_rangeify_fails(fxn): return (unittest.expectedFailure if RANGEIFY else (lambda f:f))(fxn)
+def expect_nonrangeify_fails(fxn): return (unittest.expectedFailure if not RANGEIFY else (lambda f:f))(fxn)
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -145,7 +146,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
-  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
   def test_add_chain_buffers(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -358,7 +358,7 @@ class TestSchedule(unittest.TestCase):
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 2 if RANGEIFY else 4)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
-    assert len(reduceops) == 2
+    assert len(reduceops) == (3 if RANGEIFY else 2)
 
   def test_div_collapse_buffer(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
@@ -697,7 +697,6 @@ class TestSchedule(unittest.TestCase):
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
 
-  @expect_rangeify_fails
   def test_kernelize(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -705,20 +704,20 @@ class TestSchedule(unittest.TestCase):
     d = c+2
     check_schedule(d, 2)
 
-  @expect_rangeify_fails
   def test_kernelize_view(self):
     a = Tensor.empty(4,1)
     b = a*2
     c = b.kernelize()+Tensor.empty(4,4)
     check_schedule(c, 2)
 
-  @expect_rangeify_fails
   def test_kernelize_diamond(self):
     a = Tensor([0]).realize()
     prev_a = (a+1).contiguous()
     a.assign(Tensor([2]))
     a.kernelize(prev_a)
-    assert prev_a.uop in a.uop.src, "contiguous usage must run before assign"
+    # RANGEIFY doesn't apply the post diamond graph, it's fine since we can always apply the fixup on each kernelize call
+    if not RANGEIFY:
+      assert prev_a.uop in a.uop.src, "contiguous usage must run before assign"
     self.assertEqual((prev_a+a*3).item(), 1+2*3)
 
   @expect_rangeify_fails
@@ -733,7 +732,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(b.buffer.numpy(), [12])
 
   # unlike schedule, kernelize can be called multiple times on a Tensor
-  @expect_rangeify_fails
   def test_double_kerenlize(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
@@ -742,7 +740,6 @@ class TestSchedule(unittest.TestCase):
     e = c.kernelize()+d.kernelize()
     check_schedule(e, 3)
 
-  @expect_rangeify_fails
   def test_kernelize_bw(self):
     a = Tensor.full((3,), 2.0, requires_grad=True).contiguous()
     b = Tensor.full((3,), 3.0, requires_grad=True).contiguous()
@@ -753,7 +750,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(z.item(), 18.0)
     self.assertEqual(z.grad.item(), 1.0)
 
-  @expect_rangeify_fails
   def test_kernelize_bw_view(self):
     a = Tensor.full((3,1), 2.0, requires_grad=True).contiguous()
     b = Tensor.full((3,1), 3.0, requires_grad=True).contiguous()
@@ -1629,14 +1625,14 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 2))
 
-  def test_conv2d(self): _test_conv2d(4 if RANGEIFY else 7)
-  def test_conv2d_fused(self): _test_conv2d(4 if RANGEIFY else 5, FUSE_CONV_BW=1)
+  def test_conv2d(self): _test_conv2d(5 if RANGEIFY else 7)
+  def test_conv2d_fused(self): _test_conv2d(5 if RANGEIFY else 5, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
-  def test_conv2d_half(self): _test_conv2d(4 if RANGEIFY else 7, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(5 if RANGEIFY else 7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
-  @unittest.expectedFailure
+  @unittest.skipIf(not RANGEIFY, "passes on RANGEIFY")
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
   def test_schedule_mem_used(self):
@@ -1661,7 +1657,6 @@ class TestSchedule(unittest.TestCase):
     check_schedule(constv, 1)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @expect_rangeify_fails
   def test_image_matmul(self):
     with Context(IMAGE=2):
       x = Tensor.randn((9, 9)).realize()
@@ -1903,6 +1898,19 @@ class TestSchedule(unittest.TestCase):
       # NOTE: this is a bug on non rangeify
       np.testing.assert_equal(tst.numpy(), a.numpy())
 
+  def test_setitem_sched(self, mop=lambda x:x, expected_kcount=1):
+    a = Tensor.arange(16, device="CPU").reshape(4, 4).contiguous().realize()
+    a2 = mop(a)
+    expected = (a+a2).tolist()
+    a.assign(a+a2)
+    kcount = len(sched:=a.schedule())
+    run_schedule(sched)
+    self.assertListEqual(a.tolist(), expected)
+    self.assertEqual(kcount, expected_kcount)
+  @unittest.skipUnless(RANGEIFY>0, "this asserts on non rangeify")
+  def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
+  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
+
   def test_sparse_categorical_crossentropy_simple(self):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
     Y = Tensor([1, 2]).realize()
@@ -1951,7 +1959,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
-  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -2268,11 +2275,18 @@ class TestCopyFolding(unittest.TestCase):
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
-  @expect_rangeify_fails
   def test_permute_on_disk(self):
     with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
     b = a.reshape(2, 2).permute(1, 0).to("CPU")
+    b.realize()
+    self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
+
+  @expect_nonrangeify_fails
+  def test_permute_on_disk_contiguous(self):
+    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
+    a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
+    b = a.reshape(2, 2).permute(1, 0).contiguous().to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
@@ -2284,7 +2298,7 @@ class TestCopyFolding(unittest.TestCase):
 
   # NOTE: disk permute must come after COPY
   # TODO: this is wrong because of the permute
-  @unittest.expectedFailure
+  @expect_nonrangeify_fails
   def test_permute_after_shrink_on_disk(self):
     with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).realize().uop.base.buffer.as_buffer())
     a = Tensor.empty(5, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_5_permute')}")
@@ -2427,6 +2441,7 @@ class TestUOpBecome(unittest.TestCase):
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
   # NOTE: this expand is not reordered because there's before it to fuse
+  @expect_rangeify_fails
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
