@@ -478,7 +478,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.as_buf() for x in self.src))
     # TODO: this should be the only one of these. this is the one RANGEIFY uses
     s = self
-    while len(s.src) and s.op not in {Ops.BUFFER, Ops.MSTACK}: s = s.src[0]
+    while len(s.src) and s.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: s = s.src[0]
     return s
 
   @property
