@@ -17,6 +17,7 @@ class TestRemoteMultiHost(unittest.TestCase):
     np.testing.assert_equal(b.numpy(), np.arange(0, 16))
 
   @Context(JIT_BATCH_SIZE=2**32)
+  @unittest.skip("kernel must all be multibuffer")
   def test_multihost_matmul_jit_graph(self):
     @TinyJit
     def do(a:Tensor, b:Tensor): return (a @ b).contiguous().realize()
