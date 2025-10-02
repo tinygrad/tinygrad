@@ -42,6 +42,21 @@ pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.STORE, Ops.REDUCE), name="u"), simplify_merge_adjacent),
 ])
 
+def mark_range_mod(ctx, r:UOp, c:UOp):
+  if r not in ctx: ctx[r] = c
+
+def do_substitute(ctx, x: UOp):
+  subs = {}
+  for k,v in ctx.items():
+    # TODO: support hierarchical ranges better
+    subs[k] = k.replace(src=(k.src[0]//v,), arg=(k.arg[0],0)+k.arg[1:])*v + k.replace(src=(v,), arg=(k.arg[0],1)+k.arg[1:])
+  return x.substitute(subs)
+
+pm_split_ranges = PatternMatcher([
+  (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
+  (UPat(Ops.SINK, name="x"), do_substitute),
+])
+
 # **** reduce simplification ****
 
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)

@@ -78,7 +78,7 @@ class Scheduler:
     for ls in reduce_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
     """
 
-    return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.LOOP] if store_rngs else []
+    return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[-1] == AxisType.LOOP] if store_rngs else []
 
   def convert_loop_to_global(self):
     if not self.opts.has_local: return None
