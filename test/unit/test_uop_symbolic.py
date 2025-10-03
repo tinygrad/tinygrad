@@ -163,13 +163,13 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 8)
     b = Variable("b", 0, 8)
     self.helper_test_variable(a*2+a*3, 0, 8*5, "(a*5)")
-    self.helper_test_variable(b+a*2+a*3, 0, 8*6, "(b+(a*5))")
+    self.helper_test_variable(b+a*2+a*3, 0, 8*6, "((a*5)+b)")
 
   def test_factorize_no_mul(self):
     a = Variable("a", 0, 8)
     b = Variable("b", 0, 8)
     self.helper_test_variable(a+a*3, 0, 8*4, "(a*4)")
-    self.helper_test_variable((a+b)+a*3, 0, 8*5, "(b+(a*4))")
+    self.helper_test_variable((a+b)+a*3, 0, 8*5, "((a*4)+b)")
     self.helper_test_variable((a*3+b)+b*3, 0, 8*7, "((a*3)+(b*4))")
 
   def test_neg(self):
@@ -192,8 +192,8 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 0, 8)
     self.helper_test_variable(a+a, 0, 16, "(a*2)")
     self.helper_test_variable((a+b)+b, 0, 24, "(a+(b*2))")
-    self.helper_test_variable((a*3+b)+a, 0, 40, "(b+(a*4))")
-    self.helper_test_variable((a+b)+a*3, 0, 40, "(b+(a*4))")
+    self.helper_test_variable((a*3+b)+a, 0, 40, "((a*4)+b)")
+    self.helper_test_variable((a+b)+a*3, 0, 40, "((a*4)+b)")
 
   def test_sub_self(self):
     a = Variable("a", 0, 8)
@@ -312,7 +312,7 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_congruence_multiple_vars(self):
     self.helper_test_variable((9+9*Variable("x",0,3)+9*Variable("y",0,3))%10, 3, 9, "(((x*-1)+(y*-1))+9)")
     self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9,
-                              ("(((z+(x*-1))+(y*-1))+7)", "(((y*-1)+(z+(x*-1)))+7)"))
+                              ("(((z+(x*-1))+(y*-1))+7)", "(((y*-1)+(z+(x*-1)))+7)", "((((x*-1)+(y*-1))+z)+7)"))
     self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
 
   def test_div_congruence(self):
@@ -488,7 +488,7 @@ class TestSymbolic(unittest.TestCase):
     ridx1005 = UOp.variable("ridx1005", 0, 2)
     ridx1006 = UOp.variable("ridx1006", 0, 2)
     self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -2, 20,
-      "(((((lidx1+(((gidx1*18)+(ridx1005*18))+(lidx0*162)))+(gidx0*2))+(ridx1006*2))+-40)//18)")
+      "((((((((gidx0*2)+(gidx1*18))+(lidx0*162))+lidx1)+(ridx1005*18))+(ridx1006*2))+-40)//18)")
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
@@ -528,12 +528,12 @@ class TestSymbolic(unittest.TestCase):
     c = Variable("c", -10, 10)
     d1 = Variable("d1", 1, 10)
     d2 = Variable("d2", -10, -1)
-    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(a*(b*d1))", test_z3=False)
-    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))", test_z3=False)
-    self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)", test_z3=False)
-    self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))", test_z3=False)
-    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)", test_z3=False)
-    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)", test_z3=False)
+    self.helper_test_variable((d1*a*b*d1)//(d1), -1000, 1000, "(a*(b*d1))")
+    self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))")
+    self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)")
+    self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "((a+b)+c)")
+    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)")
+    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)")
 
   def test_symbolic_factor_remainder_div(self):
     a = Variable("a", 0, 10)
@@ -541,7 +541,7 @@ class TestSymbolic(unittest.TestCase):
     d = Variable("d", 1, 10)
     self.helper_test_variable((d*a+b)//d, 0, 20, "(a+(b//d))")
     self.helper_test_variable((d*a*20+b)//(5*d), 0, 42, "((a*4)+(b//(d*5)))")
-    self.helper_test_variable((d*a*20+b*d*5+10)//(5*d), 0, 52, "((b+(a*4))+(2//d))")
+    self.helper_test_variable((d*a*20+b*d*5+10)//(5*d), 0, 52, "(((a*4)+b)+(2//d))")
 
   def test_mod_gcd_factor_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
@@ -594,9 +594,7 @@ class TestSymbolic(unittest.TestCase):
     lidx2 = Variable("lidx2", 0, 3)
     alu0 = gidx2*640+gidx1*160+(gidx0//5)*2+lidx0*320+lidx1*10
     self.helper_test_variable((alu0+lidx2*2+1)//20, 0, 8192,
-                              ("((((((gidx0//5)+lidx2)//5)+lidx1)//2)+(((gidx2*32)+(gidx1*8))+(lidx0*16)))",
-                               "(((lidx1+((lidx2+(gidx0//5))//5))//2)+((gidx2*32)+((gidx1*8)+(lidx0*16))))",
-                               "((((gidx1*8)+(gidx2*32))+(lidx0*16))+((lidx1+((lidx2+(gidx0//5))//5))//2))"))
+                              ("((((gidx1*8)+(gidx2*32))+(lidx0*16))+((lidx1+((lidx2+(gidx0//5))//5))//2))",))
 
   def test_sum_div_complex2(self):
     gidx0 = Variable("gidx0", 0, 7)
@@ -674,8 +672,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((gidx//4)*4+gidx%4, 0, 124, "gidx")
     self.helper_test_variable(lidx+gidx%4+(gidx//4)*4, 0, 248, "(gidx+lidx)")
     self.helper_test_variable(lidx+(gidx//4)*4+gidx%4, 0, 248, "(gidx+lidx)")
-    self.helper_test_variable(lidx+(gidx//4)*8+2*(gidx%4), 0, 372, "(lidx+(gidx*2))")
-    self.helper_test_variable(lidx+2*(gidx%4)+(gidx//4)*8, 0, 372, "(lidx+(gidx*2))")
+    self.helper_test_variable(lidx+(gidx//4)*8+2*(gidx%4), 0, 372, "((gidx*2)+lidx)")
+    self.helper_test_variable(lidx+2*(gidx%4)+(gidx//4)*8, 0, 372, "((gidx*2)+lidx)")
 
   def test_div_mod_recombine_folded_mod(self):
     a = Variable("a", 0, 2)
@@ -1052,6 +1050,7 @@ class TestSymbolicRealWorld(unittest.TestCase):
       ("((((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352))+lidx3)+2207744)",
        '((lidx3+((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352)))+2207744)',
        '((lidx3+((lidx4*100352)+((gidx2*8)+((gidx1*784)+((gidx0*3211264)+((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49)))))))+2207744)',
+       '((((((((gidx0*3211264)+(gidx1*784))+(gidx2*8))+lidx3)+(lidx4*100352))+(((lidx5+1)//16)*802816))+(((lidx5+1)%16)*49))+2207744)',
       ))
 
 class TestBounds(unittest.TestCase):

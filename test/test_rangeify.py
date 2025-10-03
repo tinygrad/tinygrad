@@ -45,6 +45,16 @@ class TestRangeifyOpt(unittest.TestCase):
     x = conv1(x).pad([1,1,1,1])+1
     x.realize()
 
+  # CPU=1 NOOPT=1 DEBUG=4 RANGEIFY=1 python3 test/test_rangeify.py TestRangeifyOpt.test_matmul_reshaped
+  def test_matmul_reshaped(self):
+    A = Tensor.empty(N, N)
+    B = Tensor.empty(N, N)
+    (A@B).reshape(N*N).contiguous().realize()
+
+  def test_reduce_reshapes(self):
+    A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
+    A.sum().realize()
+
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):

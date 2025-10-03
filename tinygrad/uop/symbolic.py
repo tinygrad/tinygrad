@@ -274,10 +274,16 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
 ])
 
+def chain_insert(chain, b, op):
+  if chain.op is not op or b.order_add > chain.src[1].order_add: return chain.alu(op, b)
+  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
+
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.index, name='x'), lambda x:
+    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(Ops.ADD, dtype=dtypes.index, name="x"), lambda x: functools.reduce(operator.add, sorted(x.split_uop(Ops.ADD), key=lambda u: u.order_add)))
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
@@ -509,10 +515,6 @@ sym = symbolic_flat+PatternMatcher([
   # fold gated LOAD/STORE
   (UPat((Ops.LOAD, Ops.STORE), src=(UPat().index(UPat.const(dtypes.index, Invalid)).or_casted(),), allow_any_len=True, name="x"),
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
-  (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c")).or_casted(),), allow_any_len=True, name="l"), UPat.var("a")),
-    lambda c,idx,l,a: l.replace(src=(l.src[0], a)+l.src[1:])),
-  (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c").logical_not()).or_casted(),),
-    allow_any_len=True, name="l")), lambda c,idx,l,a: l.replace(src=(l.src[0], a)+l.src[1:])),
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
   (UPat(Ops.BARRIER, name="root"),
     lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
