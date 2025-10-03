@@ -66,6 +66,7 @@ def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]
 def unwrap(x:T|None) -> T:
   assert x is not None
   return x
+def or_else(x:T|None, y:U) -> T|U: return x if x is not None else y
 def get_single_element(x:Sequence[T]) -> T:
   assert len(x) == 1, f"{x} must only have 1 element"
   return x[0]
