@@ -431,7 +431,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
     # const reduce is okay
     # TODO: move the reduce folder to before this to prevent the need for this
-    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.COPY} for y in x.sparents)
+    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.COPY} for y in x.sparents)
 
     # always run this list of ops
     if any(x.op is Ops.REDUCE and not okay_reduce(x) for x in ran): return None
