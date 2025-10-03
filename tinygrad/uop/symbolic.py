@@ -281,7 +281,9 @@ def chain_insert(chain, b, op):
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.index, name='x'), lambda x:
+    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(Ops.ADD, dtype=dtypes.index, name="x"), lambda x: functools.reduce(operator.add, sorted(x.split_uop(Ops.ADD), key=lambda u: u.order_add)))
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
