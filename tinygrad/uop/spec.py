@@ -56,7 +56,8 @@ try:
 except (ImportError, AttributeError): z3_imported = False
 
 # if you have z3 installed, by default we check the bounds
-IGNORE_OOB = ContextVar("IGNORE_OOB", int(not z3_imported))
+# TODO: disable by default due to speed
+IGNORE_OOB = ContextVar("IGNORE_OOB", 1)#int(not z3_imported))
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
