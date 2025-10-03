@@ -281,6 +281,10 @@ commutative = PatternMatcher([
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
+  # ** combine terms (opinionated), can make it harder to substitute valids **
+  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
+  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
   # ** boolean algebra **
   (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # TODO: make a more general or folder like simplify_valid
@@ -373,10 +377,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
 ])+gep_pushing
 
 symbolic_flat = symbolic + PatternMatcher([
-  # ** combine terms (opinionated), can make it harder to substitute valids **
-  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
-  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
