@@ -184,7 +184,6 @@ class TestValidIdxSimplification(unittest.TestCase):
     print("The expressions are not equivalent.")
     print(s.model())
 
-  @unittest.expectedFailure  # TODO: improve uop_given_valid
   def test_valid_becomes_const2(self):
     ridx0 = Range(0, 4)
     ridx1 = Range(1, 4)
