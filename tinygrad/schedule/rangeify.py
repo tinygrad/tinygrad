@@ -717,13 +717,18 @@ replace_contiguous = PatternMatcher([
 
 def do_sub_recurse(s:UOp):
   x,keys,values = s.src[0], s.src[1].src, s.src[2].src
-  if x in keys: return values[keys.index(x)]
+  # SUBSTITUTE applied to SUBSTITUTE runs the child SUB on the parents. though this is probably wrong in the generic case
   if x.op is Ops.SUBSTITUTE:
     sub_k = UOp(Ops.SUBSTITUTE, src=(x.src[1],)+s.src[1:])
     sub_v = UOp(Ops.SUBSTITUTE, src=(x.src[2],)+s.src[1:])
     return UOp(Ops.SUBSTITUTE, src=(x.src[0], sub_k, sub_v))
-  sparents = x.sparents
-  new_kv = {k:v for k,v in zip(keys,values) if k in sparents}
+  # here we actually do the SUBSTITUTE
+  if x in keys: return values[keys.index(x)]
+  # we filter any keys that aren't in parents. this keeps the algorithm O(output graph size)
+  new_kv = {k:v for k,v in zip(keys,values) if k in x.sparents}
+  # if there's no SUBSTITUTEs left, we can just return x
+  if len(new_kv) == 0: return x
+  # then we add SUBSTITUTE to all parents
   uop_keys, uop_values = UOp(Ops.NOOP, src=tuple(new_kv.keys())), UOp(Ops.NOOP, src=tuple(new_kv.values()))
   return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, src=(y,uop_keys,uop_values)) for y in x.src]))
 pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(Ops.NOOP), UPat(Ops.NOOP)), name="s"), do_sub_recurse)])
