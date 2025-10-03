@@ -84,7 +84,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen+pm_flatten_range, name="add local buffers"))
 
   # expand
-  ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
+  ret.append(RewriteStep(sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
