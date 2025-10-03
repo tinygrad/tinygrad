@@ -447,7 +447,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
 def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  try: return sum(-1 if other.factor(parse_valid(v)[0]) is not None else 0 for other in valids)
+  try: return sum(-1 if parse_valid(v)[0] in other.toposort() else 0 for other in valids)
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
