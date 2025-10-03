@@ -75,10 +75,10 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **
-  ret.append(RewriteStep(sym+migrate_indexing+pm_group_for_reduce, name="postopt symbolic"))
+  ret.append(RewriteStep(sym+migrate_indexing, name="postopt symbolic"))
 
   # expand
-  ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
+  ret.append(RewriteStep(sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander"))
 
   # add locals
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
