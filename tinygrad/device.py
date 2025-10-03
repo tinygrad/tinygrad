@@ -23,7 +23,7 @@ class _Device:
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
   @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
   def __get_canonicalized_item(self, ix:str) -> Compiled:
-    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
+    assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "TINYFS", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
     base = (__package__ or __name__).split('.')[0]  # tinygrad
     x = ix.split(":")[0].lower()
     ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.runtime.ops_{x}')) \
@@ -39,7 +39,7 @@ class _Device:
   @functools.cached_property
   def DEFAULT(self) -> str:
     dev = [dev] if (dev:=getenv("DEV", "").upper()) else []
-    from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "NPY"] and getenv(d) == 1])
+    from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1])
     assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
     if len(from_env) == 1: return from_env[0]
     try:
