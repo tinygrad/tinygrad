@@ -573,8 +573,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
-  def factor(self, *factors: UOp) -> UOp|None:
-    # factor out expr from self if possible
+  def factor(self, *factors: UOp) -> UOp:
+    # factor out expr from self if possible, might return self
     # (1400*a + 2800*b + c).factor(a+2*b) -> 1400*(a+2*b) + c
     if self.op is Ops.ADD:
       factored = []
@@ -591,14 +591,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
         remainders = new_remainders
         factored.append(fac*mul[0])
-      if not factored: return None
+      if not factored: return self
       start = functools.reduce(operator.add, factored)
-      return sum([or_else(k.factor(*factors), k)*v for k,v in remainders.items()], start=start)
+      return sum([k.factor(*factors)*v for k,v in remainders.items()], start=start)
 
-    if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return None
-    new_src = tuple(s.factor(*factors) for s in self.src)
-    if all(n is None for n in new_src): return None
-    return self.replace(src=tuple(or_else(n, s) for n,s in zip(new_src, self.src)))
+    if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return self
+    return self.replace(src=tuple(s.factor(*factors) for s in self.src))
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, ConstType]:
     return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
