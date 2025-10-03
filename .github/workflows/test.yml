@@ -280,6 +280,8 @@ jobs:
       run: python test/external/external_uop_gc.py
     - name: External Benchmark Schedule
       run: python3 test/external/external_benchmark_schedule.py
+    - name: test_real_world kernel and mem usage
+      run: NULL=1 python -m pytest test/external/test_real_world.py
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
     - name: Regen dataset on test_tiny
