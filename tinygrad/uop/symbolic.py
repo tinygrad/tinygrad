@@ -430,7 +430,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort(): all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
+    if expr in uop.toposort():
+      candidates.append([tup:=(expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype))])
+      all_candidates.append(tup)
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -439,6 +441,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
       elif all_same(newuops): uop = newuops[0]
+
   uop = uop.factor(*(e[0] for e in all_candidates))
   uop = uop.substitute(sub_dict:=dict(all_candidates)).simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
 
