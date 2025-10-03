@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
-from tinygrad.uop.ops import UOp
+from tinygrad.helpers import RANGEIFY, Context, GlobalCounters, getenv
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.codegen.opt import OptOps, Opt
 
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeifyAssign(unittest.TestCase):
@@ -18,7 +19,7 @@ class TestRangeifyAssign(unittest.TestCase):
     self.assertListEqual(lst, lst3)
     self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
-N = 256
+N = getenv("N", 256)
 
 class TestRangeifyOpt(unittest.TestCase):
   def test_randperm(self):
@@ -92,6 +93,29 @@ class TestRangeify(unittest.TestCase):
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     (A@B@C).realize()
+
+  #@unittest.skip("gemm tc")
+  def test_double_gemm_tc(self):
+    with Context(DEBUG=0):
+      A, B, C = [Tensor.randn(N, N) for _ in range(3)]
+      Tensor.realize(A, B, C)
+    args = ()
+    args += (Opt(OptOps.DEMOTE, 2, 8),)
+    # NOTE: these axes are poorly sorted
+    args += (Opt(OptOps.TC, 0, (0,0,1,1)),)
+    args += (Opt(OptOps.TC, 0, (0,0,1,0)),)
+
+    args += (Opt(OptOps.UPCAST, 0, 2),)
+    args += (Opt(OptOps.UPCAST, 1, 2),)
+    args += (Opt(OptOps.UNROLL, 0, 2),)
+    args += (Opt(OptOps.UNROLL, 1, 2),)
+
+    tst = (A@B@C).contiguous(arg=args).realize()
+    assert tst.uop.base.op is Ops.BUFFER, "buffer"
+    with Context(RANGEIFY=0, DEBUG=2):
+      GlobalCounters.reset()
+      mse = ((A@B@C)-tst).square().mean().item()
+      print(mse)
 
   def test_double_gemm_exp(self):
     A = Tensor.empty(N, N)
@@ -202,7 +226,10 @@ class TestRangeify(unittest.TestCase):
     out.realize()
 
   def test_flash_attention(self):
-    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+    #BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+
+    # lil bigger
+    BS, HEADS, SEQLEN, EMB = 4, 32, 128, 64
 
     # bigger
     #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
@@ -213,15 +240,31 @@ class TestRangeify(unittest.TestCase):
     def fa():
       Tensor.manual_seed(1337)
       with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-      return q.scaled_dot_product_attention(k, v).realize()
+      return q.scaled_dot_product_attention(k, v)
 
     with Context(DEBUG=4):
       GlobalCounters.reset()
-      ret = fa()
+      args = ()
+      args += (Opt(OptOps.DEMOTE, 5, 8),)
+      args += (Opt(OptOps.TC, 0, (0,0,1,3)),)
+      args += (Opt(OptOps.TC, 0, (0,0,1,0)),)
+      args += (Opt(OptOps.SWAP, 1, 4),)
+      args += (Opt(OptOps.SWAP, 2, 5),)
+      args += (Opt(OptOps.WARP, 4, 32),)
+      args += (Opt(OptOps.WARP, 5, 32),)
+      args += (Opt(OptOps.UNROLL, 1, 8),)
+      args += (Opt(OptOps.UNROLL, 2, 8),)
+      args += (Opt(OptOps.UPCAST, 0, 4),)
+      args += (Opt(OptOps.UPCAST, 1, 4),)
+      args += (Opt(OptOps.UPCAST, 2, 4),)
+      args += (Opt(OptOps.UPCAST, 3, 4),)
+      args += (Opt(OptOps.UNROLL, 0, 4),)
+      args += (Opt(OptOps.UNROLL, 3, 4),)
+      ret = fa().contiguous(arg=args).realize()
     with Context(RANGEIFY=0):
       with Context(DEBUG=2):
         GlobalCounters.reset()
-        cmp = fa()
+        cmp = fa().realize()
       with Context(DEBUG=0):
         mse = ((cmp-ret)**2).sum().item()
     print(f"mse: {mse}")
