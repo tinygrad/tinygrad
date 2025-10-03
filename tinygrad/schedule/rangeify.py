@@ -71,6 +71,7 @@ earliest_rewrites = PatternMatcher([
    lambda c,r,d: c.replace(src=(r.contiguous(), d)) if r.size != r.base.size else None),
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
+  # NOTE: tagged buffers are also unrealized Tensors
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if (((t:=target.base).op is not Ops.BUFFER) and \
        not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src))) or target.tag is not None else None),

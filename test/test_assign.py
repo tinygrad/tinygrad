@@ -119,6 +119,14 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
+  def test_assign_changes_alt(self):
+    a = Tensor.full((2, 2), 1.).contiguous().realize()
+    b = a.contiguous() # b is a new Tensor
+    b.assign(Tensor.full((2, 2), 2.))
+    b.realize()
+    self.assertListEqual(a.tolist(), [[1., 1.], [1., 1.]])
+    self.assertListEqual(b.tolist(), [[2., 2.], [2., 2.]])
+
   def test_assign_diamond_cycle(self):
     # NOTE: should *not* raise AssertionError from numpy
     with self.assertRaisesRegex(RuntimeError, "cycle"):
