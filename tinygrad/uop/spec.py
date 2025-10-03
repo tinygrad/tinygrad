@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context, cpu_profile, RANGEIFY
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context, cpu_profile, RANGEIFY
 from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
@@ -54,9 +54,6 @@ try:
 
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
-
-# if you have z3 installed, by default we check the bounds
-IGNORE_OOB = ContextVar("IGNORE_OOB", int(not z3_imported))
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -165,8 +162,8 @@ spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) == 2 and \
-     isinstance(rng.arg[0], int) and isinstance(rng.arg[1], AxisType)),
+  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
+     all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
 
   (UPat(Ops.VIEW, dtypes.void, src=(), name="x"), lambda x: isinstance(x.arg, ShapeTracker)),

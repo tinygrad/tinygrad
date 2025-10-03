@@ -50,6 +50,7 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val, *store.src[2:])
 
+def no_load(u:UOp) -> bool: return not any(x.op is Ops.LOAD for x in u.sparents)
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
@@ -60,6 +61,8 @@ load_store_indexing = PatternMatcher([
   # delete_redundant_gates (after expand)
   (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
                                   UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
+  # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes a pattern in reduce_collapse
+  (UPat.var("c")<(UPat.var("x", dtypes.index)+UPat.var("y")), lambda x,y,c: (-x < -(c-y)) if no_load(y) and no_load(c) and not no_load(x) else None),
 ])
 
 # ***** load/store grouping *****
@@ -258,6 +261,11 @@ pm_render = PatternMatcher([
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
     lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:])
       if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
+  # Where after gated load becomes alt value
+  (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c")).or_casted(),), allow_any_len=True, name="l").or_casted(),
+    UPat.var("a")), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
+  (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c").logical_not()).or_casted(),),
+    allow_any_len=True, name="l").or_casted()), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
   # gate any stores that aren't gated with ifs
   (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
     lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src[:2]+(UOp(Ops.IF, src=(idx.src[2],)),)+store.src[2:]) if \
