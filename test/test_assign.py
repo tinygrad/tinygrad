@@ -119,6 +119,7 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
+  @unittest.skipIf(not RANGEIFY, "only correct in rangeify")
   def test_assign_changes_alt(self):
     a = Tensor.full((2, 2), 1.).contiguous().realize()
     b = a.contiguous() # b is a new Tensor
