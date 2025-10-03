@@ -72,7 +72,7 @@ earliest_rewrites = PatternMatcher([
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
-   lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if ((t:=target.base).op is not Ops.BUFFER and \
+   lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if (((t:=target.base).op is not Ops.BUFFER and target.tag is None) and \
        not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src))) else None),
 
    # realize before assign if input permutes the target buffer
