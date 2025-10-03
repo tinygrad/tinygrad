@@ -146,7 +146,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
-  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
   def test_add_chain_buffers(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -720,6 +719,13 @@ class TestSchedule(unittest.TestCase):
     if not RANGEIFY:
       assert prev_a.uop in a.uop.src, "contiguous usage must run before assign"
     self.assertEqual((prev_a+a*3).item(), 1+2*3)
+
+  def test_kernelize_sym(self):
+    a = Tensor([1])+Tensor([2])
+    a.kernelize()
+    b = a/a
+    check_schedule(b, 0)
+    self.assertEqual(b.item(), 1)
 
   @expect_rangeify_fails
   def test_multioutput_ast(self):
@@ -1626,14 +1632,14 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 2))
 
-  def test_conv2d(self): _test_conv2d(4 if RANGEIFY else 7)
-  def test_conv2d_fused(self): _test_conv2d(4 if RANGEIFY else 5, FUSE_CONV_BW=1)
+  def test_conv2d(self): _test_conv2d(5 if RANGEIFY else 7)
+  def test_conv2d_fused(self): _test_conv2d(5 if RANGEIFY else 5, FUSE_CONV_BW=1)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
-  def test_conv2d_half(self): _test_conv2d(4 if RANGEIFY else 7, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(5 if RANGEIFY else 7, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
-  @unittest.expectedFailure
+  @unittest.skipIf(not RANGEIFY, "passes on RANGEIFY")
   def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
 
   def test_schedule_mem_used(self):
@@ -1899,17 +1905,18 @@ class TestSchedule(unittest.TestCase):
       # NOTE: this is a bug on non rangeify
       np.testing.assert_equal(tst.numpy(), a.numpy())
 
-  def test_setitem_sched(self, transpose=False):
+  def test_setitem_sched(self, mop=lambda x:x, expected_kcount=1):
     a = Tensor.arange(16, device="CPU").reshape(4, 4).contiguous().realize()
-    a2 = a.T if transpose else a
+    a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
     kcount = len(sched:=a.schedule())
     run_schedule(sched)
     self.assertListEqual(a.tolist(), expected)
-    self.assertEqual(kcount, 2 if transpose else 1)
+    self.assertEqual(kcount, expected_kcount)
   @unittest.skipUnless(RANGEIFY>0, "this asserts on non rangeify")
-  def test_setitem_permuted_sched(self): self.test_setitem_sched(transpose=True)
+  def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
+  def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
 
   def test_sparse_categorical_crossentropy_simple(self):
     X = Tensor([[0, 2, 3], [1, 2, 3]]).realize()
@@ -1959,7 +1966,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(swizzle_cnt(new_uop), 0)
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
-  @unittest.skipIf(RANGEIFY, "rangeify doesn't implement input buffer limiting")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -1970,6 +1976,18 @@ class TestSchedule(unittest.TestCase):
     root = bufs[0][vi] + bufs[0][vj]
     for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
     self.assertEqual(root.item(), N * 2)
+
+  def test_limit_bufs_kernelize(self):
+    N = 31
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      bufs = [Tensor(i).contiguous().realize() for i in range(N)]
+    x = bufs[0]
+    for y in bufs[1:]: x = x+y
+    x.kernelize()
+    kcount = len([s for s in x.uop.toposort() if s.op is Ops.KERNEL])
+    z = x+Tensor.empty(1) # z only loads 2 buffers
+    sched = z.schedule()
+    self.assertEqual(len(sched), kcount+1)
 
 def swizzle_cnt(u:UOp) -> int:
   return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])

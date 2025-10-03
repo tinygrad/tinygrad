@@ -287,6 +287,30 @@ def eval_llama3():
   log_perplexity = np.mean(losses)
   print(f"Log Perplexity: {log_perplexity}")
 
+# NOTE: BEAM hangs on 8xmi300x with DECODE_BS=384 in final realize below; function is declared here for external testing
+@TinyJit
+def vae_decode(x:Tensor, vae, disable_beam=False) -> Tensor:
+  from examples.stable_diffusion import AutoencoderKL
+  assert isinstance(vae, AutoencoderKL)
+  x = vae.post_quant_conv(1./0.18215 * x)
+
+  x = vae.decoder.conv_in(x)
+  x = vae.decoder.mid(x)
+  for i, l in enumerate(vae.decoder.up[::-1]):
+    print("decode", x.shape)
+    for b in l['block']: x = b(x)
+    if 'upsample' in l:
+      bs,c,py,px = x.shape
+      x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
+      x = l['upsample']['conv'](x)
+    if i == len(vae.decoder.up) - 1 and disable_beam:
+      with Context(BEAM=0): x.realize()
+    else: x.realize()
+  x = vae.decoder.conv_out(vae.decoder.norm_out(x).swish())
+
+  x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
+  return x
+
 def eval_stable_diffusion():
   import csv, PIL, sys
   from tqdm import tqdm
@@ -320,7 +344,7 @@ def eval_stable_diffusion():
     wandb.init(config=config, project="MLPerf-Stable-Diffusion")
 
   assert EVAL_CKPT_DIR != "", "provide a directory with checkpoints to be evaluated"
-  print(f"running eval on checkpoints in {EVAL_CKPT_DIR}")
+  print(f"running eval on checkpoints in {EVAL_CKPT_DIR}\nSEED={seed}")
   eval_queue:list[tuple[int, Path]] = []
   for p in Path(EVAL_CKPT_DIR).iterdir():
     if p.name.endswith(".safetensors"):
@@ -368,13 +392,6 @@ def eval_stable_diffusion():
     x_prev = alpha_prev.sqrt() * pred_x0 + dir_xt
     return x_prev.realize()
 
-  @TinyJit
-  def decode(x:Tensor) -> Tensor:
-      x = model.first_stage_model.post_quant_conv(1./0.18215 * x)
-      x = model.first_stage_model.decoder(x)
-      x = ((x + 1.0) / 2.0).clip(0.0, 1.0)
-      return x
-
   def shard_tensor(t:Tensor) -> Tensor: return t.shard(GPUS, axis=0) if len(GPUS) > 1 else t.to(GPUS[0])
   def get_batch(whole:Tensor, i:int, bs:int) -> tuple[Tensor, int]:
     batch = whole[i: i + bs].to("CPU")
@@ -394,7 +411,8 @@ def eval_stable_diffusion():
 
     uc_written = False
     models = (cond_stage, unet, first_stage, inception, clip)
-    jits = (jit_context:=TinyJit(cond_stage.embed_tokens), denoise_step, decode, jit_inception:=TinyJit(inception), jit_clip:=TinyJit(clip.get_clip_score))
+    jits = (jit_context:=TinyJit(cond_stage.embed_tokens), denoise_step, vae_decode, jit_inception:=TinyJit(inception),
+            jit_clip:=TinyJit(clip.get_clip_score))
     all_bs = (CONTEXT_BS, DENOISE_BS, DECODE_BS, INCEPTION_BS, CLIP_BS)
     if (EVAL_SAMPLES:=getenv("EVAL_SAMPLES", 0)) and EVAL_SAMPLES > 0:
       eval_inputs = eval_inputs[0:EVAL_SAMPLES]
@@ -433,7 +451,7 @@ def eval_stable_diffusion():
         x.assign(denoise_step(x, x_x, ts_ts, uc_c, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t, alpha_prev, unet, GPUS)).realize()
       return x
 
-    def decode_latents(latents:Tensor) -> Tensor: return decode(shard_tensor(latents))
+    def decode_latents(latents:Tensor) -> Tensor: return vae_decode(shard_tensor(latents), first_stage, disable_beam=True)
     def generate_inception(imgs:Tensor) -> Tensor: return jit_inception(shard_tensor(imgs))[:,:,0,0]
 
     def calc_clip_scores(batch:Tensor, batch_tokens:Tensor) -> Tensor:

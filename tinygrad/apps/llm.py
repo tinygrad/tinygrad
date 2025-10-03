@@ -58,7 +58,8 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
   assert (Hd & 1) == 0, "RoPE requires an even head dimension"
   half = Hd // 2
   angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
-  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype), angles.sin().reshape(1, 1, T, half).cast(x.dtype)
+  # contiguous here allows RoPE to be pruned in the JIT
+  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype).contiguous(), angles.sin().reshape(1, 1, T, half).cast(x.dtype).contiguous()
   x_pairs = x.reshape(B, H, T, half, 2)
   return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
                       x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
@@ -134,7 +135,7 @@ class Transformer:
     x = self.token_embd(tokens)                           # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
     # TODO: add temperature
-    return self.output(self.output_norm(x))[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
+    return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
@@ -145,7 +146,7 @@ class Transformer:
     kv, state_dict = nn.state.gguf_load(gguf.to(None))
 
     # all state items should be float16, not float32
-    state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
+    state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
