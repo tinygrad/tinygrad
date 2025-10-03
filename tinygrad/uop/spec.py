@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context, cpu_profile, RANGEIFY
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context, cpu_profile, RANGEIFY
 from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
@@ -54,10 +54,6 @@ try:
 
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
-
-# if you have z3 installed, by default we check the bounds
-# TODO: disable by default due to speed
-IGNORE_OOB = ContextVar("IGNORE_OOB", 1)#int(not z3_imported))
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
