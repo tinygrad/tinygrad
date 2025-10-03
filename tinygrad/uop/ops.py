@@ -582,7 +582,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       remainders = dict([(u.divides(f:=u.const_factor()).simplify(),f) for u in self.split_uop(Ops.ADD)])
       for fac in factors:
         fac_terms = dict((u.divides(f:=u.const_factor()).simplify(),f) for u in fac.split_uop(Ops.ADD))
-        factored_terms, new_remainders = map(dict, partition(remainders.items(), lambda t_f: t_f[0] in fac_terms))
+        factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
+        new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
 
         if any(u not in factored_terms for u in fac_terms) or any(factored_terms[u]%fac_terms[u]!=0 for u in fac_terms) or not \
           all_same(mul:=[factored_terms[u]//fac_terms[u] for u in fac_terms]):
