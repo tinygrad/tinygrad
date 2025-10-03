@@ -89,12 +89,7 @@ class Decoder:
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-
-      # for BEAM on mi300x, with decoder BS=384, (and other similar BS), BEAM kernels will hang:
-      if x.shape[1:] == (128,512,512) and x.shape[0] > 300:
-        with Context(BEAM=0):
-          x.realize()
-      else: x.realize()
+      x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
 
