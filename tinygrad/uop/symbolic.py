@@ -417,7 +417,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     if v0 > v1: return None
     # whole node became a const
     if v0 == v1:
-      uop = uop.substitute({expr:expr.const_like(v0)}).simplify(flat=True)
+      uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
       continue
     # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
@@ -429,7 +429,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      newuops = [uop.substitute({X:newX}).simplify(flat=True).substitute({newX:X}).simplify(flat=True) for X,newX in candidate]
+      newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
       if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
