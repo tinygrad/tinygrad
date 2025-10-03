@@ -461,6 +461,8 @@ class TestUOpGraph(unittest.TestCase):
       if u.op is Ops.STORE: assert u.src[1].arg==5
 
   def test_load_idx_becomes_int(self):
+    # These loads wont overflow int since we know from the gate that the value is bounded
+    r0 = UOp.range(10, 0)
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
     d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 1)
     l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),)).cast(dtypes.index)
@@ -468,6 +470,12 @@ class TestUOpGraph(unittest.TestCase):
     valid = (l0<-1).ne(True)&(l0<3000)
     l1 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx.valid(valid)),))
     uops = to_uops_list([l1])
+    for u in uops:
+      if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
+
+    valid = (10*r0<5-l0).ne(True)&(l0<3000)
+    l2 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx.valid(valid)),))
+    uops = to_uops_list([l2])
     for u in uops:
       if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
 
