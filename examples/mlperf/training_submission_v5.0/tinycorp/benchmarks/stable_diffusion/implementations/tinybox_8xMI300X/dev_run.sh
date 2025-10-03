@@ -39,7 +39,7 @@ export PARALLEL=4
 export PYTHONUNBUFFERED=1
 sudo rocm-smi -d 0 1 2 3 4 5 6 7 --setperfdeterminism 1500 || exit 1
 
-# Retry BEAM search if script fails before BEAM COMPLETE is printed; but don't retry after that
+# Retry BEAM search if script fails before BEAM COMPLETE is printed, but don't retry after that
 run_retry(){ local try=0 max=5 code tmp py pgid kids
   while :; do
     tmp=$(mktemp)
