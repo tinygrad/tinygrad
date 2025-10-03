@@ -157,9 +157,6 @@ pm_pre_expander = PatternMatcher([
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
-])
-
-pm_group_for_reduce = PatternMatcher([
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])
