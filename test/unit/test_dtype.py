@@ -21,6 +21,10 @@ class TestEqStrDType(unittest.TestCase):
   def test_ptr_eq(self):
     assert dtypes.float32.ptr() == dtypes.float32.ptr()
     assert not (dtypes.float32.ptr() != dtypes.float32.ptr())
+  def test_ptr_nbytes(self):
+    assert dtypes.float16.ptr(32).nbytes() == 32 * dtypes.float16.itemsize
+  def test_ptr_nbytes_unlimited(self):
+    self.assertRaises(RuntimeError, lambda: dtypes.float32.ptr().nbytes())
   def test_strs(self):
     if PtrDType is None: raise unittest.SkipTest("no PtrDType support")
     self.assertEqual(str(dtypes.imagef((1,2,4))), "dtypes.imagef((1, 2, 4))")
@@ -56,6 +60,7 @@ class TestCastConvenienceMethod(unittest.TestCase):
 class TestDtypeTolist(unittest.TestCase):
   def test_bfloat16(self):
     self.assertEqual(Tensor([-60000, 1.5, 3.1, 60000], device="PYTHON", dtype=dtypes.bfloat16).tolist(), [-59904.0, 1.5, 3.09375, 59904.0])
+  def test_fp8(self):
     # 448
     self.assertEqual(Tensor([-30000, 1.5, 3.1, 30000], device="PYTHON", dtype=dtypes.fp8e4m3).tolist(), [-448.0, 1.5, 3.0, 448.0])
     # 57344

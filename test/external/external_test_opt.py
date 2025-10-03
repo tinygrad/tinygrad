@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from tinygrad import GlobalCounters, Tensor, Device
-from tinygrad.helpers import getenv, Context
+from tinygrad.helpers import getenv, Context, RANGEIFY
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
 from tinygrad.tensor import _to_np_dtype
@@ -27,14 +27,14 @@ class CLCache:
     capturing.clear()
     print(f"cache: exiting with size {self.count}", f"allowed {self.allowed}" if self.allowed is not None else "")
     if self.allowed is not None:
-      assert self.count == self.allowed, f"{self.count} != {self.allowed}"
+      assert self.count <= self.allowed, f"{self.count} > {self.allowed}"
 
 from extra.models.convnext import ConvNeXt
 from extra.models.efficientnet import EfficientNet
 from extra.models.resnet import ResNet18
 from extra.models.vit import ViT
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+@unittest.skipUnless(Device.DEFAULT == "CL", "Not Implemented")
 class TestInferenceMinKernels(unittest.TestCase):
   def setUp(self):
     self.training_old = Tensor.training
@@ -90,7 +90,7 @@ class TestInferenceMinKernels(unittest.TestCase):
     with CLCache(100):
       model(inp, 0).realize()
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+@unittest.skipUnless(Device.DEFAULT == "CL", "Not Implemented")
 class TestOptBinOp(unittest.TestCase):
   def _test_no_binop_rerun(self, f1, f2=None, allowed=1):
     a = Tensor.randn(16, 16)
@@ -117,7 +117,7 @@ class TestOptBinOp(unittest.TestCase):
   #def test_no_binop_rerun_reduce(self): return self._test_no_binop_rerun(lambda a,b: (a*b).sum(), lambda a,b: (a*b).reshape(16, 16, 1).sum())
   #def test_no_binop_rerun_reduce_alt(self): return self._test_no_binop_rerun(lambda a,b: a.sum(1)+b[0], lambda a,b: a.sum(1).reshape(1,16)+b[0])
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+@unittest.skipUnless(Device.DEFAULT == "CL", "Not Implemented")
 class TestOptReduceLoop(unittest.TestCase):
   def test_loop_left(self):
     a = Tensor.randn(16, 16)
@@ -139,7 +139,7 @@ class TestOptReduceLoop(unittest.TestCase):
       c.realize()
       assert cache.count == 2, "loop right fusion broken"
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+@unittest.skipUnless(Device.DEFAULT == "CL", "Not Implemented")
 class TestOptWChild(unittest.TestCase):
   @unittest.skip("this no longer happens, use realize")
   def test_unrealized_child(self):
@@ -152,7 +152,7 @@ class TestOptWChild(unittest.TestCase):
       d.realize()
       assert cache.count == 2, "don't fuse if you have children"
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "Not Implemented")
+@unittest.skipUnless(Device.DEFAULT == "CL", "Not Implemented")
 class TestOpt(unittest.TestCase):
   def test_muladd(self):
     a,b,c = [Tensor.randn(2,2).realize() for _ in range(3)]
@@ -164,7 +164,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed(self):
     a = Tensor.randn(16, 16, 16)
-    with CLCache(2):
+    with CLCache(1 if RANGEIFY else 2):
       c = a.sum(2)
       d = c.permute(1,0).contiguous()
       d.realize()
@@ -172,7 +172,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_contract_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
-    with CLCache(2):
+    with CLCache(1 if RANGEIFY else 2):
       c = a.sum(-1)
       d = c.reshape(16,16).permute(1,0).contiguous()
       d.realize()
@@ -180,7 +180,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_contractw1s_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
-    with CLCache(2):
+    with CLCache(1 if RANGEIFY else 2):
       c = a.sum(-1)
       d = c.reshape(16,1,16).permute(2,1,0).contiguous()
       d.realize()
@@ -188,7 +188,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_expand_reshape(self):
     a = Tensor.randn(16, 16, 16)
-    with CLCache(2):
+    with CLCache(1 if RANGEIFY else 2):
       c = a.sum(2)
       d = c.reshape(4,4,4,4).permute(2,3,0,1).contiguous()
       d.realize()

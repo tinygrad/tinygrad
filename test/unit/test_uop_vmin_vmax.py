@@ -1,6 +1,6 @@
 import unittest, math
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, Invalid
 
 class TestVminVmaxProperties(unittest.TestCase):
   def test_vmin_vmax_constant(self):
@@ -58,9 +58,9 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmax, 8)
 
   def test_vmin_vmax_variable_inside_special(self):
-    uop = UOp(Ops.SPECIAL, dtypes.int, arg=('gidx0', UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10))))
+    uop = UOp(Ops.SPECIAL, dtypes.int, arg='gidx0', src=(UOp(Ops.DEFINE_VAR, dtypes.int, arg=('i', 1, 10)),))
     self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 10)
+    self.assertEqual(uop.vmax, 9)
 
   def test_vmin_vmax_multiplication_0_inf(self):
     # vmin and vmax for multiplication with a variable
@@ -121,6 +121,15 @@ class TestVminVmaxProperties(unittest.TestCase):
     x_uint = x.cast(dtypes.uint)
     self.assertEqual(x_uint.vmin, dtypes.min(dtypes.uint))
     self.assertEqual(x_uint.vmax, dtypes.max(dtypes.uint))
+
+  def test_vmin_vmax_invalid(self):
+    i = UOp.invalid()
+    self.assertNotEqual(i.vmin, i.vmax)
+
+  def test_vmin_vmax_invalid_vconst(self):
+    x = UOp.const(dtypes.index.vec(4), (0, 4, Invalid, Invalid))
+    self.assertLess(x.vmin, 0)
+    self.assertGreater(x.vmax, 4)
 
 class TestVminVmaxDivMod(unittest.TestCase):
   def test_vmin_vmax_division_positive(self):
@@ -250,6 +259,15 @@ class TestVminVmaxVConst(unittest.TestCase):
     uop = UOp.const(dtypes.bool.vec(3), (True, False, False))
     self.assertIs(uop.vmin, False)
     self.assertIs(uop.vmax, True)
+
+  def test_vmin_vmax_vector_with_gep(self):
+    # vmin and vmax for a vector constant of bool values
+    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 1)
+    idx = UOp.const(dtypes.int, 0)
+    val = UOp(Ops.LOAD, dtypes.int.vec(2), (d1.index(idx),))
+    uop = (val // 32).gep(0)
+    self.assertEqual(uop.vmin, -67108864)
+    self.assertEqual(uop.vmax, 67108863)
 
 class TestConstFactor(unittest.TestCase):
   def test_const_factor_constant(self):

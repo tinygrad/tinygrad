@@ -2,7 +2,7 @@ from __future__ import annotations
 import heapq
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp, BottomUpGate
 from tinygrad.helpers import dedup, all_same, flatten, BLOCK_REORDER
 
 # NOTE: any toposort should be valid here, unlike last time this isn't required, it's just for speed
@@ -76,12 +76,13 @@ class BlockContext:
   def from_sink(sink:UOp) -> BlockContext:
     # get children and all block contexts
     ctx = BlockContext({}, {}, {})
-    for u in sink.toposort():
+    for u in sink.toposort(gate=lambda u:u.op is not Ops.SPECIAL):
       this_block_ctx: list[UOp] = []
       ctx.child_count[u] = 0
 
       # get children and accumulate the last_ctx
       for s in u.src:
+        if s.op is Ops.SPECIAL: continue
         # NOTE: if a parent appears multiple times in the src, it counts multiple times as a child
         ctx.child_count[s] += 1
         this_block_ctx += ctx.last_ctx(s)
@@ -142,7 +143,7 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
 
   # add unmergables to sources
   srcs = []
-  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs[u], current_ctx, cnt=cnt)]*cnt
+  for u,cnt in unmergable.items(): srcs += [add_blockends(u, ctx.block_ctxs.get(u,()), current_ctx, cnt=cnt)]*cnt
 
   # add blockseeds, with blockends as needed
   for (new_ctx, new_child_ctx), v in blockseeds.items():
@@ -154,8 +155,12 @@ def make_block_bottom_up(ctx:BlockContext, x:UOp):
   bb = BasicBlock(tuple(lst), ctx=current_ctx, cnt=child_count, child_ctx=child_ctx)
   return UOp(Ops.BLOCK, src=tuple(srcs), arg=bb)
 
+# we prevent the source of the SPECIAL from being linearized since its not part of the kernel
+def raise_bottom_up_gate(): raise BottomUpGate()
+
 block_create = PatternMatcher([
   (UPat(GroupOp.All-DONT_PLACE_IN_BLOCK.union({Ops.BLOCK, Ops.BLOCKEND}), name="x"), make_block_bottom_up),
+  (UPat(Ops.SPECIAL), raise_bottom_up_gate)
 ])
 
 # ***** blockend merging ****
@@ -217,6 +222,8 @@ def remove_blockend(x:UOp):
       if late_ops[i].op is Ops.BARRIER and late_ops[i+1].op is Ops.BARRIER: late_ops[i+1] = UOp(Ops.NOOP)
     arg = BasicBlock(parent_block.arg.lst+tuple(late_ops), tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt)
     return UOp(Ops.BLOCK, src=tuple(y for y in x.src if y is not parent_block)+parent_block.src, arg=arg)
+  # else the whole context ended by the blockend is already in this block and we can safely turn it into a block
+  return UOp(Ops.BLOCK, src=x.src, arg=BasicBlock(x.arg.lst, tuple([y for y in x.arg.ctx if y is not x.arg.end]), cnt=x.arg.cnt))
 
 block_merge = PatternMatcher([
   (UPat((Ops.BLOCK, Ops.BLOCKEND), name="x"), merge_block),

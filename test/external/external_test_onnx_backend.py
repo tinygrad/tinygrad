@@ -134,7 +134,6 @@ backend_test.exclude('test_simple_rnn_*')
 
 # no control flow
 # control flow uses AttributeProto.GRAPH
-backend_test.exclude('test_if_*')
 backend_test.exclude('test_loop*')
 backend_test.exclude('test_range_float_type_positive_delta_expanded_cpu') # requires loop
 backend_test.exclude('test_affine_grid_2d_align_corners_expanded_cpu')
@@ -183,6 +182,8 @@ backend_test.exclude('test_resize_downsample_scales_cubic_antialias_cpu') # anti
 backend_test.exclude('test_resize_downsample_sizes_cubic_antialias_cpu') # antialias not implemented
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cpu') # bad data type string
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
+backend_test.exclude('test_if_opt_cpu') # ValueError: 13 is not a valid AttributeType
+backend_test.exclude('test_if_seq_cpu') # NotImplementedError: op='SequenceConstruct' is not supported
 
 backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
 backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
@@ -192,12 +193,12 @@ backend_test.exclude('test_adam_cpu')
 backend_test.exclude('test_gradient_of_add_and_mul_cpu')
 backend_test.exclude('test_gradient_of_add_cpu')
 
-if Device.DEFAULT in ['GPU', 'METAL']:
+if Device.DEFAULT in ['CL', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
-if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
+if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "CL"):
   # numerical inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')

@@ -1,16 +1,17 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator
-import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal, time
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, \
-                             Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from typing import Any, Generic, TypeVar, Iterator, Sequence, cast
+import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
+from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import unwrap_class_type
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
 # **************** Device ****************
 
-ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "GPU", "CPU", "LLVM", "DSP", "WEBGPU"]
+ALL_DEVICES = ["METAL", "AMD", "NV", "CUDA", "QCOM", "CL", "CPU", "DSP", "WEBGPU"]
 class _Device:
   def __init__(self) -> None:
     self._devices = [x.stem[len("ops_"):].upper() for x in (pathlib.Path(__file__).parent/"runtime").iterdir() if x.stem.startswith("ops_")]
@@ -138,15 +139,14 @@ class Buffer:
       if not self.device.startswith("DISK"): GlobalCounters.mem_used += self.nbytes
       if PROFILE:
         self._prof_num = num = len(Buffer.profile_events)
-        ts = decimal.Decimal(time.perf_counter_ns())/1000
-        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", ts, num, {"dtype":self.dtype, "sz":self.size}))
+        Buffer.profile_events.append(ProfilePointEvent(self.device, "alloc", num, {"dtype":self.dtype, "sz":self.size}))
     return self
   def deallocate(self):
     assert hasattr(self, '_buf'), "buffer must be allocated to deallocate"
     if DEBUG is not None and DEBUG >= 7: print(f"buffer: deallocate {self.nbytes} bytes on {self.device}")
     if self._base is None and (self.options is None or self.options.external_ptr is None):
       if GlobalCounters is not None and not self.device.startswith("DISK"): GlobalCounters.mem_used -= self.nbytes
-      if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", decimal.Decimal(time.perf_counter_ns())/1000, self._prof_num))
+      if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self._prof_num))
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     del self._buf
@@ -273,12 +273,34 @@ class Compiler:
     return lib
   def disassemble(self, lib:bytes): pass
 
+CompilerPairT = tuple[functools.partial|type[Renderer], functools.partial|type[Compiler]]
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, renderer:Renderer|None, compiler:Compiler|None, runtime, graph=None, group_id=None):
-    self.device, self.allocator, self.compiler, self.runtime, self.graph = device, allocator, compiler or Compiler(), runtime, graph
-    self.renderer, self.group_id = renderer or Renderer(), group_id
+  def __init__(self, device:str, allocator:Allocator, compilers:Sequence[CompilerPairT]|None, runtime, graph=None, group_id=None):
+    self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
+    self.compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
+
+    envnames = [self._get_compiler_envvar(c) for r,c in self.compilers]
+    enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 1)
+    disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 0)
+
+    if len(enable_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {enable_comps}")
+    for _, comp_pair in disable_comps: self.compilers.remove(comp_pair)
+
+    try: self.renderer, self.compiler = next(self._get_available_compilers([list(enable_comps)[0][1]] if len(enable_comps) == 1 else self.compilers))
+    except StopIteration as exc: raise RuntimeError(f"no usable compilers for {self.device}") from exc
+
+    if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
+
+  def _get_compiler_envvar(self, c):
+    compiler_name = f"{unwrap_class_type(c).__name__.upper().removesuffix('COMPILER').removeprefix(devname:=self.device.split(':')[0].upper())}"
+    return f"{devname}_{compiler_name if len(compiler_name) > 0 else unwrap_class_type(c).__name__.upper()}"
+
+  def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
+    for renderer, compiler in compilers:
+      with contextlib.suppress(Exception): yield renderer(), compiler()
+
   def synchronize(self):
     """
     Synchronize all pending operations on the device.
@@ -299,15 +321,14 @@ class Compiled:
 
 # TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
+  if dtype == dtypes.index: return False
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI
-    if device in {"CUDA", "NV"}: return not CI and not getenv("PTX")
-    if device in {"CPU", "LLVM"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
-    return device == "AMD"
-  if dtype in dtypes.fp8s:
-    # not supported yet - in progress
-    return False
+    if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX")
+    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
+    return device in {"AMD", "PYTHON", "NULL"}
+  if dtype in dtypes.fp8s: return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
@@ -315,11 +336,11 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
-    if device == "GPU": return not CI and not OSX
+    if device == "CL": return not CI and not OSX
     if device in ["CUDA", "NV"]: return not CI
-    if device == "LLVM": return OSX
+    if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "GPU")
+  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "CL")
   return True
 
 if PROFILE:
@@ -331,21 +352,26 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
-    if not getenv("SQTT", 0):
-      from tinygrad.uop.ops import launch_viz
-      launch_viz(PROFILE, fn)
+    from tinygrad.uop.ops import launch_viz
+    launch_viz("PROFILE", fn)
 
 if __name__ == "__main__":
+  from tinygrad import Tensor, Device
+
   for device in ALL_DEVICES:
+    compilers_results, any_works = [], False
     try:
-      _ = Device[device].device
-      try:
-        from tinygrad import Tensor
-        with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
-        if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-        result = colored("PASS", "green")
-      except Exception as e:
-        result = f"{colored('FAIL', 'yellow')} {e}"
+      default_compiler = (d:=Device[device]).compiler
+      for i,(r,c) in enumerate(d.compilers):
+        try:
+          d.renderer, d.compiler = r(), c()
+          with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
+          if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
+          default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
+          compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
+          any_works = True
+        except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
+      result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
     print(f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}")

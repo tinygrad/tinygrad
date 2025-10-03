@@ -3,9 +3,9 @@ from tinygrad import Device
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import CI
-from tinygrad.runtime.ops_gpu import CLDevice, CLAllocator, CLCompiler, CLProgram
+from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler, CLProgram
 
-@unittest.skipUnless(Device.DEFAULT == "GPU", "Runs only on OpenCL (GPU)")
+@unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLError(unittest.TestCase):
   @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")
   def test_oom(self):
@@ -24,7 +24,7 @@ class TestCLError(unittest.TestCase):
   def test_unaligned_copy(self):
     data = list(range(65))
     unaligned = memoryview(bytearray(data))[1:]
-    buffer = Buffer("GPU", 64, dtypes.uint8).allocate()
+    buffer = Buffer("CL", 64, dtypes.uint8).allocate()
     buffer.copyin(unaligned)
     result = memoryview(bytearray(len(data) - 1))
     buffer.copyout(result)
