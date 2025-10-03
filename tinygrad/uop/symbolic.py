@@ -274,10 +274,16 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
 ])
 
+def chain_insert(chain, b, op):
+  if chain.op is not op or b.order_add > chain.src[1].order_add: return chain.alu(op, b)
+  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
+
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.index, name='x'), lambda x:
+    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(Ops.ADD, dtype=dtypes.index, name="x"), lambda x: functools.reduce(operator.add, sorted(x.split_uop(Ops.ADD), key=lambda u: u.order_add)))
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
