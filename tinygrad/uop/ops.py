@@ -244,7 +244,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self, tracked=False, flat=False):
+  def simplify(self, tracked=False):
     # late import!
     from tinygrad.uop.symbolic import symbolic_flat
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
