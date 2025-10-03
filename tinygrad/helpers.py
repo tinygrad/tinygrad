@@ -148,6 +148,8 @@ CPU_COUNT = ContextVar("CPU_COUNT", max(1, (os.cpu_count() or 1) // (4 if ARCH_X
 CPU_LLVM, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("AMD_LLVM", 1)
 VIZ = PROFILE = ContextVar("VIZ", 0)
 SPEC = ContextVar("SPEC", 0)
+# TODO: disable by default due to speed
+IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 
 @dataclass(frozen=True)
 class Metadata:
