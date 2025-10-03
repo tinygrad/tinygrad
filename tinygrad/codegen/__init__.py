@@ -78,9 +78,6 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(sym+migrate_indexing+pm_group_for_reduce, name="postopt symbolic"))
 
   # add locals
-  #ret.append(RewriteStep(pm_fix_bufferize, name="fix bufferize"))
-
-  # add locals
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen+pm_flatten_range, name="add local buffers"))
 
   # expand
