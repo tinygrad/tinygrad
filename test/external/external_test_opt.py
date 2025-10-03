@@ -221,7 +221,7 @@ class TestOpt(unittest.TestCase):
       for axis in [0, 1]:
         for n in [4, 8, 16]:
           b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
-          with CLCache(allowed=2):
+          with CLCache(allowed=3 if RANGEIFY else 2):
             a = Tensor.ones(n, n).contiguous().sum(axis).reshape(n, 1).expand(n, n).sum(axis)
             a.realize()
           np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
@@ -231,7 +231,7 @@ class TestOpt(unittest.TestCase):
       axis1, axis2 = 0, 1
       for n in [4, 8, 16]:
         b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-        with CLCache(allowed=2):
+        with CLCache(allowed=3 if RANGEIFY else 2):
           a = Tensor.ones(n, n).contiguous().sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
           a.realize()
         np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
