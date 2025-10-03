@@ -9,6 +9,7 @@ from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOO
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
+from tinygrad.schedule.rangeify import BufferizeOpts
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
@@ -257,12 +258,13 @@ class Scheduler:
           except KernelOptError: continue
 
           # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-          warp = UOp.range(tc.threads, -1, AxisType.WARP)
+          warp_num = -10
           ne: list[UOp] = []
           for opt in tc.opts:
             if opt[0] == "l":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
-              warp //= 2
+              warp = UOp.range(2, warp_num, AxisType.WARP)
+              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.WARP, input_new_rng=warp)
+              warp_num += 1
             elif opt[0] == "u":
               axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
             else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
@@ -346,4 +348,15 @@ def apply_opts(ctx:Renderer, ast:UOp):
 
 pm_postrange_opt = PatternMatcher([
   (UPat(Ops.SINK, name="ast"), apply_opts),
+])
+
+def add_local_buffer(x:UOp):
+  if x.tag is not None: return None
+  # should UPCAST/UNROLL be here?
+  branges = tuple([r for r in x.ranges if r.arg[-1] in {AxisType.WARP, AxisType.LOCAL, AxisType.UPCAST, AxisType.UNROLL}])
+  buf = UOp(Ops.BUFFERIZE, x.dtype, src=(x.replace(tag=1),)+branges, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+  return UOp(Ops.INDEX, x.dtype, src=(buf,)+branges)
+
+pm_add_local_buffers = PatternMatcher([
+  (UPat(Ops.LOAD, name="x"), add_local_buffer),
 ])
