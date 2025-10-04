@@ -81,6 +81,8 @@ earliest_rewrites = PatternMatcher([
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
+  # double reshape is just one reshape
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="r")), name="x",), lambda x,r: x.replace(src=r.src)),
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
 ])
