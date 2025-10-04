@@ -137,6 +137,7 @@ def train_cifar():
     Λ, V = _eigens(_patches(X.float().cpu().numpy()))
     W = V / np.sqrt(Λ + 1e-2)[:, None, None, None]
 
+    # NOTE: freezing W raises an (innocuous) warning when using torch's full_backward_hook
     return torch.tensor((W.astype(np.float32)), dtype=torch.float32, requires_grad=False)
 
   # ========== Preprocessing ==========

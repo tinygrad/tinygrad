@@ -647,7 +647,9 @@ from torch.nn.modules import Module
 def backward_hook(model:Module, _grad_input, _grad_out):
   grads_to_realize = [unwrap(p.grad) for p in model.parameters() if p.grad is not None]
   if len(grads_to_realize): Tensor.realize(*grads_to_realize)
-def module_hook(module:Module, _name, _submodule): module.register_backward_hook(backward_hook)
+def module_hook(module:Module, _name, _submodule):
+  if any(p.requires_grad for p in _submodule.parameters(recurse=False)):
+    _submodule.register_full_backward_hook(backward_hook)
 torch.nn.modules.module.register_module_module_registration_hook(module_hook)
 
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
