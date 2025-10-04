@@ -17,7 +17,7 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
-from tinygrad.codegen.opt.postrange import pm_postrange_opt
+from tinygrad.codegen.opt.postrange import pm_postrange_opt, pm_add_local_buffers
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
@@ -77,11 +77,14 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   # ** expander (expand_rewrite) **
   ret.append(RewriteStep(sym+migrate_indexing, name="postopt symbolic"))
 
-  # expand
-  ret.append(RewriteStep(sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander"))
+  # locals
+  ret.append(RewriteStep(pm_add_local_buffers, name="add locals"))
 
   # add locals
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
+
+  # expand
+  ret.append(RewriteStep(sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
