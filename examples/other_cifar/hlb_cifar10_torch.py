@@ -219,7 +219,7 @@ def train_cifar():
       self.net_ema = SpeedyResNet(w)
       for net_ema_param, net_param in zip(self.net_ema.state_dict().values(), net.state_dict().values()):
         net_ema_param.requires_grad = False
-        net_ema_param.copy_(net_param.numpy())
+        net_ema_param.data = net_param.clone().detach()
 
     def update(self, net, decay):
       for net_ema_param, (param_name, net_param) in zip(self.net_ema.state_dict().values(), net.state_dict().items()):
@@ -238,6 +238,9 @@ def train_cifar():
     device = torch.device({"METAL": "mps", "NV": "cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1:
     print(f"using torch backend {device}")
+  # set torch device here for cleaner code
+  torch.set_default_device(device)
+
   X_train, Y_train, X_test, Y_test = cifar()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
   Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
@@ -386,7 +389,7 @@ def train_cifar():
       with Context(BEAM=getenv("LATEBEAM", BEAM.value), WINO=getenv("LATEWINO", WINO.value)):
         loss = train_step(model, [opt_bias, opt_non_bias], [lr_sched_bias, lr_sched_non_bias], X, Y)
         et = time.monotonic()
-        loss_cpu = loss.detach().numpy()
+        loss_cpu = loss.cpu().detach().numpy()
       # EMA for network weights
       if getenv("EMA") and i > hyp["ema"]["steps"] and (i + 1) % hyp["ema"]["every_n_steps"] == 0:
         if model_ema is None:
