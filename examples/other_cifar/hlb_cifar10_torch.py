@@ -399,10 +399,20 @@ def train_cifar():
     cl = time.monotonic()
     step_times.append((cl - st) * 1000.0)
     device_str = loss.device if isinstance(loss.device, str) else f"{loss.device}"
-    #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR, 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
+    #  53  221.74 ms run,    2.22 ms python,  219.52 ms CL,  803.39 loss, 0.000807 LR
     print(
-      f"{i:3d} {(cl - st) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - et) * 1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {lr_sched_non_bias.get_last_lr()[0]:.6f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS, {GlobalCounters.global_ops * 1e-9:9.2f} GOPS"
+      f"{i:3d} {(cl - st) * 1000.0:7.2f} ms run, {(et - st) * 1000.0:7.2f} ms python, {(cl - et) * 1000.0:7.2f} ms {device_str}, {loss_cpu:7.2f} loss, {lr_sched_non_bias.get_last_lr()[0]:.6f} LR",
+      end="",
     )
+    if getenv("TINY_BACKEND"):
+      # ..., 4.66 GB used,   3042.49 GFLOPS,    674.65 GOPS
+      print(
+        f", {GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS, {GlobalCounters.global_ops * 1e-9:9.2f} GOPS"
+      )
+    else:
+      # torch does not support tinygrad-like tracking of memory usage and operations (the profiler is quite cumbersome)
+      print()
+
     st = cl
     i += 1
 
