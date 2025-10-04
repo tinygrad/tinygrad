@@ -576,11 +576,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def factor(self, *factors: UOp) -> UOp:
     # factor out expr from self if possible, might return self
     # (1400*a + 2800*b + c).factor(a+2*b) -> 1400*(a+2*b) + c
+    if self.dtype in dtypes.floats: return self
     if self.op is Ops.ADD:
       factored = []
       # dict of {term: const_factor}, i.e. {a: 1, b: 2}
       remainders = dict([(u.divides(f:=u.const_factor()).simplify(),f) for u in self.split_uop(Ops.ADD)])
       for fac in factors:
+        if fac.dtype not in (dtypes.index,)+dtypes.ints: continue
         fac_terms = dict((u.divides(f:=u.const_factor()).simplify(),f) for u in fac.split_uop(Ops.ADD))
         factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
         new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
