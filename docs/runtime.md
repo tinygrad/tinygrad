@@ -14,6 +14,15 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 | [WEBGPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_webgpu.py) | Runs on GPU using the Dawn WebGPU engine (used in Google Chrome) | - | Dawn library installed and discoverable. Binaries: [pydawn v0.3.0](https://github.com/wpmed92/pydawn/releases/tag/v0.3.0) |
 
 
+## NVDEC video decoding
+
+When `libnvcuvid` is present, `Device["NV"].decode_hevc_annexb` feeds an Annex-B HEVC bitstream directly to the CUVID hardware 
+decoder and returns `NV12Surface` objects (wrapping a `Buffer` plus width, height, pitch, and timestamp metadata). Each buffer owns the 
+mapped surface and unmaps automatically on `Buffer.deallocate()`. The helper lives in `tinygrad.runtime.ops_nv` and has no software 
+fallback; callers must guard it behind hardware feature detection. The decoder allocates up to eight decode surfaces by default (cap 
+it via the `max_decode_surfaces` keyword when calling `tinygrad.runtime.cuvid.decode_annexb`).
+
+
 ## Interoperability
 
 tinygrad provides interoperability with OpenCL and PyTorch, allowing efficient tensor data sharing between frameworks through the `Tensor.from_blob` API. This enables zero-copy operations by working directly with external memory pointers.
