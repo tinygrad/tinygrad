@@ -195,6 +195,13 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+b)+a, 0, 40, "((a*4)+b)")
     self.helper_test_variable((a+b)+a*3, 0, 40, "((a*4)+b)")
 
+  def test_add_self_seperated(self):
+    a = Variable("a", 0, 8)
+    b = Variable("b", 0, 8)
+    c = Variable("c", 0, 8)
+    self.helper_test_variable((a+b)+c+a, 0, 32, "(((a*2)+b)+c)")
+    self.helper_test_variable((a*3+b*2)+c*2+a*5, 0, 96, "(((a*8)+(b*2))+(c*2))")
+
   def test_sub_self(self):
     a = Variable("a", 0, 8)
     self.helper_test_variable(a-a, 0, 0, "0")
@@ -674,6 +681,19 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(lidx+(gidx//4)*4+gidx%4, 0, 248, "(gidx+lidx)")
     self.helper_test_variable(lidx+(gidx//4)*8+2*(gidx%4), 0, 372, "((gidx*2)+lidx)")
     self.helper_test_variable(lidx+2*(gidx%4)+(gidx//4)*8, 0, 372, "((gidx*2)+lidx)")
+
+  def test_div_mod_recombine_seperated(self):
+    gidx = Variable("gidx", 0, 124)
+    lidx = Variable("lidx", 0, 124)
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    self.helper_test_variable(gidx%4+a+b+c+(gidx//4)*4, 0, 133, "(((a+b)+c)+gidx)")
+    self.helper_test_variable((gidx//4)*4+a+b*10+gidx%4, 0, 157, "((a+(b*10))+gidx)")
+    self.helper_test_variable(lidx+gidx%4+a+b+c//2+(gidx//4)*4, 0, 255, "((((a+b)+gidx)+lidx)+(c//2))")
+    self.helper_test_variable(lidx+(gidx//4)*8+b+c+a*8+2*(gidx%4), 0, 402, "(((((a*8)+b)+c)+(gidx*2))+lidx)")
+    # TODO: need better sorting for this one
+    # self.helper_test_variable(lidx+(gidx//4)*4+a*3+b*3+(c*10)%3+gidx%4, , , "")
 
   def test_div_mod_recombine_folded_mod(self):
     a = Variable("a", 0, 2)
