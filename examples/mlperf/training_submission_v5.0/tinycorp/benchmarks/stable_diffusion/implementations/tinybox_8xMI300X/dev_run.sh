@@ -2,6 +2,7 @@
 
 DATETIME=${2:-$(date "+%m%d%H%M")}
 LOGFILE="${HOME}/logs/sd_mi300x_${DATETIME}.log"
+# UNET_CKPTDIR must be set: training saves checkpoints to this path, then a separate eval process scans this path to know which checkpoints to eval.
 export UNET_CKPTDIR="${HOME}/stable_diffusion/training_checkpoints/${DATETIME}"
 mkdir -p "${HOME}/logs" "$UNET_CKPTDIR"
 
