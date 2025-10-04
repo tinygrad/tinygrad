@@ -81,6 +81,8 @@ earliest_rewrites = PatternMatcher([
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
+  # double reshape is just one reshape
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.RESHAPE, name="r")), name="x",), lambda x,r: x.replace(src=r.src)),
   # contiguous/buffer/copy/assign is already contiguous
   #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
 ])
@@ -169,7 +171,7 @@ def map_reshape(idx:UOp, r:UOp):
   for s in r.src[0].shape[::-1]:
     ret.append(mish % s) # NOTE: simplify will turn this to CONST
     mish //= s
-  tret = UOp.sink(*ret[::-1]).simplify().src
+  with Context(TRACK_MATCH_STATS=0): tret = graph_rewrite(UOp.sink(*ret[::-1]), sym).src
   return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
 
 def map_pad(idx:UOp, r:UOp):
