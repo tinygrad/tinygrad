@@ -378,7 +378,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x", dtypes.index) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
 ])+gep_pushing
 
-symbolic_flat = symbolic + PatternMatcher([
+symbolic_flat = symbolic+PatternMatcher([
   # ** combine terms (opinionated), can make it harder to substitute valids **
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
