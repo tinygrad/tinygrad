@@ -36,8 +36,9 @@ jobs:
         cuda: 'true'
         webgpu: 'true'
         llvm: 'true'
+        pydeps: 'pyyaml mako'
     - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev
+      run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
     - name: Verify OpenCL autogen
       run: |
         cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
@@ -89,3 +90,8 @@ jobs:
         cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
         ./autogen_stubs.sh llvm
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
+    - name: Verify mesa autogen
+      run: |
+        cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
+        ./autogen_stubs.sh mesa
+        diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py

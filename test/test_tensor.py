@@ -10,6 +10,7 @@ from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
 
@@ -904,7 +905,8 @@ class TestIdxUpcast(unittest.TestCase):
     store = next(uop for uop in uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
     idx = self._find_op(store, Ops.INDEX)
-    if idx is not None: # PTX turns Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+    # PTX and NIR turn Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+    if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
       assert idx_val.dtype is dtype
@@ -928,7 +930,7 @@ class TestIdxUpcast(unittest.TestCase):
   def test_regular_sym(self):
     self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX always convert Ops.INDEX to int64")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "PTX and NIR always converts Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(65535)

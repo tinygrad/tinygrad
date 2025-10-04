@@ -6,6 +6,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings, HealthCheck
@@ -29,8 +30,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
 
-# TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
-if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU":
+# TODO: CI CUDA segfaults on sin, WEBGPU and NIR sines are not precise enough for large numbers
+if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer):
   unary_operations.remove((Tensor.sin, np.sin))
   unary_operations.remove((Tensor.cos, np.cos))
 
@@ -184,8 +185,8 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  # Metal and CUDA and HIP behave differently than numpy in CI for overflows
-  skip_overflow = CI and Device.DEFAULT in {"AMD", "NV", "CUDA"}
+  # Metal and CUDA and HIP and NIR behave differently than numpy in CI for overflows
+  skip_overflow = (CI and Device.DEFAULT in {"AMD", "NV", "CUDA"}) or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer)
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))

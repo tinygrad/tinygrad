@@ -26,8 +26,9 @@ import unittest
 import numpy as np
 import torch
 from tinygrad import Tensor, dtypes, nn
-from tinygrad.device import is_dtype_supported
+from tinygrad.device import Device, is_dtype_supported
 from tinygrad.helpers import getenv
+from tinygrad.renderer.nir import NIRRenderer
 
 MOCKGPU = getenv("MOCKGPU")
 
@@ -206,7 +207,8 @@ class TestUOpValidationIssue(unittest.TestCase):
   # these fail with UOp verification error.
   # we want more of these with diverse errors!
 
-  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU, "hangs gpuocelot")
+  @unittest.skipIf((not is_dtype_supported(dtypes.long)) or MOCKGPU or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer),
+                   "hangs gpuocelot, NIR cannot render")
   def test_tensor_index_overflow(self):
     val = Tensor([1])
     big = val.expand(2**31 + 3)
