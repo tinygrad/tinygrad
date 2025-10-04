@@ -388,6 +388,7 @@ def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
  # pick the activation branch (the one that depends on output spatial + (ky,kx))
  axes = winoguard(redu)
  if axes is None: return None
+ print("AXES-UOP", axes)
  os = [axes[1][i][0].src[0].arg for i in range(len(axes[1]))]
  ts = [(o+3)//4 for o in os]
  print("AXES", ts)
@@ -399,8 +400,61 @@ winograd_rewrite = PatternMatcher([
  (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
  ])
 
+#*****************
+# Practice:
+
+# practice_rewrite = PatternMatcher([
+#   (UPat(Ops.ADD, name="plus", src=(UPat(Ops.INDEX, name="idx"),)), lambda ctx,idx,plus: practice_write(ctx, idx, plus))  
+#  ])
+A = [1, 2, 5, 4 ,5 ,6 ,71 ,80,9]
+
+def practice_write(ctx: RangeifyContext, plus: UOp):
+  if plus.src[0].op is not Ops.INDEX: return None
+  idx = plus.src[0]
+  const = UOp(Ops.CONST, dtypes.int, arg=3)
+  k = ctx.new_range(3, axistype=AxisType.REDUCE)
+  oy = idx.src[1]
+  nidx = UOp(Ops.INDEX, dtypes.int, arg=None,src=(idx.src[0], k, idx.src[2]))
+  print("x17",idx.src[2])
+  # mat = UOp()
+  i = UOp(Ops.ADD, dtypes.index, src=(UOp(Ops.MUL, dtypes.index, src=(oy, UOp(Ops.CONST, dtypes.int, arg=3))), k))
+  def select_add(A, i, dtype=dtypes.int, j=0):
+    if j == len(A): return UOp.const(dtype, 0)
+    cell = UOp(Ops.WHERE, dtype, src=(
+              UOp(Ops.CMPEQ, dtypes.bool, src=(i, UOp.const(dtypes.index, j))),
+              UOp.const(dtype, A[j]),
+              UOp.const(dtype, 0)))
+    return UOp(Ops.ADD, dtype, src=(cell, select_add(A, i, dtype, j+1)))
+
+  def select_add_bt(A, i, dtype=dtypes.int, lo=0, hi=None):
+    if hi is None: hi = len(A)
+    if lo == hi:   return UOp.const(dtype, 0)
+    if hi - lo == 1:
+      return UOp(Ops.WHERE, dtype, src=(
+              UOp(Ops.CMPEQ, dtypes.bool, src=(i, UOp.const(dtypes.index, lo))),
+              UOp.const(dtype, A[lo]),
+              UOp.const(dtype, 0)))
+    mid = (lo + hi) // 2
+    return UOp(Ops.ADD, dtype, src=(
+            select_add_bt(A, i, dtype, lo, mid),
+            select_add_bt(A, i, dtype, mid, hi)))
+  mega = select_add_bt(A, i)
+  print("mega",mega)
+
+  mul = UOp(Ops.MUL, dtypes.int, src=(nidx, UOp(Ops.CAST, dtypes.int, src=(mega,))))
+  red = UOp(Ops.REDUCE, dtypes.int, src=(mul, k), arg=Ops.ADD)
+  print("red",red)
+  return red
+
+practice_rewrite = PatternMatcher([
+  (UPat(Ops.ADD, name="plus"), lambda ctx, plus: practice_write(ctx, plus))  
+ ])
+
+
+
+
 # *****************
-# 3.5 cleanups
+# 3.5 cleanups 
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -638,6 +692,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
+  tsink = graph_rewrite(tsink, winograd_rewrite, ctx=RangeifyContext(), bottom_up=True, name="winograd")
+  tsink = graph_rewrite(tsink, practice_rewrite, ctx=RangeifyContext(), bottom_up=True, name="practice")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
