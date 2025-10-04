@@ -43,15 +43,24 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
+
+  @torch.compile
+  def forward_pass(X, Y):
+    out = model(X)
+    return loss_fn(out, Y)
+
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
-    out = model(X)
-    loss = loss_fn(out, Y)
+    loss = forward_pass(X, Y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     return loss
+
+  if getenv("TINY_BACKEND"):
+    # Ensure torch.compile falls back gracefully for tiny backend
+    import torch._dynamo
+    torch._dynamo.config.suppress_errors = True
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
