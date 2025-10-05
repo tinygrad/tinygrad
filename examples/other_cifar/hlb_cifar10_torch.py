@@ -286,7 +286,7 @@ def train_cifar():
       for net_ema_param, (param_name, net_param) in zip(self.net_ema.state_dict().values(), net.state_dict().items()):
         # batchnorm currently is not being tracked
         if not ("num_batches_tracked" in param_name) and not ("running" in param_name):
-          net_ema_param.copy_(net_ema_param.detach() * decay + net_param.detach() * (1.0 - decay)).realize()
+          net_ema_param.copy_(net_ema_param.detach() * decay + net_param.detach() * (1.0 - decay))
 
   # ========== Setup ==========
   set_seed(getenv("SEED", hyp["seed"]))
@@ -390,7 +390,7 @@ def train_cifar():
     loss_fn = nn.CrossEntropyLoss(reduction="mean")
     loss = loss_fn(out, Y)
     correct = out.argmax(axis=1) == Y.argmax(axis=1)
-    return correct.realize(), loss.realize()
+    return correct, loss
 
   # ========== Training ==========
   step_times = []
