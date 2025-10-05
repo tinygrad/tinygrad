@@ -645,7 +645,7 @@ torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_
 
 from torch.nn.modules import Module
 def param_hook(_grad):
-    if _grad is not None and _grad.is_tiny: Tensor.realize(unwrap(_grad))
+  if _grad is not None and _grad.is_tiny: Tensor.realize(unwrap(_grad))
 def module_hook(module:Module, _name, _submodule):
   for param in _submodule.parameters(recurse=False):
     if param.requires_grad: param.register_hook(param_hook)
