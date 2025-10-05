@@ -1112,27 +1112,29 @@ class RewriteContext:
       except ReprocessNode as e:
         assert e.node is self.replace[e.node]
 
-        """
         # invalidate node and all children
         invalid = [e.node]
         tset = [e.node]
         while len(tset):
           u: UOp = tset.pop()
           for c in u.children:
-            if c in self.replace:
-              tset.append(c)
-              invalid.append(c)
+            if (pc:=c()) is not None:
+              tset.append(pc)
+              invalid.append(pc)
         print(len(invalid))
+        #for s in list(stack):
+        #  if s[0] in invalid or s[2] in invalid:
+        #    stack.remove(s)
+        #    print("ISSUE")
         for u in invalid:
-          del self.replace[u]
-        """
-        del self.replace[e.node]
-        for n1,_,n2 in stack:
-          if n1 is e.node or n2 is e.node:
-            print("ISSUE")
-        #stack.clear()
-        #stack.append((root, 0, root))
-        stack.append((e.node, 0, e.node))
+          if u in self.replace:
+            print("del")
+            del self.replace[u]
+            #stack.append((u, 0, u))
+        #stack.append((e.node, 0, e.node))
+        #del self.replace[e.node]
+        stack.clear()
+        stack.append((root, 0, root))
     return self.replace[root]
 
 @track_matches
