@@ -15,6 +15,10 @@ class TestTiny(unittest.TestCase):
     out = Tensor([1.,2,3])
     self.assertListEqual(out.tolist(), [1.0, 2.0, 3.0])
 
+  def test_elu(self):
+    out = Tensor([1.,2,3]).sum().elu()
+    self.assertListEqual(out.tolist(), [1.0, 2.0, 3.0])
+
   def test_plus(self):
     out = Tensor([1.,2,3]) + Tensor([4.,5,6])
     self.assertListEqual(out.tolist(), [5.0, 7.0, 9.0])

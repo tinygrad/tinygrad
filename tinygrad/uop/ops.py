@@ -1032,6 +1032,11 @@ if TRACK_MATCH_STATS or PROFILE:
 
 class RewriteNotReady(Exception): pass
 class BottomUpGate(Exception): pass
+class ReprocessNode(Exception):
+  def __init__(self, node):
+    self.node = node
+    super().__init__(self, "reprocess node")
+
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
@@ -1053,10 +1058,10 @@ class RewriteContext:
 
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
-    on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
     while stack:
       if len(stack) > getenv("REWRITE_STACK_LIMIT", 250000): raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
+      #print(len(stack), stage)
       if n in self.replace: continue  # skip any nodes we have seen
       try:
         if stage == 0:
@@ -1071,15 +1076,14 @@ class RewriteContext:
                 seen.add(test_n)
                 new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
             stack.append((n, 1, new_n))
-            for x in reversed(new_n.src):
-              if x in on_stack: continue
-              stack.append((x, 0, x))
-              on_stack.add(x)
+            for x in reversed(new_n.src): stack.append((x, 0, x))
           # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
           except BottomUpGate: self.replace[n] = new_n
         elif stage == 1:
           try: new_src = tuple([self.replace[x] for x in new_n.src])
-          except KeyError: raise RewriteNotReady
+          except KeyError:
+            stack.append((new_n, 0, new_n))
+            continue
           if new_src == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
             if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
@@ -1093,11 +1097,11 @@ class RewriteContext:
           stack.append((new_src_n, 0, new_src_n))
         else:
           # in stage 2, we link the result of new_n to the result of n
-          try: self.replace[n] = self.replace[new_n]
-          except KeyError: raise RewriteNotReady
-      except RewriteNotReady:
-        # retry this later
-        stack.appendleft((n, stage, new_n))
+          self.replace[n] = self.replace[new_n]
+      except ReprocessNode as e:
+        assert e.node is self.replace[e.node]
+        del self.replace[e.node]
+        stack.append((e.node, 0, e.node))
     return self.replace[root]
 
 @track_matches

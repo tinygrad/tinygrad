@@ -2,7 +2,7 @@ from typing import Any, cast, Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, ReprocessNode, _substitute, ssimplify, KernelInfo, BottomUpGate
 from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
 from tinygrad.schedule.kernelize import Kernel
@@ -151,6 +151,7 @@ class RangeifyContext:
   # block on parent until all children have been seen
   seen_children: dict[UOp, dict[int, UOp]] = field(default_factory=dict)
   seen_child: dict[UOp, Any] = field(default_factory=dict)
+  pending_children: dict[UOp, list[UOp]] = field(default_factory=dict)
   progress: int = 0
 
   # create ranges
@@ -271,13 +272,18 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
   # wait here until we have seen all the children
+  ctx.seen_children[c][x.arg[0]] = idx
+  print("see child", x.arg)
   if len(ctx.seen_children[c]) != x.arg[1]:
     ctx.progress += 1
     if ctx.progress > 10000: raise RuntimeError("children not making progress")
     # NOTE: we mark this here
-    ctx.seen_children[c][x.arg[0]] = idx
-    raise RewriteNotReady
+    print("BU GATE")
+    ctx.pending_children.setdefault(c, []).append(idx)
+    raise BottomUpGate
+    #raise RewriteNotReady
   ctx.progress = 0
+  print("CHILDREN", id(c))
 
   if c not in ctx.seen_child:
     all_rngs = list(zip(*[ch.src[1:] for ch in ctx.seen_children[c].values()]))
@@ -321,6 +327,11 @@ def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
 
 def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
   if len(ctx.seen_children[c]) != c.arg: raise RuntimeError("all children should have been seen by now")
+  if len(pc:=ctx.pending_children[c]):
+    pcn = pc.pop()
+    print("reprocess", pcn.src[0].arg)
+    raise ReprocessNode(pcn)
+  print("COMPLETE", id(c))
   return idx.replace(src=(idx.src[0].src[0],)+idx.src[1:])
 
 def might_end_axis(idx:UOp):
@@ -345,7 +356,7 @@ pm_rangeify = pm_mops+PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.REALIZE, src=(UPat(),), name="x"),), allow_any_len=True, name="idx"), map_partial_realize),
 
   # if there are new ended children, tag the SINK
-  (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN, name="c"), ), name="x"),), allow_any_len=True, name="idx"), index_child),
   (UPat(Ops.INDEX, src=(UPat(Ops.CHILDREN, name="c"),), allow_any_len=True, name="idx"), children_gate),
 
   # if we come across this, remove it. it was a CHILD unused in an INDEX
