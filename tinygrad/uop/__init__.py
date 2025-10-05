@@ -10,6 +10,7 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto(); REWRITE_ERROR = auto()  # noqa: E702
+  SENTINEL = auto()
 
   # track children
   CHILD = auto(); CHILDREN = auto() # noqa: E702
