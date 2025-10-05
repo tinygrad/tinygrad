@@ -644,12 +644,11 @@ def get_real_tinygrad_buffers():
 torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
 
 from torch.nn.modules import Module
-def backward_hook(model:Module, _grad_input, _grad_out):
-  grads_to_realize = [unwrap(p.grad) for p in model.parameters() if p.grad is not None]
-  if len(grads_to_realize): Tensor.realize(*grads_to_realize)
+def param_hook(_grad):
+    if _grad is not None and _grad.is_tiny: Tensor.realize(unwrap(_grad))
 def module_hook(module:Module, _name, _submodule):
-  if any(p.requires_grad for p in _submodule.parameters(recurse=False)):
-    _submodule.register_full_backward_hook(backward_hook)
+  for param in _submodule.parameters(recurse=False):
+    if param.requires_grad: param.register_hook(param_hook)
 torch.nn.modules.module.register_module_module_registration_hook(module_hook)
 
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
