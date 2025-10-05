@@ -414,12 +414,12 @@ def train_cifar():
         #   Yt.shard_(GPUS, axis=0)
 
         correct, loss = eval_step(model, Xt, Yt)
-        losses.append(loss.numpy().tolist())
-        corrects.extend(correct.numpy().tolist())
+        losses.append(loss.cpu().numpy().tolist())
+        corrects.extend(correct.cpu().numpy().tolist())
         if model_ema:
           correct_ema, loss_ema = eval_step(model_ema.net_ema, Xt, Yt)
-          losses_ema.append(loss_ema.numpy().tolist())
-          corrects_ema.extend(correct_ema.numpy().tolist())
+          losses_ema.append(loss_ema.cpu().numpy().tolist())
+          corrects_ema.extend(correct_ema.cpu().numpy().tolist())
 
       # collect accuracy across ranks
       correct_sum, correct_len = sum(corrects), len(corrects)
