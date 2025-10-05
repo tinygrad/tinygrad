@@ -62,8 +62,8 @@ class TestCFGSchedule(unittest.TestCase):
 
     # assert the loads are in this order
     self.assertListEqual([g.src[0].src[1].render() for g in golden if g.op is Ops.LOAD],
-                         ['(gidx1*4)', '((gidx1*4)+1)', '((gidx1*4)+2)', '((gidx1*4)+3)',
-                          '(gidx0*27)', '((gidx0*27)+1)', '((gidx0*27)+2)', '((gidx0*27)+3)'])
+                         ['(gidx0*27)', '((gidx0*27)+1)', '((gidx0*27)+2)', '((gidx0*27)+3)',
+                          '(gidx1*4)', '((gidx1*4)+1)', '((gidx1*4)+2)', '((gidx1*4)+3)'])
 
     # assert math is after loads
     first_math = [i for i,g in enumerate(golden) if g.op is Ops.ADD and g.dtype == dtypes.float][0]
