@@ -730,11 +730,11 @@ def get_location() -> tuple[str, int]:
 
 @functools.cache
 def lines(fn) -> list[str]:
-  with open(fn) as f: return f.readlines()
-
-def printable(loc:tuple[str, int]) -> str:
-  try: return lines(loc[0])[loc[1]-1].strip()
+  try:
+    with open(fn) as f: return f.readlines()
   except FileNotFoundError: return "<missing>"
+
+def printable(loc:tuple[str, int]) -> str: return lines(loc[0])[loc[1]-1].strip()
 
 class UPat(MathTrait):
   __slots__ = ("op", "dtype", "arg", "name", "src")
