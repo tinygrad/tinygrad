@@ -8,7 +8,7 @@ from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, RANGEIFY, VIZ, SPEC
-from tinygrad.helpers import strip_parens
+from tinygrad.helpers import strip_parens, make_tuple
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -43,6 +43,8 @@ def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
 
 def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
+
+def range_str(u:UOp) -> str: return '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
 
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
@@ -148,6 +150,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
 
+  @functools.cached_property
+  def order_add(self:UOp) -> tuple:
+    if self.op is Ops.MUL and self.src[1].op in (Ops.CONST, Ops.VCONST): return (self.src[0].tuplize, make_tuple(self.src[1].arg, 1))
+    return (self.tuplize, (0,))
+
   @property
   def ptrdtype(self) -> PtrDType:
     if not isinstance(self.dtype, PtrDType): raise RuntimeError("ptrdtype called on UOp without PtrDType")
@@ -160,6 +167,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
                                                    Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
       return None
+    if self.op is Ops.INDEX and self.src[0].op is Ops.ASSIGN and self.src[0].src[1].op is Ops.KERNEL: return None
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
@@ -238,9 +246,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     # late import!
-    from tinygrad.uop.symbolic import symbolic
+    from tinygrad.uop.symbolic import symbolic_flat
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      return graph_rewrite(self, symbolic_flat, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -462,7 +470,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
-    return next((x._device for x in self.src if x._device is not None), None)
+    for x in self.src:
+      if x._device is not None: return x._device
+    return None
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self
@@ -476,7 +486,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.as_buf() for x in self.src))
     # TODO: this should be the only one of these. this is the one RANGEIFY uses
     s = self
-    while len(s.src) and s.op not in {Ops.BUFFER, Ops.MSTACK}: s = s.src[0]
+    while len(s.src) and s.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: s = s.src[0]
     return s
 
   @property
@@ -563,6 +573,32 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  def factor(self, *factors: UOp) -> UOp:
+    # factor out expr from self if possible, might return self
+    # (1400*a + 2800*b + c).factor(a+2*b) -> 1400*(a+2*b) + c
+    if self.dtype in dtypes.floats: return self
+    if self.op is Ops.ADD:
+      factored = []
+      # dict of {term: const_factor}, i.e. {a: 1, b: 2}
+      remainders = dict([(u.divides(f:=u.const_factor()).simplify(),f) for u in self.split_uop(Ops.ADD)])
+      for fac in factors:
+        if fac.dtype not in (dtypes.index,)+dtypes.ints: continue
+        fac_terms = dict((u.divides(f:=u.const_factor()).simplify(),f) for u in fac.split_uop(Ops.ADD))
+        factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
+        new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
+
+        if any(u not in factored_terms for u in fac_terms) or any(factored_terms[u]%fac_terms[u]!=0 for u in fac_terms) or not \
+          all_same(mul:=[factored_terms[u]//fac_terms[u] for u in fac_terms]):
+          continue
+
+        remainders = new_remainders
+        factored.append(fac*mul[0])
+      if not factored: return self
+      start = functools.reduce(operator.add, factored)
+      return sum([k.factor(*factors)*v for k,v in remainders.items()], start=start)
+
+    if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return self
+    return self.replace(src=tuple(s.factor(*factors) for s in self.src))
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, ConstType]:
     return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
@@ -987,6 +1023,7 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
+SENTINEL = UOp(Ops.SENTINEL)
 class RewriteNotReady(Exception): pass
 class BottomUpGate(Exception): pass
 class RewriteContext:
@@ -999,45 +1036,58 @@ class RewriteContext:
     self.replace: dict[UOp, UOp] = {}
 
   def cached_pm_rewrite(self, x:UOp):
-    if (ret:=self.pm_cache.get(x,False)) is not False: return ret
+    if (ret:=self.pm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.pm_cache[x] = cast(PatternMatcher, self.pm).rewrite(x, self.ctx)
     return ret
 
   def cached_bpm_rewrite(self, x:UOp):
-    if (ret:=self.bpm_cache.get(x,False)) is not False: return ret
+    if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.bpm_cache[x] = cast(PatternMatcher, self.bpm).rewrite(x, self.ctx)
     return ret
 
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
+    REWRITE_STACK_LIMIT = getenv("REWRITE_STACK_LIMIT", 250000)
     while stack:
-      if len(stack) >= 200000: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
+      if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
-      try:
-        if stage == 0:
+      if stage == 0:
+        # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
+        if self.bpm is not None:
+          # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
+          test_n: UOp|None = n
+          seen = set()
           try:
-            # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
-            if self.bpm is not None:
-              # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
-              test_n: UOp|None = n
-              seen = set()
-              while test_n is not None:
-                if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
-                seen.add(test_n)
-                new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
-            stack.append((n, 1, new_n))
-            for x in reversed(new_n.src):
-              if x in on_stack: continue
-              stack.append((x, 0, x))
-              on_stack.add(x)
-          # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
-          except BottomUpGate: self.replace[n] = new_n
-        elif stage == 1:
-          try: new_src = tuple([self.replace[x] for x in new_n.src])
-          except KeyError: raise RewriteNotReady
-          if new_src == new_n.src:
+            while test_n is not None:
+              if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
+              seen.add(test_n)
+              new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
+          except RewriteNotReady:
+            # try the full thing again later
+            stack.appendleft((n, 0, n))
+            continue
+          except BottomUpGate:
+            # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
+            self.replace[n] = new_n
+            continue
+        stack.append((n, 1, new_n))
+        for x in reversed(new_n.src):
+          if x in on_stack: continue
+          stack.append((x, 0, x))
+          on_stack.add(x)
+      elif stage == 1:
+        tmp = []
+        for x in new_n.src:
+          if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
+            # if some new sources aren't ready, we try this again later
+            stack.appendleft((n, 1, new_n))
+            break
+          tmp.append(rx)
+        else:
+          # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
+          if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
             if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
               self.replace[n] = new_n
@@ -1048,13 +1098,14 @@ class RewriteContext:
           # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
           stack.append((n, 2, new_src_n))
           stack.append((new_src_n, 0, new_src_n))
+      else:
+        # in stage 2, we link the result of new_n to the result of n
+        if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
+          # not ready, try the link later
+          stack.appendleft((n, 2, new_n))
         else:
-          # in stage 2, we link the result of new_n to the result of n
-          try: self.replace[n] = self.replace[new_n]
-          except KeyError: raise RewriteNotReady
-      except RewriteNotReady:
-        # retry this later
-        stack.appendleft((n, stage, new_n))
+          # otherwise we are done
+          self.replace[n] = replaced_new_n
     return self.replace[root]
 
 @track_matches
@@ -1111,7 +1162,7 @@ syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<"
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
   (UPat((Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg)),
-  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"r{x.arg[0]}" if x.arg[0] >= 0 else f"rm{-x.arg[0]}")),
+  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"r{range_str(x)}")),
   (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
   (UPat(Ops.UNROLL, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UNROLL({x.src[0].arg}, {x.arg})")),
   (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"({str(x.dtype)[7:]})({x.src[0].arg})")),
@@ -1124,7 +1175,7 @@ renderer = PatternMatcher([
   (UPat(Ops.WHERE, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
   (UPat(set(syms.keys()), src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}{syms[x.op]}{x.src[1].arg})")),
   (UPat(Ops.VIEW, src=(UPat(Ops.NOOP),), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.view({x.arg})")),
-  (UPat(Ops.INDEX, name="x"), lambda x:
+  (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda x:
    UOp(Ops.NOOP, arg=''.join([f"[{strip_parens(y.arg)}]" for y in x.src[1:]])) if all(y.op is Ops.NOOP for y in x.src[1:]) else None),
 ])
 renderer_infer = PatternMatcher([

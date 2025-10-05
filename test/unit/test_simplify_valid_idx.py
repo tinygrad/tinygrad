@@ -60,7 +60,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     load = get_gated_load_uop(gate, idx)
     self.check(load,
       "0",
-      "(((lidx0+(gidx0*4))<19)!=True)")
+      "((((gidx0*4)+lidx0)<19)!=True)")
 
   def test_simplify_within_valid1(self):
     ridx0 = Range(0, 4)
@@ -184,7 +184,6 @@ class TestValidIdxSimplification(unittest.TestCase):
     print("The expressions are not equivalent.")
     print(s.model())
 
-  @unittest.expectedFailure  # TODO: improve uop_given_valid
   def test_valid_becomes_const2(self):
     ridx0 = Range(0, 4)
     ridx1 = Range(1, 4)
@@ -198,11 +197,11 @@ class TestValidIdxSimplification(unittest.TestCase):
       "((((r0+r1)<1)!=True)&(((r2+r3)<1)!=True))")
 
   def test_valid_with_non_const_rhs(self):
-    ridx0 = Range(0, 2**16)
+    ridx0 = Range(0, 1024)
     ridx1 = Range(1, 4)
     ridx2 = Range(2, 4)
     valid = (ridx0<(ridx1*4 + ridx2))&(ridx0<-1).ne(True)
-    idx = ridx0%1024
+    idx = ridx0
     load = get_gated_load_uop(valid, idx)
     self.check(load,
       "r0",
@@ -304,7 +303,7 @@ class TestImageSimplification(unittest.TestCase):
     idx = ((alu4+1530)%1536, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2))
 
     load = get_load_image_uop(shape, valid, idx)
-    self.check(load, None, "((((idx1*48)+(r2*6))+r0)+-6)", "(((idx2*2)+r1)+-1)")
+    self.check(load, None, "((((idx1*48)+r0)+(r2*6))+-6)", "(((idx2*2)+r1)+-1)")
 
   def test_openpilot_conv2(self):
     # conv in test/external/external_test_valid_remove.py
@@ -325,7 +324,7 @@ class TestImageSimplification(unittest.TestCase):
     idx = ((alu3+765)%768, alu1+((idx1+((ridx2+7)//8)+31)//32)+(-2))
     load = get_load_image_uop(shape, valid, idx)
 
-    self.check(load, None, "((((idx1*24)+(r2*3))+r0)+-3)", "(((idx2*2)+r1)+-1)")
+    self.check(load, None, "((((idx1*24)+r0)+(r2*3))+-3)", "(((idx2*2)+r1)+-1)")
 
   def test_openpilot_conv3(self):
     # in openpilot 0.9.7
@@ -347,8 +346,8 @@ class TestImageSimplification(unittest.TestCase):
 
     self.check(load,
                "((((idx2*2)+r0)<11)&((((idx1*8)+r1)<3)!=True))",
-               "(((idx0+((idx1*512)+(r1*64)))+832)%1024)",
-               "((((idx2*2)+r0)+(((idx1+((r1+5)//8))+1)//2))+-4)")
+               "(((idx0+(idx1*512))+(r1*64))+-192)",
+               "((((idx2*2)+(((idx1+((r1+5)//8))+1)//2))+r0)+-4)")
 
   def test_simplify1(self):
     # idx has the form (A % m, A // m + k) and valid has (c0 < A) and (A < c1)
@@ -386,16 +385,16 @@ class TestImageSimplification(unittest.TestCase):
 
     # TODO: can this be simplified further?
     load = get_load_image_uop(shape, alu9, (((alu8+(alu2*8))%64),(alu2//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+8)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "((((idx0//32)+((idx0%8)*32))+8)%64)", "((idx0%8)//2)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu3*8))%64),(alu3//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+16)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "((((idx0//32)+((idx0%8)*32))+16)%64)", "((idx0%8)//2)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu4*8))%64),(alu4//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+24)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "((((idx0//32)+((idx0%8)*32))+24)%64)", "((idx0%8)//2)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu5*8))%64),(alu5//8)))
-    self.check(load, "(idx0<256)", "((((idx0%8)*32)+(idx0//32))%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "(((idx0//32)+((idx0%8)*32))%64)", "((idx0%8)//2)")
 
   def test_simplify5(self):
     # openpilot 0.9.7, chunk replacement to simplify

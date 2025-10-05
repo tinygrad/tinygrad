@@ -720,6 +720,13 @@ class TestSchedule(unittest.TestCase):
       assert prev_a.uop in a.uop.src, "contiguous usage must run before assign"
     self.assertEqual((prev_a+a*3).item(), 1+2*3)
 
+  def test_kernelize_sym(self):
+    a = Tensor([1])+Tensor([2])
+    a.kernelize()
+    b = a/a
+    check_schedule(b, 0)
+    self.assertEqual(b.item(), 1)
+
   @expect_rangeify_fails
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
@@ -1918,6 +1925,16 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(loss, 4))
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
+  @expect_rangeify_fails
+  def test_const_folding_alt(self):
+    t = Tensor.full((2,), 1.)
+    lt = (t < 0.)
+    a = Tensor.empty(2).assign(t*lt.where(-1., 0.))
+    b = Tensor.empty(2, dtype=dtypes.bool).assign(lt)
+    Tensor.realize(a, b)
+    self.assertEqual(a.tolist(), [0., 0.])
+    self.assertEqual(b.tolist(), [False, False])
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
@@ -1969,6 +1986,18 @@ class TestSchedule(unittest.TestCase):
     root = bufs[0][vi] + bufs[0][vj]
     for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
     self.assertEqual(root.item(), N * 2)
+
+  def test_limit_bufs_kernelize(self):
+    N = 31
+    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
+      bufs = [Tensor(i).contiguous().realize() for i in range(N)]
+    x = bufs[0]
+    for y in bufs[1:]: x = x+y
+    x.kernelize()
+    kcount = len([s for s in x.uop.toposort() if s.op is Ops.KERNEL])
+    z = x+Tensor.empty(1) # z only loads 2 buffers
+    sched = z.schedule()
+    self.assertEqual(len(sched), kcount+1)
 
 def swizzle_cnt(u:UOp) -> int:
   return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])

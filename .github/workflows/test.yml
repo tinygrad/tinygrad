@@ -452,8 +452,12 @@ jobs:
         run: CL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
       - name: Test MLPerf stuff
         run: CL=1 python -m pytest -n=auto test/external/external_test_optim.py test/external/external_test_losses.py test/external/external_test_metrics.py test/external/external_test_datasets.py --durations=20
+      - name: NULL=1 beautiful_mnist_multigpu
+        run: MAX_BUFFER_SIZE=0 NULL=1 python examples/beautiful_mnist_multigpu.py
+      - name: Test Bert training
+        run: MAX_BUFFER_SIZE=0 NULL=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=24 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
       - name: Test llama 3 training
-        run: MAX_BUFFER_SIZE=0 DEV=NULL SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=8 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
+        run: MAX_BUFFER_SIZE=0 NULL=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=8 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -532,13 +536,11 @@ jobs:
         llvm: "true"
     - name: Test CPU=1 RANGEIFY=1
       # TODO: add more passing tests here
-      # rangeify diamond cycle gives the wrong answer
       run: |
         CPU=1 CPU_LLVM=0 RANGEIFY=1 python3 -m pytest -n auto --durations 20 \
-          -k "not test_assign_diamond_cycle" \
           test/test_tiny.py test/test_rangeify.py test/test_ops.py test/test_symbolic_ops.py test/test_symbolic_jit.py test/test_tensor_variable.py \
           test/test_outerworld_range.py test/test_randomness.py test/test_nn.py test/test_arange.py test/test_tensor.py test/test_optim.py \
-          test/test_setitem.py test/test_assign.py test/test_multitensor.py
+          test/test_setitem.py test/test_assign.py test/test_multitensor.py test/test_const_folding.py
     - name: Test CPU=1 DEVECTORIZE=0 (RANGEIFY=1)
       run: CPU=1 CPU_LLVM=0 RANGEIFY=1 DEVECTORIZE=0 FUSE_ARANGE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
     - name: Test CPU=1 CPU_LLVM=1 RANGEIFY=1
@@ -547,8 +549,6 @@ jobs:
     - name: Test Docs RANGEIFY=1
       run: |
         RANGEIFY=1 python docs/abstractions2.py
-    - name: Test const folding
-      run: CPU=1 RANGEIFY=1 python3 -m pytest -n auto --durations 20 test/test_const_folding.py -k "not test_cast_padded"
     # RANGEIFY=2 isn't supported
     #- name: Test CPU=1 RANGEIFY=2
     #  run: CPU=1 CPU_LLVM=0 RANGEIFY=2 python3 -m pytest -n auto test/test_tiny.py test/test_rangeify.py test/test_ops.py --durations 20
@@ -596,7 +596,9 @@ jobs:
     - name: some unit tests
       run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/unit/test_winograd.py test/unit/test_linalg.py --durations=20
     - name: Test METAL=1 RANGEIFY=1
-      run: METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py test/test_multitensor.py --durations=20
+      run: |
+        METAL=1 RANGEIFY=1 python -m pytest -n=auto test/test_ops.py test/test_multitensor.py --durations=20
+        METAL=1 MAX_KERNEL_BUFFERS=6 RANGEIFY=1 PYTHONPATH=. python test/test_multitensor.py TestBatchNorm.test_batchnorm
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -722,6 +724,8 @@ jobs:
         run: |
           VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
+      - name: Run pytest (amd) with RANGEIFY
+        run: RANGEIFY=1 python -m pytest test/test_linearizer.py::TestLinearizer::test_where_fold
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
