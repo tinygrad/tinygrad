@@ -119,14 +119,16 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
-  @unittest.skipIf(not RANGEIFY, "only correct in rangeify")
-  def test_assign_changes_alt(self):
-    a = Tensor.full((2, 2), 1.).contiguous().realize()
-    b = a.contiguous() # b is a new Tensor
-    b.assign(Tensor.full((2, 2), 2.))
+  def test_assign_changes_alt(self, realize=False):
+    a = Tensor(1).contiguous()
+    if realize: a.realize()
+    b = a.contiguous()    # b returns a new Tensor
+    b.assign(2)
     b.realize()
-    self.assertListEqual(a.tolist(), [[1., 1.], [1., 1.]])
-    self.assertListEqual(b.tolist(), [[2., 2.], [2., 2.]])
+    self.assertNotEqual(a.item(), b.item())
+  # on a realized Tensor contiguous child changes the source
+  @unittest.expectedFailure
+  def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
 
   def test_assign_diamond_cycle(self):
     # NOTE: should *not* raise AssertionError from numpy

@@ -417,6 +417,11 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
+  def test_sub_with_cast_folds(self):
+    a = Variable("a", 0, 5)
+    uops = to_uops_list([a.cast(dtypes.int)+(-a).cast(dtypes.int)])
+    assert uops == [UOp.const(dtypes.int, 0)]
+
   def test_where_on_gated_load_fold(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
