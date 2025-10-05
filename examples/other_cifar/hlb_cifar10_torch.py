@@ -2,8 +2,9 @@ import random, time
 import numpy as np
 from typing import Optional, Tuple
 
+from tinygrad import Tensor as TinyTensor
 from tinygrad import dtypes, Device, GlobalCounters
-from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, DEBUG
+from tinygrad.helpers import Context, BEAM, WINO, getenv, colored, DEBUG, prod
 from tinygrad.nn.datasets import cifar
 from extra.bench_log import BenchEvent, WallTimeEvent
 import torch
@@ -20,10 +21,69 @@ assert BS % len(GPUS) == 0, f"{BS=} is not a multiple of {len(GPUS)=}, uneven mu
 assert EVAL_BS % len(GPUS) == 0, f"{EVAL_BS=} is not a multiple of {len(GPUS)=}, uneven multi GPU is slow"
 
 
-class BatchNorm(nn.BatchNorm2d):
-  # use the same hyperparames as the ones used in the tinygrad example
-  def __init__(self, num_features, eps=1e-5, momentum=0.1):
-    super().__init__(num_features, eps=eps, momentum=momentum)
+class UnsyncedBatchNorm(nn.Module):
+  def __init__(self, sz: int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1, num_devices=len(GPUS)):
+    super().__init__()
+    self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
+    self.num_devices = num_devices
+
+    # affine parameters, trainable
+    if affine:
+      self.weight, self.bias = nn.Parameter(torch.ones(sz, dtype=torch.float32)), nn.Parameter(torch.zeros(sz, dtype=torch.float32))
+    else:
+      self.register_parameter("weight", None)
+      self.register_parameter("bias", None)
+
+    # running stats, non trainable but still part of model state
+    if self.track_running_stats:
+      self.register_buffer("running_mean", torch.zeros(num_devices, sz, dtype=torch.float32, requires_grad=False))
+      self.register_buffer("running_var", torch.ones(num_devices, sz, dtype=torch.float32, requires_grad=False))
+      self.register_buffer("num_batches_tracked", torch.zeros(1, dtype=torch.int, requires_grad=False))
+    else:
+      self.register_buffer("running_mean", None)
+      self.register_buffer("running_var", None)
+      self.register_buffer("num_batches_tracked", None)
+
+    # tinygrad's batchnorm is perfectly compatible!
+    self._tiny_batchnorm = TinyTensor.batchnorm
+
+  def forward(self, x: torch.Tensor):
+    xr = x.reshape(self.num_devices, -1, *x.shape[1:]).float()
+    batch_mean, batch_invstd = self.calc_stats(xr)
+    ret = self._tiny_batchnorm(
+      xr,
+      self.weight.reshape(1, -1).expand((self.num_devices, -1)),
+      self.bias.reshape(1, -1).expand((self.num_devices, -1)),
+      batch_mean,
+      batch_invstd,
+      axis=(0, 2),
+    )
+    return ret.reshape(x.shape).to(x.dtype)
+
+  def calc_stats(self, x: torch.Tensor):
+    if self.training:
+      batch_mean = x.mean(dim=(1, 3, 4))
+      y = x - batch_mean.detach().reshape(shape=[batch_mean.shape[0], 1, -1, 1, 1])  # d(var)/d(mean) = 0
+      batch_var = (y * y).mean(dim=(1, 3, 4))
+      batch_invstd = batch_var.add(self.eps).pow(-0.5)
+
+      if self.track_running_stats:
+        self.running_mean.copy_((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach().to(self.running_mean.dtype))
+        batch_var_adjust = prod(y.shape[1:]) / (prod(y.shape[1:]) - y.shape[2])
+        self.running_var.copy_(
+          (1 - self.momentum) * self.running_var + self.momentum * batch_var_adjust * batch_var.detach().to(self.running_var.dtype)
+        )
+        self.num_batches_tracked.add_(1)
+    else:
+      batch_mean = self.running_mean
+      # NOTE: this can be precomputed for static inference. we expand it here so it fuses
+      batch_invstd = self.running_var.reshape(self.running_var.shape[0], 1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+    return batch_mean, batch_invstd
+
+
+class BatchNorm(nn.BatchNorm2d if getenv("SYNCBCN") else UnsyncedBatchNorm):
+  def __init__(self, num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True):
+    super().__init__(num_features, track_running_stats=track_running_stats, eps=eps, momentum=momentum, affine=affine)
     self.weight.data.fill_(1.0)
     self.bias.data.fill_(0.0)
     self.weight.requires_grad = False
