@@ -1023,7 +1023,7 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
-SENTINEL = UOp(Ops.SENTINAL)
+SENTINEL = UOp(Ops.SENTINEL)
 class RewriteNotReady(Exception): pass
 class BottomUpGate(Exception): pass
 class RewriteContext:
@@ -1071,6 +1071,7 @@ class RewriteContext:
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
             self.replace[n] = new_n
+            continue
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src):
           if x in on_stack: continue
