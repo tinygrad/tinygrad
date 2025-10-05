@@ -1,7 +1,7 @@
 import unittest, random
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import print_uops, UOp, Ops
-from tinygrad.codegen.late.linearize import block_reorder
+from tinygrad.codegen.late.control_flow import schedule
 from tinygrad.renderer.cstyle import OpenCLRenderer
 
 def is_toposorted(lst:list[UOp]):
@@ -11,7 +11,7 @@ def is_toposorted(lst:list[UOp]):
     seen.add(u)
   return True
 
-class TestBlockReorder(unittest.TestCase):
+class TestCFGSchedule(unittest.TestCase):
   def _test_randomize(self, golden:list[UOp]):
     # test random order is always same
     for _ in range(50):
@@ -24,7 +24,7 @@ class TestBlockReorder(unittest.TestCase):
           if p not in topolst: topolst.append(p)
       assert is_toposorted(topolst)
 
-      for x,y in zip(golden, this_order:=block_reorder(topolst)):
+      for x,y in zip(golden, this_order:=schedule(topolst)):
         if x is not y:
           print_uops(golden)
           print_uops(this_order)
@@ -54,7 +54,7 @@ class TestBlockReorder(unittest.TestCase):
     sink = c.store(sum(loads)).sink()
 
     # determine golden order
-    golden = block_reorder(list(sink.toposort()))
+    golden = schedule(list(sink.toposort()))
 
     # render for test
     print(self._test_render(golden))

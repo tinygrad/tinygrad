@@ -24,9 +24,6 @@ class Ops(FastEnum):
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
   REALIZE = auto()
 
-  # blocks in linearizer (only used there)
-  BLOCK = auto(); BLOCKSTART = auto(); BLOCKEND = auto(); BLOCKFINAL = auto() # noqa: E702
-
   # movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto() # noqa: E702
   MULTI = auto()  # MULTI is really a movement op
@@ -99,7 +96,6 @@ class GroupOp:
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
-  Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}

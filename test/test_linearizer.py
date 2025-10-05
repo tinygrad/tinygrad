@@ -53,7 +53,7 @@ class TestLinearizer(unittest.TestCase):
     helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])
     uops = get_program(sink, opts=[]).uops
     stores = [u for u in uops if u.op is Ops.STORE]
-    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
+    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort(gate=lambda g: g.op != Ops.ENDRANGE) if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
     assert len(mutable_bufs) == len(stores) == 2
     self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
 
