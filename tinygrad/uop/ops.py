@@ -1078,22 +1078,26 @@ class RewriteContext:
           stack.append((x, 0, x))
           on_stack.add(x)
       elif stage == 1:
-        new_src = tuple([self.replace.get(x, SENTINEL) for x in new_n.src])
-        if SENTINEL in new_src:
-          # if some new sources aren't ready, we try this again later
-          stack.appendleft((n, 1, new_n))
-          continue
-        if new_src == new_n.src:
-          # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-          if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
-            self.replace[n] = new_n
-            continue
+        tmp = []
+        for x in new_n.src:
+          if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
+            # if some new sources aren't ready, we try this again later
+            stack.appendleft((n, 1, new_n))
+            break
+          tmp.append(rx)
         else:
-          # if srcs changed from rewrites, construct a new UOp with the new srcs
-          new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
-        # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
-        stack.append((n, 2, new_src_n))
-        stack.append((new_src_n, 0, new_src_n))
+          # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
+          if (new_src:=tuple(tmp)) == new_n.src:
+            # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
+            if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
+              self.replace[n] = new_n
+              continue
+          else:
+            # if srcs changed from rewrites, construct a new UOp with the new srcs
+            new_src_n = UOp(new_n.op, new_n.dtype, new_src, new_n.arg, new_n.tag)
+          # trigger a rewrite of new_src_n, then after that rewrite is done, link it back to n
+          stack.append((n, 2, new_src_n))
+          stack.append((new_src_n, 0, new_src_n))
       else:
         # in stage 2, we link the result of new_n to the result of n
         if (replaced_new_n:=self.replace.get(new_n, SENTINEL)) is SENTINEL:
