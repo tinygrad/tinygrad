@@ -860,11 +860,18 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def fixup_pm_function(fxn) -> Callable:
+  if isinstance(fxn, UPat):
+    # TODO: write this
+    raise NotImplementedError("rhs UPat is not supported")
+  if isinstance(fxn, tuple): return types.FunctionType(*fxn)
+  return fxn
+
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
-    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
+    self.patterns:list[tuple[UPat, Callable]] = [(p,fixup_pm_function(fxn)) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
