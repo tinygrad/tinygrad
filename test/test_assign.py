@@ -130,6 +130,11 @@ class TestAssign(unittest.TestCase):
   @unittest.expectedFailure
   def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
 
+  def test_assign_changes_buffer_alt(self):
+    a, b = [Tensor(Tensor(0).contiguous().realize().uop.as_buf()) for _ in range(2)]
+    Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
+    self.assertEqual((a + b).item(), 3)
+
   def test_assign_diamond_cycle(self):
     # NOTE: should *not* raise AssertionError from numpy
     with self.assertRaisesRegex(RuntimeError, "cycle"):
