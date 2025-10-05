@@ -1925,6 +1925,16 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(loss, 4))
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
+  @expect_rangeify_fails
+  def test_const_folding_alt(self):
+    t = Tensor.full((2,), 1.)
+    lt = (t < 0.)
+    a = Tensor.empty(2).assign(t*lt.where(-1., 0.))
+    b = Tensor.empty(2, dtype=dtypes.bool).assign(lt)
+    Tensor.realize(a, b)
+    self.assertEqual(a.tolist(), [0., 0.])
+    self.assertEqual(b.tolist(), [False, False])
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
