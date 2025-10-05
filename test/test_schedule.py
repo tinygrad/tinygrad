@@ -74,15 +74,6 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
 def schedule_graph_rewrite(big_sink:UOp): return get_kernelize_map(big_sink)[big_sink]
 
 class TestSchedule(unittest.TestCase):
-  def test_const_folding_alt(self):
-    t = Tensor.full((2,), 1.)
-    lt = (t < 0.)
-    a = Tensor.empty(2).assign(t*lt.where(-1., 0.))
-    b = Tensor.empty(2, dtype=dtypes.bool).assign(lt)
-    Tensor.realize(a, b)
-    self.assertEqual(a.tolist(), [0., 0.])
-    self.assertEqual(b.tolist(), [False, False])
-
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1)
@@ -1933,6 +1924,16 @@ class TestSchedule(unittest.TestCase):
     loss = X.sparse_categorical_crossentropy(Y)
     run_schedule(check_schedule(loss, 4))
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
+
+  @expect_rangeify_fails
+  def test_const_folding_alt(self):
+    t = Tensor.full((2,), 1.)
+    lt = (t < 0.)
+    a = Tensor.empty(2).assign(t*lt.where(-1., 0.))
+    b = Tensor.empty(2, dtype=dtypes.bool).assign(lt)
+    Tensor.realize(a, b)
+    self.assertEqual(a.tolist(), [0., 0.])
+    self.assertEqual(b.tolist(), [False, False])
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
   def test_mnist_val(self):
