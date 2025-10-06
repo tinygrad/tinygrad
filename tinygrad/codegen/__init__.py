@@ -17,7 +17,7 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
-from tinygrad.codegen.opt.postrange import pm_postrange_opt, pm_add_local_buffers
+from tinygrad.codegen.opt.postrange import pm_postrange_opt, pm_add_local_buffers, pm_pipeline
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
@@ -89,6 +89,10 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
+
+  # pipelining
+  ret.append(RewriteStep(pm_pipeline, name="pipeline"))
+  ret.append(RewriteStep(sym, name="pipeline sym"))
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))

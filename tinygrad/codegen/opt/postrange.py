@@ -1,5 +1,5 @@
 from __future__ import annotations
-import math, itertools
+import math, itertools, functools, operator
 from collections import defaultdict
 from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad, GroupOp
@@ -359,4 +359,53 @@ def add_local_buffer(x:UOp):
 
 pm_add_local_buffers = PatternMatcher([
   (UPat(Ops.LOAD, name="x"), add_local_buffer),
+])
+
+def add_pipeline(x:UOp):
+  if x.tag == 1: return None
+  if x.arg[-1] == AxisType.REDUCE:
+    # 3 splits
+    #srcs = (x.const_like(0), x.replace(src=(x.src[0]-2,), tag=1)+1, x.src[0]-1)
+
+    # 4 split
+    rng = x.replace(src=((x.src[0]-2)//2,), tag=1)
+    srcs = (x.const_like(0), rng*2+1, rng*2+2, x.src[0]-1)
+
+    return UOp(Ops.SPLIT, x.dtype, src=srcs, arg=1).simplify()
+    #vec = UOp(Ops.VECTORIZE, x.dtype.vec(3), src=(x.const_like(0), x.replace(src=(x.src[0]-2,), tag=1)+1, x.src[0]-1)).simplify()
+    #return UOp(Ops.UNROLL, x.dtype, src=(vec,), arg=())
+
+def do_split(x:UOp):
+  splits = [x for x in x.src if x.op is Ops.SPLIT]
+  if len(splits) == 0: return None
+  if x.op is Ops.SINK: return x.replace(src=x.src[0].src)
+  #if x.op is Ops.REDUCE:
+    #assert x.src[0].op is Ops.SPLIT
+    #rr = [y for y in x.src[1].toposort() if y.op is Ops.RANGE][0]
+    #return x.replace(src=(functools.reduce(operator.add, x.src[0].src), rr))
+  uu = []
+  for i in range(len(splits[0].src)):
+    new_srcs = []
+    for s in x.src:
+      if s.op is Ops.SPLIT:
+        new_srcs.append(s.src[i])
+      else:
+        new_srcs.append(s)
+    uu.append(UOp(x.op, x.dtype, tuple(new_srcs), x.arg, x.tag))
+  if x.op is Ops.STORE and len(splits) == 2:
+    dl = [x for x in uu[0].toposort() if x.op is Ops.DEFINE_LOCAL][0]
+    uu2 = []
+    for i,u in enumerate(uu):
+      uu2.append(u.substitute({dl:dl.replace(arg=(dl.arg, i%2))}))
+    # NOTE: here we have to order the STORES and fix the ranges
+    return UOp(Ops.NOOP, x.dtype, src=tuple(uu2))
+  return UOp(Ops.SPLIT, x.dtype, src=tuple(uu))
+
+pm_pipeline = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), add_pipeline),
+  # do expansion
+  (UPat(GroupOp.All, name="x", custom_early_reject=set([Ops.SPLIT])), do_split),
+  #(UPat(Ops.STORE, src=(UPat(), UPat(), UPat(Ops.CONST)), name="x"), lambda x: x.replace(src=x.src[:2])),
+  (UPat(Ops.STORE, src=(UPat.var('x'), UPat.var('z'), UPat.var('rr')), name='r'),
+   lambda x,rr,r,z: r.replace(src=(x,z)+tuple([y for y in rr.toposort() if y.op is Ops.RANGE]))),
 ])
