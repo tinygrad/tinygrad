@@ -412,7 +412,31 @@ def do_split(x:UOp):
     # compute 2
     # barrier (between load 3 and compute 3)
     # compute 3
-    return UOp(Ops.NOOP, x.dtype, src=tuple(uu2))
+    def do_uncouple(ctx, l:UOp, b:UOp):
+      ctx.append(b.src[0])
+      return l.replace(src=l.src[0:1]+(UOp(Ops.NOOP, tag=len(ctx)-1),))
+    uncouple_barrier = PatternMatcher([
+      (UPat(Ops.LOAD, src=(UPat(), UPat(Ops.BARRIER, name='b')), name='l'), do_uncouple),
+      (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(), UPat()), name='x'), lambda x: x.replace(src=x.src[0:2])),
+    ])
+    rng = [x for x in x.toposort() if x.op is Ops.RANGE][0]
+    loads = []
+    ret = graph_rewrite(UOp(Ops.NOOP, x.dtype, src=tuple(uu2)), uncouple_barrier, ctx=loads)
+    computes = ret.src
+
+    # pipelined!
+    ret = computes[3]
+    ret = ret.substitute({UOp(Ops.NOOP, tag=3):computes[2].barrier()})
+    ret = ret.substitute({UOp(Ops.NOOP, tag=2):loads[3]})
+    load = [x for x in loads[3].toposort() if x.op is Ops.LOAD][0]
+    ret = ret.substitute({load: load.replace(src=load.src+(computes[1].replace(src=computes[1].src+(rng,)).barrier(),))})
+    ret = ret.substitute({UOp(Ops.NOOP, tag=1):loads[2]})
+    load = [x for x in loads[2].toposort() if x.op is Ops.LOAD][0]
+    ret = ret.substitute({load: load.replace(src=load.src+(computes[0].barrier(),))})
+    ret = ret.substitute({UOp(Ops.NOOP, tag=0):loads[1]})
+    load = [x for x in loads[1].toposort() if x.op is Ops.LOAD][0]
+    ret = ret.substitute({load: load.replace(src=load.src+(loads[0],))})
+    return ret
   return UOp(Ops.SPLIT, x.dtype, src=tuple(uu))
 
 pm_pipeline = PatternMatcher([
