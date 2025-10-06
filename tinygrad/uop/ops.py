@@ -83,7 +83,7 @@ all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.Weak
 class recursive_property(property):
   def __init__(self, fxn):
     self.fxn = fxn
-    self.nm = "_"+fxn.__name__
+    self.nm = "_RECURSIVE_PROPERTY_"+fxn.__name__
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
