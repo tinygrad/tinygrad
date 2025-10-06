@@ -51,7 +51,8 @@ def cuCtxCreate_v2(pctx, flags: int, dev: int) -> int:
   pctx._obj.value = ctx_id
   return orig_cuda.CUDA_SUCCESS
 
-def cuDevicePrimaryCtxRetain(pctx, dev: int) -> int:
+def cuDevicePrimaryCtxRetain(pctx, dev: int | ctypes.c_int) -> int:
+  dev = dev.value if isinstance(dev, ctypes.c_int) else dev
   if dev not in cuda_state.devices or "primary_ctx" not in cuda_state.devices[dev]:
     ctx_id = cuda_state.next_context_id
     cuda_state.next_context_id += 1
@@ -64,7 +65,8 @@ def cuDevicePrimaryCtxRetain(pctx, dev: int) -> int:
     pctx._obj.value = cuda_state.devices[dev]["primary_ctx"]
   return orig_cuda.CUDA_SUCCESS
 
-def cuDevicePrimaryCtxRelease_v2(dev: int) -> int:
+def cuDevicePrimaryCtxRelease_v2(dev: int | ctypes.c_int) -> int:
+  dev = dev.value if isinstance(dev, ctypes.c_int) else dev
   if dev not in cuda_state.devices: return orig_cuda.CUDA_ERROR_NOT_INITIALIZED
   if "primary_ctx_refcnt" not in cuda_state.devices[dev]: return orig_cuda.CUDA_ERROR_INVALID_VALUE
   if cuda_state.devices[dev]["primary_ctx_refcnt"] <= 0: return orig_cuda.CUDA_ERROR_INVALID_VALUE
