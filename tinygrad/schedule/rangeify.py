@@ -57,6 +57,8 @@ earliest_rewrites = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)),
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x.st is not None and x.size == 0 else None),
+
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"),
    lambda x,copy: copy.replace(src=(x,)+copy.src[1:]) if isinstance(x.device, str) and x.device.startswith("DISK") else None),
@@ -450,7 +452,6 @@ def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 
 pm_cleanups = pm_mops+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="b"), lambda b: b.const_like(0).rtag(b.tag) if b.size == 0 else None),
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
