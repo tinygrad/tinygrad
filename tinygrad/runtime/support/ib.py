@@ -10,7 +10,7 @@ DEFAULT_PORT, DEFAULT_GID = getenv("DEFAULT_PORT", 1), getenv("DEFAULT_GID", 3) 
 IOVA_ALIGN = resource.getpagesize()
 
 def checkz(x, ret=None):
-  assert x == 0, f'{x} != 0 (errno {ctypes.get_errno()})'
+  if x != 0: raise RuntimeError(f'{x} != 0 (errno {ctypes.get_errno()})')
   return ret
 
 @dataclass(frozen=True)
