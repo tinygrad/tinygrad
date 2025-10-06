@@ -1925,7 +1925,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(loss, 4))
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
-  @expect_rangeify_fails
   def test_const_folding_alt(self):
     t = Tensor.full((2,), 1.)
     lt = (t < 0.)
