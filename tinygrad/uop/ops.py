@@ -79,6 +79,20 @@ class UOpMetaClass(type):
 buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
+# recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
+class recursive_property(property):
+  def __init__(self, fxn):
+    self.fxn = fxn
+    self.nm = "_"+fxn.__name__
+    self.__doc__ = fxn.__doc__
+  def __get__(self, x:UOp|None, owner=None):
+    if x is None: return self
+    try:
+      return getattr(x, self.nm)
+    except AttributeError:
+      for s in x.toposort(lambda z: not hasattr(z, self.nm)): setattr(s, self.nm, self.fxn(s))
+      return getattr(x, self.nm)
+
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -115,7 +129,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
-  @functools.cached_property
+  @recursive_property
   def parents(self:UOp) -> dict[UOp, None]:
     ret = {s:None for s in self.src}
     for s in self.src: ret.update(s.parents)
@@ -162,7 +176,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  @functools.cached_property
+  @recursive_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
                                                    Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
