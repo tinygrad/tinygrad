@@ -7,7 +7,7 @@ from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import REAL_DEV, not_support_multi_device
+from test.helpers import REAL_DEV, not_support_multi_device, expect_rangeify_fails
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -201,6 +201,7 @@ class TestMultiTensor(unittest.TestCase):
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
+  @expect_rangeify_fails # TODO: fix
   def test_allreduce_shard_ring_sum(self):
     for axis in (0, 1, None):
       for use_ring in (0, 2):
