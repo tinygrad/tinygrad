@@ -281,6 +281,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, _substitute, dvars, bottom_up=True, name=name)
 
+  # *** uop tracing stuff ***
+
+  @recursive_property
+  def trace_num(self):
+    num = next(ucount)
+    # KERNEL also has a UOp in the arg
+    arg = type(self.arg)(self.arg.ast.trace_num, self.arg.metadata) if self.op is Ops.KERNEL else self.arg
+    uop_fields[num] = (self.op, self.dtype, tuple(s.trace_num for s in self.src), arg, self.tag)+((self.metadata,) if TRACEMETA>=2 else ())
+    return num
+
   # *** uop syntactic sugar ***
 
   @property
@@ -905,15 +915,8 @@ class PatternMatcher:
 # *** non-blocking UOp tracker ***
 
 ucount = itertools.count()
-uop_number:weakref.WeakKeyDictionary[UOp, int] = weakref.WeakKeyDictionary()
 uop_fields:dict[int, tuple] = {}
-def track_uop(u:UOp):
-  if (cret:=uop_number.get(u)) is not None: return cret
-  uop_number[u] = num = next(ucount)
-  # KERNEL also has a UOp in the arg
-  arg = type(u.arg)(track_uop(u.arg.ast), u.arg.metadata) if u.op is Ops.KERNEL else u.arg
-  uop_fields[num] = (u.op, u.dtype, tuple(track_uop(s) for s in u.src), arg, u.tag)+((u.metadata,) if TRACEMETA>=2 else ())
-  return num
+def track_uop(u:UOp): return u.trace_num
 
 # *** tracking pattern matcher ***
 
