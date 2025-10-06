@@ -521,10 +521,14 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 
 def split_reduce_2(ctx:RangeifyContext, r:UOp): # TODO: maybe unify?
   if r._device is None: return None # why?
+  all = prod(int(x.vmax + 1) for x in r.src[0].ranges if x.arg[1] != AxisType.REDUCE)
   all_reduces = prod(int(x.vmax + 1) for x in r.src[0].ranges if x.arg[1] == AxisType.REDUCE)
   my_reduce = prod(int(x.vmax + 1) for x in r.src[1:])
 
-  if not SPLIT_REDUCEOP or (all_reduces // my_reduce) < getenv("REDUCEOP_SPLIT_THRESHOLD", 16): return None
+  bad = ((all // all_reduces) < 4096*2) and (all_reduces / my_reduce > 1)
+  # print(all, all_reduces, my_reduce)
+
+  if not SPLIT_REDUCEOP or not bad: return None
 
   # TODO: Substitute op?
   s = r.src[0]
