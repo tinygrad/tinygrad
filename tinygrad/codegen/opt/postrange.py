@@ -5,7 +5,7 @@ from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad, GroupOp
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, dedup
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -393,11 +393,13 @@ def do_split(x:UOp):
         new_srcs.append(s)
     uu.append(UOp(x.op, x.dtype, tuple(new_srcs), x.arg, x.tag))
   if x.op is Ops.STORE and len(splits) == 2:
-    dl = [x for x in uu[0].toposort() if x.op is Ops.DEFINE_LOCAL][0]
+    dls = dedup([x for x in uu[0].toposort() if x.op is Ops.DEFINE_LOCAL])
     uu2 = []
     # NOTE: here we have to order the STORES and fix the ranges
     for i,u in enumerate(uu):
-      uu2.append(u.substitute({dl:dl.replace(arg=(dl.arg, i%2))}))
+      subs = {}
+      for dl in dls: subs[dl] = dl.replace(arg=(dl.arg, i%2))
+      uu2.append(u.substitute(subs))
     # TODO: reorder (is the reorder just a toposort question?)
     # there's 4 barriers and 4 output stores
     # load 0
@@ -412,30 +414,57 @@ def do_split(x:UOp):
     # compute 2
     # barrier (between load 3 and compute 3)
     # compute 3
+
+    # uncouple based on barriers
     def do_uncouple(ctx, l:UOp, b:UOp):
-      ctx.append(b.src[0])
-      return l.replace(src=l.src[0:1]+(UOp(Ops.NOOP, tag=len(ctx)-1),))
+      ctx[1].append(b.src[0])
+      return l.replace(src=l.src[0:1]+(UOp(Ops.NOOP, tag=ctx[0]),))
     uncouple_barrier = PatternMatcher([
       (UPat(Ops.LOAD, src=(UPat(), UPat(Ops.BARRIER, name='b')), name='l'), do_uncouple),
-      (UPat((Ops.LOAD, Ops.STORE), src=(UPat(), UPat(), UPat()), name='x'), lambda x: x.replace(src=x.src[0:2])),
+      (UPat(Ops.LOAD, src=(UPat(), UPat(), UPat()), name='x'), lambda x: x.replace(src=x.src[0:2])),
     ])
-    rng = [x for x in x.toposort() if x.op is Ops.RANGE][0]
+
     loads = []
-    ret = graph_rewrite(UOp(Ops.NOOP, x.dtype, src=tuple(uu2)), uncouple_barrier, ctx=loads)
-    computes = ret.src
+    computes = []
+    for i,u in enumerate(uu2):
+      cc = graph_rewrite(u, uncouple_barrier, ctx=(i,tloads:=[]))
+      computes.append(cc)
+      loads.append(UOp(Ops.NOOP, src=tuple(tloads)))
+
+    # remove the range from here
+    computes[2] = computes[2].replace(src=computes[2].src[0:2])
 
     # pipelined!
     ret = computes[3]
-    ret = ret.substitute({UOp(Ops.NOOP, tag=3):computes[2].barrier()})
+
+    # put computes[2] before compute[3]
+    const_store = [x for x in ret.toposort() if x.op is Ops.STORE and x.src[1].op is Ops.CONST][0]
+    ret = ret.substitute({const_store:const_store.replace(tag=1)})
+    ret = ret.substitute({const_store.replace(tag=1):computes[2].barrier()})
+
+    # put computes[1] before compute[2]
+    const_store = [x for x in ret.toposort() if x.op is Ops.STORE and x.src[1].op is Ops.CONST][0]
+    ret = ret.substitute({const_store:const_store.replace(tag=1)})
+    ret = ret.substitute({const_store.replace(tag=1):computes[1].barrier()})
+
+    # put computes[0] before compute[1]
+    const_store = [x for x in ret.toposort() if x.op is Ops.STORE and x.src[1].op is Ops.CONST][0]
+    ret = ret.substitute({const_store:const_store.replace(tag=1)})
+    ret = ret.substitute({const_store.replace(tag=1):computes[0].barrier()})
+
+    # put loads[3] before computes[2]
     ret = ret.substitute({UOp(Ops.NOOP, tag=2):loads[3]})
-    load = [x for x in loads[3].toposort() if x.op is Ops.LOAD][0]
-    ret = ret.substitute({load: load.replace(src=load.src+(computes[1].replace(src=computes[1].src+(rng,)).barrier(),))})
+
+    # put loads[2] before computes[1]
     ret = ret.substitute({UOp(Ops.NOOP, tag=1):loads[2]})
-    load = [x for x in loads[2].toposort() if x.op is Ops.LOAD][0]
-    ret = ret.substitute({load: load.replace(src=load.src+(computes[0].barrier(),))})
+
+    # put loads[1] before computes[0]
     ret = ret.substitute({UOp(Ops.NOOP, tag=0):loads[1]})
+
+    # put loads[0] before loads[1]
     load = [x for x in loads[1].toposort() if x.op is Ops.LOAD][0]
     ret = ret.substitute({load: load.replace(src=load.src+(loads[0],))})
+
     return ret
   return UOp(Ops.SPLIT, x.dtype, src=tuple(uu))
 
