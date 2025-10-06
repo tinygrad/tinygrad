@@ -90,7 +90,7 @@ class recursive_property(property):
     if x is None: return self
     if (val:=x.__dict__.get(self.nm, _NOT_FOUND)) is _NOT_FOUND:
       for s in x.toposort(lambda z: not hasattr(z, self.nm)):
-        setattr(s, self.nm, val:=self.fxn(s))
+        s.__dict__[self.nm] = val = self.fxn(s)
     return val
 
 # NOTE: this should be frozen, but frozen is slower
