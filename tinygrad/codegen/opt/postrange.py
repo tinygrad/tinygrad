@@ -395,9 +395,23 @@ def do_split(x:UOp):
   if x.op is Ops.STORE and len(splits) == 2:
     dl = [x for x in uu[0].toposort() if x.op is Ops.DEFINE_LOCAL][0]
     uu2 = []
+    # NOTE: here we have to order the STORES and fix the ranges
     for i,u in enumerate(uu):
       uu2.append(u.substitute({dl:dl.replace(arg=(dl.arg, i%2))}))
-    # NOTE: here we have to order the STORES and fix the ranges
+    # TODO: reorder (is the reorder just a toposort question?)
+    # there's 4 barriers and 4 output stores
+    # load 0
+    # barrier (between load 0 and compute 0)
+    #   load 1 (depends on range)
+    #   compute 0
+    #   barrier (between load 0+2 and load 2)
+    #   load 2 (depends on range)
+    #   compute 1
+    #   barrier (between load 1 and load 1)
+    # load 3
+    # compute 2
+    # barrier (between load 3 and compute 3)
+    # compute 3
     return UOp(Ops.NOOP, x.dtype, src=tuple(uu2))
   return UOp(Ops.SPLIT, x.dtype, src=tuple(uu))
 
