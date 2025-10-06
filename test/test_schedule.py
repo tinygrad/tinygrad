@@ -814,6 +814,14 @@ class TestSchedule(unittest.TestCase):
     check_schedule(a, 0)
     self.assertEqual(a.tolist(), [])
 
+  def test_zero_size_children(self):
+    r = Tensor.ones(1,2).contiguous().realize().sum(axis=(1,), keepdim=True)
+    ax = r.reshape(1)*2
+    ay = r.reshape(1).shrink(((1,1),))*2
+    out = ax+ay.pad(((1, 0),))
+    run_schedule(check_schedule(out, 1))
+    self.assertEqual(out.item(), 4.)
+
   def test_reduce_permute_nofuse(self):
     x = Tensor.empty(32, 32, 32)
     y = Tensor.empty(32, 32)
