@@ -1,4 +1,4 @@
-import time, struct
+import time, struct, unittest
 from typing import Any, Callable
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
@@ -7,7 +7,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, CI
+from tinygrad.helpers import T, CI, RANGEIFY
 from tinygrad.codegen import full_rewrite
 from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler
 
@@ -62,3 +62,6 @@ def not_support_multi_device():
 
 # NOTE: This will open REMOTE if it's the default device
 REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties.real_device)
+
+def expect_rangeify_fails(fxn): return (unittest.expectedFailure if RANGEIFY else (lambda f:f))(fxn)
+def expect_nonrangeify_fails(fxn): return (unittest.expectedFailure if not RANGEIFY else (lambda f:f))(fxn)
