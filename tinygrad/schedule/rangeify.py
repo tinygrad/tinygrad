@@ -81,8 +81,8 @@ earliest_rewrites = PatternMatcher([
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
-  # contiguous/buffer/copy/assign is already contiguous
-  #(UPat(Ops.CONTIGUOUS, name="root", src=(UPat((Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.ASSIGN)),)), lambda root: root.src[0]),
+  # contiguous buffer is buffer, this is for *correctness* of assign, not just speed
+  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.BUFFER),)), lambda root: root.src[0].forced_reshape(root.shape).rtag(root.tag)),
 ])
 
 # *****************
@@ -270,12 +270,11 @@ def map_reduce(ctx:RangeifyContext, idx:UOp, red:UOp):
 
 def index_child(ctx:RangeifyContext, c:UOp, x:UOp, idx:UOp):
   if c not in ctx.seen_children: ctx.seen_children[c] = {}
+  ctx.seen_children[c][x.arg[0]] = idx
   # wait here until we have seen all the children
   if len(ctx.seen_children[c]) != x.arg[1]:
     ctx.progress += 1
     if ctx.progress > 10000: raise RuntimeError("children not making progress")
-    # NOTE: we mark this here
-    ctx.seen_children[c][x.arg[0]] = idx
     raise RewriteNotReady
   ctx.progress = 0
 
@@ -431,7 +430,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
     # const reduce is okay
     # TODO: move the reduce folder to before this to prevent the need for this
-    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.COPY} for y in x.sparents)
+    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.COPY} for y in x.sparents)
 
     # always run this list of ops
     if any(x.op is Ops.REDUCE and not okay_reduce(x) for x in ran): return None
@@ -439,7 +438,8 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it
-  return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST})
+  replaces = flatten([(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST])
+  return UOp(Ops.SUBSTITUTE, src=(src, UOp(Ops.NOOP, src=tuple(replaces[0::2])), UOp(Ops.NOOP, src=tuple(replaces[1::2]))))
 
 def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
@@ -714,6 +714,24 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
+def do_sub_recurse(s:UOp):
+  x,keys,values = s.src[0], s.src[1].src, s.src[2].src
+  # SUBSTITUTE applied to SUBSTITUTE runs the child SUB on the parents. though this is probably wrong in the generic case
+  if x.op is Ops.SUBSTITUTE:
+    sub_k = UOp(Ops.SUBSTITUTE, src=(x.src[1],)+s.src[1:])
+    sub_v = UOp(Ops.SUBSTITUTE, src=(x.src[2],)+s.src[1:])
+    return UOp(Ops.SUBSTITUTE, src=(x.src[0], sub_k, sub_v))
+  # here we actually do the SUBSTITUTE
+  if x in keys: return values[keys.index(x)]
+  # we filter any keys that aren't in parents. this keeps the algorithm O(output graph size)
+  new_kv = {k:v for k,v in zip(keys,values) if k in x.sparents}
+  # if there's no SUBSTITUTEs left, we can just return x
+  if len(new_kv) == 0: return x
+  # then we add SUBSTITUTE to all parents
+  uop_keys, uop_values = UOp(Ops.NOOP, src=tuple(new_kv.keys())), UOp(Ops.NOOP, src=tuple(new_kv.values()))
+  return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, src=(y,uop_keys,uop_values)) for y in x.src]))
+pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(Ops.NOOP), UPat(Ops.NOOP)), name="s"), do_sub_recurse)])
+
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
@@ -731,7 +749,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
-  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
+  tsink = graph_rewrite(tsink, pm_cleanups+pm_substitute_recurse, bottom_up=True, name="remove costly buffers")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph

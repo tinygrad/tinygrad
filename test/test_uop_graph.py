@@ -417,6 +417,11 @@ class TestUOpGraph(unittest.TestCase):
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
 
+  def test_sub_with_cast_folds(self):
+    a = Variable("a", 0, 5)
+    uops = to_uops_list([a.cast(dtypes.int)+(-a).cast(dtypes.int)])
+    assert uops == [UOp.const(dtypes.int, 0)]
+
   def test_where_on_gated_load_fold(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
@@ -607,12 +612,13 @@ class TestUOpGraph(unittest.TestCase):
       with self.assertRaises(RuntimeError): to_uops_list([ld1])
 
   def test_bounds_with_loaded_bool(self):
-    glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
-    glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(8), (), 0)
-    gidx0 = UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, 16),), "gidx0")
-    ld0 = glbl0.index(gidx0).load()
-    ld1 = glbl1.index(gidx0.valid(ld0)).load()
-    with self.assertRaises(RuntimeError): to_uops_list([ld1])
+    with Context(IGNORE_OOB=0):
+      glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.bool.ptr(16), (), 0)
+      glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(8), (), 0)
+      gidx0 = UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, 16),), "gidx0")
+      ld0 = glbl0.index(gidx0).load()
+      ld1 = glbl1.index(gidx0.valid(ld0)).load()
+      with self.assertRaises(RuntimeError): to_uops_list([ld1])
 
   def test_fold_gated_load(self):
     glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
