@@ -45,8 +45,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
       #tk.apply_opt(Opt(OptOps.LOCAL, 0, 2))
       #tk.apply_opt(Opt(OptOps.LOCAL, 1, 2))
-      #tk.apply_opt(Opt(OptOps.UPCAST, 0, 4))
-      #tk.apply_opt(Opt(OptOps.UPCAST, 1, 4))
+      #tk.apply_opt(Opt(OptOps.UPCAST, 0, 2))
+      #tk.apply_opt(Opt(OptOps.UPCAST, 1, 2))
       #tk.apply_opt(Opt(OptOps.UNROLL, 0, 8))
       return tk
 

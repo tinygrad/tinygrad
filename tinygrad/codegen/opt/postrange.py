@@ -467,7 +467,10 @@ def do_split(x:UOp):
     load = [x for x in loads[1].toposort() if x.op is Ops.LOAD][0]
     ret = ret.substitute({load: load.replace(src=load.src+(loads[0],))})
 
-    return ret
+    pm_remove_noops = PatternMatcher([
+      (UPat(Ops.NOOP, src=(UPat.var('x'),)), lambda x: x),
+    ])
+    return graph_rewrite(ret, pm_remove_noops, name="remove noops")
   return UOp(Ops.SPLIT, x.dtype, src=tuple(uu))
 
 pm_pipeline = PatternMatcher([
