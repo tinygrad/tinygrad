@@ -2227,6 +2227,11 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
 
+  def test_const_copy_multi(self):
+    x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"])
+    check_schedule(x, 0, filter_sink=False)
+    self.assertEqual(x.item(), 1)
+
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
