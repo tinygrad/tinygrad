@@ -2,18 +2,20 @@
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 import tempfile
 from pathlib import Path
-import argparse
+import argparse, time
 from collections import namedtuple
 from typing import Dict, Any
 
 from PIL import Image
 import numpy as np
 from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
-from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm
+from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, flatten
 from tinygrad.nn import Conv2d, GroupNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
-from extra.models.clip import Closed, Tokenizer
+from extra.models.clip import Closed, Tokenizer, FrozenOpenClipEmbedder
+from extra.models import unet, clip
 from extra.models.unet import UNetModel
+from examples.mlperf.initializers import AutocastLinear, AutocastConv2d, AutocastGroupNorm, AutocastLayerNorm, zero_module, attn_f32_softmax, gelu_erf
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 class AttnBlock:
@@ -154,12 +156,46 @@ unet_params: Dict[str,Any] = {
   "use_linear": False,
 }
 
+mlperf_params: Dict[str,Any] = {"adm_in_ch": None, "in_ch": 4, "out_ch": 4, "model_ch": 320, "attention_resolutions": [4, 2, 1], "num_res_blocks": 2,
+                                "channel_mult": [1, 2, 4, 4], "d_head": 64, "transformer_depth": [1, 1, 1, 1], "ctx_dim": 1024, "use_linear": True,
+                                "num_groups":16, "st_norm_eps":1e-6}
+
 class StableDiffusion:
-  def __init__(self):
+  def __init__(self, version:str|None=None, pretrained:str|None=None):
     self.alphas_cumprod = get_alphas_cumprod()
-    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_params))
-    self.first_stage_model = AutoencoderKL()
-    self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = Closed.ClipTextTransformer()))
+    if version != "v2-mlperf-train":
+      self.first_stage_model = AutoencoderKL() # only needed for decoding generated latents to images; not needed in mlperf training from preprocessed moments
+
+    if not version:
+      self.cond_stage_model = namedtuple("CondStageModel", ["transformer"])(transformer = namedtuple("Transformer", ["text_model"])(text_model = Closed.ClipTextTransformer()))
+      unet_init_params = unet_params
+    elif version in {"v2-mlperf-train", "v2-mlperf-eval"}:
+      unet_init_params = mlperf_params
+      clip.gelu = gelu_erf
+      self.cond_stage_model = FrozenOpenClipEmbedder(**{"dims": 1024, "n_heads": 16, "layers": 24, "return_pooled": False, "ln_penultimate": True,
+                                                        "clip_tokenizer_version": "sd_mlperf_v5_0"})
+      unet.Linear, unet.Conv2d, unet.GroupNorm, unet.LayerNorm = AutocastLinear, AutocastConv2d, AutocastGroupNorm, AutocastLayerNorm
+      unet.attention, unet.gelu, unet.mixed_precision_dtype = attn_f32_softmax, gelu_erf, dtypes.bfloat16
+      if pretrained:
+        print("loading text encoder")
+        weights: dict[str,Tensor] = {k.replace("cond_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("cond_stage_model.")}
+        weights["model.attn_mask"] = Tensor.full((77, 77), fill_value=float("-inf")).triu(1)
+        load_state_dict(self.cond_stage_model, weights)
+        # only the eval model needs the decoder
+        if version == "v2-mlperf-eval":
+          print("loading image latent encoder")
+          weights = {k.replace("first_stage_model.", "", 1):v for k,v in torch_load(pretrained)["state_dict"].items() if k.startswith("first_stage_model.")}
+          load_state_dict(self.first_stage_model, weights)
+
+    self.model = namedtuple("DiffusionModel", ["diffusion_model"])(diffusion_model = UNetModel(**unet_init_params))
+    if version == "v2-mlperf-train":
+      # the mlperf reference inits certain weights as zeroes
+      for bb in flatten(self.model.diffusion_model.input_blocks) + self.model.diffusion_model.middle_block + flatten(self.model.diffusion_model.output_blocks):
+        if isinstance(bb, unet.ResBlock):
+          zero_module(bb.out_layers[3])
+        elif isinstance(bb, unet.SpatialTransformer):
+          zero_module(bb.proj_out)
+      zero_module(self.model.diffusion_model.out[2])
 
   def get_x_prev_and_pred_x0(self, x, e_t, a_t, a_prev):
     temperature = 1
@@ -266,17 +302,23 @@ if __name__ == "__main__":
   def run(model, *x): return model(*x).realize()
 
   # this is diffusion
+  step_times = []
   with Context(BEAM=getenv("LATEBEAM")):
     for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
       GlobalCounters.reset()
+      st = time.perf_counter_ns()
       t.set_description("%3d %3d" % (index, timestep))
       with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
         with WallTimeEvent(BenchEvent.STEP):
           tid = Tensor([index])
           latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
           if args.timing: Device[Device.DEFAULT].synchronize()
+      step_times.append((time.perf_counter_ns() - st)*1e-6)
     del run
 
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+    min_time = min(step_times)
+    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
   # upsample latent space to image with autoencoder
   x = model.decode(latent)
   print(x.shape)

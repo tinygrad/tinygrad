@@ -8,7 +8,7 @@ from typing import Dict, Union
 
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 from examples.llama3 import load
-from tinygrad import nn, Tensor
+from tinygrad import nn, Tensor, Device
 from tinygrad.helpers import fetch, colored, GlobalCounters, Timing, DEBUG
 from tinygrad.nn.state import load_state_dict, get_parameters
 
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     st = GlobalCounters.time_sum_s
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
-      with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on GPU" if DEBUG>=2 else "") +
+      with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on {Device.DEFAULT}" if DEBUG>=2 else "") +
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB" +
                   (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s" if DEBUG>=2 else "")) if DEBUG else None, enabled=args.timing):
         tok_tensor = transformer(next_tok, start_pos, args.temperature)

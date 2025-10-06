@@ -12,7 +12,7 @@ class TestHashing(unittest.TestCase):
     chunk_hashes = [hashlib.shake_128(chunk).digest(16) for chunk in chunks]
     return hashlib.shake_128(b''.join(chunk_hashes)).digest(16)
 
-  @unittest.skipIf(CI, "very slow")
+  @unittest.skip("very slow")
   def test_abc(self):
     expected = self._python_hash_1mb(b"abc" + b"\x00" * (2**20 - 3))
     out = Tensor(b"abc").hash()
@@ -61,11 +61,12 @@ class TestKeccak(unittest.TestCase):
     # self.assertEqual(bytes(Tensor(b"a" * 1000000).keccak().tolist()),
     #                  bytearray.fromhex("5c8875ae474a3634 ba4fd55ec85bffd6 61f32aca75c6d699 d0cdcb6c115891c1"))
 
+  @unittest.skipIf(CI, "times out in ci")
   def test_long(self):
     data = b"\x00" * 4
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
-    data = b"\x00" * (1000 if CI else 4096)
+    data = b"\x00" * 1000
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import unittest, struct, contextlib, statistics, time, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events
+from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
@@ -17,7 +17,7 @@ def helper_collect_profile(*devs):
   cpu_events.clear()
 
   profile_list = []
-  with Context(PROFILE=1):
+  with Context(VIZ=1):
     yield profile_list
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
@@ -31,7 +31,7 @@ def helper_profile_filter_device(profile, device:str):
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
 # TODO: support in HCQCompiled
-is_cpu_hcq = Device.DEFAULT in {"CPU", "LLVM"}
+is_cpu_hcq = Device.DEFAULT in {"CPU"}
 
 @unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
 class TestProfiler(unittest.TestCase):
@@ -208,6 +208,19 @@ class TestProfiler(unittest.TestCase):
     self.assertEqual(len(graphs), runs)
     for ge in graphs:
       self.assertEqual(len(ge.ents), len(graphs))
+
+  def test_trace_metadata(self):
+    with Context(TRACEMETA=1):
+      a = Tensor.empty(1)+2
+      b = Tensor.empty(1)+2
+      with helper_collect_profile(TestProfiler.d0) as profile:
+        Tensor.realize(a, b)
+    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
+    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent)]
+    self.assertEqual(len(exec_points), len(range_events), 2)
+    self.assertEqual(len(dedup(e.key for e in exec_points)), 1)
+    self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
 
 if __name__ == "__main__":
   unittest.main()

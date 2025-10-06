@@ -75,9 +75,14 @@
   g.tag circle {
     fill: #FFD700;
     stroke: #B8860B;
+  }
+  g.port circle {
+    fill: #b3dcc2;
+  }
+  g.tag circle, #edge-labels circle {
     stroke-width: 0.8;
   }
-  g.tag text {
+  g.tag text, #edge-labels text {
     text-anchor: middle;
     font-size: 6px;
     fill: #08090e;
@@ -85,10 +90,32 @@
   .label :is(text, p) {
     font-weight: 350;
   }
+  g.node rect {
+    stroke-width: 1.4;
+    stroke: #4a4b57;
+  }
+  g.overlay rect {
+    fill: rgba(26, 27, 38, 0.5);
+  }
   .edgePath {
     stroke: #4a4b57;
     fill: none;
     stroke-width: 1.4px;
+  }
+  g.node.highlight rect, .edgePath.highlight, g.port circle {
+    stroke: #89C9A2;
+  }
+  g.highlight.child rect, .edgePath.highlight.child {
+    stroke: #C888B0;
+  }
+  #edge-labels g.port.highlight {
+    display: block
+  }
+  #edge-labels g.port {
+    display: none
+  }
+  #arrowhead {
+    fill: #4a4b57;
   }
   .main-container {
     display: flex;
@@ -107,17 +134,6 @@
   .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
-  .stats-list > * + * {
-    margin-top: 8px;
-  }
-  .stats-list > p > * + * {
-    margin-top: 12px;
-  }
-  .stats-list {
-    width: 100%;
-    max-height: 240px;
-    overflow: auto;
-  }
   .ctx-list > ul > * + * {
     margin-top: 4px;
   }
@@ -126,7 +142,7 @@
     inset: 0;
     z-index: 1;
   }
-  .profiler {
+  .profiler, .disasm {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
@@ -220,15 +236,15 @@
     z-index: 4;
     background-color: #1e2029;
     padding: 4px 8px;
+    max-width: 164px;
     border-radius: 4px;
     pointer-events: none;
     display: none;
     font-size: 10px;
-    white-space: pre;
   }
   #device-list > div {
     min-height: 32px;
-    max-width: 100px;
+    width: 132px;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
@@ -236,6 +252,9 @@
   }
   #device-list > div:hover {
     background-color: rgba(20, 23, 35, 0.3);
+  }
+  #device-list {
+    height: fit-content;
   }
   .raw-text {
     padding: 0 8px;
@@ -322,6 +341,7 @@
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
     <div class="view profiler"></div>
+    <div class="view disasm"></div>
     <div class="view graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
@@ -331,14 +351,14 @@
         </g>
         <defs>
           <marker id="arrowhead" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="6" markerHeight="6" orient="auto">
-            <path d="M0,-5L10,0L0,5" fill="#4a4b57"></path>
+            <path d="M0,-5L10,0L0,5" fill="context-stroke"></path>
           </marker>
         </defs>
       </svg>
     </div>
     <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
-  <div id="tooltip"></div>
+  <div id="tooltip" class="wrap"></div>
   <script src="/js/index.js"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@ import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
-from tinygrad.nn.state import get_parameters, get_state_dict, safe_load, safe_save
+from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
 from extra.lr_scheduler import LRSchedulerGroup
@@ -252,6 +252,10 @@ def train_resnet():
         print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
               f"epoch global_mem: {steps_in_train_epoch * GlobalCounters.global_mem:_}")
         # if we are doing beam search, run the first eval too
+        if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+          min_time = min(step_times)
+          assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
+
         if (TRAIN_BEAM or EVAL_BEAM) and e == start_epoch: break
         return
     if MLLOGGER and RUNMLPERF:
@@ -343,6 +347,8 @@ def train_resnet():
           fn = f"./ckpts/{time.strftime('%Y%m%d_%H%M%S')}_e{e}.safe"
         print(f"saving ckpt to {fn}")
         safe_save(get_training_state(model, optimizer_group, scheduler_group), fn)
+
+
 
 def train_retinanet():
   from contextlib import redirect_stdout
@@ -1290,13 +1296,18 @@ def train_llama3():
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
 
   config = {}
+  BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
+  SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
+  EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
+  EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
+  EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
 
   # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
   # trains to 7
@@ -1308,13 +1319,14 @@ def train_llama3():
 
   opt_gradient_clip_norm = 1.0
   opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
-  opt_learning_rate_decay_steps = getenv("DECAY_STEPS", math.ceil(1_200_000 * 1152 / GBS) - opt_learning_rate_warmup_steps)
+  opt_learning_rate_decay_steps = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS)) - opt_learning_rate_warmup_steps
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
-  opt_end_learning_rate = 8e-7
+  opt_end_learning_rate = getenv("END_LR", 8e-7)
 
   # TODO: confirm weights are in bf16
   # vocab_size from the mixtral tokenizer
-  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]|{"vocab_size": 32000}
+  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
+  params = params | {"vocab_size": 32000} if not SMALL else params
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
   model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
@@ -1350,6 +1362,15 @@ def train_llama3():
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
+  if resume_ckpt := getenv("RESUME_CKPT"):
+    fn = f"./ckpts/llama3_{resume_ckpt}.safe"
+    print(f"loading initial checkpoint from {fn}")
+    load_state_dict(model, safe_load(fn), realize=False)
+
+    fn = f"./ckpts/llama3_{resume_ckpt}_optim.safe"
+    print(f"loading optim checkpoint from {fn}")
+    load_state_dict(scheduler, safe_load(fn), realize=False)
+
   @TinyJit
   @Tensor.train()
   def train_step(model, tokens:Tensor, grad_acc:int):
@@ -1375,7 +1396,7 @@ def train_llama3():
         total_norm += p.grad.float().square().sum()
       total_norm = total_norm.sqrt().contiguous()
       for p in optim.params:
-        p.grad = p.grad * opt_gradient_clip_norm / (total_norm + 1e-6)
+        p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
 
     optim.step()
     scheduler.step()
@@ -1384,33 +1405,231 @@ def train_llama3():
     loss.realize(lr)
     return loss, lr
 
-  if getenv("FAKEDATA", 0):
-    def fake_data():
-      for _ in range(SAMPLES // GBS):
-        yield Tensor.randint(GBS, SEQLEN + 1, low=0, high=32000, dtype=dtypes.int32, device=Device.DEFAULT)
-    iter = fake_data()
-  else:
-    from examples.mlperf.dataloader import batch_load_llama3
-    iter = batch_load_llama3(GBS, SAMPLES, SEQLEN, Path(getenv("BASEDIR", "/raid/datasets/c4/")), seed=SEED, val=bool(TRAIN_ON_VAL))
+  @TinyJit
+  @Tensor.train(False)
+  def eval_step(model, tokens:Tensor):
+    if (DP := getenv("DP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+      tokens = tokens.shard(device, 0)
+    if (MP := getenv("MP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
+      tokens = tokens.shard(device)
+    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    return loss.flatten().float()
 
-  i = 0
+  # ** data iters **
+  def fake_data(bs, samples):
+    for _ in range(samples // bs):
+      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
+
+  def get_train_iter():
+    if getenv("FAKEDATA", 0):
+      return fake_data(GBS, SAMPLES)
+    else:
+      if SMALL:
+        from examples.mlperf.dataloader import batch_load_llama3_small
+        return batch_load_llama3_small(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+      else:
+        from examples.mlperf.dataloader import batch_load_llama3
+        return batch_load_llama3(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+
+  def get_eval_iter():
+    if getenv("FAKEDATA", 0):
+      return fake_data(EVAL_BS, 5760)
+    else:
+      if SMALL:
+        from examples.mlperf.dataloader import batch_load_llama3_small
+        return batch_load_llama3_small(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
+      else:
+        from examples.mlperf.dataloader import batch_load_llama3
+        return batch_load_llama3(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
+
+  iter = get_train_iter()
+  i, sequences_seen = resume_ckpt, 0
   for tokens in tqdm(iter, total=SAMPLES//GBS):
     t = time.perf_counter()
     GlobalCounters.reset()
     loss, lr = train_step(model, tokens, grad_acc)
     loss = loss.float().item()
-    # above as tqdm.write f-string
+
+    i += 1
+    sequences_seen += tokens.shape[0]
+
     tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
         f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
-    if getenv("CKPT") and (i % 200 == 0 or i == 10):
+    if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
       tqdm.write("saving checkpoint")
       if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-      fn = f"{ckpt_dir}/{i}.safe"
+      fn = f"{ckpt_dir}/llama3_{i}.safe"
       safe_save(get_state_dict(model), fn)
-    i += 1
+
+      tqdm.write("saving optim checkpoint")
+      fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
+      safe_save(get_state_dict(scheduler), fn)
+
+    if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1):
+      tqdm.write(f"evaluating after {sequences_seen} sequences")
+
+      # run eval
+      eval_losses = []
+      eval_iter = get_eval_iter()
+      tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
+
+      for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
+        eval_losses += eval_step(model, tokens).tolist()
+      log_perplexity = Tensor(eval_losses).mean().float().item()
+
+      tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
+
+      if log_perplexity < EVAL_TARGET:
+        tqdm.write(f"target achieved after {sequences_seen} sequences")
+        if getenv("CKPT"):
+          if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
+          fn = f"{ckpt_dir}/llama3.safe"
+          safe_save(get_state_dict(model), fn)
+        break
+
+def train_stable_diffusion():
+  from extra.models.unet import UNetModel
+  from examples.mlperf.dataloader import batch_load_train_stable_diffusion
+  from examples.mlperf.lr_schedulers import LambdaLR, LambdaLinearScheduler
+  from examples.mlperf.initializers import init_stable_diffusion
+  from examples.mlperf.helpers import get_training_state
+  import numpy as np
+
+  config = {}
+  GPUS               = config["GPUS"]                   = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))]
+  seed               = config["seed"]                   = getenv("SEED", 12345)
+  # ** hyperparameters **
+  BS                 = config["BS"]                     = getenv("BS", 1 * len(GPUS))
+  BASE_LR            = config["LEARNING_RATE"]          = getenv("LEARNING_RATE", 2.5e-7)
+  # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
+  # "Checkpoint must be collected every 512,000 images. CEIL(512000 / global_batch_size) if 512000 is not divisible by GBS."
+  # NOTE: It's inferred that "steps" is the unit for the output of the CEIL formula, based on all other cases of CEIL in the rules
+  CKPT_STEP_INTERVAL = config["CKPT_STEP_INTERVAL"]     = getenv("CKPT_STEP_INTERVAL", math.ceil(512_000 / BS))
+  CKPTDIR            = config["CKPTDIR"]                = Path(getenv("CKPTDIR", "./checkpoints"))
+  DATADIR            = config["DATADIR"]                = Path(getenv("DATADIR", "./datasets"))
+  UNET_CKPTDIR       = config["UNET_CKPTDIR"]           = Path(getenv("UNET_CKPTDIR", "./checkpoints"))
+  TOTAL_CKPTS        = config["TOTAL_CKPTS"]            = getenv("TOTAL_CKPTS", 0)
+
+  print(f"training on {GPUS}")
+  lr = BS * BASE_LR
+  print(f"BS={BS}, BASE_LR={BASE_LR}, lr={lr}")
+  print(f"CKPT_STEP_INTERVAL = {CKPT_STEP_INTERVAL}")
+  for x in GPUS: Device[x]
+  if (WANDB := getenv("WANDB", "")):
+    import wandb
+    wandb.init(config=config, project="MLPerf-Stable-Diffusion")
+
+  Tensor.manual_seed(seed)  # seed for weight initialization
+  model, unet, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = init_stable_diffusion("v2-mlperf-train", CKPTDIR / "sd" / "512-base-ema.ckpt", GPUS)
+
+  optimizer = AdamW(get_parameters(unet))
+  lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
+  lr_scheduler = LambdaLR(optimizer, Tensor(lr, dtype=dtypes.float, device=optimizer.device), lambda_lr_callback)
+
+  @TinyJit
+  def train_step(mean:Tensor, logvar:Tensor, tokens:Tensor, unet:UNetModel, optimizer:LAMB, lr_scheduler:LambdaLR) -> Tensor:
+    optimizer.zero_grad()
+
+    timestep = Tensor.randint(BS, low=0, high=model.alphas_cumprod.shape[0], dtype=dtypes.int, device=GPUS[0])
+    latent_randn = Tensor.randn(*mean.shape, device=GPUS[0])
+    noise = Tensor.randn(*mean.shape, device=GPUS[0])
+    for t in (mean, logvar, tokens, timestep, latent_randn, noise):
+      t.shard_(GPUS, axis=0)
+
+    std = Tensor.exp(0.5 * logvar.clamp(-30.0, 20.0))
+    latent = (mean + std * latent_randn) * 0.18215
+
+    sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
+    sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[timestep].reshape(timestep.shape[0], 1, 1, 1)
+    latent_with_noise = sqrt_alphas_cumprod_t * latent + sqrt_one_minus_alphas_cumprod_t * noise
+    v_true = sqrt_alphas_cumprod_t * noise - sqrt_one_minus_alphas_cumprod_t * latent
+
+    context = model.cond_stage_model.embed_tokens(tokens)
+
+    out = unet(latent_with_noise, timestep, context)
+    loss = ((out - v_true) ** 2).mean()
+    del mean, logvar, std, latent, noise, sqrt_alphas_cumprod_t, sqrt_one_minus_alphas_cumprod_t
+    del out, v_true, context, latent_randn, tokens, timestep
+    loss.backward()
+
+    optimizer.step()
+    lr_scheduler.step()
+    loss, out_lr = loss.detach().to("CPU"), optimizer.lr.to("CPU")
+    Tensor.realize(loss, out_lr)
+    return loss, out_lr
+    
+  # checkpointing takes ~9 minutes without this, and ~1 minute with this
+  @TinyJit
+  def ckpt_to_cpu():
+    ckpt = get_training_state(unet, optimizer, lr_scheduler)
+    # move to CPU first so more GPU bufs aren't created (can trigger OOM)
+    for k,v in ckpt.items(): ckpt[k] = v.detach().to("CPU")
+    Tensor.realize(*[v for v in ckpt.values()])
+    for k,v in ckpt.items(): ckpt[k] = v.cast(v.dtype.base).contiguous()
+    Tensor.realize(*[v for v in ckpt.values()])
+    return ckpt
+
+  # training loop
+  dl = batch_load_train_stable_diffusion(f'{DATADIR}/laion-400m/webdataset-moments-filtered/{{00000..00831}}.tar', BS)
+  # for tests
+  saved_checkpoints = []
+
+  train_start_time = time.perf_counter()
+  t0 = t6 = time.perf_counter()
+  for i, batch in enumerate(dl, start=1):
+    loop_time = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    dl_time = t0 - t6
+    GlobalCounters.reset()
+
+    mean, logvar = np.split(np.concatenate(batch["npy"], axis=0), 2, axis=1)
+    mean, logvar = Tensor(mean, dtype=dtypes.float32, device="CPU"), Tensor(logvar, dtype=dtypes.float32, device="CPU")
+    tokens = []
+    for text in batch['txt']: tokens += model.cond_stage_model.tokenizer.encode(text, pad_with_zeros=True)
+    tokens = Tensor(tokens, dtype=dtypes.int32, device="CPU").reshape(-1, 77)
+
+    t1 = time.perf_counter()
+    loss, lr = train_step(mean, logvar, tokens, unet, optimizer, lr_scheduler)
+    loss_item, lr_item = loss.item(), lr.item()
+    t2 = time.perf_counter()
+
+    if i == 3:
+      for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
+      print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
+      
+    total_train_time = time.perf_counter() - train_start_time
+    if WANDB:
+      wandb.log({"train/loss": loss_item, "train/lr": lr_item, "train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
+                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (t2-t1), "train/input_prep_time": t1-t0,
+                    "train/train_step_time": t2-t1, "train/total_time": total_train_time})
+
+      if i == 1 and wandb.run is not None:
+        with open(f"{UNET_CKPTDIR}/wandb_run_id_{wandb.run.id}", "w") as f:
+          f.write(f"wandb.run.id = {wandb.run.id}")
+
+    if i % CKPT_STEP_INTERVAL == 0:
+      # https://github.com/mlcommons/training_policies/blob/cfa99da479b8d5931f7a3c67612d021dfb47510a/training_rules.adoc#benchmark_specific_rules
+      # "evaluation is done offline, the time is not counted towards the submission time."
+      fn = f"{UNET_CKPTDIR}/{i}.safetensors"
+      print(f"saving unet checkpoint at {fn}")
+      saved_checkpoints.append(fn)
+      safe_save({k.replace("model.", ""):v for k,v in ckpt_to_cpu().items() if k.startswith("model.")}, fn)
+      if TOTAL_CKPTS and i == TOTAL_CKPTS * CKPT_STEP_INTERVAL:
+        print(f"ending run after {i} steps ({TOTAL_CKPTS} checkpoints collected)")
+        return saved_checkpoints
+
+    t3 = time.perf_counter()
+    print(f"""step {i}: {GlobalCounters.global_ops * 1e-9 / (t2-t1):9.2f} GFLOPS, mem_used: {GlobalCounters.mem_used / 1e9:.2f} GB,
+  loop_time_prev: {loop_time:.2f}, dl_time: {dl_time:.2f}, input_prep_time: {t1-t0:.2f}, train_step_time: {t2-t1:.2f},
+  t3-t2: {t3-t2:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}, total_train_time:{total_train_time:.2f}
+  """)
+    t6 = time.perf_counter()
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
@@ -1420,7 +1639,7 @@ if __name__ == "__main__":
   else: bench_log_manager = contextlib.nullcontext()
 
   with Tensor.train():
-    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn").split(","):
+    for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion").split(","):
       nm = f"train_{m}"
       if nm in globals():
         print(f"training {m}")

@@ -272,4 +272,4 @@ def compare_launch_state(states, good_states):
 
   return True, "PASS"
 
-# IOCTL=1 PTX=1 CUDA=1 python3 test/test_ops.py TestOps.test_tiny_add
+# IOCTL=1 CUDA=1 CUDA_PTX=1 python3 test/test_ops.py TestOps.test_tiny_add
