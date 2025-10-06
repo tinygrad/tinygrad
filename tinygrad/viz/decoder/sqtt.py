@@ -52,7 +52,7 @@ class DecoderStatus(enum.IntEnum): SUCCESS = 0; OUT_OF_RESOURCES = 2; INVALID_AR
 
 def decode_occupancy(events, n:int, data) -> None:
   print(f"Recieved {pluralize('occupancy event', n)}")
-  wave_map:dict[int, tuple[int, int]] = {}
+  wave_map:dict[tuple[int, int, int], tuple[int, int]] = {}
   wave_cnt = itertools.count(1)
   wave_timing:list[tuple[int, int, int]] = []
   simd_used:set[tuple[int, int]] = set()
