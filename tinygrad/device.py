@@ -352,6 +352,11 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
+    if getenv("SQTT"):
+      # TODO: support llvm in isa_cb
+      # TODO: is AMD_RESET required in the final version?
+      assert getenv("AM_RESET") and not getenv("AMD_LLVM"), "currently sqtt setup requires AM_RESET=1 AMD_LLVM=0"
+
     if not getenv("SQTT", 0):
       from tinygrad.uop.ops import launch_viz
       launch_viz("PROFILE", fn)
