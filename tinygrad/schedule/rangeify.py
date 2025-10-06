@@ -135,7 +135,8 @@ def extract_children(ctx:ChildrenContext, x:UOp):
   children_map = x.get_children_map()
   ctx.children = {}
   for k,v in children_map.items():
-    non_sink_children = [u for u in v if u.op not in {Ops.SINK, Ops.MSTACK, Ops.MSELECT}]
+    # NOTE: we treat mstack children like sink here
+    non_sink_children = [u for u in v if u.op not in {Ops.SINK, Ops.MSTACK}]
     if len(non_sink_children) <= 1: continue
     # NOTE: this gate shouldn't be here
     if k.op_in_parents(Ops.REDUCE_AXIS) and k.op_in_parents(Ops.BUFFER, Ops.CONTIGUOUS):
