@@ -18,6 +18,7 @@ from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context,
 from tinygrad.schedule.kernelize import merge_views, get_kernelize_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
+from test.helpers import expect_rangeify_fails, expect_nonrangeify_fails
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -41,9 +42,6 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
         print(s.ast)
     raise KernelCountException(f"{kernel_cnt} != {allowed}")
   return sched
-
-def expect_rangeify_fails(fxn): return (unittest.expectedFailure if RANGEIFY else (lambda f:f))(fxn)
-def expect_nonrangeify_fails(fxn): return (unittest.expectedFailure if not RANGEIFY else (lambda f:f))(fxn)
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
