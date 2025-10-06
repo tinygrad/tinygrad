@@ -79,6 +79,20 @@ class UOpMetaClass(type):
 buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
+# recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
+_NOT_FOUND = object()
+class recursive_property(property):
+  def __init__(self, fxn):
+    self.fxn = fxn
+    self.nm = "_RECURSIVE_PROPERTY_"+fxn.__name__
+    self.__doc__ = fxn.__doc__
+  def __get__(self, x:UOp|None, owner=None):
+    if x is None: return self
+    if (val:=x.__dict__.get(self.nm, _NOT_FOUND)) is _NOT_FOUND:
+      for s in x.toposort(lambda z: not hasattr(z, self.nm)):
+        s.__dict__[self.nm] = val = self.fxn(s)
+    return val
+
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(MathTrait, metaclass=UOpMetaClass):
@@ -115,7 +129,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
-  @functools.cached_property
+  @recursive_property
   def parents(self:UOp) -> dict[UOp, None]:
     ret = {s:None for s in self.src}
     for s in self.src: ret.update(s.parents)
@@ -162,7 +176,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  @functools.cached_property
+  @recursive_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
                                                    Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
@@ -187,7 +201,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
-    if self.op is Ops.KERNEL: return ShapeTracker.from_shape((self.arg.ast.size,))
+    if self.op is Ops.KERNEL:
+      ast = self.arg.ast
+      return ShapeTracker.from_shape((ast.size,)) if ast.st is not None else None
     if self.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
       sz = self.ptrdtype.size
       return ShapeTracker.from_shape((sz,)) if sz > 0 else None
