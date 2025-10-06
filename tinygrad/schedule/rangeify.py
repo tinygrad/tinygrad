@@ -519,6 +519,21 @@ def limit_bufs(ctx:RangeifyContext, root:UOp):
     return root.replace(src=tuple(srcs))
 pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary), name="root"), limit_bufs)])
 
+def split_reduce_2(ctx:RangeifyContext, r:UOp): # TODO: maybe unify?
+  if r._device is None: return None # why?
+  all_reduces = prod(int(x.vmax + 1) for x in r.src[0].ranges if x.arg[1] == AxisType.REDUCE)
+  my_reduce = prod(int(x.vmax + 1) for x in r.src[1:])
+
+  if not SPLIT_REDUCEOP or (all_reduces // my_reduce) < getenv("REDUCEOP_SPLIT_THRESHOLD", 16): return None
+
+  # TODO: Substitute op?
+  s = r.src[0]
+  orig_ranges, end_ranges = s.ranges, [x.replace(arg=(next(ctx.range_idx), AxisType.LOOP)) if x.op is Ops.RANGE and x not in r.src else x for x in s.ranges]
+  buf_ranges = [x for x in end_ranges if x.op is Ops.RANGE and x not in r.src]
+  s = s.substitute(dict(zip(orig_ranges, end_ranges)))
+  return r.replace(src=(s,)+r.src[1:]).bufferize(*buf_ranges, arg=BufferizeOpts(device=r.device)).index(*r.ranges)
+pm_split_reduce_2 = PatternMatcher([(UPat(Ops.REDUCE, name="r"), split_reduce_2)])
+
 # *****************
 # 4. put in buffers for bufferize
 # TODO: should BUFFERIZE look a lot more like STORE
@@ -760,6 +775,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # TODO: can you substitute and remove costly buffers at the same time?
   tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
+  tsink = graph_rewrite(tsink, pm_split_reduce_2, ctx=rangeify_ctx, name="split_reduce_2")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
