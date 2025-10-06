@@ -78,7 +78,8 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(sym+migrate_indexing, name="postopt symbolic"))
 
   # locals
-  ret.append(RewriteStep(pm_add_local_buffers, name="add locals"))
+  if getenv("LOCALS") or getenv("PIPELINE"):
+    ret.append(RewriteStep(pm_add_local_buffers, name="add locals"))
 
   # add locals
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))

@@ -68,7 +68,7 @@ def _try_compile_linearized_w_idx(x:tuple[int,Scheduler], compiler:Compiler) -> 
   try:
     p = get_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].opts)
     assert p.uops is not None, "uop list wasn't generated?"
-    if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
+    if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 6000)) > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
     st = time.perf_counter()
