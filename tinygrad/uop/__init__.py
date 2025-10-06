@@ -21,6 +21,7 @@ class Ops(FastEnum):
   # create buffer
   BUFFERIZE = auto()
   SUBSTITUTE = auto()
+  SPLIT = auto()
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
