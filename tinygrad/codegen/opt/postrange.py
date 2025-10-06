@@ -353,7 +353,7 @@ pm_postrange_opt = PatternMatcher([
 def add_local_buffer(x:UOp):
   if x.tag is not None: return None
   # should UPCAST/UNROLL be here?
-  branges = tuple([r for r in x.ranges if r.arg[-1] in {AxisType.WARP, AxisType.LOCAL, AxisType.UPCAST, AxisType.UNROLL}])
+  branges = tuple([r for r in x.ranges if r.arg[-1] in {AxisType.WARP, AxisType.LOCAL, AxisType.UPCAST, AxisType.UNROLL}])[::-1]
   buf = UOp(Ops.BUFFERIZE, x.dtype, src=(x.replace(tag=1),)+branges, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
   return UOp(Ops.INDEX, x.dtype, src=(buf,)+branges)
 
