@@ -442,23 +442,25 @@ def do_split(x:UOp):
     ret = ret.substitute({const_store:const_store.replace(tag=1)})
     ret = ret.substitute({const_store.replace(tag=1):computes[2].barrier()})
 
-    # put computes[1] before compute[2]
+    # put loads[3] before compute[2] (both ports)
     const_store = [x for x in ret.toposort() if x.op is Ops.STORE and x.src[1].op is Ops.CONST][0]
     ret = ret.substitute({const_store:const_store.replace(tag=1)})
-    ret = ret.substitute({const_store.replace(tag=1):computes[1].barrier()})
+    ret = ret.substitute({const_store.replace(tag=1):loads[3], UOp(Ops.NOOP, tag=2):loads[3]})
 
-    # put computes[0] before compute[1]
+    # put compute[1] before loads[3]
+    load = [x for x in loads[3].toposort() if x.op is Ops.LOAD][0]
+    ret = ret.substitute({load: load.replace(src=load.src+(computes[1].barrier(),))})
+
+    # put loads[2] before compute[1] (both ports)
     const_store = [x for x in ret.toposort() if x.op is Ops.STORE and x.src[1].op is Ops.CONST][0]
     ret = ret.substitute({const_store:const_store.replace(tag=1)})
-    ret = ret.substitute({const_store.replace(tag=1):computes[0].barrier()})
+    ret = ret.substitute({const_store.replace(tag=1):loads[2], UOp(Ops.NOOP, tag=1):loads[2]})
 
-    # put loads[3] before computes[2]
-    ret = ret.substitute({UOp(Ops.NOOP, tag=2):loads[3]})
+    # put compute[0] before loads[2]
+    load = [x for x in loads[2].toposort() if x.op is Ops.LOAD][0]
+    ret = ret.substitute({load: load.replace(src=load.src+(computes[0].barrier(),))})
 
-    # put loads[2] before computes[1]
-    ret = ret.substitute({UOp(Ops.NOOP, tag=1):loads[2]})
-
-    # put loads[1] before computes[0]
+    # put loads[1] before compute[0] (one port)
     ret = ret.substitute({UOp(Ops.NOOP, tag=0):loads[1]})
 
     # put loads[0] before loads[1]
