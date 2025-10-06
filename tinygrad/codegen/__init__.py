@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, RANGEIFY
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, RANGEIFY, getenv
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
 from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
@@ -91,8 +91,9 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
 
   # pipelining
-  ret.append(RewriteStep(pm_pipeline, name="pipeline"))
-  ret.append(RewriteStep(sym, name="pipeline sym"))
+  if getenv("PIPELINE"):
+    ret.append(RewriteStep(pm_pipeline, name="pipeline"))
+    ret.append(RewriteStep(sym, name="pipeline sym"))
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
