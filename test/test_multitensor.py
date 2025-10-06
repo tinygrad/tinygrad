@@ -201,7 +201,6 @@ class TestMultiTensor(unittest.TestCase):
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
-  @expect_rangeify_fails # TODO: fix
   def test_allreduce_shard_ring_sum(self):
     for axis in (0, 1, None):
       for use_ring in (0, 2):

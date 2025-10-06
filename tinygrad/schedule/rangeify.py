@@ -135,7 +135,7 @@ def extract_children(ctx:ChildrenContext, x:UOp):
   children_map = x.get_children_map()
   ctx.children = {}
   for k,v in children_map.items():
-    non_sink_children = [u for u in v if u.op is not Ops.SINK]
+    non_sink_children = [u for u in v if u.op not in {Ops.SINK, Ops.MSTACK, Ops.MSELECT}]
     if len(non_sink_children) <= 1: continue
     # NOTE: this gate shouldn't be here
     if k.op_in_parents(Ops.REDUCE_AXIS) and k.op_in_parents(Ops.BUFFER, Ops.CONTIGUOUS):
@@ -571,7 +571,7 @@ pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0] for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
 ])
 
 # *****************
