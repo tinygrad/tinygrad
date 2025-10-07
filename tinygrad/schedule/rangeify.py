@@ -46,6 +46,9 @@ earliest_rewrites = PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
 
+  # merge adjacent RESHAPES, safe because they are not tagged
+  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, name="x"), lambda x,x2: x.replace(src=(x2.src[0],)) if x.tag is None and x2.tag is None else None),
+
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.BUFFER).f(Ops.RESHAPE, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
