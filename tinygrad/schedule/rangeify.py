@@ -393,14 +393,23 @@ def winoguard(redu):
 def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
   #TODO - Add where filters so index does not read garbage - or do we?
   #TODO - Generalize to n-dimensions
+  #TODO - Merge synth_mat with reduce and mul to create kron product
   #TODO - Fix test errors
   # 1) Use winoguard to find the activation branch and candidate (loop, reduce) axis pairs.
   guard = winoguard(redu)
-  if guard is None: return None
+  if guard is None:
+    return None
   act_branch, axis_pairs = guard
   act_like, w_like = redu.src[0].src
-  if act_branch == 1: act_like, w_like = w_like, act_like
-  (_, ky, oy_add), (_, kx, ox_add), *_ = axis_pairs
+  if act_branch == 1:
+    act_like, w_like = w_like, act_like
+  if act_like.op is not Ops.INDEX or w_like.op is not Ops.INDEX:
+    return None
+  if len(act_like.src) < 3:
+    return None
+  (_, ky, _), (_, kx, _), *_ = axis_pairs
+  oy_add, ox_add = act_like.src[1], act_like.src[2]
+  
   # 3) Algebraic split of oy/ox into tiles+in-tile (no new outer loops born)
   zero_map = {ax: ax.const_like(0) for ax in (ky, kx)}
   oy_base = oy_add.substitute(zero_map).simplify()
@@ -426,9 +435,7 @@ def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
   At_iy = synth_mat(winograd_At, c6, iy)
   tmp = (Mhat * A_ix).reduce(r6, arg=Ops.ADD, dtype=redu.dtype)
   out = (tmp * At_iy).reduce(c6, arg=Ops.ADD, dtype=redu.dtype)
-  # for ax in (ax for ax in redu.src[1:] if ax not in {ky, kx}):
-  #   out = out.reduce(ax, arg=Ops.ADD, dtype=redu.dtype)
-  print("out ranges", out)
+  #print("out ranges", out)
   # 9) Return a *pure expression* (no bufferize/store). Scheduler will handle buffers.
   return out
 
