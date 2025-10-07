@@ -1042,7 +1042,7 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
-SENTINEL = UOp(Ops.SENTINEL)
+with Context(SPEC=0): SENTINEL = UOp(Ops.SENTINEL)
 class RewriteNotReady(Exception): pass
 class BottomUpGate(Exception): pass
 class RewriteContext:
@@ -1197,7 +1197,7 @@ renderer = PatternMatcher([
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda x:
    UOp(Ops.NOOP, arg=''.join([f"[{strip_parens(y.arg)}]" for y in x.src[1:]])) if all(y.op is Ops.NOOP for y in x.src[1:]) else None),
   (UPat(Ops.VECTORIZE, src=UPat(Ops.NOOP), name="x"),
-   lambda x: UOp(Ops.NOOP, arg=f"[{','.join([y.arg for y in x.src])}]" if not all_same(x.src) else f"{len(x.src)}x[{x.src[0].arg}]")),
+   lambda x: UOp(Ops.NOOP, arg=f"{{{','.join([y.arg for y in x.src])}}}" if not all_same(x.src) else f"{{{x.src[0].arg}, ...}}")),
 ])
 renderer_infer = PatternMatcher([
   (UPat(Ops.MOD, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cmod({x.src[0].arg}, {x.src[1].arg})")),

@@ -568,5 +568,13 @@ class TestUOpChildren(unittest.TestCase):
     del c
     self.assertEqual(len(a.children), 0)
 
+class TestUOpRender(unittest.TestCase):
+  def test_render_vectorize_same(self):
+    u = UOp(Ops.VECTORIZE, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    self.assertEqual(u.render(), "{0, ...}")
+  def test_render_vectorize_different(self):
+    u = UOp(Ops.VECTORIZE, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    self.assertEqual(u.render(), "{0,1,2}")
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
