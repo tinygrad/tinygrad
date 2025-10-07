@@ -45,8 +45,8 @@ def mma_AB(outacc:UOp, a:UOp, b:UOp, *endrngs):
 
 if __name__ == "__main__":
   # TODO: support string ranges
-  tg_id_y = UOp.range(M // (M_BLOCK * TILE_DIM), -3, AxisType.GLOBAL)
-  tg_id_x = UOp.range(N // (N_BLOCK * TILE_DIM), -2, AxisType.GLOBAL)
+  tg_id_y = UOp.range(M // (M_BLOCK * TILE_DIM), -3, AxisType.GLOBAL if Device.DEFAULT != "CPU" else AxisType.LOOP)
+  tg_id_x = UOp.range(N // (N_BLOCK * TILE_DIM), -2, AxisType.GLOBAL if Device.DEFAULT != "CPU" else AxisType.LOOP)
 
   gl_d = glbl("gl0_d", dtypes.float, (N, M))
   gl_a = glbl("gl1_a", dtypes.float, (N, K))
