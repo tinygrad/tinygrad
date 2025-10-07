@@ -2,7 +2,6 @@ import unittest
 from tinygrad import Tensor, nn
 from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, UPat, Ops
-from test.helpers import expect_rangeify_fails
 
 @unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeifyAssign(unittest.TestCase):
@@ -317,7 +316,6 @@ class TestRangeifyPM(unittest.TestCase):
     self.assertIs(sink1, sink2)
 
 class TestRangeifyEdgeCase(unittest.TestCase):
-  @expect_rangeify_fails # TODO: fix
   def test_matmul_relu_cat(self):
     a = Tensor.ones(100, 512).contiguous().realize()
     c = Tensor.ones(1, 512).contiguous().realize()
