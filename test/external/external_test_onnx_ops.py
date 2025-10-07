@@ -5,7 +5,7 @@
 from typing import Any
 import unittest, onnx, tempfile
 from tinygrad import dtypes, Tensor
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 import numpy as np
 from extra.onnx_helpers import validate
 from onnx.defs import ONNX_DOMAIN, AI_ONNX_PREVIEW_TRAINING_DOMAIN

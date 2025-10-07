@@ -300,5 +300,16 @@ class TestOuterworld(unittest.TestCase):
     o.contiguous(i).realize()
     self.assertTrue((t==o).all().item())
 
+class TestRangeifyEdgeCase(unittest.TestCase):
+  def test_matmul_relu_cat(self):
+    a = Tensor.ones(100, 512).contiguous().realize()
+    c = Tensor.ones(1, 512).contiguous().realize()
+    cm = Tensor.ones(512, 512)
+    c = c @ cm
+    c = c.relu()
+
+    res = Tensor.cat(a, c, dim=0)
+    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
+
 if __name__ == '__main__':
   unittest.main()

@@ -455,12 +455,11 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
+  if valid.op_in_parents(Ops.LOAD): return None  # this should only be for indexing, skip if there's a LOAD
   ret:list[UOp] = []
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    # TODO: root cause this and test_simplify_valid_from_div
-    if stmt.op is Ops.CAST: return None
     ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
