@@ -67,7 +67,7 @@ class CFGContext:
   def __init__(self, sink:UOp):
     # there are 3 relationships between ranges:
     # nested, meaning endrange y is a dependency of endrange x and range x is a dependency of endrange y
-    # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y (i.e. load in range x depends on store in range y)
+    # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
     # independent, endrange y is not a dependency of endrange x
     # ifs are always independent
     deps: dict[UOp, set[UOp]] = {}
