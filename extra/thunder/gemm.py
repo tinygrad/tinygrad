@@ -1,4 +1,5 @@
 # include directory copied from https://github.com/HazyResearch/ThunderMittens
+# https://hazyresearch.stanford.edu/blog/2024-11-28-tk-mlx
 
 gemm = """
 #include <metal_stdlib>
@@ -41,7 +42,7 @@ kernel void matmul_naive(GEMM_PARAMS_DEF(T)) {
 instantiate_matmul_custom(float32, float);
 """
 
-from tinygrad import Device, Tensor
+from tinygrad import Device, Tensor, Context
 
 if __name__ == "__main__":
   # TODO: why isn't this type inferred?
@@ -65,7 +66,11 @@ if __name__ == "__main__":
             global_size=gsz, local_size=(32,1,1), vals=(N, N, N), wait=True)
     print(f"{N*N*N*2/(et*1e9):2f} GFLOPS")
 
-  val = ((a@b).contiguous()-c).mean()
+  for _ in range(5):
+    with Context(DEBUG=2):
+      ref = (a@b).realize()
+
+  val = (ref-c).mean()
   print(val.item())
 
 
