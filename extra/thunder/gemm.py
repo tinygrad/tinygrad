@@ -45,7 +45,6 @@ instantiate_matmul_custom(float32, float);
 from tinygrad import Device, Tensor, Context
 
 if __name__ == "__main__":
-  # TODO: why isn't this type inferred?
   device = Device["METAL"]
   lib = device.compiler.compile(gemm)
   prg = device.runtime("matmul_custom_float32", lib)
@@ -70,7 +69,6 @@ if __name__ == "__main__":
     with Context(DEBUG=2):
       ref = (a@b).realize()
 
-  val = (ref-c).mean()
-  print(val.item())
+  print((ref-c).mean().item())
 
 
