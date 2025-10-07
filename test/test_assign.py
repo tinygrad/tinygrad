@@ -280,13 +280,14 @@ class TestAssign(unittest.TestCase):
     b.realize()
     ba1 = a.uop.base.realized
     bb1 = b.uop.base.realized
-    with self.assertRaises((RuntimeError, AssertionError)):
+    with self.assert_permuted_assign():
       a = a.permute(1,0)
       a += b
       a.realize()
       ba2 = a.uop.base.realized
-      assert ba1 != ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+      # permute and base are the same buffer
+      assert ba1 == ba2 and ba1 != bb1
 
   def test_post_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
