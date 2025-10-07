@@ -408,14 +408,14 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: continue  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
-  # don't simplify any other gates, can lead to OOB, we substitute them back later
-  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
+  # # don't simplify any other gates, can lead to OOB, we substitute them back later
+  # uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
   all_candidates = []
   # simplify uop given that valid is True
   for i, (expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
-    expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
+    # expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
     # if the expr is an add we try and factorize so its more likely to substitute
     if expr.op is Ops.ADD: uop = uop.factor(expr)
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
@@ -445,8 +445,8 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   uop = uop.factor(*(e[0] for e in all_candidates))
   uop = uop.substitute(sub_dict:=dict(all_candidates)).simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
 
-  # put the loads back in
-  uop = uop.substitute({v:k for k,v in load_subs.items()})
+  # # put the loads back in
+  # uop = uop.substitute({v:k for k,v in load_subs.items()})
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):
