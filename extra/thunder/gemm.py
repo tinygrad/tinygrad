@@ -42,11 +42,10 @@ instantiate_matmul_custom(float32, float);
 """
 
 from tinygrad import Device, Tensor
-from tinygrad.device import Compiled
 
 if __name__ == "__main__":
   # TODO: why isn't this type inferred?
-  device: Compiled = Device["METAL"]
+  device = Device["METAL"]
   lib = device.compiler.compile(gemm)
   prg = device.runtime("matmul_custom_float32", lib)
 
