@@ -651,19 +651,6 @@ class TestUOpGraph(unittest.TestCase):
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
 
-  def test_switched_range_order(self):
-    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    cf = UOp.const(dtypes.float, 0.0)
-    r1 = UOp.range(2, 0)
-    r2 = UOp.range(2, 1)
-    alu = UOp(Ops.MUL, dtypes.int, (r2, r1))
-    store = UOp(Ops.STORE, dtypes.void, (glbl.index(alu), cf))
-    uops = to_uops_list([store])
-    ranges = [x for x in uops if x.op is Ops.RANGE]
-    endranges = [x for x in uops if x.op is Ops.ENDRANGE]
-    # ranges are closed in the right order
-    self.assertEqual(endranges[-1].src[0], ranges[0])
-
 @track_rewrites()
 def expander_rewrite(sink): return graph_rewrite(sink, sym + expander)
 

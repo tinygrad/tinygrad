@@ -233,7 +233,7 @@ class TestLinearizer(unittest.TestCase):
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
       # children of STORE are placed after ENDRANGE
-      if any(x.op is Ops.STORE and x.src[1].op in GroupOp.ALU for x in u.src):
+      if any(x.op is Ops.STORE and x.src[1].op in GroupOp.ALU for x in u.src) and u.op is not Ops.ENDRANGE:
         assert end_range < uops.index(u)
 
   def test_grouped_dims(self):

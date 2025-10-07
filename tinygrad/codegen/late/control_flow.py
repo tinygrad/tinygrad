@@ -66,9 +66,9 @@ pm_control_flow_ends = PatternMatcher([
 class CFGContext:
   def __init__(self, sink:UOp):
     # there are 3 relationships between ranges:
-    # nested, meaning range y is a dependency of endrange x and range x is a dependency of endrange y
-    # dependent, meaning range y is a dependency of endrange x and range x is not a dependency of endrange y (i.e. load in range x depends on store in range y)
-    # independent, range y is not a dependency if endrange x
+    # nested, meaning endrange y is a dependency of endrange x and range x is a dependency of endrange y
+    # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y (i.e. load in range x depends on store in range y)
+    # independent, endrange y is not a dependency of endrange x
     # ifs are always independent
     deps: dict[UOp, set[UOp]] = {}
     nesting: dict[UOp, UOp] = {}
