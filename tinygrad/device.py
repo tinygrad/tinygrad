@@ -47,7 +47,7 @@ class _Device:
       os.environ[device] = "1"   # we set this in environment for spawned children
       return device
     except StopIteration as exc: raise RuntimeError("no usable devices") from exc
-Device = _Device()
+Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
 
 # **************** Profile ****************
