@@ -1,7 +1,7 @@
 import sys
 from tinygrad import Tensor, fetch, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 from tinygrad.schedule.kernelize import get_kernelize_map
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.helpers import RANGEIFY
