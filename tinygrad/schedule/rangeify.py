@@ -361,22 +361,78 @@ pm_rangeify = pm_mops+PatternMatcher([
 # *****************
 # 3.2 Winograd
 
+# Practice:
+winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
+winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
+winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]] # applying At in pre-order doubles compile time
+winograd_B = [list(col) for col in zip(*winograd_Bt)]
+winograd_A = [list(col) for col in zip(*winograd_At)]
+
+def synth_mat(mat: list[list[int|float]], o: UOp, r: UOp, out_dtype=dtypes.int) -> UOp:
+  def balanced_sum(xs: list[UOp], dtype) -> UOp:
+    if not xs:            return UOp.const(dtype, 0)
+    if len(xs) == 1:      return xs[0]
+    mid = len(xs)//2
+    return UOp(Ops.ADD, dtype, src=(balanced_sum(xs[:mid], dtype),
+                                    balanced_sum(xs[mid:], dtype)))
+  # shape + sanity
+  rows = len(mat)
+  assert rows > 0, "empty matrix"
+  cols = len(mat[0])
+  assert all(len(row) == cols for row in mat), "ragged rows in mat"
+  # affine index i = r*cols + o   (row-major flatten)
+  i = UOp(Ops.ADD, dtypes.index, src=(
+        UOp(Ops.MUL, dtypes.index, src=(r, UOp.const(dtypes.index, cols))),
+        o))
+  # build masked cells; skip zeros to keep graph small
+  cells: list[UOp] = []
+  idx = 0
+  for rr in range(rows):
+    for cc in range(cols):
+      val = mat[rr][cc]
+      if val != 0:
+        cells.append(
+          UOp(Ops.WHERE, out_dtype, src=(
+            UOp(Ops.CMPEQ, dtypes.bool, src=(i, UOp.const(dtypes.index, idx))),
+            UOp.const(out_dtype, val),
+            UOp.const(out_dtype, 0)))
+        )
+      idx += 1
+  return balanced_sum(cells, out_dtype)
+
+def matmul_write(ctx: RangeifyContext, n:int, n_node: UOp, B: list[list[int]], start: UOp) -> Optional[UOp]:
+  """
+  Replace n's implementation location with k.
+  synthesize B in terms of k and n, do matmul to reduce. This happens after 
+  start
+  """
+  k = ctx.new_range(n, axistype=AxisType.REDUCE)
+  #if n_node.arg[0] != 1: return None
+  new_start = start.substitute({n_node: k})
+  # if new_start is start:
+  #   return None
+  print("new_start",new_start)
+  B_uop = synth_mat(B, n_node, k)
+  return UOp(Ops.REDUCE, dtypes.int, src=(UOp(Ops.MUL, dtypes.int, src=(new_start, B_uop)), k), arg=Ops.ADD)
+
+
 def winoguard(redu):
  if redu.arg is not Ops.ADD or redu.src[0].op is not Ops.MUL: return None
  a, b = redu.src[0].src
  three_axes = {ax for ax in redu.src[1:] if ax.op is Ops.RANGE and int(ax.vmax+1)==3}
  oa, ob = [], []
  def collect_pairs(x, three_axes, out):
-   if not three_axes: return
-   if x.op is Ops.ADD and len(x.src) == 2:
-       a, b = x.src
-       if a.op is Ops.RANGE and b.op is Ops.RANGE:
-           if a in three_axes and b.arg[1] is AxisType.LOOP:
-               three_axes.remove(a); out.append((b,a))
-           elif b in three_axes and a.arg[1] is AxisType.LOOP:
-               three_axes.remove(b); out.append((a,b))
-   if three_axes:
-       for s in x.src: collect_pairs(s, three_axes, out)
+  if x.op is Ops.BUFFERIZE: return
+  if not three_axes: return
+  if x.op is Ops.ADD and len(x.src) == 2:
+      a, b = x.src
+      if a.op is Ops.RANGE and b.op is Ops.RANGE:
+          if a in three_axes and b.arg[1] is AxisType.LOOP:
+              three_axes.remove(a); out.append((b,a,x))
+          elif b in three_axes and a.arg[1] is AxisType.LOOP:
+              three_axes.remove(b); out.append((a,b,x))
+  if three_axes:
+      for s in x.src: collect_pairs(s, three_axes, out)
  collect_pairs(a, set(three_axes), oa)
  collect_pairs(b, set(three_axes), ob)
  # decide which branch is weights vs activations and send the idx of the inpt
@@ -385,66 +441,116 @@ def winoguard(redu):
  return None
 
 def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
- # pick the activation branch (the one that depends on output spatial + (ky,kx))
- axes = winoguard(redu)
- if axes is None: return None
- print("AXES-UOP", axes)
- os = [axes[1][i][0].src[0].arg for i in range(len(axes[1]))]
- ts = [(o+3)//4 for o in os]
- print("AXES", ts)
- #os = axes[1][0][0]
+  """
+  Transform the activation + weight branches into a Winograd-style shape plumbing
+  using only CAST-based coefficient placeholders, while keeping outward ox/oy loops.
 
- return None
+  Guardrails to avoid infinite re-entry and shape/rank issues:
+  - Run only on REDUCE(ADD) of a single MUL.
+  - Do NOT re-run if any 6-wide REDUCE axes already exist under this node.
+  - Do NOT re-run if oy/ox index exprs already contain DIV/MOD.
+  - Keep the number of *free* axes identical before/after: (oy, ox, ...outer...) only.
+  - Make the 6-wide axes explicit REDUCE axes (r6, c6) and fully consume them.
+  - Fully consume (ky,kx) inside Ghat before the Hadamard multiply.
+  """
+  # 1) Basic shape: must be sum of product
+  if redu.arg is not Ops.ADD or redu.src[0].op is not Ops.MUL:
+    return None
+
+  # 2) Skip if a 6-wide REDUCE is already present (prevents re-entry)
+  if any(u.op is Ops.RANGE and int(u.vmax+1) == 6 and u.arg[1] is AxisType.REDUCE for u in redu.toposort()):
+    return None
+
+  act_like, w_like = redu.src[0].src
+  # Prefer the activation-like term to be the array INDEX
+  if act_like.op is not Ops.INDEX and w_like.op is Ops.INDEX:
+    act_like, w_like = w_like, act_like
+  if act_like.op is not Ops.INDEX or w_like.op is not Ops.INDEX:
+    return None
+
+  # Extract oy/ox indexing expressions (assume NH... not present in this toy example)
+  if len(act_like.src) < 3:
+    return None
+  oy_add = act_like.src[1]
+  ox_add = act_like.src[2]
+
+  # 3) Guard: if DIV/MOD already present on oy/ox, we've already split -> bail
+  def _has_divmod(u: UOp) -> bool:
+    return any(v.op in {Ops.IDIV, Ops.MOD} for v in u.toposort())
+  if _has_divmod(oy_add) or _has_divmod(ox_add):
+    return None
+
+  # 4) Find the two 3-wide REDUCE axes (ky,kx) among this REDUCE's axes
+  red_axes = [ax for ax in redu.src[1:] if ax.op is Ops.RANGE and ax.arg[1] is AxisType.REDUCE]
+  # keep exactly the 3-wide ones
+  red_axes = [ax for ax in red_axes if int(ax.vmax+1) == 3]
+  if len(red_axes) != 2:
+    return None
+  ky, kx = red_axes
+
+  # 5) Algebraic split of oy/ox into tiles+in-tile (no new outer loops born)
+  zero_map = {ax: ax.const_like(0) for ax in (ky, kx)}
+  oy_base = oy_add.substitute(zero_map).simplify()
+  ox_base = ox_add.substitute(zero_map).simplify()
+  ty = (oy_base // 4).simplify()  # tile-y
+  iy = (oy_base %  4).simplify()  # in-tile-y
+  tx = (ox_base // 4).simplify()  # tile-x
+  ix = (ox_base %  4).simplify()  # in-tile-x
+
+  # 6) Create 6-wide REDUCE axes (these will be eaten by the output transform)
+  c6 = ctx.new_range(6, axistype=AxisType.REDUCE)
+  r6 = ctx.new_range(6, axistype=AxisType.REDUCE)
+  v6 = ctx.new_range(6, axistype=AxisType.REDUCE)
+  u6 = ctx.new_range(6, axistype=AxisType.REDUCE)
+
+  # 7) Build Winograd input transform Dhat[c6, r6] using placeholder coefficients.
+  Bt_cv = synth_mat(winograd_Bt, v6, c6, out_dtype=redu.dtype)
+  B_ur = synth_mat(winograd_B, r6, u6, out_dtype=redu.dtype)
+  X_vu = act_like.replace(
+    src=(act_like.src[0], ty*4 + v6, tx*4 + u6),
+    dtype=act_like.dtype,
+    arg=act_like.arg
+  ).simplify()
+  col_mul = UOp(Ops.MUL, redu.dtype, src=(X_vu, B_ur))
+  col_red = UOp(Ops.REDUCE, redu.dtype, src=(col_mul, u6), arg=Ops.ADD)
+  row_mul = UOp(Ops.MUL, redu.dtype, src=(Bt_cv, col_red))
+  Xhat = UOp(Ops.REDUCE, redu.dtype, src=(row_mul, v6), arg=Ops.ADD)
+
+  # 8) Build Ghat[c6, r6] by *fully* consuming (ky,kx) under w_like.
+  #    Synthesize actual Winograd G coefficients.
+  G_rk = synth_mat(winograd_G, kx, r6, out_dtype=redu.dtype)
+  wr_r = UOp(Ops.MUL, redu.dtype, src=(w_like, G_rk))
+  G_r  = UOp(Ops.REDUCE, redu.dtype, src=(wr_r, kx), arg=Ops.ADD)
+  G_ck = synth_mat(winograd_G, ky, c6, out_dtype=redu.dtype)
+  gr_c = UOp(Ops.MUL, redu.dtype, src=(G_r, G_ck))
+  Ghat = UOp(Ops.REDUCE, redu.dtype, src=(gr_c, ky), arg=Ops.ADD)
+
+  # 9) Hadamard multiply Mhat[c6, r6] = Xhat[c6, r6] * Ghat[c6, r6]
+  Mhat = UOp(Ops.MUL, redu.dtype, src=(Xhat, Ghat))
+
+  # 10) Output transform: reduce r6 then c6 using synthesized A(ix), At(iy) coefficients.
+  #     These must depend *only* on ix/iy (no kernel or 6-wide axes).
+  A_ix  = synth_mat(winograd_A, ix, r6, out_dtype=redu.dtype)
+  At_iy = synth_mat(winograd_At, c6, iy, out_dtype=redu.dtype)
+
+  tmp = UOp(Ops.REDUCE, redu.dtype, src=(UOp(Ops.MUL, redu.dtype, src=(Mhat, A_ix)), r6), arg=Ops.ADD)
+  out = UOp(Ops.REDUCE, redu.dtype, src=(UOp(Ops.MUL, redu.dtype, src=(tmp,  At_iy)), c6), arg=Ops.ADD)
+
+  # 11) Return a *pure expression* (no bufferize/store). Scheduler will handle buffers.
+  return out
 
 winograd_rewrite = PatternMatcher([
  (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
  ])
 
 #*****************
-# Practice:
-
-# practice_rewrite = PatternMatcher([
-#   (UPat(Ops.ADD, name="plus", src=(UPat(Ops.INDEX, name="idx"),)), lambda ctx,idx,plus: practice_write(ctx, idx, plus))  
-#  ])
-A = [1, 2, 5, 4 ,5 ,6 ,71 ,80,9]
 
 def practice_write(ctx: RangeifyContext, plus: UOp):
+  return None
   if plus.src[0].op is not Ops.INDEX: return None
   idx = plus.src[0]
-  const = UOp(Ops.CONST, dtypes.int, arg=3)
-  k = ctx.new_range(3, axistype=AxisType.REDUCE)
-  oy = idx.src[1]
-  nidx = UOp(Ops.INDEX, dtypes.int, arg=None,src=(idx.src[0], k, idx.src[2]))
-  print("x17",idx.src[2])
-  # mat = UOp()
-  i = UOp(Ops.ADD, dtypes.index, src=(UOp(Ops.MUL, dtypes.index, src=(oy, UOp(Ops.CONST, dtypes.int, arg=3))), k))
-  def select_add(A, i, dtype=dtypes.int, j=0):
-    if j == len(A): return UOp.const(dtype, 0)
-    cell = UOp(Ops.WHERE, dtype, src=(
-              UOp(Ops.CMPEQ, dtypes.bool, src=(i, UOp.const(dtypes.index, j))),
-              UOp.const(dtype, A[j]),
-              UOp.const(dtype, 0)))
-    return UOp(Ops.ADD, dtype, src=(cell, select_add(A, i, dtype, j+1)))
-
-  def select_add_bt(A, i, dtype=dtypes.int, lo=0, hi=None):
-    if hi is None: hi = len(A)
-    if lo == hi:   return UOp.const(dtype, 0)
-    if hi - lo == 1:
-      return UOp(Ops.WHERE, dtype, src=(
-              UOp(Ops.CMPEQ, dtypes.bool, src=(i, UOp.const(dtypes.index, lo))),
-              UOp.const(dtype, A[lo]),
-              UOp.const(dtype, 0)))
-    mid = (lo + hi) // 2
-    return UOp(Ops.ADD, dtype, src=(
-            select_add_bt(A, i, dtype, lo, mid),
-            select_add_bt(A, i, dtype, mid, hi)))
-  mega = select_add_bt(A, i)
-  print("mega",mega)
-
-  mul = UOp(Ops.MUL, dtypes.int, src=(nidx, UOp(Ops.CAST, dtypes.int, src=(mega,))))
-  red = UOp(Ops.REDUCE, dtypes.int, src=(mul, k), arg=Ops.ADD)
-  print("red",red)
-  return red
+  oy = idx.src[2]
+  return matmul_write(ctx, 3, oy, A, plus)
 
 practice_rewrite = PatternMatcher([
   (UPat(Ops.ADD, name="plus"), lambda ctx, plus: practice_write(ctx, plus))  
@@ -692,8 +798,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # rangeify
   tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
-  tsink = graph_rewrite(tsink, winograd_rewrite, ctx=RangeifyContext(), bottom_up=True, name="winograd")
-  tsink = graph_rewrite(tsink, practice_rewrite, ctx=RangeifyContext(), bottom_up=True, name="practice")
+  #tsink = graph_rewrite(tsink, winograd_rewrite, ctx=RangeifyContext(), bottom_up=True, name="winograd")
+  #tsink = graph_rewrite(tsink, practice_rewrite, ctx=RangeifyContext(), bottom_up=True, name="practice")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
