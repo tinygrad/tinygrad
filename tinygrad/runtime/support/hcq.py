@@ -306,7 +306,6 @@ class HCQProgram(Generic[HCQDeviceType]):
     if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, name, lib, base)]
 
   @staticmethod
-  @suppress_finalizing
   def _fini(dev, buf, spec): dev.allocator.free(buf, buf.size, spec)
 
   def fill_kernargs(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=(), kernargs:HCQBuffer|None=None) -> HCQArgsState:

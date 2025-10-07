@@ -85,7 +85,7 @@ def word_wrap(x, wrap=80):
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
-    except (AttributeError, TypeError, ImportError):
+    except (RuntimeError, AttributeError, TypeError, ImportError):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
