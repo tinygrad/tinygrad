@@ -455,6 +455,7 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
+  if valid.op_in_parents(Ops.LOAD): return None  # this should only be for indexing, skip if there's a LOAD
   ret:list[UOp] = []
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
