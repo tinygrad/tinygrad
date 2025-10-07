@@ -13,7 +13,7 @@ import traceback, builtins
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import DTYPES_DICT, dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable, sint
-from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing, suppress_finalizing
+from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
 from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
@@ -385,9 +385,10 @@ class RemoteProgram:
     self.datahash = self.dev.conn.req.h(lib)
     self.dev.q(ProgramAlloc(self.name, self.datahash))
     super().__init__()
+    weakref.finalize(self, self._fini, self.dev, self.name, self.datahash)
 
-  @suppress_finalizing
-  def __del__(self): dev.q(ProgramFree(name, datahash))
+  @staticmethod
+  def _fini(dev:RemoteDevice, name:str, datahash:str): dev.q(ProgramFree(name, datahash))
 
   def __call__(self, *bufs, global_size=None, local_size=None, vals:tuple[int, ...]=(), wait=False):
     ret = self.dev.q(ProgramExec(self.name, self.datahash, bufs, vals, global_size, local_size, wait), wait=wait)

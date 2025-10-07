@@ -3,7 +3,7 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent, suppress_finalizing
+from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -305,8 +305,8 @@ class HCQProgram(Generic[HCQDeviceType]):
     self.args_state_t, self.dev, self.name, self.kernargs_alloc_size = args_state_t, dev, name, kernargs_alloc_size
     if PROFILE: Compiled.profile_events += [ProfileProgramEvent(dev.device, name, lib, base)]
 
-  @suppress_finalizing
-  def __del__(self): dev.allocator.free(buf, buf.size, spec)
+  @staticmethod
+  def _fini(dev, buf, spec): dev.allocator.free(buf, buf.size, spec)
 
   def fill_kernargs(self, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=(), kernargs:HCQBuffer|None=None) -> HCQArgsState:
     """
