@@ -65,22 +65,31 @@ pm_control_flow_ends = PatternMatcher([
 
 class CFGContext:
   def __init__(self, sink:UOp):
-    self.edges: dict[UOp, UOp] = {}
+    # there are 3 relationships between ranges:
+    # nested, meaning range y is a dependency of endrange x and range x is a dependency of endrange y
+    # dependent, meaning range y is a dependency of endrange x and range x is not a dependency of endrange y (i.e. load in range x depends on store in range y)
+    # independent, range y is not a dependency if endrange x
+    # ifs are always independent
     deps: dict[UOp, set[UOp]] = {}
-    last_endrng: UOp|None = None
-    last_endif: UOp|None = None
-    # if a range has ended and range x is used inside it means x is an outer range
-    # otherwise the ranges are separate and x needs to be scheduled after the range has ended
-    # ifs are always separate
+    nesting: dict[UOp, UOp] = {}
     for u in sink.toposort():
       deps[u] = {u} if u.op in (Ops.RANGE, Ops.IF) else set().union(*(deps[s] for s in u.src))
-      if u.op in (Ops.ENDRANGE, Ops.ENDIF):
-        last = last_endrng if u.op is Ops.ENDRANGE else last_endif
-        if last is not None:
-          if u.src[0] in deps[last]: self.edges[last.src[0]] = u.src[0]
-          else: self.edges[u.src[0]] = last
-        if u.op is Ops.ENDRANGE: last_endrng = u
-        else: last_endif = u
+      if u.op is Ops.ENDRANGE:
+        for n in [x for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and u.src[0] in deps[x] and x not in nesting]: nesting[n] = u
+      if u.op is Ops.SINK:
+        for n in [x for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and x not in nesting]: nesting[n] = u
+      if u.op in (Ops.ENDRANGE, Ops.ENDIF): deps[u] |= {u}
+
+    self.edges: dict[UOp, UOp] = {}
+    siblings: dict[UOp, list[UOp]] = {}
+    for k,v in nesting.items(): siblings.setdefault(v, []).append(k)
+    for k,v in siblings.items():
+      # sibling ranges that have dependencies on other siblings need to run after them
+      endranges = sorted([x for x in v if x.op is Ops.ENDRANGE], key=lambda x: len([y for y in v if y in deps[x]]))
+      zipped = zip([k.src[0]] + endranges, endranges) if k.op is Ops.ENDRANGE else zip(endranges, endranges[1:])
+      for x,y in zipped: self.edges[y.src[0]] = x
+      endifs = [x for x in v if x.op is Ops.ENDIF]
+      for x,y in zip(endifs, endifs[1:]): self.edges[y.src[0]] = x
 
 pm_control_flow_starts = PatternMatcher([
   (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=(x.src[0], y)) if (y:=ctx.edges.get(x)) is not None else None),
