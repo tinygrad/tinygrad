@@ -481,7 +481,6 @@ class AMDProgram(HCQProgram):
 
     super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
                      base=self.lib_gpu.va_addr)
-    weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):

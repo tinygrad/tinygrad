@@ -257,7 +257,6 @@ class NVProgram(HCQProgram):
 
     # NV's kernargs is constbuffer, then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
     super().__init__(NVArgsState, self.dev, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
-    weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def _parse_elf_info(self, sh, start_off=0):
     while start_off < sh.header.sh_size:
