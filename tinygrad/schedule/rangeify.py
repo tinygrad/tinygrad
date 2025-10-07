@@ -735,7 +735,8 @@ def do_sub_recurse(s:UOp):
   # here we actually do the SUBSTITUTE
   if x in keys: return values[keys.index(x)]
   # we filter any keys that aren't in parents. this keeps the algorithm O(output graph size)
-  new_kv = {k:v for k,v in zip(keys,values) if k in x.sparents}
+  # NOTE: if k was x, it would trigger above, so it's safe to use parents instead of sparents
+  new_kv = {k:v for k,v in zip(keys,values) if k in x.parents}
   # if there's no SUBSTITUTEs left, we can just return x
   if len(new_kv) == 0: return x
   # then we add SUBSTITUTE to all parents
