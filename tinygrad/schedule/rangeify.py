@@ -189,16 +189,12 @@ def map_pad(idx:UOp, r:UOp):
   for i,(sh,(s,e)) in enumerate(zip(r.shape, r.arg)):
     if s == 0 and e == 0: continue
     where = UOp.const(dtypes.bool, True)
-    if resolve(e > 0) and not isinstance(idx.dtype, ImageDType): where = where & (ret[i] < (sh-e))
-    if resolve(s > 0) and not isinstance(idx.dtype, ImageDType): where = where & (ret[i] >= s)
+    if not isinstance(idx.dtype, ImageDType) and resolve(e > 0): where = where & (ret[i] < (sh-e))
+    if not isinstance(idx.dtype, ImageDType) and resolve(s > 0): where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
     with Context(TRACK_MATCH_STATS=0):
       ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
   # PAD is with 0
-  # if isinstance(r.src[0].dtype, ImageDType):
-  #   print(r.src[0].dtype)
-    
-  #   return r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg)
   return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0x0))
 
 def map_expand(r:UOp, idx:UOp):
