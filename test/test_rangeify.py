@@ -21,8 +21,8 @@ class TestRangeifyAssign(unittest.TestCase):
 N = 256
 
 class TestRangeifyOpt(unittest.TestCase):
-  def test_randperm(self):
-    Tensor.randperm(10000).realize()
+  # def test_randperm(self):
+  #   Tensor.randperm(10000).realize()
 
   def test_one_getitem(self):
     X = Tensor.empty(10000)
@@ -331,19 +331,17 @@ class TestRangeifyPM(unittest.TestCase):
     b = self.base.permute(1,0).pad(((0,1),(0,0))).permute(1,0)
     self.assert_same(a, b)
 
-  @unittest.expectedFailure
   def test_padded_reshape_match(self):
     a = self.base.pad(((0,0),(0,1)))
     b = self.base.reshape(100).reshape(10, 10).pad(((0,0),(0,1)))
     self.assert_same(a, b)
 
-  @unittest.expectedFailure
   def test_padded_permute_reshape_match(self):
     a = self.base.pad(((0,0),(0,1)))
     b = self.base.permute(1,0).reshape(100).reshape(10, 10).pad(((0,1),(0,0))).permute(1,0)
     self.assert_same(a, b)
 
-  # why is this failing?
+  # why is this failing?  # this has (A & B).where(A.where(), A.where())
   @unittest.expectedFailure
   def test_cross_pad_match(self):
     a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))

@@ -349,7 +349,14 @@ def might_end_axis(idx:UOp):
   if to_end_axis: return idx.replace(src=(idx.src[0].realize(arg=tuple(to_end_axis)),)+idx.src[1:], arg=None)
   return idx.replace(arg=None)
 
+def simplify_given_gate(gate: UOp, true: UOp, false: UOp):
+  newt = true.substitute({u:u.src[1] for u in true.sparents if u.op is Ops.WHERE and u.src[0] is gate})
+  newf = false.substitute({u:u.src[2] for u in false.sparents if u.op is Ops.WHERE and u.src[0] is gate})
+  return gate.where(newt, newf) if newt is not true or newf is not false else None
+
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
+
+from tinygrad.uop.symbolic import invalid_pat, uop_given_valid
 
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
@@ -380,6 +387,12 @@ pm_rangeify = pm_mops+PatternMatcher([
     {Ops.STORE, Ops.COPY, Ops.BUFFER_VIEW, Ops.DEVICE, Ops.BIND, Ops.CONTIGUOUS, Ops.NOOP})),), allow_any_len=True, name="x"),
    lambda x: x.src[0].replace(src=tuple([s.index(*x.src[1:]) for s in x.src[0].src]))),
   (UPat(Ops.INDEX, src=(UPat(Ops.REDUCE_AXIS, name="red"),), allow_any_len=True, name="idx"), map_reduce),
+
+  # simplify valid
+  (UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), lambda cond,x,i: cond.where(newx, i) if
+    (newx:=uop_given_valid(cond, x)) is not x else None),
+  # simplify branch given gate value
+  (UPat.var("gate").where(UPat.var("true"), UPat.var("false")), simplify_given_gate),
 
   # assert if there's any index we didn't process
   (UPat(GroupOp.All-{Ops.REALIZE, Ops.BUFFERIZE, Ops.MSELECT, Ops.MSTACK}).f(Ops.INDEX, name="x"), unprocessed_index),
