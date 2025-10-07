@@ -1,6 +1,6 @@
 import unittest
 import torch
-import tinygrad.frontend.torch
+import tinygrad.nn.torch
 torch.set_default_device("tiny")
 import numpy as np
 

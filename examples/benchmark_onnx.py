@@ -1,6 +1,6 @@
 import sys, time
 from tinygrad import TinyJit, GlobalCounters, fetch, getenv
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 from extra.onnx_helpers import get_example_inputs, validate
 
 def load_onnx_model(onnx_file):
