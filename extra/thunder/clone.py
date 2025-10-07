@@ -3,6 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, graph_rewrite, AxisType, PatternMatcher, 
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import prod
 from tinygrad.schedule.rangeify import pm_mops
+from tinygrad.codegen.simplify import pm_flatten_range
 
 TILE_DIM = 8
 N_BLOCK = 4
@@ -22,16 +23,22 @@ def glbl(nm, dtype, sz): return UOp(Ops.DEFINE_GLOBAL, dtype.ptr(prod(sz), AddrS
 def rt(nm, dtype, sz): return UOp(Ops.DEFINE_REG, dtype.ptr(prod(sz), AddrSpace.REG), arg=nm).reshape(sz)
 
 def zero(reg:UOp, *endrngs):
-  rngs = [rng(s) for s in reg.shape]
+  rngs = [rng(s//TILE_DIM)*TILE_DIM for s in reg.shape]
+  rngs = [x+rng(TILE_DIM) for x in rngs]
+
   return reg[*rngs].store(UOp.const(reg.dtype.base, 0.0), *rngs, *endrngs, dtype=reg.dtype).reshape(reg.shape)
 
 def load(reg:UOp, gl:UOp, *idxs):
-  rngs = [rng(s) for s in reg.shape]
+  rngs = [rng(s//TILE_DIM)*TILE_DIM for s in reg.shape]
+  rngs = [x+rng(TILE_DIM) for x in rngs]
+
   grngs = [i*(r.vmax+1)+r for i,r in zip(idxs,rngs)]
   return reg[*rngs].store(gl[*grngs].load(), *rngs, dtype=reg.dtype).reshape(reg.shape)
 
 def store(gl:UOp, reg:UOp, *idxs):
-  rngs = [rng(s) for s in reg.shape]
+  rngs = [rng(s//TILE_DIM)*TILE_DIM for s in reg.shape]
+  rngs = [x+rng(TILE_DIM) for x in rngs]
+
   # TODO: why does this not have shape?
   #rngs = [rng(s) for s in (N_BLOCK*TILE_DIM, M_BLOCK*TILE_DIM)]
   grngs = [i*(r.vmax+1)+r for i,r in zip(idxs,rngs)]
@@ -42,12 +49,11 @@ def mma_AB(outacc:UOp, a:UOp, b:UOp, *endrngs):
   # meta::unroll_i_j_in_range -- split on TILE_DIM
   rngs = [rng(s//TILE_DIM)*TILE_DIM for s in outacc.shape]
   red = rng(a.shape[1]//TILE_DIM, AxisType.REDUCE)*TILE_DIM
-  # meta::unroll_i_in_range -- split reudce on TILE_DIM
+  # meta::unroll_i_in_range -- split reduce on TILE_DIM
   rngs = [x+rng(TILE_DIM) for x in rngs]
   red = red + rng(TILE_DIM, AxisType.REDUCE)
-  store_rngs = [x for x in UOp.sink(*rngs, red).toposort() if x.op is Ops.RANGE]
   acc = outacc[*rngs].load(red) + a[rngs[0],red].load() * b[red,rngs[1]].load()
-  return outacc[*rngs].store(acc, *store_rngs, *endrngs, dtype=outacc.dtype).reshape(outacc.shape)
+  return outacc[*rngs].store(acc, *rngs, red, *endrngs, dtype=outacc.dtype).reshape(outacc.shape)
 
 if __name__ == "__main__":
   # TODO: support string ranges
@@ -69,7 +75,7 @@ if __name__ == "__main__":
   d_reg = mma_AB(d_reg, a_reg, b_reg, k)
   sink = store(gl_d, d_reg, tg_id_y, tg_id_x).sink(arg=KernelInfo())
 
-  sink = graph_rewrite(sink, pm_mops, name="pm_mops")
+  sink = graph_rewrite(sink, pm_mops+pm_flatten_range, name="pm_mops")
 
   from tinygrad.codegen.gpudims import pm_add_gpudims
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=Device.default.renderer, name="gpudims")
