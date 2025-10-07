@@ -175,7 +175,8 @@ class RangeifyContext:
 def map_reshape(idx:UOp, r:UOp):
   acc = 1
   to_sum = []
-  for s,src in list(zip(idx.shape, idx.src[1:]))[::-1]:
+  idx_shape = [x.vmax+1 for x in idx.src[1:]]
+  for s,src in list(zip(idx_shape, idx.src[1:]))[::-1]:
     to_sum.append(acc*src)
     acc *= s
   mish = sum(to_sum, start=UOp.const(dtypes.index, 0))

@@ -182,6 +182,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
                                                    Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
       return None
     if self.op is Ops.INDEX and self.src[0].op is Ops.ASSIGN and self.src[0].src[1].op is Ops.KERNEL: return None
+    if self.op is Ops.INDEX: return None
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
@@ -194,6 +195,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
+    #if self.op is Ops.LOAD: return ShapeTracker.from_shape((self.dtype.count,))
+
+    # skip the INDEX
     if self.op is Ops.STORE and self.dtype is not dtypes.void: return self.src[0].src[0].st
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
     if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st
@@ -332,7 +336,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       i = (i,)
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
-  def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
+  def store(self, *src:UOp, **kwargs):
+    return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
+    #return UOp(Ops.STORE, self.dtype, (self,)+src, **kwargs)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def alu(self, op, *src:UOp, **kwargs):
