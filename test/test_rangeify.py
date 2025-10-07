@@ -311,7 +311,7 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     c = c.relu()
 
     res = Tensor.cat(a, c, dim=0)
-    self.assertEquals(res.numpy()[-1, :16].tolist(), [512] * 16)
+    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
 if __name__ == '__main__':
   unittest.main()
