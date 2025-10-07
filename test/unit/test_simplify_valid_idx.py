@@ -104,8 +104,9 @@ class TestValidIdxSimplification(unittest.TestCase):
   def test_simplify_valid_from_div(self):
     x = Variable("x", -100, 100)
     valid = ((x<0)&((100%x).cast(dtypes.bool)))
-    # NOTE: this simplifies the (100%x) part somehow
+    # NOTE: this simplifies the (100%x) part somehow, still has two clauses
     self.assertIsNotNone(simplify_valid(valid))
+    self.assertEqual(len(list(valid.split_uop(Ops.AND))), 2)
 
   @unittest.expectedFailure  # TODO: fix
   def test_from_merge_views(self):
