@@ -2573,14 +2573,17 @@ class TestUOpBecome(unittest.TestCase):
     assert b.uop is c.uop
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(c.uop, {})
 
-  @expect_rangeify_fails
   def test_setitem_becomes_subbuffer(self):
     a = Tensor.full((4,), 2.).contiguous().realize()
     b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
     b.realize()
     assert a.uop.is_realized
     assert a.uop.buffer._base is None
-    # b is a subbuffer of a
+    # b is a subbuffer of a (buffer_view in non rangeify, rangeify just makes a shrink)
+    if RANGEIFY:
+      assert b.uop.op_in_backward_slice_with_self(Ops.SHRINK)
+      assert b.uop.base is a.uop.base
+      return
     assert b.uop.op is Ops.BUFFER_VIEW
     assert b.uop.src[0] is a.uop
 
