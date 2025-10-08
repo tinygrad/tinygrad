@@ -274,16 +274,10 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
 ])
 
-def chain_insert(chain, b, op):
-  if chain.op is not op or b.order_add > chain.src[1].order_add: return chain.alu(op, b)
-  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
-
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.index, name='x'), lambda x:
-    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
-  (UPat(Ops.ADD, dtype=dtypes.index, name="x"), lambda x: functools.reduce(operator.add, sorted(x.split_uop(Ops.ADD), key=lambda u: u.order_add)))
+  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
@@ -379,7 +373,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
-  # ** combine terms (opinionated), can make it harder to substitute valids **
+  # ** combine terms (opinionated) **
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
@@ -411,13 +405,10 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   # don't simplify any other gates, can lead to OOB, we substitute them back later
   uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
-  all_candidates = []
   # simplify uop given that valid is True
-  for i, (expr,v) in enumerate(bounds.items()):
+  for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
-    # if the expr is an add we try and factorize so its more likely to substitute
-    if expr.op is Ops.ADD: uop = uop.factor(expr)
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
     if v0 > v1: return None
     # whole node became a const
@@ -430,9 +421,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort():
-      candidates.append([tup:=(expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype))])
-      all_candidates.append(tup)
+    if expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -441,9 +430,6 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
       elif all_same(newuops): uop = newuops[0]
-
-  uop = uop.factor(*(e[0] for e in all_candidates))
-  uop = uop.substitute(sub_dict:=dict(all_candidates)).simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
 
   # put the loads back in
   uop = uop.substitute({v:k for k,v in load_subs.items()})
@@ -455,6 +441,7 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
+  if valid.op_in_backward_slice_with_self(Ops.LOAD): return None  # this should only be for indexing, skip if there's a LOAD
   ret:list[UOp] = []
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))

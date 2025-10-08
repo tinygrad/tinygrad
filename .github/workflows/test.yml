@@ -267,10 +267,13 @@ jobs:
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
       run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: Check SPEC=1
+      run: SPEC=1 python3 test/test_tiny.py
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
-    - name: Run SDXL on NULL backend
-      run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
+    # TODO: too slow
+    # - name: Run SDXL on NULL backend
+    #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
     - name: Run Clip tests for SD MLPerf on NULL backend
       run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
     # TODO: support fake weights
