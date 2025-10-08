@@ -108,8 +108,10 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
       # treat MSTACK/MSELECT like SINK
       continue
     elif len(consumer_rngs) == 0:
+      # if no consumers have ranges and this isn't realized, this doesn't have ranges either.
       continue
     elif len(consumer_rngs) == 1:
+      # if this has one consumer, it inherits the ranges from it
       out_rngs = consumer_rngs[0]
     elif len(consumer_rngs) > 1:
       # if this has two consumers, we have to merge the ranges and might create new ones
@@ -148,7 +150,7 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
       for i,s in enumerate(x.src[0].shape):
         if i in x.arg[1]: rngs[i] = rctx.new_range(s, axistype=AxisType.REDUCE)
 
-    # apply movement ops
+    # apply movement ops. this is the definition of them
     if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
     if x.op is Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
     if x.op is Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
@@ -166,6 +168,7 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
         bigwhere = bigwhere & where
         with Context(TRACK_MATCH_STATS=0):
           rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
+      # PAD is replaced with a WHERE in the big graph to inject the 0s at the right place
       rctx.pads_gate[x] = bigwhere.simplify()
     if x.op is Ops.RESHAPE:
       acc = 1
@@ -178,8 +181,12 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
       for s in x.src[0].shape[::-1]:
         ret.append(mish % s) # NOTE: simplify will turn this to CONST
         mish //= s
+      # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
       rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+
+    # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
+
     if debug:
       print("***" if x in realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
             UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
