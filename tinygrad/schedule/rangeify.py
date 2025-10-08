@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.symbolic import sym, symbolic_simple
+from tinygrad.uop.symbolic import sym, symbolic_simple, invalid_pat, uop_given_valid
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
@@ -664,6 +664,9 @@ rangeify_codegen = PatternMatcher([
   # TODO: hack for group for reduce
   (UPat(Ops.IF, src=(UPat.var("gate"), UPat(Ops.LOAD, src=(UPat.var("src"), UPat.var("barrier"))),)),
    lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
+
+  (UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), lambda cond,x,i: cond.where(newx, i) if
+    (newx:=uop_given_valid(cond, x)) is not x else None),
 ])
 
 def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
