@@ -12,10 +12,11 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, graph_rewrite
 from tinygrad.uop.symbolic import symbolic_simple
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, RANGEIFY
-from tinygrad.schedule.kernelize import merge_views, get_kernelize_map, Kernel
+from tinygrad.codegen.opt.swizzler import merge_views
+from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from test.helpers import expect_rangeify_fails, expect_nonrangeify_fails
@@ -29,7 +30,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sink = UOp.sink(t) if t.op is not Ops.SINK else t
-    becomes_map = get_kernelize_map(sink)
+    becomes_map = get_rangeify_map(sink)
     sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
   kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
@@ -67,9 +68,6 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     assert ref_img.grad is not None and ref_w.grad is not None and img.grad is not None and w.grad is not None
     np.testing.assert_allclose(img.grad.numpy(), ref_img.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
-
-@track_rewrites(name=True)
-def schedule_graph_rewrite(big_sink:UOp): return get_kernelize_map(big_sink)[big_sink]
 
 class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=1):
@@ -2244,17 +2242,11 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.empty(4).uop
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
-    b = schedule_graph_rewrite(b)
-    # NOTE: Tensor.empty(4) always creates a VIEW(BUFFER) with ShapeTracker((4,)), we simplify this to jsut a BUFFER
-    # in the scheduler because buffer already has shape (4,)
-    self.assertIs(b, a.base)
 
   def test_copy_to_same_device_alt(self):
     a = Tensor.empty(4, 4).uop
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
-    b = schedule_graph_rewrite(b)
-    self.assertIs(b.base, a.base)
 
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.as_buf()

@@ -2,7 +2,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.helpers import all_same, prod, unwrap, colored
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View, strides_for_shape, get_contraction_with_reduce
-from tinygrad.schedule.grouper import ALWAYS_CONTIGUOUS
+from tinygrad.schedule.rangeify import ALWAYS_CONTIGUOUS
 from tinygrad.dtype import ImageDType, dtypes
 
 merge_views = PatternMatcher([
