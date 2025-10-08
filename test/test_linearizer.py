@@ -6,8 +6,6 @@ from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp
 from tinygrad.device import Device, Buffer, is_dtype_supported
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, RANGEIFY
@@ -37,24 +35,6 @@ class TestLinearizer(unittest.TestCase):
     tb = Tensor.where(Tensor(False), a, b).numpy()
     np.testing.assert_equal(a.numpy(), ta)
     np.testing.assert_equal(b.numpy(), tb)
-
-  def test_multioutput(self):
-    dtype, st = dtypes.int, ShapeTracker.from_shape((8,))
-    g0, g1, g2, g3 = [UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), arg=i) for i in range(4)]
-    a = UOp(Ops.LOAD, dtype, src=(g2.view(st),))
-    b = UOp(Ops.LOAD, dtype, src=(g3.view(st),))
-    out0 = UOp(Ops.STORE, dtypes.void, src=(g0.view(st), a + b))
-    out1 = UOp(Ops.STORE, dtypes.void, src=(g1.view(st), a * b))
-    sink = UOp(Ops.SINK, src=(out0, out1))
-
-    a_t = Tensor.full(st.shape, 2).contiguous().realize()
-    b_t = Tensor.full(st.shape, 3).contiguous().realize()
-    helper_linearizer_ast(sink, [a_t, b_t], wanna_output=[a_t.numpy()+b_t.numpy(), a_t.numpy()*b_t.numpy()])
-    uops = get_program(sink, opts=[]).uops
-    stores = [u for u in uops if u.op is Ops.STORE]
-    mutable_bufs = dedup(flatten([[x for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL] for u in stores]))
-    assert len(mutable_bufs) == len(stores) == 2
-    self.assertSetEqual(set([u.arg for u in mutable_bufs]), set([0,1]))
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
@@ -436,41 +416,6 @@ class TestLinearizer(unittest.TestCase):
 
     # the global store doesn't change
     assert stores[1].src[1].dtype == dtypes.float
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  def test_skip_unmatching_upcasts(self):
-    Tensor.manual_seed(0)
-    c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(9600), arg=0, src=())
-    c1 = c0.view(ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(40, 1, 0, 0), offset=0, mask=None, contiguous=True),)))
-    c2 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(9600), arg=1, src=())
-    c3 = c2.view(ShapeTracker(views=(View(shape=(240, 40, 1, 1), strides=(1, 240, 0, 0), offset=0, mask=None, contiguous=False),)))
-    c4 = c3.load()
-    c5 = c1.store(c4)
-    ast = c5.sink()
-    opt = [Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=16),
-           Opt(op=OptOps.LOCAL, axis=1, arg=2), Opt(op=OptOps.UPCAST, axis=3, arg=2)]
-    helper_linearizer_ast(ast, [Tensor.randn(240*40).realize()], opts=[opt])
-    out = [u for u in get_program(ast, opts=opt).uops if u.op is Ops.STORE][0]
-    assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype == dtypes.float.vec(4)
-
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  def test_skip_unmatching_upcasts_with_gep(self):
-    Tensor.manual_seed(0)
-    c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=0, src=())
-    c1 = c0.view(ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(32, 1, 0, 0), offset=0, mask=None, contiguous=True),)))
-    c2 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(256), arg=1, src=())
-    c3 = c2.view(ShapeTracker(views=(View(shape=(8, 32, 1, 1), strides=(1, 8, 0, 0), offset=0, mask=None, contiguous=False),)))
-    c4 = c3.load()
-    c5 = c1.store(c4)
-    ast = c5.sink()
-    opt = [Opt(op=OptOps.LOCAL, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.LOCAL, axis=1, arg=8),
-            Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8),
-            Opt(op=OptOps.UPCAST, axis=1, arg=0), Opt(op=OptOps.UPCAST, axis=0, arg=2)]
-    helper_linearizer_ast(ast, [Tensor.randn(8*32).realize()], opts=[opt])
-    out = [u for u in get_program(ast).uops if u.op is Ops.STORE][0]
-    assert out.src[1].op is Ops.VECTORIZE and out.src[1].dtype.count != 1
 
 # *** helpers ***
 
