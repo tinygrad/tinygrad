@@ -142,12 +142,13 @@ const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
-  for (const e of source.shapes) {
-    for (let i=0; i<e.y0.length; i++) {
-      e.y0[i] = e.y0[i]*k;
-      e.y1[i] = e.y1[i]*k;
+  for (const shapes of source.views)
+    for (const e of shapes) {
+      for (let i=0; i<e.y0.length; i++) {
+        e.y0[i] = e.y0[i]*k;
+        e.y1[i] = e.y1[i]*k;
+      }
     }
-  }
   const change = (source.height*k)-source.height;
   const div = document.getElementById(tid);
   div.style.height = rect(div).height+change+"px";
@@ -273,15 +274,33 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      const line = { x:timestamps, y1:totals.map(yscale), y0:(new Array(timestamps.length).fill(0)).map(yscale), fillColor:colorScheme.BUFFER[0] };
-      data.tracks.set(k, { shapes:[line], visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
+      // generic polygon merger
+      const base0 = yscale(0);
+      const allX = Array.from(new Set(shapes.flatMap(s => s.x))).sort((a,b)=>a-b);
+      const topAt = new Map(allX.map(x => [x, base0]));
+      const lowerBound = (a, v) => { let l=0, r=a.length; while (l<r) { const m=(l+r)>>1; if (a[m] < v) l=m+1; else r=m; } return l; };
+      // for every [a,b) set the peak y1 at x
+      for (const sh of shapes) {
+        for (let i=0; i<sh.x.length-1; i++) {
+          const a = sh.x[i], b = sh.x[i+1], v = sh.y1[i];
+          for (let k = lowerBound(allX, a); k < lowerBound(allX, b); k++) {
+            const x = allX[k]; topAt.set(x, Math.min(topAt.get(x), v));
+          }
+        }
+      }
+      const sum = {x:[], y0:[], y1:[], fillColor:colorScheme.BUFFER[0]};
+      for (let i=0; i<allX.length-1; i++) {
+        const v = topAt.get(allX[i]);
+        sum.x.push(allX[i], allX[i+1]); sum.y1.push(v, v); sum.y0.push(base0, base0);
+      }
+      data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes] });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
           track.offsetY += offset;
-          if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
-          else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
+          if (tid === newFocus) { track.shapes = track.views[1]; offset += rescaleTrack(track, tid, track.scaleFactor); }
+          else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
         data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
         focusedDevice = newFocus;
