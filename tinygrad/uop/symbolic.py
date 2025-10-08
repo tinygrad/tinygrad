@@ -296,6 +296,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   # ** where folding **
+  (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), lambda cond,t,f: cond.where(
+    t.substitute_until_index({c:UOp.const(dtypes.bool, True) for c in cond.split_uop(Ops.AND)}),
+    f.substitute_until_index({c:UOp.const(dtypes.bool, False) for c in cond.split_uop(Ops.AND)}))),
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)
     if f.arg is not Invalid else None),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
