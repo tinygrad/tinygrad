@@ -41,7 +41,7 @@ DEVICE = "CPU"   # NOTE: you can change this!
 import struct
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp, Ops, AxisType
 from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
@@ -51,13 +51,14 @@ b = Buffer(DEVICE, 1, dtypes.int32).allocate().copyin(memoryview(bytearray(struc
 # NOTE: a._buf is the same as the return from cpu.allocator.alloc
 
 # describe the computation
+idx = UOp.range(UOp.const(dtypes.index, 3), 0, AxisType.LOOP)
 buf_1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 1)
 buf_2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 2)
-ld_1 = UOp(Ops.LOAD, dtypes.int32, (buf_1.view(ShapeTracker.from_shape((1,))),))
-ld_2 = UOp(Ops.LOAD, dtypes.int32, (buf_2.view(ShapeTracker.from_shape((1,))),))
+ld_1 = UOp(Ops.LOAD, dtypes.int32, (buf_1.index(idx),))
+ld_2 = UOp(Ops.LOAD, dtypes.int32, (buf_2.index(idx),))
 alu = ld_1 + ld_2
 output_buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
-st_0 = UOp(Ops.STORE, dtypes.void, (output_buf.view(ShapeTracker.from_shape((1,))), alu))
+st_0 = UOp(Ops.STORE, dtypes.void, (output_buf.index(idx), alu))
 s = UOp(Ops.SINK, dtypes.void, (st_0,))
 
 # convert the computation to a "linearized" format (print the format)
