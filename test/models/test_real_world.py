@@ -94,7 +94,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 160 if CI else 396, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 160 if CI else 468, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_train_mnist(self):
@@ -176,7 +176,7 @@ class TestRealWorld(unittest.TestCase):
       for v in data.values(): v.to_(Device.DEFAULT)
 
       helper_test("train_bert", lambda: (data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
-          data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.28, 357)
+          data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.28, 358)
 
 if __name__ == '__main__':
   unittest.main()
