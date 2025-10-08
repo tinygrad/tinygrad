@@ -42,7 +42,6 @@ import struct
 from tinygrad.dtype import dtypes
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import UOp, Ops, AxisType
-from tinygrad.shape.shapetracker import ShapeTracker
 
 # allocate some buffers + load in values
 out = Buffer(DEVICE, 1, dtypes.int32).allocate()
