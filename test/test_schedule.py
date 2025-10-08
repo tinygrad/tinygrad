@@ -399,7 +399,6 @@ class TestSchedule(unittest.TestCase):
     # a and b share the same underlying device memory
     self.assertIs(a.uop.realized, b.uop.realized)
 
-  @expect_rangeify_fails
   def test_clone_doesnt_dedup(self):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
@@ -407,7 +406,7 @@ class TestSchedule(unittest.TestCase):
     sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     # a and b are assigned to the same device Buffer
-    self.assertIsNot(a.uop.realized, b.uop.realized)
+    self.assertIsNot(a.uop.base.realized, b.uop.base.realized)
 
   # EMPTY is assigned to a unique device Buffer
 
