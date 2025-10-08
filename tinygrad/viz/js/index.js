@@ -238,7 +238,7 @@ async function renderProfiler() {
       const peak = u64();
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
-      const timestamps = [], totals = [];
+      const timestamps = [];
       for (let j=0; j<eventsLen; j++) {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
@@ -246,11 +246,11 @@ async function renderProfiler() {
           const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
           buf_shapes.set(key, shape); temp.set(key, shape);
           timestamps.push(ts);
-          x += 1; y += nbytes; totals.push(y);
+          x += 1; y += nbytes;
         } else {
           const free = buf_shapes.get(key);
           timestamps.push(ts);
-          x += 1; y -= free.nbytes; totals.push(y);
+          x += 1; y -= free.nbytes;
           free.x.push(x);
           free.y.push(free.y.at(-1));
           temp.delete(key);
@@ -265,7 +265,7 @@ async function renderProfiler() {
         v.x.push(x);
         v.y.push(v.y.at(-1));
       }
-      timestamps.push(dur); totals.push(y);
+      timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
@@ -307,7 +307,6 @@ async function renderProfiler() {
         return resize();
       });
     }
-
   }
   updateProgress({ start:false });
   // draw events on a timeline
