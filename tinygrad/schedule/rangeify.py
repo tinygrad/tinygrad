@@ -1,4 +1,5 @@
 from typing import Any, cast, Iterator
+
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
@@ -9,6 +10,7 @@ from tinygrad.helpers import Metadata
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
+from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, IndexingContext
 
 # creation can recurse a lot
 import sys
@@ -140,7 +142,7 @@ remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.r
 class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
-  children_map = x.get_children_map()
+  children_map = x.get_consumer_map()
   ctx.children = {}
   for k,v in children_map.items():
     # NOTE: we treat mstack children like sink here
@@ -246,12 +248,6 @@ pm_mops = PatternMatcher([
 #   1. there's an explicit REALIZE in the graph
 #   2. the ranges from the children don't match and we have to create a buffer (only on children)
 #   3. might_end_axis triggers because we should be closing a loop to save compute
-
-@dataclass(frozen=True)
-class BufferizeOpts:
-  # on AddrSpace.LOCAL, device is the id
-  device: str|tuple[str, ...]|int|None
-  addrspace: AddrSpace = AddrSpace.GLOBAL
 
 def map_partial_realize(ctx:RangeifyContext, x:UOp, idx:UOp):
   if x.arg is None: return None  # map_contiguous can handle this
@@ -421,7 +417,7 @@ def cleanup_dead_axes(b:UOp):
 # we want to reexpress the indexes of idx2 in terms of the implied b1
 def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # see if we can't do it, should this ever hit?
-  assert len(buf.src) == len(idx.src), "index on wrong bufferize"
+  assert len(buf.src) == len(idx.src), f"index on wrong bufferize, {len(buf.src)} != {len(idx.src)}"
   assert all(x.op in {Ops.RANGE, Ops.CONST} for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
@@ -764,26 +760,32 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
 
   tsink = graph_rewrite(tsink, earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
-  realize_map: dict[UOp, UOp] = {}
+  realize_map: dict[UOp, None] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
-  # NOTE: we don't use contiguous here, contiguous is a user op
-  tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
-  tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
-  tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
 
-  # rangeify
-  tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
+  FAST = getenv("FAST", 1)
+  if FAST:
+    rctx: RangeifyContext|IndexingContext
+    tsink, rctx = run_rangeify(tsink, realize_map, FAST > 1)
+  else:
+    # NOTE: we don't use contiguous here, contiguous is a user op
+    tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
+    tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
+    tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
+    tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rctx:=RangeifyContext()), bottom_up=True, name="rangeify")
+
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   # TODO: can you substitute and remove costly buffers at the same time?
   tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
+  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER} and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER} and \
+                     x.tag is not None and len(x.tag)])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 

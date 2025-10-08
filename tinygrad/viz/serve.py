@@ -163,9 +163,10 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      events.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), e.arg["sz"]))
+      safe_sz = min(1_000_000_000_000, e.arg["sz"])
+      events.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
       dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
-      temp[e.key] = nbytes = e.arg["sz"]*e.arg["dtype"].itemsize
+      temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
       mem += nbytes
       if mem > peak: peak = mem
     if e.name == "free":

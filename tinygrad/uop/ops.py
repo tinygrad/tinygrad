@@ -146,12 +146,24 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
-  # returns map of UOps to their children in the graph rooted by self
-  def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
+  # returns map of UOps to their consumers in the graph rooted by self
+  def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]:
     ret: dict[UOp, dict[UOp, None]] = {}
     for u in self.toposort():
       ret[u] = {}
       for s in u.src: ret[s][u] = None
+    return ret
+
+  def reverse_toposort(self, consumer_map) -> dict[UOp, None]:
+    ret: dict[UOp, None] = {}
+    stack: list[tuple[UOp, bool]] = [(x, False) for x in consumer_map if len(x.src) == 0]
+    while stack:
+      node, visited = stack.pop()
+      if node in ret: continue
+      if not visited:
+        stack.append((node, True))  # push node back on stack to process after its srcs
+        for s in consumer_map[node]: stack.append((s, False)) # push srcs on the stack
+      else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
   @functools.cached_property
@@ -1189,7 +1201,7 @@ pm_pyrender = PatternMatcher([
 
 @Context(SPEC=0)
 def pyrender(ast:UOp) -> list[str]:
-  cmap = ast.get_children_map()
+  cmap = ast.get_consumer_map()
   to_render = set()
   for u in ast.toposort():
     if u.op is Ops.STORE: to_render.add(u.src[1])
