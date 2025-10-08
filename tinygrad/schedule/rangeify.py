@@ -829,12 +829,14 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
       ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
-      # if this element has weight and it's ending a range, we realize it
+      # if this element has weight and it's ending a range, we (force) realize it
       if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
         if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE, Ops.CONTIGUOUS):
           if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
             realize_map[x] = None
-            ending_ranges[x] = False
+
+      # if we are realizing, it doesn't matter if we are ending ranges
+      if x in realize_map: ending_ranges[x] = False
 
       # *** these are the ranges on the output ***
 
