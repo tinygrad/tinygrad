@@ -12,7 +12,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, RANGEIFY
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
-from tinygrad.codegen import apply_rewrites, rewrites_for_views
+from tinygrad.codegen import apply_rewrites
 from tinygrad.renderer.ptx import PTXRenderer
 
 class TestLinearizer(unittest.TestCase):
@@ -475,8 +475,6 @@ class TestLinearizer(unittest.TestCase):
 
 # *** helpers ***
 
-def push_views(ast): return apply_rewrites(ast, rewrites_for_views)
-
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
   s = Tensor.schedule(*r)
@@ -485,7 +483,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # now all input buffers in s[-1] should be realized
   # create fresh buffers for the outputs
   bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
-  return push_views(s[-1].ast), bufs
+  return s[-1].ast, bufs
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
