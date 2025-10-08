@@ -1054,7 +1054,7 @@ class RewriteContext:
             continue
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
-            self.replace[n] = test_n
+            self.replace[n] = unwrap(test_n)
             continue
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src):
