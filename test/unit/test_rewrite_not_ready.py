@@ -11,7 +11,7 @@ class ChildrenContext:
 # this is a generic child labeller
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
-  ctx.children = {k:list(v.keys()) for k,v in x.get_children_map().items() if len(v) > 1}
+  ctx.children = {k:list(v.keys()) for k,v in x.get_consumer_map().items() if len(v) > 1}
 
 def mark_children(ctx:ChildrenContext, x:UOp):
   new_srcs = [(UOp(Ops.CHILD, s.dtype, src=(s,), arg=(ctx.children[s].index(x), len(ctx.children[s]))) if s in ctx.children else s) for s in x.src]
