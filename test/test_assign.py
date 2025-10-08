@@ -119,6 +119,22 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
+  def test_assign_changes_alt(self, realize=False):
+    a = Tensor(1).contiguous()
+    if realize: a.realize()
+    b = a.contiguous()    # b returns a new Tensor
+    b.assign(2)
+    b.realize()
+    self.assertNotEqual(a.item(), b.item())
+  # on a realized Tensor contiguous child changes the source
+  @unittest.expectedFailure
+  def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
+
+  def test_assign_changes_buffer_alt(self):
+    a, b = [Tensor(Tensor(0).contiguous().realize().uop.as_buf()) for _ in range(2)]
+    Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
+    self.assertEqual((a + b).item(), 3)
+
   def test_assign_diamond_cycle(self):
     # NOTE: should *not* raise AssertionError from numpy
     with self.assertRaisesRegex(RuntimeError, "cycle"):
@@ -264,13 +280,14 @@ class TestAssign(unittest.TestCase):
     b.realize()
     ba1 = a.uop.base.realized
     bb1 = b.uop.base.realized
-    with self.assertRaises((RuntimeError, AssertionError)):
+    with self.assert_permuted_assign():
       a = a.permute(1,0)
       a += b
       a.realize()
       ba2 = a.uop.base.realized
-      assert ba1 != ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+      # permute and base are the same buffer
+      assert ba1 == ba2 and ba1 != bb1
 
   def test_post_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)

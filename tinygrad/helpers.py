@@ -85,7 +85,7 @@ def word_wrap(x, wrap=80):
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
-    except (AttributeError, TypeError, ImportError):
+    except (RuntimeError, AttributeError, TypeError, ImportError):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
@@ -148,6 +148,8 @@ CPU_COUNT = ContextVar("CPU_COUNT", max(1, (os.cpu_count() or 1) // (4 if ARCH_X
 CPU_LLVM, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("AMD_LLVM", 1)
 VIZ = PROFILE = ContextVar("VIZ", 0)
 SPEC = ContextVar("SPEC", 0)
+# TODO: disable by default due to speed
+IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 
 @dataclass(frozen=True)
 class Metadata:

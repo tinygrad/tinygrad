@@ -10,9 +10,9 @@ from tinygrad.renderer import Renderer
 from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
-from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
+from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.late.control_flow import pm_control_flow_ends, pm_control_flow_starts, CFGContext, schedule
@@ -72,7 +72,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(sym+migrate_indexing, name="postopt symbolic"))
 
   # expand
-  ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
+  ret.append(RewriteStep(sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander"))
 
   # add locals
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
@@ -95,6 +95,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
 
   # lower the index dtype to a concrete int
   ret.append(RewriteStep(pm_lower_index_dtype+load_store_indexing, lambda _: opts.device, name="lower all index dtypes"))
+  ret.append(RewriteStep(symbolic, name="post index symbolic"))
 
   # optional pre matcher
   if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))

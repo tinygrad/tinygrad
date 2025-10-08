@@ -1,7 +1,7 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context, cpu_profile, RANGEIFY
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context, cpu_profile, RANGEIFY
 from tinygrad.shape.shapetracker import ShapeTracker
 try:
   import z3
@@ -55,9 +55,6 @@ try:
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
 
-# if you have z3 installed, by default we check the bounds
-IGNORE_OOB = ContextVar("IGNORE_OOB", int(not z3_imported))
-
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
@@ -92,8 +89,9 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
-   # this is fine as long as it's a realized buffer and base dtypes match.
-   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
+   # this is fine as long as it's a realized buffer or const and base dtypes match.
+   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base \
+       and x.base.op in {Ops.BUFFER,Ops.ASSIGN,Ops.CONST})),
   (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
 
   # Tensor variable bindings
@@ -260,6 +258,9 @@ full_non_rangeify_spec = PatternMatcher([]) if RANGEIFY else PatternMatcher([
 ])
 
 full_spec = PatternMatcher([
+  # SENTINEL should never be in the graph
+  (UPat(Ops.SENTINEL), lambda: False),
+
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine

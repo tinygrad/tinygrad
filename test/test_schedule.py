@@ -18,6 +18,7 @@ from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context,
 from tinygrad.schedule.kernelize import merge_views, get_kernelize_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
+from test.helpers import expect_rangeify_fails, expect_nonrangeify_fails
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -41,9 +42,6 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
         print(s.ast)
     raise KernelCountException(f"{kernel_cnt} != {allowed}")
   return sched
-
-def expect_rangeify_fails(fxn): return (unittest.expectedFailure if RANGEIFY else (lambda f:f))(fxn)
-def expect_nonrangeify_fails(fxn): return (unittest.expectedFailure if not RANGEIFY else (lambda f:f))(fxn)
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -815,6 +813,14 @@ class TestSchedule(unittest.TestCase):
     a.assign(Tensor.ones_like(a))
     check_schedule(a, 0)
     self.assertEqual(a.tolist(), [])
+
+  def test_zero_size_children(self):
+    r = Tensor.ones(1,2).contiguous().realize().sum(axis=(1,), keepdim=True)
+    ax = r.reshape(1)*2
+    ay = r.reshape(1).shrink(((1,1),))*2
+    out = ax+ay.pad(((1, 0),))
+    run_schedule(check_schedule(out, 1))
+    self.assertEqual(out.item(), 4.)
 
   def test_reduce_permute_nofuse(self):
     x = Tensor.empty(32, 32, 32)
@@ -1925,6 +1931,15 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(loss, 4))
     np.testing.assert_allclose(loss.item(), 0.878309, atol=1e-5, rtol=1e-6)
 
+  def test_const_folding_alt(self):
+    t = Tensor.full((2,), 1.)
+    lt = (t < 0.)
+    a = Tensor.empty(2).assign(t*lt.where(-1., 0.))
+    b = Tensor.empty(2, dtype=dtypes.bool).assign(lt)
+    Tensor.realize(a, b)
+    self.assertEqual(a.tolist(), [0., 0.])
+    self.assertEqual(b.tolist(), [False, False])
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
@@ -2217,6 +2232,11 @@ class TestCopyFolding(unittest.TestCase):
     b = Tensor(1).to("CPU")
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
+
+  def test_const_copy_multi(self):
+    x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"])
+    check_schedule(x, 0, filter_sink=False)
+    self.assertEqual(x.item(), 1)
 
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()

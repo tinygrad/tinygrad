@@ -10,6 +10,7 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto(); REWRITE_ERROR = auto()  # noqa: E702
+  SENTINEL = auto()
 
   # track children
   CHILD = auto(); CHILDREN = auto() # noqa: E702
@@ -19,6 +20,7 @@ class Ops(FastEnum):
 
   # create buffer
   BUFFERIZE = auto()
+  SUBSTITUTE = auto()
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
