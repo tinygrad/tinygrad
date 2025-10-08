@@ -143,7 +143,7 @@ def extract_children(ctx:ChildrenContext, x:UOp):
     non_sink_children = [u for u in v if u.op not in {Ops.SINK, Ops.MSTACK}]
     if len(non_sink_children) <= 1: continue
     # NOTE: this gate shouldn't be here
-    if k.op_in_parents(Ops.REDUCE_AXIS) and k.op_in_parents(Ops.BUFFER, Ops.CONTIGUOUS):
+    if k.op_in_backward_slice_with_self(Ops.REDUCE_AXIS) and k.op_in_backward_slice_with_self(Ops.BUFFER, Ops.CONTIGUOUS):
       ctx.children[k] = non_sink_children
 
 def mark_children(ctx:ChildrenContext, x:UOp):
@@ -339,8 +339,8 @@ def children_gate(ctx:RangeifyContext, idx:UOp, c:UOp):
 def might_end_axis(idx:UOp):
   if idx.arg is None: return None
   # TODO: write a proper cost function here
-  if not idx.op_in_parents(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE): return None
-  if not idx.op_in_parents(Ops.REDUCE_AXIS): return None
+  if not idx.op_in_backward_slice_with_self(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE): return None
+  if not idx.op_in_backward_slice_with_self(Ops.REDUCE_AXIS): return None
   to_end_axis = []
   for i,a in enumerate(idx.src[1:]):
     # in RANGEIFY=1, always realize
@@ -403,7 +403,7 @@ def cleanup_dead_axes(b:UOp):
     # skip for symbolic. TODO: fix this
     if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
     # CONSTs are already dead axes
-    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].sparents):
+    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].backward_slice_with_self):
       reshape.append(1)
       hit = True
     else:
@@ -441,7 +441,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
     # const reduce is okay
     # TODO: move the reduce folder to before this to prevent the need for this
-    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.COPY} for y in x.sparents)
+    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.COPY} for y in x.backward_slice_with_self)
 
     # always run this list of ops
     if any(x.op is Ops.REDUCE and not okay_reduce(x) for x in ran): return None
@@ -450,7 +450,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it
   replaces = flatten([(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST])
-  return UOp(Ops.SUBSTITUTE, src=(src, UOp(Ops.NOOP, src=tuple(replaces[0::2])), UOp(Ops.NOOP, src=tuple(replaces[1::2]))))
+  return UOp(Ops.SUBSTITUTE, dtype=src.dtype, src=(src, UOp(Ops.NOOP, src=tuple(replaces[0::2])), UOp(Ops.NOOP, src=tuple(replaces[1::2]))))
 
 def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
@@ -731,17 +731,17 @@ def do_sub_recurse(s:UOp):
   if x.op is Ops.SUBSTITUTE:
     sub_k = UOp(Ops.SUBSTITUTE, src=(x.src[1],)+s.src[1:])
     sub_v = UOp(Ops.SUBSTITUTE, src=(x.src[2],)+s.src[1:])
-    return UOp(Ops.SUBSTITUTE, src=(x.src[0], sub_k, sub_v))
+    return UOp(Ops.SUBSTITUTE, dtype=x.dtype, src=(x.src[0], sub_k, sub_v))
   # here we actually do the SUBSTITUTE
   if x in keys: return values[keys.index(x)]
-  # we filter any keys that aren't in parents. this keeps the algorithm O(output graph size)
-  # NOTE: if k was x, it would trigger above, so it's safe to use parents instead of sparents
-  new_kv = {k:v for k,v in zip(keys,values) if k in x.parents}
+  # we filter any keys that aren't in the backward slice. this keeps the algorithm O(output graph size)
+  # NOTE: if k was x, it would trigger above, so self doesn't have to be included in backward_slice
+  new_kv = {k:v for k,v in zip(keys,values) if k in x.backward_slice}
   # if there's no SUBSTITUTEs left, we can just return x
   if len(new_kv) == 0: return x
   # then we add SUBSTITUTE to all parents
   uop_keys, uop_values = UOp(Ops.NOOP, src=tuple(new_kv.keys())), UOp(Ops.NOOP, src=tuple(new_kv.values()))
-  return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, src=(y,uop_keys,uop_values)) for y in x.src]))
+  return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, dtype=y.dtype, src=(y,uop_keys,uop_values)) for y in x.src]))
 pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(Ops.NOOP), UPat(Ops.NOOP)), name="s"), do_sub_recurse)])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
@@ -769,7 +769,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.parents if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER} and x.tag is not None])
+  tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER} and x.tag is not None])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
