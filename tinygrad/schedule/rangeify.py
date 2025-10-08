@@ -2,7 +2,7 @@ from typing import Any, cast, Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo, Invalid
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
 from tinygrad.schedule.kernelize import Kernel
@@ -754,10 +754,10 @@ def apply_rangeify(ctx, x:UOp):
   new_srcs = []
   for s in x.src:
     new_src = s
-    if s in realize_map:
-      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
+    if s.op is Ops.BUFFER:
       if x in range_map: new_src = new_src.index(*range_map[x][0])
-    elif s.op is Ops.BUFFER:
+    elif s in realize_map:
+      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
       if x in range_map: new_src = new_src.index(*range_map[x][0])
     new_srcs.append(new_src)
   # NOTE: do we need this?
@@ -791,6 +791,8 @@ pm_apply_rangeify = PatternMatcher([
   (UPat(GroupOp.All, name="x"), apply_rangeify),
   # remove movement op
   (UPat(GroupOp.Movement, name="x"), remove_movement),
+  # const/define_var shouldn't have src
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx[1] else None),
 ])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
@@ -802,7 +804,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   realize_map: dict[UOp, None] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
 
-  if getenv("FAST"):
+  FAST = getenv("FAST", 1)
+  if FAST:
     tsink_base = UOp.sink(*[x.base for x in tsink.src])
 
     # explicit rangeify
@@ -901,7 +904,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
           mish //= s
         rngs = list(UOp.sink(*ret[::-1]).simplify().src)
       range_map[x] = (rngs, out_rngs)
-      if getenv("FAST") > 1:
+      if FAST > 1:
         print("***" if x in realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
               UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map,pads_gate), bottom_up=True, name="apply rangeify")
