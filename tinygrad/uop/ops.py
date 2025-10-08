@@ -264,11 +264,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
-      return graph_rewrite(self, _substitute, dvars, bottom_up=True, name=name)
+      return graph_rewrite(self, _substitute+extra_pm if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
+  def substitute_until_index(self, dvars:dict[UOp, UOp]):
+    def gate_index(u):
+      if u.op is Ops.INDEX: raise BottomUpGate
+    return self.substitute(dvars, extra_pm=PatternMatcher([(UPat(Ops.INDEX), raise_bottom_up_gate)]))
 
   # *** uop tracing stuff ***
 
@@ -1052,7 +1056,7 @@ class RewriteContext:
             continue
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
-            self.replace[n] = new_n
+            self.replace[n] = test_n
             continue
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src):
@@ -1136,6 +1140,7 @@ pm_lower_index_dtype = PatternMatcher([
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
+def raise_bottom_up_gate(): raise BottomUpGate()
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 
 # for debug

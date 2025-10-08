@@ -402,18 +402,14 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     except ValueError: continue  # give up if we cannot parse the valid
     bounds[expr][int(is_upper)] = c
 
-  # don't simplify any other gates, can lead to OOB, we substitute them back later
-  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
-
   # simplify uop given that valid is True
   for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
-    expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
     if v0 > v1: return None
     # whole node became a const
     if v0 == v1:
-      uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
+      uop = uop.substitute_until_index({expr:expr.const_like(v0)}).simplify()
       continue
     # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
@@ -425,14 +421,13 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
+      # gate on other index so we don't simplify any other gates, can lead to OOB
+      newuops = [uop.substitute_until_index({X:newX}).simplify().substitute_until_index({newX:X}).simplify() for X,newX in candidate]
       if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
       elif all_same(newuops): uop = newuops[0]
 
-  # put the loads back in
-  uop = uop.substitute({v:k for k,v in load_subs.items()})
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):
