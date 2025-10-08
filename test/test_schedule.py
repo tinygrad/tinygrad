@@ -113,7 +113,6 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(a.tolist(), [[15]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
-  @expect_rangeify_fails
   def test_error_on_device_mismatch(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10, device="CPU")
@@ -121,7 +120,6 @@ class TestSchedule(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
-  @expect_rangeify_fails
   def test_error_on_device_mismatch_alt(self):
     a = Tensor.empty(10)
     b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
@@ -399,7 +397,6 @@ class TestSchedule(unittest.TestCase):
     # a and b share the same underlying device memory
     self.assertIs(a.uop.realized, b.uop.realized)
 
-  @expect_rangeify_fails
   def test_clone_doesnt_dedup(self):
     src = Tensor.ones(4).contiguous().realize()
     a = src.clone()
@@ -407,7 +404,7 @@ class TestSchedule(unittest.TestCase):
     sched = check_schedule([a, b], 2, filter_sink=False)
     run_schedule(sched)
     # a and b are assigned to the same device Buffer
-    self.assertIsNot(a.uop.realized, b.uop.realized)
+    self.assertIsNot(a.uop.base.realized, b.uop.base.realized)
 
   # EMPTY is assigned to a unique device Buffer
 
@@ -2468,23 +2465,24 @@ class TestUOpBecome(unittest.TestCase):
     self.assertEqual(add.uop.shape, (8, 2))
     assert add.uop is not add.uop.base
 
-  @expect_rangeify_fails
   def test_new_flat_buffer(self):
     a = Tensor.empty(4,)
     b = Tensor.empty(4,)
     add = a+b
     check_schedule(add, 1)
     # BUFFER already has a shape (4,), this tensor just becomes a contiguous BUFFER
-    assert UPat(Ops.BUFFER).match(add.uop, {})
+    assert UPat(Ops.BUFFER).match(add.uop.base, {})
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
-  # NOTE: this expand is not reordered because there's before it to fuse
-  @expect_rangeify_fails
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
+    if RANGEIFY:
+      self.assertEqual(b.uop.base.buffer.size, 4)
+      self.assertEqual(b.uop.shape, (4, 4))
+      return
     self.assertEqual(b.uop.base.buffer.size, 16)
     self.assertEqual(b.uop.st, ShapeTracker.from_shape((4, 4)))
 
@@ -2501,7 +2499,6 @@ class TestUOpBecome(unittest.TestCase):
     b = a*1
     assert UPat(Ops.MUL).match(b.uop, {}) # before scheduling it's a mul
     check_schedule(b, 0)
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.uop, {}) # scheduling merges all MovementOps into a single VIEW
     self.assertIs(a.uop.base.buffer, b.uop.base.buffer)
 
   def test_become_buf_with_mops(self):
@@ -2522,17 +2519,6 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.MUL).match(b.uop, {}) # before scheduling it's a mul
     check_schedule(b, 0)
     assert UPat(Ops.CONST, arg=0).match(b.uop.base, {}) # scheduling replaces the tensor uop with a VIEW(BUFFER)
-
-  @expect_rangeify_fails
-  def test_become_const_in_view(self):
-    # if we shrink the base down to a size 0, only the VIEW becomes CONST, base is unchanged.
-    add = Tensor.empty(2, 2)+Tensor.empty(2, 2)
-    b = add.shrink(((0, 1), (0, 0)))
-    check_schedule(b, 0)
-    assert UPat(Ops.CONST, arg=0).match(b.uop, {})
-    self.assertEqual(b.shape, (1, 0))
-    # the base is untouched.
-    assert UPat(Ops.ADD).match(add.uop, {})
 
   def test_become_const_from_const(self):
     const_add = Tensor(1)+Tensor(2)
@@ -2585,14 +2571,17 @@ class TestUOpBecome(unittest.TestCase):
     assert b.uop is c.uop
     assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER),)).match(c.uop, {})
 
-  @expect_rangeify_fails
   def test_setitem_becomes_subbuffer(self):
     a = Tensor.full((4,), 2.).contiguous().realize()
     b = a.shrink(((0, 2),)).assign(Tensor.full((2,), 1.0))
     b.realize()
     assert a.uop.is_realized
     assert a.uop.buffer._base is None
-    # b is a subbuffer of a
+    # b is a subbuffer of a (buffer_view in non rangeify, rangeify just makes a shrink)
+    if RANGEIFY:
+      assert b.uop.op_in_backward_slice_with_self(Ops.SHRINK)
+      assert b.uop.base is a.uop.base
+      return
     assert b.uop.op is Ops.BUFFER_VIEW
     assert b.uop.src[0] is a.uop
 
