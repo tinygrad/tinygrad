@@ -8,7 +8,7 @@ ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in
 if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 
 try:
-  from tinygrad.schedule.kernelize import get_kernelize_map
+  from tinygrad.schedule.rangeify import get_rangeify_map
   from tinygrad.renderer import Renderer, ProgramSpec
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
@@ -44,7 +44,7 @@ class ProcessReplayWarning(Warning): pass
 
 def replay_kernelize(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str, tuple[Any, ...]]:
   UOp.unique_num = itertools.count(max([u.arg for u in big_sink.toposort() if u.op is Ops.UNIQUE], default=0)+1)
-  new_sink = big_sink.substitute(get_kernelize_map(big_sink))
+  new_sink = big_sink.substitute(get_rangeify_map(big_sink))
   def to_str(ret:UOp) -> str:
     asts = [repr(u.arg.ast) for u in ret.toposort() if u.op is Ops.KERNEL]
     return "\n".join([f"{len(asts)} kernels", *asts])

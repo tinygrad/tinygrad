@@ -12,10 +12,9 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, graph_rewrite, track_rewrites
-from tinygrad.uop.symbolic import symbolic_simple
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, RANGEIFY
-from tinygrad.schedule.kernelize import merge_views, get_kernelize_map, Kernel
+from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
 from test.helpers import expect_rangeify_fails, expect_nonrangeify_fails
@@ -29,7 +28,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sink = UOp.sink(t) if t.op is not Ops.SINK else t
-    becomes_map = get_kernelize_map(sink)
+    becomes_map = get_rangeify_map(sink)
     sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
   # test lowering all the ScheduleItems to ExecItems
   kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
@@ -68,9 +67,6 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
     np.testing.assert_allclose(img.grad.numpy(), ref_img.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
     np.testing.assert_allclose(w.grad.numpy(), ref_w.grad.detach().numpy(), atol=1e-6 if dtype == dtypes.float else 1e-2)
 
-@track_rewrites(name=True)
-def schedule_graph_rewrite(big_sink:UOp): return get_kernelize_map(big_sink)[big_sink]
-
 class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
@@ -83,33 +79,30 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(t.numpy(), torch_out)
 
   def test_arange_avgpool2d_fused_noopt(self):
-    with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
+    with Context(NOOPT=1): self.test_arange_avgpool2d(kcount=1)
 
   # linearizer error
   @unittest.skip("recursion error no longer raised")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
   def test_arange_avgpool2d_fused(self):
     with self.assertRaises(RecursionError):
-      with Context(FUSE_ARANGE=1, NOOPT=0): self.test_arange_avgpool2d(kcount=1)
+      with Context(NOOPT=0): self.test_arange_avgpool2d(kcount=1)
 
   # when we're fusing a reduce, all ReduceOps must have the same N in the dimensions
   # all permutes, reshapes, expands and shrinks push through the reduce
   def test_arange_sum(self):
     a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(a, 1))
+    run_schedule(check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [1, 5, 9])
 
   def test_arange_sum_alt(self):
     a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(a, 1))
+    run_schedule(check_schedule(a, 1))
     np.testing.assert_equal(a.numpy(), 20)
 
   def test_permute_arange(self):
     a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(a, 1))
+    run_schedule(check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [[15]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
@@ -137,8 +130,7 @@ class TestSchedule(unittest.TestCase):
   def test_indexing_scalars_simple(self):
     X = Tensor.randn(2, 2).realize()
     xt = X[Tensor(1)][Tensor(0)]
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(xt, 2))
+    run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
@@ -158,8 +150,7 @@ class TestSchedule(unittest.TestCase):
     assume(a<x and b<y)
     X = Tensor.randn(x, y).realize()
     xt = X[Tensor(a)][Tensor(b)]
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(xt, 2))
+    run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
 
   def test_push_pads_elementwise(self):
@@ -1574,8 +1565,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(3,3,3,3, requires_grad=True)
     y = x.pad((-1,2,2,-1), mode="replicate")
     dx = y.sum().gradient(x)[0]
-    with Context(FUSE_ARANGE=1):
-      sched = check_schedule(dx, 3)
+    sched = check_schedule(dx, 3)
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
@@ -1876,8 +1866,7 @@ class TestSchedule(unittest.TestCase):
     from extra.models.llama import precompute_freqs_cis
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
     fused = precompute_freqs_cis(**args)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(fused, 3))
+    run_schedule(check_schedule(fused, 3))
     if getenv("CHECK", 1):
       ref = precompute_freqs_cis(**args)
       run_schedule(check_schedule(ref, 3))
@@ -1960,15 +1949,6 @@ class TestSchedule(unittest.TestCase):
     r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
     np.testing.assert_allclose(out0.numpy(), r_ref+2, rtol=2e-7)
     np.testing.assert_allclose(out1.numpy(), r_ref+3, rtol=2e-7)
-
-  @unittest.skip("multi output isn't supported")
-  def test_multiview_arange_children(self):
-    X = Tensor.randn(2,3,4,4).numpy()
-    with Context(FUSE_ARANGE=1):
-      compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
-    with Context(FUSE_ARANGE=0, TRACK_MATCH_STATS=0):
-      ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
-    np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
   def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
@@ -2173,56 +2153,6 @@ class TestView(unittest.TestCase):
     run_schedule(s)
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
-def tensor_rewrite(t) -> UOp: return graph_rewrite(t.uop.base, merge_views+symbolic_simple)
-class TestSimplifier(unittest.TestCase):
-  def test_sink_childless_const(self):
-    x = Tensor(0)
-    check_schedule(x, 0)
-
-  def test_sink_childless_const_alt_expanded(self):
-    x = Tensor.zeros(4, 4).contiguous()
-    check_schedule(x, 1)
-
-  def test_all_const_uops(self):
-    a = Tensor(4)*Tensor(2)
-    sink = tensor_rewrite(a)
-    assert UPat.cvar().match(sink, {})
-
-  def test_masked_const_elementwise(self):
-    a = Tensor.eye(10)@Tensor.eye(10)
-    sink = tensor_rewrite(a)
-    assert UPat(Ops.REDUCE_AXIS, src=(UPat.cvar().view()*UPat.cvar().view(),)).match(sink, {})
-
-  def test_elementwise_ops(self):
-    a = Tensor.empty(4, 4, dtype=dtypes.int)
-    sink = tensor_rewrite(a*0)
-    assert UPat(Ops.CONST, arg=0).match(sink, {})
-    self.assertIs(tensor_rewrite(a*1).base, a.uop.base)
-    self.assertIs(tensor_rewrite(a+0).base, a.uop.base)
-
-  def test_cast_folding(self):
-    a = Tensor(1.0).cast(dtypes.int)
-    sink = tensor_rewrite(a)
-    assert UPat.cvar(dtype=dtypes.int).match(sink, {})
-
-  def test_const_folding_mul(self):
-    a = Tensor([1])
-    sink = tensor_rewrite(a*0)
-    assert UPat(Ops.CONST, arg=0).match(sink, {}), f"expected {sink} to collapse to a const 0"
-    assert sink.shape == a.shape
-
-  def test_const_folding_ne(self):
-    a = Tensor([1])
-    sink = tensor_rewrite(a != a)
-    assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
-    assert sink.shape == a.shape
-
-  def test_const_folding_lt(self):
-    a = Tensor([1])
-    sink = tensor_rewrite(a < a)
-    assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
-    assert sink.shape == a.shape
-
 @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from another device to cpu")
 class TestCopyFolding(unittest.TestCase):
   def test_const_copy_is_free(self):
@@ -2260,17 +2190,11 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.empty(4).uop
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
-    b = schedule_graph_rewrite(b)
-    # NOTE: Tensor.empty(4) always creates a VIEW(BUFFER) with ShapeTracker((4,)), we simplify this to jsut a BUFFER
-    # in the scheduler because buffer already has shape (4,)
-    self.assertIs(b, a.base)
 
   def test_copy_to_same_device_alt(self):
     a = Tensor.empty(4, 4).uop
     b = a.copy_to_device(a.device)
     check_schedule(b, 0, filter_sink=False)
-    b = schedule_graph_rewrite(b)
-    self.assertIs(b.base, a.base)
 
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.as_buf()
@@ -2371,9 +2295,8 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    merged = graph_rewrite(permuted_view.uop, merge_views)
     with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
-      merged.buffer # cannot access Buffer of a non contiguous VIEW
+      permuted_view.uop.buffer # cannot access Buffer of a non contiguous VIEW
 
   def test_buffer_only_after_realize(self):
     a = Tensor([1])+Tensor([2])
