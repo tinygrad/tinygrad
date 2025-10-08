@@ -136,7 +136,7 @@ remove_contig_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.r
 class ChildrenContext: children: dict[UOp, list[UOp]]|None = None
 def extract_children(ctx:ChildrenContext, x:UOp):
   if ctx.children is not None: return
-  children_map = x.get_children_map()
+  children_map = x.get_consumer_map()
   ctx.children = {}
   for k,v in children_map.items():
     # NOTE: we treat mstack children like sink here
