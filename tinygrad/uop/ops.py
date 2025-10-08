@@ -125,12 +125,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
   @recursive_property
-  def parents(self:UOp) -> dict[UOp, None]:
+  def backward_slice(self:UOp) -> dict[UOp, None]:
     ret = {s:None for s in self.src}
-    for s in self.src: ret.update(s.parents)
+    for s in self.src: ret.update(s.backward_slice)
     return ret
   @property
-  def sparents(self:UOp) -> dict[UOp, None]: return {self:None, **self.parents}
+  def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
+  def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
 
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
@@ -144,8 +145,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
           for parent in reversed(node.src): stack.append((parent, False)) # push parents on the stack
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
-
-  def op_in_parents(self, *ops:Ops): return any(x.op in ops for x in self.toposort())
 
   # returns map of UOps to their children in the graph rooted by self
   def get_children_map(self) -> dict[UOp, dict[UOp, None]]:
