@@ -126,7 +126,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def backward_slice(self:UOp) -> dict[UOp, None]:
-    res = {}
+    res: dict[UOp, None] = {}
     for x in self.src: res.update(x.toposort())
     return res
 
