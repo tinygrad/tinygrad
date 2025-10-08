@@ -13,7 +13,7 @@ ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER,
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
-def realize_parents(ctx:dict[UOp, None], rb:UOp) -> None:
+def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
@@ -23,12 +23,12 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op is not Ops.KERNEL: ctx[a] = None
 
 pm_generate_realize_map = PatternMatcher([
-  # always realize SINK parents
+  # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize ASSIGN/COPY/BUFFER_VIEW/CONTIGUOUS
   (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
-  # realize parents of COPY, MSELECT, MSTACK
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_parents),
+  # realize srcs of COPY, MSELECT, MSTACK
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # realize input to assign (might be optimized out)
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
