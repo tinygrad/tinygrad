@@ -124,7 +124,8 @@ class TextDecoder:
   else:
     def forward(self, x:Tensor, encoded_audio:Tensor, ctx):
       # seqlen = x.shape[-1]
-      seqlen = 1
+      bs, seqlen = x.shape[0], 1
+      encoded_audio = encoded_audio.repeat(bs, 1, 1)
       x = self.token_embedding(x)
       x += self.positional_embedding.shrink(((ctx, ctx+seqlen), None, None))
       for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=ctx)
@@ -243,10 +244,10 @@ if __name__ == '__main__':
 
   def export_decoder_2():
     reload(model.decoder, change_sd=change_sd)
-
+    BS = 1
     embedding_dims = model.decoder.positional_embedding.shape[1]
     # x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
-    x = Tensor.randint(1, low=0, high=50256).to("WEBGPU").reshape(1, -1)
+    x = Tensor.randint(BS, low=0, high=50256).to("WEBGPU").reshape(BS, -1)
     prg, inp_sizes, out_sizes, state = export_model(
       model.decoder,
       Device.DEFAULT.lower(),
