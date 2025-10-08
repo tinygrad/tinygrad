@@ -15,6 +15,10 @@ class TestTiny(unittest.TestCase):
     out = Tensor([1.,2,3])
     self.assertListEqual(out.tolist(), [1.0, 2.0, 3.0])
 
+  def test_elu(self):
+    out = Tensor([[1.,2],[3,4]]).sum(axis=1).elu()
+    self.assertListEqual(out.tolist(), [3.0, 7.0])
+
   def test_plus(self):
     out = Tensor([1.,2,3]) + Tensor([4.,5,6])
     self.assertListEqual(out.tolist(), [5.0, 7.0, 9.0])
@@ -95,7 +99,7 @@ class TestTiny(unittest.TestCase):
     ones = Tensor.ones(10).contiguous()
     for s in [2,5]:
       ret = ones[:i.bind(s)] + 1
-      self.assertListEqual(ret.contiguous().reshape(s).tolist(), [2.0]*s)
+      self.assertListEqual(ret.contiguous()[:s].tolist(), [2.0]*s)
 
   def test_symbolic_reduce(self):
     i = Variable('i', 1, 10)

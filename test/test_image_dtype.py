@@ -4,7 +4,7 @@ from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.device import LRUAllocator, is_dtype_supported
 from tinygrad.dtype import ImageDType
 from tinygrad.engine.realize import lower_schedule
-from tinygrad.helpers import prod, unwrap
+from tinygrad.helpers import prod, unwrap, RANGEIFY
 from test.helpers import REAL_DEV
 
 IMAGE_SUPPORTED_DEVICES = ("QCOM", "CL")
@@ -139,7 +139,7 @@ class TestImageDType(unittest.TestCase):
       # NOTE: the w1 grad must realize to a seperate kernel
       assert w1.grad.uop.is_realized, f"never realized {w1.grad}"
       self.assertEqual(w1.grad.uop.base.buffer.dtype, dtypes.float32)
-      self.assertEqual(len(sched), 10)
+      self.assertEqual(len(sched), 9 if RANGEIFY else 10)
 
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):

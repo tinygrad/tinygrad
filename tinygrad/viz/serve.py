@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint, sym_infer
+from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
@@ -20,7 +20,8 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D", Ops.REALIZE: "#C1C14D",
-               Ops.CHILDREN: "#80ffc0", Ops.CHILD: "#80fff0", Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e"}
+               Ops.CHILDREN: "#80ffc0", Ops.CHILD: "#80fff0", Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e",
+               Ops.SUBSTITUTE: "#ffff00"}
 
 # VIZ API
 
@@ -36,8 +37,6 @@ def get_metadata(trace_bufs:list[tuple]) -> list[dict]:
       steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
                 "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
       ret.append(r:={"name":k.display_name, "steps":steps})
-      # use the first key to get runtime profiling data about this context
-      if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
       # program spec metadata
       if isinstance(k.ret, ProgramSpec):
         steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
@@ -65,14 +64,14 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     # always exclude DEVICE/CONST/UNIQUE
     if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
     # only exclude CONST VIEW source if it has no other children in the graph
-    if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
-      excluded.update(u.src)
+    if u.op is Ops.CONST and u.st is not None: excluded.update(u.src)
   for u in toposort:
     if u in excluded: continue
     argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op is Ops.VIEW:
       argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+("" if v.offset == 0 else f" / {srender(v.offset)}")+
                           (f"\nMASK {mask_to_str(v.mask)}" if v.mask is not None else "") for v in unwrap(u.st).views]))
+    if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.arg)
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src):
@@ -80,10 +79,12 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         arg = f"{x.arg:g}" if x.op is Ops.CONST and dtypes.is_float(x.dtype) else f"{x.arg}"
         label += f"\n{x.op.name}{idx} {arg}" + (f" {x.src[0].op}" if len(x.src) else "")
     try:
+      if len(rngs:=u.ranges):
+        label += f"\n({','.join([colored(range_str(x), axis_colors[x.arg[-1]]) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
       if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
         label += f"\n{shape_to_str(u.shape)}"
-      elif len(rngs:=u.ranges):
-        label += f"\n({','.join([colored(str(x.arg[0]), axis_colors[x.arg[-1]]) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
+      if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
+        label += f"\n{u.render()}"
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
@@ -197,16 +198,10 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
-  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
+  groups = sorted(layout.items(), key=lambda x: '' if len(ss:=x[0].split(" ")) == 1 else ss[1])
+  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in groups if v is not None]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
-
-def get_runtime_stats(key) -> list[dict]:
-  ret:list[dict] = []
-  for e in profile:
-    if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
-  return ret
 
 # ** Assembly analyzers
 
@@ -259,7 +254,9 @@ class Handler(BaseHTTPRequestHandler):
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
-      else: return self.stream_json(get_details(traces[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
+      else:
+        try: return self.stream_json(get_details(traces[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
+        except KeyError: status_code = 404
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
@@ -304,7 +301,7 @@ class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  parser.add_argument('--profile', type=pathlib.Path, help='Path profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -317,7 +314,7 @@ if __name__ == "__main__":
 
   ctxs = get_metadata(load_pickle(args.kernels))
 
-  profile_ret = get_profile(profile:=load_pickle(args.profile))
+  profile_ret = get_profile(load_pickle(args.profile))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

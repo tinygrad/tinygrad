@@ -9,13 +9,12 @@ with open(directory / 'README.md', encoding='utf-8') as f:
 
 testing_minimal = [
   "numpy",
-  "torch==2.7.1",
+  "torch==2.8.0",
   "pytest",
   "pytest-xdist",
   "pytest-timeout",
   "hypothesis",
   "z3-solver",
-  "ml_dtypes"
 ]
 
 setup(name='tinygrad',
@@ -32,7 +31,6 @@ setup(name='tinygrad',
         'tinygrad.codegen.opt',
         'tinygrad.codegen.late',
         'tinygrad.engine',
-        'tinygrad.frontend',
         'tinygrad.nn',
         'tinygrad.renderer',
         'tinygrad.runtime',

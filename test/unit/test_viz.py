@@ -290,6 +290,13 @@ class TestVizIntegration(BaseTestViz):
     self.assertEqual(list(next(get_viz_details(1, 0))["graph"]), [id(c)])
     self.assertEqual(list(next(get_viz_details(1, 1))["graph"]), [id(c+2)])
 
+  def test_recurse(self):
+    a = Tensor.empty(10)
+    for _ in range(10_000): a += a
+    graph_rewrite(a.uop, PatternMatcher([]))
+    lst = get_viz_list()
+    assert len(lst) == 1
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 
@@ -372,9 +379,9 @@ class TestVizProfiler(unittest.TestCase):
     j = load_profile(prof)
 
     tracks = list(j['layout'])
-    self.assertEqual(tracks[0], 'NV Graph')
-    self.assertEqual(tracks[1], 'NV')
-    self.assertEqual(tracks[2], 'NV:1')
+    self.assertEqual(tracks[0], 'NV')
+    self.assertEqual(tracks[1], 'NV:1')
+    self.assertEqual(tracks[2], 'NV Graph')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -408,7 +415,7 @@ class TestVizProfiler(unittest.TestCase):
       get_profile(prof)
 
   def test_python_marker(self):
-    with Context(PROFILE=1):
+    with Context(VIZ=1):
       a = Tensor.empty(1, device="NULL")
       b = Tensor.empty(1, device="NULL")
       (a+b).realize()

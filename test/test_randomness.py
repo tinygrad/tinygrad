@@ -1,15 +1,16 @@
 import unittest, math
 from functools import partial
 
-import numpy as np
-import torch
-from tinygrad import nn, dtypes, Tensor, Device, TinyJit
-from tinygrad.helpers import getenv, CI
+from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
+from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
-from hypothesis import given, settings, strategies as strat
-from test.helpers import not_support_multi_device
 from tinygrad.renderer.ptx import PTXRenderer
+from test.helpers import not_support_multi_device
+
+import numpy as np
+import torch
+from hypothesis import given, settings, strategies as strat
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -359,6 +360,26 @@ class TestRandomness(unittest.TestCase):
     params = (64,)
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).weight, lambda _: torch.nn.BatchNorm2d(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).bias, lambda _: torch.nn.BatchNorm2d(*params).bias.detach())
+
+  def test_rand_chain(self):
+    # NOTE: this fails if property propagates deeper than stack limit
+    for _ in range(833): Tensor.rand(1)
+    Tensor.rand(1).realize()
+
+# TODO: still fails with MAX_KERNEL_BUFFERS
+@unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")
+class TestSample(unittest.TestCase):
+  def test_sample(self):
+    X = Tensor.rand(10000, 50).realize()
+    BS = 16
+    idxs = np.random.randint(0, X.shape[0], size=(BS))
+    # this uncovered a bug with arg sort order
+    batch = [Variable(f'idx{i}', 0, X.shape[0]-1).bind(s) for i,s in enumerate(idxs.tolist())]
+    x = Tensor.cat(*[X.shrink(((batch[i], batch[i]+1), None)) for i in range(BS)])
+    print(idxs)
+    ret = x.numpy()
+    base = X.numpy()[idxs]
+    np.testing.assert_equal(ret, base)
 
 if __name__ == "__main__":
   unittest.main()

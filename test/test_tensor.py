@@ -4,7 +4,7 @@ import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _METADATA
-from tinygrad.helpers import getenv, temp, mv_address
+from tinygrad.helpers import getenv, temp, mv_address, RANGEIFY
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -550,6 +550,11 @@ class TestTinygrad(unittest.TestCase):
   def test_shrink(self):
     t = Tensor.arange(32).contiguous().realize()
     self.assertListEqual(t[16:20].tolist(), [16,17,18,19])
+    self.assertListEqual(t.shrink_to(16).tolist(), list(range(16)))
+    t = t.reshape(4, 8).contiguous().realize()
+    self.assertListEqual(t.shrink_to(2, 2).tolist(), [[0, 1], [8, 9]])
+    with self.assertRaises(ValueError): t.shrink_to(2)
+    with self.assertRaises(ValueError): t.shrink_to(2, 2, 2)
 
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
@@ -644,16 +649,21 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_pad(self):
     t = Tensor.rand(3, 2, 0).pad((None, None, (1, 1)), value=1)
-    assert t.shape == (3, 2, 2)
+    self.assertEqual(t.shape, (3, 2, 2))
     np.testing.assert_equal(t.numpy(), np.ones((3, 2, 2)))
 
     t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), value=1)
-    assert t.shape == (3, 4, 0)
+    self.assertEqual(t.shape, (3, 4, 0))
     np.testing.assert_equal(t.numpy(), np.ones((3, 4, 0)))
 
     t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), value=1)
-    assert t.shape == (5, 2, 0)
+    self.assertEqual(t.shape, (5, 2, 0))
     np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
+
+    np.testing.assert_equal(Tensor([1, 2]).pad_to(4).numpy(), [1, 2, 0, 0])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3).numpy(), [[1, 2, 0], [0, 0, 0]])
+    with self.assertRaises(TypeError): Tensor([1, 2]).pad_to(2, 3)
+    with self.assertRaises(TypeError): Tensor([[1, 2]]).pad_to(3)
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
@@ -861,11 +871,18 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
-    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "__mul__", "relu"})
-    bw = [m for m in si.metadata if m.backward]
-    self.assertEqual(len(bw), 2)
-    self.assertEqual(bw[0].name, "sigmoid")
+    if not RANGEIFY:
+      self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
+      self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "__mul__", "relu"})
+      bw = [m for m in si.metadata if m.backward]
+      self.assertEqual(len(bw), 2)
+      self.assertEqual(bw[0].name, "sigmoid")
+    else:
+      self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
+      self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
+      bw = [m for m in si.metadata if m.backward]
+      self.assertEqual(len(bw), 1)
+      self.assertEqual(bw[0].name, "sigmoid")
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):

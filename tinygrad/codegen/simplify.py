@@ -1,10 +1,10 @@
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute
-from tinygrad.uop.symbolic import symbolic_flat, sym
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
+from tinygrad.uop.symbolic import symbolic_flat, sym, invalid_pat
 from tinygrad.helpers import partition
 from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp):
-  off = 2 if r.op is Ops.STORE else 1
+  off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
   new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
@@ -17,20 +17,24 @@ pm_flatten_range = PatternMatcher([
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  i = 2 if u.op is Ops.STORE else 1
+  reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
+  i = range_start[u.op]
   while i < len(u.src)-1:
     r0, r1 = u.src[i], u.src[i+1]
     # check same type
     if r0.arg[-1] == r1.arg[-1]:
-      s0, s1 = r0.src[0], r1.src[0]
-      # do the merge
-      new_range = r0.replace(src=(s0*s1,))
-      nidx = graph_rewrite(u, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                           name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
-      # check if it simplifies
-      if count_divmod(nidx) <= count_divmod(u):
-        u = nidx
-        continue
+      # check if the ranges to merge are in the same reduces
+      if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
+        s0, s1 = r0.src[0], r1.src[0]
+        # do the merge
+        new_range = r0.replace(src=(s0*s1,))
+        nidx = graph_rewrite(u, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
+                             name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+
+        # check if it simplifies
+        if count_divmod(nidx) <= count_divmod(u):
+          u = nidx
+          continue
     i += 1
   return u
 
@@ -38,20 +42,43 @@ pm_simplify_ranges = PatternMatcher([
   (UPat((Ops.STORE, Ops.REDUCE), name="u"), simplify_merge_adjacent),
 ])
 
+def mark_range_mod(ctx, r:UOp, c:UOp):
+  if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
+
+def do_substitute(ctx, x: UOp):
+  subs = {}
+  for k,v in ctx.items():
+    if v is not None:
+      subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
+  if not len(subs): return None
+  ret = x.substitute(subs).simplify()
+  ctx.clear()
+  return ret
+
+def dont_sub_ranges_for_image(ctx, x:UOp):
+  if isinstance(x.src[0].dtype, ImageDType):
+    for s in x.src[1:]: ctx[s] = None
+
+pm_split_ranges = PatternMatcher([
+  (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
+  (UPat(Ops.STORE, name="x"), dont_sub_ranges_for_image),
+  (UPat(Ops.SINK, name="x"), do_substitute),
+])
+
 # **** reduce simplification ****
+
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
 
 def reduce_rangeless(red:UOp):
   # TODO: share code with reduce_unparented
   if red.arg not in {Ops.ADD, Ops.MAX}: return None
   if red.src[0].dtype != red.dtype: return None
-  if any(x.op in {Ops.RANGE} for x in red.src[0].toposort()): return None
+  if not no_range(red.src[0]): return None
   ret = red.src[0]
   if red.arg is Ops.ADD:
     for r in red.src[1:]:
       ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
-
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
 
 pm_reduce_collapse = PatternMatcher([
   # lift x+y out of reduce on lt
@@ -74,12 +101,12 @@ pm_reduce_collapse = PatternMatcher([
    lambda x,gate,b=None: gate.broadcast(x.dtype.count).where(x, 0) if b is not None else gate.where(x, 0)),
   # WHERE on LOAD (works on max too)
   (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda buf,idx,gate: buf.index(idx, gate).load()),
+   lambda buf,idx,gate: buf.index(idx.valid(gate)).load()),
   (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()).reduce(arg=Ops.ADD, allow_any_len=True),
-   lambda buf,idx,gate: buf.index(idx, gate.logical_not()).load()),
+   lambda buf,idx,gate: buf.index(idx.valid(gate.logical_not())).load()),
   # INDEX on RANGE / gated RANGE
-  (UPat.var("buf").index(UPat.var("expr"), UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted())),
-   lambda buf,r,idx,expr: buf.index(expr.substitute({r:idx.cast(r.dtype)}), (idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0]))),
+  (UPat.var("buf").index(UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted()).where(UPat.var("expr"), invalid_pat)),
+   lambda buf,r,idx,expr,i: buf.index(expr.substitute({r:idx.cast(r.dtype)}).valid((idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])))),
   # AND on WHERE
   ((UPat.any(UPat(Ops.DEFINE_VAR, name="x"), UPat(Ops.DEFINE_VAR).gep(name="x")) & UPat.var("y")) \
    .where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
@@ -89,7 +116,7 @@ pm_reduce_collapse = PatternMatcher([
 ])+sym
 
 def reduce_collapse(red:UOp):
-  included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
+  included, not_included = partition(red.backward_slice, lambda x: any(y in x.backward_slice_with_self for y in red.src[1:]))
   if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
   replaces: dict[UOp, UOp] = {}
   for u in included:
@@ -98,21 +125,25 @@ def reduce_collapse(red:UOp):
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
-  if any(x.op is Ops.RANGE for x in sink.toposort()): return None
-  return sink.substitute({v:k for k,v in replaces.items()})
+  return sink.substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
 
 def reduce_unparented(red:UOp):
-  if red.arg not in {Ops.ADD, Ops.MAX}: return None
-  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
+  if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
+  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].backward_slice_with_self)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg is Ops.ADD:
     for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
+  if red.arg is Ops.MUL:
+    for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
-pm_reduce_simplify = PatternMatcher([
+pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
+])
+
+pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
 ])

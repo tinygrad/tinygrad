@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 import unittest
+import contextlib
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import temp
+from tinygrad.helpers import temp, RANGEIFY
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -117,6 +118,22 @@ class TestAssign(unittest.TestCase):
     # NOTE: old_a is now 2, and this would match the behavior of pytorch
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
+
+  def test_assign_changes_alt(self, realize=False):
+    a = Tensor(1).contiguous()
+    if realize: a.realize()
+    b = a.contiguous()    # b returns a new Tensor
+    b.assign(2)
+    b.realize()
+    self.assertNotEqual(a.item(), b.item())
+  # on a realized Tensor contiguous child changes the source
+  @unittest.expectedFailure
+  def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
+
+  def test_assign_changes_buffer_alt(self):
+    a, b = [Tensor(Tensor(0).contiguous().realize().uop.as_buf()) for _ in range(2)]
+    Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
+    self.assertEqual((a + b).item(), 3)
 
   def test_assign_diamond_cycle(self):
     # NOTE: should *not* raise AssertionError from numpy
@@ -254,6 +271,8 @@ class TestAssign(unittest.TestCase):
     b.assign(a.contiguous()).realize()
     assert GlobalCounters.kernel_count - kc == 2
 
+  # passing in RANGEIFY=1, RANGEIFY=0 asserts permuted assigns it can't fuse
+  def assert_permuted_assign(self): return self.assertRaisesRegex(RuntimeError, "contiguous") if not RANGEIFY else contextlib.nullcontext()
   def test_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
     b = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -261,13 +280,14 @@ class TestAssign(unittest.TestCase):
     b.realize()
     ba1 = a.uop.base.realized
     bb1 = b.uop.base.realized
-    with self.assertRaises((RuntimeError, AssertionError)):
+    with self.assert_permuted_assign():
       a = a.permute(1,0)
       a += b
       a.realize()
       ba2 = a.uop.base.realized
-      assert ba1 != ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+      # permute and base are the same buffer
+      assert ba1 == ba2 and ba1 != bb1
 
   def test_post_permuted_assignment(self):
     a = Tensor(np.arange(N*N, dtype=np.float32)).reshape(N,N)
@@ -277,13 +297,29 @@ class TestAssign(unittest.TestCase):
     #GlobalCounters.cache = []
     ba1 = a.uop.base.realized # noqa: F841
     bb1 = b.uop.base.realized # noqa: F841
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
+    with self.assert_permuted_assign():
       a.assign(a.permute(1,0) + b)   # this should not work!
       a.realize()
       ba2 = a.uop.base.realized # noqa: F841
       # NOTE: don't test that it's assigned
       #assert ba1 == ba2 and ba1 != bb1
       np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
+
+  @unittest.skipUnless(RANGEIFY, "only correct in rangeify")
+  def test_post_permuted_assignment_alt(self):
+    a = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    b = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
+    new_a = (a.T+b).numpy()
+    a.assign(a.T+b)
+    np.testing.assert_allclose(a.numpy(), new_a)
+
+  def test_post_reshape_assignment_fine(self):
+    a = Tensor.arange(N*N).reshape(N, N).contiguous().realize()
+    b = Tensor.arange(N*N).reshape(N, N).contiguous().realize()
+    rhs = a.reshape(-1).reshape(N, N)
+    new_a = (rhs+b).numpy()
+    a.assign(rhs+b)  # self-assign with reshape view is fine
+    np.testing.assert_allclose(a.numpy(), new_a)
 
   @unittest.skip("multi output not supported anymore")
   def test_simple_assignment_multioutput(self):
@@ -309,8 +345,8 @@ class TestAssign(unittest.TestCase):
   def test_permuted_assignment_correct(self):
     a = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
     b = Tensor.arange(4 * 4).reshape(4, 4).contiguous().realize()
-    # TODO: scheduler limitation, should NOT raise AssertionError from numpy.
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
+    # TODO: swizzler.py limitation, should NOT raise AssertionError from numpy.
+    with self.assert_permuted_assign():
       a = a.permute(1, 0)
       new_val = a + b
       a.assign(new_val)
@@ -319,10 +355,11 @@ class TestAssign(unittest.TestCase):
   def test_permuted_reduceop_child_dual_use(self):
     a = Tensor.randn(32, 32, 32).realize()
     b = Tensor.full((32, 32), 1.).contiguous().realize()
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
+    with self.assert_permuted_assign():
       r = a.sum(axis=1)
       b.assign(r + b.permute(1, 0))
       b.realize()
+      np.testing.assert_allclose(b.numpy(), a.numpy().sum(axis=1)+np.ones((32, 32)).transpose(1, 0), atol=1e-6, rtol=1e-3)
 
   @unittest.skip("multi output not supported anymore")
   def test_permuted_reduceop_multioutput_dual_use(self):
@@ -364,10 +401,11 @@ class TestAssign(unittest.TestCase):
 
   def test_permuted_assignment_masked_view_not_contiguous(self):
     a = Tensor.ones(4, 4).contiguous().realize()
-    with self.assertRaisesRegex(RuntimeError, "contiguous"):
+    with self.assert_permuted_assign():
       b = a.shrink((None, (0, 2))).pad((None, (0, 2)), value=2).permute(1, 0)
       a.assign(a + b)
       a.realize()
+      self.assertListEqual(a.tolist(), [[2.,2.,2.,2.],[2.,2.,2.,2.],[3.,3.,3.,3.], [3.,3.,3.,3.]])
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 

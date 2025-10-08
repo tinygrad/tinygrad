@@ -2,7 +2,7 @@
 import functools, itertools, operator
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, partition
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, AxisType
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, AxisType, range_start
 from tinygrad.schedule.rangeify import BufferizeOpts
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
@@ -50,7 +50,7 @@ def do_expand(root:UOp):
       if root.op is Ops.IF or src.op is Ops.IF:
         # for the first arg of IF, just pass them through ignoring UNROLLS
         new_srcs.append(src)
-      elif (root.op is Ops.STORE and i >= 2) or (root.op in {Ops.REDUCE, Ops.BUFFERIZE} and i >= 1) or (root.op is Ops.WMMA and i >= 3):
+      elif root.op in range_start and i >= range_start[root.op]:
         # for any range args of STORE/REDUCE, pass them through
         new_srcs.append(src)
       elif root.op is Ops.INDEX and i >= 1 and not isinstance(root.dtype, PtrDType):
@@ -157,6 +157,9 @@ pm_pre_expander = PatternMatcher([
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
+])
+
+pm_group_for_reduce = PatternMatcher([
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])
