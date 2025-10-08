@@ -744,6 +744,8 @@ def do_sub_recurse(s:UOp):
   return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, src=(y,uop_keys,uop_values)) for y in x.src]))
 pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(Ops.NOOP), UPat(Ops.NOOP)), name="s"), do_sub_recurse)])
 
+# *** fast rangeify ***
+
 def apply_rangeify(ctx, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
   realize_map, range_map = ctx
@@ -764,10 +766,18 @@ def apply_pad(ctx, x:UOp):
   bigwhere: UOp = functools.reduce(operator.and_, [u.src[0] for u in range_map[x] if u.op is Ops.WHERE], UOp.const(dtypes.bool, True))
   return bigwhere.simplify().where(x.src[0], UOp.const(x.dtype, 0))
 
+def fix_reduce_axis(ctx, x:UOp):
+  realize_map, range_map = ctx
+  new_ranges = [r for i,r in enumerate(range_map[x]) if i in x.arg[1]]
+  ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=x.arg[0], tag=x.tag)
+  range_map[ret] = range_map[x]
+  return ret
+
 pm_apply_rangeify = PatternMatcher([
+  (UPat(Ops.REDUCE_AXIS, name="x"), fix_reduce_axis),
   (UPat(GroupOp.All, name="x"), apply_rangeify),
-  # remove movement ops
   (UPat(Ops.PAD, name="x"), apply_pad),
+  # remove movement ops
   (UPat(GroupOp.Movement, name="x"), lambda x: x.src[0]),
 ])
 
@@ -784,9 +794,19 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     # explicit rangeify
     ctx = RangeifyContext()
     range_map = {}
+    ending_ranges: dict[UOp, bool] = {}
     consumer_map = tsink.get_consumer_map()
     for x in tsink.reverse_toposort(consumer_map):
       if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+      ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
+
+      # if this element has weight and it's ending a range, we realize it
+      if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
+        if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE):
+          if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
+            realize_map[x] = None
+            ending_ranges[x] = False
+
       if x in realize_map:
         # if this is in the realize_map, we create new ranges (at the output)
         assert x.op not in GroupOp.Movement
@@ -809,11 +829,18 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
         # if this has one consumer, we just pass it through from the consumer
         rngs = range_map[list(consumer_map[x])[0]]
 
+      # handle REDUCE
+      if x.op is Ops.REDUCE_AXIS:
+        for i,s in enumerate(x.src[0].shape):
+          if i in x.arg[1]: rngs[i] = ctx.new_range(s, axistype=AxisType.REDUCE)
+
       # apply movement ops
       if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
       if x.op is Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
       if x.op is Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
-      if x.op is Ops.EXPAND:  rngs = [a if resolve(x==y, False) else a.const_like(0) for a,x,y in zip(rngs, x.src[0].shape, x.shape)]
+      if x.op is Ops.EXPAND:
+        rngs = [a if resolve(x==y, False) else a.const_like(0) for a,x,y in zip(rngs, x.src[0].shape, x.shape)]
+        ending_ranges[x] = True
       if x.op is Ops.PAD:
         for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
           if s == 0 and e == 0: continue
@@ -836,8 +863,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
           mish //= s
         rngs = list(UOp.sink(*ret[::-1]).simplify().src)
       range_map[x] = rngs
-    for k,v in range_map.items():
-      print("***" if k in realize_map else "   ", k.op, UOp.sink().index(*v).render())
+    #for k,v in range_map.items(): print("***" if k in realize_map else "   ", k.op, UOp.sink().index(*v).render())
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map), bottom_up=True, name="apply rangeify")
   else:
     # NOTE: we don't use contiguous here, contiguous is a user op
