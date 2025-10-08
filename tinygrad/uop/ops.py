@@ -825,6 +825,9 @@ class UPatAny(UPat):
     matches = [x.match(uop, store.copy()) for x in self.src[0]]
     return flatten([x for x in matches if x is not None])
 
+# Global cache for UPat RHS patterns to avoid closures in generated functions
+_upat_rhs_cache: dict[int, UPat] = {}
+
 def deconstruct_function(fxn:Callable) -> tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
   for co in fxn.__code__.co_consts:
@@ -834,9 +837,89 @@ def deconstruct_function(fxn:Callable) -> tuple:
   ret = fxn.__code__, new_globals, fxn.__name__, fxn.__defaults__
   return pickle.loads(pickle.dumps(ret)) if getenv("TEST_PICKLE") else ret
 
+def reconstruct_uop(upat: UPat, store: dict[str, UOp]) -> UOp:
+  """Recursively reconstruct a UOp from a UPat template using matched variables.
+
+  Args:
+    upat: The UPat pattern to reconstruct into a UOp
+    store: Dictionary of matched variable names to their corresponding UOps
+
+  Returns:
+    A UOp instance reconstructed from the UPat template
+
+  The reconstruction handles three cases:
+  1. Variable reference (op=None, name!=None): Return the matched UOp from store
+  2. Constant (op contains CONST): Create a UOp.const with inferred dtype
+  3. Operation (has sources): Recursively reconstruct sources and create UOp
+  """
+  # Case 1: Variable reference - return the matched UOp
+  if upat.op is None and upat.name is not None:
+    return store[upat.name]
+
+  # Case 2: Constant - infer dtype from matched variables or use explicit dtype
+  if upat.op and Ops.CONST in upat.op:
+    # Priority: explicit dtype > inferred from store > default to int
+    if upat.dtype is not None:
+      dtype = upat.dtype[0] if isinstance(upat.dtype, tuple) else upat.dtype
+    else:
+      dtype = next((v.dtype for v in store.values() if hasattr(v, 'dtype')), dtypes.int)
+    return UOp.const(dtype, upat.arg)
+
+  # Case 3: Operation with sources - recursively reconstruct
+  if upat.src is not None:
+    # Use first permutation (src[0] is a tuple of child UPats)
+    src_upats = upat.src[0] if not isinstance(upat.src[0], itertools.repeat) else [next(upat.src[0])]
+    # Recursively reconstruct each source
+    reconstructed_srcs = tuple(reconstruct_uop(s, store) for s in src_upats)
+    # Determine dtype: explicit > last source > void
+    if upat.dtype is not None:
+      dtype = upat.dtype[0] if isinstance(upat.dtype, tuple) else upat.dtype
+    else:
+      dtype = reconstructed_srcs[-1].dtype if reconstructed_srcs else dtypes.void
+    # Use first op from tuple
+    op = upat.op[0] if isinstance(upat.op, tuple) else upat.op
+    return UOp(op, dtype, reconstructed_srcs, upat.arg)
+
+  # Error case - should not reach here with valid UPats
+  raise RuntimeError(f"Cannot reconstruct UOp from UPat: {upat}")
+
+def fixup_pm_function(fxn) -> Callable:
+  """Convert various RHS formats to a standard Callable for PatternMatcher.
+
+  Supports:
+  - UPat: Reconstructs UOps from pattern template by creating a proper function
+  - tuple: Pickled function - reconstructs using types.FunctionType
+  - Callable: Pass through unchanged
+  """
+  if isinstance(fxn, UPat):
+    # Create a proper function (not a closure) that can be deconstructed by upat_compile/upat_interpret
+    # We generate a function dynamically using exec to avoid closures
+    rhs_upat = fxn
+    # Store the UPat in globals so the generated function can access it without a closure
+    upat_id = id(rhs_upat)
+    _upat_rhs_cache[upat_id] = rhs_upat
+
+    # Create function code that references the global cache
+    func_code = f'''
+def upat_rewriter_{upat_id}(**matched_vars):
+  return reconstruct_uop(_upat_rhs_cache[{upat_id}], matched_vars)
+'''
+    # Execute in a namespace with necessary globals
+    namespace = {'reconstruct_uop': reconstruct_uop, '_upat_rhs_cache': _upat_rhs_cache}
+    exec(func_code, namespace)
+    return namespace[f'upat_rewriter_{upat_id}']
+
+  if isinstance(fxn, tuple):
+    return types.FunctionType(*fxn)
+  return fxn
+
 @functools.cache
 def upat_interpret(p:UPat, fxn:Callable) -> Callable:
-  real_fxn = types.FunctionType(*deconstruct_function(fxn))
+  # functools.partial (used for UPat RHS) can't be deconstructed, so use directly
+  if isinstance(fxn, functools.partial):
+    real_fxn = fxn
+  else:
+    real_fxn = types.FunctionType(*deconstruct_function(fxn))
   if 'ctx' in inspect.signature(real_fxn).parameters:
     def universal_match(uop, ctx):
       for match in p.match(uop, {}):
@@ -852,18 +935,32 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.uop.upat import upat_compile
-    # if this comes from a pickle, we reconstruct the lambda functions here
-    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
+    # fixup_pm_function normalizes all RHS types (UPat, tuple, Callable) to Callable
+    self.patterns:list[tuple[UPat, Callable]] = [(p, fixup_pm_function(fxn)) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
+      # UPat RHS (functools.partial) can't be compiled, so skip compilation for those
+      if compiled and not isinstance(fxn, functools.partial) and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
       else: match = upat_interpret(p, fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
 
-  def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
+  def __reduce__(self):
+    # Convert functions back to picklable form, but keep UPat instances as-is
+    patterns = []
+    for x, fxn in self.patterns:
+      if isinstance(fxn, functools.partial) and len(fxn.args) == 1 and isinstance(fxn.args[0], UPat):
+        # This is a UPat RHS - keep the UPat
+        patterns.append((x, fxn.args[0]))
+      elif fxn.__name__ == "<lambda>":
+        # Lambda function - deconstruct it
+        patterns.append((x, deconstruct_function(fxn)))
+      else:
+        # Regular function - keep as-is
+        patterns.append((x, fxn))
+    return PatternMatcher, (patterns,)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
