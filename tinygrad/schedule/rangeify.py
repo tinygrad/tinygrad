@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.symbolic import sym, symbolic_simple
+from tinygrad.uop.symbolic import symbolic_simple, pm_simplify_valid, symbolic
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
 from tinygrad.schedule.kernelize import Kernel
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
@@ -183,7 +183,7 @@ def map_reshape(idx:UOp, r:UOp):
   for s in r.src[0].shape[::-1]:
     ret.append(mish % s) # NOTE: simplify will turn this to CONST
     mish //= s
-  tret = UOp.sink(*ret[::-1]).simplify().src
+  with Context(TRACK_MATCH_STATS=0): tret = graph_rewrite(UOp.sink(*ret[::-1]), symbolic+pm_simplify_valid).src
   return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
 
 def map_pad(idx:UOp, r:UOp):
@@ -195,8 +195,7 @@ def map_pad(idx:UOp, r:UOp):
     if resolve(e > 0): where = where & (ret[i] < (sh-e))
     if resolve(s > 0): where = where & (ret[i] >= s)
     bigwhere = bigwhere & where
-    with Context(TRACK_MATCH_STATS=0):
-      ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
+    with Context(TRACK_MATCH_STATS=0): ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), symbolic+pm_simplify_valid)
   # PAD is with 0
   return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
 
