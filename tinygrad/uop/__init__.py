@@ -33,12 +33,6 @@ class Ops(FastEnum):
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto() # noqa: E702
   MULTI = auto()  # MULTI is really a movement op
 
-  # view is what all movement ops become
-  VIEW = auto()
-
-  # TODO: remove VALID with the VIEW(CONST(DEVICE)) refactor
-  VALID = auto()
-
   # TODO: unify these ops into the levels of the memory hierarchy. depends on ASSIGN is STORE
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto() # noqa: E702
 
@@ -100,7 +94,7 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
-  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
+  Buffer = {Ops.LOAD, Ops.STORE, Ops.CONST, Ops.DEFINE_VAR}
   Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped

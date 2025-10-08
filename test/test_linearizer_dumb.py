@@ -32,6 +32,7 @@ class TestLinearizerFailure(unittest.TestCase):
 
 class TestLinearizerDumb(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "need local")
+  @unittest.skip("Ops.VALID no longer exists")
   def test_max_simplify_and_cancel(self):
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1000), arg=0, src=())
     c1 = c0.view(ShapeTracker(views=(View(shape=(1000, 1), strides=(1, 0), offset=0, mask=None, contiguous=True),)))
@@ -54,6 +55,7 @@ class TestLinearizerDumb(unittest.TestCase):
 
   # this was a bug in embedding, someday we should fold this anyway
   @unittest.skipUnless(is_dtype_supported(dtypes.half), f"half dtype not supported on {Device.DEFAULT}")
+  @unittest.skip("UOp.view is no longer supported")
   def test_llama_embedding(self):
     c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(4096), arg=0, src=())
     c1 = c0.view(ShapeTracker(views=(View(shape=(4096, 1, 1), strides=(1, 0, 0), offset=0, mask=None, contiguous=True),)))
