@@ -81,17 +81,12 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-def dvar(s:sint)-> UOp|None:
-  if isinstance(s, UOp) and (dnums:=[x for x in s.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
-    assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
-    return dnums[0]
-  return None
-
 # NOTE: view path is for RANGEIFY=0, there should only be one way of doing this
 def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   def apply_shrink(s:UOp, i:int) -> UOp:
-    new_arg = [tuple([x.substitute({d:d.const_like(i)}) if (d:=dvar(x)) is not None else x for x in ss]) for ss in shrink.arg]
+    new_arg = [tuple([x.substitute({dvar[0]:dvar[0].const_like(i)}) if isinstance(x, UOp) and
+                      (dvar:=[v for v in x.vars() if v.op is Ops.DEFINE_VAR and v.arg[0]=='_device_num']) else x for x in ss]) for ss in shrink.arg]
     return s.shrink(tuple(new_arg))
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
