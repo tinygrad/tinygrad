@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
-from tinygrad.schedule.kernelize import Kernel
+from tinygrad.helpers import Metadata
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
@@ -675,6 +675,14 @@ pm_remove_tags = PatternMatcher([
   # remove all the tags
   (UPat(GroupOp.All, name="x"), remove_metadata_tags),
 ])
+
+@dataclass(frozen=True)
+class Kernel:
+  ast: UOp
+  metadata: tuple[Metadata, ...] = ()
+  def __repr__(self):
+    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
+    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
 def split_store(ctx:list[UOp], x:UOp):
   if len(x.ranges): return None

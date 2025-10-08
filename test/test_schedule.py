@@ -83,33 +83,30 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(t.numpy(), torch_out)
 
   def test_arange_avgpool2d_fused_noopt(self):
-    with Context(FUSE_ARANGE=1, NOOPT=1): self.test_arange_avgpool2d(kcount=1)
+    with Context(NOOPT=1): self.test_arange_avgpool2d(kcount=1)
 
   # linearizer error
   @unittest.skip("recursion error no longer raised")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
   def test_arange_avgpool2d_fused(self):
     with self.assertRaises(RecursionError):
-      with Context(FUSE_ARANGE=1, NOOPT=0): self.test_arange_avgpool2d(kcount=1)
+      with Context(NOOPT=0): self.test_arange_avgpool2d(kcount=1)
 
   # when we're fusing a reduce, all ReduceOps must have the same N in the dimensions
   # all permutes, reshapes, expands and shrinks push through the reduce
   def test_arange_sum(self):
     a = Tensor.arange(6).reshape(3, 2).sum(axis=1)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(a, 1))
+    run_schedule(check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [1, 5, 9])
 
   def test_arange_sum_alt(self):
     a = (Tensor.arange(5).reshape(1,5).expand(6,5)*Tensor(2)).reshape(1,6,5).sum(axis=2)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(a, 1))
+    run_schedule(check_schedule(a, 1))
     np.testing.assert_equal(a.numpy(), 20)
 
   def test_permute_arange(self):
     a = Tensor.arange(6).reshape(6, 1, 1).permute(2, 0, 1).sum(axis=1)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(a, 1))
+    run_schedule(check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [[15]])
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
@@ -137,8 +134,7 @@ class TestSchedule(unittest.TestCase):
   def test_indexing_scalars_simple(self):
     X = Tensor.randn(2, 2).realize()
     xt = X[Tensor(1)][Tensor(0)]
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(xt, 2))
+    run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
@@ -158,8 +154,7 @@ class TestSchedule(unittest.TestCase):
     assume(a<x and b<y)
     X = Tensor.randn(x, y).realize()
     xt = X[Tensor(a)][Tensor(b)]
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(xt, 2))
+    run_schedule(check_schedule(xt, 2))
     np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
 
   def test_push_pads_elementwise(self):
@@ -1574,8 +1569,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(3,3,3,3, requires_grad=True)
     y = x.pad((-1,2,2,-1), mode="replicate")
     dx = y.sum().gradient(x)[0]
-    with Context(FUSE_ARANGE=1):
-      sched = check_schedule(dx, 3)
+    sched = check_schedule(dx, 3)
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
@@ -1876,8 +1870,7 @@ class TestSchedule(unittest.TestCase):
     from extra.models.llama import precompute_freqs_cis
     args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
     fused = precompute_freqs_cis(**args)
-    with Context(FUSE_ARANGE=1):
-      run_schedule(check_schedule(fused, 3))
+    run_schedule(check_schedule(fused, 3))
     if getenv("CHECK", 1):
       ref = precompute_freqs_cis(**args)
       run_schedule(check_schedule(ref, 3))
@@ -1960,15 +1953,6 @@ class TestSchedule(unittest.TestCase):
     r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
     np.testing.assert_allclose(out0.numpy(), r_ref+2, rtol=2e-7)
     np.testing.assert_allclose(out1.numpy(), r_ref+3, rtol=2e-7)
-
-  @unittest.skip("multi output isn't supported")
-  def test_multiview_arange_children(self):
-    X = Tensor.randn(2,3,4,4).numpy()
-    with Context(FUSE_ARANGE=1):
-      compare = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
-    with Context(FUSE_ARANGE=0, TRACK_MATCH_STATS=0):
-      ref = Tensor(X).interpolate(size=(2, 2), mode="linear").numpy()
-    np.testing.assert_allclose(ref, compare, atol=1e-5, rtol=1e-6)
 
   def test_recursive_swizzle(self):
     a = Tensor([1,2,3,4]).realize()
