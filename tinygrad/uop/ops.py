@@ -270,7 +270,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, _substitute+extra_pm if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
   def substitute_until_index(self, dvars:dict[UOp, UOp]):
-    return self.substitute(dvars, extra_pm=PatternMatcher([(UPat(Ops.INDEX), raise_bottom_up_gate)]))
+    return self.substitute(dvars, extra_pm=PatternMatcher([(UPat((Ops.INDEX, Ops.LOAD, Ops.STORE)), raise_bottom_up_gate)]))
 
   # *** uop tracing stuff ***
 
