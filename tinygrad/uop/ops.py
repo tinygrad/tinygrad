@@ -367,7 +367,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
   def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
-  def realize(self, *args, **kwargs): return UOp(Ops.REALIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
@@ -954,8 +953,8 @@ class TrackedPatternMatcher(PatternMatcher):
         continue
       match_stats[p][1] += 1
       try: ret = match(uop, ctx)
-      except Exception as e:
-        if TRACK_MATCH_STATS >= 2 and active_rewrites and not isinstance(e, RewriteNotReady):
+      except Exception:
+        if TRACK_MATCH_STATS >= 2 and active_rewrites:
           active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR, src=uop.src, arg=str(sys.exc_info()[1]))), p.location))
         raise
       if ret is not None and ret is not uop:
@@ -998,7 +997,6 @@ if TRACK_MATCH_STATS or PROFILE:
 # *** simple graph rewrite engine ***
 
 with Context(SPEC=0): SENTINEL = UOp(Ops.SENTINEL)
-class RewriteNotReady(Exception): pass
 class BottomUpGate(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
@@ -1038,10 +1036,6 @@ class RewriteContext:
               if test_n in seen: raise RuntimeError("infinite loop in fixed_point_rewrite")
               seen.add(test_n)
               new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
-          except RewriteNotReady:
-            # try the full thing again later
-            stack.appendleft((n, 0, n))
-            continue
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
             self.replace[n] = new_n
@@ -1055,7 +1049,7 @@ class RewriteContext:
         tmp = []
         for x in new_n.src:
           if (rx:=self.replace.get(x, SENTINEL)) is SENTINEL:
-            # if some new sources aren't ready, we try this again later
+            # if some new sources aren't ready, we try this again later. happens with on_stack, maybe should remove?
             stack.appendleft((n, 1, new_n))
             break
           tmp.append(rx)

@@ -7,6 +7,32 @@ from tinygrad.uop.symbolic import sym
 from tinygrad.helpers import argsort, all_same, Context
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType
 
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+                     Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL}
+
+def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
+
+def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
+  for s in rb.src:
+    if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
+
+def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
+  if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
+  # if it's a kernel, we don't realize it
+  if a.src[1].op is not Ops.KERNEL: ctx[a] = None
+
+pm_generate_realize_map = PatternMatcher([
+  # always realize SINK src
+  (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
+  # always realize ASSIGN/COPY/BUFFER_VIEW/CONTIGUOUS
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
+  # realize srcs of COPY, MSELECT, MSTACK
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
+  # realize input to assign (might be optimized out)
+  (UPat(Ops.ASSIGN, name="a"), realize_assign),
+])
+
 @dataclass(frozen=True)
 class BufferizeOpts:
   # on AddrSpace.LOCAL, device is the id
@@ -77,11 +103,15 @@ pm_apply_rangeify = PatternMatcher([
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
 
-def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, IndexingContext]:
+def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   tsink_base = UOp.sink(*[x.base for x in tsink.src])
 
-  # explicit rangeify
   rctx = IndexingContext()
+
+  # get ops to realize
+  graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="Input Graph")
+
+  # explicit rangeify
   ending_ranges: dict[UOp, bool] = {}
   for x in tsink_base.reverse_toposort(consumer_map:=tsink_base.get_consumer_map()):
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
@@ -89,9 +119,9 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
 
     # if this element has weight and it's ending a range, we (force) realize it
     if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
-      if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE, Ops.CONTIGUOUS):
+      if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.BUFFERIZE, Ops.CONTIGUOUS):
         if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
-          realize_map[x] = None
+          rctx.realize_map[x] = None
 
     # *** the ranges on the output are
     #  1. new if this op is realized
@@ -99,7 +129,7 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
     #  3. potentially new if this op has 2+ consumers
 
     consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
-    if x in realize_map:
+    if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = [rctx.new_range(s) for s in x.shape]
       # all ranges are ended now
@@ -136,7 +166,7 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
           out_rngs.append(rctx.new_range(x.shape[i]))
 
       # we have to realize here if there's new ranges
-      if not all_all_same: realize_map[x] = None
+      if not all_all_same: rctx.realize_map[x] = None
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
@@ -190,12 +220,11 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
         if i in x.arg[1]: rngs[i] = rctx.new_range(s, axistype=AxisType.REDUCE)
 
     if debug:
-      print("***" if x in realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
+      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
             UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
 
-  rctx.realize_map = realize_map
   tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   return tsink, rctx
