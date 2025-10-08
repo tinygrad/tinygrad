@@ -258,6 +258,9 @@ full_non_rangeify_spec = PatternMatcher([]) if RANGEIFY else PatternMatcher([
 ])
 
 full_spec = PatternMatcher([
+  # SENTINEL should never be in the graph
+  (UPat(Ops.SENTINEL), lambda: False),
+
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine

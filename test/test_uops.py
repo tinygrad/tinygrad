@@ -544,29 +544,13 @@ class TestUopsObject(unittest.TestCase):
     with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
     assert len(ret) == 10000
 
-class TestUOpChildren(unittest.TestCase):
-  def test_children_exist(self):
-    a = UOp.variable("weird_name_234", 0, 10)
-    b = a*a
-    self.assertEqual(len(a.children), 1)
-    self.assertIs(list(a.children)[0](), b)
-
-  def test_children_cleaned_up(self):
-    a = UOp.variable("weird_name_235", 0, 10)
-    b = a*a
-    self.assertEqual(len(a.children), 1)
-    del b
-    self.assertEqual(len(a.children), 0)
-
-  def test_children_cleaned_up_two(self):
-    a = UOp.variable("weird_name_236", 0, 10)
-    b = a*a
-    c = a*2
-    self.assertEqual(len(a.children), 2)
-    del b
-    self.assertEqual(len(a.children), 1)
-    del c
-    self.assertEqual(len(a.children), 0)
+class TestUOpRender(unittest.TestCase):
+  def test_render_vectorize_same(self):
+    u = UOp(Ops.VECTORIZE, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    self.assertEqual(u.render(), "{0, ...}")
+  def test_render_vectorize_different(self):
+    u = UOp(Ops.VECTORIZE, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    self.assertEqual(u.render(), "{0,1,2}")
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

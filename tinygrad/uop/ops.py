@@ -1,14 +1,14 @@
 from __future__ import annotations
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, RANGEIFY, VIZ, SPEC
-from tinygrad.helpers import strip_parens, make_tuple
+from tinygrad.helpers import strip_parens
 if TYPE_CHECKING:
   from tinygrad.shape.shapetracker import ShapeTracker
   from tinygrad.device import Buffer, MultiBuffer
@@ -62,8 +62,7 @@ class UOpMetaClass(type):
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
-    UOpMetaClass.ucache[key] = ref = weakref.ref(created:=super().__call__(*key))
-    for s in src: s.children.add(ref)
+    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if metadata is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
@@ -101,13 +100,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
   tag:Any = None
-  children:set[weakref.ref[UOp]] = field(default_factory=set)
   def __del__(self):
     if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
-    try:
-      if (ref:=UOpMetaClass.ucache.get(k:=(self.op, self.dtype, self.src, self.arg, self.tag))) is not None:
-        for s in self.src: s.children.discard(ref)
-        del UOpMetaClass.ucache[k]
+    try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg, self.tag)]
     except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
@@ -163,11 +158,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
-
-  @functools.cached_property
-  def order_add(self:UOp) -> tuple:
-    if self.op is Ops.MUL and self.src[1].op in (Ops.CONST, Ops.VCONST): return (self.src[0].tuplize, make_tuple(self.src[1].arg, 1))
-    return (self.tuplize, (0,))
 
   @property
   def ptrdtype(self) -> PtrDType:
@@ -262,9 +252,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     # late import!
-    from tinygrad.uop.symbolic import symbolic_flat
+    from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic_flat, name="simplify")
+      return graph_rewrite(self, symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -599,32 +589,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
-  def factor(self, *factors: UOp) -> UOp:
-    # factor out expr from self if possible, might return self
-    # (1400*a + 2800*b + c).factor(a+2*b) -> 1400*(a+2*b) + c
-    if self.dtype in dtypes.floats: return self
-    if self.op is Ops.ADD:
-      factored = []
-      # dict of {term: const_factor}, i.e. {a: 1, b: 2}
-      remainders = dict([(u.divides(f:=u.const_factor()).simplify(),f) for u in self.split_uop(Ops.ADD)])
-      for fac in factors:
-        if fac.dtype not in (dtypes.index,)+dtypes.ints: continue
-        fac_terms = dict((u.divides(f:=u.const_factor()).simplify(),f) for u in fac.split_uop(Ops.ADD))
-        factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
-        new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
-
-        if any(u not in factored_terms for u in fac_terms) or any(factored_terms[u]%fac_terms[u]!=0 for u in fac_terms) or not \
-          all_same(mul:=[factored_terms[u]//fac_terms[u] for u in fac_terms]):
-          continue
-
-        remainders = new_remainders
-        factored.append(fac*mul[0])
-      if not factored: return self
-      start = functools.reduce(operator.add, factored)
-      return sum([k.factor(*factors)*v for k,v in remainders.items()], start=start)
-
-    if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return self
-    return self.replace(src=tuple(s.factor(*factors) for s in self.src))
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, ConstType]:
     return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
@@ -1042,7 +1006,7 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
-SENTINEL = UOp(Ops.SENTINEL)
+with Context(SPEC=0): SENTINEL = UOp(Ops.SENTINEL)
 class RewriteNotReady(Exception): pass
 class BottomUpGate(Exception): pass
 class RewriteContext:
@@ -1197,7 +1161,7 @@ renderer = PatternMatcher([
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda x:
    UOp(Ops.NOOP, arg=''.join([f"[{strip_parens(y.arg)}]" for y in x.src[1:]])) if all(y.op is Ops.NOOP for y in x.src[1:]) else None),
   (UPat(Ops.VECTORIZE, src=UPat(Ops.NOOP), name="x"),
-   lambda x: UOp(Ops.NOOP, arg=f"[{','.join([y.arg for y in x.src])}]" if not all_same(x.src) else f"{len(x.src)}x[{x.src[0].arg}]")),
+   lambda x: UOp(Ops.NOOP, arg=f"{{{','.join([y.arg for y in x.src])}}}" if not all_same(x.src) else f"{{{x.src[0].arg}, ...}}")),
 ])
 renderer_infer = PatternMatcher([
   (UPat(Ops.MOD, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cmod({x.src[0].arg}, {x.src[1].arg})")),
