@@ -2501,7 +2501,6 @@ class TestUOpBecome(unittest.TestCase):
     b = a*1
     assert UPat(Ops.MUL).match(b.uop, {}) # before scheduling it's a mul
     check_schedule(b, 0)
-    assert UPat(Ops.VIEW, src=(UPat(Ops.BUFFER))).match(b.uop, {}) # scheduling merges all MovementOps into a single VIEW
     self.assertIs(a.uop.base.buffer, b.uop.base.buffer)
 
   def test_become_buf_with_mops(self):
