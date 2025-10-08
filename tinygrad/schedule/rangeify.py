@@ -47,10 +47,10 @@ earliest_rewrites = PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
 
   # merge adjacent RESHAPES, safe because they are not tagged
-  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, name="x"), lambda x,x2: x.replace(src=(x2.src[0],)) if x.tag is None and x2.tag is None else None),
+  #(UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, name="x"), lambda x,x2: x.replace(src=(x2.src[0],)) if x.tag is None and x2.tag is None else None),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
-  (UPat(Ops.BUFFER).f(Ops.RESHAPE, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  #(UPat(Ops.BUFFER).f(Ops.RESHAPE, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
@@ -754,7 +754,7 @@ def apply_rangeify(ctx, x:UOp):
     new_src = s
     if s in realize_map:
       new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
-      if x in range_map and x.op is not Ops.SINK: new_src = new_src.index(*range_map[x][0])
+      if x in range_map and len(range_map[x][0]): new_src = new_src.index(*range_map[x][0])
     elif s.op is Ops.BUFFER:
       new_src = new_src.index(*range_map[x][0])
     new_srcs.append(new_src)
@@ -807,7 +807,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
       # if this element has weight and it's ending a range, we realize it
       if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
-        if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE):
+        if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.REALIZE, Ops.BUFFERIZE, Ops.CONTIGUOUS):
           if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
             realize_map[x] = None
             ending_ranges[x] = False
@@ -849,6 +849,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
         # if this has one consumer, we just pass it through from the consumer
         out_rngs = range_map[list(consumer_map[x])[0]][0]
 
+      assert len(out_rngs) == len(x.shape), \
+        f"shape len mismatch {len(out_rngs)} != {len(x.shape)} on {x.op} with {len(consumer_map[x])} consumers and realize {x in realize_map}"
+
       # rngs is the input ranges
       rngs = out_rngs[:]
 
@@ -887,18 +890,15 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
           mish //= s
         rngs = list(UOp.sink(*ret[::-1]).simplify().src)
       range_map[x] = (rngs, out_rngs)
-    if getenv("FAST") > 1:
-      for k,(in_rng,out_rng) in range_map.items():
-        print("***" if k in realize_map else "   ", len(consumer_map[k]), k.op,
-              UOp.sink().index(*in_rng).render(), " -> ", UOp.sink().index(*out_rng).render())
+      if getenv("FAST") > 1:
+        print("***" if x in realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
+              UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map), bottom_up=True, name="apply rangeify")
   else:
     # NOTE: we don't use contiguous here, contiguous is a user op
     tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
     tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
     tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
-
-    # rangeify
     tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
 
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
