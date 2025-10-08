@@ -167,6 +167,11 @@ class RangeifyContext:
   seen_child: dict[UOp, Any] = field(default_factory=dict)
   progress: int = 0
 
+  # used in FAST=1
+  realize_map: dict[UOp, None] = field(default_factory=dict)
+  range_map: dict[UOp, tuple[list[UOp], list[UOp]]] = field(default_factory=dict)
+  pads_gate: dict[UOp, UOp] = field(default_factory=dict)
+
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
@@ -748,47 +753,42 @@ pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(
 
 # *** fast rangeify ***
 
-def apply_rangeify(ctx, x:UOp):
+def apply_rangeify(ctx:RangeifyContext, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.KERNEL}: return None
   if x.op is Ops.ASSIGN and x.src[1].op is Ops.KERNEL: return None
-  realize_map, range_map, pads_gate = ctx
   new_srcs = []
   for s in x.src:
     new_src = s
     if s.op in {Ops.BUFFER, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
-      if x in range_map and x.op not in {Ops.MSTACK, Ops.MSELECT}: new_src = new_src.index(*range_map[x][0])
-    elif s in realize_map:
-      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
-      if x in range_map and x.op not in {Ops.MSTACK, Ops.MSELECT}: new_src = new_src.index(*range_map[x][0])
+      if x in ctx.range_map and x.op not in {Ops.MSTACK, Ops.MSELECT}: new_src = new_src.index(*ctx.range_map[x][0])
+    elif s in ctx.realize_map:
+      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(ctx.range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
+      if x in ctx.range_map and x.op not in {Ops.MSTACK, Ops.MSELECT}: new_src = new_src.index(*ctx.range_map[x][0])
     new_srcs.append(new_src)
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
 
-def apply_pad(ctx, x:UOp):
-  realize_map, range_map, pads_gate = ctx
-  if x not in range_map: return None
-  ret = pads_gate[x].where(x.src[0], UOp.const(x.dtype, 0))
-  range_map[ret] = range_map[x]
+def apply_pad(ctx:RangeifyContext, x:UOp):
+  if x not in ctx.range_map: return None
+  ret = ctx.pads_gate[x].where(x.src[0], UOp.const(x.dtype, 0))
+  ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
-def fix_reduce_axis(ctx, x:UOp):
-  realize_map, range_map, pads_gate = ctx
+def fix_reduce_axis(ctx:RangeifyContext, x:UOp):
   # input ranges
-  new_ranges = [r for i,r in enumerate(range_map[x][0]) if i in x.arg[1]]
+  new_ranges = [r for i,r in enumerate(ctx.range_map[x][0]) if i in x.arg[1]]
   ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=x.arg[0], tag=x.tag)
-  range_map[ret] = range_map[x]
+  ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
-def remove_movement(ctx, x:UOp):
-  realize_map, range_map, pads_gate = ctx
-  if x in range_map or x.src[0].op is Ops.INDEX: return x.src[0]
+def remove_movement(ctx:RangeifyContext, x:UOp):
+  if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
-def fix_assign(ctx, assign:UOp):
-  realize_map, range_map, pads_gate = ctx
+def fix_assign(ctx:RangeifyContext, assign:UOp):
   if assign.src[1].op is Ops.KERNEL: return None
   to_mop = graph_rewrite(assign.src[0], PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.replace(tag=()))]))
   ret = assign.replace(src=assign.src+(to_mop,))
-  range_map[ret] = range_map[assign]
+  ctx.range_map[ret] = ctx.range_map[assign]
   return ret
 
 pm_apply_rangeify = PatternMatcher([
@@ -803,7 +803,7 @@ pm_apply_rangeify = PatternMatcher([
   # remove movement op
   (UPat(GroupOp.Movement, name="x"), remove_movement),
   # const/define_var shouldn't have src
-  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx[1] else None),
+  (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
   # fixup M index
   (UPat((Ops.MSTACK, Ops.MSELECT), name="m"), lambda m: m.replace(src=tuple([x.src[0] if x.op is Ops.INDEX else x for x in m.src]))),
 ])
@@ -822,11 +822,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     tsink_base = UOp.sink(*[x.base for x in tsink.src])
 
     # explicit rangeify
-    rangeify_ctx = RangeifyContext()
-    range_map:dict[UOp, tuple[list[UOp], list[UOp]]] = {} #tsink_base:([], [])}
-    ending_ranges: dict[UOp, bool] = {}
-    pads_gate: dict[UOp, UOp] = {}
+    rctx = RangeifyContext()
     consumer_map = tsink_base.get_consumer_map()
+    ending_ranges: dict[UOp, bool] = {}
     for x in tsink_base.reverse_toposort(consumer_map):
       if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
       ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
@@ -840,11 +838,11 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
       # *** these are the ranges on the output ***
 
-      consumer_rngs = [range_map[c][0] for c in consumer_map[x] if c in range_map]
+      consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
       if x in realize_map:
         # if this is in the realize_map, we create new ranges (at the output)
         #assert x.op not in GroupOp.Movement
-        out_rngs = [rangeify_ctx.new_range(s) for s in x.shape]
+        out_rngs = [rctx.new_range(s) for s in x.shape]
       elif x.op is Ops.MSTACK:
         # treat MSTACK like SINK
         continue
@@ -872,7 +870,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
             minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
             out_rngs.append(minimum_valid.where(local_rngs[0], UOp.invalid()).simplify())
           else:
-            out_rngs.append(rangeify_ctx.new_range(x.shape[i]))
+            out_rngs.append(rctx.new_range(x.shape[i]))
 
         # we have to realize here if there's new ranges
         if not all_all_same: realize_map[x] = None
@@ -887,7 +885,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       if x.op is Ops.REDUCE_AXIS:
         rngs = rngs[:]
         for i,s in enumerate(x.src[0].shape):
-          if i in x.arg[1]: rngs[i] = rangeify_ctx.new_range(s, axistype=AxisType.REDUCE)
+          if i in x.arg[1]: rngs[i] = rctx.new_range(s, axistype=AxisType.REDUCE)
 
       # apply movement ops
       if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
@@ -907,7 +905,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
           bigwhere = bigwhere & where
           with Context(TRACK_MATCH_STATS=0):
             rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
-        pads_gate[x] = bigwhere.simplify()
+        rctx.pads_gate[x] = bigwhere.simplify()
       if x.op is Ops.RESHAPE:
         acc = 1
         to_sum = []
@@ -920,24 +918,25 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
           ret.append(mish % s) # NOTE: simplify will turn this to CONST
           mish //= s
         rngs = list(UOp.sink(*ret[::-1]).simplify().src)
-      range_map[x] = (rngs, out_rngs)
+      rctx.range_map[x] = (rngs, out_rngs)
       if FAST > 1:
         print("***" if x in realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
               UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
-    tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map,pads_gate), bottom_up=True, name="apply rangeify")
+    rctx.realize_map = realize_map
+    tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   else:
     # NOTE: we don't use contiguous here, contiguous is a user op
     tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
     tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
     tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
-    tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
+    tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rctx:=RangeifyContext()), bottom_up=True, name="rangeify")
 
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   # TODO: can you substitute and remove costly buffers at the same time?
   tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
+  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
