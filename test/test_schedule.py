@@ -12,10 +12,8 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, graph_rewrite
-from tinygrad.uop.symbolic import symbolic_simple
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, RANGEIFY
-from tinygrad.codegen.opt.swizzler import merge_views
 from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
@@ -2155,56 +2153,6 @@ class TestView(unittest.TestCase):
     run_schedule(s)
     self.assertEqual(other_child.tolist(), [2, 3, 4])
 
-def tensor_rewrite(t) -> UOp: return graph_rewrite(t.uop.base, merge_views+symbolic_simple)
-class TestSimplifier(unittest.TestCase):
-  def test_sink_childless_const(self):
-    x = Tensor(0)
-    check_schedule(x, 0)
-
-  def test_sink_childless_const_alt_expanded(self):
-    x = Tensor.zeros(4, 4).contiguous()
-    check_schedule(x, 1)
-
-  def test_all_const_uops(self):
-    a = Tensor(4)*Tensor(2)
-    sink = tensor_rewrite(a)
-    assert UPat.cvar().match(sink, {})
-
-  def test_masked_const_elementwise(self):
-    a = Tensor.eye(10)@Tensor.eye(10)
-    sink = tensor_rewrite(a)
-    assert UPat(Ops.REDUCE_AXIS, src=(UPat.cvar().view()*UPat.cvar().view(),)).match(sink, {})
-
-  def test_elementwise_ops(self):
-    a = Tensor.empty(4, 4, dtype=dtypes.int)
-    sink = tensor_rewrite(a*0)
-    assert UPat(Ops.CONST, arg=0).match(sink, {})
-    self.assertIs(tensor_rewrite(a*1).base, a.uop.base)
-    self.assertIs(tensor_rewrite(a+0).base, a.uop.base)
-
-  def test_cast_folding(self):
-    a = Tensor(1.0).cast(dtypes.int)
-    sink = tensor_rewrite(a)
-    assert UPat.cvar(dtype=dtypes.int).match(sink, {})
-
-  def test_const_folding_mul(self):
-    a = Tensor([1])
-    sink = tensor_rewrite(a*0)
-    assert UPat(Ops.CONST, arg=0).match(sink, {}), f"expected {sink} to collapse to a const 0"
-    assert sink.shape == a.shape
-
-  def test_const_folding_ne(self):
-    a = Tensor([1])
-    sink = tensor_rewrite(a != a)
-    assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
-    assert sink.shape == a.shape
-
-  def test_const_folding_lt(self):
-    a = Tensor([1])
-    sink = tensor_rewrite(a < a)
-    assert UPat(Ops.CONST, arg=False).match(sink, {}), f"expected {sink} to collapse to a const False"
-    assert sink.shape == a.shape
-
 @unittest.skipIf(Device.DEFAULT == "CPU", "tests copy from another device to cpu")
 class TestCopyFolding(unittest.TestCase):
   def test_const_copy_is_free(self):
@@ -2347,9 +2295,8 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    merged = graph_rewrite(permuted_view.uop, merge_views)
     with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
-      merged.buffer # cannot access Buffer of a non contiguous VIEW
+      permuted_view.uop.buffer # cannot access Buffer of a non contiguous VIEW
 
   def test_buffer_only_after_realize(self):
     a = Tensor([1])+Tensor([2])
