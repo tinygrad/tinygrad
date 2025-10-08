@@ -112,6 +112,7 @@ jobs:
       run: time PYTHONPATH=. TARGET_EVAL_ACC_PCT=96.0 python3.11 examples/beautiful_mnist.py | tee beautiful_mnist.txt
 
     # NOTE: this is failing in CI. it is not failing on my machine and I don't really have a way to debug it
+    # the error is "RuntimeError: Internal Error (0000000e:Internal Error)"
     #- name: Run 10 CIFAR training steps
     #  run: BENCHMARK_LOG=cifar_10steps JIT=1 ASSERT_MIN_STEP_TIME=3000 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar.txt
     #- name: Run 10 CIFAR training steps w HALF
