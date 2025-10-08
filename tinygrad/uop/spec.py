@@ -289,7 +289,7 @@ full_spec = PatternMatcher([
   # copy on index
   (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
   # assign on index. the third op is the shape
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.INDEX), UPat(), UPat(GroupOp.Movement))), lambda: True),
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat(GroupOp.Movement))), lambda: True),
 
   # expander: unroll/contract/gep/ptrcat/cat
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),

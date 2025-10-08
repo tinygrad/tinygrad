@@ -24,7 +24,7 @@ class IndexingContext:
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
-def apply_rangeify(ctx:IndexingContext, x:UOp):
+def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.KERNEL}: return None
   if x.op is Ops.ASSIGN and x.src[1].op is Ops.KERNEL: return None
   new_srcs = []
@@ -39,23 +39,23 @@ def apply_rangeify(ctx:IndexingContext, x:UOp):
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
 
-def apply_pad(ctx:IndexingContext, x:UOp):
+def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
   ret = ctx.pads_gate[x].where(x.src[0], UOp.const(x.dtype, 0))
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
-def fix_reduce_axis(ctx:IndexingContext, x:UOp):
+def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   # input ranges
   new_ranges = [r for i,r in enumerate(ctx.range_map[x][0]) if i in x.arg[1]]
   ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=x.arg[0], tag=x.tag)
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
-def remove_movement(ctx:IndexingContext, x:UOp):
+def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
-def fix_assign(ctx:IndexingContext, assign:UOp):
+def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
   if assign.src[1].op is Ops.KERNEL: return None
   to_mop = graph_rewrite(assign.src[0], PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.replace(tag=()))]))
   ret = assign.replace(src=assign.src+(to_mop,))
@@ -64,15 +64,15 @@ def fix_assign(ctx:IndexingContext, assign:UOp):
 
 pm_apply_rangeify = PatternMatcher([
   # REDUCE_AXIS -> REDUCE
-  (UPat(Ops.REDUCE_AXIS, name="x"), fix_reduce_axis),
+  (UPat(Ops.REDUCE_AXIS, name="x"), convert_reduce_axis_to_reduce_with_ranges),
   # PAD -> WHERE
-  (UPat(Ops.PAD, name="x"), apply_pad),
+  (UPat(Ops.PAD, name="x"), convert_pad_to_where_to_keep_behavior_local),
   # add third op to assign
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat()), name="assign"), fix_assign),
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat()), name="assign"), add_third_op_to_assign_to_track_shape),
   # finally, apply_rangeify
-  (UPat(GroupOp.All, name="x"), apply_rangeify),
+  (UPat(GroupOp.All, name="x"), create_bufferize_and_index_based_on_ranges),
   # remove movement op
-  (UPat(GroupOp.Movement, name="x"), remove_movement),
+  (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
   # const/define_var shouldn't have src
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
@@ -82,9 +82,8 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
 
   # explicit rangeify
   rctx = IndexingContext()
-  consumer_map = tsink_base.get_consumer_map()
   ending_ranges: dict[UOp, bool] = {}
-  for x in tsink_base.reverse_toposort(consumer_map):
+  for x in tsink_base.reverse_toposort(consumer_map:=tsink_base.get_consumer_map()):
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
     ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
@@ -94,16 +93,17 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
         if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
           realize_map[x] = None
 
-    # if we are realizing, it doesn't matter if we are ending ranges
-    if x in realize_map: ending_ranges[x] = False
-
-    # *** these are the ranges on the output ***
+    # *** the ranges on the output are
+    #  1. new if this op is realized
+    #  2. from the single consumer if this op only has one consumer
+    #  3. potentially new if this op has 2+ consumers
 
     consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
     if x in realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
-      #assert x.op not in GroupOp.Movement
       out_rngs = [rctx.new_range(s) for s in x.shape]
+      # all ranges are ended now
+      ending_ranges[x] = False
     elif x.op in {Ops.MSTACK, Ops.MSELECT}:
       # treat MSTACK/MSELECT like SINK
       continue
@@ -138,17 +138,16 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
       # we have to realize here if there's new ranges
       if not all_all_same: realize_map[x] = None
 
+    # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
     #  f"shape len mismatch {len(out_rngs)} != {len(x.shape)} on {x.op} with {len(consumer_map[x])} consumers and realize {x in realize_map}"
 
-    # rngs is the input ranges
-    rngs = out_rngs
+    # *** the ranges on the inputs are
+    #  1. swizzled for MovementOps
+    #  2. newly created for REDUCE_AXIS
+    #  3. passed through for everything else
 
-    # handle REDUCE
-    if x.op is Ops.REDUCE_AXIS:
-      rngs = rngs[:]
-      for i,s in enumerate(x.src[0].shape):
-        if i in x.arg[1]: rngs[i] = rctx.new_range(s, axistype=AxisType.REDUCE)
+    rngs = out_rngs  # rngs is the input ranges
 
     # apply movement ops. this is the definition of them
     if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
@@ -184,12 +183,19 @@ def run_rangeify(tsink:UOp, realize_map:dict[UOp, None], debug) -> tuple[UOp, In
       # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
       rngs = list(UOp.sink(*ret[::-1]).simplify().src)
 
-    # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
-    rctx.range_map[x] = (rngs, out_rngs)
+    # REDUCE_AXIS creates ranges for the axes it is reducing
+    if x.op is Ops.REDUCE_AXIS:
+      rngs = rngs[:]
+      for i,s in enumerate(x.src[0].shape):
+        if i in x.arg[1]: rngs[i] = rctx.new_range(s, axistype=AxisType.REDUCE)
 
     if debug:
       print("***" if x in realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
             UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
+
+    # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
+    rctx.range_map[x] = (rngs, out_rngs)
+
   rctx.realize_map = realize_map
   tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   return tsink, rctx
