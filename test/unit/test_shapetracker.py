@@ -757,63 +757,6 @@ class TestShapeTracker(unittest.TestCase):
     self.test_expand()
     self.test_permute()
 
-class TestShapeTrackerSize(unittest.TestCase):
-  def test_simple_size(self):
-    st = ShapeTracker.from_shape((100, 100))
-    self.assertEqual(st.real_size(), 100*100)
-
-  def test_0_in_shape_size(self):
-    st = ShapeTracker.from_shape((0, 100))
-    self.assertEqual(st.real_size(), 0)
-    st = ShapeTracker.from_shape((100, 0))
-    self.assertEqual(st.real_size(), 0)
-
-  def test_expand_size(self):
-    st = ShapeTracker.from_shape((100, 100))
-    st = st.reshape((100, 100, 1))
-    st = st.expand((100, 100, 100))
-    self.assertEqual(st.real_size(), 100*100)
-
-  def test_expand_size_flatten(self):
-    st = ShapeTracker.from_shape((100, 100))
-    st = st.reshape((100, 100, 1))
-    st = st.expand((100, 100, 100))
-    st = st.reshape((100*100*100,))
-    self.assertEqual(st.real_size(), 100*100)
-
-  def test_shrink_size_axis_0(self):
-    st = ShapeTracker.from_shape((100, 100))
-    st = st.shrink(((0, 50), (0, 100)))
-    self.assertEqual(st.real_size(), 50*100)
-
-  def test_shrink_size_axis_0_variable(self):
-    st = ShapeTracker.from_shape((100, 100))
-    st = st.shrink(((0, Variable("a", 0, 50)), (0, 100)))
-    self.assertEqual(st.real_size(), 50*100)
-
-  def test_shrink_size_axis_1(self):
-    st = ShapeTracker.from_shape((100, 100))
-    st = st.shrink(((0, 100), (0, 50)))
-    self.assertEqual(st.real_size(), 9950)    # careful here
-
-  def test_size_variable(self):
-    st = ShapeTracker(views=(View(shape=(1, 1, 1, (Variable('start_pos', 0, 8192)+1), 1, 8, 4, 128), strides=(0, 0, 0, 1024, 0, 128, 0, 1),
-                                  offset=0, mask=None, contiguous=False), View(shape=(1, 32, 1, (Variable('start_pos', 0, 8192)+1), 128),
-                                                                               strides=(0, 128, 0, 4096, 1), offset=0, mask=None, contiguous=False)))
-    self.assertEqual(st.real_size(), 8389632)
-
-  def test_pad_size_simple(self):
-    st = ShapeTracker.from_shape((10,)).pad(((2,4),))
-    self.assertEqual(st.real_size(), 10)
-
-  def test_pad_size_multiview(self):
-    st = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).reshape((16*14,))
-    self.assertEqual(st.real_size(), 100)
-
-  def test_flip_size(self):
-    st = ShapeTracker.from_shape((10,10)).pad(((2,4), (3,1))).flip((True, True))
-    self.assertEqual(st.real_size(), 100)
-
 class TestVariableShrink(unittest.TestCase):
   def test_shrink(self):
     st = ShapeTracker.from_shape((10,))

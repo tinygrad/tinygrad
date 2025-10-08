@@ -66,14 +66,6 @@ class ShapeTracker:
   def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
     return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
 
-  # upper bound on buffer size required to fit this shapetracker
-  def real_size(self) -> int:
-    if 0 in self.shape: return 0
-    view = (v.shrink(v.mask) if (v:=self.views[0]).mask else v)
-    idx = views_to_valid_uop((view,)).get_idx()
-    assert idx.vmax < 1e12, f"real_size broken for {self}"
-    return int(idx.vmax + 1)
-
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
