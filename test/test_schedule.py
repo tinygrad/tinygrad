@@ -1954,8 +1954,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     new_uop = a.reshape(4,1).realize().uop
-    self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
-    self.assertEqual(swizzle_cnt(new_uop), 0)
+    assert new_uop.base.op is Ops.BUFFER
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_limit_bufs_with_var(self):
@@ -1980,9 +1979,6 @@ class TestSchedule(unittest.TestCase):
     z = x+Tensor.empty(1) # z only loads 2 buffers
     sched = z.schedule()
     self.assertEqual(len(sched), kcount+1)
-
-def swizzle_cnt(u:UOp) -> int:
-  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
