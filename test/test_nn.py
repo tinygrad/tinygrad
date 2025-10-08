@@ -447,11 +447,11 @@ class TestNN(unittest.TestCase):
 
   # TODO: fused with opts uses more ops
   def test_embedding_one_kernel_fused(self):
-    with Context(FUSE_ARANGE=1, NOOPT=0):
+    with Context(NOOPT=0):
       self.test_embedding_one_kernel(ops=612_000, kcount=2)
 
   def test_embedding_one_kernel_fused_noopt(self):
-    with Context(FUSE_ARANGE=1, NOOPT=1):
+    with Context(NOOPT=1):
       self.test_embedding_one_kernel(ops=0, kcount=2)
 
   def test_embedding_shape(self):
@@ -465,10 +465,9 @@ class TestNN(unittest.TestCase):
 
   def test_embedding_regression(self):
     # used to fail bounds check
-    with Context(FUSE_ARANGE=1):
-      embedding = Embedding(100, 1024)
-      input_ids = Tensor.empty(16, 16, dtype=dtypes.int)
-      embedding(input_ids).realize()
+    embedding = Embedding(100, 1024)
+    input_ids = Tensor.empty(16, 16, dtype=dtypes.int)
+    embedding(input_ids).realize()
 
   def test_load_state_dict(self):
     layer = Conv2d(3, 5, kernel_size=3)

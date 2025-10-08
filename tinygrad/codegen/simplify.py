@@ -17,7 +17,7 @@ pm_flatten_range = PatternMatcher([
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  reduce_ranges = [x.ranges for x in u.sparents if x.op is Ops.REDUCE]
+  reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   i = range_start[u.op]
   while i < len(u.src)-1:
     r0, r1 = u.src[i], u.src[i+1]
@@ -67,7 +67,7 @@ pm_split_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
-def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.sparents)
+def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
 
 def reduce_rangeless(red:UOp):
   # TODO: share code with reduce_unparented
@@ -116,7 +116,7 @@ pm_reduce_collapse = PatternMatcher([
 ])+sym
 
 def reduce_collapse(red:UOp):
-  included, not_included = partition(red.parents, lambda x: any(y in x.sparents for y in red.src[1:]))
+  included, not_included = partition(red.backward_slice, lambda x: any(y in x.backward_slice_with_self for y in red.src[1:]))
   if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
   replaces: dict[UOp, UOp] = {}
   for u in included:
@@ -129,7 +129,7 @@ def reduce_collapse(red:UOp):
 
 def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
-  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].sparents)
+  reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].backward_slice_with_self)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
   if red.arg is Ops.ADD:

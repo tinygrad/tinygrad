@@ -42,13 +42,6 @@ class ShapeTracker:
     for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
     return ret
 
-  def invert(self, out_shape:tuple[sint, ...]) -> ShapeTracker|None:
-    inverted_views:list[View] = []
-    for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
-      if (inverted:= v.invert(s)) is None: return None
-      inverted_views.append(inverted)
-    return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
-
   @staticmethod
   def from_shape(shape:tuple[sint, ...], strides:tuple[sint, ...]|None=None) -> ShapeTracker: return ShapeTracker((View.create(shape, strides),))
 
@@ -65,14 +58,6 @@ class ShapeTracker:
 
   def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
     return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
-
-  # upper bound on buffer size required to fit this shapetracker
-  def real_size(self) -> int:
-    if 0 in self.shape: return 0
-    view = (v.shrink(v.mask) if (v:=self.views[0]).mask else v)
-    idx = views_to_valid_uop((view,)).get_idx()
-    assert idx.vmax < 1e12, f"real_size broken for {self}"
-    return int(idx.vmax + 1)
 
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
