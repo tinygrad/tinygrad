@@ -273,7 +273,7 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      const line = { line:true, x:timestamps, y:totals.map(yscale), fillColor:colorScheme.BUFFER[0] };
+      const line = { x:timestamps, y1:totals.map(yscale), y0:(new Array(timestamps.length).fill(0)).map(yscale), fillColor:colorScheme.BUFFER[0] };
       data.tracks.set(k, { shapes:[line], visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
@@ -306,15 +306,6 @@ async function renderProfiler() {
     for (const [_, { offsetY, shapes, visible }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
-        if (e.line) {
-          if (e.x[0]>et || e.x.at(-1)<st) continue;
-          const xs = e.x.map(xscale);
-          const ys = e.y.map(y => offsetY + y);
-          ctx.beginPath(); ctx.moveTo(xs[0], ys[0]);
-          for (let i=1;i<xs.length;i++) { ctx.lineTo(xs[i], ys[i]); visible.push({ x0:xs[i-1], x1:xs[i], y0:ys[i-1]-3, y1:ys[i-1]+3, arg:e.arg }); }
-          ctx.strokeStyle = e.fillColor; ctx.stroke();
-          continue;
-        }
         // generic polygon
         if (e.width == null) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
