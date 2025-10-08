@@ -18,7 +18,6 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
-from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -232,7 +231,7 @@ class Tensor(MathTrait):
       _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")
       big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
 
-    becomes_map = get_rangeify_map(big_sink) if RANGEIFY else get_kernelize_map(big_sink)
+    becomes_map = get_rangeify_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
