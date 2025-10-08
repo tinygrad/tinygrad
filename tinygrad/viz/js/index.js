@@ -277,21 +277,22 @@ async function renderProfiler() {
       // generic polygon merger
       const base0 = yscale(0);
       const allX = Array.from(new Set(shapes.flatMap(s => s.x))).sort((a,b)=>a-b);
-      const topAt = new Map(allX.map(x => [x, base0]));
-      const lowerBound = (a, v) => { let l=0, r=a.length; while (l<r) { const m=(l+r)>>1; if (a[m] < v) l=m+1; else r=m; } return l; };
-      // for every [a,b) set the peak y1 at x
+      const idxs = new Map(allX.map((x,i) => [x, i]));
+      const maxY = new Map(allX.map(x => [x, base0]));
+      // for every [a,b) update the max y at x
       for (const sh of shapes) {
         for (let i=0; i<sh.x.length-1; i++) {
-          const a = sh.x[i], b = sh.x[i+1], v = sh.y1[i];
-          for (let k = lowerBound(allX, a); k < lowerBound(allX, b); k++) {
-            const x = allX[k]; topAt.set(x, Math.min(topAt.get(x), v));
+          const startIdx = idxs.get(sh.x[i]), endIdx = idxs.get(sh.x[i+1]);
+          const shapeY = sh.y1[i];
+          for (let k=startIdx; k<endIdx; k++) {
+            const x = allX[k]; maxY.set(x, Math.min(maxY.get(x), shapeY));
           }
         }
       }
       const sum = {x:[], y0:[], y1:[], fillColor:colorScheme.BUFFER[0]};
       for (let i=0; i<allX.length-1; i++) {
-        const v = topAt.get(allX[i]);
-        sum.x.push(allX[i], allX[i+1]); sum.y1.push(v, v); sum.y0.push(base0, base0);
+        sum.x.push(allX[i], allX[i+1]);
+        const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
       }
       data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes] });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
