@@ -269,11 +269,6 @@ full_spec = PatternMatcher([
   # where on index in rhs position is fine
   (UPat(Ops.WHERE, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
 
-  # all children is fine
-  (UPat(Ops.CHILDREN), lambda: True),
-  # child must have CHILDREN parent
-  (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN),)), lambda: True),
-
   # all rewrite error are okay
   (UPat(Ops.REWRITE_ERROR), lambda: True),
 
@@ -281,8 +276,6 @@ full_spec = PatternMatcher([
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
   # bufferize (must be on ranges)
   (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
-  # realize with one src is fine
-  (UPat(Ops.REALIZE, src=(UPat(),)), lambda: True),
   # intermediate index
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
