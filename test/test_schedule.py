@@ -2467,14 +2467,13 @@ class TestUOpBecome(unittest.TestCase):
     self.assertEqual(add.uop.shape, (8, 2))
     assert add.uop is not add.uop.base
 
-  @expect_rangeify_fails
   def test_new_flat_buffer(self):
     a = Tensor.empty(4,)
     b = Tensor.empty(4,)
     add = a+b
     check_schedule(add, 1)
     # BUFFER already has a shape (4,), this tensor just becomes a contiguous BUFFER
-    assert UPat(Ops.BUFFER).match(add.uop, {})
+    assert UPat(Ops.BUFFER).match(add.uop.base, {})
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
