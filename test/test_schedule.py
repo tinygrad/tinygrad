@@ -45,7 +45,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
 
-def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
+def _test_conv2d(allowed:int, dtype:DType=dtypes.float):
   old_default_float, dtypes.default_float = dtypes.default_float, dtype
   dtypes.default_float = dtype
   Tensor.manual_seed(0)
@@ -54,7 +54,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
   w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
-  with Context(**kwargs): s = Tensor.schedule(ret, img.grad, w.grad)
+  s = Tensor.schedule(ret, img.grad, w.grad)
   run_schedule(s.copy())
   cnt = len([si for si in s if si.ast.op is Ops.SINK])
   assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
@@ -470,15 +470,14 @@ class TestSchedule(unittest.TestCase):
           check_schedule(opt.schedule_step(), cnt)
 
   def test_fold_batchnorm_backward(self):
-    with Context(FUSE_CONV_BW=1):
-      with Tensor.train():
-        x = Tensor.empty((2, 16, 8, 8)).contiguous()
-        bn = nn.BatchNorm2d(16)
-        bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
-        fw = bn(x).contiguous_backward().relu().contiguous()
-        fw.sum().backward()
-        # TODO: this is too many
-        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
+    with Tensor.train():
+      x = Tensor.empty((2, 16, 8, 8)).contiguous()
+      bn = nn.BatchNorm2d(16)
+      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
+      fw = bn(x).contiguous_backward().relu().contiguous()
+      fw.sum().backward()
+      # TODO: this is too many
+      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -1321,7 +1320,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 14)
+      check_schedule(opt.schedule_step(), 14)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @expect_rangeify_fails
@@ -1626,7 +1625,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(out, 2))
 
   def test_conv2d(self): _test_conv2d(5 if RANGEIFY else 7)
-  def test_conv2d_fused(self): _test_conv2d(5 if RANGEIFY else 5, FUSE_CONV_BW=1)
+  def test_conv2d_fused(self): _test_conv2d(5 if RANGEIFY else 5)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(5 if RANGEIFY else 7, dtype=dtypes.half)

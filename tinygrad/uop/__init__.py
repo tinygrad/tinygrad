@@ -12,9 +12,6 @@ class Ops(FastEnum):
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto(); REWRITE_ERROR = auto()  # noqa: E702
   SENTINEL = auto()
 
-  # track children
-  CHILD = auto(); CHILDREN = auto() # noqa: E702
-
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
 
@@ -24,7 +21,6 @@ class Ops(FastEnum):
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
-  REALIZE = auto()
 
   # blocks in linearizer (only used there)
   BLOCK = auto(); BLOCKSTART = auto(); BLOCKEND = auto(); BLOCKFINAL = auto() # noqa: E702
