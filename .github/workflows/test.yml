@@ -144,7 +144,7 @@ jobs:
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
     - name: Test beautiful_mnist in torch with TINY_BACKEND
-      run: SPLIT_REDUCEOP=0 FUSE_ARANGE=1 CPU=1 CPU_LLVM=1 TARGET_EVAL_ACC_PCT=96.0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
+      run: CPU=1 CPU_LLVM=1 TARGET_EVAL_ACC_PCT=96.0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
     - name: Test some torch tests (expect failure)
       run: python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
@@ -533,7 +533,7 @@ jobs:
     - name: Test LLVM=1 DEVECTORIZE=0 for model
       run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
     - name: Test CPU=1 DEVECTORIZE=0
-      run: CPU=1 CPU_LLVM=0 DEVECTORIZE=0 FUSE_ARANGE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+      run: CPU=1 CPU_LLVM=0 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
 
   testdsp:
     name: Linux (DSP)

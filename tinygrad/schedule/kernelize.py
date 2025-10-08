@@ -2,7 +2,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewr
 from tinygrad.uop.ops import track_rewrites, _substitute, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import all_int, all_same, prod, dedup, unwrap, getenv, pluralize, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
@@ -250,7 +250,7 @@ def do_fusion(x:UOp):
 
 def fuse_arange(root:UOp):
   # skip if root is arange
-  if not FUSE_ARANGE or root.src[0].base.op is Ops.CONST: return None
+  if root.src[0].base.op is Ops.CONST: return None
   # gather all local aranges (including any fused ones)
   local_arange: list[UOp] = []
   def gate_reduce(u):
