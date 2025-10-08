@@ -120,7 +120,6 @@ class TestSchedule(unittest.TestCase):
     with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 1)
 
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
-  @expect_rangeify_fails
   def test_error_on_device_mismatch_alt(self):
     a = Tensor.empty(10)
     b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
