@@ -2,7 +2,7 @@ from typing import Any, cast, Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, RewriteNotReady, _substitute, ssimplify, KernelInfo, Invalid
 from tinygrad.uop.symbolic import sym, symbolic_simple
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
 from tinygrad.schedule.kernelize import Kernel
@@ -47,10 +47,10 @@ earliest_rewrites = PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
 
   # merge adjacent RESHAPES, safe because they are not tagged
-  #(UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, name="x"), lambda x,x2: x.replace(src=(x2.src[0],)) if x.tag is None and x2.tag is None else None),
+  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, name="x"), lambda x,x2: x.replace(src=(x2.src[0],)) if x.tag is None and x2.tag is None else None),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
-  #(UPat(Ops.BUFFER).f(Ops.RESHAPE, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  (UPat(Ops.BUFFER).f(Ops.RESHAPE, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
@@ -750,42 +750,47 @@ pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(
 
 def apply_rangeify(ctx, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
-  realize_map, range_map = ctx
+  realize_map, range_map, pads_gate = ctx
   new_srcs = []
   for s in x.src:
     new_src = s
     if s in realize_map:
       new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
-      if x in range_map and len(range_map[x][0]): new_src = new_src.index(*range_map[x][0])
+      if x in range_map: new_src = new_src.index(*range_map[x][0])
     elif s.op is Ops.BUFFER:
-      new_src = new_src.index(*range_map[x][0])
+      if x in range_map: new_src = new_src.index(*range_map[x][0])
     new_srcs.append(new_src)
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
 
 def apply_pad(ctx, x:UOp):
-  realize_map, range_map = ctx
-  bigwhere: UOp = functools.reduce(operator.and_, [u.src[0] for u in range_map[x][0] if u.op is Ops.WHERE], UOp.const(dtypes.bool, True))
-  ret = bigwhere.simplify().where(x.src[0], UOp.const(x.dtype, 0))
+  realize_map, range_map, pads_gate = ctx
+  if x not in range_map: return None
+  ret = pads_gate[x].where(x.src[0], UOp.const(x.dtype, 0))
   range_map[ret] = range_map[x]
   return ret
 
 def fix_reduce_axis(ctx, x:UOp):
-  realize_map, range_map = ctx
+  realize_map, range_map, pads_gate = ctx
   # input ranges
   new_ranges = [r for i,r in enumerate(range_map[x][0]) if i in x.arg[1]]
   ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=x.arg[0], tag=x.tag)
   range_map[ret] = range_map[x]
   return ret
 
+def remove_movement(ctx, x:UOp):
+  realize_map, range_map, pads_gate = ctx
+  if x in range_map or x.src[0].op in {Ops.BUFFERIZE, Ops.INDEX}: return x.src[0]
+
 pm_apply_rangeify = PatternMatcher([
   # REDUCE_AXIS -> REDUCE
   (UPat(Ops.REDUCE_AXIS, name="x"), fix_reduce_axis),
   # PAD -> WHERE
   (UPat(Ops.PAD, name="x"), apply_pad),
+  # finally, apply_rangeify
   (UPat(GroupOp.All, name="x"), apply_rangeify),
-  # remove movement ops
-  (UPat(GroupOp.Movement, name="x"), lambda x: x.src[0]),
+  # remove movement op
+  (UPat(GroupOp.Movement, name="x"), remove_movement),
 ])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
@@ -798,13 +803,16 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
 
   if getenv("FAST"):
+    tsink_base = UOp.sink(*[x.base for x in tsink.src])
+
     # explicit rangeify
     rangeify_ctx = RangeifyContext()
-    range_map:dict[UOp, tuple[list[UOp], list[UOp]]] = {tsink:([], [])}
+    range_map:dict[UOp, tuple[list[UOp], list[UOp]]] = {} #tsink_base:([], [])}
     ending_ranges: dict[UOp, bool] = {}
-    consumer_map = tsink.get_consumer_map()
-    for x in tsink.reverse_toposort(consumer_map):
-      if x.op in {Ops.DEVICE, Ops.UNIQUE, Ops.BUFFER, Ops.CONST}: continue
+    pads_gate: dict[UOp, UOp] = {}
+    consumer_map = tsink_base.get_consumer_map()
+    for x in tsink_base.reverse_toposort(consumer_map):
+      if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
       ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
       # if this element has weight and it's ending a range, we realize it
@@ -816,16 +824,18 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
       # *** these are the ranges on the output ***
 
+      consumer_rngs = [range_map[c][0] for c in consumer_map[x] if c.op is not Ops.SINK]
       if x in realize_map:
         # if this is in the realize_map, we create new ranges (at the output)
         #assert x.op not in GroupOp.Movement
         out_rngs = [rangeify_ctx.new_range(s) for s in x.shape]
-      elif len(consumer_map[x]) == 0:
+      elif len(consumer_rngs) == 0:
         continue
-      elif len(consumer_map[x]) > 1:
+      elif len(consumer_rngs) == 1:
+        out_rngs = consumer_rngs[0]
+      elif len(consumer_rngs) > 1:
         # if this has two consumers, we have to merge the ranges and might create new ones
-        all_rngs = list(zip(*[range_map[c][0] for c in consumer_map[x]]))
-
+        all_rngs = list(zip(*consumer_rngs))
         rngs_valids = []
         for valid_rngs in all_rngs:
           local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
@@ -847,9 +857,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
         # we have to realize here if there's new ranges
         if not all_all_same: realize_map[x] = None
-      else:
-        # if this has one consumer, we just pass it through from the consumer
-        out_rngs = range_map[list(consumer_map[x])[0]][0]
 
       assert len(out_rngs) == len(x.shape), \
         f"shape len mismatch {len(out_rngs)} != {len(x.shape)} on {x.op} with {len(consumer_map[x])} consumers and realize {x in realize_map}"
@@ -871,14 +878,16 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
         ending_ranges[x] = True
       if x.op is Ops.PAD:
         rngs = rngs[:]
+        bigwhere = UOp.const(dtypes.bool, True)
         for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
           if s == 0 and e == 0: continue
           where = UOp.const(dtypes.bool, True)
           if resolve(e > 0): where = where & (rngs[i] < (sh-e))
           if resolve(s > 0): where = where & (rngs[i] >= s)
+          bigwhere = bigwhere & where
           with Context(TRACK_MATCH_STATS=0):
             rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
-          # NOTE: pad is replaced with a WHERE in the big graph to preserve behavior
+        pads_gate[x] = bigwhere.simplify()
       if x.op is Ops.RESHAPE:
         acc = 1
         to_sum = []
@@ -895,7 +904,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       if getenv("FAST") > 1:
         print("***" if x in realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
               UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
-    tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map), bottom_up=True, name="apply rangeify")
+    tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map,pads_gate), bottom_up=True, name="apply rangeify")
   else:
     # NOTE: we don't use contiguous here, contiguous is a user op
     tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
