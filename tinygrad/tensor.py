@@ -24,15 +24,15 @@ from tinygrad.schedule.kernelize import get_kernelize_map
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> None:
-  fixed_tensors = [t for tref in all_tensors if (t:=tref()) is not None and
+  scope_tensors = [t for tref in tuple(all_tensors) if (t:=tref()) is not None and
                    (t.uop in applied_map or len(applied_map.keys() & t.uop.backward_slice.keys()))]
 
   # get all Tensors and apply the map
-  sink = UOp.sink(*[t.uop for t in fixed_tensors])
+  sink = UOp.sink(*[t.uop for t in scope_tensors])
   new_sink = sink.substitute(applied_map, name=name)
 
   # set the relevant uop to the realized UOps
-  for t,s,ns in zip(fixed_tensors, sink.src, new_sink.src):
+  for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
     if s is ns: continue
     t.uop = ns
 

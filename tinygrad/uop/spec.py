@@ -261,6 +261,9 @@ full_spec = PatternMatcher([
   # SENTINEL should never be in the graph
   (UPat(Ops.SENTINEL), lambda: False),
 
+  # allow any SUBSTITUTE
+  (UPat(Ops.SUBSTITUTE), lambda: True),
+
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine
@@ -277,7 +280,7 @@ full_spec = PatternMatcher([
   # rangeify: buffer view with index or load is okay
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
   # bufferize (must be on ranges)
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op is Ops.RANGE for y in x.src[1:])),
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
   # realize with one src is fine
   (UPat(Ops.REALIZE, src=(UPat(),)), lambda: True),
   # intermediate index
