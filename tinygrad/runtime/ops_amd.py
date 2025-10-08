@@ -210,7 +210,7 @@ class AMDComputeQueue(HWQueue):
 
     user_regs = []
     if prg.enable_private_segment_sgpr:
-      assert self.dev.xccs == 1, "Only architected flat scratch is suppored on multi-xcc"
+      assert self.dev.xccs == 1, "Only architected flat scratch is supported on multi-xcc"
       scratch_hilo = data64_le(prg.dev.scratch.va_addr)
       # sgpr word1 bit31 enables swizzle
       # sgpr word3 = 0x14 << 12 | 2 << 28 | 2 << 21 | 1 << 23
