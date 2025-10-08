@@ -781,7 +781,7 @@ def fix_reduce_axis(ctx, x:UOp):
 
 def remove_movement(ctx, x:UOp):
   realize_map, range_map, pads_gate = ctx
-  if x in range_map or x.src[0].op in {Ops.BUFFERIZE, Ops.INDEX}: return x.src[0]
+  if x in range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
 def fix_assign(ctx, assign:UOp):
   realize_map, range_map, pads_gate = ctx
