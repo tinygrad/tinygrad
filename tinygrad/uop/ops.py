@@ -154,8 +154,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s in u.src: ret[s][u] = None
     return ret
 
-  def reverse_toposort(self) -> dict[UOp, None]:
-    consumer_map = self.get_consumer_map()
+  def reverse_toposort(self, consumer_map) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(x, False) for x in consumer_map if len(x.src) == 0]
     while stack:

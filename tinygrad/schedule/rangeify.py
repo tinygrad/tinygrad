@@ -744,27 +744,115 @@ def do_sub_recurse(s:UOp):
   return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, src=(y,uop_keys,uop_values)) for y in x.src]))
 pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(Ops.NOOP), UPat(Ops.NOOP)), name="s"), do_sub_recurse)])
 
+def apply_rangeify(ctx, x:UOp):
+  if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
+  realize_map, range_map = ctx
+  new_srcs = []
+  for s in x.src:
+    new_src = s
+    if s in realize_map:
+      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(range_map[s]), arg=BufferizeOpts(device=s.device), tag=s.tag)
+      if x in range_map: new_src = new_src.index(*range_map[x])
+    elif s.op is Ops.BUFFER:
+      new_src = new_src.index(*range_map[x])
+    new_srcs.append(new_src)
+  # NOTE: do we need this?
+  return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
+
+def apply_pad(ctx, x:UOp):
+  realize_map, range_map = ctx
+  bigwhere: UOp = functools.reduce(operator.and_, [u.src[0] for u in range_map[x] if u.op is Ops.WHERE], UOp.const(dtypes.bool, True))
+  return bigwhere.simplify().where(x.src[0], UOp.const(x.dtype, 0))
+
+pm_apply_rangeify = PatternMatcher([
+  (UPat(GroupOp.All, name="x"), apply_rangeify),
+  # remove movement ops
+  (UPat(Ops.PAD, name="x"), apply_pad),
+  (UPat(GroupOp.Movement, name="x"), lambda x: x.src[0]),
+])
+
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
 
   tsink = graph_rewrite(tsink, earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
-  realize_map: dict[UOp, UOp] = {}
+  realize_map: dict[UOp, None] = {}
   graph_rewrite(tsink, do_realize, ctx=realize_map, name="Input Graph")
-  # NOTE: we don't use contiguous here, contiguous is a user op
-  tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
-  tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
-  tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
 
-  # rangeify
-  tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
-  # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
-  tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
-  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
-  # TODO: can you substitute and remove costly buffers at the same time?
-  tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
+  if getenv("FAST"):
+    # explicit rangeify
+    ctx = RangeifyContext()
+    range_map = {}
+    consumer_map = tsink.get_consumer_map()
+    for x in tsink.reverse_toposort(consumer_map):
+      if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+      if x in realize_map:
+        # if this is in the realize_map, we create new ranges (at the output)
+        assert x.op not in GroupOp.Movement
+        rngs = [ctx.new_range(s) for s in x.shape]
+      elif len(consumer_map[x]) == 0:
+        continue
+      elif len(consumer_map[x]) > 1:
+        # if this has two consumers, we have to merge the ranges and might create new ones
+        all_rngs = list(zip(*[range_map[c] for c in consumer_map[x]]))
+        # for RANGEIFY=1, if any differ we create all new ones
+        all_all_same = all(all_same(x) for x in all_rngs)
+        if all_all_same:
+          # all are the same
+          rngs = range_map[list(consumer_map[x])[0]]
+        else:
+          # create new ranges and add to realize_map
+          rngs = [ctx.new_range(s) for s in x.shape]
+          realize_map[x] = None
+      else:
+        # if this has one consumer, we just pass it through from the consumer
+        rngs = range_map[list(consumer_map[x])[0]]
+
+      # apply movement ops
+      if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
+      if x.op is Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
+      if x.op is Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
+      if x.op is Ops.EXPAND:  rngs = [a if resolve(x==y, False) else a.const_like(0) for a,x,y in zip(rngs, x.src[0].shape, x.shape)]
+      if x.op is Ops.PAD:
+        for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
+          if s == 0 and e == 0: continue
+          where = UOp.const(dtypes.bool, True)
+          if resolve(e > 0): where = where & (rngs[i] < (sh-e))
+          if resolve(s > 0): where = where & (rngs[i] >= s)
+          with Context(TRACK_MATCH_STATS=0):
+            rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
+          # NOTE: pad is replaced with a WHERE in the big graph to preserve behavior
+      if x.op is Ops.RESHAPE:
+        acc = 1
+        to_sum = []
+        for s,src in list(zip(x.shape, rngs))[::-1]:
+          to_sum.append(acc*src)
+          acc *= s
+        mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
+        ret:list[UOp] = []
+        for s in x.src[0].shape[::-1]:
+          ret.append(mish % s) # NOTE: simplify will turn this to CONST
+          mish //= s
+        rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+      range_map[x] = rngs
+    for k,v in range_map.items():
+      print("***" if k in realize_map else "   ", k.op, UOp.sink().index(*v).render())
+    tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map), bottom_up=True, name="apply rangeify")
+  else:
+    # NOTE: we don't use contiguous here, contiguous is a user op
+    tsink = graph_rewrite(tsink, add_contiguous, ctx=realize_map, bottom_up=True, name="add realize")
+    tsink = graph_rewrite(tsink, remove_contig_tags, name="remove contiguous tags")
+    tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
+
+    # rangeify
+    tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
+    # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
+    tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
+    tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
+    # TODO: can you substitute and remove costly buffers at the same time?
+    tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
+    tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
