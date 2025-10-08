@@ -544,6 +544,11 @@ class TestUopsObject(unittest.TestCase):
     with Timing("create 10k uops:"): ret = [UOp(Ops.CONST, dtypes.int, arg=10000000+i) for i in range(10000)]
     assert len(ret) == 10000
 
+  def test_nested(self):
+    a = UOp.new_buffer(Device.DEFAULT, 1, dtypes.char)
+    for _ in range(10_000): a = a+a
+    self.assertEqual(a.device, Device.DEFAULT)
+
 class TestUOpRender(unittest.TestCase):
   def test_render_vectorize_same(self):
     u = UOp(Ops.VECTORIZE, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
