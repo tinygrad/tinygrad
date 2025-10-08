@@ -141,8 +141,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if node in ret: continue
       if not visited:
         if gate is None or gate(node):
-          stack.append((node, True))  # push node back on stack to process after its parents
-          for parent in reversed(node.src): stack.append((parent, False)) # push parents on the stack
+          stack.append((node, True))  # push node back on stack to process after its srcs
+          for s in reversed(node.src): stack.append((s, False)) # push srcs on the stack
       else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
     return ret
 
@@ -704,8 +704,8 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 def print_uops(uops:list[UOp]):
   for i,u in enumerate(uops):
-    formatted_parents = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_parents):32s} {u.arg}")
+    formatted_srcs = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # ***** pattern matcher *****
 
@@ -1036,7 +1036,7 @@ class RewriteContext:
       n, stage, new_n = stack.pop()
       if n in self.replace: continue  # skip any nodes we have seen
       if stage == 0:
-        # if bottom up, we rewrite this node early. in both cases, we add its parents to the stack
+        # if bottom up, we rewrite this node early. in both cases, we add its srcs to the stack
         if self.bpm is not None:
           # apply rewrite rules until a fixed point is reached. may return `uop` itself if PatternMatcher doesn't match
           test_n: UOp|None = n
