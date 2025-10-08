@@ -417,7 +417,7 @@ def cleanup_dead_axes(b:UOp):
 # we want to reexpress the indexes of idx2 in terms of the implied b1
 def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # see if we can't do it, should this ever hit?
-  assert len(buf.src) == len(idx.src), "index on wrong bufferize"
+  assert len(buf.src) == len(idx.src), f"index on wrong bufferize, {len(buf.src)} != {len(idx.src)}"
   assert all(x.op in {Ops.RANGE, Ops.CONST} for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
@@ -754,7 +754,7 @@ def apply_rangeify(ctx, x:UOp):
     new_src = s
     if s in realize_map:
       new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
-      if x in range_map: new_src = new_src.index(*range_map[x][0])
+      if x in range_map and x.op is not Ops.SINK: new_src = new_src.index(*range_map[x][0])
     elif s.op is Ops.BUFFER:
       new_src = new_src.index(*range_map[x][0])
     new_srcs.append(new_src)
@@ -764,7 +764,9 @@ def apply_rangeify(ctx, x:UOp):
 def apply_pad(ctx, x:UOp):
   realize_map, range_map = ctx
   bigwhere: UOp = functools.reduce(operator.and_, [u.src[0] for u in range_map[x][0] if u.op is Ops.WHERE], UOp.const(dtypes.bool, True))
-  return bigwhere.simplify().where(x.src[0], UOp.const(x.dtype, 0))
+  ret = bigwhere.simplify().where(x.src[0], UOp.const(x.dtype, 0))
+  range_map[ret] = range_map[x]
+  return ret
 
 def fix_reduce_axis(ctx, x:UOp):
   realize_map, range_map = ctx
@@ -775,9 +777,11 @@ def fix_reduce_axis(ctx, x:UOp):
   return ret
 
 pm_apply_rangeify = PatternMatcher([
+  # REDUCE_AXIS -> REDUCE
   (UPat(Ops.REDUCE_AXIS, name="x"), fix_reduce_axis),
-  (UPat(GroupOp.All, name="x"), apply_rangeify),
+  # PAD -> WHERE
   (UPat(Ops.PAD, name="x"), apply_pad),
+  (UPat(GroupOp.All, name="x"), apply_rangeify),
   # remove movement ops
   (UPat(GroupOp.Movement, name="x"), lambda x: x.src[0]),
 ])
@@ -793,12 +797,12 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   if getenv("FAST"):
     # explicit rangeify
-    ctx = RangeifyContext()
-    range_map = {}
+    rangeify_ctx = RangeifyContext()
+    range_map:dict[UOp, tuple[list[UOp], list[UOp]]] = {tsink:([], [])}
     ending_ranges: dict[UOp, bool] = {}
     consumer_map = tsink.get_consumer_map()
     for x in tsink.reverse_toposort(consumer_map):
-      if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+      if x.op in {Ops.DEVICE, Ops.UNIQUE, Ops.BUFFER, Ops.CONST}: continue
       ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
       # if this element has weight and it's ending a range, we realize it
@@ -813,7 +817,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       if x in realize_map:
         # if this is in the realize_map, we create new ranges (at the output)
         #assert x.op not in GroupOp.Movement
-        out_rngs = [ctx.new_range(s) for s in x.shape]
+        out_rngs = [rangeify_ctx.new_range(s) for s in x.shape]
       elif len(consumer_map[x]) == 0:
         continue
       elif len(consumer_map[x]) > 1:
@@ -827,6 +831,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
           same_rngs = [x if x.op is not Ops.RANGE or resolve(x.src[0] != 1) else UOp.const(dtypes.index, 0) for x in local_rngs]
           rngs_valids.append((local_rngs, valids, all_same(same_rngs)))
 
+        # TODO: in RANGEIFY > 1 all_all_same isn't required
         all_all_same = all(same_rngs for _,_,same_rngs in rngs_valids)
         out_rngs = []
         for i,(local_rngs,valids,same_rngs) in enumerate(rngs_valids):
@@ -836,7 +841,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
             minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
             out_rngs.append(minimum_valid.where(local_rngs[0], UOp.invalid()).simplify())
           else:
-            out_rngs.append(ctx.new_range(x.shape[i]))
+            out_rngs.append(rangeify_ctx.new_range(x.shape[i]))
 
         # we have to realize here if there's new ranges
         if not all_all_same: realize_map[x] = None
@@ -850,7 +855,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       # handle REDUCE
       if x.op is Ops.REDUCE_AXIS:
         for i,s in enumerate(x.src[0].shape):
-          if i in x.arg[1]: rngs[i] = ctx.new_range(s, axistype=AxisType.REDUCE)
+          if i in x.arg[1]: rngs[i] = rangeify_ctx.new_range(s, axistype=AxisType.REDUCE)
 
       # apply movement ops
       if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
@@ -882,9 +887,10 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
           mish //= s
         rngs = list(UOp.sink(*ret[::-1]).simplify().src)
       range_map[x] = (rngs, out_rngs)
-    for k,(in_rng,out_rng) in range_map.items():
-      print("***" if k in realize_map else "   ", len(consumer_map[k]), k.op,
-            UOp.sink().index(*in_rng).render(), " -> ", UOp.sink().index(*out_rng).render())
+    if getenv("FAST") > 1:
+      for k,(in_rng,out_rng) in range_map.items():
+        print("***" if k in realize_map else "   ", len(consumer_map[k]), k.op,
+              UOp.sink().index(*in_rng).render(), " -> ", UOp.sink().index(*out_rng).render())
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=(realize_map,range_map), bottom_up=True, name="apply rangeify")
   else:
     # NOTE: we don't use contiguous here, contiguous is a user op
@@ -894,12 +900,13 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
     # rangeify
     tsink = graph_rewrite(tsink, pm_rangeify, ctx=(rangeify_ctx:=RangeifyContext()), bottom_up=True, name="rangeify")
-    # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
-    tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
-    tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
-    # TODO: can you substitute and remove costly buffers at the same time?
-    tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
-    tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
+
+  # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
+  tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
+  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
+  # TODO: can you substitute and remove costly buffers at the same time?
+  tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
+  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rangeify_ctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
