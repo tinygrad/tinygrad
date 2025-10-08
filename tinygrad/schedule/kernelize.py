@@ -1,12 +1,12 @@
-from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map, identity_element, resolve
 from tinygrad.uop.ops import track_rewrites, _substitute, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_uop_spec
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import Metadata, all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
+from tinygrad.helpers import all_int, all_same, prod, dedup, unwrap, getenv, pluralize, FUSE_ARANGE, DEBUG, SPLIT_REDUCEOP
 from tinygrad.dtype import ImageDType
 from tinygrad.schedule.multi import multi_pm
 from tinygrad.schedule.grouper import group_realizes, ALWAYS_CONTIGUOUS
+from tinygrad.schedule.rangeify import Kernel
 from tinygrad.codegen.opt.swizzler import merge_views, apply_swizzle, swizzle_reduceop
 from tinygrad.codegen.opt import Opt
 
@@ -107,14 +107,6 @@ replace_contiguous = PatternMatcher([
 ])
 
 # **** create kernels
-
-@dataclass(frozen=True)
-class Kernel:
-  ast: UOp
-  metadata: tuple[Metadata, ...] = ()
-  def __repr__(self):
-    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
-    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
 def create_kernel(x:UOp, b:UOp|None=None):
   if b is None: b = UOp.new_buffer(x.device, x.size, x.dtype)
