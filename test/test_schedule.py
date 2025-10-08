@@ -2477,12 +2477,14 @@ class TestUOpBecome(unittest.TestCase):
 
   # sometimes we prefer to perform an op before movement ops, in this case we should stack the mops on top of the new buffer
 
-  # NOTE: this expand is not reordered because there's before it to fuse
-  @expect_rangeify_fails
   def test_reorder_expand(self):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
+    if RANGEIFY:
+      self.assertEqual(b.uop.base.buffer.size, 4)
+      self.assertEqual(b.uop.shape, (4, 4))
+      return
     self.assertEqual(b.uop.base.buffer.size, 16)
     self.assertEqual(b.uop.st, ShapeTracker.from_shape((4, 4)))
 
