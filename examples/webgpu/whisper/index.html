@@ -422,7 +422,7 @@
 
                 let decoder_state = {
                     last_index: undefined,
-                    context: undefined
+                    context: []
                 };
                 async function decodeOne(decode_sequence, decoder_state, temperature) {
                     const {index: i, max_range, last_eos_logprob} = decode_sequence;
@@ -441,18 +441,46 @@
                     let last_token_index = i;
                     let one_before_last_token_index = i - 1;
 
-                    if (last_index !== i - 1) {
+                    function batch_double_helper(array) {
+                        // return [...array, ...array];
+                        return array;
+                    }
+
+                    const BS = 1;
+                    async function decoder_helper(context, context_input, audio_features, context_index, decoder_state) {
+                        context_input = batch_double_helper(context_input);
+                        let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index]);
+                        decoder_state.last_index = context_index;
+                        decoder_state.context = [...decoder_state.context.slice(0, context_index*BS), ...context_input];
+                        return decoder_output;
+                    }
+
+                    function rebuild_cache_tail_index(c1, c2) {
+                        let i = 0;
+                        for (; i < c1.length && i < c2.length; ++i) {
+                            if (c1[i] !== c2[i]) break;
+                        }
+                        return i;
+                    }
+
+                    let tail_index = rebuild_cache_tail_index(context, decoder_state.context);
+                    if (tail_index < i - 1) {
                         // NOTE(irwin): rebuild self attention kv cache
+                        // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
                         for (let build_cache_index = 0; build_cache_index < offset-1; ++build_cache_index) {
-                            await nets.decoder(context.slice(build_cache_index, build_cache_index+1), audio_features, [build_cache_index]);
-                            decoder_state.last_index = build_cache_index;
-                            decoder_state.context = context;
+                            let context_input = context.slice(build_cache_index, build_cache_index+1);
+                            await decoder_helper(context, context_input, audio_features, build_cache_index, decoder_state);
                         }
                     }
 
-                    let [decoder_output] = await nets.decoder(context.slice(i-1, i), audio_features, [i-1]);
+                    let context_input = context.slice(i-1, i);
+                    // context_input = batch_double_helper(context_input);
+
+                    // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
+                    decoder_output = await decoder_helper(context, context_input, audio_features, i-1, decoder_state);
+                    decoder_output = decoder_output.slice(0, decoder_output.length / BS);
                     decoder_state.last_index = i;
-                    decoder_state.context = context;
+                    // decoder_state.context = context;
                     let nextLogprobs;
                     let nextTokens;
                     let max;
