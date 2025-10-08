@@ -124,7 +124,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
-  @property
+  @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
     res: dict[UOp, None] = {}
     for x in self.src: res.update(x.toposort())
