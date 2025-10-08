@@ -12,7 +12,6 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, RANGEIFY
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
-from tinygrad.codegen import apply_rewrites
 from tinygrad.renderer.ptx import PTXRenderer
 
 class TestLinearizer(unittest.TestCase):
