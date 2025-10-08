@@ -760,10 +760,10 @@ def apply_rangeify(ctx:RangeifyContext, x:UOp):
   for s in x.src:
     new_src = s
     if s.op in {Ops.BUFFER, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
-      if x in ctx.range_map and x.op not in {Ops.MSTACK, Ops.MSELECT}: new_src = new_src.index(*ctx.range_map[x][0])
+      if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(ctx.range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
-      if x in ctx.range_map and x.op not in {Ops.MSTACK, Ops.MSELECT}: new_src = new_src.index(*ctx.range_map[x][0])
+      if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     new_srcs.append(new_src)
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
@@ -804,8 +804,6 @@ pm_apply_rangeify = PatternMatcher([
   (UPat(GroupOp.Movement, name="x"), remove_movement),
   # const/define_var shouldn't have src
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
-  # fixup M index
-  (UPat((Ops.MSTACK, Ops.MSELECT), name="m"), lambda m: m.replace(src=tuple([x.src[0] if x.op is Ops.INDEX else x for x in m.src]))),
 ])
 
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
@@ -845,8 +843,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
         # if this is in the realize_map, we create new ranges (at the output)
         #assert x.op not in GroupOp.Movement
         out_rngs = [rctx.new_range(s) for s in x.shape]
-      elif x.op is Ops.MSTACK:
-        # treat MSTACK like SINK
+      elif x.op in {Ops.MSTACK, Ops.MSELECT}:
+        # treat MSTACK/MSELECT like SINK
         continue
       elif len(consumer_rngs) == 0:
         continue
