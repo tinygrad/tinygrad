@@ -10,6 +10,10 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 
+# creation can recurse a lot
+import sys
+sys.setrecursionlimit(10000)
+
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
