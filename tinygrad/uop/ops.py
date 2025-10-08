@@ -223,7 +223,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS | Ops.WMMA:
+        axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
+        assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
+        shape = src_sts[0].reduce(axis_arg)
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
@@ -286,12 +289,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop syntactic sugar ***
 
-  @property
-  def axis_arg(self) -> tuple[int, ...]:
-    assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
-    ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
-    assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
-    return ret
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
