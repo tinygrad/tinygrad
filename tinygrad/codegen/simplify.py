@@ -5,10 +5,10 @@ from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp):
   off = range_start[r.op]
-  rngs = r.src[off:]
+  rngs, noops = partition(r.src[off:], lambda x: x.op is not Ops.NOOP)
   if not len(rngs): return None
-  new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
-  return r.replace(src=r.src[:off]+tuple(new_rngs))
+  new_rngs = [x for x in UOp.sink(*rngs).toposort(lambda x: x.op is not Ops.NOOP) if x.op is Ops.RANGE]
+  return r.replace(src=r.src[:off]+tuple(new_rngs)+tuple(noops))
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
