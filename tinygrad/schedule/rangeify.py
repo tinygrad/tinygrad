@@ -124,7 +124,7 @@ def cleanup_dead_axes(b:UOp):
     # skip for symbolic. TODO: fix this
     if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
     # CONSTs are already dead axes
-    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].backward_slice_with_self):
+    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].ranges):
       reshape.append(1)
       hit = True
     else:
@@ -149,23 +149,27 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     # *** here is where we compute the cost ***
     # if we return None, the bufferize is kept
 
-    accessed_buffers = []
+    accessed_buffers: list[UOp] = []
+    reduces: list[UOp] = []
     def red_gate(x:UOp):
-      if x.op is Ops.INDEX:
+      if x.op in {Ops.BUFFER, Ops.BUFFERIZE}:
         accessed_buffers.append(x)
         return False
+      if x.op is Ops.REDUCE: reduces.append(x)
       return True
-    ran = src.toposort(gate=red_gate)
+    src.toposort(gate=red_gate)
 
     # if this is generated from multiple buffers, don't remove this buffer
-    if len(dedup([x.src[0] for x in accessed_buffers])) > 2: return None
+    if len(accessed_buffers) > 2: return None
 
-    # const reduce is okay
-    # TODO: move the reduce folder to before this to prevent the need for this
-    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.COPY} for y in x.backward_slice_with_self)
+    # if any reduces access a buffer, don't remove this buffer
+    for r in reduces[:]:
+      accessed_buffers.clear()
+      r.src[0].toposort(gate=red_gate)
+      if len(accessed_buffers): return None
 
-    # always run this list of ops
-    if any(x.op is Ops.REDUCE and not okay_reduce(x) for x in ran): return None
+    # clean this up
+    del red_gate
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
