@@ -601,7 +601,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         remainders = new_remainders
         factored.append(fac*mul[0] if mul[0]!=1 else fac)
       if not factored: return self
-      return functools.reduce(operator.add, sorted(factored+[k.factor(*factors)*v if v!=1 else k.factor(*factors) for k,v in remainders.items()], key=lambda x:x.tuplize))
+      return functools.reduce(operator.add,
+        sorted(factored+[k.factor(*factors)*v if v!=1 else k.factor(*factors) for k,v in remainders.items()], key=lambda x:x.tuplize))
 
     if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return self
     return self.replace(src=tuple(s.factor(*factors) for s in self.src))
