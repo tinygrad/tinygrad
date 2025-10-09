@@ -53,8 +53,6 @@ class ShapeTracker:
   @property
   def size(self) -> int: return self.views[-1].size()
 
-  def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-
   def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
     return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
 
