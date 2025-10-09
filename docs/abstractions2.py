@@ -80,7 +80,6 @@ print("******** third, the UOp ***********")
 
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.helpers import RANGEIFY
 from tinygrad.schedule.rangeify import get_rangeify_map
 
 # allocate some values + load in values
