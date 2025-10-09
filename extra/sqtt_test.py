@@ -1,6 +1,6 @@
 import os, unittest
 os.environ["SQTT"] = "1"
-os.environ["PROFILE"] = "1"
+os.environ["VIZ"] = "1"
 os.environ["PRINT_MATCH_STATS"] = "0"
 
 os.environ["AMD_LLVM"] = "0"
