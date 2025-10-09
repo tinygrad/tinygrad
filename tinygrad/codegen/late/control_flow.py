@@ -77,7 +77,6 @@ class CFGContext:
     # nested, meaning endrange y is a dependency of endrange x and range x is a dependency of endrange y
     # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
     # independent, endrange y is not a dependency of endrange x
-    # ifs are always independent
     deps: dict[UOp, set[UOp]] = {}
     nesting: dict[UOp, UOp] = {}
     for u in sink.toposort():
@@ -92,12 +91,10 @@ class CFGContext:
     siblings: dict[UOp, list[UOp]] = {}
     for k,v in nesting.items(): siblings.setdefault(v, []).append(k)
     for k,v in siblings.items():
-      # sibling ranges that have dependencies on other siblings need to run after them
-      endranges = sorted([x for x in v if x.op is Ops.ENDRANGE], key=lambda x: len([y for y in v if y in deps[x]]))
-      zipped = zip(endranges, endranges[1:]) if k.op is Ops.SINK else zip([k.src[0]] + endranges, endranges)
+      # endrange/endif that have dependencies on other siblings need to run after them
+      order = sorted(v, key=lambda x: len([y for y in v if y in deps[x]]))
+      zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
       for x,y in zipped: self.edges[y.src[0]] = x
-      endifs = [x for x in v if x.op is Ops.ENDIF]
-      for x,y in zip(endifs, endifs[1:]): self.edges[y.src[0]] = x
 
 pm_control_flow_starts = PatternMatcher([
   (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=x.src + (y,)) if (y:=ctx.edges.get(x)) is not None else None),
