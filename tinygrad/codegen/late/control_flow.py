@@ -67,7 +67,7 @@ def close_ifs(x:UOp):
 
 pm_control_flow_ends = PatternMatcher([
   (UPat((Ops.SINK, Ops.NOOP, Ops.LOAD), name="x"), add_endrange),
-  (UPat((Ops.SINK, Ops.ENDRANGE), name="x"), add_endif),
+  (UPat((Ops.SINK, Ops.ENDRANGE, Ops.BARRIER), name="x"), add_endif),
   (UPat(Ops.SINK, name="x"), close_ifs),
 ])
 
