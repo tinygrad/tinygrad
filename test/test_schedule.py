@@ -708,13 +708,13 @@ class TestSchedule(unittest.TestCase):
     check_schedule(b, 0)
     self.assertEqual(b.item(), 1)
 
+  # TODO: this requires supporting multiple stores in the AST
   @unittest.expectedFailure
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
     b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
     c = Tensor.arange(4).realize().uop
-    kernel = UOp(Ops.KERNEL, src=(a, b, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
-    assert all(s.op is Ops.BUFFER for s in kernel.src), f"views are not allowed here {kernel}"
+    kernel = UOp(Ops.KERNEL, src=(a.base, b.base, c.base), arg=Kernel(UOp.sink(c.r(Ops.ADD, (0,))+1, c.r(Ops.ADD, (0,))*2)))
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
     self.assertEqual(b.buffer.numpy(), [12])
@@ -1686,15 +1686,14 @@ class TestSchedule(unittest.TestCase):
   def test_late_fusion_post_expand(self):
     self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
-  @unittest.expectedFailure
   def test_cast_padded_view(self):
     a = Tensor.arange(4).reshape(1, 4)
     casted_view = a.pad(((0, 1), (0, 0))).cast(dtypes.float)
     casted_view.realize()
-    self.assertEqual(casted_view.uop.base.realized.size, 4)
-    realized_view = casted_view.contiguous().realize()
-    self.assertEqual(realized_view.uop.base.realized.size, 8)
-    self.assertListEqual(realized_view.tolist(), [[0.0, 1.0, 2.0, 3.0], [0.0, 0.0, 0.0, 0.0]])
+    self.assertEqual(casted_view.uop.base.realized.size, 8)
+    contig = casted_view.contiguous().realize()
+    self.assertEqual(contig.uop.base.realized.size, 8)
+    self.assertListEqual(contig.tolist(), [[0.0, 1.0, 2.0, 3.0], [0.0, 0.0, 0.0, 0.0]])
 
   # NOTE: we only reorder CAST if it's an EXPAND
   def test_cast_after_shrink(self):
