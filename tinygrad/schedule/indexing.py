@@ -2,10 +2,9 @@ from typing import Iterator, Sequence
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
 from tinygrad.uop.symbolic import sym
 from tinygrad.helpers import argsort, all_same, Context
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -133,12 +132,6 @@ def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
       rngs = list(UOp.sink(*ret[::-1]).simplify().src)
     case _: raise RuntimeError(f"{x.op} is not a MovementOp")
   return rngs
-
-# movement op on INDEX as a PatternMatcher
-pm_mops = PatternMatcher([
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
-])
 
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()

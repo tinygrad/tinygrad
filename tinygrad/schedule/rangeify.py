@@ -8,7 +8,7 @@ from tinygrad.helpers import Metadata
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, pm_mops
+from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
 
 # creation can recurse a lot
 import sys
@@ -96,6 +96,15 @@ earliest_rewrites = PatternMatcher([
 
   # contiguous buffer is buffer, this is for *correctness* of assign, not just speed
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.BUFFER),)), lambda root: root.src[0].forced_reshape(root.shape).rtag(root.tag)),
+])
+
+# *****************
+# 3a. rangeify (movement)
+
+# movement op on INDEX as a PatternMatcher
+pm_mops = PatternMatcher([
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
 ])
 
 # *****************
