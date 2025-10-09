@@ -224,7 +224,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.REDUCE_AXIS | Ops.WMMA:
         axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
         assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
-        shape = src_sts[0].reduce(axis_arg)
+        shape = tuple(1 if i in axis_arg else s for i,s in enumerate(src_sts[0].shape))
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
