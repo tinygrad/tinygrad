@@ -45,7 +45,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
 
-def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
+def _test_conv2d(allowed:int, dtype:DType=dtypes.float):
   old_default_float, dtypes.default_float = dtypes.default_float, dtype
   dtypes.default_float = dtype
   Tensor.manual_seed(0)
@@ -54,7 +54,7 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float, **kwargs):
   w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
-  with Context(**kwargs): s = Tensor.schedule(ret, img.grad, w.grad)
+  s = Tensor.schedule(ret, img.grad, w.grad)
   run_schedule(s.copy())
   cnt = len([si for si in s if si.ast.op is Ops.SINK])
   assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
@@ -470,15 +470,14 @@ class TestSchedule(unittest.TestCase):
           check_schedule(opt.schedule_step(), cnt)
 
   def test_fold_batchnorm_backward(self):
-    with Context(FUSE_CONV_BW=1):
-      with Tensor.train():
-        x = Tensor.empty((2, 16, 8, 8)).contiguous()
-        bn = nn.BatchNorm2d(16)
-        bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
-        fw = bn(x).contiguous_backward().relu().contiguous()
-        fw.sum().backward()
-        # TODO: this is too many
-        check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
+    with Tensor.train():
+      x = Tensor.empty((2, 16, 8, 8)).contiguous()
+      bn = nn.BatchNorm2d(16)
+      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
+      fw = bn(x).contiguous_backward().relu().contiguous()
+      fw.sum().backward()
+      # TODO: this is too many
+      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10)
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -1321,7 +1320,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2, c3, c4]))
       opt.zero_grad()
       c4(c3(c2(c1(img).relu()).relu()).relu()).relu().sum().backward()
-      with Context(FUSE_CONV_BW=1): check_schedule(opt.schedule_step(), 14)
+      check_schedule(opt.schedule_step(), 14)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @expect_rangeify_fails
@@ -1625,15 +1624,14 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 2))
 
-  def test_conv2d(self): _test_conv2d(5 if RANGEIFY else 7)
-  def test_conv2d_fused(self): _test_conv2d(5 if RANGEIFY else 5, FUSE_CONV_BW=1)
+  def test_conv2d(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
+  def test_conv2d_fused(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
-  def test_conv2d_half(self): _test_conv2d(5 if RANGEIFY else 7, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
-  @unittest.skipIf(not RANGEIFY, "passes on RANGEIFY")
-  def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
+  def test_conv2d_fused_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
 
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
@@ -1954,8 +1952,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor([1,2,3,4]).realize()
     for _ in range(24): a = a + a
     new_uop = a.reshape(4,1).realize().uop
-    self.assertEqual(new_uop.st, ShapeTracker.from_shape((4,)).reshape((4, 1)))
-    self.assertEqual(swizzle_cnt(new_uop), 0)
+    assert new_uop.base.op is Ops.BUFFER
 
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_limit_bufs_with_var(self):
@@ -1980,9 +1977,6 @@ class TestSchedule(unittest.TestCase):
     z = x+Tensor.empty(1) # z only loads 2 buffers
     sched = z.schedule()
     self.assertEqual(len(sched), kcount+1)
-
-def swizzle_cnt(u:UOp) -> int:
-  return len([x for x in u.toposort() if x.op is Ops.VIEW and len(x.src) != 0 and x.src[0].op not in {Ops.BUFFER, Ops.DEFINE_GLOBAL, Ops.ASSIGN}])
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -2295,7 +2289,7 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
+    with self.assertRaisesRegex(AssertionError, "can only be RESHAPE"):
       permuted_view.uop.buffer # cannot access Buffer of a non contiguous VIEW
 
   def test_buffer_only_after_realize(self):
