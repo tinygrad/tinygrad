@@ -1209,6 +1209,76 @@ class Tensor(MathTrait):
     # dim injection from None by including None dim size (which is 1) and dim collapse by skipping int dim size
     x = x.reshape(tuple(index['size'] for index in indices_parsed if not isinstance(index['index'], sint)))
 
+    # simple indexing with setitem - use WHERE to return full tensor instead of view
+    # Only apply for simple cases (no striding, no None dimensions) to avoid complexity
+    has_strides = any(i['stride'] != 1 for i in indices_parsed if i['index'] is not None)
+    has_none = any(i['index'] is None for i in indices_parsed)
+    if v is not None and not any(isinstance(i['index'], Tensor) for i in indices_parsed) and not has_strides and not has_none:
+      # Build mask for the indexed region
+      mask = None
+      for dim_idx, parsed_idx in enumerate([i for i in indices_parsed if i['index'] is not None]):
+        dim_size = self.shape[dim_idx]
+        index = parsed_idx['index']
+
+        if isinstance(index, (int, UOp)):  # int indexing
+          # Create mask: arange(dim_size) == index
+          dim_mask = Tensor.arange(dim_size, device=self.device, dtype=dtypes.int32) == index
+        elif isinstance(index, slice):  # slice indexing
+          arange = Tensor.arange(dim_size, device=self.device, dtype=dtypes.int32)
+          start, stop, stride = parsed_idx['boundary'][0], parsed_idx['boundary'][1], parsed_idx['stride']
+
+          if stride == 1:
+            # Simple slice: (arange >= start) & (arange < stop)
+            dim_mask = (arange >= start) & (arange < stop)
+          else:
+            # Strided slice: ((arange - start) % stride == 0) & (arange >= start) & (arange < stop)
+            dim_mask = ((arange - start) % stride == 0) & (arange >= start) & (arange < stop)
+        else:
+          # Full dimension (None or full slice)
+          continue
+
+        # Reshape for broadcasting
+        shape_before = (1,) * dim_idx
+        shape_after = (1,) * (self.ndim - dim_idx - 1)
+        dim_mask = dim_mask.reshape(shape_before + (dim_size,) + shape_after)
+
+        # Combine masks
+        mask = dim_mask if mask is None else mask & dim_mask
+
+      # If we created a mask, use WHERE to return full tensor
+      if mask is not None:
+        # Broadcast value to match the indexed region shape (x.shape, not self.shape)
+        vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
+
+        # For int indexing, we need to unsqueeze dimensions that were collapsed
+        # and for slices/full dims, we need to pad to match parent shape
+        padding = []
+        vb_idx = 0  # Index into vb dimensions
+        for dim_idx, parsed_idx in enumerate(indices_parsed):
+          if isinstance(parsed_idx['index'], (int, UOp)):
+            # Int indexing - unsqueeze to restore dimension
+            vb = vb.unsqueeze(vb_idx)
+            padding.append((parsed_idx['boundary'][0], self.shape[dim_idx] - parsed_idx['boundary'][1]))
+            vb_idx += 1
+          elif isinstance(parsed_idx['index'], slice):
+            # Slice indexing - need to pad before and after
+            start, stop = parsed_idx['boundary'][0], parsed_idx['boundary'][1]
+            padding.append((start, self.shape[dim_idx] - stop))
+            vb_idx += 1
+          else:
+            # Full dimension (None) - no padding needed
+            padding.append((0, 0))
+            vb_idx += 1
+
+        # Apply padding to match self.shape
+        vb_expanded = vb.pad(tuple(padding))
+
+        # Broadcast mask to full tensor shape
+        mask_expanded = mask._broadcast_to(self.shape)
+
+        # Return full tensor with values replaced
+        return mask_expanded.where(vb_expanded, self)
+
     # tensor indexing
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
@@ -1293,13 +1363,33 @@ class Tensor(MathTrait):
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
 
-    res = self.realize()._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
+    # Check if we're in JIT capture mode - if so, use realize-based path for JIT compatibility
+    from tinygrad.engine.realize import capturing
+    if capturing:
+      # JIT mode: use old realize-based behavior to create capturable operations
+      res = self.realize()._getitem(indices)  # Get view without v to avoid WHERE path
+      if res.shape == self.shape and res.uop is not self.uop:
+        self.assign(res).realize()
+      else:
+        v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
+        res.assign(v).realize()
+      return
+
+    # Non-JIT mode: use WHERE-based optimization for kernel fusion
+    # _getitem returns full tensor for simple indexing when v is provided (via WHERE operations)
+    res = self._getitem(indices, v)
+    # if shapes match and data is not shared it's a copy - update self's UOp directly (WHERE path)
     if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res).realize()
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v).realize()
+      self.uop = res.uop  # Direct UOp update - maintains lazy graph without ASSIGN
+    else:
+      # Fallback path for complex cases (strided slices, etc.) - needs realize() for correctness
+      # This is the old behavior for cases not optimized by WHERE
+      res_realized = self.realize()._getitem(indices)  # Get view without v
+      if res_realized.shape == self.shape and res_realized.uop is not self.uop:
+        self.assign(res_realized).realize()
+      else:
+        v = v.cast(res_realized.dtype)._broadcast_to(_broadcast_shape(res_realized.shape, v.shape)).contiguous()
+        res_realized.assign(v).realize()
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """

@@ -504,6 +504,33 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: s = s.src[0]
     return s
 
+  def get_base_buffer(self) -> UOp|None:
+    """
+    Traverses the UOp graph to find the base BUFFER node for unrealized tensors and views.
+    Essential for ASSIGN operations to identify correct target buffer when LHS is unrealized
+    or a view of unrealized tensor.
+
+    Returns the base buffer UOp (with op in {BUFFER, BUFFERIZE, MSTACK}) if it exists, None otherwise.
+    """
+    if self.op in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: return self
+    if self.op is Ops.MSELECT: return self.src[0].get_base_buffer()
+    # For ASSIGN, check the LHS (src[0])
+    if self.op is Ops.ASSIGN and len(self.src) > 0:
+      return self.src[0].get_base_buffer()
+    # Traverse backwards through src[0] following movement operations, VIEW, and CONTIGUOUS operations
+    s = self
+    while len(s.src) > 0:
+      if s.op in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: return s
+      # For movement operations, VIEW, and CONTIGUOUS, traverse to src[0]
+      if s.op in GroupOp.Movement or s.op is Ops.VIEW or s.op is Ops.CONTIGUOUS:
+        s = s.src[0]
+      else:
+        # Stop at other operation types
+        break
+    # Check if we ended at a buffer type
+    if s.op in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: return s
+    return None
+
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer

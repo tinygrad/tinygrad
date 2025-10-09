@@ -23,11 +23,26 @@ def realize_before_view(ctx:dict[UOp, None], view:UOp, tr:UOp) -> None:
   # realize before expand
   if resolve(prod(tr.shape) < prod(st.shape)) and not DONT_REALIZE_EXPAND: return realize(ctx, tr)
 
+def realize_assign(ctx:dict[UOp, None], assign:UOp) -> None:
+  # Check if LHS has an unrealized base buffer
+  # If the base buffer exists (even if unrealized), we should keep the ASSIGN lazy to enable fusion
+  lhs_base = assign.src[0].get_base_buffer()
+  if lhs_base is not None and lhs_base.op is Ops.BUFFER:
+    # LHS has a base buffer (even if unrealized) - keep lazy to enable fusion
+    # But still need to realize RHS if needed
+    if assign.src[1].op not in ALWAYS_CONTIGUOUS: ctx[assign.src[1]] = None
+    # Don't realize the ASSIGN itself - let scheduler fuse multiple assignments
+    return
+  # Otherwise fall back to default behavior: realize the ASSIGN
+  realize(ctx, assign)
+
 do_realize = PatternMatcher([
   # always realize SINK parents
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize ASSIGN/CONTIGUOUS/COPY/BUFFER_VIEW
-  (UPat({Ops.ASSIGN, Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
+  # conditionally realize ASSIGN (check if LHS is unrealized buffer)
+  (UPat(Ops.ASSIGN, name="assign"), realize_assign),
+  # always realize CONTIGUOUS/COPY/BUFFER_VIEW
+  (UPat({Ops.CONTIGUOUS, Ops.COPY, Ops.BUFFER_VIEW}, name="tr"), realize),
   # realize before expand or unsafe pad ops
   (UPat(Ops.VIEW, src=(UPat(GroupOp.All-ALWAYS_CONTIGUOUS, name="tr"),), name="view"), realize_before_view),
   # realize parents of COPY, MSELECT, MSTACK
