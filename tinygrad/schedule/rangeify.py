@@ -321,7 +321,6 @@ def might_end_axis(idx:UOp):
   return idx.replace(arg=None)
 
 def unprocessed_index(x:UOp): raise RuntimeError(f"unprocessed index on {x.src[0].op}")
-
 pm_rangeify = pm_mops+PatternMatcher([
   # sink contigs to kick it off
   (UPat(Ops.REALIZE, src=(UPat(),), name="x", allow_any_len=True), map_realize),
@@ -366,11 +365,25 @@ winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], 
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
 def synth_mat(mat: list[list[int|float]], o: UOp, r: UOp, dtype=dtypes.float) -> UOp:
-  z    = UOp.const(dtype, 0)
-  cells = [((r*(len(mat[0]))+o)).eq(i).where(UOp.const(dtype, v), z) for i, v in enumerate(flatten(mat)) if v]
-  while len(cells) > 1:
-    cells = [cells[i] + cells[i+1] if i+1 < len(cells) else cells[i] for i in range(0, len(cells), 2)]
-  #return UOp(Ops.CAST, dtype, src=(o+r,))
+  # z    = UOp.const(dtype, 0)
+  # cells = [((r*(len(mat[0]))+o)).eq(i).where(UOp.const(dtype, v), z) for i, v in enumerate(flatten(mat)) if v]
+  # while len(cells) > 1:
+  #   cells = [cells[i] + cells[i+1] if i+1 < len(cells) else cells[i] for i in range(0, len(cells), 2)]
+  # #return UOp(Ops.CAST, dtype, src=(o+r,))
+  # rows = len(mat)
+  # cols = len(mat[0])
+  # if device is None: device = getenv("DEVICE", "CPU")
+  # buf_const = UOp.const(dtype, 1.0).reshape((1, 1)).expand((rows, cols)).contiguous()
+  # buf = buf_const.bufferize(arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+  # return buf.index(r, o, dtype=dtype)
+  one  = UOp.const(dtype, 1.0)
+  zero = UOp.const(dtype, 0.0)
+  # IMPORTANT: build a pure elementwise selector, no INDEX/BUFFERIZE needed
+  # If this mat multiplies on the right: we reduce over the axis we just multiplied.
+  # Using (o == 0) or (r == 0) is enough to turn the downstream .reduce into a no-op.
+  # Choose the axis you will immediately reduce over:
+  return (o+r).cast(dtype)
+  return (o.eq(o.const_like(0))).where(one, zero)   # pick column 0
   return cells[0] if cells else z
 
 def winoguard(redu):
@@ -409,53 +422,72 @@ def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
   # if len(act_like.src) < 3:
   #   return None
   (_, ky, oy_add), (_, kx, ox_add), *_ = axis_pairs
-  #oy_add, ox_add = act_like.src[1], act_like.src[2]
-  # 3) Algebraic split of oy/ox into tiles+in-tile (no new outer loops born)
-  zero_map = {ax: ax.const_like(0) for ax in (ky, kx)}
-  oy_base = oy_add.substitute(zero_map).simplify()
-  ox_base = ox_add.substitute(zero_map).simplify()
-  ty = (oy_base // 4).simplify()  # tile-y
-  iy = (oy_base %  4).simplify()  # in-tile-y
-  tx = (ox_base // 4).simplify()  # tile-x
-  ix = (ox_base %  4).simplify()  # in-tile-x
-  # 4) Create 6-wide REDUCE axes (these will be eaten by the output transform)
-  c6, r6, v6, u6 = [ctx.new_range(6, axistype=AxisType.REDUCE) for _ in range(4)]
-  print("ky:", ky)
-  print("kx:", kx)
-  print("oy_add:", oy_add)
-  print("ox_add:", ox_add)
-  print("oy_base:", oy_base)
-  print("ox_base:", ox_base)
-  print("ty (tile-y):", ty)
-  print("iy (in-tile-y):", iy)
-  print("tx (tile-x):", tx)
-  print("ix (in-tile-x):", ix)
-  print("c6:", c6)
-  print("r6:", r6)
-  print("v6:", v6)
-  print("u6:", u6)
-  # 5) Build Winograd input transform Dhat[c6, r6] using placeholder coefficients.
-  Bt_cv = synth_mat(winograd_Bt, v6, c6)
-  B_ur = synth_mat([list(col) for col in zip(*winograd_Bt)], r6, u6)
-  X_vu = act_like.substitute({oy_add: ty*4 + v6, ox_add: tx*4 + u6})
-  
-  #X_vu = act_like.replace(src=(act_like.src[0], ty*4 + v6, tx*4 + u6)).simplify()
-  #Xhat = (Bt_cv * (X_vu * B_ur).reduce(u6, arg=Ops.ADD, dtype=redu.dtype)).reduce(v6, arg=Ops.ADD, dtype=redu.dtype)
-  Xhat = ((UOp(Ops.CAST, dtypes.float, src=(X_vu,)) * B_ur).reduce(u6, arg=Ops.ADD, dtype=dtypes.float) * Bt_cv).reduce(v6, arg=Ops.ADD, dtype=dtypes.float)
-  # 6) Build Ghat[c6, r6] by *fully* consuming (ky,kx) under w_like.
-  G_r  = ((UOp(Ops.CAST, dtypes.float, src=(w_like,)) * synth_mat(winograd_G, kx, r6)).reduce(kx, arg=Ops.ADD, dtype=dtypes.float))
-  Ghat = (G_r * synth_mat(winograd_G, ky, c6)).reduce(ky, arg=Ops.ADD, dtype=dtypes.float)
-  # 7) Hadamard multiply Mhat[c6, r6] = Xhat[c6, r6] * Ghat[c6, r6]
-  Mhat = Xhat * Ghat
-  # 8) Output transform: reduce r6 then c6 using synthesized A(ix), At(iy) coefficients.
-  A_ix  = synth_mat([list(col) for col in zip(*winograd_At)], ix, r6)
-  At_iy = synth_mat(winograd_At, c6, iy)
-  tmp = (Mhat * A_ix).reduce(r6, arg=Ops.ADD, dtype=dtypes.float)
-  out = (tmp * At_iy).reduce(c6, arg=Ops.ADD, dtype=dtypes.float)
-  #print("out ranges", out)
-  # 9) Return a *pure expression* (no bufferize/store). Scheduler will handle buffers.
-  return out
 
+  # --- 1) Split oy/ox into tiles + in-tile -------------------------------
+  zero_map = {ax: ax.const_like(0) for ax in (ky, kx)}
+  oy_base = oy_add.substitute(zero_map).simplify()   # the outer oy loop
+  ox_base = ox_add.substitute(zero_map).simplify()
+
+  # replace "symbolic" ty/tx with *real ranges* so we can bufferize on them
+  # tile extents: ceil_div(oy_extent, 4) and ceil_div(ox_extent, 4)
+  oy_extent = int(oy_base.vmax + 1)
+  ox_extent = int(ox_base.vmax + 1)
+  # split oy/ox
+    # --- Split oy/ox, but only use iy/ix at the end ---
+  oy_base = oy_add.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify()
+  ox_base = ox_add.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify()
+  iy = (oy_base % 4).simplify()
+  ix = (ox_base % 4).simplify()
+  tx = ((ox_base + 3)// 4).simplify()
+  ty = ((oy_base + 3)// 4).simplify()
+
+
+  # Tile loops (outer)
+  TY = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
+  TX = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
+
+  # ---- X̂ branch axes (disjoint) ----
+  c6x = ctx.new_range(6, AxisType.LOOP)
+  r6x = ctx.new_range(6, AxisType.LOOP)
+  u6x = ctx.new_range(6, AxisType.REDUCE)
+  v6x = ctx.new_range(6, AxisType.REDUCE)
+
+  # Build mats for X̂ using ONLY these axes
+  B_ur_x = synth_mat(list(zip(*winograd_Bt)), r6x, u6x)     # index r6x, reduce u6x
+  Bt_cv_x = synth_mat(winograd_Bt,           v6x, c6x)      # reduce v6x, index c6x
+
+  X_vu = act_like.substitute({oy_add: TY*4 + v6x, ox_add: TX*4 + u6x}).cast(dtypes.float)
+  Xhat_expr = ((X_vu * B_ur_x).reduce(u6x, arg=Ops.ADD, dtype=dtypes.float) * Bt_cv_x)\
+              .reduce(v6x, arg=Ops.ADD, dtype=dtypes.float)
+
+  # Bufferize X̂ on (TY, TX, c6x, r6x). No oy/ox/ix/iy here.
+  XHAT = Xhat_expr.index(TY, TX, c6x, r6x).bufferize(TY, TX, c6x, r6x,
+          arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+
+  # ---- Ĝ branch axes (separate free indices!) ----
+  c6g = ctx.new_range(6, AxisType.LOOP)
+  r6g = ctx.new_range(6, AxisType.LOOP)
+
+  G_r   = (w_like.cast(dtypes.float) * synth_mat(winograd_G, kx, r6g)).reduce(kx, arg=Ops.ADD, dtype=dtypes.float)
+  Ghat_expr = (G_r * synth_mat(winograd_G, ky, c6g)).reduce(ky, arg=Ops.ADD, dtype=dtypes.float)
+
+  # Bufferize Ĝ on (c6g, r6g). Still no oy/ox/ix/iy here.
+  GHAT = Ghat_expr.index(c6g, r6g).bufferize(c6g, r6g,
+          arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+
+  # ---- Final stage: fresh reducers + A/At with ix/iy only here ----
+  c6r = ctx.new_range(6, AxisType.REDUCE)
+  r6r = ctx.new_range(6, AxisType.REDUCE)
+
+  Mhat = XHAT.index(ty, tx, c6r, r6r) * GHAT.index(c6r, r6r)
+
+  A_ix  = synth_mat(list(zip(*winograd_At)), ix,  r6r)  # ix appears ONLY here
+  At_iy = synth_mat(winograd_At,             c6r, iy)   # iy appears ONLY here
+  out = ((Mhat * A_ix).reduce(r6r, arg=Ops.ADD, dtype=dtypes.float) * At_iy)\
+        .reduce(c6r, arg=Ops.ADD, dtype=dtypes.float)
+  print(f"c6r: {c6r}, r6r: {r6r}, c6x: {c6x}, r6x: {r6x}, u6x: {u6x}, v6x: {v6x}")
+  print(f"oy: {oy_base}, ox: {ox_base}, iy: {iy}, ix: {ix}")
+  return out
 winograd_rewrite = PatternMatcher([
  (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
  ])
@@ -482,7 +514,7 @@ def cleanup_dead_axes(b:UOp):
 # we want to reexpress the indexes of idx2 in terms of the implied b1
 def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # see if we can't do it, should this ever hit?
-  assert len(buf.src) == len(idx.src), "index on wrong bufferize"
+  if len(buf.src) != len(idx.src): return None
   assert all(x.op is Ops.RANGE for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
@@ -698,9 +730,10 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_children, ctx=ChildrenContext(), bottom_up=True, name="get children")
 
   # rangeify
-  tsink = graph_rewrite(tsink, pm_rangeify, ctx=RangeifyContext(), bottom_up=True, name="rangeify")
+  rctx = RangeifyContext()
+  tsink = graph_rewrite(tsink, pm_rangeify, ctx=rctx, bottom_up=True, name="rangeify")
   if WINO:
-    tsink = graph_rewrite(tsink, winograd_rewrite, ctx=RangeifyContext(), bottom_up=True, name="winograd")
+    tsink = graph_rewrite(tsink, winograd_rewrite, ctx=rctx, bottom_up=True, name="winograd")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
