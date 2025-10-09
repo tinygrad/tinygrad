@@ -236,7 +236,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # determine what ranges this is in
-  @functools.cached_property
+  @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     if self.op in range_start.keys():
