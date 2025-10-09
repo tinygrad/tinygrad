@@ -155,6 +155,7 @@ class RGP:
       device_event = device_events[device]
     sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
+    device_props = sqtt_events[0].props
     sqtt_itrace_enabled = any([event.itrace for event in sqtt_events])
     sqtt_itrace_masked = not all_same([event.itrace for event in sqtt_events])
     sqtt_itrace_se_mask = functools.reduce(lambda a,b: a|b, [int(event.itrace) << event.se for event in sqtt_events], 0) if sqtt_itrace_masked else 0
@@ -192,14 +193,14 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id=0x744c,
+        device_id={110000: 0x744c, 110003: 0x7480, 120000: 0x7550}[device_props['gfx_target_version']],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
-        shader_engines=6,
-        compute_unit_per_shader_engine=16,
-        simd_per_compute_unit=2,
-        wavefronts_per_simd=16,
+        shader_engines=device_props['array_count'] // device_props['simd_arrays_per_engine'],
+        compute_unit_per_shader_engine=device_props['simd_count'] // device_props['simd_per_cu'] // (device_props['array_count'] // device_props['simd_arrays_per_engine']),
+        simd_per_compute_unit=device_props['simd_per_cu'],
+        wavefronts_per_simd=device_props['max_waves_per_simd'],
         minimum_vgpr_alloc=4,
         vgpr_alloc_granularity=8,
         minimum_sgpr_alloc=128,
@@ -218,7 +219,7 @@ class RGP:
         vram_bus_width=384, # 384-bit
         l2_cache_size=6 * 1024 * 1024, # 6 MB
         l1_cache_size=32 * 1024, # 32 KB per SIMD (?)
-        lds_size=65536, # 64 KB per CU
+        lds_size=device_props['lds_size_in_kb'] * 1024,
         gpu_name=b'NAVI31',
         alu_per_clock=0,
         texture_per_clock=0,
