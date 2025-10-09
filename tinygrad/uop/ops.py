@@ -869,11 +869,11 @@ match_stats:dict[UPat, list[int|float]] = dict()
 
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc:tuple[str, int]                         # location that called graph_rewrite
-  sink:int                                    # the sink input to graph_rewrite
-  matches:list[tuple[int, int, tuple, int]]   # before/after UOp, UPat location and time
-  name:str|None                               # optional name of the rewrite
-  depth:int                                   # depth if it's a subrewrite
+  loc:tuple[str, int]                           # location that called graph_rewrite
+  sink:int                                      # the sink input to graph_rewrite
+  matches:list[tuple[int, int, tuple, float]]   # before/after UOp, UPat location and time
+  name:str|None                                 # optional name of the rewrite
+  depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
 
 tracked_keys:list[TracingKey] = []
