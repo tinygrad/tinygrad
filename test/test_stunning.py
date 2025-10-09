@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import nn, Tensor, Variable, Context, Device
+from tinygrad import nn, Tensor, Variable, Device
 from tinygrad.helpers import trange
 
 class Model:
@@ -40,17 +40,16 @@ class TestStunning(unittest.TestCase):
     Y_train = Y_train.one_hot(10)
     X_samp, Y_samp = X_train[samples], Y_train[samples]
     vi = Variable('i', 0, samples.shape[0]-1)
-    with Context(SPLIT_REDUCEOP=0):
-      with Tensor.train():
-        losses = []
-        for i in range(samples.shape[0]):
-          vib = vi.bind(i)
-          opt.zero_grad()
-          pred = model(X_samp[vib].realize())
-          loss = (pred - Y_samp[vib]).square().mean()
-          losses.append(loss.backward())
-          opt.schedule_step()
-        #losses = Tensor.stack(*losses)
+    with Tensor.train():
+      losses = []
+      for i in range(samples.shape[0]):
+        vib = vi.bind(i)
+        opt.zero_grad()
+        pred = model(X_samp[vib].realize())
+        loss = (pred - Y_samp[vib]).square().mean()
+        losses.append(loss.backward())
+        opt.schedule_step()
+      #losses = Tensor.stack(*losses)
 
     # run
     for i in (t:=trange(len(losses))): t.set_description(f"loss: {losses[i].item():6.2f}")

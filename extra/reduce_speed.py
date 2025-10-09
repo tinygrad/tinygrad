@@ -108,21 +108,20 @@ void reduce(float* restrict data0, float* restrict data1) {
 
 if __name__ == "__main__":
   a = Tensor(np_array:=(np.random.default_rng().random((4096, 4096), dtype=np.float32)-0.5)).realize()
-  with Context(SPLIT_REDUCEOP=0):
-    # TODO: make it easy to alter the OptOps for a ScheduleItem
-    GlobalCounters.reset()
-    out = a.sum()
-    sis = out.schedule()
-    for i,(_,ei) in enumerate(lower_schedule(sis)):
-      if i == 0:
-        # change the source code
-        prg_spec = ei.prg.p
-        prg_spec = replace(prg_spec, name="reduce", src=reduce_src)
-        prg = CompiledRunner(prg_spec)
-        # change the assembly
-        #prg._prg = CPUProgram(prg_spec.name, arm_bytecode)
-        print("buffer at:",hex(ctypes.addressof(ei.bufs[1]._buf)))
-        ei = replace(ei, prg=prg)
-      ei.run()
-    print(out.item())
-    np.testing.assert_allclose(out.item(), np_array.sum(), atol=1, rtol=1e-4)
+  # TODO: make it easy to alter the OptOps for a ScheduleItem
+  GlobalCounters.reset()
+  out = a.sum()
+  sis = out.schedule()
+  for i,(_,ei) in enumerate(lower_schedule(sis)):
+    if i == 0:
+      # change the source code
+      prg_spec = ei.prg.p
+      prg_spec = replace(prg_spec, name="reduce", src=reduce_src)
+      prg = CompiledRunner(prg_spec)
+      # change the assembly
+      #prg._prg = CPUProgram(prg_spec.name, arm_bytecode)
+      print("buffer at:",hex(ctypes.addressof(ei.bufs[1]._buf)))
+      ei = replace(ei, prg=prg)
+    ei.run()
+  print(out.item())
+  np.testing.assert_allclose(out.item(), np_array.sum(), atol=1, rtol=1e-4)

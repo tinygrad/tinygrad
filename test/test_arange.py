@@ -109,12 +109,12 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       np.testing.assert_equal(X.numpy(), 0)
 
-  def test_index_mnist(self, noopt=1, op_limit=512*784*13, split_reduceop=0):
+  def test_index_mnist(self, noopt=1, op_limit=512*784*13):
     # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
-    with Context(NOOPT=noopt, SPLIT_REDUCEOP=split_reduceop):
+    with Context(NOOPT=noopt):
       samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0]).realize()
       GlobalCounters.reset()
       x = X_train[samples].numpy()
@@ -124,8 +124,8 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(Y_train.numpy()[samples.numpy()], y)
 
   def test_index_mnist_opt(self): self.test_index_mnist(0)
-  def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
-  def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
+  # def test_index_mnist_split(self): self.test_index_mnist(1, split_reduceop=1)
+  # def test_index_mnist_opt_split(self): self.test_index_mnist(0, split_reduceop=1)
 
   def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256

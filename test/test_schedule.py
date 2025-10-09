@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
-from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, RANGEIFY
+from tinygrad.helpers import CI, DEBUG, GlobalCounters, Context, getenv, all_same, temp, RANGEIFY
 from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
@@ -821,7 +821,7 @@ class TestSchedule(unittest.TestCase):
     out = x.sum(1).relu().elu() + y.sum(1).relu().elu()
     check_schedule(out, 2)
 
-  @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
+  @unittest.skip("Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
     big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
     x = Tensor.randn(big_enough).realize()
@@ -1932,10 +1932,9 @@ class TestSchedule(unittest.TestCase):
     _, Y_train, _, _ = mnist()
     samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
     yt = Tensor.randn(BS, 10).realize()
-    with Context(SPLIT_REDUCEOP=0):
-      loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      run_schedule(check_schedule(loss, 6))
-      loss_fused = loss.numpy()
+    loss = yt.sparse_categorical_crossentropy(Y_train[samples])
+    run_schedule(check_schedule(loss, 6))
+    loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
 
