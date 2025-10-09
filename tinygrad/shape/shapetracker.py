@@ -72,7 +72,6 @@ class ShapeTracker:
 
   def real_strides(self, ignore_valid=False) -> tuple[sint|None, ...]:
     with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
-  def unit_stride_axes(self, ignore_valid=False) -> list[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
