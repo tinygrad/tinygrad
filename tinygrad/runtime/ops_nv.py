@@ -196,20 +196,16 @@ class NVProgram(HCQProgram):
     self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[va_addr, size]]
 
     if (NAK:=isinstance(dev.compiler, NAKCompiler)):
-      image, self.cbuf_0, self.regs_usage = memoryview(lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer(lib)):]), [], info.num_gprs
-      self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
-      prog_addr, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
-    else:
-      if MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
-      else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
-
+      image, self.cbuf_0= memoryview(lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer(lib)):]), []
+      self.regs_usage, self.shmem_usage, self.lcmem_usage = info.num_gprs, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
+    elif MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
+    else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
+    # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
+    self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
+    prog_addr = self.lib_gpu.va_addr
+    if not NAK:
       # For MOCKGPU, the lib is PTX code, so some values are emulated.
-      cbuf0_size = 0 if not MOCKGPU else 0x160
-
-      # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
-      self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
-
-      prog_addr, prog_sz, self.regs_usage, self.shmem_usage, self.lcmem_usage = self.lib_gpu.va_addr, image.nbytes, 0, 0x400, 0x240
+      self.regs_usage, self.shmem_usage, self.lcmem_usage, cbuf0_size = 0, 0x400, 0x240, 0 if not MOCKGPU else 0x160
       for sh in sections:
         if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
         if sh.name == f".text.{self.name}": prog_addr, prog_sz = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size
