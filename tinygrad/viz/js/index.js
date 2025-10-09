@@ -238,7 +238,7 @@ async function renderProfiler() {
       const peak = u64();
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
-      const timestamps = [];
+      const timestamps = [], valueMap = new Map();
       for (let j=0; j<eventsLen; j++) {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
@@ -246,11 +246,11 @@ async function renderProfiler() {
           const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
           buf_shapes.set(key, shape); temp.set(key, shape);
           timestamps.push(ts);
-          x += 1; y += nbytes;
+          x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
           timestamps.push(ts);
-          x += 1; y -= free.nbytes;
+          x += 1; y -= free.nbytes; valueMap.set(ts, y);
           free.x.push(x);
           free.y.push(free.y.at(-1));
           temp.delete(key);
@@ -289,12 +289,12 @@ async function renderProfiler() {
           }
         }
       }
-      const sum = {x:[], y0:[], y1:[], fillColor:colorScheme.BUFFER[0]};
+      const sum = {x:[], y0:[], y1:[], fillColor:"#39009c"};
       for (let i=0; i<allX.length-1; i++) {
         sum.x.push(allX[i], allX[i+1]);
         const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
       }
-      data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes] });
+      data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -322,7 +322,7 @@ async function renderProfiler() {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+    for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
         // generic polygon
@@ -333,7 +333,9 @@ async function renderProfiler() {
           ctx.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y0[i]);
-            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg });
+            let arg = e.arg;
+            if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(values.get(e.x[i-1]), 'B')}`}
+            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
           ctx.closePath();
