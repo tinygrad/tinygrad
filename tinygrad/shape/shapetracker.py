@@ -12,7 +12,6 @@ from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uo
 def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
   idx = views[-1].to_valid_uop(_idxs)
   for view in reversed(views[0:-1]):
-    view = view.minify()
     idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
   with Context(TRACK_MATCH_STATS=0):
     return graph_rewrite(idx, sym, name="indexing sym @ 1")

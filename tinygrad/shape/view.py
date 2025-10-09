@@ -226,11 +226,6 @@ class View:
 
     return View.create(vm1.shape, tuple(strides), ssimplify(sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset))
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def minify(self):
-    min_shape = tuple(x[0] for x in merge_dims(self.shape, self.strides, self.mask))
-    return nv if (nv := self.reshape(min_shape)) else self
-
   def __unsafe_resize(self, arg: tuple[tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
     if self.mask:
