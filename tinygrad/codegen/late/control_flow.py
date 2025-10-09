@@ -91,12 +91,12 @@ class CFGContext:
     siblings: dict[UOp, list[UOp]] = {}
     for k,v in nesting.items(): siblings.setdefault(v, []).append(k)
     for k,v in siblings.items():
-      # endrange/endif that have dependencies on other siblings need to run after them
+      # range/if that have dependencies on other siblings need to run after them
       order = sorted(v, key=lambda x: len([y for y in v if y in deps[x]]))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
       for x,y in zipped: self.edges[y.src[0]] = x
 
 pm_control_flow_starts = PatternMatcher([
-  (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=x.src + (y,)) if (y:=ctx.edges.get(x)) is not None else None),
-  (UPat(Ops.IF, src=(UPat(), UPat(Ops.BARRIER)), name="x"), lambda ctx,x: x.replace(src=x.src + (y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  (UPat(Ops.IF, src=(UPat(), UPat(Ops.BARRIER)), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
