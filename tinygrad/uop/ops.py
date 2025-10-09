@@ -580,6 +580,31 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
       if (d1:=self.src[1].divides(v)) is not None: return self.src[0] * d1
     return None # generic None if we aren't sure
+  def factor(self, *factors: UOp) -> UOp:
+    # factor out expr from self if possible, might return self
+    # (1400*a + 2800*b + c).factor(a+2*b) -> 1400*(a+2*b) + c
+    if self.dtype in dtypes.floats: return self
+    if self.op is Ops.ADD:
+      factored = []
+      # dict of {term: const_factor}, i.e. {a: 1, b: 2}
+      remainders = dict([(u.divides(f:=u.const_factor()).simplify(),f) for u in self.split_uop(Ops.ADD)])
+      for fac in factors:
+        if fac.dtype not in (dtypes.index,)+dtypes.ints: continue
+        fac_terms = dict((u.divides(f:=u.const_factor()).simplify(),f) for u in fac.split_uop(Ops.ADD))
+        factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
+        new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
+
+        if any(u not in factored_terms for u in fac_terms) or any(factored_terms[u]%fac_terms[u]!=0 for u in fac_terms) or not \
+          all_same(mul:=[factored_terms[u]//fac_terms[u] for u in fac_terms]):
+          continue
+
+        remainders = new_remainders
+        factored.append(fac*mul[0] if mul[0]!=1 else fac)
+      if not factored: return self
+      return functools.reduce(operator.add, sorted(factored+[k.factor(*factors)*v if v!=1 else k.factor(*factors) for k,v in remainders.items()], key=lambda x:x.tuplize))
+
+    if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return self
+    return self.replace(src=tuple(s.factor(*factors) for s in self.src))
   def pop_const(self, op=Ops.ADD) -> tuple[UOp, ConstType]:
     return (self.src[0], self.src[1].arg) if self.op is op and self.src[1].op is Ops.CONST else (self, identity_element(op, self.dtype))
   @staticmethod
