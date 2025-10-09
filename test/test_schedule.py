@@ -1715,7 +1715,6 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
   @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
-  @unittest.expectedFailure
   def test_cast_padded_const(self, dt1, dt2):
     assume(is_dtype_supported(dt1) and is_dtype_supported(dt2))
     a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
