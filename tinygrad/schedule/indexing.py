@@ -148,7 +148,10 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # if this element has weight and it's ending a range, we (force) realize it
     if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
-      rctx.realize_map[x] = None
+      # TODO: remove these restrictions, they are slow
+      if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.BUFFERIZE, Ops.CONTIGUOUS):
+        if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
+          rctx.realize_map[x] = None
 
     # *** the ranges on the output are
     #  1. new if this op is realized
