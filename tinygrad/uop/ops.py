@@ -491,7 +491,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
     if self is not self.base:
-      assert all(x.op is Ops.RESHAPE for x in self.toposort(gate=lambda x:x is self)), f"can only be RESHAPE {self}"
+      assert self.op is Ops.RESHAPE, f"can only be RESHAPE {self}"
       return self.src[0].buffer
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
