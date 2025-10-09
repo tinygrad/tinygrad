@@ -47,9 +47,9 @@ def schedule(lst:list[UOp]) -> list[UOp]:
 def add_endrange(x:UOp):
   if not ((x.op is Ops.LOAD and x.src[-1].op is Ops.STORE) or all(s.op is Ops.STORE and any(n.op is Ops.RANGE for n in s.src) for s in x.src)):
     return None
-  src: list[tuple[UOp, ...]] = []
+  src: list[UOp] = []
   for k,g in groupby(x.src, key=lambda k: tuple(dedup(s for s in k.src if s.op is Ops.RANGE))):
-    if not k: src.extend(tuple(g))
+    if not k: src.extend(g)
     else: src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g)))
   return x.replace(src=tuple(src))
 
