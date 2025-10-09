@@ -186,7 +186,6 @@ class TestValidIdxSimplification(unittest.TestCase):
     print("The expressions are not equivalent.")
     print(s.model())
 
-  @unittest.expectedFailure  # TODO: improve uop_given_valid
   def test_valid_becomes_const2(self):
     ridx0 = Range(0, 4)
     ridx1 = Range(1, 4)
@@ -349,7 +348,7 @@ class TestImageSimplification(unittest.TestCase):
 
     self.check(load,
                "((((idx2*2)+r0)<11)&((((idx1*8)+r1)<3)!=True))",
-               "(((idx0+((idx1*512)+(r1*64)))+832)%1024)",
+               "((idx0+((idx1*512)+(r1*64)))+-192)",
                "((((idx2*2)+r0)+(((idx1+((r1+5)//8))+1)//2))+-4)")
 
   def test_simplify1(self):
