@@ -469,9 +469,9 @@ def do_sub_recurse(s:UOp):
     return UOp(Ops.SUBSTITUTE, dtype=x.dtype, src=(x.src[0], sub_k, sub_v))
   # here we actually do the SUBSTITUTE
   if x in keys: return values[keys.index(x)]
-  # we filter any keys that aren't in the backward slice. this keeps the algorithm O(output graph size)
-  # NOTE: if k was x, it would trigger above, so self doesn't have to be included in backward_slice
-  new_kv = {k:v for k,v in zip(keys,values) if k in x.backward_slice}
+  # we filter any keys where the ranges don't overlap. this keeps the algorithm O(output graph size)
+  x_ranges = x.ranges
+  new_kv = {k:v for k,v in zip(keys,values) if any(r in x_ranges for r in k.ranges)}
   # if there's no SUBSTITUTEs left, we can just return x
   if len(new_kv) == 0: return x
   # then we add SUBSTITUTE to all parents
