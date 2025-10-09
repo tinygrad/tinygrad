@@ -2,10 +2,9 @@ from typing import cast
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
-from tinygrad.helpers import Metadata
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
+from tinygrad.uop.symbolic import symbolic_simple
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op

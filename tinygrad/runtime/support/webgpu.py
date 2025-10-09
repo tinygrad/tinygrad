@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, os, subprocess, platform, sysconfig
+import ctypes.util, os, subprocess, platform, sysconfig
 from tinygrad.helpers import OSX
 
 WEBGPU_PATH: str | None

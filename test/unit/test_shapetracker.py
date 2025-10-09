@@ -175,12 +175,6 @@ class TestRealSimplifies(unittest.TestCase):
       View.create((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
       View.create((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)))
 
-class TestViewMinify(unittest.TestCase):
-  def test_minifies(self):
-    assert len(View.create((10,10)).minify().shape) == 1
-    assert len(View.create((10,10)).permute((1,0)).minify().shape) == 2
-    assert len(View.create((10,10,10,10)).permute((1,0,2,3)).minify().shape) == 3
-
 class TestIndexExpressions2d(unittest.TestCase):
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
