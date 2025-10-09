@@ -205,27 +205,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       sz = self.ptrdtype.size
       return ShapeTracker.from_shape((sz,)) if sz > 0 else None
 
-    # CONTIGUOUS with RANGE
-    # TODO: how are these not RANGE?
-    if self.op is Ops.CONTIGUOUS and len(self.src) > 1 and all(x.op is Ops.RANGE for x in self.src[1:]):
-      return ShapeTracker.from_shape((tuple([int(x.vmax+1) for x in self.src[1:]])+self.src[0].shape))
-
     # hack for PTX, CASTing the ptr loses the shape
     if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    shape = src_sts[0].shape
+    # shape changing ops
     match self.op:
-      case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
+      case Ops.MULTI: shape = tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(shape))
       case Ops.BITCAST:
-        shape = src_sts[0].shape
-        if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // output_sz,)
       case Ops.REDUCE_AXIS | Ops.WMMA:
         axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
         assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
-        shape = src_sts[0].reduce(axis_arg)
-      case _: shape = src_sts[0].shape
+        shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
     return ShapeTracker.from_shape(shape)
 
   @property
@@ -236,7 +231,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # determine what ranges this is in
-  @functools.cached_property
+  @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     if self.op in range_start.keys():

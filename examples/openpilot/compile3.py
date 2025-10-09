@@ -1,4 +1,4 @@
-import os, sys, pickle, time
+import os, sys, pickle, time, re
 import numpy as np
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
@@ -52,6 +52,8 @@ def compile(onnx_file):
       kernel_count += 1
       read_image_count += ei.prg.p.src.count("read_image")
       gated_read_image_count += ei.prg.p.src.count("?read_image")
+      for v in [m.group(1) for m in re.finditer(r'(val\d+)\s*=\s*read_imagef\(', ei.prg.p.src)]:
+        if len(re.findall(fr'[\?\:]{v}\.[xyzw]', ei.prg.p.src)) > 0: gated_read_image_count += 1
   print(f"{kernel_count=},  {read_image_count=}, {gated_read_image_count=}")
   if (allowed_kernel_count:=getenv("ALLOWED_KERNEL_COUNT", -1)) != -1:
     assert kernel_count == allowed_kernel_count, f"different kernels! {kernel_count=}, {allowed_kernel_count=}"

@@ -3,14 +3,14 @@ import unittest
 import numpy as np
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import prod
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker, View, views_to_valid_uop
 from tinygrad import Variable
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.codegen.late.devectorizer import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
-  valid_idx = st.reshape((st.size,)).to_valid_uop([UOp.const(dtypes.int, val)])
+  valid_idx = views_to_valid_uop(st.reshape((st.size,)).views, (UOp.const(dtypes.int, val),))
   idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
   idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
   assert idx.op is Ops.CONST and valid.op is Ops.CONST

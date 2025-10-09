@@ -1,9 +1,8 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
+from tinygrad.helpers import Context, GlobalCounters
 from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, UPat, Ops
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
     A = Tensor.empty(4, 4, dtype='int')
@@ -55,7 +54,6 @@ class TestRangeifyOpt(unittest.TestCase):
     A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
     A.sum().realize()
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
     # ranges 1 and 3 are merging
@@ -230,7 +228,6 @@ class TestRangeify(unittest.TestCase):
 # contiguous + reduce can support ranges?
 
 @unittest.skip("okay to disable this for now")
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestOuterworld(unittest.TestCase):
   def test_passthrough_range(self):
     t = Tensor.rand(10, 10).realize()

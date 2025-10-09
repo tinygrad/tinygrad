@@ -53,11 +53,6 @@ class ShapeTracker:
   @property
   def size(self) -> int: return self.views[-1].size()
 
-  def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-
-  def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
-    return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
-
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
@@ -67,7 +62,6 @@ class ShapeTracker:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     if all(len(x) == 0 for x in var_vals): return self, {}
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
-  def substitute(self, dvars:dict[UOp, UOp]): return ShapeTracker(tuple(x.substitute(dvars) for x in self.views))
 
   def real_strides(self, ignore_valid=False) -> tuple[sint|None, ...]:
     with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
