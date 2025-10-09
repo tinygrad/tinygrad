@@ -803,7 +803,7 @@ class AMDDevice(HCQCompiled):
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
     if self.sqtt_enabled:
-      if self.target[0] == 11: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
+      if self.target[0] != 11: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
       if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
         raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
