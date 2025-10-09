@@ -253,11 +253,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self, tracked=False, flat=False, simple=False):
+  def simplify(self, tracked=False, flat=False):
     # late import!
-    from tinygrad.uop.symbolic import symbolic, symbolic_flat, symbolic_simple
+    from tinygrad.uop.symbolic import symbolic, symbolic_flat
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic_flat if flat else symbolic_simple if simple else symbolic, name="simplify")
+      return graph_rewrite(self, symbolic_flat if flat else symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
@@ -588,11 +588,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       factored = []
       # dict of {term: const_factor}, i.e. {a: 1, b: 2}
       remainders: collections.defaultdict[UOp, int]|dict[UOp,int] = collections.defaultdict(int)
-      for u in self.split_uop(Ops.ADD): remainders[u.divides(u.const_factor()).simplify(simple=True)] += cast(int, u.const_factor())
+      for u in self.split_uop(Ops.ADD): remainders[u.pop_const(Ops.MUL)[0]] += u.pop_const(Ops.MUL)[1]
       for fac in factors:
         if fac.dtype not in (dtypes.index,)+dtypes.ints: continue
         fac_terms: collections.defaultdict[UOp, int] = collections.defaultdict(int)
-        for u in fac.split_uop(Ops.ADD): fac_terms[u.divides(u.const_factor()).simplify(simple=True)] += cast(int, u.const_factor())
+        for u in fac.split_uop(Ops.ADD): fac_terms[u.pop_const(Ops.MUL)[0]] += u.pop_const(Ops.MUL)[1]
         factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
         new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
 
