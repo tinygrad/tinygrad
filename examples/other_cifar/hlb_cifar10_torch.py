@@ -170,7 +170,6 @@ hyp = {
 }
 
 
-@Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1))
 def train_cifar():
   def set_seed(seed):
     torch.manual_seed(seed)
@@ -292,7 +291,7 @@ def train_cifar():
   set_seed(getenv("SEED", hyp["seed"]))
 
   if getenv("TINY_BACKEND"):
-    import tinygrad.frontend.torch  # noqa: F401
+    import tinygrad.nn.torch  # noqa: F401
 
     device = torch.device("tiny")
   else:
