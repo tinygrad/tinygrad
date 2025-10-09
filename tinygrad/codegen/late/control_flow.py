@@ -47,9 +47,9 @@ def schedule(lst:list[UOp]) -> list[UOp]:
 def add_endrange(x:UOp):
   if not ((x.op is Ops.LOAD and x.src[-1].op is Ops.STORE) or all(s.op is Ops.STORE and any(n.op is Ops.RANGE for n in s.src) for s in x.src)):
     return None
-  src = []
+  src: list[tuple[UOp, ...]] = []
   for k,g in groupby(x.src, key=lambda k: tuple(dedup(s for s in k.src if s.op is Ops.RANGE))):
-    if not k: src.extend(g)
+    if not k: src.extend(tuple(g))
     else: src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g)))
   return x.replace(src=tuple(src))
 
@@ -89,7 +89,7 @@ class CFGContext:
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}
-    for k,v in nesting.items(): siblings.setdefault(v, []).append(k)
+    for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
       # range/if that have dependencies on other siblings need to run after them
       order = sorted(v, key=lambda x: len([y for y in v if y in deps[x]]))
