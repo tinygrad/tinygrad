@@ -13,7 +13,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
-from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, RANGEIFY
+from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
@@ -32,7 +32,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   # test lowering all the ScheduleItems to ExecItems
   kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
-    if RANGEIFY: return sched # allow different kernel count, TODO: fix the asserts
+    return sched # allow different kernel count, TODO: fix the asserts
     print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
     if DEBUG >= 3:
       for i,s in enumerate(sched):
@@ -699,9 +699,6 @@ class TestSchedule(unittest.TestCase):
     prev_a = (a+1).contiguous()
     a.assign(Tensor([2]))
     a.kernelize(prev_a)
-    # RANGEIFY doesn't apply the post diamond graph, it's fine since we can always apply the fixup on each kernelize call
-    if not RANGEIFY:
-      assert prev_a.uop in a.uop.src, "contiguous usage must run before assign"
     self.assertEqual((prev_a+a*3).item(), 1+2*3)
 
   def test_kernelize_sym(self):
@@ -2111,7 +2108,6 @@ class TestView(unittest.TestCase):
 
   # a*VIEW(x), where VIEW(x) = 0
   # x collapses along with its children
-  @unittest.skipIf(RANGEIFY, "this only fails if you run all of TestSchedule, some global tensor map bug?")
   def test_parent_view_collapses(self):
     a = Tensor([1, 2])
     b = Tensor.arange(3).contiguous()
