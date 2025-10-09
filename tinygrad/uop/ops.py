@@ -587,10 +587,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.ADD:
       factored = []
       # dict of {term: const_factor}, i.e. {a: 1, b: 2}
-      remainders = dict([(u.divides(f:=u.const_factor()).simplify(simple=True),f) for u in self.split_uop(Ops.ADD)])
+      remainders = collections.defaultdict(int)
+      for u in self.split_uop(Ops.ADD): remainders[u.divides(u.const_factor()).simplify(simple=True)] += u.const_factor()
       for fac in factors:
         if fac.dtype not in (dtypes.index,)+dtypes.ints: continue
-        fac_terms = dict((u.divides(f:=u.const_factor()).simplify(simple=True),f) for u in fac.split_uop(Ops.ADD))
+        fac_terms = collections.defaultdict(int)
+        for u in fac.split_uop(Ops.ADD): fac_terms[u.divides(u.const_factor()).simplify(simple=True)] += u.const_factor()
         factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
         new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
 
@@ -599,10 +601,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
           continue
 
         remainders = new_remainders
-        factored.append(fac*mul[0] if mul[0]!=1 else fac)
+        factored.append(fac*mul[0])
       if not factored: return self
-      return functools.reduce(operator.add,
-        sorted(factored+[k.factor(*factors)*v if v!=1 else k.factor(*factors) for k,v in remainders.items()], key=lambda x:x.tuplize))
+      return functools.reduce(operator.add, sorted(factored+[k.factor(*factors)*v for k,v in remainders.items()], key=lambda x:x.tuplize))
 
     if self.op not in GroupOp.ALU|{Ops.VECTORIZE}: return self
     return self.replace(src=tuple(s.factor(*factors) for s in self.src))
