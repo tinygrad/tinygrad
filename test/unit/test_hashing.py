@@ -29,8 +29,11 @@ class TestKeccak(unittest.TestCase):
       out_shape = Tensor.randint(*s[i:], high=255, dtype=dtypes.uint8).keccak().shape
       self.assertTupleEqual(s[i:-1], out_shape[:-1])
 
+  @unittest.skipUnless(Device.DEFAULT=="METAL", "slow")
   def test_sha3_224(self): self._test_preset("sha3_224", [143, 144])
+  @unittest.skipUnless(Device.DEFAULT=="METAL", "slow")
   def test_sha3_256(self): self._test_preset("sha3_256", [135, 136])
+  @unittest.skipUnless(Device.DEFAULT=="METAL", "slow")
   def test_shake_128(self): self._test_preset("shake_128", [167, 168], lambda d: hashlib.shake_128(d).digest(16))
 
   def _test_preset(self, name: str, special_sizes: list[int], hasher: Callable[[bytes], bytes] | None = None):

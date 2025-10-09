@@ -12,7 +12,6 @@ from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uo
 def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
   idx = views[-1].to_valid_uop(_idxs)
   for view in reversed(views[0:-1]):
-    view = view.minify()
     idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
   with Context(TRACK_MATCH_STATS=0):
     return graph_rewrite(idx, sym, name="indexing sym @ 1")
@@ -42,13 +41,6 @@ class ShapeTracker:
     for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
     return ret
 
-  def invert(self, out_shape:tuple[sint, ...]) -> ShapeTracker|None:
-    inverted_views:list[View] = []
-    for v,s in zip(self.views[::-1], [x.shape for x in self.views[::-1][1:]]+[out_shape]):
-      if (inverted:= v.invert(s)) is None: return None
-      inverted_views.append(inverted)
-    return ShapeTracker(tuple(inverted_views)).reshape(out_shape)
-
   @staticmethod
   def from_shape(shape:tuple[sint, ...], strides:tuple[sint, ...]|None=None) -> ShapeTracker: return ShapeTracker((View.create(shape, strides),))
 
@@ -66,14 +58,6 @@ class ShapeTracker:
   def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
     return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
 
-  # upper bound on buffer size required to fit this shapetracker
-  def real_size(self) -> int:
-    if 0 in self.shape: return 0
-    view = (v.shrink(v.mask) if (v:=self.views[0]).mask else v)
-    idx = views_to_valid_uop((view,)).get_idx()
-    assert idx.vmax < 1e12, f"real_size broken for {self}"
-    return int(idx.vmax + 1)
-
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
@@ -87,7 +71,6 @@ class ShapeTracker:
 
   def real_strides(self, ignore_valid=False) -> tuple[sint|None, ...]:
     with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
-  def unit_stride_axes(self, ignore_valid=False) -> list[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
