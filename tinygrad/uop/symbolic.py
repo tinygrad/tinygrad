@@ -51,8 +51,6 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
-  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
-  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
   # 4 variations of (x%c)+(x//c)*c = x   TODO: add sorting to remove some variations
   (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
@@ -76,10 +74,6 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)) != UPat.var("x"),
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
-  # x*0 -> 0 or 0*x -> 0
-  # if x is nan or inf it should render the nan value.
-  # NOTE: this can be wrong for loaded NaN
-  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # ** constant folding **
   # TODO: add const folding for Ops.THREEFRY
   (UPat(GroupOp.Unary, src=(UPat((Ops.VCONST, Ops.CONST)),), name="a"), lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg], False))),
@@ -91,6 +85,17 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
+  # *** div rules ***
+  (UPat.cvar('x', arg=0) / 0, lambda x: x.const_like(float('nan'))),   # 0/0 -> nan
+  ((UPat.var("x") * 0) / 0, lambda x: x.const_like(float('nan'))),     # (x*0)/0 -> nan
+  # can be wrong if x or x2 is 0
+  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)),          # x/x -> 1
+  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
+  # x*0 -> 0 or 0*x -> 0
+  # if x is nan or inf it should render the nan value.
+  # NOTE: this can be wrong for loaded NaN
+  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if x.op is Ops.CONST
+                                             and isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # *** cast/bitcast ***
   (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.arg)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
@@ -274,16 +279,10 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
 ])
 
-def chain_insert(chain, b, op):
-  if chain.op is not op or b.order_add > chain.src[1].order_add: return chain.alu(op, b)
-  return chain_insert(chain.src[0], b, op).alu(op, chain.src[1])
-
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative-{Ops.ADD}, dtype=dtypes.index, name='x'), lambda x:
-    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
-  (UPat(Ops.ADD, dtype=dtypes.index, name="x"), lambda x: functools.reduce(operator.add, sorted(x.split_uop(Ops.ADD), key=lambda u: u.order_add)))
+  (UPat(GroupOp.Commutative, dtype=dtypes.index, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
@@ -379,7 +378,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
-  # ** combine terms (opinionated), can make it harder to substitute valids **
+  # ** combine terms (opinionated) **
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
@@ -411,13 +410,10 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   # don't simplify any other gates, can lead to OOB, we substitute them back later
   uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
-  all_candidates = []
   # simplify uop given that valid is True
-  for i, (expr,v) in enumerate(bounds.items()):
+  for expr,v in bounds.items():
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
-    # if the expr is an add we try and factorize so its more likely to substitute
-    if expr.op is Ops.ADD: uop = uop.factor(expr)
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
     if v0 > v1: return None
     # whole node became a const
@@ -430,9 +426,7 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort():
-      candidates.append([tup:=(expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype))])
-      all_candidates.append(tup)
+    if expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -441,9 +435,6 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
       elif all_same(newuops): uop = newuops[0]
-
-  uop = uop.factor(*(e[0] for e in all_candidates))
-  uop = uop.substitute(sub_dict:=dict(all_candidates)).simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
 
   # put the loads back in
   uop = uop.substitute({v:k for k,v in load_subs.items()})
@@ -455,12 +446,11 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   except ValueError: return 0
 
 def simplify_valid(valid:UOp) -> UOp|None:
+  if valid.op_in_backward_slice_with_self(Ops.LOAD): return None  # this should only be for indexing, skip if there's a LOAD
   ret:list[UOp] = []
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    # TODO: root cause this and test_simplify_valid_from_div
-    if stmt.op is Ops.CAST: return None
     ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None

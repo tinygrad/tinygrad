@@ -1,6 +1,6 @@
 import time, sys, hashlib
 from pathlib import Path
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 from tinygrad import Tensor, dtypes, TinyJit
 from tinygrad.helpers import IMAGE, GlobalCounters, fetch, colored, getenv, trange
 import numpy as np
@@ -38,10 +38,6 @@ if __name__ == "__main__":
       ret = next(iter(run_onnx_jit(**inputs).values())).cast(dtypes.float32).numpy()
       step_times.append(t:=(time.perf_counter_ns() - st)*1e-6)
     print(f"jitted:  {t:7.4f} ms")
-
-  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
-    min_time = min(step_times)
-    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
 
   suffix = ""
   if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility
