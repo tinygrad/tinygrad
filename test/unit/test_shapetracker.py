@@ -3,14 +3,14 @@ import unittest
 import numpy as np
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import prod
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker, View, views_to_valid_uop
 from tinygrad import Variable
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.codegen.late.devectorizer import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
-  valid_idx = st.reshape((st.size,)).to_valid_uop([UOp.const(dtypes.int, val)])
+  valid_idx = views_to_valid_uop(st.reshape((st.size,)).views, (UOp.const(dtypes.int, val),))
   idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
   idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
   assert idx.op is Ops.CONST and valid.op is Ops.CONST
@@ -174,12 +174,6 @@ class TestRealSimplifies(unittest.TestCase):
     self.st = ShapeTracker((
       View.create((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
       View.create((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)))
-
-class TestViewMinify(unittest.TestCase):
-  def test_minifies(self):
-    assert len(View.create((10,10)).minify().shape) == 1
-    assert len(View.create((10,10)).permute((1,0)).minify().shape) == 2
-    assert len(View.create((10,10,10,10)).permute((1,0,2,3)).minify().shape) == 3
 
 class TestIndexExpressions2d(unittest.TestCase):
   def setUp(self):

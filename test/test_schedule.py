@@ -17,7 +17,6 @@ from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context,
 from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
-from test.helpers import expect_rangeify_fails, expect_nonrangeify_fails
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -117,7 +116,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.empty(10)
     b = Tensor.empty((1,), device="CPU").expand(10).contiguous()
     c = a+b
-    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 2 if RANGEIFY else 1)
+    with self.assertRaisesRegex(RuntimeError, "all buffers must be on the same device"): check_schedule(c, 2)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and getenv("CAST_AFTER_EXPAND"), "need half and CAST_AFTER_EXPAND=1")
   @unittest.skip("CAST_AFTER_EXPAND is not supported")
@@ -343,7 +342,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out0 = r0 + y
     out1 = r1 + y
-    schedule = check_schedule([out0, out1], 2 if RANGEIFY else 4)
+    schedule = check_schedule([out0, out1], 2)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
     assert len(reduceops) in [2,3]  # why is RANGEIFY different?
 
@@ -712,7 +711,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule(b, 0)
     self.assertEqual(b.item(), 1)
 
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_multioutput_ast(self):
     a = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
     b = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize().uop
@@ -919,7 +918,7 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum() + 2
     out1 = a.sum() + 4
     out2 = out0 * out1
-    run_schedule(check_schedule([out0, out1, out2], 1 if RANGEIFY else 4))
+    run_schedule(check_schedule([out0, out1, out2], 1))
     np.testing.assert_allclose(out0.numpy(), out0_np:=a.numpy().sum()+2, atol=1e-4, rtol=1e-6)
     np.testing.assert_allclose(out1.numpy(), out1_np:=a.numpy().sum()+4, atol=1e-4, rtol=1e-6)
     np.testing.assert_allclose(out2.numpy(), out0_np*out1_np, atol=1e-4, rtol=1e-6)
@@ -930,7 +929,7 @@ class TestSchedule(unittest.TestCase):
     out0 = a.sum().exp2()
     # out1 has two paths to a.sum()
     out1 = a.sum() + out0
-    run_schedule(check_schedule([out0, out1], 1 if RANGEIFY else 3))
+    run_schedule(check_schedule([out0, out1], 1))
     np.testing.assert_allclose(out0.numpy(), out0_np:=np.exp2(a.numpy().sum()), atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), a.numpy().sum()+out0_np, atol=1e-4, rtol=1e-6)
 
@@ -1022,7 +1021,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.empty(10,)
     c = a.sum() + b[0]
     d = a.sum() + 2
-    check_schedule([c, d], 1 if RANGEIFY else 3)
+    check_schedule([c, d], 1)
 
   def test_reduce_multiple_paths_midshrink(self):
     a = Tensor.empty(4, 4)
@@ -1186,14 +1185,14 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_softmax_upcast(self):
     # input half, softmax in float
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.half).realize()
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
-    self.assertEqual(len(sched), 2 if RANGEIFY else 3)
+    self.assertEqual(len(sched), 2)
     self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
 
     # input float, softmax in float
@@ -1323,7 +1322,7 @@ class TestSchedule(unittest.TestCase):
       check_schedule(opt.schedule_step(), 14)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_prefer_half_buffer(self):
     x = Tensor.ones(4).contiguous().realize()
     # y = Tensor.ones(4).contiguous().realize()
@@ -1475,7 +1474,7 @@ class TestSchedule(unittest.TestCase):
     e = c * d
     f = b.sum() - e
     # run_schedule(check_schedule([c, d, e, f], 1))
-    run_schedule(check_schedule([c, d, e, f], 2 if RANGEIFY else 5))
+    run_schedule(check_schedule([c, d, e, f], 2))
     np.testing.assert_allclose(c.numpy(), c_np:=a.numpy().sum()+2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(d.numpy(), d_np:=a.numpy().sum()*2, atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(e.numpy(), e_np:=c_np*d_np, atol=1e-4, rtol=1e-4)
@@ -1624,15 +1623,14 @@ class TestSchedule(unittest.TestCase):
     out = x.argmax(1)
     run_schedule(check_schedule(out, 2))
 
-  def test_conv2d(self): _test_conv2d(5 if RANGEIFY else 7)
-  def test_conv2d_fused(self): _test_conv2d(5 if RANGEIFY else 5)
+  def test_conv2d(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
+  def test_conv2d_fused(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
-  def test_conv2d_half(self): _test_conv2d(5 if RANGEIFY else 7, dtype=dtypes.half)
+  def test_conv2d_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
-  @unittest.skipIf(not RANGEIFY, "passes on RANGEIFY")
-  def test_conv2d_fused_half(self): _test_conv2d(5, dtype=dtypes.half)
+  def test_conv2d_fused_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
 
   def test_schedule_mem_used(self):
     base = GlobalCounters.mem_used
@@ -1691,7 +1689,7 @@ class TestSchedule(unittest.TestCase):
   def test_late_fusion_post_expand(self):
     self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_cast_padded_view(self):
     a = Tensor.arange(4).reshape(1, 4)
     casted_view = a.pad(((0, 1), (0, 0))).cast(dtypes.float)
@@ -1721,7 +1719,7 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(realized_const_view.tolist(), [[1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]])
 
   @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_cast_padded_const(self, dt1, dt2):
     assume(is_dtype_supported(dt1) and is_dtype_supported(dt2))
     a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
@@ -1892,9 +1890,7 @@ class TestSchedule(unittest.TestCase):
       tst = x.shrink((None, (0, 2))).assign(a).realize()
       xref[:, :2] = np.arange(8).reshape(4, 2)+y.numpy()
     np.testing.assert_equal(x.numpy(), xref)
-    if RANGEIFY > 0:
-      # NOTE: this is a bug on non rangeify
-      np.testing.assert_equal(tst.numpy(), a.numpy())
+    np.testing.assert_equal(tst.numpy(), a.numpy())
 
   def test_setitem_sched(self, mop=lambda x:x, expected_kcount=1):
     a = Tensor.arange(16, device="CPU").reshape(4, 4).contiguous().realize()
@@ -1905,7 +1901,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(sched)
     self.assertListEqual(a.tolist(), expected)
     self.assertEqual(kcount, expected_kcount)
-  @unittest.skipUnless(RANGEIFY>0, "this asserts on non rangeify")
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
   def test_setitem_paddded_sched(self): self.test_setitem_sched(lambda x: x.shrink_to(4, 1).pad_to(4, 4), 1)
 
@@ -1944,7 +1939,7 @@ class TestSchedule(unittest.TestCase):
     r = (X+Tensor.arange(16).reshape(4, 4)).sum()
     out0 = r+2
     out1 = r+3
-    run_schedule(check_schedule([out0, out1], 1 if RANGEIFY else 3))
+    run_schedule(check_schedule([out0, out1], 1))
     r_ref = (X.numpy()+np.arange(16).reshape(4, 4)).sum()
     np.testing.assert_allclose(out0.numpy(), r_ref+2, rtol=2e-7)
     np.testing.assert_allclose(out1.numpy(), r_ref+3, rtol=2e-7)
@@ -2089,7 +2084,7 @@ class TestView(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_equal(b.numpy(), 0)
 
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_mask_dim_1(self):
     # mask out dim = 1 works too
     a = Tensor.rand(10, 10).realize()
@@ -2237,7 +2232,6 @@ class TestCopyFolding(unittest.TestCase):
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
-  @expect_nonrangeify_fails
   def test_permute_on_disk_contiguous(self):
     with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
@@ -2252,8 +2246,6 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   # NOTE: disk permute must come after COPY
-  # TODO: this is wrong because of the permute
-  @expect_nonrangeify_fails
   def test_permute_after_shrink_on_disk(self):
     with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).realize().uop.base.buffer.as_buffer())
     a = Tensor.empty(5, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_5_permute')}")
@@ -2290,7 +2282,7 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
+    with self.assertRaisesRegex(AssertionError, "can only be RESHAPE"):
       permuted_view.uop.buffer # cannot access Buffer of a non contiguous VIEW
 
   def test_buffer_only_after_realize(self):
@@ -2397,12 +2389,8 @@ class TestUOpBecome(unittest.TestCase):
     a = Tensor.empty(4, 1)
     b = a.expand(4, 4).reciprocal()
     check_schedule(b, 1)
-    if RANGEIFY:
-      self.assertEqual(b.uop.base.buffer.size, 4)
-      self.assertEqual(b.uop.shape, (4, 4))
-      return
-    self.assertEqual(b.uop.base.buffer.size, 16)
-    self.assertEqual(b.uop.st, ShapeTracker.from_shape((4, 4)))
+    self.assertEqual(b.uop.base.buffer.size, 4)
+    self.assertEqual(b.uop.shape, (4, 4))
 
   def test_reorder_expand_alt(self):
     x = Tensor.empty(4, 1)
@@ -2411,7 +2399,7 @@ class TestUOpBecome(unittest.TestCase):
     z = (img*x) / y
     check_schedule(z, 1)
 
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
     b = a*1
@@ -2445,7 +2433,7 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.CONST, arg=3).match(const_add.uop.base, {})
 
   # tensors can become another realized tensor source
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_become_existing_buf_simple(self):
     a = Tensor.empty(4, 4)
     b = a+0
@@ -2454,14 +2442,14 @@ class TestUOpBecome(unittest.TestCase):
     self.assertIs(a.uop, b.uop)
 
   # they can also chain other movement ops on top of the tensor source
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_become_existing_buf_view(self):
     a = Tensor.empty(4, 4)
     b = a.permute((1, 0))+0
     check_schedule(b, 0)
     self.assertEqual(b.uop.st, a.uop.permute((1, 0)).st)
 
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_become_existing_buf_view_alt(self):
     a = Tensor.empty(4, 4)
     b = a.permute((1, 0)).reshape((8, 2))+0
@@ -2469,7 +2457,7 @@ class TestUOpBecome(unittest.TestCase):
     self.assertEqual(b.uop.st, a.uop.permute((1, 0)).reshape((8, 2)).st)
 
   # they can also have other base parents that simplified, in that case we just backtrack to the chained mops
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_become_existing_buf_complex(self):
     a = Tensor.empty(4, 4)
     b = (a.permute((1, 0))+0).reshape((8, 2))+0
@@ -2477,7 +2465,7 @@ class TestUOpBecome(unittest.TestCase):
     self.assertEqual(b.uop.st, a.uop.permute((1, 0)).reshape((8, 2)).st)
     assert b.uop.base.op is Ops.BUFFER
 
-  @expect_rangeify_fails
+  @unittest.expectedFailure
   def test_become_multiple_choices(self):
     a = Tensor.empty(16)
     b = (a.reshape(1, 1, 4, 1, 4)+0).reshape(1, 1, 4, 4).shrink(((0, 1), (0, 1), (0, 3), (0, 3)))+0
@@ -2495,13 +2483,8 @@ class TestUOpBecome(unittest.TestCase):
     b.realize()
     assert a.uop.is_realized
     assert a.uop.buffer._base is None
-    # b is a subbuffer of a (buffer_view in non rangeify, rangeify just makes a shrink)
-    if RANGEIFY:
-      assert b.uop.op_in_backward_slice_with_self(Ops.SHRINK)
-      assert b.uop.base is a.uop.base
-      return
-    assert b.uop.op is Ops.BUFFER_VIEW
-    assert b.uop.src[0] is a.uop
+    assert b.uop.op_in_backward_slice_with_self(Ops.SHRINK)
+    assert b.uop.base is a.uop.base
 
   def test_setitem_offset(self):
     a = Tensor.full((16,), 0.).contiguous().realize()

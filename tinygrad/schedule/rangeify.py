@@ -2,13 +2,12 @@ from typing import cast
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.symbolic import sym, symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, RANGEIFY, Context, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP
-from tinygrad.helpers import Metadata
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
+from tinygrad.uop.symbolic import symbolic_simple
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
-from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext
+from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
 
 # creation can recurse a lot
 import sys
@@ -100,69 +99,11 @@ earliest_rewrites = PatternMatcher([
 
 # *****************
 # 3a. rangeify (movement)
-# NOTE: this can be deleted after the cleanup is refactored
 
-def map_reshape(idx:UOp, r:UOp):
-  acc = 1
-  to_sum = []
-  for s,src in list(zip(idx.shape, idx.src[1:]))[::-1]:
-    to_sum.append(acc*src)
-    acc *= s
-  mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
-  ret:list[UOp] = []
-  for s in r.src[0].shape[::-1]:
-    ret.append(mish % s) # NOTE: simplify will turn this to CONST
-    mish //= s
-  tret = UOp.sink(*ret[::-1]).simplify().src
-  return r.src[0].index(*tret, dtype=idx.dtype, arg=idx.arg)
-
-def map_pad(idx:UOp, r:UOp):
-  ret = list(idx.src[1:])
-  bigwhere = UOp.const(dtypes.bool, True)
-  for i,(sh,(s,e)) in enumerate(zip(r.shape, r.arg)):
-    if s == 0 and e == 0: continue
-    where = UOp.const(dtypes.bool, True)
-    if resolve(e > 0): where = where & (ret[i] < (sh-e))
-    if resolve(s > 0): where = where & (ret[i] >= s)
-    bigwhere = bigwhere & where
-    with Context(TRACK_MATCH_STATS=0):
-      ret[i] = graph_rewrite(where.where(ret[i]-s, UOp.invalid()), sym)
-  # PAD is with 0
-  return bigwhere.simplify().where(r.src[0].index(*ret, dtype=idx.dtype, arg=idx.arg), UOp.const(r.dtype, 0))
-
-def map_expand(r:UOp, idx:UOp):
-  new_rngs = []
-  ending_ranges = []
-  non_ending_ranges = []
-  for a,x,y in zip(idx.src[1:], r.src[0].shape, r.shape):
-    axis_to_range = [u for u in a.toposort() if u.op is Ops.RANGE]
-    if resolve(x==y, False):
-      non_ending_ranges.extend(axis_to_range)
-      new_rngs.append(a)
-    else:
-      ending_ranges.extend(axis_to_range)
-      new_rngs.append(a.const_like(0))
-  # if RANGEIFY >= 2, we are aggressive about not ending ranges
-  if RANGEIFY >= 2: ending_ranges = [x.arg for x in ending_ranges if x not in non_ending_ranges]
-  # if RANGEIFY=1, if it's ending at all we end it
-  else: ending_ranges = [x.arg for x in ending_ranges]
-  if idx.arg is not None: ending_ranges.append(idx.arg)
-  return r.src[0].index(*new_rngs, arg=min(ending_ranges) if ending_ranges else None)
-
+# movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
-  # this is like the definitions of these
-  (UPat(Ops.SHRINK, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*[a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(idx.src[1:], r.arg)], dtype=idx.dtype, arg=idx.arg)),
-  (UPat(Ops.PERMUTE, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*[idx.src[1+p] for p in argsort(idx.src[0].arg)], dtype=idx.dtype, arg=idx.arg)),
-  (UPat(Ops.FLIP, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*[((s-1)-a) if f else a for a,s,f in zip(idx.src[1:], r.shape, r.arg)], dtype=idx.dtype, arg=idx.arg)),
-  # expand needs to end ranges
-  (UPat(Ops.EXPAND, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_expand),
-  # reshape does a lot of symbolic stuff
-  (UPat(Ops.RESHAPE, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_reshape),
-  # pad adds min and max
-  (UPat(Ops.PAD, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), map_pad),
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
 ])
 
 # *****************
@@ -183,7 +124,7 @@ def cleanup_dead_axes(b:UOp):
     # skip for symbolic. TODO: fix this
     if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
     # CONSTs are already dead axes
-    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].backward_slice_with_self):
+    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in b.src[0].ranges):
       reshape.append(1)
       hit = True
     else:
@@ -208,23 +149,29 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     # *** here is where we compute the cost ***
     # if we return None, the bufferize is kept
 
-    accessed_buffers = []
+    accessed_buffers: list[UOp] = []
+    reduces: list[UOp] = []
     def red_gate(x:UOp):
       if x.op is Ops.INDEX:
         accessed_buffers.append(x)
         return False
+      if x.op is Ops.REDUCE: reduces.append(x)
       return True
-    ran = src.toposort(gate=red_gate)
+    src.toposort(gate=red_gate)
+    del red_gate
 
     # if this is generated from multiple buffers, don't remove this buffer
     if len(dedup([x.src[0] for x in accessed_buffers])) > 2: return None
 
-    # const reduce is okay
-    # TODO: move the reduce folder to before this to prevent the need for this
-    def okay_reduce(x:UOp): return all(y.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.COPY} for y in x.backward_slice_with_self)
-
-    # always run this list of ops
-    if any(x.op is Ops.REDUCE and not okay_reduce(x) for x in ran): return None
+    # if any reduces access a buffer, don't remove this buffer
+    buffer_in_reduce = False
+    def buf_gate(x:UOp):
+      nonlocal buffer_in_reduce
+      if x.op in {Ops.BUFFER, Ops.BUFFERIZE}: buffer_in_reduce = True
+      return not buffer_in_reduce
+    UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
+    del buf_gate
+    if buffer_in_reduce: return None
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
@@ -524,9 +471,9 @@ def do_sub_recurse(s:UOp):
     return UOp(Ops.SUBSTITUTE, dtype=x.dtype, src=(x.src[0], sub_k, sub_v))
   # here we actually do the SUBSTITUTE
   if x in keys: return values[keys.index(x)]
-  # we filter any keys that aren't in the backward slice. this keeps the algorithm O(output graph size)
-  # NOTE: if k was x, it would trigger above, so self doesn't have to be included in backward_slice
-  new_kv = {k:v for k,v in zip(keys,values) if k in x.backward_slice}
+  # we filter any keys where the ranges don't overlap. this keeps the algorithm O(output graph size)
+  x_ranges = x.ranges
+  new_kv = {k:v for k,v in zip(keys,values) if any(r in x_ranges for r in k.ranges)}
   # if there's no SUBSTITUTEs left, we can just return x
   if len(new_kv) == 0: return x
   # then we add SUBSTITUTE to all parents

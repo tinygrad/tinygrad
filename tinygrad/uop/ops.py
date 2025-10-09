@@ -23,9 +23,6 @@ range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3}
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(root:UOp, edges:dict[UOp, None]) -> bool:
-  return all(u.op not in GroupOp.UnsafePad for u in root.toposort(gate=lambda x:x not in edges))
-
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
   if isinstance(x, bool): return x
@@ -124,11 +121,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
-  @recursive_property
+  @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
-    ret = {s:None for s in self.src}
-    for s in self.src: ret.update(s.backward_slice)
-    return ret
+    res: dict[UOp, None] = self.toposort()
+    res.pop(self)
+    return res
+
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
   def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
@@ -207,24 +205,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       sz = self.ptrdtype.size
       return ShapeTracker.from_shape((sz,)) if sz > 0 else None
 
-    # CONTIGUOUS with RANGE
-    # TODO: how are these not RANGE?
-    if self.op is Ops.CONTIGUOUS and len(self.src) > 1 and all(x.op is Ops.RANGE for x in self.src[1:]):
-      return ShapeTracker.from_shape((tuple([int(x.vmax+1) for x in self.src[1:]])+self.src[0].shape))
-
     # hack for PTX, CASTing the ptr loses the shape
     if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    shape = src_sts[0].shape
+    # shape changing ops
     match self.op:
-      case Ops.MULTI: shape = tuple(self.src[0].shape[a]*len(self.device) if a == self.axis else s for a,s in enumerate(self.src[0].shape))
+      case Ops.MULTI: shape = tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(shape))
       case Ops.BITCAST:
-        shape = src_sts[0].shape
-        if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
-      case _: shape = src_sts[0].shape
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // output_sz,)
+      case Ops.REDUCE_AXIS | Ops.WMMA:
+        axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
+        assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
+        shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
     return ShapeTracker.from_shape(shape)
 
   @property
@@ -235,7 +231,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
   # determine what ranges this is in
-  @functools.cached_property
+  @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     if self.op in range_start.keys():
@@ -286,16 +282,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop syntactic sugar ***
 
-  @property
-  def st_arg(self) -> ShapeTracker:
-    assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
-    return unwrap(self.st)
-  @property
-  def axis_arg(self) -> tuple[int, ...]:
-    assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
-    ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
-    assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
-    return ret
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
@@ -501,7 +487,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
     if self is not self.base:
-      assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
+      assert self.op is Ops.RESHAPE, f"can only be RESHAPE {self}"
       return self.src[0].buffer
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
@@ -906,11 +892,11 @@ match_stats:dict[UPat, list[int|float]] = dict()
 
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
-  loc:tuple[str, int]                    # location that called graph_rewrite
-  sink:int                               # the sink input to graph_rewrite
-  matches:list[tuple[int, int, tuple]]   # before/after UOp, UPat location
-  name:str|None                          # optional name of the rewrite
-  depth:int                              # depth if it's a subrewrite
+  loc:tuple[str, int]                           # location that called graph_rewrite
+  sink:int                                      # the sink input to graph_rewrite
+  matches:list[tuple[int, int, tuple, float]]   # before/after UOp, UPat location and time
+  name:str|None                                 # optional name of the rewrite
+  depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
 
 tracked_keys:list[TracingKey] = []
@@ -982,14 +968,14 @@ class TrackedPatternMatcher(PatternMatcher):
       try: ret = match(uop, ctx)
       except Exception:
         if TRACK_MATCH_STATS >= 2 and active_rewrites:
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR, src=uop.src, arg=str(sys.exc_info()[1]))), p.location))
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1]))),p.location,0))
         raise
       if ret is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
         if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location))
+          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location, et))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
@@ -1019,7 +1005,7 @@ if TRACK_MATCH_STATS or PROFILE:
     if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")) and not int(os.getenv("SQTT", "0")):
       args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
       args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
-      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "../", "viz", "serve.py")] + args)
+      os.execv(sys.executable, [sys.executable] + [pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"] + args)
 
 # *** simple graph rewrite engine ***
 

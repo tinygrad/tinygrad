@@ -8,7 +8,7 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
-from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, RANGEIFY
+from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 
@@ -314,7 +314,7 @@ class TestLinearizer(unittest.TestCase):
     a.realize()
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
-  @unittest.skipIf(RANGEIFY and isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexes differently. might be ok?")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexes differently. might be ok?")
   def test_where_fold(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.shrink(((1, 2), None)).pad(((1, 2), None))
@@ -432,7 +432,7 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"
   inbufs = [x.uop.base.buffer for x in inputs]
-  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.st_arg.size, out.src[1].dtype).allocate() for out in ast.src]
+  outbufs = [Buffer(inbufs[-1].device if inbufs else Device.DEFAULT, out.size, out.src[1].dtype).allocate() for out in ast.src]
   _helper_linearizer_opt_ast(ast, outbufs+inbufs, *args, **kwargs)
 
 def helper_linearizer_opt(r:Tensor|list[Tensor], *args, **kwargs):

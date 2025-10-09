@@ -12,7 +12,6 @@ from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uo
 def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
   idx = views[-1].to_valid_uop(_idxs)
   for view in reversed(views[0:-1]):
-    view = view.minify()
     idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
   with Context(TRACK_MATCH_STATS=0):
     return graph_rewrite(idx, sym, name="indexing sym @ 1")
@@ -54,11 +53,6 @@ class ShapeTracker:
   @property
   def size(self) -> int: return self.views[-1].size()
 
-  def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-
-  def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
-    return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
-
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
@@ -68,11 +62,9 @@ class ShapeTracker:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     if all(len(x) == 0 for x in var_vals): return self, {}
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
-  def substitute(self, dvars:dict[UOp, UOp]): return ShapeTracker(tuple(x.substitute(dvars) for x in self.views))
 
   def real_strides(self, ignore_valid=False) -> tuple[sint|None, ...]:
     with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
-  def unit_stride_axes(self, ignore_valid=False) -> list[int]: return [i for i,st in enumerate(self.real_strides(ignore_valid)) if st == 1]
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
