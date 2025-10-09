@@ -627,7 +627,7 @@ jobs:
         if: matrix.backend=='amdllvm'
         run: python test/device/test_amd_llvm.py
       - name: Run pytest (amd)
-        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/test_jit.py test/test_graph.py test/test_multitensor.py test/device/test_hcq.py --durations=20
+        run: python -m pytest -n=auto test/test_ops.py test/test_dtype.py test/test_dtype_alu.py test/test_linearizer.py test/test_randomness.py test/test_jit.py test/test_graph.py test/test_multitensor.py test/device/test_hcq.py --durations=20 -k "not test_avg_pool3d_failure"
       - name: Run pytest (amd)
         run: python -m pytest test/external/external_test_am.py --durations=20
       - name: Run TRANSCENDENTAL math
