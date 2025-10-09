@@ -1,4 +1,4 @@
-from typing import Iterator
+from typing import Iterator, Sequence
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
@@ -43,7 +43,6 @@ class BufferizeOpts:
 class IndexingContext:
   realize_map: dict[UOp, None] = field(default_factory=dict)
   range_map: dict[UOp, tuple[list[UOp], list[UOp]]] = field(default_factory=dict)
-  pads_gate: dict[UOp, UOp] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
@@ -59,7 +58,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
     if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
-      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(ctx.range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
+      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+tuple(ctx.range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     new_srcs.append(new_src)
   # NOTE: do we need this?
@@ -67,7 +66,8 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  ret = ctx.pads_gate[x].where(x.src[0], UOp.const(x.dtype, 0))
+  valid: UOp = functools.reduce(operator.and_, [r.get_valid() for r in ctx.range_map[x][0]], UOp.const(dtypes.bool, True))
+  ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
@@ -102,6 +102,41 @@ pm_apply_rangeify = PatternMatcher([
   # const/define_var shouldn't have src
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
+
+def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
+  if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
+  elif x.op is Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
+  elif x.op is Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
+  elif x.op is Ops.EXPAND:
+    rngs = [a.const_like(0) if resolve(in_sh!=out_sh) else a for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
+  elif x.op is Ops.PAD:
+    rngs = list(rngs)
+    for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
+      if s == 0 and e == 0: continue
+      where = UOp.const(dtypes.bool, True)
+      if resolve(e > 0): where = where & (rngs[i] < (sh-e))
+      if resolve(s > 0): where = where & (rngs[i] >= s)
+      with Context(TRACK_MATCH_STATS=0): rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
+  elif x.op is Ops.RESHAPE:
+    acc = 1
+    to_sum = []
+    for s,src in list(zip(x.shape, rngs))[::-1]:
+      to_sum.append(acc*src)
+      acc *= s
+    mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
+    ret:list[UOp] = []
+    for s in x.src[0].shape[::-1]:
+      ret.append(mish % s) # NOTE: simplify will turn this to CONST
+      mish //= s
+    # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
+    rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+  else: raise RuntimeError(f"{x.op} is not a MovementOp")
+  return rngs
+
+# movement op on INDEX as a PatternMatcher
+#pm_mops = PatternMatcher([
+#  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]))),
+#])
 
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()
@@ -177,39 +212,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     rngs = out_rngs  # rngs is the input ranges
 
-    # apply movement ops. this is the definition of them
-    if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
-    if x.op is Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
-    if x.op is Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
-    if x.op is Ops.EXPAND:
-      rngs = [a.const_like(0) if resolve(in_sh!=out_sh) else a for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
-      ending_ranges[x] = True
-    if x.op is Ops.PAD:
-      rngs = rngs[:]
-      bigwhere = UOp.const(dtypes.bool, True)
-      for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
-        if s == 0 and e == 0: continue
-        where = UOp.const(dtypes.bool, True)
-        if resolve(e > 0): where = where & (rngs[i] < (sh-e))
-        if resolve(s > 0): where = where & (rngs[i] >= s)
-        bigwhere = bigwhere & where
-        with Context(TRACK_MATCH_STATS=0):
-          rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
-      # PAD is replaced with a WHERE in the big graph to inject the 0s at the right place
-      rctx.pads_gate[x] = bigwhere.simplify()
-    if x.op is Ops.RESHAPE:
-      acc = 1
-      to_sum = []
-      for s,src in list(zip(x.shape, rngs))[::-1]:
-        to_sum.append(acc*src)
-        acc *= s
-      mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
-      ret:list[UOp] = []
-      for s in x.src[0].shape[::-1]:
-        ret.append(mish % s) # NOTE: simplify will turn this to CONST
-        mish //= s
-      # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
-      rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+    # apply movement ops
+    if x.op in GroupOp.Movement: rngs = apply_movement_op(x, rngs)
+    if x.op is Ops.EXPAND: ending_ranges[x] = True
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
