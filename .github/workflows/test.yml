@@ -129,7 +129,7 @@ jobs:
   torchbackendmore:
     name: Torch Backend Tests More
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -145,6 +145,8 @@ jobs:
         sudo apt install -y --no-install-recommends ninja-build
     - name: Test beautiful_mnist in torch with TINY_BACKEND
       run: SPLIT_REDUCEOP=0 FUSE_ARANGE=1 CPU=1 CPU_LLVM=1 TARGET_EVAL_ACC_PCT=96.0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
+    - name: Test hlb_cifar10 in torch with TINY_BACKEND
+      run: TINY_BACKEND=1 python3 examples/other_cifar/hlb_cifar10_torch.py
     - name: Test some torch tests (expect failure)
       run: python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
