@@ -209,7 +209,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         ret.append(mish % s) # NOTE: simplify will turn this to CONST
         mish //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
-      rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+      with Context(TRACK_MATCH_STATS=0): rngs = list(graph_rewrite(UOp.sink(*ret[::-1]), sym).src)
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
