@@ -50,7 +50,7 @@ def add_endrange(x:UOp):
   src: list[UOp] = []
   for k,g in groupby(x.src, key=lambda k: tuple(dedup(s for s in k.src if s.op is Ops.RANGE))):
     if not k: src.extend(g)
-    else: src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g)))
+    else: src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g))) # type: ignore
   return x.replace(src=tuple(src))
 
 def add_endif(x:UOp):
