@@ -110,26 +110,23 @@ def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
     case Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
     case Ops.EXPAND:  rngs = [a.const_like(0) if resolve(in_sh!=out_sh) else a for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
     case Ops.PAD:
-      rngs = list(rngs)
-      for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
-        if s == 0 and e == 0: continue
-        where = UOp.const(dtypes.bool, True)
-        if resolve(e > 0): where = where & (rngs[i] < (sh-e))
-        if resolve(s > 0): where = where & (rngs[i] >= s)
-        with Context(TRACK_MATCH_STATS=0): rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
+      # TODO: why is multiple graph_rewrites faster than one here?
+      with Context(TRACK_MATCH_STATS=0):
+        rngs = [r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh-e))).where(r-s, UOp.invalid()), sym)
+                for r,sh,(s,e) in zip(rngs, x.shape, x.arg)]
     case Ops.RESHAPE:
       acc = 1
-      to_sum = []
+      axes_in:list[UOp] = []
       for s,src in list(zip(x.shape, rngs))[::-1]:
-        to_sum.append(acc*src)
+        axes_in.append(acc*src)
         acc *= s
-      mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
-      ret:list[UOp] = []
+      combined_axes = sum(axes_in, start=UOp.const(dtypes.index, 0))
+      axes_out:list[UOp] = []
       for s in x.src[0].shape[::-1]:
-        ret.append(mish % s) # NOTE: simplify will turn this to CONST
-        mish //= s
-      # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
-      rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+        axes_out.append(combined_axes % s)
+        combined_axes //= s
+      # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
+      rngs = list(UOp.sink(*axes_out[::-1]).simplify().src)
     case _: raise RuntimeError(f"{x.op} is not a MovementOp")
   return rngs
 
