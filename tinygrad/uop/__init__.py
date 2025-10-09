@@ -12,9 +12,6 @@ class Ops(FastEnum):
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto(); REWRITE_ERROR = auto()  # noqa: E702
   SENTINEL = auto()
 
-  # track children
-  CHILD = auto(); CHILDREN = auto() # noqa: E702
-
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
 
@@ -24,17 +21,10 @@ class Ops(FastEnum):
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
-  REALIZE = auto()
 
   # movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto() # noqa: E702
   MULTI = auto()  # MULTI is really a movement op
-
-  # view is what all movement ops become
-  VIEW = auto()
-
-  # TODO: remove VALID with the VIEW(CONST(DEVICE)) refactor
-  VALID = auto()
 
   # TODO: unify these ops into the levels of the memory hierarchy. depends on ASSIGN is STORE
   DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto() # noqa: E702
@@ -97,7 +87,7 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
-  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
+  Buffer = {Ops.LOAD, Ops.STORE, Ops.CONST, Ops.DEFINE_VAR}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}
@@ -113,7 +103,5 @@ class GroupOp:
 
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
-
-  Meta = {Ops.COPY, Ops.BUFFER_VIEW}
 
   All = set(Ops)

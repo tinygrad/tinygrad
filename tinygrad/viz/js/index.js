@@ -137,17 +137,18 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
-  for (const e of source.shapes) {
-    for (let i=0; i<e.y0.length; i++) {
-      e.y0[i] = e.y0[i]*k;
-      e.y1[i] = e.y1[i]*k;
+  for (const shapes of source.views)
+    for (const e of shapes) {
+      for (let i=0; i<e.y0.length; i++) {
+        e.y0[i] = e.y0[i]*k;
+        e.y1[i] = e.y1[i]*k;
+      }
     }
-  }
   const change = (source.height*k)-source.height;
   const div = document.getElementById(tid);
   div.style.height = rect(div).height+change+"px";
@@ -221,14 +222,15 @@ async function renderProfiler() {
         const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
         const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        if (e.ref != null) ref = {ctx:e.ref, step:0};
+        let shapeRef = e.ref;
+        if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
         else if (ref != null) {
           const start = ref.step>0 ? ref.step+1 : 0;
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-          ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
+          if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
         const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
-        const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
+        const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -237,7 +239,7 @@ async function renderProfiler() {
       const peak = u64();
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
-      const timestamps = [];
+      const timestamps = [], valueMap = new Map();
       for (let j=0; j<eventsLen; j++) {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
@@ -245,11 +247,11 @@ async function renderProfiler() {
           const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
           buf_shapes.set(key, shape); temp.set(key, shape);
           timestamps.push(ts);
-          x += 1; y += nbytes;
+          x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
           timestamps.push(ts);
-          x += 1; y -= free.nbytes;
+          x += 1; y -= free.nbytes; valueMap.set(ts, y);
           free.x.push(x);
           free.y.push(free.y.at(-1));
           temp.delete(key);
@@ -273,14 +275,34 @@ async function renderProfiler() {
         const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
+      // generic polygon merger
+      const base0 = yscale(0);
+      const allX = Array.from(new Set(shapes.flatMap(s => s.x))).sort((a,b)=>a-b);
+      const idxs = new Map(allX.map((x,i) => [x, i]));
+      const maxY = new Map(allX.map(x => [x, base0]));
+      // for every [a,b) update the max y at x
+      for (const sh of shapes) {
+        for (let i=0; i<sh.x.length-1; i++) {
+          const startIdx = idxs.get(sh.x[i]), endIdx = idxs.get(sh.x[i+1]);
+          const shapeY = sh.y1[i];
+          for (let k=startIdx; k<endIdx; k++) {
+            const x = allX[k]; maxY.set(x, Math.min(maxY.get(x), shapeY));
+          }
+        }
+      }
+      const sum = {x:[], y0:[], y1:[], fillColor:"#2B1B72"};
+      for (let i=0; i<allX.length-1; i++) {
+        sum.x.push(allX[i], allX[i+1]);
+        const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
+      }
+      data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
           track.offsetY += offset;
-          if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
-          else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
+          if (tid === newFocus) { track.shapes = track.views[1]; offset += rescaleTrack(track, tid, track.scaleFactor); }
+          else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
         data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
         focusedDevice = newFocus;
@@ -301,7 +323,7 @@ async function renderProfiler() {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+    for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
         // generic polygon
@@ -312,7 +334,9 @@ async function renderProfiler() {
           ctx.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y0[i]);
-            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg });
+            let arg = e.arg;
+            if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), 'B')}`}
+            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
           ctx.closePath();
