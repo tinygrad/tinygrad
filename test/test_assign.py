@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import temp, RANGEIFY
+from tinygrad.helpers import temp
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -300,7 +300,6 @@ class TestAssign(unittest.TestCase):
     #assert ba1 == ba2 and ba1 != bb1
     np.testing.assert_allclose(a.numpy(), np.arange(N*N).reshape((N,N)) + np.arange(N*N).reshape((N,N)).transpose(1,0))
 
-  @unittest.skipUnless(RANGEIFY, "only correct in rangeify")
   def test_post_permuted_assignment_alt(self):
     a = Tensor.arange(N*N).reshape(N,N).contiguous().realize()
     b = Tensor.arange(N*N).reshape(N,N).contiguous().realize()

@@ -1,7 +1,7 @@
 import unittest, sys
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, Context, nn
-from tinygrad.helpers import CI, Profiling, WINO, RANGEIFY
+from tinygrad.helpers import CI, Profiling, WINO
 
 @unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinogradClose(unittest.TestCase):
@@ -61,9 +61,9 @@ class TestWinograd(unittest.TestCase):
     print(f"ops: normal {ops_normal:9d} wino {ops_wino:9d} ratio {ops_ratio:.2f}")
     print(f"mem: normal {mem_normal:9d} wino {mem_wino:9d} ratio {mem_ratio:.2f}")
 
-    if not RANGEIFY:
-      self.assertLess(ops_ratio, 2.6)  # TODO: there's issues with factorization now
-      self.assertLess(mem_ratio, 10)
+    # TODO: what's optimal on this?
+    self.assertLess(ops_ratio, 4.3)
+    self.assertLess(mem_ratio, 3)
 
   def test_dtype(self):
     IC, OC, X, Y = 4,4,9,9

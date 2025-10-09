@@ -3,7 +3,6 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.codegen import full_rewrite_to_sink
-from tinygrad.helpers import RANGEIFY
 from tinygrad.device import is_dtype_supported
 import numpy as np
 from test.helpers import not_support_multi_device
@@ -158,8 +157,7 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
 
   def test_add_padded_zero(self):
-    # TODO: it's 1 now, this might be possible to fold
-    _check_ast_count(0 if RANGEIFY else 1, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(2).pad(((1, 1),)))
+    _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(2).pad(((1, 1),)))
 
   def test_mul_shrunk_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) * Tensor.ones(6).shrink(((1, 5),)))
@@ -168,16 +166,16 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_cast_padded(self):
-    # NOTE: RANGEIFY or not, it's always 1 kernel when calling .numpy, limitation of _check_ast_count
+    # NOTE: it's always 1 kernel when calling .numpy, limitation of _check_ast_count
     if is_dtype_supported(dtypes.int16):
-      _check_ast_count(1 if RANGEIFY else 0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
       np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
     if is_dtype_supported(dtypes.uint16):
-      _check_ast_count(1 if RANGEIFY else 0, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+      _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
       np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # folded
     if is_dtype_supported(dtypes.int64):
-      _check_ast_count(1 if RANGEIFY else 0, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
+      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
       np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
 
 class TestReduceOpsConstFolding(unittest.TestCase):
@@ -249,7 +247,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
         t = Tensor.ones(16, dtype=dt).reshape(4, 4)
         assert t.sum().dtype == t.contiguous().sum().dtype
 
-@unittest.skipIf(not_support_multi_device() or RANGEIFY, "no multi, RANGEIFY doesn't support multi const folding")
+@unittest.skipIf(not_support_multi_device() or True, "no multi, RANGEIFY doesn't support multi const folding")
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
