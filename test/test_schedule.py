@@ -2289,7 +2289,7 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_buffer_view_not_allowed(self):
     permuted_view = Tensor.empty(1, 2, 3).permute(0, 2, 1)
-    with self.assertRaisesRegex(AssertionError, "VIEW only works here if it's contiguous"):
+    with self.assertRaisesRegex(AssertionError, "can only be RESHAPE"):
       permuted_view.uop.buffer # cannot access Buffer of a non contiguous VIEW
 
   def test_buffer_only_after_realize(self):
