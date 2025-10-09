@@ -121,11 +121,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
 
-  @recursive_property
+  @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
-    ret = {s:None for s in self.src}
-    for s in self.src: ret.update(s.backward_slice)
-    return ret
+    res: dict[UOp, None] = self.toposort()
+    res.pop(self)
+    return res
+
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
   def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
