@@ -404,38 +404,35 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
   # don't simplify any other gates, can lead to OOB, we substitute them back later
   uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
-  candidates = []
+  all_candidates = []
   # simplify uop given that valid is True
   for i, (expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
+    # if the expr is an add we try and factorize so its more likely to substitute
+    if expr.op is Ops.ADD: uop = uop.factor(expr)
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
     if v0 > v1: return None
     # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
+    candidates = []
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
+      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    candidates.append([(expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype))])
-  old_uop=uop
+    if expr in uop.toposort():
+      candidates.append([tup:=(expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype))])
+      all_candidates.append(tup)
 
-  while True:
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      factored_uop = uop.factor(candidate[0][0]) if len(candidate)==1 else uop
-      newuops = [factored_uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
+      newuops = [uop.substitute({X:newX}).simplify(flat=True).substitute({newX:X}).simplify(flat=True) for X,newX in candidate]
       if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
-      elif all_same(newuops) and newuops[0] is not factored_uop: uop = newuops[0]
+      elif all_same(newuops): uop = newuops[0]
 
-    # if the expr is an add we try and factorize so its more likely to substitute
-    single_candidates = [e[0] for e in candidates if len(e)==1]
-    factored_uop = uop.factor(*(s[0] for s in single_candidates))
-    new_uop = factored_uop.substitute(sub_dict:=dict(single_candidates)).simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
-    if new_uop is not factored_uop: uop = new_uop
-    if uop is old_uop: break
-    old_uop = uop
+  uop = uop.factor(*(e[0] for e in all_candidates))
+  uop = uop.substitute(sub_dict:=dict(all_candidates)).simplify(flat=True).substitute({newX:X for X,newX in sub_dict.items()}).simplify(flat=True)
 
   # put the loads back in
   uop = uop.substitute({v:k for k,v in load_subs.items()})
