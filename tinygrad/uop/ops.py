@@ -216,16 +216,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
     assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+    shape = src_sts[0].shape
+    # shape changing ops
     match self.op:
-      case Ops.MULTI: shape = tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(src_sts[0].shape))
+      case Ops.MULTI: shape = tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(shape))
       case Ops.BITCAST:
-        shape = src_sts[0].shape
-        if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // output_sz,)
       case Ops.REDUCE_AXIS | Ops.WMMA:
         axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
         assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
-        shape = tuple(1 if i in axis_arg else s for i,s in enumerate(src_sts[0].shape))
-      case _: shape = src_sts[0].shape
+        shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
     return ShapeTracker.from_shape(shape)
 
   @property
