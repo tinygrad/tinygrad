@@ -71,6 +71,7 @@ class CPUProgram(HCQProgram):
   except OSError: pass
 
   def __init__(self, dev, name:str, lib:bytes):
+    LVP = isinstance(dev.compiler, LVPCompiler)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -86,7 +87,7 @@ class CPUProgram(HCQProgram):
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      if (LVP:=isinstance(dev.compiler, LVPCompiler)):
+      if LVP:
         (lib, _, rels), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
         for loc,tgt,_,add in rels: lib[loc:loc+8] = (bytes(getattr(ctypes.CDLL(ctypes.util.find_library('m')), tgt, None) or unwrap(self.rt_lib)[tgt])
                                                      if isinstance(tgt, str) else struct.pack("<Q", tgt+add+addr))
@@ -106,7 +107,7 @@ class CPUProgram(HCQProgram):
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if not WIN and LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if not WIN and LVP else 0)
+    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
 
   @suppress_finalizing
   def __del__(self):
