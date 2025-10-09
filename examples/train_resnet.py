@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
   lr = 5e-3
   transform = ComposeTransforms([
-    lambda x: [Image.fromarray(xx, mode='L').resize((64, 64)) for xx in x],
+    lambda x: [Image.fromarray(xx).resize((64, 64)) for xx in x],
     lambda x: np.stack([np.asarray(xx) for xx in x], 0),
     lambda x: x / 255.0,
     lambda x: np.tile(np.expand_dims(x, 1), (1, 3, 1, 1)).astype(np.float32),

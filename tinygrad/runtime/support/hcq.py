@@ -3,10 +3,11 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
+from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
+from tinygrad.runtime.support.memory import BumpAllocator
 
 class MMIOInterface:
   def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
@@ -61,15 +62,6 @@ HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
-
-class BumpAllocator:
-  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
-  def alloc(self, size:int, alignment:int=1) -> int:
-    if round_up(self.ptr, alignment) + size > self.size:
-      if not self.wrap: raise RuntimeError("Out of memory")
-      self.ptr = 0
-    self.ptr = (res:=round_up(self.ptr, alignment)) + size
-    return res + self.base
 
 class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   """

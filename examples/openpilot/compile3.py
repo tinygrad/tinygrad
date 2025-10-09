@@ -10,7 +10,7 @@ from tinygrad.helpers import DEBUG, getenv
 from tinygrad.engine.realize import CompiledRunner
 
 import onnx
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
 OUTPUT = sys.argv[2] if len(sys.argv) > 2 else "/tmp/openpilot.pkl"
@@ -77,13 +77,20 @@ def test_vs_compile(run, new_inputs, test_val=None):
             **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'img' not in k}}
 
   # run 20 times
+  step_times = []
   for _ in range(20):
     st = time.perf_counter()
     out = run(**inputs)
     mt = time.perf_counter()
     val = out.numpy()
     et = time.perf_counter()
-    print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
+    step_times.append((et-st)*1e3)
+    print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
+
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+    min_time = min(step_times)
+    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
+
   print(out, val.shape, val.dtype)
   if test_val is not None: np.testing.assert_equal(test_val, val)
   print("**** test done ****")
