@@ -103,40 +103,42 @@ pm_apply_rangeify = PatternMatcher([
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
 
+# this is the definition of the movement ops
 def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
-  if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
-  elif x.op is Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
-  elif x.op is Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
-  elif x.op is Ops.EXPAND:
-    rngs = [a.const_like(0) if resolve(in_sh!=out_sh) else a for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
-  elif x.op is Ops.PAD:
-    rngs = list(rngs)
-    for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
-      if s == 0 and e == 0: continue
-      where = UOp.const(dtypes.bool, True)
-      if resolve(e > 0): where = where & (rngs[i] < (sh-e))
-      if resolve(s > 0): where = where & (rngs[i] >= s)
-      with Context(TRACK_MATCH_STATS=0): rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
-  elif x.op is Ops.RESHAPE:
-    acc = 1
-    to_sum = []
-    for s,src in list(zip(x.shape, rngs))[::-1]:
-      to_sum.append(acc*src)
-      acc *= s
-    mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
-    ret:list[UOp] = []
-    for s in x.src[0].shape[::-1]:
-      ret.append(mish % s) # NOTE: simplify will turn this to CONST
-      mish //= s
-    # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
-    rngs = list(UOp.sink(*ret[::-1]).simplify().src)
-  else: raise RuntimeError(f"{x.op} is not a MovementOp")
+  match x.op:
+    case Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
+    case Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
+    case Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
+    case Ops.EXPAND:  rngs = [a.const_like(0) if resolve(in_sh!=out_sh) else a for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
+    case Ops.PAD:
+      rngs = list(rngs)
+      for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
+        if s == 0 and e == 0: continue
+        where = UOp.const(dtypes.bool, True)
+        if resolve(e > 0): where = where & (rngs[i] < (sh-e))
+        if resolve(s > 0): where = where & (rngs[i] >= s)
+        with Context(TRACK_MATCH_STATS=0): rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
+    case Ops.RESHAPE:
+      acc = 1
+      to_sum = []
+      for s,src in list(zip(x.shape, rngs))[::-1]:
+        to_sum.append(acc*src)
+        acc *= s
+      mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
+      ret:list[UOp] = []
+      for s in x.src[0].shape[::-1]:
+        ret.append(mish % s) # NOTE: simplify will turn this to CONST
+        mish //= s
+      # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
+      rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+    case _: raise RuntimeError(f"{x.op} is not a MovementOp")
   return rngs
 
 # movement op on INDEX as a PatternMatcher
-#pm_mops = PatternMatcher([
-#  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]))),
-#])
+pm_mops = PatternMatcher([
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
+])
 
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()
