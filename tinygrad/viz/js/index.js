@@ -226,7 +226,7 @@ async function renderProfiler() {
         else if (ref != null) {
           const start = ref.step>0 ? ref.step+1 : 0;
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-          ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
+          ref = {ctx:ref.ctx, step:stepIdx};
         }
         const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
         const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
