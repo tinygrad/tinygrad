@@ -1181,6 +1181,7 @@ class TestSchedule(unittest.TestCase):
     expected = (x_exp:=np.exp(x.numpy()-x.numpy().max(-1, keepdims=True)))/x_exp.sum(-1, keepdims=True)
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
 
+  # TODO: rangeify stores the output in float32
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   @unittest.expectedFailure
   def test_softmax_upcast(self):
@@ -2391,6 +2392,7 @@ class TestUOpBecome(unittest.TestCase):
     z = (img*x) / y
     check_schedule(z, 1)
 
+  # TODO: rangeify doesn't yet cleanup this kind of re-indexing
   @unittest.expectedFailure
   def test_become_existing_buffer(self):
     a = Tensor.empty(4, 4)
