@@ -379,9 +379,9 @@ class TestVizProfiler(unittest.TestCase):
     j = load_profile(prof)
 
     tracks = list(j['layout'])
-    self.assertEqual(tracks[0], 'NV Graph')
-    self.assertEqual(tracks[1], 'NV')
-    self.assertEqual(tracks[2], 'NV:1')
+    self.assertEqual(tracks[0], 'NV')
+    self.assertEqual(tracks[1], 'NV:1')
+    self.assertEqual(tracks[2], 'NV Graph')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')

@@ -25,22 +25,6 @@ class TestArange(unittest.TestCase):
     t = Tensor.arange(2, dtype=dtypes.int)+Tensor([3])
     self.assertEqual(t.cat(t).tolist(), [3, 4, 3, 4])
 
-class TestRand(unittest.TestCase):
-  def test_fused_rand_less_ops(self, noopt=1):
-    GlobalCounters.reset()
-    with Context(FUSE_ARANGE=0, NOOPT=noopt):
-      out = Tensor.rand(16384)
-      out.realize()
-    unfused_ops = GlobalCounters.global_ops
-
-    GlobalCounters.reset()
-    with Context(FUSE_ARANGE=1, NOOPT=noopt):
-      out = Tensor.rand(16384)
-      out.realize()
-    print(f"fused {GlobalCounters.global_ops} unfused {unfused_ops}")
-    self.assertLessEqual(GlobalCounters.global_ops, unfused_ops*2)
-  def test_fused_rand_less_ops_opt(self): self.test_fused_rand_less_ops(0)
-
 DSET, DDIM = 2048, 32
 
 class TestIndexing(unittest.TestCase):
@@ -48,7 +32,7 @@ class TestIndexing(unittest.TestCase):
     needle = Tensor.zeros(16384, dtype=dtypes.int).contiguous()
     needle[1337] = 1
     needle.realize()
-    with Context(NOOPT=1, FUSE_ARANGE=1):
+    with Context(NOOPT=1):
       GlobalCounters.reset()
       out = ((Tensor.arange(1,16385)-1)*needle).sum()
       sched = out.schedule()
@@ -61,7 +45,7 @@ class TestIndexing(unittest.TestCase):
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
-    with Context(NOOPT=1, FUSE_ARANGE=1):
+    with Context(NOOPT=1):
       GlobalCounters.reset()
       rng = Tensor.ones(4, DDIM, DSET, dtype=dtypes.int)._cumalu(axis=-1, op=Ops.ADD, _include_initial=True).reshape(4, DDIM, DSET, 1)
       idxs = idxs.reshape(4,1,1,1).expand(4, DDIM, DSET, 1)
@@ -77,7 +61,7 @@ class TestIndexing(unittest.TestCase):
   def test_index_variable(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
     v = Variable("v", 0, DDIM-1)
-    with Context(NOOPT=1, FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+    with Context(NOOPT=1):
       GlobalCounters.reset()
       vb = Tensor(v.bind(12))
       comp = dataset[vb].numpy()
@@ -106,7 +90,7 @@ class TestIndexing(unittest.TestCase):
     idxs = Tensor([0,3,5,6]).realize()
     real_index = dataset.numpy()[idxs.numpy()]
     print("*** indexing ***")
-    with Context(NOOPT=noopt, FUSE_ARANGE=1):
+    with Context(NOOPT=noopt):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
@@ -121,7 +105,7 @@ class TestIndexing(unittest.TestCase):
   def test_index_fused_out_of_bounds(self):
     dataset = Tensor.rand(256, 256).realize()
     idxs = Tensor([-19238, -257, 256, 495, 10982377]).realize()
-    with Context(NOOPT=1, FUSE_ARANGE=1):
+    with Context(NOOPT=1):
       X = dataset[idxs]
       np.testing.assert_equal(X.numpy(), 0)
 
@@ -130,7 +114,7 @@ class TestIndexing(unittest.TestCase):
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
     from tinygrad.nn.datasets import mnist
     X_train, Y_train, _, _ = mnist()
-    with Context(NOOPT=noopt, FUSE_ARANGE=1, SPLIT_REDUCEOP=split_reduceop):
+    with Context(NOOPT=noopt, SPLIT_REDUCEOP=split_reduceop):
       samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0]).realize()
       GlobalCounters.reset()
       x = X_train[samples].numpy()
@@ -150,7 +134,7 @@ class TestIndexing(unittest.TestCase):
     # TODO: why is a new realize needed here
     emb_w = emb.weight.realize().numpy()
     x = Tensor([1,2,3,4])
-    with Context(NOOPT=noopt, FUSE_ARANGE=1):
+    with Context(NOOPT=noopt):
       GlobalCounters.reset()
       z = emb(x).realize()
       self.assertLessEqual(GlobalCounters.global_ops, op_limit)

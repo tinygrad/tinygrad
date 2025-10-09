@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, os, sys, subprocess
+import ctypes.util, os, sys, subprocess
 from tinygrad.helpers import DEBUG, OSX, getenv
 
 if sys.platform == 'win32':

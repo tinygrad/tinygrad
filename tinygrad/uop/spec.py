@@ -1,8 +1,7 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context, cpu_profile, RANGEIFY
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context, cpu_profile
 try:
   import z3
   # older versions of z3 dont have some operators like & overloaded
@@ -64,8 +63,6 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
    lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.MSTACK, src=UPat(Ops.BUFFER)),)), lambda: True),
-  # allow VIEW here. TODO: what views specifically are allowed? does this mess with gradient?
-  (UPat(Ops.VIEW), lambda: True),
 ])
 
 assign_spec = PatternMatcher([
@@ -92,17 +89,10 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    # this is fine as long as it's a realized buffer or const and base dtypes match.
    ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base \
        and x.base.op in {Ops.BUFFER,Ops.ASSIGN,Ops.CONST})),
-  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
 
-  # Tensor const has a device and an unmasked ShapeTracker of stride 0
-  # NOTE: variables in shape can cause multiple views in this ShapeTracker and other issues, see TestSymbolicJit.test_ones_sum
-  # TODO: remove after rangeify is default
-  (UPat(Ops.CONST, src=(UPat.any(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="st"),
-                                 UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND)), name="st")),)),
-   lambda st: len(st.st.views) == 1 and all(v.mask is None for v in st.st.views)),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
@@ -167,19 +157,7 @@ spec = PatternMatcher([
      all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
 
-  (UPat(Ops.VIEW, dtypes.void, src=(), name="x"), lambda x: isinstance(x.arg, ShapeTracker)),
-  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"),
-   lambda x,src: isinstance(x.arg, ShapeTracker) and src.op is not Ops.STORE and x.dtype.base == src.dtype.base),
-
-  (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
-
-  # early LOAD has a <bufview, store?>
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)),)), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat(Ops.STORE))), lambda: True),
-
-  # early STORE has a <bufview, val>
-  (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat())), lambda: True),
 
   # **** new style load/store ****
 
@@ -243,30 +221,23 @@ spec = PatternMatcher([
 # *** this is the UOp AST spec ***
 
 ast_spec = PatternMatcher([
-  # VIEW can only exist in the edges
-  (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
-  (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),
   # all parent UOps must have the same shape
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
 ])
 
 # *** this spec should match all UOps ever created ***
 
-full_non_rangeify_spec = PatternMatcher([]) if RANGEIFY else PatternMatcher([
-  # in non rangeify const can still have a View, and sometimes a FUSE while propagating
-  (UPat((Ops.VIEW, Ops.FUSE)).f(Ops.CONST), lambda: True),
-])
-
 full_spec = PatternMatcher([
+  # SENTINEL should never be in the graph
+  (UPat(Ops.SENTINEL), lambda: False),
+
+  # allow any SUBSTITUTE
+  (UPat(Ops.SUBSTITUTE), lambda: True),
+
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine
   (UPat(Ops.WHERE, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
-
-  # all children is fine
-  (UPat(Ops.CHILDREN), lambda: True),
-  # child must have CHILDREN parent
-  (UPat(Ops.CHILD, src=(UPat(Ops.CHILDREN),)), lambda: True),
 
   # all rewrite error are okay
   (UPat(Ops.REWRITE_ERROR), lambda: True),
@@ -274,16 +245,14 @@ full_spec = PatternMatcher([
   # rangeify: buffer view with index or load is okay
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
   # bufferize (must be on ranges)
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op is Ops.RANGE for y in x.src[1:])),
-  # realize with one src is fine
-  (UPat(Ops.REALIZE, src=(UPat(),)), lambda: True),
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
   # intermediate index
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
   # copy on index
   (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
   # assign on index. the third op is the shape
-  (UPat(Ops.ASSIGN, src=(UPat(Ops.INDEX), UPat(), UPat(GroupOp.Movement))), lambda: True),
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat(GroupOp.Movement))), lambda: True),
 
   # expander: unroll/contract/gep/ptrcat/cat
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
@@ -311,7 +280,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.DEFINE_VAR), lambda: True),
   # reshape on STORE
   (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
-])+full_non_rangeify_spec+tensor_uop_spec+spec
+])+tensor_uop_spec+spec
 
 # ***** uop helpers *****
 

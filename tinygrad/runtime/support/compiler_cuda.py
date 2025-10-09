@@ -1,4 +1,4 @@
-import subprocess, hashlib, tempfile, ctypes, ctypes.util, re, pathlib
+import subprocess, hashlib, tempfile, ctypes, re, pathlib
 from typing import Callable
 from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
 import tinygrad.runtime.autogen.nvrtc as nvrtc
