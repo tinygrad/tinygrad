@@ -193,7 +193,7 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id={110000: 0x744c, 110003: 0x7480, 120000: 0x7550}[device_props['gfx_target_version']],
+        device_id={110000: 0x744c, 110003: 0x7480}[device_props['gfx_target_version']],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
