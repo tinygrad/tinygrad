@@ -152,24 +152,26 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     accessed_buffers: list[UOp] = []
     reduces: list[UOp] = []
     def red_gate(x:UOp):
-      if x.op in {Ops.BUFFER, Ops.BUFFERIZE}:
+      if x.op is Ops.INDEX:
         accessed_buffers.append(x)
         return False
       if x.op is Ops.REDUCE: reduces.append(x)
       return True
     src.toposort(gate=red_gate)
+    del red_gate
 
     # if this is generated from multiple buffers, don't remove this buffer
-    if len(accessed_buffers) > 2: return None
+    if len(dedup([x.src[0] for x in accessed_buffers])) > 2: return None
 
     # if any reduces access a buffer, don't remove this buffer
-    for r in reduces[:]:
-      accessed_buffers.clear()
-      r.src[0].toposort(gate=red_gate)
-      if len(accessed_buffers): return None
-
-    # clean this up
-    del red_gate
+    buffer_in_reduce = False
+    def buf_gate(x:UOp):
+      nonlocal buffer_in_reduce
+      if x.op in {Ops.BUFFER, Ops.BUFFERIZE}: buffer_in_reduce = True
+      return not buffer_in_reduce
+    UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
+    del buf_gate
+    if buffer_in_reduce: return None
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
