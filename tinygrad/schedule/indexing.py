@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.uop.symbolic import symbolic, pm_simplify_valid
+from tinygrad.uop.symbolic import sym
 from tinygrad.helpers import argsort, all_same, Context
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType
 
@@ -193,7 +193,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         if resolve(e > 0): where = where & (rngs[i] < (sh-e))
         if resolve(s > 0): where = where & (rngs[i] >= s)
         bigwhere = bigwhere & where
-        with Context(TRACK_MATCH_STATS=0): rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), symbolic+pm_simplify_valid)
+        with Context(TRACK_MATCH_STATS=0):
+          rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
       # PAD is replaced with a WHERE in the big graph to inject the 0s at the right place
       rctx.pads_gate[x] = bigwhere.simplify()
     if x.op is Ops.RESHAPE:
@@ -208,7 +209,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         ret.append(mish % s) # NOTE: simplify will turn this to CONST
         mish //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
-      with Context(TRACK_MATCH_STATS=0): rngs = list(graph_rewrite(UOp.sink(*ret[::-1]), symbolic+pm_simplify_valid).src)
+      rngs = list(UOp.sink(*ret[::-1]).simplify().src)
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
