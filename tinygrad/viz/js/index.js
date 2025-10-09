@@ -289,7 +289,7 @@ async function renderProfiler() {
           }
         }
       }
-      const sum = {x:[], y0:[], y1:[], fillColor:"#39009c"};
+      const sum = {x:[], y0:[], y1:[], fillColor:"#2F4AA8"};
       for (let i=0; i<allX.length-1; i++) {
         sum.x.push(allX[i], allX[i+1]);
         const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
