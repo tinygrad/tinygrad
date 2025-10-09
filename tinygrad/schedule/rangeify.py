@@ -370,6 +370,7 @@ def synth_mat(mat: list[list[int|float]], o: UOp, r: UOp, dtype=dtypes.float) ->
   cells = [((r*(len(mat[0]))+o)).eq(i).where(UOp.const(dtype, v), z) for i, v in enumerate(flatten(mat)) if v]
   while len(cells) > 1:
     cells = [cells[i] + cells[i+1] if i+1 < len(cells) else cells[i] for i in range(0, len(cells), 2)]
+  #return UOp(Ops.CAST, dtype, src=(o+r,))
   return cells[0] if cells else z
 
 def winoguard(redu):
@@ -403,13 +404,12 @@ def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
   act_like, w_like = redu.src[0].src
   if act_branch == 1:
     act_like, w_like = w_like, act_like
-  if act_like.op is not Ops.INDEX or w_like.op is not Ops.INDEX:
-    return None
-  if len(act_like.src) < 3:
-    return None
-  (_, ky, _), (_, kx, _), *_ = axis_pairs
-  oy_add, ox_add = act_like.src[1], act_like.src[2]
-  
+  # if act_like.op is not Ops.INDEX or w_like.op is not Ops.INDEX:
+  #   return None
+  # if len(act_like.src) < 3:
+  #   return None
+  (_, ky, oy_add), (_, kx, ox_add), *_ = axis_pairs
+  #oy_add, ox_add = act_like.src[1], act_like.src[2]
   # 3) Algebraic split of oy/ox into tiles+in-tile (no new outer loops born)
   zero_map = {ax: ax.const_like(0) for ax in (ky, kx)}
   oy_base = oy_add.substitute(zero_map).simplify()
@@ -420,21 +420,38 @@ def winowrite(ctx: RangeifyContext, redu: UOp) -> Optional[UOp]:
   ix = (ox_base %  4).simplify()  # in-tile-x
   # 4) Create 6-wide REDUCE axes (these will be eaten by the output transform)
   c6, r6, v6, u6 = [ctx.new_range(6, axistype=AxisType.REDUCE) for _ in range(4)]
+  print("ky:", ky)
+  print("kx:", kx)
+  print("oy_add:", oy_add)
+  print("ox_add:", ox_add)
+  print("oy_base:", oy_base)
+  print("ox_base:", ox_base)
+  print("ty (tile-y):", ty)
+  print("iy (in-tile-y):", iy)
+  print("tx (tile-x):", tx)
+  print("ix (in-tile-x):", ix)
+  print("c6:", c6)
+  print("r6:", r6)
+  print("v6:", v6)
+  print("u6:", u6)
   # 5) Build Winograd input transform Dhat[c6, r6] using placeholder coefficients.
   Bt_cv = synth_mat(winograd_Bt, v6, c6)
   B_ur = synth_mat([list(col) for col in zip(*winograd_Bt)], r6, u6)
-  X_vu = act_like.replace(src=(act_like.src[0], ty*4 + v6, tx*4 + u6)).simplify()
-  Xhat = (Bt_cv * (X_vu * B_ur).reduce(u6, arg=Ops.ADD, dtype=redu.dtype)).reduce(v6, arg=Ops.ADD, dtype=redu.dtype)
+  X_vu = act_like.substitute({oy_add: ty*4 + v6, ox_add: tx*4 + u6})
+  
+  #X_vu = act_like.replace(src=(act_like.src[0], ty*4 + v6, tx*4 + u6)).simplify()
+  #Xhat = (Bt_cv * (X_vu * B_ur).reduce(u6, arg=Ops.ADD, dtype=redu.dtype)).reduce(v6, arg=Ops.ADD, dtype=redu.dtype)
+  Xhat = ((UOp(Ops.CAST, dtypes.float, src=(X_vu,)) * B_ur).reduce(u6, arg=Ops.ADD, dtype=dtypes.float) * Bt_cv).reduce(v6, arg=Ops.ADD, dtype=dtypes.float)
   # 6) Build Ghat[c6, r6] by *fully* consuming (ky,kx) under w_like.
-  G_r  = (w_like * synth_mat(winograd_G, kx, r6)).reduce(kx, arg=Ops.ADD, dtype=redu.dtype)
-  Ghat = (G_r * synth_mat(winograd_G, ky, c6)).reduce(ky, arg=Ops.ADD, dtype=redu.dtype)
+  G_r  = ((UOp(Ops.CAST, dtypes.float, src=(w_like,)) * synth_mat(winograd_G, kx, r6)).reduce(kx, arg=Ops.ADD, dtype=dtypes.float))
+  Ghat = (G_r * synth_mat(winograd_G, ky, c6)).reduce(ky, arg=Ops.ADD, dtype=dtypes.float)
   # 7) Hadamard multiply Mhat[c6, r6] = Xhat[c6, r6] * Ghat[c6, r6]
   Mhat = Xhat * Ghat
   # 8) Output transform: reduce r6 then c6 using synthesized A(ix), At(iy) coefficients.
   A_ix  = synth_mat([list(col) for col in zip(*winograd_At)], ix, r6)
   At_iy = synth_mat(winograd_At, c6, iy)
-  tmp = (Mhat * A_ix).reduce(r6, arg=Ops.ADD, dtype=redu.dtype)
-  out = (tmp * At_iy).reduce(c6, arg=Ops.ADD, dtype=redu.dtype)
+  tmp = (Mhat * A_ix).reduce(r6, arg=Ops.ADD, dtype=dtypes.float)
+  out = (tmp * At_iy).reduce(c6, arg=Ops.ADD, dtype=dtypes.float)
   #print("out ranges", out)
   # 9) Return a *pure expression* (no bufferize/store). Scheduler will handle buffers.
   return out
