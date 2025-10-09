@@ -125,7 +125,7 @@ def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
         axes_out.append(combined_axes % s)
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-      rngs = list(graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic, name="reshape").src)
+      rngs = list(graph_rewrite(UOp.sink(*axes_out[::-1]), sym, name="reshape").src)
     case _: raise RuntimeError(f"{x.op} is not a MovementOp")
   return rngs
 
