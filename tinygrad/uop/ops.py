@@ -587,12 +587,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.ADD:
       factored = []
       # dict of {term: const_factor}, i.e. {a: 1, b: 2}
-      remainders: collections.defaultdict[UOp, ConstType] = collections.defaultdict(int)
-      for u in self.split_uop(Ops.ADD): remainders[u.divides(u.const_factor()).simplify(simple=True)] += u.const_factor()
+      remainders: collections.defaultdict[UOp, int]|dict[UOp,int] = collections.defaultdict(int)
+      for u in self.split_uop(Ops.ADD): remainders[u.divides(u.const_factor()).simplify(simple=True)] += cast(int, u.const_factor())
       for fac in factors:
         if fac.dtype not in (dtypes.index,)+dtypes.ints: continue
-        fac_terms: collections.defaultdict[UOp, ConstType] = collections.defaultdict(int)
-        for u in fac.split_uop(Ops.ADD): fac_terms[u.divides(u.const_factor()).simplify(simple=True)] += u.const_factor()
+        fac_terms: collections.defaultdict[UOp, int] = collections.defaultdict(int)
+        for u in fac.split_uop(Ops.ADD): fac_terms[u.divides(u.const_factor()).simplify(simple=True)] += cast(int, u.const_factor())
         factored_terms  = {k:v for k,v in remainders.items() if k in fac_terms}
         new_remainders  = {k:v for k,v in remainders.items() if k not in fac_terms}
 
