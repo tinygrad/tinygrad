@@ -3,8 +3,8 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
-from tinygrad.uop.symbolic import sym
-from tinygrad.helpers import argsort, all_same, Context
+from tinygrad.uop.symbolic import sym, symbolic
+from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -105,15 +105,14 @@ pm_apply_rangeify = PatternMatcher([
 # this is the definition of the movement ops
 def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
   match x.op:
-    case Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
+    case Ops.SHRINK:  rngs = [a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, x.arg)]
     case Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
     case Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
-    case Ops.EXPAND:  rngs = [a.const_like(0) if resolve(in_sh!=out_sh) else a for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
+    case Ops.EXPAND:  rngs = [a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
     case Ops.PAD:
       # TODO: why is multiple graph_rewrites faster than one here?
-      with Context(TRACK_MATCH_STATS=0):
-        rngs = [r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh-e))).where(r-s, UOp.invalid()), sym)
-                for r,sh,(s,e) in zip(rngs, x.shape, x.arg)]
+      rngs = [r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh-e))).where(r-s, UOp.invalid()), sym, name="pad")
+              for r,sh,(s,e) in zip(rngs, x.shape, x.arg)]
     case Ops.RESHAPE:
       acc = 1
       axes_in:list[UOp] = []
@@ -126,24 +125,30 @@ def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
         axes_out.append(combined_axes % s)
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-      rngs = list(UOp.sink(*axes_out[::-1]).simplify().src)
+      rngs = list(graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic, name="reshape").src)
     case _: raise RuntimeError(f"{x.op} is not a MovementOp")
   return rngs
 
+@cpu_profile(TracingKey("run_rangeify"), "TINY")
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="Input Graph")
 
+  # get the traversal order
+  with cpu_profile(TracingKey("reverse toposort"), "TINY"):
+    tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
+
   # explicit rangeify
   ending_ranges: dict[UOp, bool] = {}
-  for x in tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map()):
+  for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
     ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
     # if this element has weight and it's ending a range, we (force) realize it
     if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
+      # TODO: remove these restrictions, they are slow
       if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.BUFFERIZE, Ops.CONTIGUOUS):
         if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
           rctx.realize_map[x] = None
@@ -186,7 +191,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         if all_all_same:
           # the new valid is the OR of all the children valids
           minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
-          out_rngs.append(minimum_valid.where(local_rngs[0], UOp.invalid()).simplify())
+          out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
         else:
           out_rngs.append(rctx.new_range(x.shape[i]))
 
