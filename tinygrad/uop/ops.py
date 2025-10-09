@@ -23,9 +23,6 @@ range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3}
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
-def can_pad(root:UOp, edges:dict[UOp, None]) -> bool:
-  return all(u.op not in GroupOp.UnsafePad for u in root.toposort(gate=lambda x:x not in edges))
-
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
   if isinstance(x, bool): return x
@@ -223,7 +220,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.BITCAST:
         shape = src_sts[0].shape
         if self.dtype.itemsize != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // self.dtype.itemsize,)
-      case Ops.REDUCE_AXIS | Ops.WMMA: shape = src_sts[0].reduce(self.axis_arg)
+      case Ops.REDUCE_AXIS | Ops.WMMA:
+        axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
+        assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
+        shape = src_sts[0].reduce(axis_arg)
       case _: shape = src_sts[0].shape
     return ShapeTracker.from_shape(shape)
 
@@ -286,16 +286,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop syntactic sugar ***
 
-  @property
-  def st_arg(self) -> ShapeTracker:
-    assert self.op in GroupOp.Buffer, f"st_arg called on {self.op}"
-    return unwrap(self.st)
-  @property
-  def axis_arg(self) -> tuple[int, ...]:
-    assert self.op in {Ops.REDUCE_AXIS, Ops.WMMA}, f"axis_arg called on {self.op}"
-    ret = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
-    assert isinstance(ret, tuple) and all(isinstance(x, int) for x in ret), f"axis_arg trying to return {ret}"
-    return ret
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
@@ -501,7 +491,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
     if self is not self.base:
-      assert unwrap(self.st).contiguous, "VIEW only works here if it's contiguous"
+      assert self.op is Ops.RESHAPE, f"can only be RESHAPE {self}"
       return self.src[0].buffer
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
@@ -992,7 +982,7 @@ if TRACK_MATCH_STATS or PROFILE:
     if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")) and not int(os.getenv("SQTT", "0")):
       args = ['--kernels', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
       args += ['--profile', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
-      os.execv(sys.executable, [sys.executable] + [os.path.join(os.path.dirname(__file__), "../", "viz", "serve.py")] + args)
+      os.execv(sys.executable, [sys.executable] + [pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"] + args)
 
 # *** simple graph rewrite engine ***
 
