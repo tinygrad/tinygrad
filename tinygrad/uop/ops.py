@@ -123,8 +123,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
-    res: dict[UOp, None] = {}
-    for x in self.src: res.update(x.toposort())
+    res: dict[UOp, None] = self.toposort()
+    res.pop(self)
     return res
 
   @property
