@@ -3,6 +3,8 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.nn.onnx import OnnxRunner, OnnxValue
 import numpy as np
 import onnxruntime as ort
+ort_options = ort.SessionOptions()
+ort_options.log_severity_level = 3
 
 def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
   def _get_shape(onnx_shape: tuple[str|int]):
@@ -44,11 +46,9 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
     ret.update({name:value})
   return ret
 
-def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
+def _get_tinygrad_and_ort_np_outputs(onnx_file, inputs):
   run_onnx = OnnxRunner(onnx_file)
 
-  ort_options = ort.SessionOptions()
-  ort_options.log_severity_level = 3
   ort_sess = ort.InferenceSession(onnx_file, ort_options, ["CPUExecutionProvider"])
   np_inputs = {k:v.numpy() if isinstance(v, Tensor) else v for k,v in inputs.items()}
   out_names = list(run_onnx.graph_outputs)
@@ -56,9 +56,90 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
   ort_out = dict(zip(out_names, out_values))
 
   tinygrad_out = run_onnx(inputs)
+  Tensor.realize(*tinygrad_out.values())
+  tinygrad_out = {k:v.numpy() for k,v in tinygrad_out.items()}
+  return tinygrad_out, ort_out
+
+def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
+  tinygrad_out, ort_out = _get_tinygrad_and_ort_np_outputs(onnx_file, inputs)
 
   assert tinygrad_out.keys() == ort_out.keys()
   for k in tinygrad_out.keys():
     tiny_v, onnx_v = tinygrad_out[k], ort_out[k]
     if tiny_v is None: assert onnx_v is None, f"{k}: {tiny_v=}, {onnx_v=}"
-    else: np.testing.assert_allclose(tiny_v.numpy(), onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
+    else: np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
+
+def validate_all_intermediates(onnx_file, inputs, rtol=1e-5, atol=1e-5):
+  report = produce_node_output_report(onnx_file, inputs)
+  for i, node in enumerate(report):
+    node_name = node["node"]
+    outputs = node["outputs"]
+    print(f"Validating node_{i}: {node_name}")
+    for output in outputs:
+      output_name = output["name"]
+      tinygrad_out = output["tinygrad"]
+      ort_out = output["onnxruntime"]
+      np.testing.assert_allclose(tinygrad_out, ort_out, rtol=rtol, atol=atol, err_msg=f"For tensor '{output_name}' in {node_name}")
+      abs_diff = np.abs(tinygrad_out - ort_out)
+      ort_out_abs = np.abs(ort_out)
+      relative_diff = np.divide(abs_diff, ort_out_abs, out=np.zeros_like(abs_diff), where=(ort_out_abs != 0))
+      print(f"{output_name}: (max_abs_diff={np.max(abs_diff):.2e}, max_rel_diff={np.max(relative_diff):.2e})")
+
+def produce_node_output_report(onnx_file, inputs):
+  """
+  Build a report of all ONNX node outputs from tinygrad and onnxruntime
+
+  Returns:
+  ```
+  [
+    {
+      "node": str,
+      "outputs": [
+        { "name": str, "tinygrad": np.ndarray, "onnxruntime": np.ndarray },
+        ...
+      ]
+    },
+    ...
+  ]
+  ```
+
+  Note:
+  - requires onnx_graphsurgeon: pip install onnx-graphsurgeon
+  """
+  import onnx_graphsurgeon as gs
+  import onnx
+  import tempfile
+
+  # rewrite the model to output all the node outputs
+  # infer shapes here fills the shapes and dtypes of intermediate values which graphsurgeon requires
+  inferred_model = onnx.shape_inference.infer_shapes(onnx.load(onnx_file))
+  model = gs.import_onnx(inferred_model)
+  model_nodes = model.nodes
+  node_outputs = [n.outputs for n in model.nodes]
+  model.outputs = [each_output for outputs in node_outputs for each_output in outputs]
+  rewritten_model = gs.export_onnx(model)
+  # onnxruntime only supports up to IR version 10
+  if getattr(rewritten_model, "ir_version", 0) > 10:
+    rewritten_model.ir_version = 10
+  with tempfile.NamedTemporaryFile(delete=False, suffix=".onnx") as f:
+    onnx.save(rewritten_model, f.name)
+    rewritten_model = f.name
+
+  tinygrad_out, ort_out = _get_tinygrad_and_ort_np_outputs(rewritten_model, inputs)
+
+  report = []
+  for node in model_nodes:
+    outputs = []
+    for each_output in node.outputs:
+      name = each_output.name
+      outputs.append({ "name": name, "tinygrad": tinygrad_out[name], "onnxruntime": ort_out[name] })
+    report.append({"node": node.name, "outputs": outputs})
+
+  return report
+
+
+if __name__ == "__main__":
+  from tinygrad.helpers import fetch
+  fn = fetch("https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx")
+  validate(fn, get_example_inputs(OnnxRunner(fn).graph_inputs), rtol=7e-3, atol=9e-2)
+  # pprint(report)
