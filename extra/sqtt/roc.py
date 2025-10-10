@@ -20,14 +20,15 @@ class InstInfo:
 class _ROCParseCtx:
   def __init__(self, sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.sqtt_evs, self.prog_evs = iter(sqtt_evs), prog_evs
-    self.wave_events = {}
+    self.wave_events, self.disasms, self.addr2prg = {}, {}, {}
+
+    for prog in prog_evs:
+      for addr, info in comgr_get_address_table(prog.lib).items():
+        self.disasms[prog.base + addr] = info
+        self.addr2prg[prog.base + addr] = prog
 
   def next_sqtt(self): return next(self.sqtt_evs, None)
-  def find_program(self, idx): return self.prog_evs[idx]
-  def get_instr_info(self, idx, exec_addr): return self.disasm_program(idx)[exec_addr - self.find_program(idx).base]
-
-  @functools.lru_cache(None)
-  def disasm_program(self, idx): return comgr_get_address_table(self.find_program(idx).lib)
+  def find_program(self, addr): return self.addr2prg[addr]
 
   def on_occupancy_ev(self, ev):
     if DEBUG >= 4: print("OCC", ev.time, ev.cu, ev.simd, ev.wave_id, ev.start)
@@ -39,10 +40,10 @@ class _ROCParseCtx:
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
-      asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.get_instr_info(inst_ev.pc.code_object_id, inst_ev.pc.address)[0]))
+      asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.disasms[inst_ev.pc.address][0]))
       asm[inst_ev.pc.address].on_ev(inst_ev)
 
-    self.wave_events[(self.find_program(ev.instructions_array[0].pc.code_object_id).name, ev.wave_id, ev.cu, ev.simd)] = asm
+    self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -78,7 +79,7 @@ if __name__ == "__main__":
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
-    instr, mem_size_ptr[0] = ROCParseCtx.get_instr_info(pc.code_object_id, pc.address)
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0
