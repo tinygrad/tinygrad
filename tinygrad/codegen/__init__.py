@@ -9,7 +9,7 @@ from tinygrad.renderer import Renderer
 # import all pattern matchers here
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_drop_and_clauses
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
@@ -54,7 +54,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
+    ret.append(RewriteStep(sym+pm_drop_and_clauses+pm_flatten_range, name="initial symbolic"))
 
     # optimize (schedule) the AST
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
