@@ -130,8 +130,7 @@ class AMDComputeQueue(HWQueue):
       self.wreg(self.gc.regSQ_THREAD_TRACE_USERDATA_2, *data_ints[i:i+2])
 
   def sqtt_config(self, tracing:bool):
-    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1,
-              mode=int(tracing))
+    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1, mode=int(tracing))
 
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
   def sqtt_start(self, buf0s:list[HCQBuffer], se_mask:int):
@@ -140,13 +139,13 @@ class AMDComputeQueue(HWQueue):
     # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
     for se in range(len(buf0s)):
       self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
-      buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr>>12)
+      buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
       if self.dev.target >= (12,0,0):
-        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, size=buf0s[se].size>>12)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, size=buf0s[se].size >> 12)
         self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_LO, base_lo=buf0_lo)
         self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_HI, base_hi=buf0_hi)
       else:
-        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size>>12)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size >> 12)
         self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, base_lo=buf0_lo)
       # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
       # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
@@ -154,19 +153,19 @@ class AMDComputeQueue(HWQueue):
       # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
       # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
       # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
-      self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=(1 << 6) if self.dev.target >= (12,0,0) else self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT, simd_sel=0, wgp_sel=0, sa_sel=0)
-      # print(self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT)
+      cs_wtype = (1 << 6) if self.dev.target >= (12,0,0) else self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT
+      self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=cs_wtype, simd_sel=0, wgp_sel=0, sa_sel=0)
       reg_include = self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_SHDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
-                    self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
+                    self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
       token_exclude = 0 if self.dev.target >= (12,0,0) else (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT)
-      barrier_wait_exclude = 1 if self.dev.target >= (12,0,0) else 0
+      reg_exclude, inst_exclude = 0x3, 0x0
+
+      # disable tracing
       if not (se_mask >> se) & 0b1:
-        token_exclude |= 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT
-        if self.dev.target < (12,0,0): token_exclude |= 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | \
-                          1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
-                          1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
-      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, exclude_barrier_wait=barrier_wait_exclude,
-                bop_events_token_include=1)
+        token_exclude, inst_exclude, reg_exclude, reg_include = 0x7ff, 0x3, (0x7 if self.dev.target >= (12,0,0) else 0x3), 0
+
+      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude,
+                bop_events_token_include=1, reg_exclude=reg_exclude, reg_detail_all=1, inst_exclude=inst_exclude)
       # Enable SQTT
       self.sqtt_config(tracing=True)
     # Restore global broadcasting
