@@ -67,7 +67,7 @@ if __name__ == "__main__":
   a_reg = rt("a_reg", dtypes.float, (N_BLOCK*TILE_DIM, K_BLOCK*TILE_DIM))
   b_reg = rt("b_reg", dtypes.float, (K_BLOCK*TILE_DIM, M_BLOCK*TILE_DIM))
   d_reg = rt("d_reg", dtypes.float, (N_BLOCK*TILE_DIM, M_BLOCK*TILE_DIM))
-  d_reg = zero(d_reg, UOp(Ops.NOOP, src=(tg_id_y, tg_id_x)))
+  d_reg = zero(d_reg, tg_id_y, tg_id_x)
 
   k = UOp.range(K // (K_BLOCK * TILE_DIM), -1, AxisType.REDUCE)
   a_reg = load(a_reg, gl_a, tg_id_y, k)
