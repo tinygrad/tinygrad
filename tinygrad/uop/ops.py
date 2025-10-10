@@ -184,20 +184,23 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
-    # MovementOps define a new ShapeTracker from the arg
-    if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([int(r.vmax+1) for r in self.src[1:]]))
-    # allow reshape from nothing
-    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
-    if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
+    shape = None
+    if self.op is Ops.BUFFERIZE: shape = tuple([int(r.vmax+1) for r in self.src[1:]])
+    if self.op in GroupOp.Movement:
+      # allow reshape from nothing
+      if self.op is Ops.RESHAPE and self.src[0].st is None: shape = self.arg
+      # otherwise apply the MovementOp on the ShapeTracker
+      # this is probably the main thing blocking the .st removal.
+      else: return unwrap(self.src[0].st).mop(self.op, self.arg)
     # CONST with a DEVICE has a shape of ()
-    if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
-    if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
-    if self.op is Ops.STORE and self.dtype is not dtypes.void: return self.src[0].src[0].st
+    if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: shape = ()
+    if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): shape = (self.dtype.size,)
     # BufferOps and ASSIGN flow ShapeTracker from a direct edge
+    if self.op is Ops.STORE and self.dtype is not dtypes.void: return self.src[0].src[0].st
     if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st
 
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
-    if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
+    if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: shape = (self.size,)
     if self.op is Ops.KERNEL:
       ast = self.arg.ast
       return ShapeTracker.from_shape((ast.size,)) if ast.st is not None else None
@@ -207,6 +210,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # hack for PTX, CASTing the ptr loses the shape
     if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
+
+    if shape is not None: return ShapeTracker.from_shape(shape)
 
     # otherwise we get the shape from sources
     if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
