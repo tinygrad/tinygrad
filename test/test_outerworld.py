@@ -1,18 +1,40 @@
 import unittest
-from tinygrad import Tensor, UOp
+from tinygrad import Tensor, UOp, Variable
 from tinygrad.uop.ops import Ops, AxisType
 
-@unittest.skip("TODO: understand assign")
+#@unittest.skip("TODO: understand assign")
 class TestOuterworldAssign(unittest.TestCase):
-  def test_triple_add(self):
+  def test_triple_add_inner(self):
+    t = Tensor.zeros(5).contiguous().realize()
+    t2 = Tensor.ones(3).contiguous().realize()
+    a = UOp.range(3, -1)
+    t = t.reshape(1,5).expand(a+1,5)[a].assign(t+t2[a])
+    self.assertListEqual(t.tolist(), [3,3,3,3,3])
+
+  def test_triple_add_outer(self):
     t = Tensor.zeros(5).contiguous().realize()
     t2 = Tensor.ones(3).contiguous().realize()
 
+    # OUTER is a loop at the schedule level
     a = UOp.range(3, -1, AxisType.OUTER)
-    t = t.assign(t+t2[a])
-    t = Tensor(UOp(Ops.ENDRANGE, dtype=t.uop.dtype, src=(a, t.uop))).contiguous()
+    va = Variable("loop", 0, 2).bind(a)
+    t = t.assign(t+t2[va])
+    t = Tensor(UOp(Ops.ENDRANGE, dtype=t.uop.dtype, src=(a, t.uop)))
 
     self.assertListEqual(t.tolist(), [3,3,3,3,3])
+
+  def test_triple_gemm(self):
+    x = Tensor.rand(1, 16).realize()
+    W = Tensor.rand(3, 16, 16).realize()
+
+    #manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
+
+    a = UOp.range(3, -1)
+
+    out = (x @ W[a]).contiguous()
+    t = Tensor(UOp(Ops.ASSIGN, dtype=out.uop.dtype, src=(x.uop, out.uop, a)))
+    #t = Tensor(UOp(Ops.REDUCE, dtype=out.uop.dtype, src=(out.uop, x.uop, a), arg=Ops.NOOP))
+    t.realize()
 
 class TestOuterworldReduce(unittest.TestCase):
   def test_reduce(self):

@@ -17,7 +17,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
-  if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
+  #if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
   # if it's a kernel, we don't realize it
   if a.src[1].op is not Ops.KERNEL: ctx[a] = None
 
@@ -25,7 +25,7 @@ pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize COPY/BUFFER_VIEW/CONTIGUOUS
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.ENDRANGE}, name="tr"), realize),
   # realize srcs of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
