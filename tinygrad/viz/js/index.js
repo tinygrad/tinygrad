@@ -14,8 +14,9 @@ const darkenHex = (h, p = 0) =>
   ).toString(16).padStart(6, '0')}`;
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
+const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
-  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (c => (parseInt(code) >= 90 ? d3.color(c).brighter(0.9).formatHex() : c))(ANSI_COLORS[parseInt(code)%10]) : defaultColor }));
+  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (parseInt(code) >= 90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
