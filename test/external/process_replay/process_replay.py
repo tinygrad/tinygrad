@@ -114,7 +114,7 @@ def _pmap(fxns:dict[str, Callable]) -> None:
 
   with multiprocessing.get_context("spawn").Pool(multiprocessing.cpu_count()) as pool:
     bar = tqdm(total=row_count)
-    for _ in pool.imap_unordered(functools.partial(diff, fxns=fxns), range(0, row_count, PAGE_SIZE)): bar.update(PAGE_SIZE)
+    for _ in pool.imap_unordered(functools.partial(diff, fxns=fxns), range(0, row_count, s:=min(PAGE_SIZE, row_count))): bar.update(s)
     pool.close()
     pool.join()
     pool.terminate()

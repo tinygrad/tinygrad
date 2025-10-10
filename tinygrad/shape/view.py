@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import resolve, UOp, Variable, sint, smax, smin, sint_to_uop, Ops, ssimplify
-from tinygrad.helpers import prod, all_int, flatten, ceildiv
+from tinygrad.helpers import prod, all_int, flatten
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
@@ -171,7 +171,6 @@ class View:
     if not all_int(vm1.shape):
       # if all strides are 0 and vm2 is unmasked, return vm1
       if all(x == 0 for x in vm2.strides+vm1.strides) and vm2.mask is None: return vm1
-      # TODO: handle more cases
       return None
 
     # Project vm1's offset and strides on to vm2.
@@ -184,47 +183,7 @@ class View:
         if not resolve((s1 := s1 - o)!=0): continue  # if s1 can possibly be 0
         terms[d2].append((d1, s1))
         strides[d1] += ssimplify(s1 * vm2.strides[d2])
-
-    # Merge dimensions in vm2 if required.
-    # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    idxs: list[UOp] = [UOp.variable(f"idx{i}", 0, s-1, dtypes.index) for i,s in enumerate(vm1.shape)]
-    merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
-    extents: list[tuple[sint, UOp]] = []
-    for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
-      merged_term += (sum([idxs[d1] * s1 for d1, s1 in term]) + o) * merged_size
-      merged_size *= s
-      if resolve(merged_term < merged_size, False) and resolve(0 <= merged_term, False):
-        extents.append((merged_size, merged_term))
-        merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
-    if resolve(merged_term != 0): return None
-    if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
-      if (reshaped_vm2 := vm2.reshape(vm2_shape)) is None: return None
-      # NOTE: this != to prevent infinite loop
-      if reshaped_vm2.shape != vm2.shape: return reshaped_vm2 + vm1
-
-    if vm2.mask:
-      # Try to project vm2's mask on to vm1.
-      newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
-      for (b, e), o, term, (_, t) in zip(vm2.mask, origin, terms, reversed(extents)):
-        if resolve(b <= (t := t.simplify()).vmin and t.vmax < e, False): continue
-        if len(term) != 1:
-          if not term and newe:
-            # t should be a constant if no terms contribute to this dimension, but it might not be simplified
-            if t.vmin != t.vmax: return None
-            newe[0] = 0
-          else: bad = True
-          continue
-        d1, s1 = term[0]
-        newb[d1] = smax(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
-        newe[d1] = smin(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
-
-      # If any of vm1 was masked off, try again with that mask in place.
-      if any((b, e) != (0, s) for b, e, s in zip(newb, newe, vm1.shape)):
-        return vm2 + View.create(vm1.shape, vm1.strides, vm1.offset, tuple(zip(newb, newe)))
-      # Otherwise if vm2's mask was violated, then cannot merge.
-      if bad: return None
-
-    return View.create(vm1.shape, tuple(strides), ssimplify(sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset))
+    return None
 
   def __unsafe_resize(self, arg: tuple[tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
