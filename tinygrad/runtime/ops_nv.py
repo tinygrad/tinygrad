@@ -1,12 +1,13 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
+import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref, types
 assert sys.platform != 'win32'
-from typing import cast, ClassVar
+from typing import cast, ClassVar, Iterable
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
 from tinygrad.uop.ops import sint
-from tinygrad.device import BufferSpec, CompilerPairT
+from tinygrad.device import Buffer, BufferSpec, CompilerPairT
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
@@ -15,6 +16,7 @@ from tinygrad.runtime.autogen import nv_gpu, pci
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
 from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
+from tinygrad.runtime.cuvid import Surface, decode_annexb
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
@@ -550,6 +552,46 @@ class NVDevice(HCQCompiled[HCQSignal]):
 
     return GPFifo(ring=MMIOInterface(gpfifo_area.va_addr + offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken,
                   controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
+
+  @dataclass(slots=True)
+  class NV12Surface:
+    buffer: Buffer
+    width: int
+    height: int
+    pitch: int
+    timestamp: int
+
+  def decode_hevc_annexb(self, stream: bytes | bytearray | memoryview | Iterable[bytes]) -> list[NV12Surface]:
+    wrapped: list[NVDevice.NV12Surface] = []
+    try:
+      for surface in decode_annexb(stream):
+        wrapped.append(self._wrap_surface(surface))
+    except Exception:
+      for nv12 in wrapped:
+        nv12.buffer.deallocate()
+      raise
+    return wrapped
+
+  def _wrap_surface(self, surface: Surface) -> NV12Surface:
+    height = max(surface.height, 1)
+    pitch = surface.pitch
+    chroma = pitch * ((height + 1) // 2)
+    size = pitch * height + chroma
+    buf = Buffer(self.device, size, dtypes.uint8)
+    try:
+      buf.allocate(external_ptr=surface.pointer)
+    except Exception:
+      surface.release()
+      raise
+
+    def _deallocate(self_buf, release=surface.release):
+      try:
+        release()
+      finally:
+        Buffer.deallocate(self_buf)
+
+    buf.deallocate = types.MethodType(_deallocate, buf)
+    return NVDevice.NV12Surface(buffer=buf, width=surface.width, height=surface.height, pitch=surface.pitch, timestamp=surface.timestamp)
 
   def _query_gpu_info(self, *reqs):
     nvrs = [getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_'+r.upper(), getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_LITTER_'+r.upper(), None)) for r in reqs]
