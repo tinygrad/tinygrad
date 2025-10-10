@@ -434,6 +434,7 @@ generate_sqtt() {
     $ROCPROF_SRC/include/trace_decoder_types.h \
     -o extra/sqtt/rocprof/rocprof.py
   fixup extra/sqtt/rocprof/rocprof.py
+  sed -i '1s/^/# pylint: skip-file\n/' extra/sqtt/rocprof/rocprof.py
   sed -i "s/import ctypes/import ctypes, tinygrad.helpers.fetch as tgfetch/g" extra/sqtt/rocprof/rocprof.py
   sed -i "s|FunctionFactoryStub()|ctypes.CDLL(str(tgfetch('https://github.com/ROCm/rocprof-trace-decoder/raw/5420409ad0963b2d76450add067b9058493ccbd0/releases/linux_glibc_2_28_x86_64/librocprof-trace-decoder.so')))|g" extra/sqtt/rocprof/rocprof.py
 }
