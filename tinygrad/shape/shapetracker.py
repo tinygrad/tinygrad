@@ -72,7 +72,7 @@ class ShapeTracker:
   def flip(self, mul: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].flip(mul), ))
 
   def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
-    if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
+    if getenv("MERGE_VIEW", 0) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
     return ShapeTracker(self.views + (View.create(new_shape), ))
 
   def mop(self, op, arg): return mops[op](self, arg)
