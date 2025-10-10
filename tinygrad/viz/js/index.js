@@ -14,8 +14,9 @@ const darkenHex = (h, p = 0) =>
   ).toString(16).padStart(6, '0')}`;
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
+const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
-  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
+  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
@@ -165,12 +166,12 @@ const drawLine = (ctx, x, y, opts) => {
 }
 
 function tabulate(rows) {
-  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`);
-  for (const [k,v] of rows) { root.append("div").text(k); root.append("div").text(v); }
+  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em");
+  for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
   return root;
 }
 
-var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -281,7 +282,7 @@ async function renderProfiler() {
         const html = document.createElement("div");
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         const info = html.appendChild(tabulate(rows).node());
-        const arg = {tooltipText:info.outerHTML, html};
+        const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -350,6 +351,7 @@ async function renderProfiler() {
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
           ctx.closePath();
           ctx.fillStyle = e.fillColor; ctx.fill();
+          if (focusedShape && e.arg?.key === focusedShape) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(); }
           continue;
         }
         // contiguous rect
@@ -443,6 +445,7 @@ async function renderProfiler() {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
+    if (foundRect?.key != focusedShape) { focusedShape = foundRect?.key; render(zoomLevel); }
     return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
   });
 
@@ -654,17 +657,10 @@ async function main() {
           }
         }
       }
-      const summary = metadata.appendChild(document.createElement("table"));
-      for (const s of ret.summary) {
-        const tr = summary.appendChild(document.createElement("tr"));
-        tr.className = "main-row";
-        const td = tr.appendChild(document.createElement("td"));
-        const div = td.appendChild(document.createElement("div"));
-        div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, s.idx);
-        div.appendChild(document.createElement("p")).textContent = s.label;
-        appendTd(tr, s.value);
-      }
+      metadata.appendChild(tabulate(ret.summary.map(s => {
+        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "24px").style("height", "100%");
+        return [s.label.trim(), div.node()];
+      })).node());
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".disasm").replaceChildren(root);
   }
