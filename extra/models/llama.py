@@ -105,13 +105,18 @@ class FeedForward:
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int, linear=nn.Linear,
-               feed_forward=FeedForward, qk_norm=None):
+               feed_forward=FeedForward, qk_norm=None, sliding_window:int=0):
     self.attention = Attention(dim, n_heads, n_kv_heads, max_context, linear, qk_norm)
     self.feed_forward = feed_forward(dim, hidden_dim, linear)
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
+    self.sliding_window = sliding_window
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
+    if self.sliding_window:
+      seqlen = x.shape[1]
+      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=mask.dtype, device=mask.device).tril(-self.sliding_window)
+      mask += sliding_mask
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
