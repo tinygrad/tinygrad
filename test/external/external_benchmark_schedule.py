@@ -29,7 +29,7 @@ if __name__ == "__main__":
         asts = list({x.ast.key:x.ast for x in sched if x.ast.op is Ops.SINK}.values())
         if (restrict_kernel := getenv("RESTRICT_KERNEL", -1)) != -1: asts = asts[restrict_kernel:restrict_kernel+1]
 
-        rewrites = get_rewrites_for_renderer(Device.default.renderer, linearizer=LINEARIZE)
+        rewrites = get_rewrites_for_renderer(Device.default.renderer)
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):
           with Timing("***** model rewrite in   "):
             rewritten_uops: list[UOp] = []
