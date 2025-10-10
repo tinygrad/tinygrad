@@ -31,9 +31,9 @@ def split_reduceop(reduce:UOp, x:UOp):
   #   ~2**10 should be enough if GROUP is used
   # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
   # split is moved to the end to provide maximum locality for the second phase reduce.
-  real_strides = unwrap(x.st).real_strides(ignore_valid=True)
+  is_expanded = unwrap(x.st).is_expanded()
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
-                             if x.shape[i]%d==0 and real_strides[i]!=0]): return None
+                             if x.shape[i]%d==0 and not is_expanded[i]]): return None
   dim_to_split, divisor = split_candidates[0]
   splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
@@ -442,7 +442,7 @@ def tag_uop(ctx:list[UOp], x:UOp):
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND,
-                     Ops.MSTACK, Ops.MSELECT}.union(GroupOp.Movement), name="x"), tag_uop),
+                     Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
   (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
 ])
 

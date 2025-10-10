@@ -81,7 +81,6 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-# NOTE: view path is for RANGEIFY=0, there should only be one way of doing this
 def mstack_early_shrink(ms:UOp, shrink:UOp):
   ret:list[UOp] = []
   def apply_shrink(s:UOp, i:int) -> UOp:
