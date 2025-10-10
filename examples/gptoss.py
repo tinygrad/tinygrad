@@ -7,6 +7,9 @@ from examples.llama3 import load
 # from examples.olmoe import MixtureFeedForward
 from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
 
+from icecream import install
+install()
+
 MODELS = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "n_heads": 64, "n_kv_heads": 8, "n_layers": 24, "norm_eps": 1e-5, "rope_theta": 150000, "vocab_size": 201088, "max_context": 4096, "num_experts": 32, "activated_experts": 4},
@@ -49,7 +52,7 @@ class MixtureFeedForward:
     return (down * probs.unsqueeze(-1)).sum(0).unsqueeze(0).unsqueeze(0)
 
 def download_weights(model:str, total_num_weights:int) -> Path:
-  model = fetch(f"https://huggingface.co/{model}/blob/main/model.safetensors.index.json?download=true", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
+  model = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
   for i in range(total_num_weights):
     filename = f"model-{i:05d}-of-{total_num_weights-1:05d}.safetensors"
     fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
@@ -74,7 +77,8 @@ def load_model(path:Path, params:dict[str, int|float]) -> Transformer:
   for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
 
   # load weights
-  weights = fix_bf16(convert_from_huggingface(load(str(path / "model.safetensors.index.json")), params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False))
+  l = load(str(path / "model.safetensors.index.json"))
+  weights = fix_bf16(convert_from_huggingface(l, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False))
 
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)
