@@ -91,8 +91,20 @@ def eval_retinanet():
   from contextlib import redirect_stdout
   tlog("imports")
 
-  mdl = RetinaNet(ResNeXt50_32X4D())
-  mdl.load_from_pretrained()
+  class RetinaNetRunner:
+    def __init__(self):
+      self.mdl = RetinaNet(ResNeXt50_32X4D())
+      self.mdl.load_from_pretrained()
+    
+    @TinyJit
+    def __call__(self, x:Tensor) -> tuple[Tensor, list[tuple[int, int]]]:
+      x, grid_sizes = self.mdl(normalize(x))
+      return x, grid_sizes
+
+    def postprocess_detections(self, *args, **kwargs):
+      return self.mdl.postprocess_detections2(*args, **kwargs)
+
+  mdl = RetinaNetRunner()
   tlog("loaded models")
 
   coco = COCO(download_dataset(base_dir:=getenv("BASEDIR", BASEDIR), 'validation'))
@@ -108,17 +120,17 @@ def eval_retinanet():
   proc = data_get()
   tlog("loaded initial data")
   st = time.perf_counter()
+  counter = 0
   while proc is not None:
     GlobalCounters.reset()
-    proc = (mdl(normalize(proc[0])), proc[1], proc[2], proc[3])
+    proc = (mdl(proc[0]), proc[1], proc[2], proc[3])
     run = time.perf_counter()
     # load the next data here
     try: next_proc = data_get()
     except StopIteration: next_proc = None
     nd = time.perf_counter()
-    predictions, img_ids = mdl.postprocess_detections(proc[0].numpy(), orig_image_sizes=proc[2]), proc[1]
-    pd = time.perf_counter()
-    coco_results  = [{"image_id": img_ids[i], "category_id": label, "bbox": box.tolist(), "score": score}
+    predictions, img_ids = mdl.postprocess_detections(proc[0][0], proc[0][1], orig_image_sizes=proc[2]), proc[1]
+    coco_results  = [{"image_id": img_ids[i], "category_id": label.item(), "bbox": box.tolist(), "score": score.numpy()}
       for i, prediction in enumerate(predictions) for box, score, label in zip(*prediction.values())]
     with redirect_stdout(None):
       coco_eval.cocoDt = coco.loadRes(coco_results)
@@ -126,11 +138,12 @@ def eval_retinanet():
       coco_eval.evaluate()
     evaluated_imgs.extend(img_ids)
     coco_evalimgs.append(np.array(coco_eval.evalImgs).reshape(ncats, narea, len(img_ids)))
-    n += len(proc[0])
+    n += len(proc)
     et = time.perf_counter()
-    tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching, {(pd-run)*1000:4.2f} ms postprocess_detections). {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
+    tlog(f"****** {(run-st)*1000:7.2f} ms to enqueue, {(et-run)*1000:7.2f} ms to realize ({(nd-run)*1000:7.2f} ms fetching. {(len(proc))/(et-st):8.2f} examples/sec. {GlobalCounters.global_ops*1e-12/(et-st):5.2f} TFLOPS")
     st = et
     proc, next_proc = next_proc, None
+    counter += 1
 
   coco_eval.params.imgIds = evaluated_imgs
   coco_eval._paramsEval.imgIds = evaluated_imgs
