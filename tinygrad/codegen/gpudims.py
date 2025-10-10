@@ -1,8 +1,7 @@
 import math
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
-from tinygrad.helpers import all_int, dedup
+from tinygrad.helpers import all_int, dedup, get_contraction
 from tinygrad.dtype import dtypes
-from tinygrad.shape.view import get_contraction
 from tinygrad.renderer import Renderer
 
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):

@@ -206,7 +206,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
   data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
   cr = data["CodeRegions"][0]
-  resource_labels = data["TargetInfo"]["Resources"]
+  resource_labels = [repr(x)[1:-1] for x in data["TargetInfo"]["Resources"]]
   rows:list = [[instr] for instr in cr["Instructions"]]
   # add scheduler estimates
   for info in cr["InstructionInfoView"]["InstructionList"]: rows[info["Instruction"]].append(info["Latency"])
