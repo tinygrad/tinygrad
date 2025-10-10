@@ -165,8 +165,8 @@ const drawLine = (ctx, x, y, opts) => {
 }
 
 function tabulate(rows) {
-  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`);
-  for (const [k,v] of rows) { root.append("div").text(k); root.append("div").text(v); }
+  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em");
+  for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
   return root;
 }
 
@@ -654,17 +654,10 @@ async function main() {
           }
         }
       }
-      const summary = metadata.appendChild(document.createElement("table"));
-      for (const s of ret.summary) {
-        const tr = summary.appendChild(document.createElement("tr"));
-        tr.className = "main-row";
-        const td = tr.appendChild(document.createElement("td"));
-        const div = td.appendChild(document.createElement("div"));
-        div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, s.idx);
-        div.appendChild(document.createElement("p")).textContent = s.label;
-        appendTd(tr, s.value);
-      }
+      metadata.appendChild(tabulate(ret.summary.map(s => {
+        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "24px").style("height", "100%");
+        return [s.label.trim(), div.node()];
+      })).node());
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".disasm").replaceChildren(root);
   }
