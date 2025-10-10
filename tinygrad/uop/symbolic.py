@@ -410,8 +410,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp:
   # don't simplify any other gates, can lead to OOB, we substitute them back later
   uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
+  all_candidates = []
   # simplify uop given that valid is True
-  for expr,v in bounds.items():
+  for i, (expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
@@ -419,9 +420,10 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp:
     candidates = []
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
+      candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
+    candidates.append([(expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype))])
+    all_candidates.append(candidates[-1][0])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -430,6 +432,9 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp:
         if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
         if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
       elif all_same(newuops): uop = newuops[0]
+
+  # try all the valids together (but only the non-simplex ones)
+  uop = uop.substitute(sub_dict:=dict(all_candidates)).simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
 
   # put the loads back in
   uop = uop.substitute({v:k for k,v in load_subs.items()})

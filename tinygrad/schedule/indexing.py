@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
-from tinygrad.uop.symbolic import sym, symbolic, pm_simplify_valid
+from tinygrad.uop.symbolic import symbolic, pm_simplify_valid
 from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
