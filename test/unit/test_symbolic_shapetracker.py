@@ -10,22 +10,20 @@ class TestSymbolic(unittest.TestCase):
   def test_symbolic_st(self):
     x = Variable("x", 1, 100)
     st = ShapeTracker.from_shape((x, 3))
-    assert st.shape == (x, 3)
-    assert st.real_strides() == (3, 1)
+    self.assert_tuple_equal(st.shape, (x, 3))
+    self.assert_tuple_equal(st.is_expanded(), (False, False))
 
-  def test_real_strides_0(self):
+  def test_is_expanded_0(self):
     st = ShapeTracker(views=(View(shape=(2, (Variable('start_pos', 1, 8)+1), 1, 1), strides=(8, 1, 0, 0), offset=0, mask=((0, 2), (0, Variable('start_pos', 1, 8)), (0, 1), (0, 1)), contiguous=False), View(shape=(2, (Variable('start_pos', 1, 8)+1)), strides=((Variable('start_pos', 1, 8)+1), 1), offset=0, mask=None, contiguous=True)))   # noqa: E501
-    self.assertEqual(st.real_strides(), (8, None))
+    self.assert_tuple_equal(st.is_expanded(), (False, False))
 
-  @unittest.expectedFailure
-  def test_real_strides_1(self):
+  def test_is_expanded_1(self):
     st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+2)), strides=(Variable('i', 1, 10), 1), offset=0, mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
-    self.assertEqual(st.real_strides(), (Variable('i', 1, 10), None))
+    self.assert_tuple_equal(st.is_expanded(), (False, False))
 
-  @unittest.expectedFailure
-  def test_real_strides_2(self):
+  def test_is_expanded_2(self):
     st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+Variable('j', 1, 10))), strides=(Variable('i', 1, 10), 1), offset=0, mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
-    self.assertEqual(st.real_strides(), (Variable('i', 1, 10), None))
+    self.assert_tuple_equal(st.is_expanded(), (False, False))
 
   def test_merge_view_recursion_err(self):
     vm2 = View(shape=(Variable('j', 1, 10),), strides=(0,), offset=0, mask=None, contiguous=False)
@@ -43,18 +41,18 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(vm3.strides, vm1.strides)
     self.assertEqual(vm2+vm3, vm2)
 
-  def test_cat_dim0_strides(self):
+  def test_cat_dim0_is_expanded(self):
     i = Variable("i", 1, 5).bind(3)
     j = Variable("j", 1, 5).bind(3)
     k = Variable("k", 1, 5).bind(3)
     t = Tensor.rand(5, 4)[:i].cat(Tensor.rand(5, 4)[:j], dim=0).cat(Tensor.rand(5, 4)[:k], dim=0)
     st = t.uop.st
     self.assert_tuple_equal(st.shape, (i+j+k, 4))
-    assert st.real_strides() == (4, 1)
+    self.assert_tuple_equal(st.is_expanded(), (False, False))
     t = Tensor.rand(5, 3)[:i].cat(Tensor.rand(5, 3)[:i], dim=0).cat(Tensor.rand(3, 3), dim=0)
     st = t.uop.st
     self.assert_tuple_equal(st.shape, (2*i+3, 3))
-    assert st.real_strides() == (3, 1)
+    self.assert_tuple_equal(st.is_expanded(), (False, False))
 
   def test_cat_dim1_strides(self):
     i = Variable("i", 1, 5).bind(4)
@@ -63,7 +61,7 @@ class TestSymbolic(unittest.TestCase):
     t = Tensor.rand(3, 5)[:, :i].cat(Tensor.rand(3, 5)[:, :j], dim=1).cat(Tensor.rand(3, 5)[:, :k], dim=1)
     st = t.uop.st
     self.assert_tuple_equal(st.shape, (3, i+j+k))
-    self.assert_tuple_equal(st.real_strides(), (i+j+k, 1))
+    self.assert_tuple_equal(st.is_expanded(), (False, False))
 
 class TestSymbolicVarVals(unittest.TestCase):
   def assert_equal(self, x, y): self.assertFalse(x != y)
