@@ -157,7 +157,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
-      out_rngs = [rctx.new_range(s) for s in x.shape]
+      out_rngs = [rctx.new_range(s) if not isinstance(s, UOp) or s.op is not Ops.RANGE else s for s in x.shape]
       # all ranges are ended now
       ending_ranges[x] = False
     elif x.op in {Ops.MSTACK, Ops.MSELECT}:
@@ -207,7 +207,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # apply movement ops
     if x.op in GroupOp.Movement: rngs = apply_movement_op(x, rngs)
-    if x.op is Ops.EXPAND: ending_ranges[x] = True
+    # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
+    if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape): ending_ranges[x] = True
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
