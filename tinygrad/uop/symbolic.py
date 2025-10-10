@@ -397,8 +397,8 @@ def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
   if valid.op is Ops.CMPLT and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, int((valid.src[1]).vmax)-1
   raise ValueError(f"not able to parse {valid=}")
 
-def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
-  # return None if valid is always False, otherwise the simplified uop (might be the same as input)
+def uop_given_valid(valid:UOp, uop:UOp) -> UOp:
+  # return simplified uop (might be the same as input)
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
@@ -415,18 +415,13 @@ def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
     # some expr has lower bound > upper bound -> valid is an empty set and we return None
-    if v0 > v1: return None
-    # whole node became a const
-    if v0 == v1:
-      uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
-      continue
     # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
     candidates = []
     if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
       # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
       candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
+    candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
 
     for candidate in candidates:
       # if every branch in candidate gives the same simplified uop, we can rewrite the uop
@@ -451,7 +446,7 @@ def simplify_valid(valid:UOp) -> UOp|None:
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
+    ret.append(uop_given_valid(functools.reduce(operator.and_, ret), stmt) if ret else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
