@@ -54,18 +54,6 @@ def concat_weights(models, device=None):
   return {name: convert(name) for name in {name: None for model in models for name in model}}
 
 def load(fn:str):
-  ic(fn)
-
-  # Check file content
-  with open(fn, 'rb') as fp:
-    first_bytes = fp.read(10)
-    ic(first_bytes)  # Should start with b'{' for JSON
-
-  with open(fn) as fp:
-    content = fp.read()
-    ic(len(content), content[:100])  # Debug the content
-    weight_map = json.loads(content)['weight_map']
-
   if fn.endswith('.index.json'):
     with open(fn) as fp: weight_map = ic(json.load(fp))['weight_map']
     parts = {n: load(str(Path(fn).parent / Path(n).name)) for n in set(weight_map.values())}
