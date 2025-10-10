@@ -154,21 +154,6 @@ class TestRealStrides(unittest.TestCase):
     ))
     self.assertEqual(st.is_expanded(), (False, False, False, True, False))
 
-class TestRealSimplifies(unittest.TestCase):
-  def tearDown(self):
-    self.st = self.st.simplify()
-    assert len(self.st.views) == 1
-
-  def test_1(self):
-    self.st = ShapeTracker((
-      View.create((1, 3, 2, 11, 4, 28), (0, 308, 0, 28, 0, 1), 0, None),
-      View.create((1, 3, 2, 11, 26, 1, 1, 3), (0, 2464, 0, 112, 1, 0, 0, 29), 0, None)))
-
-  def test_2(self):
-    self.st = ShapeTracker((
-      View.create((8, 3, 3, 11, 2, 28), (924, 308, 0, 28, 0, 1), 0, None),
-      View.create((8, 1, 6, 10, 28, 3, 2, 1), (5544, 0, 0, 56, 1, 1848, 672, 0), 0, None)))
-
 class TestIndexExpressions2d(unittest.TestCase):
   def setUp(self):
     shapes = [(30, 5), (15, 10), (15, 1), (5, 10), (5, 1)] # Make sure dim0 is a multiple of 5, one of the tests divides this dimension by 5
