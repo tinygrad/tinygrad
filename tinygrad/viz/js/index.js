@@ -170,7 +170,7 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -281,7 +281,7 @@ async function renderProfiler() {
         const html = document.createElement("div");
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         const info = html.appendChild(tabulate(rows).node());
-        const arg = {tooltipText:info.outerHTML, html};
+        const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -350,6 +350,7 @@ async function renderProfiler() {
           for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
           ctx.closePath();
           ctx.fillStyle = e.fillColor; ctx.fill();
+          if (focusedShape && e.arg?.key === focusedShape) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(); }
           continue;
         }
         // contiguous rect
@@ -443,6 +444,7 @@ async function renderProfiler() {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
+    if (foundRect?.key != focusedShape) { focusedShape = foundRect?.key; render(zoomLevel); }
     return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
   });
 
