@@ -2,7 +2,7 @@ import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import CI, getenv, prod, Context, RANGEIFY
+from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 import numpy as np
@@ -390,7 +390,7 @@ class TestMultiTensor(unittest.TestCase):
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
-  @unittest.skipIf(RANGEIFY, "TODO: pm_rangeify hangs")
+  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -427,7 +427,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
   @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
-  @unittest.skipIf(RANGEIFY, "TODO: pm_rangeify hangs")
+  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     fake_image = Tensor.rand((2, 3, 224//16, 224//16))
@@ -435,7 +435,7 @@ class TestMultiTensor(unittest.TestCase):
     m = ResNet18()
     self._test_model_train_step(m, fake_image, labels)
 
-  @unittest.skipIf(RANGEIFY, "TODO: pm_rangeify hangs")
+  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_simple_train_step(self):
     class Model:
       def __init__(self): self.conv1 = nn.Linear(128,128)
@@ -800,7 +800,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
-  @unittest.skipIf(RANGEIFY, "RANGEIFY doesn't support multi const folding")
+  @unittest.skip("RANGEIFY doesn't support multi const folding")
   def test_multi_const_folding(self):
     with Context(TRACK_MATCH_STATS=0):
       a = Tensor.arange(3).realize()
