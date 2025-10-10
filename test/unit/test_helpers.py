@@ -3,7 +3,7 @@ from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import Tensor, get_shape
-from tinygrad.shape.view import get_contraction, get_contraction_with_reduce
+from tinygrad.shape.view import get_contraction
 import numpy as np
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -219,20 +219,6 @@ class TestMemoryview(unittest.TestCase):
     print(f"from_mv vs mv_address: {fmv_us:8.3f} µs vs {mva_us:8.3f} µs")
 
 class TestGetContraction(unittest.TestCase):
-  def test_contraction_with_reduce(self):
-    r = get_contraction((16, 1, 1, 1), (16, 1, 1))
-    self.assertEqual(r, [[0], [], [1, 2, 3]])
-    r = get_contraction_with_reduce((16, 1, 1, 1), (16, 1, 1), (1,))
-    self.assertEqual(r, [[0], [1, 2], [3]])
-
-    r = get_contraction((16, 1, 1, 1, 1), (16, 1, 1, 1))
-    self.assertEqual(r, [[0], [], [], [1, 2, 3, 4]])
-    r = get_contraction_with_reduce((16, 1, 1, 1, 1), (16, 1, 1, 1), (1,))
-    self.assertEqual(r, [[0], [1, 2], [3], [4]])
-
-    r = get_contraction_with_reduce((2, 512, 1, 1), (2, 1, 512), (1,))
-    self.assertIsNone(r)
-
   def test_contraction(self):
     r = get_contraction((1,2,3,4), (2,3,4))
     self.assertEqual(r, [[0, 1], [2], [3]])

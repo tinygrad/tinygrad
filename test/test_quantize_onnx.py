@@ -3,7 +3,6 @@ import numpy as np
 import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.helpers import RANGEIFY
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item, get_program
@@ -69,7 +68,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
       import onnx # noqa: F401 # pylint: disable=unused-import
     except ImportError:
       raise unittest.SkipTest()
-    from tinygrad.frontend.onnx import OnnxRunner
+    from tinygrad.nn.onnx import OnnxRunner
     out_file = get_quantized_model(sz)
     run_onnx = OnnxRunner(out_file)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
@@ -94,8 +93,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))
     W = Tensor(np.random.uniform(0, 255, size=(64, 32, 1, 1)).astype(np.uint8))
     out = X.conv2d(W, dtype=X.dtype)
-    # rangeify merges axis in a different order
-    opts = [Opt(op=OptOps.UPCAST, axis=0 if RANGEIFY else 1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
 
   def test_prequant_gemm(self):

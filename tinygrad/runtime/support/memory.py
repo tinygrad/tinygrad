@@ -2,6 +2,15 @@ import collections, functools, dataclasses
 from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
+class BumpAllocator:
+  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
+  def alloc(self, size:int, alignment:int=1) -> int:
+    if round_up(self.ptr, alignment) + size > self.size:
+      if not self.wrap: raise RuntimeError("Out of memory")
+      self.ptr = 0
+    self.ptr = (res:=round_up(self.ptr, alignment)) + size
+    return res + self.base
+
 class TLSFAllocator:
   """
   The allocator is based on the Two-Level Segregated Fit (TLSF) algorithm. The allocator maintains 2 level of buckets:

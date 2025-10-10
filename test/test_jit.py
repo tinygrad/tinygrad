@@ -833,5 +833,20 @@ class TestJitGraphSplit(unittest.TestCase):
       multigraph=[self.ji_graph(2), self.ji_copy(), self.ji_comp()],
       hcqgraph=[self.ji_graph(4)])
 
+class TestJitRandom(unittest.TestCase):
+  def test_jit_rangeify(self):
+    tst = {0:[], 1:[]}
+    for r in [0,1]:
+      Tensor.manual_seed(1337)
+      with Context(JIT=r):
+        _ = Tensor.randint(4, high=3)
+        # this second one makes the behavior different
+        _ = Tensor.randint(4, high=3)
+        @TinyJit
+        def f(): return Tensor.randint(20, high=5)
+        for _ in range(5): tst[r].append(f().tolist())
+    for i, (t0, t1) in enumerate(zip(tst[0], tst[1])):
+      self.assertListEqual(t0, t1, msg=f"mismatch at list {i}")
+
 if __name__ == '__main__':
   unittest.main()

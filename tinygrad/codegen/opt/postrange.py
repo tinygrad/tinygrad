@@ -2,10 +2,10 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, can_pad, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
 from tinygrad.device import Buffer
 from tinygrad.dtype import AddrSpace, dtypes, ImageDType
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -25,7 +25,7 @@ class Scheduler:
   @property
   def rngs(self):
     # always in order by axistype
-    return sorted([u for u in self.ast.parents if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
+    return sorted([u for u in self.ast.backward_slice if u.op is Ops.RANGE and u.vmax > 0], key=lambda x: (axis_to_pos[x.arg[-1]],) + x.arg[0:-1])
   @property
   def shape_len(self): return len(self.rngs)
   @property
@@ -71,13 +71,20 @@ class Scheduler:
                         or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
     for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
 
-    return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[1] == AxisType.LOOP] if store_rngs else []
+    # filter any not in reduces
+    # TODO: enable this
+    """
+    reduce_rngs = [x.ranges for x in self.ast.toposort() if x.op is Ops.REDUCE]
+    for ls in reduce_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
+    """
+
+    return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[-1] == AxisType.LOOP] if store_rngs else []
 
   def convert_loop_to_global(self):
     if not self.opts.has_local: return None
 
     globalizible_rngs = self._globalizable_rngs()
-    rng = [x.replace(arg=(x.arg[0], AxisType.GLOBAL)) if x in globalizible_rngs else x for x in self.rngs]
+    rng = [x.replace(arg=x.arg[0:-1]+(AxisType.GLOBAL,)) if x in globalizible_rngs else x for x in self.rngs]
 
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
@@ -142,7 +149,7 @@ class Scheduler:
         check(smem_sz <= self.opts.shared_max, f"exceeds maximum shared memory size: needs {smem_sz}, max {self.opts.shared_max}")
       if self.reduceop is not None and (opt.op in {OptOps.GROUP, OptOps.GROUPTOP}):
         # We currently dont support a group within another rudece, TODO: fix if-contexts
-        reduce = [u for u in self.ast.parents if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
+        reduce = [u for u in self.ast.backward_slice if u.op is Ops.REDUCE and rng in merge_dicts([r.ranges for r in u.src[1:]])][0]
         check(not any(u.arg[-1] in (AxisType.REDUCE, AxisType.UNROLL, AxisType.GROUP_REDUCE) for u in reduce.ranges),
           "cannot have a GROUP_REDUCE inside another reduce")
 
@@ -181,14 +188,14 @@ class Scheduler:
       check(rng.arg[-1] is not AxisType.THREAD, "cannot pad thread")
       # ok to pad SUM if all parent ALU ops have f(0) = 0
       if (r:=self.reduceop) is not None and rng.arg[-1] in (AxisType.GROUP_REDUCE, AxisType.REDUCE):
-        check(r.arg[0] is Ops.ADD and can_pad(r, {}), f"cannot pad {r}")
+        check(r.arg[0] is Ops.ADD and not r.op_in_backward_slice_with_self(*GroupOp.UnsafePad), f"cannot pad {r}")
       new_sz = round_up(int(rng.vmax+1), cast(int, opt.arg))
       check(rng.vmax+1 > new_sz//4, "pad adds more than quadruple the work")
       replaced_rng = UOp.range(new_sz, *rng.arg)
       replaces = {rng:replaced_rng}
       valid = replaced_rng < rng.vmax+1
       for b in self.bufs:
-        if rng in (i:=b.src[1].get_idx()).sparents:
+        if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
           replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
@@ -235,6 +242,9 @@ class Scheduler:
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
 
+          # tag the reduceop
+          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
+
           # do optimizations and save the ranges
           try:
             for i,a in enumerate(axes):
@@ -264,7 +274,7 @@ class Scheduler:
 
           if use_tensor_cores != 2:
             # fix the srcs
-            reduceop = [x for x in self.ast.toposort() if x.op is Ops.REDUCE][0]
+            reduceop = get_single_element([x for x in self.ast.toposort() if x.op is Ops.REDUCE and x.tag == "TC"])
             tne = [x.replace(tag=1) for x in ne]
             ret = reduceop.substitute(dict(zip(ne, tne)))
             srcs = list((ret.src[0] if ret.src[0].op is not Ops.CAST else ret.src[0].src[0]).src)
@@ -300,7 +310,7 @@ class Scheduler:
   # helpers for hand_coded_optimizations
   @property
   def reduceop(self) -> UOp|None:
-    red = [x for x in self.ast.parents if x.op is Ops.REDUCE]
+    red = [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
     if not len(red): return None
     return UOp(Ops.REDUCE_AXIS, red[0].dtype, red[0].src, (red[0].arg, ()))
   @property
@@ -314,7 +324,7 @@ class Scheduler:
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
-  glbls = sorted([x for x in ast.parents if x.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg)
+  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg)
   return [Buffer(dname, x.ptrdtype.size, x.dtype.base if not isinstance(x.dtype, ImageDType) else x.dtype) for x in glbls]
 
 def apply_opts(ctx:Renderer, ast:UOp):
@@ -330,7 +340,7 @@ def apply_opts(ctx:Renderer, ast:UOp):
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if all(len(u.src) == 1 for u in ast.parents if u.op is Ops.LOAD):
+    if all(len(u.src) == 1 for u in ast.backward_slice if u.op is Ops.LOAD):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 

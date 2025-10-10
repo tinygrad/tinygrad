@@ -6,7 +6,6 @@ from tinygrad.uop.ops import UPat, Ops, UOp
 realized_pattern = UPat(Ops.BUFFER)
 # after realization, base tensor uops become RESHAPE(BUFFER)
 buffer_view_pattern = UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),))
-const_pattern = UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),),)))
 def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pat}"
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.uop, pat)
 
@@ -32,8 +31,7 @@ class TestTensorMutates(unittest.TestCase):
     d.realize()
     is_pattern_uop(d.uop.base, realized_pattern)
     is_pattern_uop(c.uop.base, realized_pattern)
-    # NOTE: we keep movement ops on top of the buffer view
-    is_pattern_uop(c.uop, UPat(Ops.BUFFER))
+    is_pattern_uop(c.uop.base, realized_pattern)
     assert d.uop is not d.uop.base
 
   def test_reshape_is_same_child(self):
@@ -56,7 +54,8 @@ class TestTensorUopRepresentation(unittest.TestCase):
     b = Tensor([4.,5,6]).realize()
     c = a+b
     print(c.uop)
-    is_pattern(c, UPat(Ops.ADD, src=(realized_pattern, realized_pattern)))
+    is_pattern(c, UPat(Ops.ADD))
+    for s in c.uop.src: is_pattern_uop(s.base, realized_pattern)
 
   def test_empty_buf(self):
     a = Tensor.empty(3, 3)

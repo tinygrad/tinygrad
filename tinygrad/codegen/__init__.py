@@ -7,18 +7,16 @@ from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
-from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
+from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
-from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range
+from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 
 @dataclass
@@ -31,12 +29,6 @@ class RewriteStep:
     return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
-
-rewrites_for_views = [
-  RewriteStep(view_left, name="Main View Left"),
-  RewriteStep(view_right, name="Main View Right"),
-  RewriteStep(view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel"),
-]
 
 rewrites_for_linearizer = [
   RewriteStep(block_create, ctx=BlockContext.from_sink, name="Linearizer: Create Blocks", bottom_up=True),
@@ -54,12 +46,12 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret: list[RewriteStep] = []
 
   if optimize:
-    # view pushing
-    ret.extend(rewrites_for_views)
 
     # lowerer first
     if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
-    ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
+
+    # split ranges
+    ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
     ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
@@ -73,7 +65,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(sym+migrate_indexing, name="postopt symbolic"))
 
   # expand
-  ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
+  ret.append(RewriteStep(sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander"))
 
   # add locals
   ret.append(RewriteStep(pm_add_buffers+rangeify_codegen, name="add local buffers"))
@@ -95,7 +87,8 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
 
   # lower the index dtype to a concrete int
-  ret.append(RewriteStep(load_store_indexing+pm_lower_index_dtype, lambda _: opts.device, name="lower all index dtypes"))
+  ret.append(RewriteStep(pm_lower_index_dtype+load_store_indexing, lambda _: opts.device, name="lower all index dtypes"))
+  ret.append(RewriteStep(symbolic, name="post index symbolic"))
 
   # optional pre matcher
   if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))

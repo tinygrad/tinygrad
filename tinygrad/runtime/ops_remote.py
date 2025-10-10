@@ -176,7 +176,7 @@ class RemoteHandler:
     self.sessions: defaultdict[SessionKey, RemoteSession] = defaultdict(RemoteSession)
 
     try: self.ib_ctx: IBCtx|None = IBCtx(getenv("IB_DEV", 0))
-    except (IndexError, AttributeError): self.ib_ctx = None
+    except (RuntimeError, IndexError, AttributeError): self.ib_ctx = None
     self.ib_lock = asyncio.Lock()
     self.ib_conns: dict[str, IBConn|None] = {}
     self.iova_cache: dict[tuple[SessionKey, int], tuple[int, int, int]] = {}

@@ -51,7 +51,8 @@ class TestMemoryCount(unittest.TestCase):
     a = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
     b = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
     _, mem = get_stats(a+b)
-    self.assertEqual(mem, 1024*1024 + 2*1024)  # 2 lil reads + 1 write
+    # rangeify is smart!
+    self.assertEqual(mem, 1024 + 2*1024)  # 2 lil reads + 1 lil write
 
   def test_self_add(self):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)

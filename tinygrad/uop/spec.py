@@ -1,8 +1,7 @@
 from typing import cast, Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, python_alu, graph_rewrite, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import all_same, prod, DEBUG, ContextVar, Context, cpu_profile
-from tinygrad.shape.shapetracker import ShapeTracker
+from tinygrad.helpers import all_same, prod, DEBUG, IGNORE_OOB, Context, cpu_profile
 try:
   import z3
   # older versions of z3 dont have some operators like & overloaded
@@ -29,9 +28,9 @@ try:
     (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(x.arg, 0, x.src[0].arg[1]-1, ctx[0])))),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0])))),
     (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(f"ridx{x.arg}", 0, x.src[0].arg[1]-1, ctx[0])))),
-    # float loads only become a variable when they get cast to int/bool
-    (UPat(Ops.LOAD, dtypes.ints, name="x"),
-      lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.dtype.min, x.dtype.max, ctx[0])))),
+    # loaded bools become a z3 int with min max of 0-1
+    (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), name="x"), lambda x,ctx:
+      UOp(Ops.NOOP, arg=(ctx[0],create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.dtype.min, x.dtype.max, ctx[0]))).cast(x.dtype)),
     (UPat(Ops.CONST, dtype=dtypes.ints+(dtypes.bool,dtypes.index), name="x"),
       lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx)))),
     # z3 can cast from bool to int automatically
@@ -49,14 +48,11 @@ try:
   ])
 
   def uops_to_z3(solver, *uops: UOp) -> 'list[z3.ExprRef]':
-    with Context(TRACK_MATCH_STATS=0):  # cant pickle z3 objects
+    with Context(TRACK_MATCH_STATS=0, SPEC=0):  # cant pickle z3 objects, and these UOps don't follow spec
       return [s.arg[1] for s in graph_rewrite(uops[0].sink(*uops[1:]), z3_renderer, ctx=(solver, {})).src]
 
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
-
-# if you have z3 installed, by default we check the bounds
-IGNORE_OOB = ContextVar("IGNORE_OOB", int(not z3_imported))
 
 buffer_spec = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -67,8 +63,6 @@ buffer_spec = PatternMatcher([
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
    lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.MSTACK, src=UPat(Ops.BUFFER)),)), lambda: True),
-  # allow VIEW here. TODO: what views specifically are allowed? does this mess with gradient?
-  (UPat(Ops.VIEW), lambda: True),
 ])
 
 assign_spec = PatternMatcher([
@@ -92,19 +86,13 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
    # "make things that can't be images not images" can change the buffer dtype
-   # this is fine as long as it's a realized buffer and base dtypes match.
-   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base and x.base.op is Ops.BUFFER)),
-  (UPat(Ops.VIEW, src=(UPat.var("x"),)), lambda x: x.base.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.CONST, Ops.DEVICE}),
+   # this is fine as long as it's a realized buffer or const and base dtypes match.
+   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base \
+       and x.base.op in {Ops.BUFFER,Ops.ASSIGN,Ops.CONST})),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
 
-  # Tensor const has a device and an unmasked ShapeTracker of stride 0
-  # NOTE: variables in shape can cause multiple views in this ShapeTracker and other issues, see TestSymbolicJit.test_ones_sum
-  # TODO: remove after rangeify is default
-  (UPat(Ops.CONST, src=(UPat.any(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),), name="st"),
-                                 UPat(Ops.VIEW, src=(UPat(Ops.DEVICE), UPat(Ops.BIND)), name="st")),)),
-   lambda st: len(st.st.views) == 1 and all(v.mask is None for v in st.st.views)),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
@@ -124,7 +112,8 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
 # ***** uop type spec *****
 
-def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
+def validate_index(idx:UOp, gate:UOp|None=None):
+  if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
   if IGNORE_OOB or isinstance(idx.dtype, ImageDType) or (sz := idx.src[0].ptrdtype.size) == -1: return True
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
@@ -146,7 +135,8 @@ def validate_index(idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
       return False
   return True
 
-def validate_store(idx:UOp, val:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
+def validate_store(idx:UOp, val:UOp, gate:UOp|None=None):
+  if gate is None: gate = UOp.const(dtypes.bool, True)
   if gate.op is Ops.IF: gate = gate.src[0]
   # we need to find the implicit gates, inverse of delete_redundant_gates
   for u in val.toposort():
@@ -163,23 +153,11 @@ spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
-  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) == 2 and \
-     isinstance(rng.arg[0], int) and isinstance(rng.arg[1], AxisType)),
+  (UPat(Ops.RANGE, src=(UPat.var("x"),), name="rng"), lambda rng,x: rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
+     all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
 
-  (UPat(Ops.VIEW, dtypes.void, src=(), name="x"), lambda x: isinstance(x.arg, ShapeTracker)),
-  (UPat(Ops.VIEW, src=(UPat.var("src"),), name="x"),
-   lambda x,src: isinstance(x.arg, ShapeTracker) and src.op is not Ops.STORE and x.dtype.base == src.dtype.base),
-
-  (UPat(Ops.VALID, dtypes.bool, (UPat(Ops.VIEW),)), lambda: True),
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
-
-  # early LOAD has a <bufview, store?>
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)),)), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat(Ops.STORE))), lambda: True),
-
-  # early STORE has a <bufview, val>
-  (UPat(Ops.STORE, src=(UPat(Ops.VIEW, src=(UPat(GroupOp.Defines),)), UPat())), lambda: True),
 
   # **** new style load/store ****
 
@@ -226,7 +204,7 @@ spec = PatternMatcher([
 
   (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
-  (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.count and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
+  (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat((Ops.BITCAST, Ops.CAST), src=(UPat(),), name="x"), lambda x: x.arg is None),
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
   (UPat(Ops.BARRIER, dtypes.void), lambda: True), # BARRIERs can also happen at the end of loops
@@ -243,12 +221,66 @@ spec = PatternMatcher([
 # *** this is the UOp AST spec ***
 
 ast_spec = PatternMatcher([
-  # VIEW can only exist in the edges
-  (UPat(Ops.VIEW, src=(UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL),))), lambda: True),
-  (UPat(Ops.VIEW, name="view"), lambda view: len(view.src) == 0),
   # all parent UOps must have the same shape
   (UPat(GroupOp.All-{Ops.SINK}, name="root"), lambda root: all_same([x.shape for x in root.src if x.st is not None])),
 ])
+
+# *** this spec should match all UOps ever created ***
+
+full_spec = PatternMatcher([
+  # SENTINEL should never be in the graph
+  (UPat(Ops.SENTINEL), lambda: False),
+
+  # allow any SUBSTITUTE
+  (UPat(Ops.SUBSTITUTE), lambda: True),
+
+  # Invalid must have type Index
+  (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
+  # where on index in rhs position is fine
+  (UPat(Ops.WHERE, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
+
+  # all rewrite error are okay
+  (UPat(Ops.REWRITE_ERROR), lambda: True),
+
+  # rangeify: buffer view with index or load is okay
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
+  # bufferize (must be on ranges)
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
+  # intermediate index
+  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
+  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+  # copy on index
+  (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
+  # assign on index. the third op is the shape
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat(GroupOp.Movement))), lambda: True),
+
+  # expander: unroll/contract/gep/ptrcat/cat
+  (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
+  # GEP multi is supported here
+  (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
+  # PTRCAT is like VECTORIZE, but it functions on ptrs
+  (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
+  # CAT is like VECTORIZE, but the srcs can be vectors
+  (UPat(Ops.CAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
+  # vectorized index
+  (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
+
+  # linearizer: outputs + intermediate KERNELs
+  (UPat((Ops.BLOCKSTART, Ops.BLOCK, Ops.BLOCKFINAL, Ops.BLOCKEND, Ops.KERNEL), dtype=dtypes.void), lambda: True),
+
+  # allow index dtype on a restricted set of UOps
+  (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX, Ops.WHERE,
+         Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.VECTORIZE), dtype=dtypes.index), lambda: True),
+
+  # all loads/stores
+  (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
+  # all ifs
+  (UPat(Ops.IF), lambda: True),
+  # all DEFINE_VAR to deal with the floats used in reduce collapse
+  (UPat(Ops.DEFINE_VAR), lambda: True),
+  # reshape on STORE
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
+])+tensor_uop_spec+spec
 
 # ***** uop helpers *****
 

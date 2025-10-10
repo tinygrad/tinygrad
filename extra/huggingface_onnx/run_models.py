@@ -1,7 +1,7 @@
 import onnx, yaml, tempfile, time, argparse, json
 from pathlib import Path
 from typing import Any
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 from extra.onnx_helpers import validate, get_example_inputs
 from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
 

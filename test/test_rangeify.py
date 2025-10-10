@@ -1,9 +1,8 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
-from tinygrad.uop.ops import UOp
+from tinygrad.helpers import Context, GlobalCounters
+from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, UPat, Ops
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
     A = Tensor.empty(4, 4, dtype='int')
@@ -15,11 +14,52 @@ class TestRangeifyAssign(unittest.TestCase):
     print(lst)
     print(lst2)
     print(lst3)
+    self.assertListEqual(lst, lst3)
+    self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
 N = 256
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
+class TestRangeifyOpt(unittest.TestCase):
+  def test_randperm(self):
+    Tensor.randperm(10000).realize()
+
+  def test_one_getitem(self):
+    X = Tensor.empty(10000)
+    sel = Tensor.arange(1000).contiguous().realize()
+    Xsel = X[sel]
+    Tensor.realize(Xsel)
+
+  def test_two_getitem(self):
+    # this is splitting on the child even when it really shouldn't
+    X = Tensor.empty(10000)
+    Y = Tensor.empty(10000)
+    sel = Tensor.arange(1000).contiguous().realize()
+    Xsel, Ysel = X[sel], Y[sel]
+    Tensor.realize(Xsel, Ysel)
+
+  def test_resnetconv(self):
+    conv1 = nn.Conv2d(3, 8, kernel_size=7, stride=2, bias=False, padding=3)
+    conv1.weight.replace(conv1.weight.empty_like())
+    x = Tensor.empty(1, 3, 56, 56)
+    x = conv1(x).pad([1,1,1,1])+1
+    x.realize()
+
+  # CPU=1 NOOPT=1 DEBUG=4 RANGEIFY=1 python3 test/test_rangeify.py TestRangeifyOpt.test_matmul_reshaped
+  def test_matmul_reshaped(self):
+    A = Tensor.empty(N, N)
+    B = Tensor.empty(N, N)
+    (A@B).reshape(N*N).contiguous().realize()
+
+  def test_reduce_reshapes(self):
+    A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
+    A.sum().realize()
+
 class TestRangeify(unittest.TestCase):
+  def test_groupnorm(self):
+    # ranges 1 and 3 are merging
+    x = nn.GroupNorm(32, 128)
+    x(Tensor.empty(1, 128, 64, 64)).realize()
+
   def test_expand_children(self):
     A = Tensor.empty(N, N).sum(axis=1)
     ba = A.expand(N, N)
@@ -30,6 +70,7 @@ class TestRangeify(unittest.TestCase):
     ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
     ret.realize()
 
+  @unittest.skip("RANGEIFY=0 does nothing")
   def test_double_gemm_real(self):
     def go():
       with Context(DEBUG=0):
@@ -56,6 +97,14 @@ class TestRangeify(unittest.TestCase):
     B = Tensor.empty(N, N)
     C = Tensor.empty(N, N)
     (((A@B).exp()@C).exp()).realize()
+
+  def test_double_gemm_exp_child(self):
+    A = Tensor.empty(N, N)
+    B = Tensor.empty(N, N)
+    C = Tensor.empty(N, N)
+    # A@B is used with exp, and also on the sum. this is two kernels now, is this right?
+    ret = A@B
+    ((ret.exp()@C)+ret).realize()
 
   def test_double_gemm_relu(self):
     A = Tensor.empty(N, N)
@@ -95,6 +144,11 @@ class TestRangeify(unittest.TestCase):
     w1 = Tensor.empty(8, 4, 3, 3)
     x.conv2d(w1).realize()
 
+  def test_conv2d_elu(self):
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 3, 3)
+    x.conv2d(w1).elu().realize()
+
   def test_conv2d_t(self):
     x = Tensor.empty(1, 4, 32, 32)
     w1 = Tensor.empty(8, 4, 3, 3)
@@ -105,6 +159,13 @@ class TestRangeify(unittest.TestCase):
     w1 = Tensor.empty(8, 4, 3, 3)
     w2 = Tensor.empty(12, 8, 3, 3)
     x.conv2d(w1).conv2d(w2).realize()
+
+  def test_xception_conv2d(self):
+    # NOTE: this fusion is bad, it's recomputing the inner many times
+    x = Tensor.empty(1, 4, 32, 32)
+    w1 = Tensor.empty(8, 4, 1, 1)
+    w2 = Tensor.empty(8, 1, 3, 3)
+    x.conv2d(w1).conv2d(w2, groups=8).realize()
 
   def test_conv_maxpool_contig(self): self.test_conv_maxpool(True)
   def test_conv_maxpool(self, contig=False):
@@ -139,6 +200,7 @@ class TestRangeify(unittest.TestCase):
     out = blk._feed_forward(x)
     out.realize()
 
+  @unittest.skip("RANGEIFY=0 does nothing")
   def test_flash_attention(self):
     BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
@@ -168,7 +230,6 @@ class TestRangeify(unittest.TestCase):
 # contiguous + reduce can support ranges?
 
 @unittest.skip("okay to disable this for now")
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestOuterworld(unittest.TestCase):
   def test_passthrough_range(self):
     t = Tensor.rand(10, 10).realize()
@@ -237,6 +298,68 @@ class TestOuterworld(unittest.TestCase):
     o[i] = t[i]
     o.contiguous(i).realize()
     self.assertTrue((t==o).all().item())
+
+@unittest.skip("pm_rangeify no longer exists. test this in a different way")
+class TestRangeifyPM(unittest.TestCase):
+  def setUp(self): self.base = Tensor.empty(10*10).reshape(10, 10).contiguous()
+  def assert_same(self, a, b):
+    def run_pm_rangeify(t:Tensor):
+      from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext
+      sink = t.uop.sink()
+      pm_realize = PatternMatcher([(UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.replace(op=Ops.REALIZE))])
+      sink = graph_rewrite(sink, pm_realize)
+      return graph_rewrite(sink, pm_rangeify, ctx=RangeifyContext())
+    self.assertIs(run_pm_rangeify(a.contiguous()), run_pm_rangeify(b.contiguous()))
+
+  def test_nothing_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.pad(((0,0),(0,1)))
+    self.assert_same(a, b)
+
+  def test_reshape_match(self):
+    a = self.base
+    b = self.base.reshape(100).reshape(10, 10)
+    self.assert_same(a, b)
+
+  def test_permute_reshape_match(self):
+    a = self.base
+    b = self.base.permute(1,0).reshape(100).reshape(10, 10).permute(1,0)
+    self.assert_same(a, b)
+
+  def test_padded_permute_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.permute(1,0).pad(((0,1),(0,0))).permute(1,0)
+    self.assert_same(a, b)
+
+  @unittest.expectedFailure
+  def test_padded_reshape_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.reshape(100).reshape(10, 10).pad(((0,0),(0,1)))
+    self.assert_same(a, b)
+
+  @unittest.expectedFailure
+  def test_padded_permute_reshape_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.permute(1,0).reshape(100).reshape(10, 10).pad(((0,1),(0,0))).permute(1,0)
+    self.assert_same(a, b)
+
+  # why is this failing?
+  @unittest.expectedFailure
+  def test_cross_pad_match(self):
+    a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))
+    b = self.base.pad(((0,1),(0,0))).pad(((0,0),(0,1)))
+    self.assert_same(a, b)
+
+class TestRangeifyEdgeCase(unittest.TestCase):
+  def test_matmul_relu_cat(self):
+    a = Tensor.ones(100, 512).contiguous().realize()
+    c = Tensor.ones(1, 512).contiguous().realize()
+    cm = Tensor.ones(512, 512)
+    c = c @ cm
+    c = c.relu()
+
+    res = Tensor.cat(a, c, dim=0)
+    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
 if __name__ == '__main__':
   unittest.main()
