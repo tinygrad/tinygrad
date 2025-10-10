@@ -3,14 +3,14 @@ import unittest
 import numpy as np
 from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import prod
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from tinygrad.shape.shapetracker import ShapeTracker, View, views_to_valid_uop
 from tinygrad import Variable
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite
 from tinygrad.codegen.late.devectorizer import sym
 from itertools import product
 
 def shapetracker_getitem(st:ShapeTracker, val:int):
-  valid_idx = st.reshape((st.size,)).to_valid_uop([UOp.const(dtypes.int, val)])
+  valid_idx = views_to_valid_uop(st.reshape((st.size,)).views, (UOp.const(dtypes.int, val),))
   idx, valid = valid_idx.get_idx(), valid_idx.get_valid()
   idx, valid = graph_rewrite(idx, sym), graph_rewrite(valid, sym)
   assert idx.op is Ops.CONST and valid.op is Ops.CONST
@@ -95,23 +95,20 @@ class TestRealIssues(unittest.TestCase):
 
 class TestRealDoesntSimplify(unittest.TestCase):
   def tearDown(self):
-    st = self.st.real_strides()
-    print(st)
     self.st = self.st.simplify()
     assert len(self.st.views) != 1
-    assert None in st
 
   def test_1(self):
     self.st = ShapeTracker((
       View.create((8, 3, 1, 2, 11, 1), (33, 11, 0, 0, 1, 0), 0, None),
       View.create((8, 6, 11), (66, 11, 1), 0, None)))
-    self.assertEqual(self.st.real_strides(), (33, None, 1))
+    self.assertEqual(self.st.is_expanded(), (False, False, False))
 
   def test_2(self):
     self.st = ShapeTracker((
       View.create((2, 2, 4, 3, 3), (72, 9, 18, -3, -1), 8, None),
       View.create((4, 4, 3, 3), (36, 9, 3, 1), 0, None)))
-    self.assertEqual(self.st.real_strides(), (None, 18, -3, -1))
+    self.assertEqual(self.st.is_expanded(), (False, False, False, False))
 
 class TestRealStrides(unittest.TestCase):
   def test_1(self):
@@ -119,7 +116,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((2048,), (1,), 0, ((0, 512),)),
       View.create((16, 32, 4), (128, 4, 1), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (None, 4, 1))
+    self.assertEqual(st.is_expanded(), (False, False, False))
 
   def test_2(self):
     # test/test_ops.py::TestOps::test_simple_padding_conv1d
@@ -128,7 +125,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((6, 2, 78), (140, 70, 1), 0, ((0, 6), (0, 2), (0, 70))),
       View.create((6, 2, 13, 6), (156, 78, 1, 13), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (90, 45, None, None))
+    self.assertEqual(st.is_expanded(), (False, False, False, False))
 
   def test_3(self):
     # test/test_ops.py::TestOps::test_simple_cumsum
@@ -137,7 +134,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((4, 131327), (131072, 1), 0, ((0, 4), (0, 131072))),
       View.create((4, 511, 257), (131327, 1, 511), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (256, None, None))
+    self.assertEqual(st.is_expanded(), (False, False, False))
 
   def test_4(self):
     # test/test_nn.py::TestNN::test_conv_transpose1d
@@ -146,7 +143,7 @@ class TestRealStrides(unittest.TestCase):
       View.create((1, 4, 1, 16, 8, 121), (0, 1792, 0, 112, 0, 1), -5, ((0, 1), (0, 4), (0, 1), (0, 16), (0, 8), (5, 116))),
       View.create((4, 64, 115, 16, 7), (15488, 0, 1, 968, 122), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (896, 0, None, 56, None))
+    self.assertEqual(st.is_expanded(), (False, True, False, False, False))
 
   def test_5(self):
     # test/test_ops.py::TestOps::test_conv2d
@@ -155,15 +152,12 @@ class TestRealStrides(unittest.TestCase):
       View.create((1, 3, 22, 21), (0, 192, 16, 1), 0, ((0, 1), (0, 3), (0, 12), (0, 16))),
       View.create((3, 11, 7, 2, 3), (462, 21, 1, 231, 7), 0, None),
     ))
-    self.assertEqual(st.real_strides(), (132, 12, None, None, None))
+    self.assertEqual(st.is_expanded(), (False, False, False, True, False))
 
 class TestRealSimplifies(unittest.TestCase):
   def tearDown(self):
-    st = self.st.real_strides()
     self.st = self.st.simplify()
     assert len(self.st.views) == 1
-    print(self.st.views[-1].strides, st)
-    self.assertEqual(self.st.views[-1].strides, st)
 
   def test_1(self):
     self.st = ShapeTracker((

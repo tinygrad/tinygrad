@@ -58,7 +58,7 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
 
 def import_soc(ip):
-  # rocm socket headers have more profiling info than linux kernel ones
+  # rocm soc headers have more profiling enums than upstream linux
   url = "https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects"
   return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", url=url))
 

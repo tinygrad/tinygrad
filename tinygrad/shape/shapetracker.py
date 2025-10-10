@@ -17,20 +17,12 @@ def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None)
     return graph_rewrite(idx, sym, name="indexing sym @ 1")
 
 @functools.cache
-def views_to_real_strides(views: tuple[View, ...], ignore_valid=False) -> tuple[sint|None, ...]:
-  # NOTE: if a stride is not always valid, it will be None
-  if len(views) == 1 and views[-1].mask is None: return views[-1].strides
-  ret: list[sint|None] = [None] * len(views[-1].shape)
-  idx, valid = (vidx:=views_to_valid_uop(views)).get_idx(), vidx.get_valid()
-  for c in idx.split_uop(Ops.ADD):
-    if c.op is Ops.RANGE: ret[c.arg[0]] = 1
-    if c.op is Ops.MUL and c.src[0].op is Ops.RANGE and c.src[1].op is Ops.CONST: ret[c.src[0].arg[0]] = c.src[1].arg
-    if c.op is Ops.MUL and c.src[1].op is Ops.RANGE and c.src[0].op is Ops.CONST: ret[c.src[1].arg[0]] = c.src[0].arg
+def views_to_is_expanded(views: tuple[View, ...]) -> tuple[bool, ...]:
+  # NOTE: return if each dim is expanded
+  if len(views) == 1 and views[-1].mask is None: return tuple([bool(st==0) for st in views[-1].strides])
+  idx = views_to_valid_uop(views).get_idx()
   used_ranges = [x.arg[0] for x in idx.toposort() if x.op is Ops.RANGE]
-  ret = [x if i in used_ranges else 0 for i,x in enumerate(ret)]
-  if not ignore_valid:
-    for masked_axis in [x.arg[0] for x in valid.toposort() if x.op is Ops.RANGE]: ret[masked_axis] = None
-  return tuple(ret)
+  return tuple([i not in used_ranges for i in range(len(views[-1].shape))])
 
 @dataclass(frozen=True, order=True)
 class ShapeTracker:
@@ -53,11 +45,6 @@ class ShapeTracker:
   @property
   def size(self) -> int: return self.views[-1].size()
 
-  def reduce(self, axis:tuple[int, ...]) -> tuple[sint, ...]: return tuple(1 if i in axis else s for i,s in enumerate(self.shape))
-
-  def to_valid_uop(self,  _idxs:list[UOp]|tuple[UOp, ...]|None=None) -> UOp:
-    return views_to_valid_uop(self.views, tuple(_idxs) if _idxs is not None else None)
-
   def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
 
   @property
@@ -67,10 +54,9 @@ class ShapeTracker:
     unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
     if all(len(x) == 0 for x in var_vals): return self, {}
     return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
-  def substitute(self, dvars:dict[UOp, UOp]): return ShapeTracker(tuple(x.substitute(dvars) for x in self.views))
 
-  def real_strides(self, ignore_valid=False) -> tuple[sint|None, ...]:
-    with Context(TRACK_MATCH_STATS=0): return views_to_real_strides(self.views, ignore_valid)
+  def is_expanded(self) -> tuple[bool, ...]:
+    with Context(TRACK_MATCH_STATS=0): return views_to_is_expanded(self.views)
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
