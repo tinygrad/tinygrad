@@ -70,6 +70,7 @@ class TestRangeify(unittest.TestCase):
     ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
     ret.realize()
 
+  @unittest.skip("RANGEIFY=0 does nothing")
   def test_double_gemm_real(self):
     def go():
       with Context(DEBUG=0):
@@ -199,6 +200,7 @@ class TestRangeify(unittest.TestCase):
     out = blk._feed_forward(x)
     out.realize()
 
+  @unittest.skip("RANGEIFY=0 does nothing")
   def test_flash_attention(self):
     BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
