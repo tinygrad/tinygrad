@@ -7,21 +7,16 @@ import heapq
 
 def linearize(sink:UOp) -> list[UOp]:
   lst = list(sink.toposort())
-  in_this_block = set(lst)
-  local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
+  consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
   priorities:dict[UOp, int] = {}
 
-  # get local children and assign priorities
-  # NOTE: this requires the lst be locally toposorted
+  # get consumers and assign priorities
   for u in reversed(lst):
-    in_degree[u] = 0
-    for s in u.src:
-      if s in in_this_block:
-        local_children[s].append(u)
-        in_degree[u] += 1
+    for s in u.src: consumers[s].append(u)
+    in_degree[u] = len(u.src)
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x] for x in local_children[u]]
+    priority = [0] + [priorities[x] for x in consumers[u]]
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
@@ -38,7 +33,7 @@ def linearize(sink:UOp) -> list[UOp]:
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in local_children[u]:
+    for v in consumers[u]:
       in_degree[v] -= 1
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
 
