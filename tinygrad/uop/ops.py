@@ -15,10 +15,11 @@ if TYPE_CHECKING:
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
+  OUTER = auto()
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
   THREAD = auto()
 
-range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.ENDRANGE: 1}
+range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
@@ -240,6 +241,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if s in ret: del ret[s]
     else:
       for s in self.src: ret.update(s.ranges)
+    if self.op is Ops.ENDRANGE: del ret[self.src[0]]
     return ret
 
   @property
@@ -1098,6 +1100,8 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat((Ops.STORE, Ops.LOAD), src=(UPat(), UPat(), UPat().cast(dtypes.index)), allow_any_len=True, name="s"),
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
   (UPat((Ops.SINK, Ops.NOOP), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
+  # hack for ENDRANGE
+  (UPat(Ops.ENDRANGE, src=(UPat(Ops.RANGE, name="r").cast(dtypes.index),), allow_any_len=True, name="x"), lambda x,r: x.replace(src=(r,)+x.src[1:])),
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 

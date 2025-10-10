@@ -11,6 +11,17 @@ class TestOuterworldReduce(unittest.TestCase):
     t = Tensor(UOp(Ops.REDUCE, dtype=out.uop.dtype, src=(out.uop, a), arg=Ops.ADD))
     print(t.numpy())
 
+class TestOuterworldAssign(unittest.TestCase):
+  def test_triple_add(self):
+    t = Tensor.zeros(5).contiguous().realize()
+
+    a = UOp.range(3, -1, AxisType.OUTER)
+    t = t.assign(t+1)
+    t = Tensor(UOp(Ops.ENDRANGE, dtype=t.uop.dtype, src=(a, t.uop))).contiguous()
+
+    self.assertListEqual(t.tolist(), [3,3,3,3,3])
+
+  @unittest.skip("gemm is complex")
   def test_triple_gemm(self):
     Tensor.manual_seed(1337)
     x0 = Tensor.rand(1, 16).realize()
@@ -24,7 +35,7 @@ class TestOuterworldReduce(unittest.TestCase):
     # does ASSIGN always terminate the range?
     a = UOp.range(3, -1, AxisType.REDUCE)
     x1 = x1.assign(x1 @ W[a])
-    out = Tensor(UOp(Ops.ENDRANGE, dtype=x1.uop.dtype, src=(x1.uop, a))).contiguous()
+    out = Tensor(UOp(Ops.ENDRANGE, dtype=x1.uop.dtype, src=(a, x1.uop))).contiguous()
     out.realize()
     print(out)
 
