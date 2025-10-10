@@ -1,6 +1,29 @@
 import unittest
-from tinygrad import Tensor, UOp, Variable
+from tinygrad import Tensor, UOp, Variable, nn
 from tinygrad.uop.ops import AxisType, Ops
+
+class TestOuterworldTrain(unittest.TestCase):
+  @Tensor.train()
+  def test_train(self):
+    # same example over and over
+    X = Tensor.rand(1, 32).expand(16,32).contiguous()
+    Y = Tensor.rand(1, 1).expand(16,1).contiguous()
+
+    layer = nn.Linear(32, 1, bias=False)
+    opt = nn.optim.SGD(nn.state.get_parameters(layer))
+    Tensor.realize(X, Y, *nn.state.get_parameters(layer))
+
+    print("train")
+
+    # if everything is correct, this should be a 16 step training loop
+    steps = UOp.range(16, -1)
+    opt.zero_grad()
+    loss = (layer(X[steps]) - Y[steps]).square().mean().backward()
+    opt.schedule_step() # TODO: does this need to know anything about steps?
+    # NOTE: this can't work. the inputs to layer are not the assign, need to run twice for the fixed point?
+    all_losses = loss.reshape(1).expand(steps).contiguous()
+    all_losses.realize()
+    print(all_losses.numpy())
 
 #@unittest.skip("TODO: understand assign")
 class TestOuterworldAssign(unittest.TestCase):
