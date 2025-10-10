@@ -201,7 +201,7 @@ spec = PatternMatcher([
   # if has a <gate, barrier?>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(),)), lambda: True),
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(), UPat(Ops.BARRIER))), lambda: True),
-  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(), UPat(Ops.IF))), lambda: True),
 
   (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),

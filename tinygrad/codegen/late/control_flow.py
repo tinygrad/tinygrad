@@ -10,8 +10,27 @@ def end_store_ranges(x:UOp):
   for r in ranges_to_end: ret = UOp(Ops.ENDRANGE, src=(ret,r))
   return ret
 
+def might_end_if(x:UOp):
+  ifs_to_end = []
+  ended_ifs = []
+  def find_if(y:UOp):
+    if y.op is Ops.BARRIER: return False
+    if y.op is Ops.IF: ifs_to_end.append(y)
+    if y.op is Ops.ENDIF: ended_ifs.append(y.src[1])
+    return True
+  x.toposort(find_if)
+  del find_if
+  ifs_to_end = [x for x in ifs_to_end if x not in ended_ifs]
+  if not len(ifs_to_end): return None
+  ret = x.src[0] if len(x.src) == 1 else UOp(Ops.NOOP, src=x.src)
+  for r in ifs_to_end: ret = UOp(Ops.ENDIF, src=(ret,r))
+  return x.replace(src=(ret,))
+
 pm_endranges = PatternMatcher([
+  # all ranges are ended by STORE
   (UPat(Ops.STORE, name="x"), end_store_ranges),
+  # all ENDIF either goes on BARRIER or SINK
+  (UPat((Ops.BARRIER, Ops.SINK), name="x"), might_end_if),
 ])
 
 class CFGContext:
@@ -60,6 +79,8 @@ def linearize(x:UOp) -> list[UOp]:
         in_degree[u] += 1
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
     priority = [0] + [priorities[x] for x in local_children[u]]
+    # if needs to be the first thing
+    if u.op is Ops.IF: priority.append(-10000)
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is

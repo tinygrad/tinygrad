@@ -71,6 +71,9 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   # add gpu dims (late). this works after devectorize, but it's faster here
   ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
+  # add end ranges
+  ret.append(RewriteStep(pm_endranges, name="add end ranges"))
+
   # devectorize (TODO: does this need opts?)
   if _DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
   elif _DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
@@ -96,7 +99,6 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
   # build CFG
-  ret.append(RewriteStep(pm_endranges, name="add end ranges"))
   ret.append(RewriteStep(pm_control_flow, lambda sink: CFGContext(sink), name="add control flow"))
 
   # return the list (with optional linearizer)
