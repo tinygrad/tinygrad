@@ -595,21 +595,21 @@ class TestMoveTensor(unittest.TestCase):
     np.testing.assert_equal(x.grad.numpy(), [[2,2,2],[0,0,0],[-2,-2,-2]])
 
 class TestZeroShapeTensor(unittest.TestCase):
-  def test_shape_stride(self):
+  def test_shape_is_expanded(self):
     t = Tensor.empty(3, 2, 0)
     assert t.shape == (3, 2, 0)
     # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
+    assert t.uop.st.is_expanded() == (True, True, True)
 
     t = Tensor.empty(3, 0, 2)
     assert t.shape == (3, 0, 2)
     # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
+    assert t.uop.st.is_expanded() == (True, True, True)
 
     t = Tensor.empty(0, 0, 0)
     assert t.shape == (0, 0, 0)
     # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
+    assert t.uop.st.is_expanded() == (True, True, True)
 
   def test_rand(self):
     t = Tensor.rand(3, 2, 0)
