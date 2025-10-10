@@ -192,9 +192,6 @@ class AMDComputeQueue(HWQueue):
                 self.gc.regSQ_THREAD_TRACE_STATUS.addr[0], 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_pending'), 4)
       # Disable SQTT
       self.sqtt_config(tracing=False)
-      # Wait for FINISH_DONE!=0
-      # self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
-      #           self.gc.regSQ_THREAD_TRACE_STATUS.addr[0], 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_done'), 4)
       # Wait for BUSY==0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
                 self.gc.regSQ_THREAD_TRACE_STATUS.addr[0], 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('busy'), 4)
