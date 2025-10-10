@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp, Variable
-from tinygrad.uop.ops import Ops, AxisType
+from tinygrad.uop.ops import AxisType, Ops
 
 #@unittest.skip("TODO: understand assign")
 class TestOuterworldAssign(unittest.TestCase):

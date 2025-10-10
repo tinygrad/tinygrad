@@ -111,6 +111,8 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
   # endrange/reduce for outerworld range work
   (UPat(Ops.ENDRANGE, src=(UPat(Ops.RANGE),), allow_any_len=True), lambda: True),
+
+  # REDUCE with an outerworld range
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
 ])
 
