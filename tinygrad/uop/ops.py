@@ -240,6 +240,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if s in ret: del ret[s]
     else:
       for s in self.src: ret.update(s.ranges)
+    if self.op is Ops.ENDRANGE: del ret[self.src[0]]
     return ret
 
   @property
