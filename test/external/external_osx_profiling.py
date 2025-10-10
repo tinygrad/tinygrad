@@ -1,4 +1,4 @@
-from tinygrad.runtime.ops_gpu import CLProgram, CL, CLBuffer
+from tinygrad.runtime.ops_cl import CLProgram, CL, CLBuffer
 from tinygrad import dtypes
 import time
 

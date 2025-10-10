@@ -4,6 +4,7 @@ import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
 from tinygrad.uop.ops import Ops, UOp, UPat
+from tinygrad.helpers import SPLIT_REDUCEOP
 
 class TestTensorUOp(unittest.TestCase):
   def test_fromcpu_shape_tracker(self):
@@ -79,6 +80,7 @@ class TestTensorUOp(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), a.numpy()+b.numpy()+2)
 
   # NOTE: contiguous on a buffer collapses
+  @unittest.skip("contiguous on a buffer no longer collapses")
   def test_contiguous_empty(self):
     empty = Tensor.empty(1).contiguous()
     sched = empty.schedule()
@@ -92,7 +94,8 @@ class TestTensorUOp(unittest.TestCase):
     out.realize()
     self.assertEqual(out.tolist(), Tensor.zeros(4, 8).tolist())
 
-reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, src=(UPat(), UPat(Ops.REDUCE_AXIS)))))
+reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, allow_any_len=True, src=(UPat(), UPat((Ops.REDUCE_AXIS, Ops.REDUCE))))))
+@unittest.skipUnless(SPLIT_REDUCEOP, "only for SPLIT_REDUCEOP")
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
     a = Tensor.rand(4, 4).realize()

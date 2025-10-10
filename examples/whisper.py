@@ -109,7 +109,7 @@ class TextDecoder:
 
   def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
     seqlen = x.shape[-1]
-    x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
+    x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None))
     for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
     return self.output_tok(x)
 
@@ -321,7 +321,7 @@ if __name__ == "__main__":
         log_spec = prep_audio(total.reshape(1, -1), model.batch_size, truncate=True)
         encoded_audio = model.encoder.encode(Tensor(log_spec))
       # pass the previously inferred tokens as 'prefix' - https://github.com/openai/whisper/discussions/117#discussioncomment-3727051
-      out = model.decoder(Tensor([lst]), 0, encoded_audio, streaming=True).realize()
+      out = model.decoder(Tensor([lst]), 0, encoded_audio).realize()
       idx = int(out[0,-1].argmax().numpy().item())
       lst.append(idx)
       dec = enc.decode(lst)

@@ -181,7 +181,7 @@ class TestIndexing(unittest.TestCase):
     # self.assertRaises(TypeError, delitem)
 
   # TODO: LLVM is quite fast, why are other compiled backends slow?
-  @unittest.skipIf(CI and Device.DEFAULT in ["CPU", "GPU", "METAL", "NV", "AMD"], "slow")
+  @unittest.skipIf(CI and Device.DEFAULT in ["CPU", "CL", "METAL", "NV", "AMD"], "slow")
   def test_advancedindex(self):
     # integer array indexing
 
@@ -971,9 +971,8 @@ class TestIndexing(unittest.TestCase):
     numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
     # this isn't technically necessary, but matches NumPy stride calculations.
     # NOTE: this is empty and shouldn't have strides
-    #numpy_testing_assert_equal_helper((60, 20, 5), z.uop.st.real_strides())
-    # NOTE tinygrad's int slicing implementation makes this not contiguous
-    # self.assertTrue(z.uop.st.contiguous)
+    numpy_testing_assert_equal_helper((True, True, True), z.uop.st.is_expanded())
+    self.assertTrue(z.uop.st.contiguous)
 
   @unittest.skip("bool indexing not supported")
   def test_index_getitem_copy_bools_slices(self):

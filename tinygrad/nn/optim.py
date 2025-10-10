@@ -76,21 +76,32 @@ def SGD(params: list[Tensor], lr=0.001, momentum=0.0, weight_decay=0.0, nesterov
   Stochastic Gradient Descent (SGD) optimizer with optional momentum and weight decay.
 
   `classic` is a boolean flag that determines whether to use the popular momentum update rule or the classic momentum update rule.
-
-  - Described: https://paperswithcode.com/method/sgd
   """
-  return LARS(params, lr, momentum, weight_decay, nesterov, classic, tcoef=0.0, fused=fused)
+  return LARS(params, lr, momentum, weight_decay, 0, None, nesterov, classic=classic, pre_wd=True, tcoef=0.0, fused=fused)
+
+# Muon applies the newton schulz algorithm on gradient. also can include momentum, nesterov, and weight decay
+def Muon(params: list[Tensor], lr=0.02, momentum=0.95, weight_decay=0.0, ns_steps=5, ns_params=(3.4445, -4.775, 2.0315),
+         nesterov=True, fused=FUSE_OPTIM):
+  """
+  SGD with newton-schulz iteration and post momentum weight decay.
+
+  - Described: https://kellerjordan.github.io/posts/muon/
+  - Paper: https://arxiv.org/pdf/2502.16982
+  """
+  assert not fused, "FUSE_OPTIM not allowed for Muon optimizer"
+  return LARS(params, lr, momentum, weight_decay, ns_steps, ns_params, nesterov, classic=False, pre_wd=False, tcoef=0.0, fused=fused)
 
 class LARS(Optimizer):
   """
   Layer-wise Adaptive Rate Scaling (LARS) optimizer with optional momentum and weight decay.
 
-  - Described: https://paperswithcode.com/method/lars
   - Paper: https://arxiv.org/abs/1708.03888v3
   """
-  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, nesterov=False, classic=True, tcoef=0.001, fused=FUSE_OPTIM):
+  def __init__(self, params:list[Tensor], lr=0.001, momentum=0.9, weight_decay=1e-4, ns_steps=0, ns_params=None,
+               nesterov=False, classic=True, pre_wd=True, tcoef=0.001, fused=FUSE_OPTIM):
     super().__init__(params, lr, fused)
-    self.momentum, self.wd, self.nesterov, self.classic, self.tcoef = momentum, weight_decay, nesterov, classic, tcoef
+    self.momentum, self.wd, self.ns_steps, self.ns_params  = momentum, weight_decay, ns_steps, ns_params
+    self.nesterov, self.classic, self.pre_wd, self.tcoef = nesterov, classic, pre_wd, tcoef
     self.b = self._new_optim_param() if self.momentum else []
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
@@ -101,7 +112,7 @@ class LARS(Optimizer):
         r2 = g.square().sum().sqrt()
         r:Tensor|float = (r1 > 0).where((r2 > 0).where(self.tcoef * r1 / (r2 + self.wd * r1), 1.0), 1.0)
       else: r = 1.0
-      if self.wd > 0: g = g + self.wd * t.detach()
+      if self.pre_wd and self.wd > 0: g = g + self.wd * t.detach()
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
@@ -109,6 +120,9 @@ class LARS(Optimizer):
         # the scheduler should detect this and just insert contiguous
         self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
+      if self.ns_params: g = g.reshape(g.shape[0], -1).newton_schulz(self.ns_steps, self.ns_params).reshape(g.shape)
+      # muon does post momentum weight decay
+      if not self.pre_wd and self.wd > 0: t = t.detach() * (1.0 - self.wd * self.lr)
       # popular momentum does pre learning rate update
       if not self.classic: g = g * r * self.lr
       ret.append((t.detach() - g).cast(t.dtype))
@@ -119,7 +133,6 @@ def AdamW(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_dec
   """
   AdamW optimizer with optional weight decay.
 
-  - Described: https://paperswithcode.com/method/adamw
   - Paper: https://arxiv.org/abs/1711.05101v3
   """
   return LAMB(params, lr, b1, b2, eps, weight_decay, adam=True, fused=fused)
@@ -127,7 +140,6 @@ def Adam(params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, fused=FUSE_
   """
   Adam optimizer.
 
-  - Described: https://paperswithcode.com/method/adam
   - Paper: https://arxiv.org/abs/1412.6980
   """
   return LAMB(params, lr, b1, b2, eps, 0.0, adam=True, fused=fused)
@@ -136,7 +148,6 @@ class LAMB(Optimizer):
   """
   LAMB optimizer with optional weight decay.
 
-  - Described: https://paperswithcode.com/method/lamb
   - Paper: https://arxiv.org/abs/1904.00962
   """
   def __init__(self, params: list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False, fused=FUSE_OPTIM):

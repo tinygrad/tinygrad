@@ -1,8 +1,8 @@
 # ruff: noqa: E501
-from tinygrad.opt.kernel import Kernel, Opt, OptOps
+from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.dtype import dtypes
-from tinygrad.engine.realize import CompiledRunner
-from tinygrad.opt.search import bufs_from_lin
+from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.codegen.opt.search import bufs_from_lin
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
@@ -35,7 +35,7 @@ k = Kernel(ast)
 k.apply_opts(opts)
 bufs = bufs_from_lin(k)
 
-prg = CompiledRunner(k.to_program())
+prg = CompiledRunner(get_program(k.ast, k.opts, k.applied_opts))
 
 for i in range(10):
   speed = prg(bufs, var_vals={}, wait=True)

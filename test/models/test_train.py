@@ -1,9 +1,8 @@
-import unittest
-import time
+import unittest, time
 import numpy as np
+from tinygrad import Device
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.tensor import Device
 from tinygrad.helpers import getenv, CI
 from extra.training import train
 from extra.models.convnext import ConvNeXt
@@ -27,7 +26,7 @@ def train_one_step(model,X,Y):
   print("done in %.2f ms" % (et*1000.))
 
 def check_gc():
-  if Device.DEFAULT == "GPU":
+  if Device.DEFAULT == "CL":
     from extra.introspection import print_objects
     assert print_objects() == 0
 
@@ -40,7 +39,6 @@ class TestTrain(unittest.TestCase):
     check_gc()
 
   @unittest.skipIf(CI, "slow")
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "too many buffers for webgpu and metal")
   def test_efficientnet(self):
     model = EfficientNet(0)
     X = np.zeros((BS,3,224,224), dtype=np.float32)
@@ -49,7 +47,6 @@ class TestTrain(unittest.TestCase):
     check_gc()
 
   @unittest.skipIf(CI, "slow")
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "too many buffers for webgpu and metal")
   def test_vit(self):
     model = ViT()
     X = np.zeros((BS,3,224,224), dtype=np.float32)
@@ -57,7 +54,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
-  @unittest.skipIf(Device.DEFAULT in ["METAL", "WEBGPU"], "too many buffers for webgpu and metal")
+  @unittest.skipIf(CI, "slow")
   def test_transformer(self):
     # this should be small GPT-2, but the param count is wrong
     # (real ff_dim is 768*4)

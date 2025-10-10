@@ -10,7 +10,6 @@ class BatchNorm:
   """
   Applies Batch Normalization over a 2D or 3D input.
 
-  - Described: https://paperswithcode.com/method/batch-normalization
   - Paper: https://arxiv.org/abs/1502.03167v3
 
   See: `Tensor.batchnorm`
@@ -182,7 +181,6 @@ class GroupNorm:
   """
   Applies Group Normalization over a mini-batch of inputs.
 
-  - Described: https://paperswithcode.com/method/group-normalization
   - Paper: https://arxiv.org/abs/1803.08494v3
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -213,7 +211,6 @@ class InstanceNorm:
   """
   Applies Instance Normalization over a mini-batch of inputs.
 
-  - Described: https://paperswithcode.com/method/instance-normalization
   - Paper: https://arxiv.org/abs/1607.08022v3
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -240,7 +237,6 @@ class LayerNorm:
   """
   Applies Layer Normalization over a mini-batch of inputs.
 
-  - Described: https://paperswithcode.com/method/layer-normalization
   - Paper: https://arxiv.org/abs/1607.06450v1
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -287,7 +283,6 @@ class RMSNorm:
   """
   Applies Root Mean Square Normalization to input.
 
-  - Described: https://paperswithcode.com/method/rmsnorm
   - Paper: https://arxiv.org/abs/1910.07467
 
   ```python exec="true" source="above" session="tensor" result="python"
@@ -325,6 +320,7 @@ class Embedding:
 
   def __call__(self, idx:Tensor) -> Tensor:
     if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
+    if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
     big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
     return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)

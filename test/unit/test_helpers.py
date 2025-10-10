@@ -1,9 +1,8 @@
-import ctypes, gzip, unittest
+import ctypes, gzip, unittest, timeit
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address, get_contraction
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import Tensor, get_shape
-from tinygrad.shape.view import get_contraction, get_contraction_with_reduce
 import numpy as np
 
 VARIABLE = ContextVar("VARIABLE", 0)
@@ -93,7 +92,7 @@ class TestMergeDicts(unittest.TestCase):
     assert merge_dicts([a, b]) == {"a": 1, "b": 2, "c": 3}
     assert merge_dicts([a, c]) == a
     assert merge_dicts([a, b, c]) == {"a": 1, "b": 2, "c": 3}
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(RuntimeError):
       merge_dicts([a, d])
 
 class TestStripParens(unittest.TestCase):
@@ -186,21 +185,39 @@ class TestMemoryview(unittest.TestCase):
     mv[0] = 2
     assert base[0] == 2
 
+  @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")
+  def test_to_mv(self):
+    sizes = [
+      (16, "16 B"),
+      (64, "64 B"),
+      (256, "256 B"),
+      (1024, "1 KB"),
+      (4 * 1024, "4 KB"),
+      (16 * 1024, "16 KB"),
+      (64 * 1024, "64 KB"),
+      (256 * 1024, "256 KB"),
+      (1 * 1024 * 1024, "1 MB"),
+      (10 * 1024 * 1024, "10 MB"),
+      (200 * 1024 * 1024, "200 MB"),
+    ]
+
+    for sz, label in sizes:
+      buf = np.random.randint(0, 256, sz, dtype=np.uint8)
+      ptr = buf.ctypes.data
+
+      iters = 100_000
+      t_us = timeit.timeit(lambda: to_mv(ptr, sz), number=iters) * 1e6 / iters
+      print(f"Size {label:>9} | Time: {t_us:8.3f} µs")
+
+  def test_speed_from_mv_vs_mv_address(self):
+    x = memoryview(bytearray(1))
+
+    iters = 100000
+    fmv_us = timeit.timeit(lambda: from_mv(x), number=iters) * 1e6 / iters
+    mva_us = timeit.timeit(lambda: mv_address(x), number=iters) * 1e6 / iters
+    print(f"from_mv vs mv_address: {fmv_us:8.3f} µs vs {mva_us:8.3f} µs")
+
 class TestGetContraction(unittest.TestCase):
-  def test_contraction_with_reduce(self):
-    r = get_contraction((16, 1, 1, 1), (16, 1, 1))
-    self.assertEqual(r, [[0], [], [1, 2, 3]])
-    r = get_contraction_with_reduce((16, 1, 1, 1), (16, 1, 1), (1,))
-    self.assertEqual(r, [[0], [1, 2], [3]])
-
-    r = get_contraction((16, 1, 1, 1, 1), (16, 1, 1, 1))
-    self.assertEqual(r, [[0], [], [], [1, 2, 3, 4]])
-    r = get_contraction_with_reduce((16, 1, 1, 1, 1), (16, 1, 1, 1), (1,))
-    self.assertEqual(r, [[0], [1, 2], [3], [4]])
-
-    r = get_contraction_with_reduce((2, 512, 1, 1), (2, 1, 512), (1,))
-    self.assertIsNone(r)
-
   def test_contraction(self):
     r = get_contraction((1,2,3,4), (2,3,4))
     self.assertEqual(r, [[0, 1], [2], [3]])
@@ -375,6 +392,20 @@ class TestWordWrap(unittest.TestCase):
     st = colored("x"*wrap*2, "red")
     st2 = word_wrap(st, wrap=wrap)
     self.assertEqual(len(st2.splitlines()), 2)
+
+  def test_wrap_explicit_newline(self):
+    wrap = 10
+    st = "\n".join(["x"*wrap, "x"*wrap, "x"*wrap])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines()))
+
+    st = "\n".join(["x"*(wrap+1), "x"*wrap, "x"*wrap])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+1)
+
+    st = "\n".join(["x"*(wrap+1), "x"*(wrap+1), "x"*(wrap+1)])
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(len(st2.splitlines()), len(st.splitlines())+3)
 
 class TestIsNumpyNdarray(unittest.TestCase):
   def test_ndarray(self):

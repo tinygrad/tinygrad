@@ -43,6 +43,7 @@ enum sqtt_version
    SQTT_VERSION_2_3 = 0x6, /* GFX9 */
    SQTT_VERSION_2_4 = 0x7, /* GFX10+ */
    SQTT_VERSION_3_2 = 0xb, /* GFX11+ */
+   SQTT_VERSION_3_3 = 0xc, /* GFX12+ */
 };
 
 enum sqtt_file_chunk_type
@@ -144,6 +145,8 @@ enum sqtt_gfxip_level
    SQTT_GFXIP_LEVEL_GFXIP_10_1 = 0x7,
    SQTT_GFXIP_LEVEL_GFXIP_10_3 = 0x9,
    SQTT_GFXIP_LEVEL_GFXIP_11_0 = 0xc,
+   SQTT_GFXIP_LEVEL_GFXIP_11_5 = 0xd,
+   SQTT_GFXIP_LEVEL_GFXIP_12 = 0x10,
 };
 
 enum sqtt_memory_type
@@ -427,6 +430,8 @@ enum elf_gfxip_level
    EF_AMDGPU_MACH_AMDGCN_GFX1010 = 0x033,
    EF_AMDGPU_MACH_AMDGCN_GFX1030 = 0x036,
    EF_AMDGPU_MACH_AMDGCN_GFX1100 = 0x041,
+   EF_AMDGPU_MACH_AMDGCN_GFX1150 = 0x043,
+   EF_AMDGPU_MACH_AMDGCN_GFX1200 = 0x04e,
 };
 
 struct sqtt_file_chunk_spm_db {

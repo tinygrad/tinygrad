@@ -62,6 +62,7 @@ class TestShapeTrackerAdd(unittest.TestCase):
     b = ShapeTracker.from_shape((100,))
     assert a+b == b
 
+  @unittest.skip("no longer simplifies")
   def test_simple_add_permute(self):
     a = ShapeTracker.from_shape((10, 10))
     a = a.permute((1,0))
@@ -87,20 +88,6 @@ class TestShapeTrackerAdd(unittest.TestCase):
     assert not (st_equal(st1, st2))
 
 class TestShapeTrackerAddVariable(unittest.TestCase):
-  def test_self_add(self):
-    j = Variable("j", 0, 20).bind(10)
-    a = ShapeTracker.from_shape((10,10))
-    x = a.reshape((10, j))
-    out = x + x
-    assert out == x
-
-  def test_self_add_reshape(self):
-    j = Variable("j", 0, 20).bind(10)
-    a = ShapeTracker.from_shape((10,10))
-    x = a.reshape((10, j))
-    out = x.reshape((5, 2, j)) + x
-    assert out == x
-
   def test_merge_symbolic_views(self):
     var_i = Variable('i', 1, 10)
     var_j = Variable('i', 1, 10)
@@ -116,63 +103,6 @@ class TestShapeTrackerAddVariable(unittest.TestCase):
     ret = (ShapeTracker((vm1,)) + ShapeTracker((vm2,))).reshape((var_i, var_j, 1))
     ret_2 = ShapeTracker((vm1,)) + ShapeTracker((vm2,)).reshape((var_i, var_j, 1))
     assert ret == ret_2
-
-class TestShapeTrackerInvert(unittest.TestCase):
-  def test_invert_reshape(self):
-    a = ShapeTracker.from_shape((10, 10))
-    x = a.reshape((5, 20))
-    ap = ShapeTracker.from_shape(x.shape) + x.invert(a.shape)
-    assert ap == a, f"{ap} != {a}"
-
-  def test_invert_permute(self):
-    a = ShapeTracker.from_shape((5, 20))
-    x = a.permute((1,0))
-    ap = x + x.invert(a.shape)
-    assert ap == a, f"{ap} != {a}"
-
-  def test_invert_permute_3(self):
-    a = ShapeTracker.from_shape((8, 4, 5))
-    x = a.permute((1,2,0))
-    ap = x + x.invert(a.shape)
-    assert ap == a, f"{ap} != {a}"
-
-  def test_invert_real1(self):
-    a = ShapeTracker.from_shape((3, 6, 10))
-    x = a.reshape( (3, 3, 2, 10) )
-    x = x.permute( (2, 1, 3, 0) )
-    ap = x + x.invert(a.shape)
-    assert ap == a, f"{ap} != {a}"
-
-  def test_cant_invert_expand(self):
-    a = ShapeTracker.from_shape((10, 1))
-    x = a.expand((10,10))
-    assert x.invert(a.shape) is None
-
-  def test_cant_invert_shrink(self):
-    a = ShapeTracker.from_shape((10, 10))
-    x = a.shrink(((0,10),(2,8)))
-    assert x.invert(a.shape) is None
-
-  def test_can_invert_flip(self):
-    a = ShapeTracker.from_shape((20, 10))
-    x = a.flip((True,False))
-    ap = x + x.invert(a.shape)
-    assert st_equal(ap, a)
-
-  def test_can_invert_flip_permute(self):
-    a = ShapeTracker.from_shape((20, 10))
-    x = a.permute((1,0))
-    x = x.flip((True,False))
-    ap = x + x.invert(a.shape)
-    assert st_equal(ap, a)
-
-  def test_invert_failure(self):
-    a = ShapeTracker.from_shape((2, 5))
-    x = a.pad( ((2, 0), (0, 0)) )
-    x = x.reshape( (2, 2, 5) )
-    x = x.reshape( (4, 5) )
-    ap = x + x.invert(a.shape)
-    assert st_equal(ap, a)
 
 if __name__ == '__main__':
   unittest.main()

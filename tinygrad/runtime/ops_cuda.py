@@ -1,11 +1,11 @@
 from __future__ import annotations
-import ctypes, ctypes.util, functools
-from tinygrad.helpers import DEBUG, getenv, from_mv, init_c_var, init_c_struct_t
-from tinygrad.device import Compiled, BufferSpec, LRUAllocator
+import ctypes, functools
+from tinygrad.helpers import DEBUG, getenv, mv_address, init_c_var, init_c_struct_t, suppress_finalizing
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerPairT
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
-from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler, PTX
+from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
 
@@ -45,9 +45,8 @@ class CUDAProgram:
     self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
 
-  def __del__(self):
-    try: check(cuda.cuModuleUnload(self.module))
-    except AttributeError: pass
+  @suppress_finalizing
+  def __del__(self): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     check(cuda.cuCtxSetCurrent(self.dev.context))
@@ -76,12 +75,12 @@ class CUDAAllocator(LRUAllocator['CUDADevice']):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     host_mem = self.alloc(len(src), BufferSpec(host=True))
     self.dev.pending_copyin.append((host_mem, len(src), BufferSpec(host=True)))
-    ctypes.memmove(host_mem, from_mv(src), len(src))
+    ctypes.memmove(host_mem, mv_address(src), len(src))
     check(cuda.cuMemcpyHtoDAsync_v2(dest, host_mem, len(src), None))
   def _copyout(self, dest:memoryview, src):
     CUDADevice.synchronize_system()
     check(cuda.cuCtxSetCurrent(self.dev.context))
-    check(cuda.cuMemcpyDtoH_v2(from_mv(dest), src, len(dest)))
+    check(cuda.cuMemcpyDtoH_v2(mv_address(dest), src, len(dest)))
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
     check(cuda.cuCtxSetCurrent(src_dev.context))
     check(cuda.cuEventCreate(ctypes.byref(sync_event := cuda.CUevent()), 0))
@@ -116,8 +115,9 @@ class CUDADevice(Compiled):
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    super().__init__(device, CUDAAllocator(self), PTXRenderer(self.arch) if PTX else CUDARenderer(self.arch),
-                     PTXCompiler(self.arch) if PTX else CUDACompiler(self.arch), functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
+    compilers:list[CompilerPairT] = [(functools.partial(CUDARenderer, self.arch), functools.partial(CUDACompiler, self.arch)),
+                                     (functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch))]
+    super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))

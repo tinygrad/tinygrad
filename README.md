@@ -39,9 +39,8 @@ Try a matmul. See how, despite the style, it is fused into one kernel with the p
 
 ```sh
 DEBUG=3 python3 -c "from tinygrad import Tensor;
-N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N);
-c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2);
-print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+N = 1024; a, b = Tensor.empty(N, N), Tensor.empty(N, N);
+(a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2).realize()"
 ```
 
 And we can change `DEBUG` to `4` to see the generated code.
@@ -80,9 +79,8 @@ See [examples/beautiful_mnist.py](examples/beautiful_mnist.py) for the full vers
 
 tinygrad already supports numerous accelerators, including:
 
-- [x] [GPU (OpenCL)](tinygrad/runtime/ops_gpu.py)
-- [x] [CPU (C Code)](tinygrad/runtime/ops_cpu.py)
-- [x] [LLVM](tinygrad/runtime/ops_llvm.py)
+- [x] [OpenCL](tinygrad/runtime/ops_cl.py)
+- [x] [CPU](tinygrad/runtime/ops_cpu.py)
 - [x] [METAL](tinygrad/runtime/ops_metal.py)
 - [x] [CUDA](tinygrad/runtime/ops_cuda.py)
 - [x] [AMD](tinygrad/runtime/ops_amd.py)

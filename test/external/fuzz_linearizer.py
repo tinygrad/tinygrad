@@ -3,6 +3,7 @@ from typing import Any
 import numpy as np
 from collections import defaultdict
 from extra.optimization.helpers import load_worlds, ast_str_to_lin, kern_str_to_lin
+from tinygrad.engine.realize import get_program
 
 # We need to insert ioctl before opening devices.
 if os.getenv("VALIDATE_HCQ", 0) != 0:
@@ -15,14 +16,14 @@ if os.getenv("VALIDATE_HCQ", 0) != 0:
   try:
     import extra.qcom_gpu_driver.opencl_ioctl
     from tinygrad import Device
-    _, _ = Device["QCOM"], Device["GPU"]
+    _, _ = Device["QCOM"], Device["CL"]
   except Exception: pass
 
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.opt.kernel import Kernel
-from tinygrad.opt.kernel import Opt, OptOps
-from tinygrad.opt.search import get_kernel_actions, bufs_from_lin
+from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.codegen.opt.search import get_kernel_actions, bufs_from_lin
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import getenv, from_mv, prod, colored, Context, DEBUG, Timing
 from tinygrad.uop.ops import UOp, Ops
@@ -41,9 +42,9 @@ if getenv("VALIDATE_HCQ"):
     on_linearizer_did_run = extra.nv_gpu_driver.nv_ioctl.collect_last_launch_state
     compare_states = extra.nv_gpu_driver.nv_ioctl.compare_launch_state
   elif Device.DEFAULT == "QCOM":
-    print("VALIDATE_HCQ: Comparing QCOM to GPU")
+    print("VALIDATE_HCQ: Comparing QCOM to CL")
     import extra.qcom_gpu_driver.opencl_ioctl
-    validate_device = Device["GPU"]
+    validate_device = Device["CL"]
     on_linearizer_will_run = extra.qcom_gpu_driver.opencl_ioctl.before_launch
     on_linearizer_did_run = extra.qcom_gpu_driver.opencl_ioctl.collect_last_launch_state
     compare_states = extra.qcom_gpu_driver.opencl_ioctl.compare_launch_state
@@ -89,11 +90,11 @@ def get_fuzz_rawbuf_like(old_rawbuf, zero=False, copy=False, size=None, force_de
 
 def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> tuple[str, Any]: # (error msg, run state)
   if rawbufs is None: rawbufs = bufs_from_lin(lin)
-  if var_vals is None: var_vals = {v: v.min for v in lin.vars}
+  if var_vals is None: var_vals = {v.expr: v.min for v in lin.vars}
 
   # TODO: images needs required_optimization
   try:
-    prg = CompiledRunner(lin.to_program())
+    prg = CompiledRunner(get_program(lin.get_optimized_ast(), lin.opts))
   except KeyboardInterrupt: raise
   except Exception:
     traceback.print_exc()
@@ -114,7 +115,7 @@ def run_linearizer(lin: Kernel, rawbufs=None, var_vals=None) -> tuple[str, Any]:
 
 def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=None, rtol=1e-2, atol=1e-2):
   # TODO: for bfloat16 it compiles linearizer, but it does not run because numpy cannot generate bf16 buffer.
-  has_bf16 = any(b.dtype.base == dtypes.bfloat16 for b in lin.membufs)
+  has_bf16 = any(b.dtype.base == dtypes.bfloat16 for b in lin.bufs)
 
   # TODO: raise specific fuzzing errors instead of str, and propagate the error message
   try:
@@ -128,7 +129,7 @@ def compare_linearizer(lin: Kernel, rawbufs=None, var_vals=None, ground_truth=No
 
   if var_vals is None:
     # TODO: handle symbolic max case
-    var_vals = {v: random.randint(v.vmin, v.vmax) for v in lin.ast.variables()}
+    var_vals = {v.expr: random.randint(v.vmin, v.vmax) for v in lin.ast.variables()}
 
   if ground_truth is None and not has_bf16:
     unoptimized = Kernel(lin.ast)
@@ -206,7 +207,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        try: tuops = tuplize_uops(test_lin.linearize().uops)
+        try: tuops = tuplize_uops(get_program(test_lin.get_optimized_ast(), test_lin.opts).uops)
         except KeyboardInterrupt: raise
         except BaseException as e:
           print(test_lin.ast)
@@ -301,7 +302,7 @@ if __name__ == "__main__":
     for i, ast in enumerate(ast_strs[:getenv("FUZZ_N", len(ast_strs))]):
       if (nth := getenv("FUZZ_NTH", -1)) != -1 and i != nth: continue
       if getenv("FUZZ_IMAGEONLY") and "dtypes.image" not in ast: continue
-      if "dtypes.image" in ast and Device.DEFAULT not in {"GPU", "QCOM"}: continue  # IMAGE is only for GPU
+      if "dtypes.image" in ast and Device.DEFAULT not in {"CL", "QCOM"}: continue  # IMAGE is only for CL
       if ast in seen_ast_strs: continue
       seen_ast_strs.add(ast)
 

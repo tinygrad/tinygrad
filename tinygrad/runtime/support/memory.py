@@ -2,6 +2,15 @@ import collections, functools, dataclasses
 from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
+class BumpAllocator:
+  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
+  def alloc(self, size:int, alignment:int=1) -> int:
+    if round_up(self.ptr, alignment) + size > self.size:
+      if not self.wrap: raise RuntimeError("Out of memory")
+      self.ptr = 0
+    self.ptr = (res:=round_up(self.ptr, alignment)) + size
+    return res + self.base
+
 class TLSFAllocator:
   """
   The allocator is based on the Two-Level Segregated Fit (TLSF) algorithm. The allocator maintains 2 level of buckets:
@@ -77,11 +86,10 @@ class TLSFAllocator:
       if self.lv1_entries[l1] == 0: continue
       for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
         if len(self.storage[l1][l2]) > 0:
-          nsize = self.blocks[self.storage[l1][l2][0]][0]
-          assert nsize >= size, "block must be larger"
-
           # Block start address.
           start = self.storage[l1][l2][0]
+          nsize = self.blocks[start][0]
+          assert nsize >= size, "block must be larger"
 
           # If request contains alignment, split the block into two parts.
           if (new_start:=round_up(start, align)) != start:
@@ -118,7 +126,7 @@ class PageTableTraverseContext:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
 
-    assert not pt.is_huge_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
     child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -145,7 +153,7 @@ class PageTableTraverseContext:
         assert paddr is not None, "paddr must be provided when allocating new page tables"
         while pte_covers > size or not pt.supports_huge_page(paddr+off) or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while not pt.is_huge_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
+        while not pt.is_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
 
       entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
       assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
@@ -158,10 +166,11 @@ class PageTableTraverseContext:
 class MemoryManager:
   va_allocator: ClassVar[TLSFAllocator|None] = None
 
-  def __init__(self, dev, vram_size:int, boot_size:int, pt_t, pte_cnt:list[int], pte_covers:list[int], va_base:int,
+  def __init__(self, dev, vram_size:int, boot_size:int, pt_t, va_bits:int, va_shifts:list[int], va_base:int,
                palloc_ranges:list[tuple[int, int]], first_lv:int=0):
-    self.dev, self.vram_size, self.va_base = dev, vram_size, va_base
-    self.pt_t, self.pte_cnt, self.pte_covers, self.palloc_ranges = pt_t, pte_cnt, pte_covers, palloc_ranges
+    self.dev, self.vram_size, self.va_shifts, self.va_base, lvl_msb = dev, vram_size, va_shifts, va_base, va_shifts + [va_bits + 1]
+    self.pte_covers, self.pte_cnt = [1 << x for x in va_shifts][::-1], [1 << (lvl_msb[i+1] - lvl_msb[i]) for i in range(len(lvl_msb) - 1)][::-1]
+    self.pt_t, self.palloc_ranges, self.level_cnt, self.va_bits = pt_t, palloc_ranges, len(va_shifts), va_bits
 
     self.boot_allocator = TLSFAllocator(boot_size, base=0) # per device
     self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device

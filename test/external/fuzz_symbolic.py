@@ -1,8 +1,8 @@
 import random, operator
 import z3
 from tinygrad import Variable, dtypes
-from tinygrad.uop.ops import UOp, graph_rewrite
-from tinygrad.uop.spec import z3_renderer
+from tinygrad.uop.ops import UOp
+from tinygrad.uop.spec import uops_to_z3
 from tinygrad.helpers import DEBUG, Context
 
 seed = random.randint(0, 100)
@@ -57,8 +57,7 @@ if __name__ == "__main__":
 
     solver = z3.Solver()
     solver.set(timeout=5000)  # some expressions take very long verify, but its very unlikely they actually return sat
-    z3_sink = graph_rewrite(expr.sink(simplified_expr, u1, u2, u3), z3_renderer, ctx=(solver, {}))
-    z3_expr, z3_simplified_expr = z3_sink.src[0].arg, z3_sink.src[1].arg
+    z3_expr, z3_simplified_expr, v1, v2, v3 = uops_to_z3(solver, expr, simplified_expr, u1, u2, u3)
     check = solver.check(z3_simplified_expr != z3_expr)
     if check == z3.unknown and DEBUG>=1:
       skipped += 1
@@ -69,7 +68,6 @@ if __name__ == "__main__":
             f"expr = {expr.render(simplify=False)}\n")
     elif check == z3.sat:
       m = solver.model()
-      v1, v2, v3 = z3_sink.src[2].arg, z3_sink.src[3].arg, z3_sink.src[4].arg
       n1, n2, n3 = m[v1], m[v2], m[v3]
       u1_val, u2_val, u3_val = u1.const_like(n1.as_long()), u2.const_like(n2.as_long()), u3.const_like(n3.as_long())
       with Context(CORRECT_DIVMOD_FOLDING=1):

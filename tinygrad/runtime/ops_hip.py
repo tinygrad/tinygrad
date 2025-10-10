@@ -1,5 +1,5 @@
 import ctypes, functools
-from tinygrad.helpers import init_c_var, from_mv, init_c_struct_t, getenv
+from tinygrad.helpers import init_c_var, mv_address, init_c_struct_t, getenv
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec
 from tinygrad.runtime.autogen import hip
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
@@ -14,7 +14,9 @@ class HIPDevice(Compiled):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
-    super().__init__(device, HIPAllocator(self), HIPRenderer(self.arch), HIPCompiler(self.arch), functools.partial(HIPProgram, self))
+
+    compilers = [(functools.partial(HIPRenderer, self.arch), functools.partial(HIPCompiler, self.arch))]
+    super().__init__(device, HIPAllocator(self), compilers, functools.partial(HIPProgram, self))
   def synchronize(self):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())
@@ -57,7 +59,7 @@ class HIPAllocator(LRUAllocator[HIPDevice]):
   def _free(self, opaque, options:BufferSpec): check(hip.hipFree(opaque))
   def _copyin(self, dest, src: memoryview):
     check(hip.hipSetDevice(self.dev.device_id))
-    check(hip.hipMemcpy(dest, from_mv(src), len(src), hip.hipMemcpyHostToDevice))
+    check(hip.hipMemcpy(dest, mv_address(src), len(src), hip.hipMemcpyHostToDevice))
   def _copyout(self, dest:memoryview, src):
     self.dev.synchronize()
-    check(hip.hipMemcpy(from_mv(dest), src, len(dest), hip.hipMemcpyDeviceToHost))
+    check(hip.hipMemcpy(mv_address(dest), src, len(dest), hip.hipMemcpyDeviceToHost))

@@ -9,7 +9,7 @@ try:
     assert comgr.AMD_COMGR_LANGUAGE_HIP == 3
 except AttributeError: pass  # ignore if ROCm isn't installed
 from tinygrad.device import Compiler, CompileError
-from tinygrad.runtime.ops_llvm import LLVMCompiler
+from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
 
 def amdgpu_disassemble(lib:bytes):
