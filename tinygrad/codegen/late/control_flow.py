@@ -48,23 +48,23 @@ def linearize(sink:UOp) -> list[UOp]:
 def add_endrange(x:UOp):
   if not ((x.op is Ops.LOAD and x.src[-1].op is Ops.STORE) or all(s.op is Ops.STORE and any(n.op is Ops.RANGE for n in s.src) for s in x.src)):
     return None
+  # group together stores with the same ranges, then add the endranges to them
   src: list[UOp] = []
   for k,g in groupby(x.src, key=lambda k: tuple(dedup(s for s in k.src if s.op is Ops.RANGE))):
-    if not k: src.extend(g)
-    else: src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g))) # type: ignore
+    src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g)) if k else g) # type: ignore
   return x.replace(src=tuple(src))
 
 def add_endif(x:UOp):
-  groups = {k: tuple(g) for k,g in groupby(x.src, key=lambda k: k.src[2] if len(k.src) >= 3 and k.src[2].op is Ops.IF else k)}
+  # group together stores with the same if, then add the endif to them
+  groups = {k: tuple(g) for k,g in groupby(x.src, key=lambda k: k.src[2] if len(k.src) > 2 and k.src[2].op is Ops.IF else k)}
   if not any(k.op is Ops.IF for k in groups): return None
   return x.replace(src=tuple(UOp(Ops.ENDIF, src=(k,) + g) if k.op is Ops.IF else k for k,g in groups.items()))
 
 # some Ops.IF aren't closed by an Ops.STORE, in that case the Ops.SINK closes it
 def close_ifs(x:UOp):
   consumers = x.get_consumer_map()
-  if (y:=next((s for s in consumers if s.op is Ops.IF and all(n.op is not Ops.ENDIF for n in consumers[s])), None)) is not None:
-    return x.replace(src=(UOp(Ops.ENDIF, src=(y,) + x.src),))
-  return None
+  if (y:=next((s for s in consumers if s.op is Ops.IF and all(n.op is not Ops.ENDIF for n in consumers[s])), None)) is None: return None
+  return x.replace(src=(UOp(Ops.ENDIF, src=(y,) + x.src),))
 
 pm_control_flow_ends = PatternMatcher([
   (UPat((Ops.SINK, Ops.NOOP, Ops.LOAD), name="x"), add_endrange),
