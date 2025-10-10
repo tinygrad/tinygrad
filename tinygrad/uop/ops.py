@@ -233,7 +233,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
-    if self.op in range_start.keys():
+    if self.op is Ops.ENDRANGE:
+      for s in self.src[1:]: ret.update(s.ranges)
+      assert self.src[0] not in ret
+    elif self.op in range_start.keys():
       for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
       for s in UOp.sink(*self.src[range_start[self.op]:]).ranges:
         if s in ret: del ret[s]
