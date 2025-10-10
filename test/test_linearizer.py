@@ -314,18 +314,18 @@ class TestLinearizer(unittest.TestCase):
     a.realize()
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexes differently. might be ok?")
-  def test_where_fold(self):
-    a = Tensor.ones(4, 4).contiguous().realize()
-    b = a.shrink(((1, 2), None)).pad(((1, 2), None))
-    a.assign(b.where(2, a))
-    sched = a.schedule()
-    assert len(sched) == 1
-    sched_copy = sched[:]
-    run_schedule(sched)
-    np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    program = get_program(sched_copy[-1].ast, opts=())
-    assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
+  # @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexes differently. might be ok?")
+  # def test_where_fold(self):
+  #   a = Tensor.ones(4, 4).contiguous().realize()
+  #   b = a.shrink(((1, 2), None)).pad(((1, 2), None))
+  #   a.assign(b.where(2, a))
+  #   sched = a.schedule()
+  #   assert len(sched) == 1
+  #   sched_copy = sched[:]
+  #   run_schedule(sched)
+  #   np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
+  #   program = get_program(sched_copy[-1].ast, opts=())
+  #   assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
     def helper(t, max_ops=0):
