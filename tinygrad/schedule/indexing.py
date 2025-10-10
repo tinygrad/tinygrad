@@ -65,7 +65,8 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  valid: UOp = functools.reduce(operator.and_, [r.get_valid() for r in ctx.range_map[x][0]], UOp.const(dtypes.bool, True))
+  valid: UOp = functools.reduce(operator.and_, [((r >= s) & (r < (sh-e))) for r,sh,(s,e) in zip(ctx.range_map[x][1], x.shape, x.arg)
+    if not (s == 0 and e == 0)])
   ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
