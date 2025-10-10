@@ -414,10 +414,29 @@ generate_sqtt() {
   clang2py -k cdefstum \
     extra/sqtt/sqtt.h \
     -o $BASE/sqtt.py
-
   fixup $BASE/sqtt.py
   sed -i "s\import ctypes\import ctypes, os\g" $BASE/sqtt.py
   python3 -c "import tinygrad.runtime.autogen.sqtt"
+
+  ROCPROF_COMMIT_HASH=dd0485100971522cc4cd8ae136bdda431061a04d
+  ROCPROF_SRC=/tmp/rocprof-trace-decoder-$ROCPROF_COMMIT_HASH
+  if [ ! -d "$ROCPROF_SRC" ]; then
+    git clone https://github.com/ROCm/rocprof-trace-decoder $ROCPROF_SRC
+    pushd .
+    cd $ROCPROF_SRC
+    git reset --hard $ROCPROF_COMMIT_HASH
+    popd
+  fi
+
+  clang2py -k cdefstum \
+    $ROCPROF_SRC/include/rocprof_trace_decoder.h \
+    $ROCPROF_SRC/include/trace_decoder_instrument.h \
+    $ROCPROF_SRC/include/trace_decoder_types.h \
+    -o extra/sqtt/rocprof/rocprof.py
+  fixup extra/sqtt/rocprof/rocprof.py
+  sed -i '1s/^/# pylint: skip-file\n/' extra/sqtt/rocprof/rocprof.py
+  sed -i "s/import ctypes/import ctypes, tinygrad.helpers.fetch as tgfetch/g" extra/sqtt/rocprof/rocprof.py
+  sed -i "s|FunctionFactoryStub()|ctypes.CDLL(str(tgfetch('https://github.com/ROCm/rocprof-trace-decoder/raw/5420409ad0963b2d76450add067b9058493ccbd0/releases/linux_glibc_2_28_x86_64/librocprof-trace-decoder.so')))|g" extra/sqtt/rocprof/rocprof.py
 }
 
 generate_webgpu() {
