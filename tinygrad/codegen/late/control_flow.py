@@ -5,7 +5,8 @@ from itertools import groupby
 from functools import reduce
 import heapq
 
-def schedule(lst:list[UOp]) -> list[UOp]:
+def linearize(sink:UOp) -> list[UOp]:
+  lst = list(sink.toposort())
   in_this_block = set(lst)
   local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
