@@ -183,7 +183,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.INDEX and self.src[0].op is Ops.ASSIGN and self.src[0].src[1].op is Ops.KERNEL: return None
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
-    from tinygrad.shape.shapetracker import ShapeTracker
+    # hack for PTX, CASTing the ptr loses the shape
+    if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
+
     shape = None
     if self.op is Ops.BUFFERIZE: shape = tuple([int(r.vmax+1) for r in self.src[1:]])
     if self.op in GroupOp.Movement:
@@ -201,6 +203,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: shape = (self.size,)
+
+    # these can return a None shape early
+    from tinygrad.shape.shapetracker import ShapeTracker
     if self.op is Ops.KERNEL:
       ast = self.arg.ast
       return ShapeTracker.from_shape((ast.size,)) if ast.st is not None else None
@@ -208,24 +213,21 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       sz = self.ptrdtype.size
       return ShapeTracker.from_shape((sz,)) if sz > 0 else None
 
-    # hack for PTX, CASTing the ptr loses the shape
-    if self.op is Ops.CAST and self.src[0].op is Ops.DEFINE_GLOBAL: return None
-
-    if shape is not None: return ShapeTracker.from_shape(shape)
-
     # otherwise we get the shape from sources
-    if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
-    assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
-    shape = src_sts[0].shape
-    # shape changing ops
-    match self.op:
-      case Ops.MULTI: shape = tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(shape))
-      case Ops.BITCAST:
-        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // output_sz,)
-      case Ops.REDUCE_AXIS | Ops.WMMA:
-        axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
-        assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
-        shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
+    if shape is None:
+      if not (src_sts := [x.st for x in self.src if x.st is not None]): return None
+      assert all_same([x.shape for x in src_sts]), f"UOp sources must have the same shape {self} {[x.shape for x in src_sts]}"
+      shape = src_sts[0].shape
+      # shape changing ops
+      match self.op:
+        case Ops.MULTI: shape = tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(shape))
+        case Ops.BITCAST:
+          if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): shape = shape[:-1]+((shape[-1]*input_sz) // output_sz,)
+        case Ops.REDUCE_AXIS | Ops.WMMA:
+          axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
+          assert isinstance(axis_arg, tuple) and all(isinstance(x, int) for x in axis_arg), f"invalid type for axis: {axis_arg}"
+          shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
+    assert shape is not None, f"couldn't get shape for {self.op}"
     return ShapeTracker.from_shape(shape)
 
   @property
