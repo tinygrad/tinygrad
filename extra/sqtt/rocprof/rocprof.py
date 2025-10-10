@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
 # TARGET arch is: []
@@ -5,7 +6,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes
+import ctypes, tinygrad.helpers.fetch as tgfetch
 
 
 class AsDictMixin:
@@ -149,14 +150,11 @@ class FunctionFactoryStub:
 
 # libraries['FIXME_STUB'] explanation
 # As you did not list (-l libraryname.so) a library that exports this function
-# This is a non-working stub instead. 
+# This is a non-working stub instead.
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-
-from tinygrad.helpers import fetch
-decoder_path = fetch("https://github.com/ROCm/rocprof-trace-decoder/raw/5420409ad0963b2d76450add067b9058493ccbd0/releases/linux_glibc_2_28_x86_64/librocprof-trace-decoder.so")
-_libraries['FIXME_STUB'] = ctypes.CDLL(str(decoder_path))
+_libraries['FIXME_STUB'] = ctypes.CDLL(str(tgfetch('https://github.com/ROCm/rocprof-trace-decoder/raw/5420409ad0963b2d76450add067b9058493ccbd0/releases/linux_glibc_2_28_x86_64/librocprof-trace-decoder.so'))) #  ctypes.CDLL('FIXME_STUB')
 
 
 
