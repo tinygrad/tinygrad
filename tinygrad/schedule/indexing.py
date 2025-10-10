@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
-from tinygrad.uop.symbolic import sym, symbolic
+from tinygrad.uop.symbolic import symbolic, pm_simplify_valid
 from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
@@ -111,7 +111,7 @@ def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
     case Ops.EXPAND:  rngs = [a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, x.src[0].shape, x.shape)]
     case Ops.PAD:
       # TODO: why is multiple graph_rewrites faster than one here?
-      rngs = [r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh-e))).where(r-s, UOp.invalid()), sym, name="pad")
+      rngs = [r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh-e))).where(r-s, UOp.invalid()), symbolic+pm_simplify_valid, name="pad")
               for r,sh,(s,e) in zip(rngs, x.shape, x.arg)]
     case Ops.RESHAPE:
       acc = 1
@@ -125,7 +125,7 @@ def apply_movement_op(x:UOp, rngs:Sequence[UOp]) -> list[UOp]:
         axes_out.append(combined_axes % s)
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-      rngs = list(graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic, name="reshape").src)
+      rngs = list(graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid, name="reshape").src)
     case _: raise RuntimeError(f"{x.op} is not a MovementOp")
   return rngs
 
