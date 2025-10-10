@@ -349,3 +349,7 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 
   return kv_data, state_dict
+
+@accept_filename
+def png_load(t:Tensor) -> Tensor:
+  assert t[0:8].tolist() == [0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A], "not a PNG"
