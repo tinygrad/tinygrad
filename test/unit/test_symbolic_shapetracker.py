@@ -28,7 +28,7 @@ class TestSymbolic(unittest.TestCase):
   def test_merge_view_recursion_err(self):
     vm2 = View(shape=(Variable('j', 1, 10),), strides=(0,), offset=0, mask=None, contiguous=False)
     vm1 = View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True)
-    self.assertEqual(vm2+vm1, vm1)
+    self.assertEqual(vm2+vm1, None)
 
   def test_merge_view_recursion_err2(self):
     vm2 = View(shape=(Variable('a', 1, 10).bind(4),), strides=(0,), offset=0, mask=None, contiguous=False)
