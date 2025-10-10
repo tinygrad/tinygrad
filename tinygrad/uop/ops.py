@@ -235,7 +235,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret: dict[UOp, None] = {}
     if self.op is Ops.ENDRANGE:
       for s in self.src[1:]: ret.update(s.ranges)
-      assert self.src[0] not in ret
+      # NOTE: the ended range should always be in the ranges
+      if self.src[0] in ret: del ret[self.src[0]]
     elif self.op in range_start.keys():
       for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
       for s in UOp.sink(*self.src[range_start[self.op]:]).ranges:

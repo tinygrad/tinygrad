@@ -99,4 +99,6 @@ class CFGContext:
 pm_control_flow_starts = PatternMatcher([
   (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
   (UPat(Ops.IF, src=(UPat(), UPat(Ops.BARRIER)), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  # remove ranges from STORE. keep NOOP since they determine ordering
+  (UPat(Ops.STORE, name="s"), lambda s: s.replace(src=s.src[0:2]+tuple([x for x in s.src[2:] if x.op not in {Ops.RANGE, Ops.CONST}]))),
 ])
