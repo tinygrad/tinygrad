@@ -35,8 +35,7 @@ def get_metadata(trace_bufs:list[tuple]) -> list[dict]:
       traces[i:=len(traces)] = (k, v, uop_fields)
       steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
                 "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
-      ret.append(r:={"name":" ".join([colored(str(k).split(".")[1], v) for k,v in axis_colors.items()]), "steps":steps})
-      print(r["name"])
+      ret.append(r:={"name":k.display_name, "steps":steps})
       # program spec metadata
       if isinstance(k.ret, ProgramSpec):
         steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
