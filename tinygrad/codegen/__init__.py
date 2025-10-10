@@ -30,12 +30,12 @@ class RewriteStep:
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
-def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool=True) -> list[RewriteStep]:
+def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, optimize, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
+  return _get_rewrites_for_renderer(opts, optimize, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
 
@@ -96,15 +96,14 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
   # add control flow to the graph
-  if linearizer:
-    ret.append(RewriteStep(pm_control_flow_ends, name="add control flow ends"))
-    ret.append(RewriteStep(pm_control_flow_starts, CFGContext, name="add control flow starts", bottom_up=True))
+  ret.append(RewriteStep(pm_control_flow_ends, name="add control flow ends"))
+  ret.append(RewriteStep(pm_control_flow_starts, CFGContext, name="add control flow starts", bottom_up=True))
 
   # return the list
   return ret
 
-def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True, linearizer:bool=False) -> UOp:
-  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize, linearizer))
+def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True) -> UOp:
+  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize))
 
 def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
@@ -117,6 +116,6 @@ def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   Returns:
     Linear program in UOps.
   """
-  lst = linearize(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None, linearizer=True))
+  lst = linearize(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None))
   if __debug__: type_verify(lst)
   return lst
