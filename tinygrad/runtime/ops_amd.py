@@ -130,7 +130,9 @@ class AMDComputeQueue(HWQueue):
       self.wreg(self.gc.regSQ_THREAD_TRACE_USERDATA_2, *data_ints[i:i+2])
 
   def sqtt_config(self, tracing:bool):
-    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1, mode=int(tracing))
+    trace_ctrl = {'rt_freq': self.soc.SQ_TT_RT_FREQ_4096_CLK} if self.dev.target < (12,0,0) else {}
+    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1, util_timer=1,
+      mode=int(tracing), **trace_ctrl)
 
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
   def sqtt_start(self, buf0s:list[HCQBuffer], se_mask:int):
@@ -157,15 +159,17 @@ class AMDComputeQueue(HWQueue):
       self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=cs_wtype, simd_sel=0, wgp_sel=0, sa_sel=0)
       reg_include = self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_SHDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
                     self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
-      token_exclude = 0 if self.dev.target >= (12,0,0) else (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT)
-      reg_exclude, inst_exclude = 0x3, 0x0
+      token_exclude = (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT) if self.dev.target < (12,0,0) else 0
 
       # disable tracing
       if not (se_mask >> se) & 0b1:
-        token_exclude, inst_exclude, reg_exclude, reg_include = 0x7ff, 0x3, (0x7 if self.dev.target >= (12,0,0) else 0x3), 0
+        # gfx12 doesn't have enums with all fields, so it's hardcoded, but it's the same as gfx11.
+        token_exclude |= (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
+                         1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
+                         1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) if self.dev.target < (12,0,0) else 0x927
 
-      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude,
-                bop_events_token_include=1, reg_exclude=reg_exclude, reg_detail_all=1, inst_exclude=inst_exclude)
+      token_mask = {} if self.dev.target < (12,0,0) else {'exclude_barrier_wait': 1}
+      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1, **token_mask)
       # Enable SQTT
       self.sqtt_config(tracing=True)
     # Restore global broadcasting
