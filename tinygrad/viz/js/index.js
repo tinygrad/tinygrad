@@ -164,6 +164,12 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
+function tabulate(rows) {
+  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`);
+  for (const [k,v] of rows) { root.append("div").text(k); root.append("div").text(v); }
+  return root;
+}
+
 var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
@@ -272,7 +278,10 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
+        const html = document.createElement("div");
+        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
+        const info = html.appendChild(tabulate(rows).node());
+        const arg = {tooltipText:info.outerHTML, html};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -434,6 +443,7 @@ async function renderProfiler() {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
+    return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
   });
 
   canvas.addEventListener("mousemove", e => {
