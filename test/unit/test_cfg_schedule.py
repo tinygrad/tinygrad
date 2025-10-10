@@ -12,7 +12,6 @@ def is_toposorted(lst:list[UOp]):
   return True
 
 class TestCFGSchedule(unittest.TestCase):
-  @unittest.skip("toposort is done inside the linearize now")
   def _test_randomize(self, golden:list[UOp]):
     # test random order is always same
     for _ in range(50):
@@ -25,6 +24,7 @@ class TestCFGSchedule(unittest.TestCase):
           if p not in topolst: topolst.append(p)
       assert is_toposorted(topolst)
 
+      # TODO: still want this to work?
       #for x,y in zip(golden, this_order:=linearize(topolst)):
       #  if x is not y:
       #    print_uops(golden)
