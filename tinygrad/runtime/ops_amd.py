@@ -884,7 +884,7 @@ class AMDDevice(HCQCompiled):
       self.synchronize()
       if DEBUG >= 2: print(f'{self.device}: Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):
-        wptr = ((struct.unpack('<I', wptrs[i*4:i*4+4])[0] & 0x1FFFFFFF) - ((buf0.va_addr//32) & 0x1FFFFFFF) if self.dev.target < (12,0,0) else 0) * 32
+        wptr = ((struct.unpack('<I', wptrs[i*4:i*4+4])[0] & 0x1FFFFFFF) - ((buf0.va_addr//32) & 0x1FFFFFFF) if self.target < (12,0,0) else 0) * 32
         if DEBUG >= 2: print(f'\t{self.device}: SE {i} blob size {wptr:#x}')
         assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
         # When sqtt buffer overflows, wptr stops at the last dword
