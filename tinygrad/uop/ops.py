@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import textwrap
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
@@ -819,11 +821,30 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def fixup_pm_function(fxn: Callable|tuple|UPat) -> Callable:
+  if isinstance(fxn, UPat):
+    def upat_to_uop(p=fxn, **kwargs):
+      dtype = least_upper_dtype(*{v.dtype for v in kwargs.values()})
+      op = getattr(p, "op", None)
+      if p.src is None:
+        if op == (Ops.CONST,): return UOp.const(dtype, p.arg)
+        if op is None: return kwargs.get(p.name)
+        raise RuntimeError("can't map upat to uop")
+      uops = tuple(upat_to_uop(child, **kwargs) for child in p.src[0])
+      if isinstance(op, tuple) and op[0] in (Ops.MUL, Ops.AND): return UOp(op[0], dtype=dtype, src=uops)
+      raise RuntimeError("can't map upat to uop")
+    src = textwrap.dedent(inspect.getsource(upat_to_uop))
+    g = {"fxn": fxn, "Ops": Ops, "UOp": UOp, "dtypes": dtypes, "least_upper_dtype": least_upper_dtype}
+    exec(compile(src, "<gen>", "exec"), g) # pylint: disable=W0122
+    return cast(Callable, g["upat_to_uop"])
+  if isinstance(fxn, tuple): return types.FunctionType(*fxn)
+  return fxn
+
 class PatternMatcher:
-  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple|UPat]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
-    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
+    self.patterns: list[tuple[UPat, Callable]] = [(p, fixup_pm_function(fxn)) for p, fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
