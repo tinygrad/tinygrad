@@ -13,6 +13,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
   a,b = A[..., 0:1], A[..., 1:2]
+  ic(a.shape, b.shape, c.shape)
   ro = a*c - b*d
   co = a*d + b*c
   return ro.cat(co, dim=-1)
@@ -23,6 +24,7 @@ def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Te
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
   assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
   c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+  ic(c.shape, d.shape)
   xq_out = complex_mult(xq, c, d)
   xk_out = complex_mult(xk, c, d)
   return xq_out.flatten(3), xk_out.flatten(3)
@@ -61,6 +63,7 @@ class Attention:
       xq = self.q_norm(xq)
       xk = self.k_norm(xk)
 
+    ic(xq.shape, xk.shape)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
@@ -181,7 +184,7 @@ class Transformer:
     self.tok_embeddings = embedding(vocab_size, dim)
     self.output = nn.Linear(dim, vocab_size, bias=False) if embedding == nn.Embedding else linear(dim, vocab_size, bias=False)
     self.max_context = max_context
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).contiguous().requires_grad_(False)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads if head_dim is None else head_dim, self.max_context * 2, rope_theta).contiguous().requires_grad_(False)
     self.forward_jit = TinyJit(self.forward) if jit else None
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
