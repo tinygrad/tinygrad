@@ -1,11 +1,12 @@
 import argparse, os, functools
 from pathlib import Path
-from tinygrad import Tensor, nn, dtypes
+from tinygrad import Tensor, nn, dtypes, Device
 from tinygrad.helpers import fetch, getenv
-from tinygrad.nn.state import load_state_dict
+from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
 # from examples.olmoe import MixtureFeedForward
-from extra.models.llama import Transformer, convert_from_huggingface, fix_bf16
+from extra.models.llama import Transformer, fix_bf16
+from transformers import AutoTokenizer
 
 from icecream import install
 install()
@@ -26,7 +27,7 @@ def swiglu(x:Tensor, alpha:float=1.702, limit:float=7.0) -> Tensor:
 class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
     self.activated_experts = activated_experts
-    self.gate = nn.Linear(dim, num_experts, bias=False)
+    self.gate = nn.Linear(dim, num_experts, bias=True)
     self.gate_up_proj = Tensor.zeros(num_experts, dim, hidden_dim * 2, dtype=dtypes.bfloat16)
     self.gate_up_proj_bias = Tensor.zeros(num_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
     self.down_proj = Tensor.zeros(num_experts, hidden_dim, dim, dtype=dtypes.bfloat16)
@@ -58,27 +59,84 @@ def download_weights(model:str, total_num_weights:int) -> Path:
     fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
   return Path(os.path.dirname(model))
 
+def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: int, n_kv_heads: int, permute_layers: bool = True):
+  # huggingface stores Q and K permuted! it is mostly correct without this, but without it makes RoPE different, so it will diverge after 10+ toks.
+  def permute(v: Tensor, n_heads: int):
+    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1] if len(v.shape) > 1 else 1).transpose(1, 2).reshape(*v.shape[:2])
+
+  keymap = {
+    "model.embed_tokens.weight": "tok_embeddings.weight",
+    **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attention_norm.weight" for l in range(n_layers)},
+    **{f"model.layers.{l}.self_attn.{x}_norm.weight": f"layers.{l}.attention.{x}_norm.weight" for x in ["q", "k"] for l in range(n_layers)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"layers.{l}.attention.w{x}.weight" for x in ["q", "k", "v", "o"] for l in range(n_layers)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"layers.{l}.attention.w{x}.bias" for x in ["q", "k", "v", "o"] for l in range(n_layers)},
+    **{f"model.layers.{l}.self_attn.sinks": f"layers.{l}.attention.sinks" for l in range(n_layers)},
+    **{f"model.layers.{l}.post_attention_layernorm.weight": f"layers.{l}.ffn_norm.weight" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.{x}_proj.weight": f"layers.{l}.feed_forward.w{y}.weight" for x, y in {"gate": "1", "down": "2", "up": "3"}.items() for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.router.weight": f"layers.{l}.feed_forward.gate.weight" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.router.bias": f"layers.{l}.feed_forward.gate.bias" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.gate_up_proj_bias": f"layers.{l}.feed_forward.gate_up_proj_bias" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.down_proj_bias": f"layers.{l}.feed_forward.gate_down_proj_bias" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.gate_up_proj_blocks": f"layers.{l}.feed_forward.gate_up_proj_blocks" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.gate_up_proj_scales": f"layers.{l}.feed_forward.gate_up_proj_scales" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.down_proj_blocks": f"layers.{l}.feed_forward.gate_down_proj_blocks" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.down_proj_scales": f"layers.{l}.feed_forward.gate_down_proj_scales" for l in range(n_layers)},
+    "model.norm.weight": "norm.weight",
+    "lm_head.weight": "output.weight",
+  }
+
+  sd = {}
+  for k, v in weights.items():
+    if 'model.layers.0' in k: ic(k, v.dtype, v.shape)
+    if ".rotary_emb." in k: continue
+    v = v.to(Device.DEFAULT)
+    if "model.layers" in k:
+      if ("q_proj" in k or "q_norm" in k) and permute_layers: v = permute(v, n_heads)
+      elif ("k_proj" in k or "k_norm" in k) and permute_layers: v = permute(v, n_kv_heads)
+    sd[keymap[k]] = v
+  return sd
+
+def fix_mxfp4(weights, n_layers) -> Tensor:
+    def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
+        """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
+        assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
+        mxfp4_data = Tensor.cat(scales.unsqueeze(-1), blocks, dim=-1).flatten()  # interleave and flatten to 1D
+        ic(blocks, scales, mxfp4_data)
+        return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, 39).reshape(*scales.shape[:2], -1)
+
+    for l in range(n_layers):
+        for proj in ['gate_up_proj', 'gate_down_proj']:
+            blocks = f'layers.{l}.feed_forward.{proj}_blocks'
+            scales = f'layers.{l}.feed_forward.{proj}_scales'
+            proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
+            ic(proj)
+            weights[f'layers.{l}.feed_forward.{proj}.weights'] = proj
+    return weights
+
 def load_model(path:Path, params:dict[str, int|float]) -> Transformer:
   # build model
-  ffn = functools.partial(MixtureFeedForward, params.pop("num_experts"), params.pop("activated_experts"))
-  model = Transformer(**params, feed_forward=ffn)
+  feed_forward = functools.partial(MixtureFeedForward, params.pop("num_experts"), params.pop("activated_experts"))
+  model = Transformer(**params, feed_forward=feed_forward)
 
-  # update layers to add bias
-  updated_layers = []
-  for layer in model.layers:
-    head_dim = params["dim"] // params["n_heads"]
-    layer.attention.wq = nn.Linear(params["dim"], params["n_heads"] * head_dim, bias=True)
-    layer.attention.wk = nn.Linear(params["dim"], params["n_kv_heads"] * head_dim, bias=True)
-    layer.attention.wv = nn.Linear(params["dim"], params["n_kv_heads"] * head_dim, bias=True)
-    updated_layers.append(layer)
-  model.layers = updated_layers
+  # set head dim and add bias to each attention projection
+  for i in range(len(model.layers)):
+    head_dim = 64 # in gpt-oss head_dim ≠ dim // n_heads so we manually set it
+    model.layers[i].attention.wq = nn.Linear(params["dim"], params["n_heads"] * head_dim, bias=True)
+    model.layers[i].attention.wk = nn.Linear(params["dim"], params["n_kv_heads"] * head_dim, bias=True)
+    model.layers[i].attention.wv = nn.Linear(params["dim"], params["n_kv_heads"] * head_dim, bias=True)
+    model.layers[i].attention.wo = nn.Linear(params["n_heads"] * head_dim, params["dim"], bias=True)
 
-  # update layers to add sliding attention
+  # add sliding attention to all even attention layers
   for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
 
+  # add attention sinks to all attention layers
+  for i in range(len(model.layers)): model.layers[i].sinks = Tensor.empty(params['n_heads'], dtype=dtypes.bfloat16)
+
   # load weights
-  l = load(str(path / "model.safetensors.index.json"))
-  weights = fix_bf16(convert_from_huggingface(l, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False))
+  weights = convert_from_huggingface(load(str(path / "model.safetensors.index.json")), params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
+  weights = fix_mxfp4(weights, params["n_layers"])
+  for k, v in weights.items():
+      if 'model.layers.0' in k: ic(k, v.dtype, v.shape)
 
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)
@@ -98,7 +156,7 @@ if __name__ == "__main__":
   model_info = MODELS[args.size]
 
   if getenv("TORCH"):
-    from transformers import GptOssForCausalLM, AutoTokenizer
+    from transformers import GptOssForCausalLM
     model = GptOssForCausalLM.from_pretrained(model_info["model"])
     tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
     inputs = tokenizer("Hello", return_tensors="pt")
@@ -113,7 +171,7 @@ if __name__ == "__main__":
   # load weights to GPU
   transformer = load_model(model_path, model_info["params"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
-  assert tokenizer.vocab_size() == model_info["params"]["vocab_size"], f"{tokenizer.vocab_size()=} not equal to {model_info['params']['vocab_size']}"
+  assert tokenizer.vocab_size == model_info["params"]["vocab_size"], f"{tokenizer.vocab_size=} not equal to {model_info['params']['vocab_size']}"
 
   param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(transformer))
 
