@@ -41,7 +41,7 @@ class BufferizeOpts:
 @dataclass
 class IndexingContext:
   realize_map: dict[UOp, None] = field(default_factory=dict)
-  range_map: dict[UOp, tuple[tuple[UOp], tuple[UOp]]] = field(default_factory=dict)
+  range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
@@ -104,7 +104,7 @@ pm_apply_rangeify = PatternMatcher([
 
 # this is the definition of the movement ops
 @functools.cache
-def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg, rngs:tuple[UOp]) -> tuple[UOp]:
+def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg: tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   match op:
     case Ops.SHRINK:  rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, arg))
     case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
