@@ -352,4 +352,14 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
 
 @accept_filename
 def png_load(t:Tensor) -> Tensor:
-  assert t[0:8].tolist() == [0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A], "not a PNG"
+  f = io.BufferedReader(TensorIO(t))
+  assert f.read(8) == b'\x89PNG\r\n\x1a\n', "not a PNG"
+  while (slen:=f.read(4)):
+    len, typ = struct.unpack(">I", slen)[0], f.read(4)
+    dat = f.read(len)
+    if typ == b'IHDR':
+      width, height, depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", dat)
+      print(width, height, depth, color_type)
+
+    print(len, typ)
+    f.seek(4, 1)
