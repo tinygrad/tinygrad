@@ -142,6 +142,7 @@ class CStyleLanguage(Renderer):
     name = "test"
     for u in uops:
       if u.op is Ops.NOOP: continue
+      if u.op is Ops.AFTER: continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
@@ -159,6 +160,7 @@ class CStyleLanguage(Renderer):
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg
       elif u.op is Ops.RANGE: r[u] = "ridx"+range_str(u)
+      elif u.op is Ops.STORE: r[u] = r[u.src[0].src[0]]
       else:
         prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.PRECAST: "precast",
