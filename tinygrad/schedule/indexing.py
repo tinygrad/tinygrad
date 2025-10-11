@@ -104,7 +104,7 @@ pm_apply_rangeify = PatternMatcher([
 
 # this is the definition of the movement ops
 @functools.cache
-def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg: tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   match op:
     case Ops.SHRINK:  rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, arg))
     case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
@@ -126,7 +126,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg: tuple, rngs:tuple[U
         axes_out.append(combined_axes % s)
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-      rngs = tuple(graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic, name="reshape").src)
+      rngs = graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic, name="reshape").src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
@@ -155,7 +155,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
-    consumer_rngs = tuple(rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map)
+    consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) if not isinstance(s, UOp) or s.op is not Ops.RANGE else s for s in x.shape)
@@ -172,7 +172,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       out_rngs = consumer_rngs[0]
     elif len(consumer_rngs) > 1:
       # if this has two consumers, we have to merge the ranges and might create new ones
-      all_rngs = tuple(zip(*consumer_rngs))
+      all_rngs = list(zip(*consumer_rngs))
       rngs_valids = []
       for valid_rngs in all_rngs:
         local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
