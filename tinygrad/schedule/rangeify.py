@@ -110,7 +110,7 @@ pm_mops = PatternMatcher([
 # 3.5 cleanups
 
 # Ops.NOOP happens when we have a COPY to the device the Tensor is already on. We treat it like COPY here for MSTACK.
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.ENDRANGE}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -338,6 +338,7 @@ def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag is not None: return None
+  if r.arg[-1] is AxisType.OUTER: return None
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=())
   ctx.range += 1
   return ret
@@ -412,7 +413,7 @@ class Kernel:
     return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
 def split_store(ctx:list[UOp], x:UOp):
-  if len(x.ranges): return None
+  if len([r for r in x.ranges if r.arg[-1] != AxisType.OUTER]): return None
   if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
 
   # local kernel rewrite
@@ -424,7 +425,7 @@ def split_store(ctx:list[UOp], x:UOp):
 
   # NOTE: the hack for COPY is here
   ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None) \
-    if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
+    if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENDRANGE} else ret.src[1]
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src if x.op is not Ops.BIND]):
@@ -481,6 +482,11 @@ def do_sub_recurse(s:UOp):
   return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, dtype=y.dtype, src=(y,uop_keys,uop_values)) for y in x.src]))
 pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(Ops.NOOP), UPat(Ops.NOOP)), name="s"), do_sub_recurse)])
 
+pm_localize_bufs = PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), lambda x:
+   x.replace(arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL), tag=None) if len(x.ranges) > 0 else None),
+])
+
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   uop_list: list[UOp] = []
@@ -496,7 +502,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   # TODO: can you substitute and remove costly buffers at the same time?
   tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
+  tsink = graph_rewrite(tsink, pm_localize_bufs+pm_limit_bufs, ctx=rctx, name="localize/limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
