@@ -410,33 +410,34 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # don't simplify any other gates, can lead to OOB, we substitute them back later
   uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
-  all_candidates = []
   # simplify uop given that valid is True
-  for i, (expr,v) in enumerate(bounds.items()):
+  all_candidates = []
+  for i,(expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
-    # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
-    candidates = []
-    if try_simplex and expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
-      # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    candidates.append([(expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype))])
-    all_candidates.append(candidates[-1][0])
+    all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
 
-    for candidate in candidates:
-      # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      newuops = [uop.substitute({X:newX}) for X,newX in candidate]
-      if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
-      newuops = [u.simplify().substitute({newX:X}).simplify(full_symbolic=False) for (X,newX),u in zip(candidate,newuops)]
-      if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
-        if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
-        if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
-      elif all_same(newuops): uop = newuops[0]
+    if try_simplex:
+      # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
+      candidates = [[all_candidates[-1]]]
+      if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
+        # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
+        candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
 
-  # try all the valids together (but only the non-simplex ones)
-  uop = uop.substitute(sub_dict:=dict(all_candidates)).simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
+      for candidate in candidates:
+        # if every branch in candidate gives the same simplified uop, we can rewrite the uop
+        newuops = [uop.substitute({X:newX}) for X,newX in candidate]
+        if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
+        newuops = [u.simplify().substitute({newX:X}).simplify(full_symbolic=False) for (X,newX),u in zip(candidate,newuops)]
+        if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
+          if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
+          if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
+        elif all_same(newuops): uop = newuops[0]
 
+  # try all the valids together (but only the whole expressions)
+  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
+    uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify(full_symbolic=False)
   # put the loads back in
   uop = uop.substitute({v:k for k,v in load_subs.items()})
   return uop
