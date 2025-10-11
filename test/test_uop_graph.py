@@ -21,6 +21,21 @@ def to_uops_list(u:List[UOp]) -> List[UOp]:
   assert ret[-1].op is Ops.SINK
   return ret[:-1]
 
+def test_sqrt_cast_f16_bf16_to_f32():
+  from tinygrad.uop.decompositions import get_late_rewrite_patterns
+  pm = get_late_rewrite_patterns((Ops.SQRT,))
+  def rew(dt):
+    x = UOp(Ops.DEFINE_VAR, dt)
+    return graph_rewrite(UOp(Ops.SQRT, dt, (x,)), pm)
+  for dt in (dtypes.float16, dtypes.bfloat16):
+    r = rew(dt)
+    assert r.op is Ops.CAST and r.dtype == dt
+    s = r.src[0]
+    assert s.op is Ops.SQRT and s.dtype is dtypes.float32
+    assert s.src[0].op is Ops.CAST and s.src[0].dtype is dtypes.float32
+  r = rew(dtypes.float32)
+  assert r.op is Ops.SQRT and r.dtype is dtypes.float32
+
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
     v1 = UOp.const(dtypes.int.vec(3), (0,1,2))

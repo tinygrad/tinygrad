@@ -259,8 +259,7 @@ class OpenCLRenderer(CStyleLanguage):
   type_map = { dtypes.int8: "char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
               dtypes.bfloat16: "ushort" }
 
-  code_for_op = {**CStyleLanguage.code_for_op,
-    Ops.SQRT: lambda x,dtype: f"sqrt((float)({x}))" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})"}
+  code_for_op = {**CStyleLanguage.code_for_op}
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}({ctx[x.src[0]]})"),
     # load/store image (OpenCL)

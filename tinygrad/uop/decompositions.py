@@ -325,6 +325,10 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
       pat += [(UPat(op, dtype=TRANSCENDENTAL_DTYPES, src=(UPat.var("d"),)), f),
               (UPat(op, dtype=tuple(dt for dt in dtypes.floats if dt not in TRANSCENDENTAL_DTYPES), src=(UPat.var("d"),), name="x"),
                 lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
+  # promote f16/bf16 sqrt to f32
+  if Ops.SQRT in ops or force_transcendental:
+    pat += [(UPat(Ops.SQRT, dtype=(dtypes.float16, dtypes.bfloat16), src=(UPat.var("d"),), name="x"),
+            lambda x,d: d.cast(dtypes.float32).alu(x.op).cast(x.dtype))]
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
