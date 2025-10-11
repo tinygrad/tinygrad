@@ -6,7 +6,8 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes, gzip, base64, tinygrad.runtime.support.mesa as mesa
+import ctypes, ctypes.util, os, gzip, base64
+found = (os.path.exists(path:=(BASE:=os.getenv('MESA_PATH', '/usr/lib'))+'/libtinymesa_cpu.so') or (path:=ctypes.util.find_library('tinymesa_cpu') or '') or os.path.exists(path:=f'{BASE}/libtinymesa.so') or (path:=ctypes.util.find_library('tinymesa') or ''))
 
 
 class AsDictMixin:
@@ -145,7 +146,7 @@ else:
     c_long_double_t = ctypes.c_ubyte*16
 
 _libraries = {}
-_libraries['libtinymesa_cpu.so'] = ctypes.CDLL(mesa.path) if mesa.found else None
+_libraries['libtinymesa_cpu.so'] = ctypes.CDLL(path) if found else None
 class FunctionFactoryStub:
     def __getattr__(self, _):
       return ctypes.CFUNCTYPE(lambda y:y)
@@ -155,7 +156,7 @@ class FunctionFactoryStub:
 # This is a non-working stub instead.
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
-_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL(mesa.path) if mesa.found else None
+_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL(path) if found else None
 
 
 class struct_blob(Structure):
@@ -19744,4 +19745,4 @@ __all__ = \
     'union_util_format_description_0', 'util_format_colorspace',
     'util_format_layout', 'va_list']
 lvp_nir_options = gzip.decompress(base64.b64decode('H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA'))
-def __getattr__(nm): raise AttributeError() if mesa.found else FileNotFoundError(f'libtinymesa not found ({mesa.PATH=}). See https://github.com/sirhcm/tinymesa (release: mesa-25.2.3-3a5961a)')
+def __getattr__(nm): raise AttributeError() if found else FileNotFoundError(f'libtinymesa not found (BASE PATH={BASE}). See https://github.com/sirhcm/tinymesa (release: mesa-25.2.3-3a5961a)')
