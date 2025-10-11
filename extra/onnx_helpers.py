@@ -70,22 +70,18 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
     else: np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
 
 def validate_all_intermediates(onnx_file, inputs, rtol=1e-5, atol=1e-5):
-  report = produce_node_output_report(onnx_file, inputs)
+  report = generate_node_output_report(onnx_file, inputs)
   for i, node in enumerate(report):
     node_name = node["node"]
     outputs = node["outputs"]
-    print(f"Validating node_{i}: {node_name}")
     for output in outputs:
       output_name = output["name"]
       tinygrad_out = output["tinygrad"]
       ort_out = output["onnxruntime"]
-      np.testing.assert_allclose(tinygrad_out, ort_out, rtol=rtol, atol=atol, err_msg=f"For tensor '{output_name}' in {node_name}")
-      abs_diff = np.abs(tinygrad_out - ort_out)
-      ort_out_abs = np.abs(ort_out)
-      relative_diff = np.divide(abs_diff, ort_out_abs, out=np.zeros_like(abs_diff), where=(ort_out_abs != 0))
-      print(f"{output_name}: (max_abs_diff={np.max(abs_diff):.2e}, max_rel_diff={np.max(relative_diff):.2e})")
+      np.testing.assert_allclose(tinygrad_out, ort_out, rtol=rtol, atol=atol, err_msg=f"NODE{i}:{node_name} OUTPUT:{output_name}")
+      print(f"Validated NODE{i}:{node_name} OUTPUT:{output_name}")
 
-def produce_node_output_report(onnx_file, inputs):
+def generate_node_output_report(onnx_file, inputs):
   """
   Build a report of all ONNX node outputs from tinygrad and onnxruntime
 
@@ -95,7 +91,11 @@ def produce_node_output_report(onnx_file, inputs):
     {
       "node": str,
       "outputs": [
-        { "name": str, "tinygrad": np.ndarray, "onnxruntime": np.ndarray },
+        {
+          "name": str,
+          "tinygrad": np.ndarray|null,
+          "onnxruntime": np.ndarray|null,
+        },
         ...
       ]
     },
@@ -104,7 +104,7 @@ def produce_node_output_report(onnx_file, inputs):
   ```
 
   Note:
-  - requires onnx_graphsurgeon: pip install onnx-graphsurgeon
+  - requires onnx_graphsurgeon: python3 -m pip install onnx-graphsurgeon
   """
   import onnx_graphsurgeon as gs
   import onnx
@@ -132,14 +132,9 @@ def produce_node_output_report(onnx_file, inputs):
     outputs = []
     for each_output in node.outputs:
       name = each_output.name
-      outputs.append({ "name": name, "tinygrad": tinygrad_out[name], "onnxruntime": ort_out[name] })
+      tinygrad_output = tinygrad_out[name]
+      ort_output = ort_out[name]
+      outputs.append({"name": name, "tinygrad": tinygrad_output, "onnxruntime": ort_output})
     report.append({"node": node.name, "outputs": outputs})
 
   return report
-
-
-if __name__ == "__main__":
-  from tinygrad.helpers import fetch
-  fn = fetch("https://github.com/commaai/openpilot/raw/v0.9.4/selfdrive/modeld/models/supercombo.onnx")
-  validate(fn, get_example_inputs(OnnxRunner(fn).graph_inputs), rtol=7e-3, atol=9e-2)
-  # pprint(report)
