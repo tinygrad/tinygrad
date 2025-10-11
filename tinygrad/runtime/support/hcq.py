@@ -432,19 +432,19 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
-  def _make_no_iface_error(self, errs:str, err_short:str) -> RuntimeError:
-    # Keep it in a separate function to avoid creating a traceback <-> locals ref cycle
-    e = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
-    if hasattr(e, "add_note"): e.add_note(errs + err_short)
-    return e
+  # def _make_no_iface_error(self, errs:str, err_short:str) -> RuntimeError:
+  #   # Keep it in a separate function to avoid creating a traceback <-> locals ref cycle
+  #   e = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
+  #   e.add_note(errs + err_short)
+  #   return e
 
   def _select_iface(self, *ifaces:Type):
-    errs, err_short = "", ""
+    excs = []
     if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val.upper()))
     for iface_t in ifaces:
       try: return iface_t(self, self.device_id)
-      except Exception as e: errs, err_short = errs + f"\n{iface_t.__name__}: {traceback.format_exc()}", err_short + f"\n{iface_t.__name__}: {e}."
-    raise self._make_no_iface_error(errs, err_short)
+      except Exception as e: excs.append(e)
+    raise ExceptionGroup(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available", excs)
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
