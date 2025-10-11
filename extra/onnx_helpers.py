@@ -7,6 +7,14 @@ ort_options = ort.SessionOptions()
 ort_options.log_severity_level = 3
 
 def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
+  """
+  Generate example input tensors based on the provided ONNX graph input specifications.
+
+  Example:
+    from tinygrad.nn.onnx import OnnxRunner
+    from extra.onnx_helpers import get_example_inputs
+    inputs = get_example_inputs(OnnxRunner(model_path).graph_inputs)
+  """
   def _get_shape(onnx_shape: tuple[str|int]):
     shape = []
     for onnx_dim in onnx_shape:
@@ -61,6 +69,9 @@ def _get_tinygrad_and_ort_np_outputs(onnx_file, inputs):
   return tinygrad_out, ort_out
 
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
+  """
+  Compares the final output tensors of an onnx model run in tinygrad and onnxruntime.
+  """
   tinygrad_out, ort_out = _get_tinygrad_and_ort_np_outputs(onnx_file, inputs)
 
   assert tinygrad_out.keys() == ort_out.keys()
@@ -70,41 +81,47 @@ def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
     else: np.testing.assert_allclose(tiny_v, onnx_v, rtol=rtol, atol=atol, err_msg=f"For tensor '{k}' in {tinygrad_out.keys()}")
 
 def validate_all_intermediates(onnx_file, inputs, rtol=1e-5, atol=1e-5):
+  """
+  Compares all intermediate node output of an onnx model run in tinygrad and onnxruntime.
+  """
   report = generate_node_output_report(onnx_file, inputs)
   for i, node in enumerate(report):
     node_name = node["node"]
+    op = node["op"]
     outputs = node["outputs"]
     for output in outputs:
       output_name = output["name"]
       tinygrad_out = output["tinygrad"]
       ort_out = output["onnxruntime"]
-      np.testing.assert_allclose(tinygrad_out, ort_out, rtol=rtol, atol=atol, err_msg=f"NODE{i}:{node_name} OUTPUT:{output_name}")
-      print(f"Validated NODE{i}:{node_name} OUTPUT:{output_name}")
+      try:
+        np.testing.assert_allclose(tinygrad_out, ort_out, rtol=rtol, atol=atol, err_msg=f"{i}: {op=} {node_name=} {output_name=}")
+        print(f"Validated {i}: {op=} {node_name=} {output_name=}")
+      except AssertionError as e:
+        print(f"FAILED {i}: {op=} {node_name=} {output_name=}")
+        print(e)
 
 def generate_node_output_report(onnx_file, inputs):
   """
   Build a report of all ONNX node outputs from tinygrad and onnxruntime
 
   Returns:
-  ```
-  [
-    {
-      "node": str,
-      "outputs": [
-        {
-          "name": str,
-          "tinygrad": np.ndarray|null,
-          "onnxruntime": np.ndarray|null,
-        },
-        ...
-      ]
-    },
-    ...
-  ]
-  ```
-
-  Note:
-  - requires onnx_graphsurgeon: python3 -m pip install onnx-graphsurgeon
+    A list of dictionaries, where each entry corresponds to one
+    node in the ONNX graph. The structure is as follows:
+    [
+      {
+        "node": str,  # The name of the ONNX node.
+        "op": str,    # The operation type of the ONNX node.
+        "outputs": [
+          {
+            "name": str,                       # The name of the output tensor.
+            "tinygrad": np.ndarray | None,     # The output value from tinygrad.
+            "onnxruntime": np.ndarray | None,  # The output value from onnxruntime.
+          },
+          ...
+        ]
+      },
+      ...
+    ]
   """
   import onnx_graphsurgeon as gs
   import onnx
@@ -131,10 +148,10 @@ def generate_node_output_report(onnx_file, inputs):
   for node in model_nodes:
     outputs = []
     for each_output in node.outputs:
-      name = each_output.name
+      name = each_output.name or "unnamed"
       tinygrad_output = tinygrad_out[name]
       ort_output = ort_out[name]
       outputs.append({"name": name, "tinygrad": tinygrad_output, "onnxruntime": ort_output})
-    report.append({"node": node.name, "outputs": outputs})
+    report.append({"node": node.name, "op": node.op, "outputs": outputs})
 
   return report
