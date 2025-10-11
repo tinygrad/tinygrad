@@ -10,7 +10,8 @@ class MathTrait:
 
   # great functions you get!
   def ufix(self:TMathTrait, x:ConstType|TMathTrait) -> TMathTrait: return self.const_like(x) if not isinstance(x, MathTrait) else x
-  def _binop(self, op, x, reverse): return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
+  def _binop(self:TMathTrait, op:Ops, x:TMathTrait|ConstType, reverse:bool) -> TMathTrait:
+    return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
   def logical_not(self): return self.ne(True)
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
