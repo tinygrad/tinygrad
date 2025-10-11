@@ -1,9 +1,8 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
-from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, UPat, Ops
+from tinygrad.helpers import Context, GlobalCounters
+from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
     A = Tensor.empty(4, 4, dtype='int')
@@ -55,7 +54,6 @@ class TestRangeifyOpt(unittest.TestCase):
     A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
     A.sum().realize()
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
     # ranges 1 and 3 are merging
@@ -72,6 +70,7 @@ class TestRangeify(unittest.TestCase):
     ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
     ret.realize()
 
+  @unittest.skip("RANGEIFY=0 does nothing")
   def test_double_gemm_real(self):
     def go():
       with Context(DEBUG=0):
@@ -201,6 +200,7 @@ class TestRangeify(unittest.TestCase):
     out = blk._feed_forward(x)
     out.realize()
 
+  @unittest.skip("RANGEIFY=0 does nothing")
   def test_flash_attention(self):
     BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
@@ -228,77 +228,6 @@ class TestRangeify(unittest.TestCase):
     self.assertLessEqual(mse, 1e-6)
 
 # contiguous + reduce can support ranges?
-
-@unittest.skip("okay to disable this for now")
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
-class TestOuterworld(unittest.TestCase):
-  def test_passthrough_range(self):
-    t = Tensor.rand(10, 10).realize()
-
-    # passthrough ranges
-    a = UOp.range(10, -1)
-    sel = t[a]
-    cpy = sel.contiguous(a).realize()
-
-    self.assertTrue((t==cpy).all().item())
-
-  def test_flip_range(self):
-    t = Tensor.rand(10, 10).realize()
-
-    # passthrough ranges
-    a = UOp.range(10, -1)
-    sel = t[9-a]
-    cpy = sel.contiguous(a).realize()
-
-    self.assertTrue((t.flip(0)==cpy).all().item())
-
-  def test_vmap(self):
-    def f(x): return x.sum(axis=0)*2
-
-    x = Tensor.ones(3, 10, 2).contiguous()
-
-    # vmap across axis 0
-    a = UOp.range(3, -1)
-    out = f(x[a])
-    out = out.contiguous(a)
-
-    # 3x2 grid of 20
-    out.realize()
-    print(out.numpy())
-
-  @unittest.skip("opts don't work")
-  def test_triple_gemm(self):
-    x = Tensor.rand(1, 16).realize()
-    W = Tensor.rand(3, 16, 16).realize()
-
-    manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
-
-    a = UOp.range(3, -1)
-    x = x.assign(x @ W[a])
-    out = x.contiguous(a)[-1].contiguous().realize()
-
-    self.assertTrue((manual==out).all().item())
-
-  def test_setitem_pyrange(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    for i in range(10):
-      o[i] = t[i]
-    o.realize()
-    self.assertTrue((t==o).all().item())
-
-  @unittest.skip("TODO: fix this")
-  def test_setitem(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    i = UOp.range(10, -1)
-    o[i] = t[i]
-    o.contiguous(i).realize()
-    self.assertTrue((t==o).all().item())
 
 @unittest.skip("pm_rangeify no longer exists. test this in a different way")
 class TestRangeifyPM(unittest.TestCase):

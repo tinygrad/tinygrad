@@ -2,10 +2,9 @@ from typing import Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp
-from tinygrad.uop.symbolic import sym
-from tinygrad.helpers import argsort, all_same, Context
-from tinygrad.uop.ops import graph_rewrite, sint, AxisType
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
+from tinygrad.uop.symbolic import symbolic, pm_simplify_valid
+from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -42,8 +41,7 @@ class BufferizeOpts:
 @dataclass
 class IndexingContext:
   realize_map: dict[UOp, None] = field(default_factory=dict)
-  range_map: dict[UOp, tuple[list[UOp], list[UOp]]] = field(default_factory=dict)
-  pads_gate: dict[UOp, UOp] = field(default_factory=dict)
+  range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
@@ -56,10 +54,10 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   new_srcs = []
   for s in x.src:
     new_src = s
-    if s.op in {Ops.BUFFER, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
+    if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
-      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(s,)+tuple(ctx.range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
+      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+tuple(ctx.range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     new_srcs.append(new_src)
   # NOTE: do we need this?
@@ -67,7 +65,8 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  ret = ctx.pads_gate[x].where(x.src[0], UOp.const(x.dtype, 0))
+  valid: UOp = functools.reduce(operator.and_, [r.get_valid() for r in ctx.range_map[x][0]], UOp.const(dtypes.bool, True))
+  ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
@@ -103,23 +102,53 @@ pm_apply_rangeify = PatternMatcher([
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
 
+# this is the definition of the movement ops
+@functools.cache
+def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  match op:
+    case Ops.SHRINK:  rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, arg))
+    case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
+    case Ops.FLIP:    rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, in_shape, arg))
+    case Ops.EXPAND:  rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
+    case Ops.PAD:
+      # TODO: why is multiple graph_rewrites faster than one here?
+      rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh+s))).where(r-s, UOp.invalid()),
+        symbolic+pm_simplify_valid, name="pad") for r,sh,(s,e) in zip(rngs, in_shape, arg))
+    case Ops.RESHAPE:
+      acc = 1
+      axes_in:list[UOp] = []
+      for s,src in list(zip(arg, rngs))[::-1]:
+        axes_in.append(acc*src)
+        acc *= s
+      combined_axes = sum(axes_in, start=UOp.const(dtypes.index, 0))
+      axes_out:list[UOp] = []
+      for s in in_shape[::-1]:
+        axes_out.append(combined_axes % s)
+        combined_axes //= s
+      # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
+      rngs = graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid, name="reshape").src
+    case _: raise RuntimeError(f"{op} is not a MovementOp")
+  return rngs
+
+@cpu_profile(TracingKey("run_rangeify"), "TINY")
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="Input Graph")
 
+  # get the traversal order
+  with cpu_profile(TracingKey("reverse toposort"), "TINY"):
+    tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
+
   # explicit rangeify
   ending_ranges: dict[UOp, bool] = {}
-  for x in tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map()):
+  for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
     ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
     # if this element has weight and it's ending a range, we (force) realize it
-    if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
-      if x.op_in_backward_slice_with_self(Ops.BUFFER, Ops.BUFFERIZE, Ops.CONTIGUOUS):
-        if x.op_in_backward_slice_with_self(Ops.REDUCE_AXIS):
-          rctx.realize_map[x] = None
+    if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}): rctx.realize_map[x] = None
 
     # *** the ranges on the output are
     #  1. new if this op is realized
@@ -129,7 +158,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
-      out_rngs = [rctx.new_range(s) for s in x.shape]
+      out_rngs = tuple(rctx.new_range(s) if not isinstance(s, UOp) or s.op is not Ops.RANGE else s for s in x.shape)
       # all ranges are ended now
       ending_ranges[x] = False
     elif x.op in {Ops.MSTACK, Ops.MSELECT}:
@@ -153,15 +182,16 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
       # TODO: in RANGEIFY > 1 all_all_same isn't required
       all_all_same = all(same_rngs for _,_,same_rngs in rngs_valids)
-      out_rngs = []
+      _out_rngs = []
       for i,(local_rngs,valids,same_rngs) in enumerate(rngs_valids):
         # we compare the ranges without their valids
         if all_all_same:
           # the new valid is the OR of all the children valids
           minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
-          out_rngs.append(minimum_valid.where(local_rngs[0], UOp.invalid()).simplify())
+          _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
         else:
-          out_rngs.append(rctx.new_range(x.shape[i]))
+          _out_rngs.append(rctx.new_range(x.shape[i]))
+      out_rngs = tuple(_out_rngs)
 
       # we have to realize here if there's new ranges
       if not all_all_same: rctx.realize_map[x] = None
@@ -175,47 +205,16 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     #  2. newly created for REDUCE_AXIS
     #  3. passed through for everything else
 
-    rngs = out_rngs  # rngs is the input ranges
+    rngs = out_rngs  # rngs is the input ranges  # pylint: disable=possibly-used-before-assignment
 
-    # apply movement ops. this is the definition of them
-    if x.op is Ops.SHRINK:  rngs = [a+ss if resolve(ss != 0) else a for a,(ss,_) in zip(rngs, x.arg)]
-    if x.op is Ops.PERMUTE: rngs = [rngs[p] for p in argsort(x.arg)]
-    if x.op is Ops.FLIP:    rngs = [((s-1)-a) if f else a for a,s,f in zip(rngs, x.shape, x.arg)]
-    if x.op is Ops.EXPAND:
-      rngs = [a if resolve(x==y, False) else a.const_like(0) for a,x,y in zip(rngs, x.src[0].shape, x.shape)]
-      ending_ranges[x] = True
-    if x.op is Ops.PAD:
-      rngs = rngs[:]
-      bigwhere = UOp.const(dtypes.bool, True)
-      for i,(sh,(s,e)) in enumerate(zip(x.shape, x.arg)):
-        if s == 0 and e == 0: continue
-        where = UOp.const(dtypes.bool, True)
-        if resolve(e > 0): where = where & (rngs[i] < (sh-e))
-        if resolve(s > 0): where = where & (rngs[i] >= s)
-        bigwhere = bigwhere & where
-        with Context(TRACK_MATCH_STATS=0):
-          rngs[i] = graph_rewrite(where.where(rngs[i]-s, UOp.invalid()), sym)
-      # PAD is replaced with a WHERE in the big graph to inject the 0s at the right place
-      rctx.pads_gate[x] = bigwhere.simplify()
-    if x.op is Ops.RESHAPE:
-      acc = 1
-      to_sum = []
-      for s,src in list(zip(x.shape, rngs))[::-1]:
-        to_sum.append(acc*src)
-        acc *= s
-      mish = sum(to_sum, start=UOp.const(dtypes.index, 0))
-      ret:list[UOp] = []
-      for s in x.src[0].shape[::-1]:
-        ret.append(mish % s) # NOTE: simplify will turn this to CONST
-        mish //= s
-      # this simplify is doing a lot of heavy lifting. this is the replacement for the view merger in RESHAPE
-      rngs = list(UOp.sink(*ret[::-1]).simplify().src)
+    # apply movement ops
+    if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.arg, rngs)
+    # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
+    if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape): ending_ranges[x] = True
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
-      rngs = rngs[:]
-      for i,s in enumerate(x.src[0].shape):
-        if i in x.arg[1]: rngs[i] = rctx.new_range(s, axistype=AxisType.REDUCE)
+      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
 
     if debug:
       print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",

@@ -183,7 +183,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
-  all = floats + ints + (bool, index)
+  all = floats + ints + (bool, index) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())

@@ -14,8 +14,9 @@ const darkenHex = (h, p = 0) =>
   ).toString(16).padStart(6, '0')}`;
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
+const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
-  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? ANSI_COLORS[(parseInt(code)-30+60)%60] : defaultColor }));
+  ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
@@ -137,17 +138,18 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#3A57B7","#5066C1","#6277CD","#7488D8","#8A9BE3","#A3B4F2"],
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
-  for (const e of source.shapes) {
-    for (let i=0; i<e.y0.length; i++) {
-      e.y0[i] = e.y0[i]*k;
-      e.y1[i] = e.y1[i]*k;
+  for (const shapes of source.views)
+    for (const e of shapes) {
+      for (let i=0; i<e.y0.length; i++) {
+        e.y0[i] = e.y0[i]*k;
+        e.y1[i] = e.y1[i]*k;
+      }
     }
-  }
   const change = (source.height*k)-source.height;
   const div = document.getElementById(tid);
   div.style.height = rect(div).height+change+"px";
@@ -163,7 +165,13 @@ const drawLine = (ctx, x, y, opts) => {
   ctx.stroke();
 }
 
-var data, focusedDevice, canvasZoom, zoomLevel = d3.zoomIdentity;
+function tabulate(rows) {
+  const root = d3.create("div").style("display", "grid").style("grid-template-columns", `${Math.max(...rows.map(x => x[0].length), 0)}ch 1fr`).style("gap", "0.2em");
+  for (const [k,v] of rows) { root.append("div").text(k); root.append("div").node().append(v); }
+  return root;
+}
+
+var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
   d3.select(".metadata").html("");
@@ -221,14 +229,15 @@ async function renderProfiler() {
         const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
         const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
-        if (e.ref != null) ref = {ctx:e.ref, step:0};
+        let shapeRef = e.ref;
+        if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
         else if (ref != null) {
           const start = ref.step>0 ? ref.step+1 : 0;
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
-          ref = stepIdx === -1 ? null : {ctx:ref.ctx, step:stepIdx};
+          if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
         const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
-        const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...ref };
+        const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -237,7 +246,7 @@ async function renderProfiler() {
       const peak = u64();
       let x = 0, y = 0;
       const buf_shapes = new Map(), temp = new Map();
-      const timestamps = [];
+      const timestamps = [], valueMap = new Map();
       for (let j=0; j<eventsLen; j++) {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
@@ -245,11 +254,11 @@ async function renderProfiler() {
           const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
           buf_shapes.set(key, shape); temp.set(key, shape);
           timestamps.push(ts);
-          x += 1; y += nbytes;
+          x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
           timestamps.push(ts);
-          x += 1; y -= free.nbytes;
+          x += 1; y -= free.nbytes; valueMap.set(ts, y);
           free.x.push(x);
           free.y.push(free.y.at(-1));
           temp.delete(key);
@@ -270,17 +279,40 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = {tooltipText:`${dtype} len:${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\nnum:${num}\nalive for ${formatTime(dur)}`};
+        const html = document.createElement("div");
+        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
+        const info = html.appendChild(tabulate(rows).node());
+        const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
-      data.tracks.set(k, { shapes, visible, offsetY, height, peak, scaleFactor:maxheight*4/height });
+      // generic polygon merger
+      const base0 = yscale(0);
+      const allX = Array.from(new Set(shapes.flatMap(s => s.x))).sort((a,b)=>a-b);
+      const idxs = new Map(allX.map((x,i) => [x, i]));
+      const maxY = new Map(allX.map(x => [x, base0]));
+      // for every [a,b) update the max y at x
+      for (const sh of shapes) {
+        for (let i=0; i<sh.x.length-1; i++) {
+          const startIdx = idxs.get(sh.x[i]), endIdx = idxs.get(sh.x[i+1]);
+          const shapeY = sh.y1[i];
+          for (let k=startIdx; k<endIdx; k++) {
+            const x = allX[k]; maxY.set(x, Math.min(maxY.get(x), shapeY));
+          }
+        }
+      }
+      const sum = {x:[], y0:[], y1:[], fillColor:"#2B1B72"};
+      for (let i=0; i<allX.length-1; i++) {
+        sum.x.push(allX[i], allX[i+1]);
+        const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
+      }
+      data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
         for (const [tid, track] of data.tracks) {
           track.offsetY += offset;
-          if (tid === newFocus) offset += rescaleTrack(track, tid, track.scaleFactor);
-          else if (tid === focusedDevice) offset += rescaleTrack(track, tid, 1/track.scaleFactor);
+          if (tid === newFocus) { track.shapes = track.views[1]; offset += rescaleTrack(track, tid, track.scaleFactor); }
+          else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
         data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
         focusedDevice = newFocus;
@@ -301,22 +333,26 @@ async function renderProfiler() {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    for (const [_, { offsetY, shapes, visible }] of data.tracks) {
+    const paths = [];
+    for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
         // generic polygon
         if (e.width == null) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          ctx.beginPath();
-          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          const p = new Path2D();
+          p.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
-            ctx.lineTo(x[i], offsetY+e.y0[i]);
-            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg:e.arg });
+            p.lineTo(x[i], offsetY+e.y0[i]);
+            let arg = e.arg;
+            if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), 'B')}`}
+            visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
-          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
-          ctx.closePath();
-          ctx.fillStyle = e.fillColor; ctx.fill();
+          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
+          p.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill(p);
+          if (focusedShape && e.arg?.key === focusedShape) { paths.push(p); }
           continue;
         }
         // contiguous rect
@@ -370,6 +406,7 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
+    for (const p of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(p); }
   }
 
   function resize() {
@@ -410,6 +447,8 @@ async function renderProfiler() {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
+    if (foundRect?.key != focusedShape) { focusedShape = foundRect?.key; render(zoomLevel); }
+    return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
   });
 
   canvas.addEventListener("mousemove", e => {
@@ -620,17 +659,10 @@ async function main() {
           }
         }
       }
-      const summary = metadata.appendChild(document.createElement("table"));
-      for (const s of ret.summary) {
-        const tr = summary.appendChild(document.createElement("tr"));
-        tr.className = "main-row";
-        const td = tr.appendChild(document.createElement("td"));
-        const div = td.appendChild(document.createElement("div"));
-        div.className = "legend";
-        div.appendChild(document.createElement("div")).style.background = cycleColors(colorScheme.CATEGORICAL, s.idx);
-        div.appendChild(document.createElement("p")).textContent = s.label;
-        appendTd(tr, s.value);
-      }
+      metadata.appendChild(tabulate(ret.summary.map(s => {
+        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "24px").style("height", "100%");
+        return [s.label.trim(), div.node()];
+      })).node());
     } else root.appendChild(codeBlock(ret.src, "x86asm"));
     return document.querySelector(".disasm").replaceChildren(root);
   }

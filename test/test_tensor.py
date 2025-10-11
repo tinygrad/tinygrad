@@ -4,7 +4,7 @@ import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _METADATA
-from tinygrad.helpers import getenv, temp, mv_address, RANGEIFY
+from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
@@ -595,21 +595,21 @@ class TestMoveTensor(unittest.TestCase):
     np.testing.assert_equal(x.grad.numpy(), [[2,2,2],[0,0,0],[-2,-2,-2]])
 
 class TestZeroShapeTensor(unittest.TestCase):
-  def test_shape_stride(self):
+  def test_shape_is_expanded(self):
     t = Tensor.empty(3, 2, 0)
     assert t.shape == (3, 2, 0)
     # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
+    assert t.uop.st.is_expanded() == (True, True, True)
 
     t = Tensor.empty(3, 0, 2)
     assert t.shape == (3, 0, 2)
     # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
+    assert t.uop.st.is_expanded() == (True, True, True)
 
     t = Tensor.empty(0, 0, 0)
     assert t.shape == (0, 0, 0)
     # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
+    assert t.uop.st.is_expanded() == (True, True, True)
 
   def test_rand(self):
     t = Tensor.rand(3, 2, 0)
@@ -872,18 +872,11 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    if not RANGEIFY:
-      self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
-      self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "__mul__", "relu"})
-      bw = [m for m in si.metadata if m.backward]
-      self.assertEqual(len(bw), 2)
-      self.assertEqual(bw[0].name, "sigmoid")
-    else:
-      self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-      self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
-      bw = [m for m in si.metadata if m.backward]
-      self.assertEqual(len(bw), 1)
-      self.assertEqual(bw[0].name, "sigmoid")
+    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
+    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
+    bw = [m for m in si.metadata if m.backward]
+    self.assertEqual(len(bw), 1)
+    self.assertEqual(bw[0].name, "sigmoid")
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):

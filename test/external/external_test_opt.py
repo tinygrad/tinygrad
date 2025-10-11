@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from tinygrad import GlobalCounters, Tensor, Device
-from tinygrad.helpers import getenv, RANGEIFY
+from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing
 from tinygrad.tensor import _to_np_dtype
@@ -164,7 +164,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed(self):
     a = Tensor.randn(16, 16, 16)
-    with CLCache(1 if RANGEIFY else 2):
+    with CLCache(1):
       c = a.sum(2)
       d = c.permute(1,0).contiguous()
       d.realize()
@@ -172,7 +172,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_contract_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
-    with CLCache(1 if RANGEIFY else 2):
+    with CLCache(1):
       c = a.sum(-1)
       d = c.reshape(16,16).permute(1,0).contiguous()
       d.realize()
@@ -180,7 +180,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_contractw1s_reshape(self):
     a = Tensor.randn(4, 4, 4, 4, 4)
-    with CLCache(1 if RANGEIFY else 2):
+    with CLCache(1):
       c = a.sum(-1)
       d = c.reshape(16,1,16).permute(2,1,0).contiguous()
       d.realize()
@@ -188,7 +188,7 @@ class TestOpt(unittest.TestCase):
 
   def test_permute_was_pushed_through_expand_reshape(self):
     a = Tensor.randn(16, 16, 16)
-    with CLCache(1 if RANGEIFY else 2):
+    with CLCache(1):
       c = a.sum(2)
       d = c.reshape(4,4,4,4).permute(2,3,0,1).contiguous()
       d.realize()
@@ -220,7 +220,7 @@ class TestOpt(unittest.TestCase):
     for axis in [0, 1]:
       for n in [4, 8, 16]:
         b = torch.ones(n, n).sum(axis).reshape(n, 1).expand(n, n).sum(axis)
-        with CLCache(allowed=3 if RANGEIFY else 2):
+        with CLCache(allowed=3):
           a = Tensor.ones(n, n).contiguous().sum(axis).reshape(n, 1).expand(n, n).sum(axis)
           a.realize()
         np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)
@@ -229,7 +229,7 @@ class TestOpt(unittest.TestCase):
     axis1, axis2 = 0, 1
     for n in [4, 8, 16]:
       b = torch.ones(n, n).sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
-      with CLCache(allowed=3 if RANGEIFY else 2):
+      with CLCache(allowed=3):
         a = Tensor.ones(n, n).contiguous().sum(axis1).reshape(n, 1).expand(n, n).sum(axis2)
         a.realize()
       np.testing.assert_allclose(a.numpy(), b.numpy(), rtol=1e-3, atol=1e-5)

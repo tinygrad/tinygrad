@@ -2,7 +2,7 @@ from typing import Literal, Callable, cast
 import os, math, sys
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, sint_to_uop, range_str
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
 from tinygrad.renderer import Renderer
@@ -112,7 +112,7 @@ class CStyleLanguage(Renderer):
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
-    launch_bounds = sint_to_uop(prod(local_dims)).vmax
+    launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
     [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] +
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])

@@ -1,7 +1,7 @@
 from typing import Any, Callable
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, RANGEIFY
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
 from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
@@ -38,11 +38,10 @@ rewrites_for_linearizer = [
 
 def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, optimize, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value, RANGEIFY.value)
+  return _get_rewrites_for_renderer(opts, optimize, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL,
-                               _RANGEIFY) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
 
@@ -52,8 +51,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
 
     # split ranges
-    if _RANGEIFY:
-      ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
+    ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
     ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
