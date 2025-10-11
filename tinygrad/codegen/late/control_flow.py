@@ -73,14 +73,13 @@ class CFGContext:
     # nested, meaning endrange y is a dependency of endrange x and range x is a dependency of endrange y
     # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
     # independent, endrange y is not a dependency of endrange x
+    # everything is nested inside the sink
     deps: dict[UOp, set[UOp]] = {}
     nesting: dict[UOp, UOp] = {}
     for u in sink.toposort():
       deps[u] = set().union(*(deps[s] for s in u.src))
-      if u.op in (Ops.ENDRANGE, Ops.ENDIF):
-        nesting |= {x:u for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and u.src[0] in deps[x] and x not in nesting}
-      if u.op is Ops.SINK:
-        nesting |= {x:u for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and x not in nesting}
+      if u.op in (Ops.ENDRANGE, Ops.ENDIF, Ops.SINK):
+        nesting |= {x:u for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and (u.op is Ops.SINK or u.src[0] in deps[x]) and x not in nesting}
       if u.op in (Ops.RANGE, Ops.ENDRANGE, Ops.IF, Ops.ENDIF): deps[u] |= {u}
 
     self.edges: dict[UOp, UOp] = {}
