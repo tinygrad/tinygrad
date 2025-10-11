@@ -111,14 +111,14 @@ def produce_node_output_report(onnx_file, inputs):
   import tempfile
 
   # rewrite the model to output all the node outputs
-  # infer shapes here fills the shapes and dtypes of intermediate values which graphsurgeon requires
+  # infer shapes here fills the shapes and dtypes of intermediate values which graphsurgeon requires when assigning them as outputs
   inferred_model = onnx.shape_inference.infer_shapes(onnx.load(onnx_file))
   model = gs.import_onnx(inferred_model)
   model_nodes = model.nodes
   node_outputs = [n.outputs for n in model.nodes]
   model.outputs = [each_output for outputs in node_outputs for each_output in outputs]
   rewritten_model = gs.export_onnx(model)
-  # onnxruntime only supports up to IR version 10
+  # TODO: remove this once ORT supports 1.18.0
   if getattr(rewritten_model, "ir_version", 0) > 10:
     rewritten_model.ir_version = 10
   with tempfile.NamedTemporaryFile(delete=False, suffix=".onnx") as f:
