@@ -115,7 +115,8 @@ class TransformerBlock:
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     if self.sliding_window:
       seqlen = x.shape[1]
-      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
+      ic(seqlen, start_pos, self.sliding_window)
+      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window+1)
       mask = sliding_mask if mask is None else mask+sliding_mask
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
@@ -188,8 +189,11 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
+    ic(start_pos, start_pos+seqlen)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
-    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
+    for layer in self.layers:
+      h = layer(h, start_pos, freqs_cis, mask)
+      ic(h.numpy())
     logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 

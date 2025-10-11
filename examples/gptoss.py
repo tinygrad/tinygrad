@@ -1,10 +1,12 @@
-import argparse, os, functools
+# https://huggingface.co/blog/faster-transformers
+# https://magazine.sebastianraschka.com/p/from-gpt-2-to-gpt-oss-analyzing-the
+import argparse, functools, os, sys
 from pathlib import Path
 from tinygrad import Tensor, nn, dtypes, Device
 from tinygrad.helpers import fetch, getenv, Timing, GlobalCounters
 from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters
 from examples.llama3 import load
-from extra.models.llama import Transformer, fix_bf16
+from extra.models.llama import Transformer
 from transformers import AutoTokenizer
 
 from icecream import install
@@ -27,29 +29,58 @@ class MixtureFeedForward:
   def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
     self.activated_experts = activated_experts
     self.gate = nn.Linear(dim, num_experts, bias=True)
-    self.gate_up_proj = Tensor.zeros(num_experts, dim, hidden_dim * 2, dtype=dtypes.bfloat16)
-    self.gate_up_proj_bias = Tensor.zeros(num_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
-    self.down_proj = Tensor.zeros(num_experts, hidden_dim, dim, dtype=dtypes.bfloat16)
+    self.up_proj = Tensor.zeros(num_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16)
+    self.up_proj_bias = Tensor.zeros(num_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
+    self.down_proj = Tensor.zeros(num_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
     self.down_proj_bias = Tensor.zeros(num_experts, dim, dtype=dtypes.bfloat16)
 
-  def __call__(self, x:Tensor) -> Tensor:
+  # def __call__(self, x:Tensor) -> Tensor:
+  #   assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
+  #   ic(x.shape)
+
+  #   # Select top-k experts
+  #   g = self.gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
+  #   g = g.squeeze() # (B,T,E) -> (E,)
+  #   probs, sel = g.topk(self.activated_experts) # (E,) -> (E,) (E,)
+  #   ic(probs.shape, sel.shape)
+
+  #   # expert weights
+  #   w1, b1 = self.up_proj[sel].transpose(1, 2), self.up_proj_bias[sel] # (E,D,D2) (E,D2)
+  #   w2, b2 = self.down_proj[sel].transpose(1, 2), self.down_proj_bias[sel] # (E,D,D) (E,D)
+  #   ic(w1.shape, b1.shape, w2.shape, b2.shape)
+
+
+
+  #   # out = (swiglu(x @ w1 + b1) @ w2 + b2).reshape(1, 1, -1)
+  #   out = swiglu(Tensor.einsum("beck,bk->bec", w1, g) + b1)
+  #   ic(out.shape)
+  #   out = Tensor.einsum("beck,bek->bec", w2, out) + b2
+  #   ic(out.shape)
+  #   out = Tensor.einsum("bec,be->bc", out, probs)
+  #   ic(out.shape)
+  #   return out
+
+  def __call__(self, x: Tensor) -> Tensor:
     assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
-    x = x.squeeze()
 
     # Select top-k experts
-    g = self.gate(x.unsqueeze(0)).squeeze()
-    probs, sel = g.topk(self.activated_experts)
-    probs = probs.softmax(axis=-1)
+    g = self.gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
+    g = g.squeeze() # (B,T,E) -> (E,)
+    probs, sel = g.topk(self.activated_experts) # (E,) -> (E,) (E,)
 
-    # Up projection + SwiGLU
-    up = x.dot(self.gate_up_proj[sel].transpose(1, 2)) + self.gate_up_proj_bias[sel]
-    up = swiglu(up)
+    # reshape
+    w1 = self.up_proj[sel].unsqueeze(0) # (1,E,D2,D)
+    w2 = self.down_proj[sel].unsqueeze(0) # (1,E,D,D)
+    b1 = self.up_proj_bias[sel].unsqueeze(0) # (1,E,D2)
+    b2 = self.down_proj_bias[sel].unsqueeze(0) # (1,E,D)
 
-    # Down projection
-    down = up.dot(self.down_proj[sel].transpose(1, 2)) + self.down_proj_bias[sel]
+    # MLP forward
+    t = x.squeeze(1)  # (B,T,D) -> (B,1,T,D)
+    t = swiglu(Tensor.einsum("bk,beck->bec", t, w1) + b1)  # (B,1,T,D) (1,E,D2,D) -> ?
+    t = Tensor.einsum("bek,beck->bec", t, w2) + b2  # (1, 4, 2880)
 
-    # Weighted sum
-    return (down * probs.unsqueeze(-1)).sum(0).unsqueeze(0).unsqueeze(0)
+    # Weighted sum over experts
+    return (t * probs.reshape(1, -1, 1)).sum(1, keepdim=True)  # (1, 1, 2880)
 
 def download_weights(model:str, total_num_weights:int) -> Path:
   model = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
@@ -176,6 +207,7 @@ if __name__ == "__main__":
 
   tok_tensor = None
   for i in range(args.count):
+    ic(start_pos, type(start_pos))
     GlobalCounters.reset()
 
     if args.timing: print("")
