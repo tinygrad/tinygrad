@@ -1,10 +1,9 @@
 import argparse, os, functools
 from pathlib import Path
 from tinygrad import Tensor, nn, dtypes, Device
-from tinygrad.helpers import fetch, getenv
-from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
+from tinygrad.helpers import fetch, getenv, Timing, GlobalCounters
+from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters
 from examples.llama3 import load
-# from examples.olmoe import MixtureFeedForward
 from extra.models.llama import Transformer, fix_bf16
 from transformers import AutoTokenizer
 
@@ -13,7 +12,7 @@ install()
 
 MODELS = {
   "20B": {
-    "params": {"dim": 2880, "hidden_dim": 2880, "n_heads": 64, "n_kv_heads": 8, "n_layers": 24, "norm_eps": 1e-5, "rope_theta": 150000, "vocab_size": 201088, "max_context": 4096, "num_experts": 32, "activated_experts": 4},
+    "params": {"dim": 2880, "hidden_dim": 2880, "n_heads": 64, "n_layers": 24, "norm_eps": 1e-5, "vocab_size": 201088, "n_kv_heads": 8, "head_dim": 64, "rope_theta": 150000, "max_context": 4096, "num_experts": 32, "activated_experts": 4},
     "total_num_weights": 3,
     "model": "openai/gpt-oss-20b",
     "tokenizer": "openai/gpt-oss-20b",
@@ -87,7 +86,6 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
 
   sd = {}
   for k, v in weights.items():
-    if 'model.layers.0' in k: ic(k, v.dtype, v.shape)
     if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
     if "model.layers" in k:
@@ -101,7 +99,7 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
         """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
         assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
         mxfp4_data = Tensor.cat(scales.unsqueeze(-1), blocks, dim=-1).flatten()  # interleave and flatten to 1D
-        ic(blocks, scales, mxfp4_data)
+        # ic(blocks, scales, mxfp4_data)
         return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, 39).reshape(*scales.shape[:2], -1)
 
     for l in range(n_layers):
@@ -109,7 +107,7 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
             blocks = f'layers.{l}.feed_forward.{proj}_blocks'
             scales = f'layers.{l}.feed_forward.{proj}_scales'
             proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
-            ic(proj)
+            # ic(proj)
             weights[f'layers.{l}.feed_forward.{proj}.weights'] = proj
     return weights
 
@@ -120,11 +118,10 @@ def load_model(path:Path, params:dict[str, int|float]) -> Transformer:
 
   # set head dim and add bias to each attention projection
   for i in range(len(model.layers)):
-    head_dim = 64 # in gpt-oss head_dim ≠ dim // n_heads so we manually set it
-    model.layers[i].attention.wq = nn.Linear(params["dim"], params["n_heads"] * head_dim, bias=True)
-    model.layers[i].attention.wk = nn.Linear(params["dim"], params["n_kv_heads"] * head_dim, bias=True)
-    model.layers[i].attention.wv = nn.Linear(params["dim"], params["n_kv_heads"] * head_dim, bias=True)
-    model.layers[i].attention.wo = nn.Linear(params["n_heads"] * head_dim, params["dim"], bias=True)
+    model.layers[i].attention.wq = nn.Linear(params["dim"], params["n_heads"] * params["head_dim"], bias=True)
+    model.layers[i].attention.wk = nn.Linear(params["dim"], params["n_kv_heads"] * params["head_dim"], bias=True)
+    model.layers[i].attention.wv = nn.Linear(params["dim"], params["n_kv_heads"] * params["head_dim"], bias=True)
+    model.layers[i].attention.wo = nn.Linear(params["n_heads"] * params["head_dim"], params["dim"], bias=True)
 
   # add sliding attention to all even attention layers
   for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
@@ -133,10 +130,10 @@ def load_model(path:Path, params:dict[str, int|float]) -> Transformer:
   for i in range(len(model.layers)): model.layers[i].sinks = Tensor.empty(params['n_heads'], dtype=dtypes.bfloat16)
 
   # load weights
-  weights = convert_from_huggingface(load(str(path / "model.safetensors.index.json")), params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
+  weights = convert_from_huggingface(load(str(path / "model.safetensors.index.json")), params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=True)
   weights = fix_mxfp4(weights, params["n_layers"])
-  for k, v in weights.items():
-      if 'model.layers.0' in k: ic(k, v.dtype, v.shape)
+#   for k, v in weights.items():
+#       if 'model.layers.0' in k: ic(k, v.dtype, v.shape)
 
   # replace weights in model
   load_state_dict(model, weights, strict=False, consume=True)
@@ -165,14 +162,38 @@ if __name__ == "__main__":
     print(out)
     exit(0)
 
-  # download weights
-#   with Timing("download weights ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
   model_path = Path(args.weights) if args.weights else download_weights(model_info["model"], model_info["total_num_weights"])
-  # load weights to GPU
   transformer = load_model(model_path, model_info["params"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
-  assert tokenizer.vocab_size == model_info["params"]["vocab_size"], f"{tokenizer.vocab_size=} not equal to {model_info['params']['vocab_size']}"
-
   param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(transformer))
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
+
+  outputted = args.prompt
+  start_pos, toks = 0, tokenizer(outputted)["input_ids"]
+  print(outputted, end="", flush=True)
+
+  tok_tensor = None
+  for i in range(args.count):
+    GlobalCounters.reset()
+
+    if args.timing: print("")
+    st = GlobalCounters.time_sum_s
+    next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
+    with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
+      with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on {Device.DEFAULT}") +
+                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB" +
+                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s")), enabled=args.timing):
+        tok_tensor = transformer(next_tok, start_pos, args.temperature)
+      tok = tok_tensor.item()
+
+    # use the kv cache
+    start_pos = len(toks)
+
+    # add the new token
+    toks.append(tok)
+
+    cur = tokenizer.decode(toks, skip_special_tokens=True)
+    sys.stdout.write(cur[len(outputted):])
+    sys.stdout.flush()
+    outputted = cur

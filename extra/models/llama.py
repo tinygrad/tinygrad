@@ -34,10 +34,10 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   return x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
 
 class Attention:
-  def __init__(self, dim, n_heads, n_kv_heads=None, max_context=0, linear=nn.Linear, qk_norm:float|None=None):
+  def __init__(self, dim, n_heads, n_kv_heads=None, head_dim=None, max_context=0, linear=nn.Linear, qk_norm:float|None=None):
     self.n_heads = n_heads
     self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads # n_kv_heads != n_heads implies MQA [arxiv/2307.09288, A.2.1]
-    self.head_dim = dim // n_heads
+    self.head_dim = dim // n_heads if head_dim is None else head_dim
     self.n_rep = self.n_heads // self.n_kv_heads
     self.max_context = max_context
 
@@ -65,6 +65,7 @@ class Attention:
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
 
+    ic(xq.shape, xk.shape)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
 
@@ -104,9 +105,9 @@ class FeedForward:
     return self.w2(w1 * w3)
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int, linear=nn.Linear,
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, head_dim:int, norm_eps:float, max_context:int, linear=nn.Linear,
                feed_forward=FeedForward, qk_norm=None, sliding_window:int=0):
-    self.attention = Attention(dim, n_heads, n_kv_heads, max_context, linear, qk_norm)
+    self.attention = Attention(dim, n_heads, n_kv_heads, head_dim, max_context, linear, qk_norm)
     self.feed_forward = feed_forward(dim, hidden_dim, linear)
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
@@ -173,8 +174,8 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
 
 class Transformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, embedding=nn.Embedding,
-               n_kv_heads=None, rope_theta=10000, max_context=1024, jit=True, feed_forward=FeedForward, qk_norm=None, disable_kv_cache=False):
-    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, 0 if disable_kv_cache else max_context,
+               n_kv_heads=None, head_dim=None, rope_theta=10000, max_context=1024, jit=True, feed_forward=FeedForward, qk_norm=None, disable_kv_cache=False):
+    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, head_dim, norm_eps, 0 if disable_kv_cache else max_context,
                                     linear, feed_forward=feed_forward, qk_norm=qk_norm) for _ in range(n_layers)]
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = embedding(vocab_size, dim)
