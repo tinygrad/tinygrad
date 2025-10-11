@@ -1,14 +1,14 @@
+from typing import cast, Self
 from tinygrad.uop import Ops
-from tinygrad.helpers import T
 from tinygrad.dtype import dtypes
 
 class MathTrait:
   # required to implement
-  def alu(self:T, op:Ops, *src) -> T: raise NotImplementedError
-  def const_like(self:T, b) -> T: raise NotImplementedError
+  def alu(self, op:Ops, *src) -> Self: raise NotImplementedError
+  def const_like(self, b) -> Self: raise NotImplementedError
 
   # great functions you get!
-  def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
+  def ufix(self, x) -> Self: return self.const_like(x) if not isinstance(x, MathTrait) else cast(Self, x)
   def _binop(self, op, x, reverse): return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
   def logical_not(self): return self.ne(True)
   def neg(self):

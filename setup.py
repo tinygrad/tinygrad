@@ -52,7 +52,7 @@ setup(name='tinygrad',
         "License :: OSI Approved :: MIT License"
       ],
       install_requires=[],
-      python_requires='>=3.10',
+      python_requires='>=3.11',
       extras_require={
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
