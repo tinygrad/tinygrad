@@ -864,7 +864,7 @@ class TestIFUOps(unittest.TestCase):
     if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
-    for st in sink.src:
+    for st in sink.src[0].src:
       self.assertEqual(len(st.src), 2)
 
   # this will be fixed with the merge gated stores bounty
