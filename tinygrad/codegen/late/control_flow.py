@@ -78,9 +78,9 @@ class CFGContext:
     for u in sink.toposort():
       deps[u] = set().union(*(deps[s] for s in u.src))
       if u.op in (Ops.ENDRANGE, Ops.ENDIF):
-        for n in [x for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and u.src[0] in deps[x] and x not in nesting]: nesting[n] = u
+        nesting |= {x:u for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and u.src[0] in deps[x] and x not in nesting}
       if u.op is Ops.SINK:
-        for n in [x for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and x not in nesting]: nesting[n] = u
+        nesting |= {x:u for x in deps[u] if x.op in (Ops.ENDRANGE, Ops.ENDIF) and x not in nesting}
       if u.op in (Ops.RANGE, Ops.ENDRANGE, Ops.IF, Ops.ENDIF): deps[u] |= {u}
 
     self.edges: dict[UOp, UOp] = {}
