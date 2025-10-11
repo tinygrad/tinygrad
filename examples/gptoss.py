@@ -33,13 +33,13 @@ class MixtureFeedForward:
     self.down_proj_bias = Tensor.zeros(num_experts, dim, dtype=dtypes.bfloat16)
 
   def __call__(self, x:Tensor) -> Tensor:
-    assert x.shape[0] == 1 and x.shape[1] == 1, "only BS=1 and seqlen=1"
+    assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
     x = x.squeeze()
 
     # Select top-k experts
     g = self.gate(x.unsqueeze(0)).squeeze()
     probs, sel = g.topk(self.activated_experts)
-    probs = probs.softmax(dim=-1)
+    probs = probs.softmax(axis=-1)
 
     # Up projection + SwiGLU
     up = x.dot(self.gate_up_proj[sel].transpose(1, 2)) + self.gate_up_proj_bias[sel]
@@ -145,7 +145,7 @@ if __name__ == "__main__":
   parser.add_argument("--count", type=int, default=30, help="Max number of tokens to generate")
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
-  parser.add_argument("--prompt", type=str, default="Hello.", help="Phrase to start with")
+  parser.add_argument("--prompt", type=str, default="Hi", help="Phrase to start with")
   parser.add_argument("--weights", type=str, default=None, help="Path to the downloaded weights")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   args = parser.parse_args()
@@ -171,6 +171,7 @@ if __name__ == "__main__":
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
+  ic(toks)
   print(outputted, end="", flush=True)
 
   tok_tensor = None
@@ -180,6 +181,7 @@ if __name__ == "__main__":
     if args.timing: print("")
     st = GlobalCounters.time_sum_s
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
+    ic(next_tok)
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
       with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on {Device.DEFAULT}") +
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB" +
