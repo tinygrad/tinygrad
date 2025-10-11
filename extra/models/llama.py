@@ -13,7 +13,6 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
 def complex_mult(A, c, d):
   a,b = A[..., 0:1], A[..., 1:2]
-  ic(a.shape, b.shape, c.shape)
   ro = a*c - b*d
   co = a*d + b*c
   return ro.cat(co, dim=-1)
@@ -24,7 +23,6 @@ def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Te
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
   assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
   c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
-  ic(c.shape, d.shape)
   xq_out = complex_mult(xq, c, d)
   xk_out = complex_mult(xk, c, d)
   return xq_out.flatten(3), xk_out.flatten(3)
@@ -63,12 +61,10 @@ class Attention:
       xq = self.q_norm(xq)
       xk = self.k_norm(xk)
 
-    ic(xq.shape, xk.shape)
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
 
-    ic(xq.shape, xk.shape)
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
 
@@ -119,8 +115,8 @@ class TransformerBlock:
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     if self.sliding_window:
       seqlen = x.shape[1]
-      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=mask.dtype, device=mask.device).tril(-self.sliding_window)
-      mask += sliding_mask
+      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
+      mask = sliding_mask if mask is None else mask+sliding_mask
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
