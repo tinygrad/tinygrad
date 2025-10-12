@@ -158,7 +158,7 @@ class NIRRenderer(Renderer):
 
   def __del__(self):
     try: mesa.glsl_type_singleton_decref()
-    except AttributeError: pass
+    except FileNotFoundError: pass
 
   @property
   def nir_options(self): raise NotImplementedError("needs nir_options")

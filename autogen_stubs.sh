@@ -519,13 +519,12 @@ generate_mesa() {
   LVP_NIR_OPTIONS=$(./extra/mesa/lvp_nir_options.sh $MESA_SRC)
 
   fixup $BASE/mesa.py
-  SUPPORT="found = (os.path.exists(path:=(BASE:=os.getenv('MESA_PATH', '/usr/lib'))+'/libtinymesa_cpu.so') or (path:=ctypes.util.find_library('tinymesa_cpu') or '') or os.path.exists(path:=f'{BASE}/libtinymesa.so') or (path:=ctypes.util.find_library('tinymesa') or ''))"
+  patch_dlopen $BASE/mesa.py tinymesa_cpu "(BASE:=os.getenv('MESA_PATH', f\"/usr{'/local/' if helpers.OSX else '/'}lib\"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so')" "f'{BASE}/libtinymesa{EXT}'"
   echo "lvp_nir_options = gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))" >> $BASE/mesa.py
   sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
-  sed -i "s/AttributeError/(AttributeError,ValueError)/" $BASE/mesa.py
-  sed -i -e "s/import ctypes/import ctypes, ctypes.util, os, gzip, base64/" -e "/import ctypes/a $SUPPORT" $BASE/mesa.py
-  sed -i "s/ctypes.CDLL('.\+')/ctypes.CDLL(path) if found else None/g" $BASE/mesa.py
-  echo "def __getattr__(nm): raise AttributeError() if found else FileNotFoundError(f'libtinymesa not found (MESA_PATH={BASE}). See https://github.com/sirhcm/tinymesa ($TINYMESA_TAG, $MESA_TAG)')" >> $BASE/mesa.py
+  sed -i "s/import ctypes/import ctypes, ctypes.util, os, gzip, base64, tinygrad.helpers as helpers/" $BASE/mesa.py
+  sed -i "s/ctypes.CDLL('.\+')/(dll := _try_dlopen_tinymesa_cpu())/" $BASE/mesa.py
+  echo "def __getattr__(nm): raise AttributeError() if dll else FileNotFoundError(f'libtinymesa not found (MESA_PATH={BASE}). See https://github.com/sirhcm/tinymesa ($TINYMESA_TAG, $MESA_TAG)')" >> $BASE/mesa.py
   sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/mesa.py
   # bitfield bug in clang2py
   sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/mesa.py
