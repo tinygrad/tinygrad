@@ -8,7 +8,7 @@
 #
 import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers
 def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'dawn']).decode().strip()
+  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
   except Exception: return ''
 PATHS_TO_TRY = [
   (BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'),
