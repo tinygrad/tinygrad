@@ -2,9 +2,9 @@ import socket, uuid, json, asyncio, threading
 from contextlib import asynccontextmanager
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
-from tinygrad.tensor import Tensor
 
 TINYFS_ENDPOINT = getenv("TINYFS_ENDPOINT", "localhost:6767")
+CHUNK_SIZE = 2**20
 
 class TinyFSDevice(Compiled):
   def __init__(self, device:str):
@@ -116,8 +116,8 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     async def _worker(item):
       i, loc, h = item
       async with self.dev.connection(loc) as (reader, writer):
-        ptr = i * Tensor.CHUNK_SIZE
-        size = min(len(dest[ptr:ptr+Tensor.CHUNK_SIZE]), Tensor.CHUNK_SIZE)
+        ptr = i * CHUNK_SIZE
+        size = min(len(dest[ptr:ptr+CHUNK_SIZE]), CHUNK_SIZE)
 
         writer.write(f"CHUNK_OUT {size}\r\n".encode())
         writer.write(h)

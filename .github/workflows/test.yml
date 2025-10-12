@@ -310,9 +310,9 @@ jobs:
     - name: Fuzz Test fast idiv
       run: python test/external/fuzz_fast_idiv.py
     - name: Fuzz Test shapetracker
-      run: |
-        python test/external/fuzz_shapetracker.py
-        python test/external/fuzz_shapetracker_math.py
+      run: CNT=50 python test/external/fuzz_shapetracker.py
+    - name: Fuzz Test shapetracker math
+      run: CNT=200 python test/external/fuzz_shapetracker_math.py
     - name: Fuzz Test shape ops
       run: python test/external/fuzz_shape_ops.py
 
