@@ -462,5 +462,17 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(len(ret["events"]), 4)
 
+  def test_free_last(self):
+    a = _alloc(1)
+    b = _alloc(1)
+    c = _alloc(2)
+    device = c.device
+    del a
+    del b
+    del c
+    ret = load_profile(Buffer.profile_events)["layout"][f"{device} Memory"]
+    self.assertEqual(ret["peak"], 4)
+    self.assertEqual(len(ret["events"]), 6)
+
 if __name__ == "__main__":
   unittest.main()
