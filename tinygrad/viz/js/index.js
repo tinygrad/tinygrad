@@ -257,8 +257,8 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          timestamps.push(ts);
-          x += 1; y -= free.nbytes; valueMap.set(ts, y);
+          timestamps.push(ts); valueMap.set(ts, y);
+          x += 1; y -= free.nbytes;
           free.x.push(x);
           free.y.push(free.y.at(-1));
           temp.delete(key);
@@ -401,6 +401,7 @@ async function renderProfiler() {
       }
     }
     // draw markers
+    ctx.textBaseline = "top";
     for (const m of markers) {
       const x = xscale(m.ts);
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
