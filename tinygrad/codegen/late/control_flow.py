@@ -55,16 +55,17 @@ def add_endif(x:UOp):
   if not any(k.op is Ops.IF for k in groups): return None
   return x.replace(src=tuple(UOp(Ops.ENDIF, src=(k,) + g) if k.op is Ops.IF else k for k,g in groups.items()))
 
-# some Ops.IF aren't closed by an Ops.STORE, in that case the Ops.SINK closes it
+# some IFs aren't closed by STOREs, in that case the ENDRANGE/SINK that nests it closes it
 def close_ifs(x:UOp):
   consumers = x.get_consumer_map()
   if (y:=next((s for s in consumers if s.op is Ops.IF and all(n.op is not Ops.ENDIF for n in consumers[s])), None)) is None: return None
+  if x.op is Ops.ENDRANGE: return x.replace(src=(x.src[0], UOp(Ops.ENDIF, src=(y,) + x.src[1:]))) if x.src[0] in y.ranges else None
   return x.replace(src=(UOp(Ops.ENDIF, src=(y,) + x.src),))
 
 pm_control_flow_ends = PatternMatcher([
   (UPat((Ops.SINK, Ops.NOOP, Ops.LOAD), name="x"), add_endrange),
-  (UPat((Ops.SINK, Ops.ENDRANGE), name="x"), add_endif),
-  (UPat(Ops.SINK, name="x"), close_ifs),
+  (UPat((Ops.SINK, Ops.ENDRANGE, Ops.BARRIER), name="x"), add_endif),
+  (UPat((Ops.SINK, Ops.ENDRANGE), name="x"), close_ifs),
 ])
 
 class CFGContext:
