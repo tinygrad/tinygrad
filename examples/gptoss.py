@@ -122,11 +122,16 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
             weights[f'layers.{l}.feed_forward.{proj}.weights'] = proj
     return weights
 
-def load_model(path:Path, params:dict[str, int|float]) -> Transformer:
+def load_weights(model_path:Path, params:dict[str, int|float]):
+  weights = load(str(model_path / "model.safetensors.index.json"))
+  weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=True)
+  weights = fix_mxfp4(weights, params["n_layers"])
+  return weights
+
+def load_model(params:dict[str, int|float]) -> Transformer:
   # build model
   feed_forward = functools.partial(MixtureFeedForward, params.pop("num_experts"), params.pop("activated_experts"))
-  # todo: fix jit=True
-  model = Transformer(**params, jit=False, feed_forward=feed_forward)
+  model = Transformer(**params, jit=False, feed_forward=feed_forward) # todo: fix jit=True
 
   # set head dim and add bias to each attention projection
   for i in range(len(model.layers)):
@@ -135,20 +140,12 @@ def load_model(path:Path, params:dict[str, int|float]) -> Transformer:
     model.layers[i].attention.wv = nn.Linear(params["dim"], params["n_kv_heads"] * params["head_dim"], bias=True)
     model.layers[i].attention.wo = nn.Linear(params["n_heads"] * params["head_dim"], params["dim"], bias=True)
 
-  # add sliding attention to all even attention layers
+  # add sliding attention to all even layers
   for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
 
-  # add attention sinks to all attention layers
+  # add attention sinks to all layers
   for i in range(len(model.layers)): model.layers[i].sinks = Tensor.empty(params['n_heads'], dtype=dtypes.bfloat16)
 
-  # load weights
-  weights = convert_from_huggingface(load(str(path / "model.safetensors.index.json")), params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=True)
-  weights = fix_mxfp4(weights, params["n_layers"])
-#   for k, v in weights.items():
-#       if 'model.layers.0' in k: ic(k, v.dtype, v.shape)
-
-  # replace weights in model
-  load_state_dict(model, weights, strict=False, consume=True)
   return model
 
 if __name__ == "__main__":
@@ -162,26 +159,27 @@ if __name__ == "__main__":
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   args = parser.parse_args()
 
+  if args.seed is not None: Tensor.manual_seed(args.seed)
+
   model_info = MODELS[args.size]
   model_path = Path(args.weights) if args.weights else download_weights(model_info["model"], model_info["total_num_weights"])
-  ic(model_path)
+  tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
 
   if getenv("TORCH"):
     from transformers import GptOssForCausalLM
-    # hf takes a lot longer to load model than in tinygrad because tinygrad is lazy and hf is not
-    model = GptOssForCausalLM.from_pretrained(model_path, cache_dir=model_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
+    # hf takes a lot longer to load model than in tinygrad (because tinygrad is lazy and hf is not?)
+    transformer = GptOssForCausalLM.from_pretrained(model_path, cache_dir=model_path)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"]
-    generate_ids = model.generate(input_ids, max_length=args.count)
+    generate_ids = transformer.generate(input_ids, max_length=args.count)
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
     exit(0)
 
-  transformer = load_model(model_path, model_info["params"])
-  tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
-  param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(transformer))
-
-  if args.seed is not None: Tensor.manual_seed(args.seed)
+  # build model
+  model = load_model(model_info["params"])
+  weights = load_weights(model_path, model_info["params"])
+  load_state_dict(model, weights, strict=False, consume=True)
+  param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(model))
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
@@ -199,7 +197,7 @@ if __name__ == "__main__":
       with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on {Device.DEFAULT}") +
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB" +
                   (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s")), enabled=args.timing):
-        tok_tensor = transformer(next_tok, start_pos, args.temperature)
+        tok_tensor = model(next_tok, start_pos, args.temperature)
       tok = tok_tensor.item()
 
     # use the kv cache
