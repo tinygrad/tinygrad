@@ -176,26 +176,75 @@ def kron_apply(read_fn, axis_L: UOp, axis_R: UOp,
   terms = [ read_fn(k,j) * alpha[k] * beta[j] for k in range(K) for j in range(J) ]
   return pairwise_sum(terms)
 
+  # --- helpers: after the winograd_* matrices ---
+from itertools import product as _it_product
+
+def _T(m: list[list[float]]) -> list[list[float]]:
+  return [list(row) for row in zip(*m)]
+
+def _mulall(xs: list[UOp]) -> UOp:
+  # multiply a list using a shallow tree to keep codegen balanced
+  if not xs: return _cf(1.0)
+  while len(xs) > 1:
+    xs = [ xs[i] if i+1>=len(xs) else (xs[i] * xs[i+1]) for i in range(0, len(xs), 2) ]
+  return xs[0]
+
 def selectN(axis: UOp, coeffs: list[float]) -> UOp:
-  n = len(coeffs)
-  assert n in (4, 6)
-  if n == 4:
-    i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
-    i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
-    i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
-    s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
-    s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
-    return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, s23))
-  else:
-    i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
-    i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
-    i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
-    i3 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(3)))
-    i4 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(4)))
-    s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
-    s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
-    s45 = UOp(Ops.WHERE, dtypes.float, src=(i4, _cf(coeffs[4]), _cf(coeffs[5])))
-    return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, UOp(Ops.WHERE, dtypes.float, src=(i3, s23, s45))))
+  """
+  Generic N-way selector for an index axis:
+    returns sum_i (axis == i ? coeffs[i] : 0)
+  Works for any length 'coeffs'.
+  """
+  zero = _cf(0.0)
+  terms = [ UOp(Ops.WHERE, dtypes.float,
+                src=(UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(i))), _cf(float(c)), zero))
+            for i, c in enumerate(coeffs) ]
+  return pairwise_sum(terms)
+
+def kron_apply_nd(read_fn,
+                  axes_L: list[UOp] | tuple[UOp, ...],
+                  axes_R: list[UOp] | tuple[UOp, ...],
+                  L_mats: list[list[list[float]]] | tuple[list[list[float]], ...],
+                  R_mats: list[list[list[float]]] | tuple[list[list[float]], ...]) -> UOp:
+  """
+  N-D Kronecker apply:
+    out = sum_{k⃗,j⃗} read_fn(k⃗, j⃗) * Π_i L_i[axes_L[i], k_i] * Π_t R_t[axes_R[t], j_t]
+
+  - axes_L : list/tuple of left index axes
+  - axes_R : list/tuple of right index axes
+  - L_mats : list of transform matrices for the left side (one per left axis)
+  - R_mats : list of transform matrices for the right side (one per right axis)
+  Each matrix is (rows = size of that axis, cols = K_i or J_t).
+  """
+  axes_L, axes_R = list(axes_L), list(axes_R)
+  L_mats, R_mats = list(L_mats), list(R_mats)
+
+  # Precompute per-axis column selectors
+  alpha_axes: list[list[UOp]] = []
+  for ax, L in zip(axes_L, L_mats):
+    rows, K = len(L), len(L[0])
+    alpha_axes.append([ selectN(ax, [L[r][k] for r in range(rows)]) for k in range(K) ])
+
+  beta_axes: list[list[UOp]] = []
+  for ax, R in zip(axes_R, R_mats):
+    rows, J = len(R), len(R[0])
+    beta_axes.append([ selectN(ax, [R[r][j] for r in range(rows)]) for j in range(J) ])
+
+  # Cartesian sum over all left/right column choices
+  terms: list[UOp] = []
+  k_ranges = [ range(len(cols)) for cols in alpha_axes ]
+  j_ranges = [ range(len(cols)) for cols in beta_axes ]
+  for k_idx in _it_product(*k_ranges) if k_ranges else [((),)]:
+    alpha = _mulall([ alpha_axes[i][k_idx[i]] for i in range(len(alpha_axes)) ]) if alpha_axes else _cf(1.0)
+    for j_idx in _it_product(*j_ranges) if j_ranges else [((),)]:
+      beta = _mulall([ beta_axes[t][j_idx[t]] for t in range(len(beta_axes)) ]) if beta_axes else _cf(1.0)
+      terms.append(read_fn(k_idx, j_idx) * alpha * beta)
+  return pairwise_sum(terms)
+
+# Back-compat 1-D wrapper (current Winograd calls)
+def kron_apply(read_fn, axis_L: UOp, axis_R: UOp,
+               L_rows: list[list[float]], R_rows: list[list[float]]) -> UOp:
+  return kron_apply_nd(read_fn, [axis_L], [axis_R], [L_rows], [R_rows])
 
 def winowrite(ctx: IndexingContext, redu: UOp):
   #TODO - Add where filters so index does not read garbage - or do we?
@@ -211,8 +260,8 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   act_like, w_like = redu.src[0].src
   if act_branch == 1:
     act_like, w_like = w_like, act_like
-  if act_like.op is not Ops.INDEX or w_like.op is not Ops.INDEX: #will extend to not index when I am not fucking sick
-    print("Not an index bailing!"); return None
+  # if act_like.op is not Ops.INDEX or w_like.op is not Ops.INDEX: #will extend to not index when I am not fucking sick
+    #print("Not an index bailing!"); return None
   act_buf = act_like.src[0]
   (_, ky, oy_add), (_, kx, ox_add), *_ = axis_pairs
 
@@ -273,7 +322,6 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   KYO = ctx.new_range(3, AxisType.LOOP)
   KXO = ctx.new_range(3, AxisType.LOOP)
   w_like = w_like.substitute({ky:KYO, kx:KXO})
-  print("THE RESULT OF SUBSTITUTION", w_like)
   w_f32 = w_like.bufferize(KYO, KXO, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   # cast once (fractions in G)
  #w_f32 = w_buf.cast(dtypes.float) if w_buf.dtype != dtypes.float else w_buf
@@ -305,7 +353,7 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   out = kron_apply(
           lambda p,q: XHAT.index(TYw, TXw, _ci(p), _ci(q)) * GHAT.index(_ci(p), _ci(q)),
           o4y, o4x, winograd_At, winograd_At)
-          
+
   YTILE = out.bufferize(TYw, TXw, o4y, o4x,
             arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   out = YTILE.index(ty, tx, iy, ix)
