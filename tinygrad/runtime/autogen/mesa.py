@@ -15344,6 +15344,112 @@ try:
     lp_context_destroy.argtypes = [ctypes.POINTER(struct_lp_context_ref)]
 except (AttributeError,ValueError):
     pass
+class struct_lp_cached_code(Structure):
+    pass
+
+struct_lp_cached_code._pack_ = 1 # source:False
+struct_lp_cached_code._fields_ = [
+    ('data', ctypes.POINTER(None)),
+    ('data_size', ctypes.c_uint64),
+    ('dont_cache', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('jit_obj_cache', ctypes.POINTER(None)),
+]
+
+class struct_lp_generated_code(Structure):
+    pass
+
+class struct_LLVMOpaqueTargetLibraryInfotData(Structure):
+    pass
+
+LLVMTargetLibraryInfoRef = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
+try:
+    gallivm_create_target_library_info = _libraries['libtinymesa_cpu.so'].gallivm_create_target_library_info
+    gallivm_create_target_library_info.restype = LLVMTargetLibraryInfoRef
+    gallivm_create_target_library_info.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except (AttributeError,ValueError):
+    pass
+try:
+    gallivm_dispose_target_library_info = _libraries['libtinymesa_cpu.so'].gallivm_dispose_target_library_info
+    gallivm_dispose_target_library_info.restype = None
+    gallivm_dispose_target_library_info.argtypes = [LLVMTargetLibraryInfoRef]
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_set_target_options = _libraries['libtinymesa_cpu.so'].lp_set_target_options
+    lp_set_target_options.restype = None
+    lp_set_target_options.argtypes = []
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_bld_init_native_targets = _libraries['libtinymesa_cpu.so'].lp_bld_init_native_targets
+    lp_bld_init_native_targets.restype = None
+    lp_bld_init_native_targets.argtypes = []
+except (AttributeError,ValueError):
+    pass
+class struct_LLVMOpaqueExecutionEngine(Structure):
+    pass
+
+class struct_LLVMOpaqueModule(Structure):
+    pass
+
+LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
+class struct_LLVMOpaqueMCJITMemoryManager(Structure):
+    pass
+
+LLVMMCJITMemoryManagerRef = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
+try:
+    lp_build_create_jit_compiler_for_module = _libraries['libtinymesa_cpu.so'].lp_build_create_jit_compiler_for_module
+    lp_build_create_jit_compiler_for_module.restype = ctypes.c_int32
+    lp_build_create_jit_compiler_for_module.argtypes = [ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)), ctypes.POINTER(ctypes.POINTER(struct_lp_generated_code)), ctypes.POINTER(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_free_generated_code = _libraries['libtinymesa_cpu.so'].lp_free_generated_code
+    lp_free_generated_code.restype = None
+    lp_free_generated_code.argtypes = [ctypes.POINTER(struct_lp_generated_code)]
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_get_default_memory_manager = _libraries['libtinymesa_cpu.so'].lp_get_default_memory_manager
+    lp_get_default_memory_manager.restype = LLVMMCJITMemoryManagerRef
+    lp_get_default_memory_manager.argtypes = []
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_free_memory_manager = _libraries['libtinymesa_cpu.so'].lp_free_memory_manager
+    lp_free_memory_manager.restype = None
+    lp_free_memory_manager.argtypes = [LLVMMCJITMemoryManagerRef]
+except (AttributeError,ValueError):
+    pass
+class struct_LLVMOpaqueValue(Structure):
+    pass
+
+LLVMValueRef = ctypes.POINTER(struct_LLVMOpaqueValue)
+try:
+    lp_get_called_value = _libraries['libtinymesa_cpu.so'].lp_get_called_value
+    lp_get_called_value.restype = LLVMValueRef
+    lp_get_called_value.argtypes = [LLVMValueRef]
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_is_function = _libraries['libtinymesa_cpu.so'].lp_is_function
+    lp_is_function.restype = ctypes.c_bool
+    lp_is_function.argtypes = [LLVMValueRef]
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_free_objcache = _libraries['libtinymesa_cpu.so'].lp_free_objcache
+    lp_free_objcache.restype = None
+    lp_free_objcache.argtypes = [ctypes.POINTER(None)]
+except (AttributeError,ValueError):
+    pass
+try:
+    lp_set_module_stack_alignment_override = _libraries['libtinymesa_cpu.so'].lp_set_module_stack_alignment_override
+    lp_set_module_stack_alignment_override.restype = None
+    lp_set_module_stack_alignment_override.argtypes = [LLVMModuleRef, ctypes.c_uint32]
+except (AttributeError,ValueError):
+    pass
 lp_native_vector_width = 0 # Variable ctypes.c_uint32
 class struct_lp_type(Structure):
     pass
@@ -15371,9 +15477,6 @@ class struct_gallivm_state(Structure):
 class struct_LLVMOpaqueType(Structure):
     pass
 
-class struct_LLVMOpaqueValue(Structure):
-    pass
-
 struct_lp_build_context._pack_ = 1 # source:False
 struct_lp_build_context._fields_ = [
     ('gallivm', ctypes.POINTER(struct_gallivm_state)),
@@ -15387,31 +15490,16 @@ struct_lp_build_context._fields_ = [
     ('one', ctypes.POINTER(struct_LLVMOpaqueValue)),
 ]
 
-class struct_LLVMOpaqueModule(Structure):
-    pass
-
 class struct_LLVMOpaqueTargetData(Structure):
     pass
 
-class struct_LLVMOpaqueExecutionEngine(Structure):
-    pass
-
 class struct_lp_passmgr(Structure):
-    pass
-
-class struct_LLVMOpaqueMCJITMemoryManager(Structure):
-    pass
-
-class struct_lp_generated_code(Structure):
     pass
 
 class struct_LLVMOpaqueBuilder(Structure):
     pass
 
 class struct_LLVMOpaqueDIBuilder(Structure):
-    pass
-
-class struct_lp_cached_code(Structure):
     pass
 
 class struct_LLVMOpaqueMetadata(Structure):
@@ -15643,7 +15731,6 @@ try:
     lp_check_vec_type.argtypes = [struct_lp_type, LLVMTypeRef]
 except (AttributeError,ValueError):
     pass
-LLVMValueRef = ctypes.POINTER(struct_LLVMOpaqueValue)
 try:
     lp_check_value = _libraries['libtinymesa_cpu.so'].lp_check_value
     lp_check_value.restype = ctypes.c_bool
@@ -15775,7 +15862,6 @@ try:
     lp_build_context_init.argtypes = [ctypes.POINTER(struct_lp_build_context), ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except (AttributeError,ValueError):
     pass
-LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
 try:
     lp_build_count_ir_module = _libraries['libtinymesa_cpu.so'].lp_build_count_ir_module
     lp_build_count_ir_module.restype = ctypes.c_uint32
@@ -17316,9 +17402,10 @@ __all__ = \
     'LLVMIntSGE', 'LLVMIntSGT', 'LLVMIntSLE', 'LLVMIntSLT',
     'LLVMIntUGE', 'LLVMIntUGT', 'LLVMIntULE', 'LLVMIntULT',
     'LLVMIntegerTypeKind', 'LLVMLabelTypeKind',
-    'LLVMMetadataTypeKind', 'LLVMModuleRef', 'LLVMPPC_FP128TypeKind',
-    'LLVMPointerTypeKind', 'LLVMScalableVectorTypeKind',
-    'LLVMStructTypeKind', 'LLVMTargetExtTypeKind',
+    'LLVMMCJITMemoryManagerRef', 'LLVMMetadataTypeKind',
+    'LLVMModuleRef', 'LLVMPPC_FP128TypeKind', 'LLVMPointerTypeKind',
+    'LLVMScalableVectorTypeKind', 'LLVMStructTypeKind',
+    'LLVMTargetExtTypeKind', 'LLVMTargetLibraryInfoRef',
     'LLVMTokenTypeKind', 'LLVMTypeKind', 'LLVMTypeKind__enumvalues',
     'LLVMTypeRef', 'LLVMValueRef', 'LLVMVectorTypeKind',
     'LLVMVoidTypeKind', 'LLVMX86_AMXTypeKind', 'LLVMX86_FP80TypeKind',
@@ -17881,16 +17968,17 @@ __all__ = \
     'c_uint64', 'compare_func', 'decode_type_from_blob',
     'encode_type_to_blob', 'func_pointer',
     'gallivm_add_global_mapping', 'gallivm_compile_module',
-    'gallivm_create', 'gallivm_destroy', 'gallivm_free_ir',
-    'gallivm_get_perf_flags', 'gallivm_jit_function',
-    'gallivm_stub_func', 'gallivm_verify_function', 'gc_alloc_size',
-    'gc_context', 'gc_ctx', 'gc_free', 'gc_get_context',
-    'gc_mark_live', 'gc_sweep_end', 'gc_sweep_start',
-    'gc_zalloc_size', 'gl_access_qualifier', 'gl_derivative_group',
-    'gl_shader_stage', 'gl_shader_stage__enumvalues',
-    'gl_subgroup_size', 'gl_system_value',
-    'gl_system_value__enumvalues', 'gl_varying_slot',
-    'gl_varying_slot__enumvalues',
+    'gallivm_create', 'gallivm_create_target_library_info',
+    'gallivm_destroy', 'gallivm_dispose_target_library_info',
+    'gallivm_free_ir', 'gallivm_get_perf_flags',
+    'gallivm_jit_function', 'gallivm_stub_func',
+    'gallivm_verify_function', 'gc_alloc_size', 'gc_context',
+    'gc_ctx', 'gc_free', 'gc_get_context', 'gc_mark_live',
+    'gc_sweep_end', 'gc_sweep_start', 'gc_zalloc_size',
+    'gl_access_qualifier', 'gl_derivative_group', 'gl_shader_stage',
+    'gl_shader_stage__enumvalues', 'gl_subgroup_size',
+    'gl_system_value', 'gl_system_value__enumvalues',
+    'gl_varying_slot', 'gl_varying_slot__enumvalues',
     'glsl_apply_signedness_to_base_type', 'glsl_array_size',
     'glsl_array_type', 'glsl_atomic_size', 'glsl_atomic_uint_type',
     'glsl_bare_sampler_type', 'glsl_bare_shadow_sampler_type',
@@ -17999,19 +18087,20 @@ __all__ = \
     'linear_opts', 'linear_strcat', 'linear_strdup',
     'linear_vasprintf', 'linear_vasprintf_append',
     'linear_vasprintf_rewrite_tail', 'linear_zalloc_child',
-    'linear_zalloc_child_array', 'lp_bld_ppc_disable_denorms',
-    'lp_build_alloca', 'lp_build_alloca_undef',
-    'lp_build_array_alloca', 'lp_build_array_get2',
-    'lp_build_array_get_ptr2', 'lp_build_const_aos',
-    'lp_build_const_channel_vec', 'lp_build_const_double',
-    'lp_build_const_elem', 'lp_build_const_float',
-    'lp_build_const_func_pointer',
+    'linear_zalloc_child_array', 'lp_bld_init_native_targets',
+    'lp_bld_ppc_disable_denorms', 'lp_build_alloca',
+    'lp_build_alloca_undef', 'lp_build_array_alloca',
+    'lp_build_array_get2', 'lp_build_array_get_ptr2',
+    'lp_build_const_aos', 'lp_build_const_channel_vec',
+    'lp_build_const_double', 'lp_build_const_elem',
+    'lp_build_const_float', 'lp_build_const_func_pointer',
     'lp_build_const_func_pointer_from_type', 'lp_build_const_int32',
     'lp_build_const_int64', 'lp_build_const_int_pointer',
     'lp_build_const_int_vec', 'lp_build_const_mask_aos',
     'lp_build_const_mask_aos_swizzled', 'lp_build_const_string',
     'lp_build_const_vec', 'lp_build_context_init',
     'lp_build_count_ir_module',
+    'lp_build_create_jit_compiler_for_module',
     'lp_build_create_jit_vertex_header_type',
     'lp_build_cs_func_call_context', 'lp_build_elem_type',
     'lp_build_else', 'lp_build_endif', 'lp_build_flow_skip_begin',
@@ -18041,13 +18130,17 @@ __all__ = \
     'lp_const_scale', 'lp_const_shift', 'lp_context_create',
     'lp_context_destroy', 'lp_context_ref',
     'lp_create_builder_at_entry', 'lp_dump_llvmtype', 'lp_elem_type',
-    'lp_float32_vec4_type', 'lp_img_op_from_intrinsic',
-    'lp_init_clock_hook', 'lp_init_env_options', 'lp_int32_vec4_type',
-    'lp_int_type', 'lp_llvm_buffer_base',
+    'lp_float32_vec4_type', 'lp_free_generated_code',
+    'lp_free_memory_manager', 'lp_free_objcache',
+    'lp_get_called_value', 'lp_get_default_memory_manager',
+    'lp_img_op_from_intrinsic', 'lp_init_clock_hook',
+    'lp_init_env_options', 'lp_int32_vec4_type', 'lp_int_type',
+    'lp_is_function', 'lp_llvm_buffer_base',
     'lp_llvm_buffer_num_elements', 'lp_llvm_descriptor_base',
     'lp_mantissa', 'lp_native_vector_width',
     'lp_nir_array_build_gather_values', 'lp_nir_call_context_args',
     'lp_packed_img_op_from_intrinsic', 'lp_sampler_lod_property',
+    'lp_set_module_stack_alignment_override', 'lp_set_target_options',
     'lp_sizeof_llvm_type', 'lp_translate_atomic_op', 'lp_type_fixed',
     'lp_type_float', 'lp_type_float_vec', 'lp_type_from_format',
     'lp_type_from_format_desc', 'lp_type_int', 'lp_type_int_vec',
@@ -19632,11 +19725,12 @@ __all__ = \
     'struct_LLVMOpaqueExecutionEngine',
     'struct_LLVMOpaqueMCJITMemoryManager',
     'struct_LLVMOpaqueMetadata', 'struct_LLVMOpaqueModule',
-    'struct_LLVMOpaqueTargetData', 'struct_LLVMOpaqueType',
-    'struct_LLVMOpaqueValue', 'struct__IO_FILE', 'struct__IO_codecvt',
-    'struct__IO_marker', 'struct__IO_wide_data',
-    'struct___va_list_tag', 'struct_blob', 'struct_blob_reader',
-    'struct_c__SA_linear_opts',
+    'struct_LLVMOpaqueTargetData',
+    'struct_LLVMOpaqueTargetLibraryInfotData',
+    'struct_LLVMOpaqueType', 'struct_LLVMOpaqueValue',
+    'struct__IO_FILE', 'struct__IO_codecvt', 'struct__IO_marker',
+    'struct__IO_wide_data', 'struct___va_list_tag', 'struct_blob',
+    'struct_blob_reader', 'struct_c__SA_linear_opts',
     'struct_c__SA_nir_input_to_output_deps',
     'struct_c__SA_nir_input_to_output_deps_0',
     'struct_c__SA_nir_output_clipper_var_groups',

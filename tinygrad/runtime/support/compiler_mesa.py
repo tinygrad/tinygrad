@@ -1,7 +1,6 @@
 import base64, ctypes, pathlib, tempfile, hashlib, subprocess
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump
-from tinygrad.runtime.support.compiler_cpu import cerr, expect
 import tinygrad.runtime.autogen.mesa as mesa
 try: import tinygrad.runtime.autogen.llvm as llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
@@ -21,8 +20,8 @@ class LVPCompiler(NIRCompiler):
   def __init__(self, cache_key="lvp"): super().__init__(f"compile_{cache_key}")
 
   def compile(self, src) -> bytes:
-    shader, ctx = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext()
-    gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), None)
+    shader, ctx, cache = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext(), mesa.struct_lp_cached_code()
+    gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), cache)
     module, builder = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
 
     params = mesa.struct_lp_build_tgsi_params(mesa.struct_lp_type(floating=True, sign=True, width=32, length=4),
@@ -41,12 +40,9 @@ class LVPCompiler(NIRCompiler):
     llvm.LLVMBuildRetVoid(builder)
     mesa.gallivm_verify_function(gallivm, ctypes.cast(fn, mesa.LLVMValueRef))
     mesa.gallivm_compile_module(gallivm)
-    t = llvm.LLVMGetExecutionEngineTargetMachine(ctypes.cast(gallivm.contents.engine, llvm.LLVMExecutionEngineRef))
-    obj_buf = expect(llvm.LLVMTargetMachineEmitToMemoryBuffer(t, module, llvm.LLVMObjectFile, e:=cerr(),
-                                                              ctypes.pointer(b:=llvm.LLVMMemoryBufferRef())), e, b)
-    ret = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
+    mesa.gallivm_jit_function(gallivm, ctypes.cast(fn, mesa.LLVMValueRef), shader.contents.info.name)
+    ret = ctypes.string_at(cache.data, cache.data_size)
     mesa.gallivm_destroy(gallivm)
-    llvm.LLVMDisposeMemoryBuffer(obj_buf)
     mesa.ralloc_free(shader)
     return ret
 

@@ -89,8 +89,7 @@ class CPUProgram(HCQProgram):
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
       if LVP:
         (lib, _, rels), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
-        for loc,tgt,_,add in rels: lib[loc:loc+8] = (bytes(getattr(ctypes.CDLL(ctypes.util.find_library('m')), tgt, None) or unwrap(self.rt_lib)[tgt])
-                                                     if isinstance(tgt, str) else struct.pack("<Q", tgt+add+addr))
+        for L,S,_,A in rels: lib[L:L+8] = bytes(ctypes.CDLL(ctypes.util.find_library('m'))[S]) if isinstance(S, str) else struct.pack("<Q", S+A+addr)
       self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
