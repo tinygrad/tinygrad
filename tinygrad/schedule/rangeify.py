@@ -405,29 +405,36 @@ def winowrite(ctx: IndexingContext, redu: UOp):
               for p in range(6) for q in range(6) ]
 
   # 2) build selector polynomials α_p(o4y) and β_q(o4x) from A = A^T^T (4×6)
-  A = winograd_At   # shape 4×6
-  # α_p(o4y) = Σ_i 1_{o4y==i} * A[i,p]  (for p=0..5)
-  alpha = []
+  A = winograd_At
+
+  # 0) precompute β_q(o4x) and α_p(o4y) once
+  beta = [ selectN(o4x, [A[0][q], A[1][q], A[2][q], A[3][q]]) for q in range(6) ]   # 6 scalars
+  alpha = [ selectN(o4y, [A[0][p], A[1][p], A[2][p], A[3][p]]) for p in range(6) ]   # 6 scalars
+
+  # 1) materialize M[p,q] = XHAT(TXw,TYw,p,q) * GHAT(p,q)
+  #    (you already have M_reads, but we’ll also keep a 2D list for factoring)
+  M = [[None]*6 for _ in range(6)]
+  for (p,q), M_pq in M_reads:
+    M[p][q] = M_pq
+
+  # 2) first pass over q: S_p = Σ_q M[p,q] * β_q
+  def pairwise_sum(xs):
+    # shallow add tree to keep codegen nice
+    while len(xs) > 1:
+      xs = [ xs[i] if i+1>=len(xs) else (xs[i] + xs[i+1]) for i in range(0, len(xs), 2) ]
+    return xs[0] if xs else _cf(0.0)
+
+  S = []
   for p in range(6):
-    alpha.append(selectN(o4y, [A[0][p], A[1][p], A[2][p], A[3][p]]))
+    terms = [ M[p][q] * beta[q] for q in range(6) ]
+    S.append(pairwise_sum(terms))
 
-  beta = []
-  for q in range(6):
-    beta.append(selectN(o4x, [A[0][q], A[1][q], A[2][q], A[3][q]]))
+  # 3) second pass over p: Y = Σ_p α_p * S_p
+  terms = [ alpha[p] * S[p] for p in range(6) ]
+  out   = pairwise_sum(terms)
 
-  # 3) assemble Y(o4y,o4x) = Σ_{p,q} M̂[p,q] * α_p(o4y) * β_q(o4x)  (NO REDUCE nodes)
-  terms = [ M_pq * alpha[p] * beta[q] for (p,q), M_pq in M_reads ]
-  while len(terms) > 1:
-    terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1])
-            for i in range(0, len(terms), 2)]
-  out = terms[0]
-
-  YTILE = out.bufferize(
-      TYw, TXw, o4y, o4x,
-      arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)
-  )
-
-  # 5) Map the consumer's loops to these tile axes and RETURN an INDEX (no free ranges left)
+  YTILE = out.bufferize(TYw, TXw, o4y, o4x,
+            arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   out = YTILE.index(ty, tx, iy, ix)
   return out
   
