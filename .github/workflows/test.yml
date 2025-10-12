@@ -896,7 +896,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [metal, llvm, cpu]
+        backend: [metal, llvm, cpu, lvp]
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 20
@@ -909,12 +909,13 @@ jobs:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_minimal
           pydeps: "capstone"
-          llvm: ${{ matrix.backend == 'llvm' && 'true' }}
+          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
+          mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1'}}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
       - name: Run pytest (${{ matrix.backend }})
         run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
