@@ -132,9 +132,7 @@ def load_weights(model_path:Path, params:dict[str, int|float]):
   weights = load(str(model_path / "model.safetensors.index.json"))
   weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
   weights = fix_mxfp4(weights, params["n_layers"])
-  # ic([(k, v.dtype, v.shape) for k, v in weights.items() if 'layers.0.attention.w' in k])
   # weights = fix_bf16(weights) # todo: do we need ?? turns bf16 into fp32->fp16
-  # ic([(k, v.dtype, v.shape) for k, v in weights.items() if 'layers.0.attention.w' in k])
   return weights
 
 def load_model(params:dict[str, int|float]) -> Transformer:
@@ -155,6 +153,7 @@ def load_model(params:dict[str, int|float]) -> Transformer:
   # add attention sinks to all layers
   for i in range(len(model.layers)): model.layers[i].sinks = Tensor.empty(params['n_heads'], dtype=dtypes.bfloat16)
 
+  # delete freqs_cis
   model_state_dict = get_state_dict(model)
   del model_state_dict['freqs_cis']
 

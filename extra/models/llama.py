@@ -7,7 +7,8 @@ from tinygrad.helpers import getenv
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
+  # todo: remove hardcoding a constant from yarn
+  return Tensor.stack(freqs.cos() * 1.34375, freqs.sin() * 1.34375, dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # matches meta, non hugging face weights
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
@@ -23,6 +24,7 @@ def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Te
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
   assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
   c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+  ic(c.numpy(), d.numpy())
   xq_out = complex_mult(xq, c, d)
   xk_out = complex_mult(xk, c, d)
   return xq_out.flatten(3), xk_out.flatten(3)
@@ -57,12 +59,11 @@ class Attention:
     else:
       xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-    assert self.q_norm is None and self.k_norm is None
     if self.q_norm is not None and self.k_norm is not None:
       xq = self.q_norm(xq)
       xk = self.k_norm(xk)
 
-    ic(self.wq.weight.numpy())
+    ic(x.numpy())
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
@@ -70,6 +71,8 @@ class Attention:
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
+
+    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1], xk.transpose(1, 2).shape, xk.transpose(1, 2).numpy()[:, :8, :, -1], xv.transpose(1, 2).shape, xv.transpose(1, 2).numpy()[:, :8, :, -1])
 
     # create kv cache
     if self.max_context:
@@ -120,13 +123,7 @@ class TransformerBlock:
       seqlen = x.shape[1]
       sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
       mask = sliding_mask if mask is None else mask+sliding_mask
-      # ic(mask.numpy())
-    ic(x.numpy())
-    norm = self.attention_norm(x)
-    ic(norm.numpy())
-    # h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    h = x + self.attention(norm, start_pos, freqs_cis, mask)
-    ic(h.numpy())
+    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
