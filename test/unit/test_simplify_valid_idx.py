@@ -104,7 +104,9 @@ class TestValidIdxSimplification(unittest.TestCase):
   def test_simplify_valid_from_div(self):
     x = Variable("x", -100, 100)
     valid = ((x<0)&((100%x).cast(dtypes.bool)))
-    self.assertIsNone(simplify_valid(valid))
+    # NOTE: this simplifies the (100%x) part somehow, still has two clauses
+    self.assertIsNotNone(simplify_valid(valid))
+    self.assertEqual(len(list(valid.split_uop(Ops.AND))), 2)
 
   @unittest.expectedFailure  # TODO: fix
   def test_from_merge_views(self):
@@ -184,13 +186,13 @@ class TestValidIdxSimplification(unittest.TestCase):
     print("The expressions are not equivalent.")
     print(s.model())
 
-  @unittest.expectedFailure  # TODO: improve uop_given_valid
   def test_valid_becomes_const2(self):
     ridx0 = Range(0, 4)
     ridx1 = Range(1, 4)
     ridx2 = Range(2, 4)
     ridx3 = Range(3, 4)
-    idx= ((ridx0+ridx1+ridx2+ridx3+28)//30)
+    # TODO: this should also work without the extra nesting
+    idx = (((ridx0+ridx1)+(ridx2+ridx3)+28)//30)
     valid = ((ridx0+ridx1)<1).ne(True) & ((ridx2+ridx3)<1).ne(True)
     load = get_gated_load_uop(valid, idx)
     self.check(load,

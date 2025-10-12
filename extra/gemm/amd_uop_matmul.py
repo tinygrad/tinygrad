@@ -49,8 +49,7 @@ def rangeify_kernel3():
   b = Tensor.empty(N,N)
   c = a@b
   #c = c.reshape((32,2,16,4,32,2,16,4)).contiguous()
-  with Context(RANGEIFY=1):
-    sink = c.schedule()[-1].ast
+  sink = c.schedule()[-1].ast
   #print(sink)
 
   opts  = [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.LOCAL, 0, 16), Opt(OptOps.UPCAST, 0, 2)]
@@ -329,7 +328,7 @@ if __name__ == "__main__":
   elif HL == 1: hprg = hl_spec_kernel3()
   else: hprg = hand_spec_kernel3()
   if HL == 3:
-    with Context(RANGEIFY=1, BLOCK_REORDER=0):
+    with Context(BLOCK_REORDER=0):
       prg = get_program(hprg, Device.default.renderer)
   else:
     prg = get_program(hprg, Device.default.renderer)

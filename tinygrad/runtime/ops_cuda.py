@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, ctypes.util, functools
+import ctypes, functools
 from tinygrad.helpers import DEBUG, getenv, mv_address, init_c_var, init_c_struct_t, suppress_finalizing
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerPairT
 from tinygrad.renderer.cstyle import CUDARenderer

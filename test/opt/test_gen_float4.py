@@ -149,6 +149,7 @@ class TestFloat4(unittest.TestCase):
 
     assert TestFloat4.count_float4(uops) == (1, 1)
 
+  @unittest.skip("Ops.VIEW no longer exists")
   def test_half4_load_unrolled(self):
     # from llama 7B shard 4 gpus
     ast = UOp(Ops.SINK, dtypes.void, arg=None, src=(

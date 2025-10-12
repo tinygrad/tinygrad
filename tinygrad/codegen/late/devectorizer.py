@@ -11,7 +11,7 @@ from tinygrad.renderer import Renderer
 # ***** image load valid simplification *****
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
-  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.index(UOp.invalid())
+  idx = uop_given_valid(valid, start_idx)
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid))
 
   # wait for it to be image indexed before running simplification
@@ -50,6 +50,7 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val, *store.src[2:])
 
+def no_load(u:UOp) -> bool: return not any(x.op is Ops.LOAD for x in u.backward_slice_with_self)
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
@@ -60,6 +61,8 @@ load_store_indexing = PatternMatcher([
   # delete_redundant_gates (after expand)
   (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
                                   UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
+  # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes a pattern in reduce_collapse
+  (UPat.var("c")<(UPat.var("x", dtypes.index)+UPat.var("y")), lambda x,y,c: (-x < -(c-y)) if no_load(y) and no_load(c) and not no_load(x) else None),
 ])
 
 # ***** load/store grouping *****

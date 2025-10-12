@@ -10,7 +10,7 @@ Directories are listed in order of how they are processed.
 
 Group UOps into kernels.
 
-::: tinygrad.schedule.kernelize.get_kernelize_map
+::: tinygrad.schedule.rangeify.get_rangeify_map
     options:
         members: false
         show_labels: false

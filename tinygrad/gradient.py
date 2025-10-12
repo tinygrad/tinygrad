@@ -39,7 +39,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret: (ctx.r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # there's no gradient for bitcast
-  (UPat(Ops.BITCAST), lambda ctx: (None,)),
+  (UPat(Ops.BITCAST), lambda: (None,)),
 ])
 
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:
