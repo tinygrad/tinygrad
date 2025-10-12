@@ -63,11 +63,11 @@ class MixtureFeedForward:
     return (t * probs.reshape(1, -1, 1)).sum(1, keepdim=True)  # (1, 1, 2880)
 
 def download_weights(model:str, total_num_weights:int) -> Path:
-  model = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
+  model_path = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
   for i in range(total_num_weights):
     filename = f"model-{i:05d}-of-{total_num_weights-1:05d}.safetensors"
     fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
-  return Path(os.path.dirname(model))
+  return Path(os.path.dirname(model_path))
 
 def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: int, n_kv_heads: int, permute_layers: bool = True):
   # huggingface stores Q and K permuted! it is mostly correct without this, but without it makes RoPE different, so it will diverge after 10+ toks.
