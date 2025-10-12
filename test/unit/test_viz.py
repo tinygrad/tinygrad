@@ -30,6 +30,7 @@ class BaseTestViz(unittest.TestCase):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
     Buffer.profile_events.clear()
+    cpu_events.clear()
     self.tms = TRACK_MATCH_STATS.value
     self.profile = PROFILE.value
     TRACK_MATCH_STATS.value = 2
