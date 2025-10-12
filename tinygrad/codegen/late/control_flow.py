@@ -46,7 +46,7 @@ def add_endrange(x:UOp):
   # group together stores with the same ranges, then add the endranges to them
   src: list[UOp] = []
   for k,g in groupby(x.src, key=lambda k: tuple(dedup(s for s in k.src if s.op is Ops.RANGE))):
-    src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g)) if k else g)
+    src.extend(reduce(lambda acc,rng: (UOp(Ops.ENDRANGE, src=(rng,) + acc),), reversed(k), tuple(g)) if k else g) # type: ignore
   return x.replace(src=tuple(src))
 
 def add_endif(x:UOp):
