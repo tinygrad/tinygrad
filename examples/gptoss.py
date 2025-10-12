@@ -15,9 +15,9 @@ import argparse, functools, os, sys
 from pathlib import Path
 from tinygrad import Tensor, nn, dtypes, Device
 from tinygrad.helpers import fetch, getenv, Timing, GlobalCounters
-from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters
+from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters, get_state_dict
 from examples.llama3 import load
-from extra.models.llama import Transformer
+from extra.models.llama import Transformer, fix_bf16
 from transformers import AutoTokenizer
 
 from icecream import install
@@ -90,8 +90,8 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
     **{f"model.layers.{l}.mlp.{x}_proj.weight": f"layers.{l}.feed_forward.w{y}.weight" for x, y in {"gate": "1", "down": "2", "up": "3"}.items() for l in range(n_layers)},
     **{f"model.layers.{l}.mlp.router.weight": f"layers.{l}.feed_forward.gate.weight" for l in range(n_layers)},
     **{f"model.layers.{l}.mlp.router.bias": f"layers.{l}.feed_forward.gate.bias" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.gate_up_proj_bias": f"layers.{l}.feed_forward.gate_up_proj_bias" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.down_proj_bias": f"layers.{l}.feed_forward.gate_down_proj_bias" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.gate_up_proj_bias": f"layers.{l}.feed_forward.up_proj_bias" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.down_proj_bias": f"layers.{l}.feed_forward.down_proj_bias" for l in range(n_layers)},
     **{f"model.layers.{l}.mlp.experts.gate_up_proj_blocks": f"layers.{l}.feed_forward.gate_up_proj_blocks" for l in range(n_layers)},
     **{f"model.layers.{l}.mlp.experts.gate_up_proj_scales": f"layers.{l}.feed_forward.gate_up_proj_scales" for l in range(n_layers)},
     **{f"model.layers.{l}.mlp.experts.down_proj_blocks": f"layers.{l}.feed_forward.gate_down_proj_blocks" for l in range(n_layers)},
@@ -118,6 +118,7 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
         # ic(blocks, scales, mxfp4_data)
         return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, 39).reshape(*scales.shape[:2], -1)
 
+    # dequantize only the gate_up_proj and gate_down_proj
     for l in range(n_layers):
         for proj in ['gate_up_proj', 'gate_down_proj']:
             blocks = f'layers.{l}.feed_forward.{proj}_blocks'
@@ -129,8 +130,11 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
 
 def load_weights(model_path:Path, params:dict[str, int|float]):
   weights = load(str(model_path / "model.safetensors.index.json"))
-  weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=True)
+  weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
   weights = fix_mxfp4(weights, params["n_layers"])
+  # ic([(k, v.dtype, v.shape) for k, v in weights.items() if 'layers.0.attention.w' in k])
+  # weights = fix_bf16(weights) # todo: do we need ?? turns bf16 into fp32->fp16
+  # ic([(k, v.dtype, v.shape) for k, v in weights.items() if 'layers.0.attention.w' in k])
   return weights
 
 def load_model(params:dict[str, int|float]) -> Transformer:
@@ -138,7 +142,7 @@ def load_model(params:dict[str, int|float]) -> Transformer:
   feed_forward = functools.partial(MixtureFeedForward, params.pop("num_experts"), params.pop("activated_experts"))
   model = Transformer(**params, jit=False, feed_forward=feed_forward) # todo: fix jit=True
 
-  # set head dim and add bias to each attention projection
+  # add bias to each attention projection
   for i in range(len(model.layers)):
     model.layers[i].attention.wq = nn.Linear(params["dim"], params["n_heads"] * params["head_dim"], bias=True)
     model.layers[i].attention.wk = nn.Linear(params["dim"], params["n_kv_heads"] * params["head_dim"], bias=True)
@@ -151,12 +155,15 @@ def load_model(params:dict[str, int|float]) -> Transformer:
   # add attention sinks to all layers
   for i in range(len(model.layers)): model.layers[i].sinks = Tensor.empty(params['n_heads'], dtype=dtypes.bfloat16)
 
+  model_state_dict = get_state_dict(model)
+  del model_state_dict['freqs_cis']
+
   return model
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--size", choices=["20B"], default="20B", help="Model size")
-  parser.add_argument("--count", type=int, default=5, help="Max number of tokens to generate")
+  parser.add_argument("--count", type=int, default=1, help="Max number of tokens to generate")
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--prompt", type=str, default="Hi", help="Phrase to start with")
@@ -171,13 +178,14 @@ if __name__ == "__main__":
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
 
   if getenv("TORCH"):
+    print("Using torch, not tinygrad.")
     import torch
     from transformers import GptOssForCausalLM
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=(subdir:=model_info["model"].split('/')[-1]))
-    transformer = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
+    model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
-    generate_ids = transformer.generate(input_ids, max_length=args.count)
+    generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   357,   939,   261]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
     exit(0)
@@ -191,21 +199,13 @@ if __name__ == "__main__":
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
   print(outputted, end="", flush=True)
-  # ic(tokenizer.apply_chat_template([{"role": "assistant", "content": args.prompt}], tokenize=False, add_system_prompt=False, add_generation_prompt=False))
 
   tok_tensor = None
   for i in range(args.count):
-    GlobalCounters.reset()
 
-    if args.timing: print("")
-    st = GlobalCounters.time_sum_s
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
-    with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
-      with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on {Device.DEFAULT}") +
-                  f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB" +
-                  (f", {GlobalCounters.global_mem*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s, param {param_bytes*1e-9/(GlobalCounters.time_sum_s-st):.2f} GB/s")), enabled=args.timing):
-        tok_tensor = model(next_tok, start_pos, args.temperature)
-      tok = tok_tensor.item()
+    tok_tensor = model(next_tok, start_pos, args.temperature)
+    tok = tok_tensor.item()
 
     # use the kv cache
     start_pos = len(toks)
@@ -213,6 +213,7 @@ if __name__ == "__main__":
     # add the new token
     toks.append(tok)
 
+    # display
     cur = tokenizer.decode(toks, skip_special_tokens=True)
     sys.stdout.write(cur[len(outputted):])
     sys.stdout.flush()

@@ -144,6 +144,8 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
   with Timing("loaded weights in ",
               lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s", enabled=verbose):
     model_state_dict = get_state_dict(model)
+    ic({k: (v.shape, v.dtype) for k, v in model_state_dict.items() if 'layers.0.feed_forward.down_proj' in k})
+    ic({k: (v.shape, v.dtype) for k, v in state_dict.items() if 'layers.0.feed_forward.down_proj' in k})
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
       print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
     for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):

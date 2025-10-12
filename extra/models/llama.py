@@ -57,13 +57,16 @@ class Attention:
     else:
       xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
+    assert self.q_norm is None and self.k_norm is None
     if self.q_norm is not None and self.k_norm is not None:
       xq = self.q_norm(xq)
       xk = self.k_norm(xk)
 
+    ic(self.wq.weight.numpy())
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
+    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1], xk.transpose(1, 2).shape, xk.transpose(1, 2).numpy()[:, :8, :, -1], xv.transpose(1, 2).shape, xv.transpose(1, 2).numpy()[:, :8, :, -1])
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
@@ -117,7 +120,13 @@ class TransformerBlock:
       seqlen = x.shape[1]
       sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
       mask = sliding_mask if mask is None else mask+sliding_mask
-    h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
+      # ic(mask.numpy())
+    ic(x.numpy())
+    norm = self.attention_norm(x)
+    ic(norm.numpy())
+    # h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
+    h = x + self.attention(norm, start_pos, freqs_cis, mask)
+    ic(h.numpy())
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
@@ -187,9 +196,10 @@ class Transformer:
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
-
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
-    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
+    for layer in self.layers:
+      h = layer(h, start_pos, freqs_cis, mask)
+      break
     logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 
