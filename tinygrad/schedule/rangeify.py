@@ -168,73 +168,35 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   act_like, w_like = redu.src[0].src
   if act_branch == 1:
     act_like, w_like = w_like, act_like
-  # if act_like.op is not Ops.INDEX or w_like.op is not Ops.INDEX: #will extend to not index when I am not fucking sick
-    #print("Not an index bailing!"); return None
   act_buf = act_like.src[0]
   (_, ky, oy_add), (_, kx, ox_add), *_ = axis_pairs
-
-  # --- 1) Split oy/ox into tiles + in-tile -------------------------------
-  zero_map = {ax: ax.const_like(0) for ax in (ky, kx)}
-  oy_base = oy_add.substitute(zero_map).simplify()   # the outer oy loop
-  ox_base = ox_add.substitute(zero_map).simplify()
-
-  oy_base = oy_add.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify()
-  ox_base = ox_add.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify()
-  iy = (oy_base % 4).simplify()
-  ix = (ox_base % 4).simplify()
-  tx = (ox_base// 4).simplify()
-  ty = (oy_base// 4).simplify()
-
-  TYx = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
-  TXx = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
-  RU  = ctx.new_range(6, AxisType.LOOP)
-  UX  = ctx.new_range(6, AxisType.LOOP)
+  oy_base, ox_base = (e.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify() for e in (oy_add, ox_add))
+  iy, ix, tx, ty = (oy_base % 4).simplify(), (ox_base % 4).simplify(), (ox_base//4).simplify(), (oy_base//4).simplify()
+  # one-liners for range creation
+  TYx, TXx, RU, UX = tuple(ctx.new_range(s, AxisType.LOOP) for s in ((int(oy_base.vmax+1)+3)//4, (int(ox_base.vmax+1)+3)//4, 6, 6))
+  c6g, r6g, c6x, r6x, TXw, TYw = (ctx.new_range(6, AxisType.LOOP) for _ in range(6))
+  KYO, KXO = (ctx.new_range(3, AxisType.LOOP) for _ in range(2)); o4y, o4x = (ctx.new_range(4, AxisType.LOOP) for _ in range(2))
+  TYh, TXh = tuple(ctx.new_range(s, AxisType.LOOP) for s in ((int(oy_base.vmax+1)+3)//4, (int(ox_base.vmax+1)+3)//4))
   # bufferize the “data” branch in 2×2×6×6 tile space
   X_vu = act_like.substitute({oy_add: TYx*4 + RU, ox_add: TXx*4 + UX}) \
                 .cast(dtypes.float) \
                 .bufferize(TYx, TXx, RU, UX, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-  TYh = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
-  TXh = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
-  c6x = ctx.new_range(6, AxisType.LOOP)
-  r6x = ctx.new_range(6, AxisType.LOOP)
   # X̂, buffered on (TYh, TXh, c6x, r6x)
   XHAT = kron_buf(
     lambda k,j: X_vu.index(TYh, TXh, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
     (TYh, TXh), (c6x,), (r6x,), (winograd_Bt,), (winograd_Bt,),
     BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-  # free eval axes for the transformed 6×6 tile
-  # ---- Ĝ branch axes (separate free indices!) ----
-  c6g = ctx.new_range(6, AxisType.LOOP)
-  r6g = ctx.new_range(6, AxisType.LOOP)
-  KYO = ctx.new_range(3, AxisType.LOOP)
-  KXO = ctx.new_range(3, AxisType.LOOP)
-  w_like = w_like.substitute({ky:KYO, kx:KXO})
-  w_f32 = w_like.bufferize(KYO, KXO, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-
+  w_f32 = w_like.substitute({ky:KYO, kx:KXO}).bufferize(KYO, KXO, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   GHAT = kron_buf(
-  lambda k,j: w_f32.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
-  (), (c6g,), (r6g,), (winograd_G,), (winograd_G,),
-  BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-
-  o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
-  o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
-  TXw = ctx.new_range(6, AxisType.LOOP)
-  TYw = ctx.new_range(6, AxisType.LOOP)
-
-  o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
-  o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
-  TXw = ctx.new_range(6, AxisType.LOOP)
-  TYw = ctx.new_range(6, AxisType.LOOP)
-
+    lambda k,j: w_f32.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
+    (), (c6g,), (r6g,), (winograd_G,), (winograd_G,),
+    BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   YTILE = kron_buf(
-  lambda k,j: XHAT.index(TYw, TXw, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])) *
-              GHAT.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
-  (TYw, TXw), (o4y,), (o4x,), (winograd_At,), (winograd_At,),
-  BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-
-  out = YTILE.index(ty, tx, iy, ix)
-
-  return out
+    lambda k,j: XHAT.index(TYw, TXw, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])) *
+                GHAT.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
+    (TYw, TXw), (o4y,), (o4x,), (winograd_At,), (winograd_At,),
+    BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  return YTILE.index(ty, tx, iy, ix)
 
 winograd_rewrite = PatternMatcher([
  (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
