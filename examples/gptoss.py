@@ -1,10 +1,15 @@
+# install
+# pip install -e .["testing"]
+# pip install accelerate kernels # needed for mxfp4 quantization
+
+# implementations
+# openai - https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py
+# hf - https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/models/gpt_oss/modeling_gpt_oss.py
+
 # blogs
 # https://huggingface.co/blog/faster-transformers
 # https://magazine.sebastianraschka.com/p/from-gpt-2-to-gpt-oss-analyzing-the
 # https://cameronrwolfe.substack.com/p/gpt-oss
-# implementations
-# openai - https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py
-# hf - https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/models/gpt_oss/modeling_gpt_oss.py
 
 import argparse, functools, os, sys
 from pathlib import Path
@@ -151,7 +156,7 @@ def load_model(params:dict[str, int|float]) -> Transformer:
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--size", choices=["20B"], default="20B", help="Model size")
-  parser.add_argument("--count", type=int, default=30, help="Max number of tokens to generate")
+  parser.add_argument("--count", type=int, default=5, help="Max number of tokens to generate")
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
   parser.add_argument("--prompt", type=str, default="Hi", help="Phrase to start with")
@@ -166,10 +171,12 @@ if __name__ == "__main__":
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
 
   if getenv("TORCH"):
+    import torch
     from transformers import GptOssForCausalLM
-    # hf takes a lot longer to load model than in tinygrad (because tinygrad is lazy and hf is not?)
-    transformer = GptOssForCausalLM.from_pretrained(model_path, cache_dir=model_path)
-    input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"]
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=(subdir:=model_info["model"].split('/')[-1]))
+    transformer = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
+    input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
     generate_ids = transformer.generate(input_ids, max_length=args.count)
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
