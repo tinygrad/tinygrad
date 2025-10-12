@@ -366,19 +366,54 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   #         arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
 
   # ---- Final stage: fresh reducers + A/At with ix/iy only here ----
-  c6r = ctx.new_range(6, AxisType.REDUCE)
-  r6r = ctx.new_range(6, AxisType.REDUCE)
+  # c6r = ctx.new_range(6, AxisType.REDUCE)
+  # r6r = ctx.new_range(6, AxisType.REDUCE)
 
-  Mhat = XHAT.index(ty, tx, ix, iy) * GHAT.index(ix, iy)#* GHAT.index(ix, iy)
+  # Mhat = XHAT.index(ty, tx, ix, iy) * GHAT.index(ix, iy)#* GHAT.index(ix, iy)
 
-  A_ix  = synth_mat(list(zip(*winograd_At)), ix,  r6r)  # ix appears ONLY here
-  At_iy = synth_mat(winograd_At,             c6r, iy)   # iy appears ONLY here
-  A_ix = 3
-  At_iy = 3
-  out = ((Mhat).reduce(r6r, arg=Ops.ADD, dtype=dtypes.float))\
-        .reduce(c6r, arg=Ops.ADD, dtype=dtypes.float)
+  # A_ix  = synth_mat(list(zip(*winograd_At)), ix,  r6r)  # ix appears ONLY here
+  # At_iy = synth_mat(winograd_At,             c6r, iy)   # iy appears ONLY here
+  # A_ix = 3
+  # At_iy = 3
+  # out = ((Mhat).reduce(r6r, arg=Ops.ADD, dtype=dtypes.float))\
+  #       .reduce(c6r, arg=Ops.ADD, dtype=dtypes.float)
 
-  return Mhat
+  o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
+  o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
+  TXw = ctx.new_range(6, AxisType.LOOP)
+  TYw = ctx.new_range(6, AxisType.LOOP)
+  # 1) read all 36 entries of M̂[p,q] (X̂*Ĝ) once
+  M_reads = [ ((p,q),
+              XHAT.index(TXw, TYw, _ci(p), _ci(q)) * GHAT.index(_ci(p), _ci(q)) )
+              for p in range(6) for q in range(6) ]
+
+  # 2) build selector polynomials α_p(o4y) and β_q(o4x) from A = A^T^T (4×6)
+  A = winograd_At   # shape 4×6
+  # α_p(o4y) = Σ_i 1_{o4y==i} * A[i,p]  (for p=0..5)
+  alpha = [ sum(one_hot(o4y, i) * _cf(A[i][p]) for i in range(4)) for p in range(6) ]
+  # β_q(o4x) = Σ_j 1_{o4x==j} * A[j,q]  (for q=0..5)
+  beta  = [ sum(one_hot(o4x, j) * _cf(A[j][q]) for j in range(4)) for q in range(6) ]
+
+  # 3) assemble Y(o4y,o4x) = Σ_{p,q} M̂[p,q] * α_p(o4y) * β_q(o4x)  (NO REDUCE nodes)
+  terms = [ M_pq * alpha[p] * beta[q] for (p,q), M_pq in M_reads ]
+  while len(terms) > 1:
+    terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1])
+            for i in range(0, len(terms), 2)]
+  out = terms[0]
+
+  YTILE = out.bufferize(
+      TYw, TXw, o4y, o4x,
+      arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL)
+  )
+
+  # 5) Map the consumer's loops to these tile axes and RETURN an INDEX (no free ranges left)
+  out = YTILE.index(ty, tx, iy, ix)
+  return out
+  
+
+  print("rng1", out.src[0], "rng2", out.src[1])
+  
+  return out
 
 winograd_rewrite = PatternMatcher([
  (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
