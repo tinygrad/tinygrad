@@ -401,6 +401,7 @@ async function renderProfiler() {
       }
     }
     // draw markers
+    ctx.textBaseline = "top";
     for (const m of markers) {
       const x = xscale(m.ts);
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
