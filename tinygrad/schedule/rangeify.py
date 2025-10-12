@@ -115,28 +115,26 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
-
-#   # make a (rows x cols) constant table (values don't matter for plumbing tests)
-#   ones = UOp.const(dtype, 1.0).reshape((1, 1)).expand((rows, cols)).contiguous()
-
-#   # CRITICAL: bufferize on the SAME axes you'll use to index
-#   # We store with (r, o) so buf.src == (value, r, o)
-#   buf = ones.bufferize(r, o, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
-
-#   # Index with the SAME (r, o) pair → idx.src == (buf, r, o)
-#   return 3
-#   return buf.index(r, o, dtype=dtype)
-
-def synth_mat(mat: list[list[int|float]], o: UOp, r: UOp, dtype=dtypes.float) -> UOp:
-  z    = UOp.const(dtype, 0)
-  cells = [((r*(len(mat[0]))+o)).eq(i).where(UOp.const(dtype, v), z) for i, v in enumerate(flatten(mat)) if v]
-  while len(cells) > 1:
-    cells = [cells[i] + cells[i+1] if i+1 < len(cells) else cells[i] for i in range(0, len(cells), 2)]
-  return (o+r).cast(dtype)
-  return cells[0] if cells else z
-
-def _ci(i: int) -> UOp:  return UOp.const(dtypes.index, i)
-def _cf(x: float) -> UOp: return UOp.const(dtypes.float, float(x))
+def kron_buf(read_fn, outer_axes, axes_L, axes_R, L_mats, R_mats, bufopts):
+  # balanced sum
+  def add(xs):
+    while len(xs) > 1: xs = [xs[i] if i+1>=len(xs) else xs[i]+xs[i+1] for i in range(0, len(xs), 2)]
+    return xs[0] if xs else UOp.const(dtypes.float, 0.0)
+  # N-way selector: sum_i (axis==i ? coeffs[i] : 0)
+  def sel(ax, coeffs):
+    z = UOp.const(dtypes.float, 0.0)
+    return add([UOp(Ops.WHERE, dtypes.float, src=(UOp(Ops.CMPEQ, dtypes.bool, src=(ax, UOp.const(dtypes.index, i))),
+                                                  UOp.const(dtypes.float, float(c)), z)) for i, c in enumerate(coeffs)])
+  axes_L, axes_R, L_mats, R_mats = list(axes_L), list(axes_R), list(L_mats), list(R_mats)
+  al = [[sel(ax, [L[r][k] for r in range(len(L))]) for k in range(len(L[0]))] for ax, L in zip(axes_L, L_mats)]
+  be = [[sel(ax, [R[r][j] for r in range(len(R))]) for j in range(len(R[0]))] for ax, R in zip(axes_R, R_mats)]
+  one = UOp.const(dtypes.float, 1.0)
+  terms = [read_fn(k,j) *
+           (add([al[i][k[i]] for i in range(len(al))]) if al else one) *
+           (add([be[t][j[t]] for t in range(len(be))]) if be else one)
+           for k in (product(*[range(len(cols)) for cols in al]) if al else [()])
+           for j in (product(*[range(len(cols)) for cols in be]) if be else [()])]
+  return add(terms).bufferize(*(tuple(outer_axes)+tuple(axes_L)+tuple(axes_R)), arg=bufopts)
 
 def winoguard(redu):
  #TODO - Can we make this simpler?
@@ -155,96 +153,6 @@ def winoguard(redu):
  if len(oa) >= 2 and not ob: return (0, oa)
  if len(ob) >= 2 and not oa: return (1, ob)
  return None
-
-  # shallow add tree to keep codegen nice
-def pairwise_sum(xs):
-  while len(xs) > 1:
-    xs = [ xs[i] if i+1>=len(xs) else (xs[i] + xs[i+1]) for i in range(0, len(xs), 2) ]
-  return xs[0] if xs else _cf(0.0)
-
-# Generic left/right transform application:
-# For axes axis_L, axis_R and coefficient tables L_rows (len(axis_L) x K)
-# and R_rows (len(axis_R) x J), compute:
-#   out = sum_{k=0..K-1} sum_{j=0..J-1} read_fn(k,j) * L[axis_L,k] * R[axis_R,j]
-def kron_apply(read_fn, axis_L: UOp, axis_R: UOp,
-                L_rows: list[list[float]], R_rows: list[list[float]]):
-  K = len(L_rows[0])
-  J = len(R_rows[0])
-  # Build selector polynomials once
-  alpha = [ selectN(axis_L, [L_rows[i][k] for i in range(len(L_rows))]) for k in range(K) ]
-  beta  = [ selectN(axis_R, [R_rows[i][j] for i in range(len(R_rows))]) for j in range(J) ]
-  terms = [ read_fn(k,j) * alpha[k] * beta[j] for k in range(K) for j in range(J) ]
-  return pairwise_sum(terms)
-
-  # --- helpers: after the winograd_* matrices ---
-from itertools import product as _it_product
-
-def _T(m: list[list[float]]) -> list[list[float]]:
-  return [list(row) for row in zip(*m)]
-
-def _mulall(xs: list[UOp]) -> UOp:
-  # multiply a list using a shallow tree to keep codegen balanced
-  if not xs: return _cf(1.0)
-  while len(xs) > 1:
-    xs = [ xs[i] if i+1>=len(xs) else (xs[i] * xs[i+1]) for i in range(0, len(xs), 2) ]
-  return xs[0]
-
-def selectN(axis: UOp, coeffs: list[float]) -> UOp:
-  """
-  Generic N-way selector for an index axis:
-    returns sum_i (axis == i ? coeffs[i] : 0)
-  Works for any length 'coeffs'.
-  """
-  zero = _cf(0.0)
-  terms = [ UOp(Ops.WHERE, dtypes.float,
-                src=(UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(i))), _cf(float(c)), zero))
-            for i, c in enumerate(coeffs) ]
-  return pairwise_sum(terms)
-
-def kron_apply_nd(read_fn,
-                  axes_L: list[UOp] | tuple[UOp, ...],
-                  axes_R: list[UOp] | tuple[UOp, ...],
-                  L_mats: list[list[list[float]]] | tuple[list[list[float]], ...],
-                  R_mats: list[list[list[float]]] | tuple[list[list[float]], ...]) -> UOp:
-  """
-  N-D Kronecker apply:
-    out = sum_{k⃗,j⃗} read_fn(k⃗, j⃗) * Π_i L_i[axes_L[i], k_i] * Π_t R_t[axes_R[t], j_t]
-
-  - axes_L : list/tuple of left index axes
-  - axes_R : list/tuple of right index axes
-  - L_mats : list of transform matrices for the left side (one per left axis)
-  - R_mats : list of transform matrices for the right side (one per right axis)
-  Each matrix is (rows = size of that axis, cols = K_i or J_t).
-  """
-  axes_L, axes_R = list(axes_L), list(axes_R)
-  L_mats, R_mats = list(L_mats), list(R_mats)
-
-  # Precompute per-axis column selectors
-  alpha_axes: list[list[UOp]] = []
-  for ax, L in zip(axes_L, L_mats):
-    rows, K = len(L), len(L[0])
-    alpha_axes.append([ selectN(ax, [L[r][k] for r in range(rows)]) for k in range(K) ])
-
-  beta_axes: list[list[UOp]] = []
-  for ax, R in zip(axes_R, R_mats):
-    rows, J = len(R), len(R[0])
-    beta_axes.append([ selectN(ax, [R[r][j] for r in range(rows)]) for j in range(J) ])
-
-  # Cartesian sum over all left/right column choices
-  terms: list[UOp] = []
-  k_ranges = [ range(len(cols)) for cols in alpha_axes ]
-  j_ranges = [ range(len(cols)) for cols in beta_axes ]
-  for k_idx in _it_product(*k_ranges) if k_ranges else [((),)]:
-    alpha = _mulall([ alpha_axes[i][k_idx[i]] for i in range(len(alpha_axes)) ]) if alpha_axes else _cf(1.0)
-    for j_idx in _it_product(*j_ranges) if j_ranges else [((),)]:
-      beta = _mulall([ beta_axes[t][j_idx[t]] for t in range(len(beta_axes)) ]) if beta_axes else _cf(1.0)
-      terms.append(read_fn(k_idx, j_idx) * alpha * beta)
-  return pairwise_sum(terms)
-
-# Back-compat 1-D wrapper (current Winograd calls)
-def kron_apply(read_fn, axis_L: UOp, axis_R: UOp,
-               L_rows: list[list[float]], R_rows: list[list[float]]) -> UOp:
-  return kron_apply_nd(read_fn, [axis_L], [axis_R], [L_rows], [R_rows])
 
 def winowrite(ctx: IndexingContext, redu: UOp):
   #TODO - Add where filters so index does not read garbage - or do we?
@@ -270,12 +178,6 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   oy_base = oy_add.substitute(zero_map).simplify()   # the outer oy loop
   ox_base = ox_add.substitute(zero_map).simplify()
 
-  # replace "symbolic" ty/tx with *real ranges* so we can bufferize on them
-  # tile extents: ceil_div(oy_extent, 4) and ceil_div(ox_extent, 4)
-  oy_extent = int(oy_base.vmax + 1)
-  ox_extent = int(ox_base.vmax + 1)
-  # split oy/ox
-    # --- Split oy/ox, but only use iy/ix at the end ---
   oy_base = oy_add.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify()
   ox_base = ox_add.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify()
   iy = (oy_base % 4).simplify()
@@ -287,76 +189,51 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   TXx = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
   RU  = ctx.new_range(6, AxisType.LOOP)
   UX  = ctx.new_range(6, AxisType.LOOP)
-
-  
   # bufferize the “data” branch in 2×2×6×6 tile space
   X_vu = act_like.substitute({oy_add: TYx*4 + RU, ox_add: TXx*4 + UX}) \
                 .cast(dtypes.float) \
                 .bufferize(TYx, TXx, RU, UX, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   TYh = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
   TXh = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
-  # build the Kron *reading from X_vu* with the SAME tile ranges (TYx,TXx); only (u,v) vary as consts
-
-  # free eval axes for the transformed 6×6 tile
-
   c6x = ctx.new_range(6, AxisType.LOOP)
   r6x = ctx.new_range(6, AxisType.LOOP)
-
-  # X̂ = Bt * X * Btᵀ   (read from the 6x6 tile-bufferized activation X_vu)
-  Xhat_expr = kron_apply(
-      lambda u,v: X_vu.index(TYh, TXh, _ci(u), _ci(v)),
-      c6x, r6x, winograd_Bt, winograd_Bt)
-
-  # bufferize X̂ into its OWN tile namespace (don’t reuse TYx/TXx here!)
-  XHAT = Xhat_expr.bufferize(TYh, TXh, c6x, r6x,
-            arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-
+  # X̂, buffered on (TYh, TXh, c6x, r6x)
+  XHAT = kron_buf(
+    lambda k,j: X_vu.index(TYh, TXh, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
+    (TYh, TXh), (c6x,), (r6x,), (winograd_Bt,), (winograd_Bt,),
+    BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  # free eval axes for the transformed 6×6 tile
   # ---- Ĝ branch axes (separate free indices!) ----
   c6g = ctx.new_range(6, AxisType.LOOP)
   r6g = ctx.new_range(6, AxisType.LOOP)
-
-  # discover outer axes of the weight INDEX (everything except ky,kx)
-  w_buf = w_like.src[0]
-  w_axes = tuple(ax for ax in w_like.src[1:] if ax not in {ky, kx})
-
   KYO = ctx.new_range(3, AxisType.LOOP)
   KXO = ctx.new_range(3, AxisType.LOOP)
   w_like = w_like.substitute({ky:KYO, kx:KXO})
   w_f32 = w_like.bufferize(KYO, KXO, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-  # cast once (fractions in G)
- #w_f32 = w_buf.cast(dtypes.float) if w_buf.dtype != dtypes.float else w_buf
 
-  # pure Kronecker build: GHAT[c6g, r6g] = sum_{p,q} G[c6g,p]*g[p,q]*G[r6g,q]
-  # Ĝ = G * g * Gᵀ   (g is 3×3 from w_f32)
-  Ghat_expr = kron_apply(
-      lambda p,q: w_f32.index(_ci(p), _ci(q)),
-      c6g, r6g, winograd_G, winograd_G)
-  # bufferize GHAT only on its two free axes (outer axes are *not* free here)
-  GHAT = Ghat_expr.bufferize(c6g, r6g, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-
-
-  o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
-  o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
-  TXw = ctx.new_range(6, AxisType.LOOP)
-  TYw = ctx.new_range(6, AxisType.LOOP)
-  # 1) read all 36 entries of M̂[p,q] (X̂*Ĝ) once
-  M_reads = [ ((p,q),
-              XHAT.index(TYw, TXw, _ci(p), _ci(q)) * GHAT.index(_ci(p), _ci(q)) )
-              for p in range(6) for q in range(6) ]
+  GHAT = kron_buf(
+  lambda k,j: w_f32.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
+  (), (c6g,), (r6g,), (winograd_G,), (winograd_G,),
+  BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
   o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
   o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
   TXw = ctx.new_range(6, AxisType.LOOP)
   TYw = ctx.new_range(6, AxisType.LOOP)
 
-  # Y = A * (X̂ ⊙ Ĝ) * Aᵀ  → no explicit M/S temporaries needed
-  out = kron_apply(
-          lambda p,q: XHAT.index(TYw, TXw, _ci(p), _ci(q)) * GHAT.index(_ci(p), _ci(q)),
-          o4y, o4x, winograd_At, winograd_At)
+  o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
+  o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
+  TXw = ctx.new_range(6, AxisType.LOOP)
+  TYw = ctx.new_range(6, AxisType.LOOP)
 
-  YTILE = out.bufferize(TYw, TXw, o4y, o4x,
-            arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  YTILE = kron_buf(
+  lambda k,j: XHAT.index(TYw, TXw, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])) *
+              GHAT.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
+  (TYw, TXw), (o4y,), (o4x,), (winograd_At,), (winograd_At,),
+  BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+
   out = YTILE.index(ty, tx, iy, ix)
+
   return out
 
 winograd_rewrite = PatternMatcher([
