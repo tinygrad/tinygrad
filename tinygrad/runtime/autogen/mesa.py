@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: ['-DHAVE_ENDIAN_H', '-DHAVE_STRUCT_TIMESPEC', '-DHAVE_PTHREAD', '-I/tmp/mesa-mesa-25.2.3/src', '-I/tmp/mesa-mesa-25.2.3/include', '-I/tmp/mesa-mesa-25.2.3/gen', '-I/tmp/mesa-mesa-25.2.3/src/compiler/nir', '-I/tmp/mesa-mesa-25.2.3/src/gallium/auxiliary', '-I/tmp/mesa-mesa-25.2.3/src/gallium/include', '-I/usr/lib/llvm-20/include']
+# TARGET arch is: ['-DHAVE_ENDIAN_H', '-DHAVE_STRUCT_TIMESPEC', '-DHAVE_PTHREAD', '-I/tmp/mesa-mesa-25.2.4/src', '-I/tmp/mesa-mesa-25.2.4/include', '-I/tmp/mesa-mesa-25.2.4/gen', '-I/tmp/mesa-mesa-25.2.4/src/compiler/nir', '-I/tmp/mesa-mesa-25.2.4/src/gallium/auxiliary', '-I/tmp/mesa-mesa-25.2.4/src/gallium/include', '-I/usr/lib/llvm-20/include']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
@@ -19745,4 +19745,4 @@ __all__ = \
     'union_util_format_description_0', 'util_format_colorspace',
     'util_format_layout', 'va_list']
 lvp_nir_options = gzip.decompress(base64.b64decode('H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA'))
-def __getattr__(nm): raise AttributeError() if found else FileNotFoundError(f'libtinymesa not found (BASE PATH={BASE}). See https://github.com/sirhcm/tinymesa (release: mesa-25.2.3-3a5961a)')
+def __getattr__(nm): raise AttributeError() if found else FileNotFoundError(f'libtinymesa not found (MESA_PATH={BASE}). See https://github.com/sirhcm/tinymesa (tinymesa-32dc66c, mesa-25.2.4)')

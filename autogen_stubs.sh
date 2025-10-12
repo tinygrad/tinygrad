@@ -462,10 +462,10 @@ generate_libusb() {
 }
 
 generate_mesa() {
-  MESA_TAG="mesa-25.2.3"
+  MESA_TAG="mesa-25.2.4"
   MESA_SRC=/tmp/mesa-$MESA_TAG
-  TINYMESA_COMMIT_HASH=3a5961a
-  TINYMESA_DIR=/tmp/tinymesa-$MESA_TAG-$TINYMESA_COMMIT_HASH/
+  TINYMESA_TAG=tinymesa-32dc66c
+  TINYMESA_DIR=/tmp/tinymesa-$MESA_TAG-$TINYMESA_TAG/
   TINYMESA_SO=$TINYMESA_DIR/libtinymesa_cpu.so
   if [ ! -d "$MESA_SRC" ]; then
     git clone --depth 1 --branch $MESA_TAG https://gitlab.freedesktop.org/mesa/mesa.git $MESA_SRC
@@ -489,7 +489,7 @@ generate_mesa() {
 
   if [ ! -d "$TINYMESA_DIR" ]; then
     mkdir $TINYMESA_DIR
-    curl -L https://github.com/sirhcm/tinymesa/releases/download/$MESA_TAG-$TINYMESA_COMMIT_HASH/libtinymesa_cpu.so -o $TINYMESA_SO
+    curl -L https://github.com/sirhcm/tinymesa/releases/download/$TINYMESA_TAG/libtinymesa_cpu-$MESA_TAG-linux-amd64.so -o $TINYMESA_SO
   fi
 
   clang2py -k cdefstu \
@@ -524,7 +524,7 @@ generate_mesa() {
   sed -i "s/AttributeError/(AttributeError,ValueError)/" $BASE/mesa.py
   sed -i -e "s/import ctypes/import ctypes, ctypes.util, os, gzip, base64/" -e "/import ctypes/a $SUPPORT" $BASE/mesa.py
   sed -i "s/ctypes.CDLL('.\+')/ctypes.CDLL(path) if found else None/g" $BASE/mesa.py
-  echo "def __getattr__(nm): raise AttributeError() if found else FileNotFoundError(f'libtinymesa not found (BASE PATH={BASE}). See https://github.com/sirhcm/tinymesa (release: $MESA_TAG-$TINYMESA_COMMIT_HASH)')" >> $BASE/mesa.py
+  echo "def __getattr__(nm): raise AttributeError() if found else FileNotFoundError(f'libtinymesa not found (MESA_PATH={BASE}). See https://github.com/sirhcm/tinymesa ($TINYMESA_TAG, $MESA_TAG)')" >> $BASE/mesa.py
   sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/mesa.py
   # bitfield bug in clang2py
   sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/mesa.py
