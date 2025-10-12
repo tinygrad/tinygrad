@@ -126,8 +126,8 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
         chunk = await reader.readexactly(size)
 
         view = dest[ptr:ptr+len(chunk)]
-        f = await asyncio.to_thread(lambda: view.__setitem__(slice(None), chunk))
-        del view, f
+        view[:] = chunk
+        del view
 
     workers = [asyncio.create_task(_worker(item)) for item in src.copyout_queue]
     await asyncio.gather(*workers)
