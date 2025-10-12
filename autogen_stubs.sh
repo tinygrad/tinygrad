@@ -501,6 +501,7 @@ generate_mesa() {
     $MESA_SRC/src/nouveau/headers/nv_device_info.h \
     $MESA_SRC/src/nouveau/compiler/nak.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld.h \
+    $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_passmgr.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_misc.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_type.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_init.h \
