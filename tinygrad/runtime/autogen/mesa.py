@@ -15358,35 +15358,6 @@ try:
     lp_context_destroy.argtypes = [ctypes.POINTER(struct_lp_context_ref)]
 except AttributeError:
     pass
-class struct_lp_passmgr(Structure):
-    pass
-
-class struct_LLVMOpaqueModule(Structure):
-    pass
-
-LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
-try:
-    lp_passmgr_create = _libraries['libtinymesa_cpu.so'].lp_passmgr_create
-    lp_passmgr_create.restype = ctypes.c_bool
-    lp_passmgr_create.argtypes = [LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(struct_lp_passmgr))]
-except AttributeError:
-    pass
-class struct_LLVMOpaqueTargetMachine(Structure):
-    pass
-
-LLVMTargetMachineRef = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
-try:
-    lp_passmgr_run = _libraries['libtinymesa_cpu.so'].lp_passmgr_run
-    lp_passmgr_run.restype = None
-    lp_passmgr_run.argtypes = [ctypes.POINTER(struct_lp_passmgr), LLVMModuleRef, LLVMTargetMachineRef, ctypes.POINTER(ctypes.c_char)]
-except AttributeError:
-    pass
-try:
-    lp_passmgr_dispose = _libraries['libtinymesa_cpu.so'].lp_passmgr_dispose
-    lp_passmgr_dispose.restype = None
-    lp_passmgr_dispose.argtypes = [ctypes.POINTER(struct_lp_passmgr)]
-except AttributeError:
-    pass
 class struct_lp_cached_code(Structure):
     pass
 
@@ -15433,6 +15404,10 @@ except AttributeError:
 class struct_LLVMOpaqueExecutionEngine(Structure):
     pass
 
+class struct_LLVMOpaqueModule(Structure):
+    pass
+
+LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
 class struct_LLVMOpaqueMCJITMemoryManager(Structure):
     pass
 
@@ -15530,6 +15505,9 @@ struct_lp_build_context._fields_ = [
 ]
 
 class struct_LLVMOpaqueTargetData(Structure):
+    pass
+
+class struct_lp_passmgr(Structure):
     pass
 
 class struct_LLVMOpaqueBuilder(Structure):
@@ -17442,10 +17420,10 @@ __all__ = \
     'LLVMModuleRef', 'LLVMPPC_FP128TypeKind', 'LLVMPointerTypeKind',
     'LLVMScalableVectorTypeKind', 'LLVMStructTypeKind',
     'LLVMTargetExtTypeKind', 'LLVMTargetLibraryInfoRef',
-    'LLVMTargetMachineRef', 'LLVMTokenTypeKind', 'LLVMTypeKind',
-    'LLVMTypeKind__enumvalues', 'LLVMTypeRef', 'LLVMValueRef',
-    'LLVMVectorTypeKind', 'LLVMVoidTypeKind', 'LLVMX86_AMXTypeKind',
-    'LLVMX86_FP80TypeKind', 'LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV',
+    'LLVMTokenTypeKind', 'LLVMTypeKind', 'LLVMTypeKind__enumvalues',
+    'LLVMTypeRef', 'LLVMValueRef', 'LLVMVectorTypeKind',
+    'LLVMVoidTypeKind', 'LLVMX86_AMXTypeKind', 'LLVMX86_FP80TypeKind',
+    'LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV',
     'LP_BLD_TEX_MODIFIER_EXPLICIT_LOD',
     'LP_BLD_TEX_MODIFIER_LOD_BIAS', 'LP_BLD_TEX_MODIFIER_LOD_ZERO',
     'LP_BLD_TEX_MODIFIER_NONE', 'LP_BLD_TEX_MODIFIER_PROJECTED',
@@ -18175,8 +18153,7 @@ __all__ = \
     'lp_llvm_buffer_num_elements', 'lp_llvm_descriptor_base',
     'lp_mantissa', 'lp_native_vector_width',
     'lp_nir_array_build_gather_values', 'lp_nir_call_context_args',
-    'lp_packed_img_op_from_intrinsic', 'lp_passmgr_create',
-    'lp_passmgr_dispose', 'lp_passmgr_run', 'lp_sampler_lod_property',
+    'lp_packed_img_op_from_intrinsic', 'lp_sampler_lod_property',
     'lp_set_module_stack_alignment_override', 'lp_set_target_options',
     'lp_sizeof_llvm_type', 'lp_translate_atomic_op', 'lp_type_fixed',
     'lp_type_float', 'lp_type_float_vec', 'lp_type_from_format',
@@ -19764,11 +19741,10 @@ __all__ = \
     'struct_LLVMOpaqueMetadata', 'struct_LLVMOpaqueModule',
     'struct_LLVMOpaqueTargetData',
     'struct_LLVMOpaqueTargetLibraryInfotData',
-    'struct_LLVMOpaqueTargetMachine', 'struct_LLVMOpaqueType',
-    'struct_LLVMOpaqueValue', 'struct__IO_FILE', 'struct__IO_codecvt',
-    'struct__IO_marker', 'struct__IO_wide_data',
-    'struct___va_list_tag', 'struct_blob', 'struct_blob_reader',
-    'struct_c__SA_linear_opts',
+    'struct_LLVMOpaqueType', 'struct_LLVMOpaqueValue',
+    'struct__IO_FILE', 'struct__IO_codecvt', 'struct__IO_marker',
+    'struct__IO_wide_data', 'struct___va_list_tag', 'struct_blob',
+    'struct_blob_reader', 'struct_c__SA_linear_opts',
     'struct_c__SA_nir_input_to_output_deps',
     'struct_c__SA_nir_input_to_output_deps_0',
     'struct_c__SA_nir_output_clipper_var_groups',

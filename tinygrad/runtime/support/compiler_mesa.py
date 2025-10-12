@@ -21,8 +21,8 @@ class LVPCompiler(NIRCompiler):
 
   def compile(self, src) -> bytes:
     shader, ctx, cache = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext(), mesa.struct_lp_cached_code()
-    gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), cache).contents
-    module, builder = ctypes.cast(gallivm.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.builder, llvm.LLVMBuilderRef)
+    gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), cache)
+    module, builder = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
 
     params = mesa.struct_lp_build_tgsi_params(mesa.struct_lp_type(floating=True, sign=True, width=32, length=4),
       resources_type=mesa.lp_build_jit_resources_type(gallivm), mask=ctypes.pointer(mesa.struct_lp_build_mask_context()))
@@ -39,16 +39,9 @@ class LVPCompiler(NIRCompiler):
     mesa.lp_build_nir_soa(gallivm, shader, params, None)
     llvm.LLVMBuildRetVoid(builder)
     mesa.gallivm_verify_function(gallivm, ctypes.cast(fn, mesa.LLVMValueRef))
-
-    # gallivm_compile_module
-    llvm.LLVMSetDataLayout(module, b"")
-    mesa.lp_build_create_jit_compiler_for_module(gallivm.engine, gallivm.code, gallivm.cache, gallivm.module, gallivm.memorymgr, 2, None)
-    tgt = ctypes.cast(llvm.LLVMGetExecutionEngineTargetMachine(ctypes.cast(gallivm.engine, llvm.LLVMExecutionEngineRef)), mesa.LLVMTargetMachineRef)
-    mesa.lp_passmgr_run(gallivm.passmgr, gallivm.module, tgt, gallivm.module_name)
-
-    llvm.LLVMGetPointerToGlobal(ctypes.cast(gallivm.engine, llvm.LLVMExecutionEngineRef), fn) # triggers emitObject
+    mesa.gallivm_compile_module(gallivm)
+    mesa.gallivm_jit_function(gallivm, ctypes.cast(fn, mesa.LLVMValueRef), shader.contents.info.name)
     ret = ctypes.string_at(cache.data, cache.data_size)
-
     mesa.gallivm_destroy(gallivm)
     mesa.ralloc_free(shader)
     return ret
