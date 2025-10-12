@@ -5,10 +5,10 @@ from tinygrad.helpers import prod
 from tinygrad.schedule.rangeify import pm_mops
 from tinygrad.codegen.simplify import pm_flatten_range
 
-TILE_DIM = 8
-N_BLOCK = 4
+TILE_DIM = 16
+N_BLOCK = 2
 K_BLOCK = 2
-M_BLOCK = 4
+M_BLOCK = 2
 
 #M = N = K = 4096
 M = N = K = 1024
@@ -20,6 +20,7 @@ def rng(x, typ=AxisType.LOOP) -> UOp:
   return UOp.range(x, range_num-1, typ)
 
 def glbl(nm, dtype, sz): return UOp(Ops.DEFINE_GLOBAL, dtype.ptr(prod(sz), AddrSpace.GLOBAL), arg=nm).reshape(sz)
+def st(nm, dtype, sz): return UOp(Ops.DEFINE_LOCAL, dtype.ptr(prod(sz), AddrSpace.LOCAL), arg=nm).reshape(sz)
 def rt(nm, dtype, sz): return UOp(Ops.DEFINE_REG, dtype.ptr(prod(sz), AddrSpace.REG), arg=nm).reshape(sz)
 
 def zero(reg:UOp, *endrngs):
@@ -30,12 +31,13 @@ def zero(reg:UOp, *endrngs):
 
 def after(*rngs): return UOp(Ops.AFTER, src=rngs)
 
-def load(reg:UOp, gl:UOp, *idxs):
+def load(reg:UOp, gl:UOp, *idxs, barrier=None):
   rngs = [rng(s//TILE_DIM)*TILE_DIM for s in reg.shape]
   rngs = [x+rng(TILE_DIM) for x in rngs]
 
   grngs = [i*(r.vmax+1)+r for i,r in zip(idxs,rngs)]
-  return reg[*rngs].store(gl[*grngs].load(), *rngs, dtype=reg.dtype).reshape(reg.shape)
+  loaded = reg[*rngs].store(gl[*grngs].load(*([barrier] if barrier is not None else [])), *rngs, dtype=reg.dtype)
+  return loaded.reshape(reg.shape), loaded
 
 def store(gl:UOp, reg:UOp, *idxs):
   rngs = [rng(s//TILE_DIM)*TILE_DIM for s in reg.shape]
@@ -46,7 +48,7 @@ def store(gl:UOp, reg:UOp, *idxs):
   grngs = [i*(r.vmax+1)+r for i,r in zip(idxs,rngs)]
   return gl[*grngs].store(reg[*rngs].load(), *rngs)
 
-def mma_AB(outacc:UOp, a:UOp, b:UOp, *endrngs):
+def mma_AB(outacc:UOp, a:UOp, b:UOp, *endrngs, barrier=None):
   assert a.shape[1] == b.shape[0]
   # meta::unroll_i_j_in_range -- split on TILE_DIM
   rngs = [rng(s//TILE_DIM)*TILE_DIM for s in outacc.shape]
@@ -54,7 +56,7 @@ def mma_AB(outacc:UOp, a:UOp, b:UOp, *endrngs):
   # meta::unroll_i_in_range -- split reduce on TILE_DIM
   rngs = [x+rng(TILE_DIM) for x in rngs]
   red = red + rng(TILE_DIM, AxisType.REDUCE)
-  acc = outacc[*rngs].load(red) + a[rngs[0],red].load() * b[red,rngs[1]].load()
+  acc = outacc[*rngs].load(red) + a[rngs[0],red].load(*([barrier] if barrier is not None else [])) * b[red,rngs[1]].load(*([barrier] if barrier is not None else []))
   return outacc[*rngs].store(acc, *rngs, red, *endrngs, dtype=outacc.dtype).reshape(outacc.shape)
 
 if __name__ == "__main__":
@@ -66,15 +68,29 @@ if __name__ == "__main__":
   gl_a = glbl("gl1_a", dtypes.float, (N, K))
   gl_b = glbl("gl2_b", dtypes.float, (K, M))
 
+  As = st("a_st", dtypes.float, (N_BLOCK*TILE_DIM, K_BLOCK*TILE_DIM))
+  Bs = st("b_st", dtypes.float, (K_BLOCK*TILE_DIM, M_BLOCK*TILE_DIM))
+
   a_reg = rt("a_reg", dtypes.float, (N_BLOCK*TILE_DIM, K_BLOCK*TILE_DIM))
   b_reg = rt("b_reg", dtypes.float, (K_BLOCK*TILE_DIM, M_BLOCK*TILE_DIM))
   d_reg = rt("d_reg", dtypes.float, (N_BLOCK*TILE_DIM, M_BLOCK*TILE_DIM))
   d_reg = zero(d_reg, after(tg_id_y, tg_id_x))
 
   k = UOp.range(K // (K_BLOCK * TILE_DIM), -1, AxisType.REDUCE)
-  a_reg = load(a_reg, gl_a, tg_id_y, k)
-  b_reg = load(b_reg, gl_b, k, tg_id_x)
-  d_reg = mma_AB(d_reg, a_reg, b_reg, k)
+
+  As, As_ = load(As, gl_a, tg_id_y, k)
+  Bs, Bs_ = load(Bs, gl_b, k, tg_id_x)
+
+  barrier = UOp.barrier(As_, Bs_)
+
+  a_reg, a_reg_ = load(a_reg, As, barrier=barrier)
+  b_reg, b_reg_ = load(b_reg, Bs, barrier=barrier)
+
+  barrier = UOp.barrier(a_reg_, b_reg_)
+
+  # a_reg = load(a_reg, gl_a, tg_id_y, k)
+  # b_reg = load(b_reg, gl_b, k, tg_id_x)
+  d_reg = mma_AB(d_reg, a_reg, b_reg, k, barrier=barrier)
   sink = store(gl_d, d_reg, tg_id_y, tg_id_x).sink(arg=KernelInfo())
 
   sink = graph_rewrite(sink, pm_mops+pm_flatten_range, name="pm_mops")
