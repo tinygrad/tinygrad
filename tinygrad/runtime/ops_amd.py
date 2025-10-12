@@ -820,7 +820,8 @@ class AMDDevice(HCQCompiled):
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True)) for _ in range(self.se_cnt)]
-      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
+      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", -1) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
+      assert self.sqtt_itrace_se_mask < self.se_cnt, f"SQTT_ITRACE_SE_MASK must be [-1, {self.se_cnt})"
       self.sqtt_next_cmd_id = itertools.count(0)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
