@@ -268,22 +268,52 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   RU  = ctx.new_range(6, AxisType.LOOP)
   UX  = ctx.new_range(6, AxisType.LOOP)
 
+  def selectN(axis: UOp, coeffs: list[float]) -> UOp:
+    n = len(coeffs)
+    assert n in (4, 6)
+    if n == 4:
+      i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
+      i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
+      i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
+      s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
+      s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
+      return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, s23))
+    else:
+      i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
+      i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
+      i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
+      i3 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(3)))
+      i4 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(4)))
+      s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
+      s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
+      s45 = UOp(Ops.WHERE, dtypes.float, src=(i4, _cf(coeffs[4]), _cf(coeffs[5])))
+      return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, UOp(Ops.WHERE, dtypes.float, src=(i3, s23, s45))))
   # bufferize the “data” branch in 2×2×6×6 tile space
   X_vu = act_like.substitute({oy_add: TYx*4 + RU, ox_add: TXx*4 + UX}) \
                 .cast(dtypes.float) \
-                .bufferize(TYx, TXx, RU, UX, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+                .bufferize(TYx, TXx, RU, UX, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   TYh = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
   TXh = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
   # build the Kron *reading from X_vu* with the SAME tile ranges (TYx,TXx); only (u,v) vary as consts
   def kron_from_Xvu(B, c6x, r6x):
-      N = len(B) #TXh, TYh
-      reads = [ ((u,v), X_vu.index(TXh, TYh, _ci(u), _ci(v))) for u in range(N) for v in range(N) ]
-      alpha = [ sum(one_hot(c6x,i)*_cf(B[i][u]) for i in range(N)) for u in range(N) ]
-      beta  = [ sum(one_hot(r6x,j)*_cf(B[j][v]) for j in range(N)) for v in range(N) ]
-      terms = [ Duv * alpha[u] * beta[v] for (u,v), Duv in reads ]
-      while len(terms) > 1:
-          terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1]) for i in range(0, len(terms), 2)]
-      return terms[0]
+    N = len(B)
+    # read from X_vu with the SAME tile axis order used when bufferizing: (TYh, TXh, u, v)
+    reads = [((u, v), X_vu.index(TYh, TXh, _ci(u), _ci(v))) for u in range(N) for v in range(N)]
+
+    # α_p(c6x), β_q(r6x)
+    alpha6 = []
+    for u in range(6):
+        alpha6.append(selectN(c6x, [B[0][u], B[1][u], B[2][u], B[3][u], B[4][u], B[5][u]]))
+
+    beta6 = []
+    for v in range(6):
+        beta6.append(selectN(r6x, [B[0][v], B[1][v], B[2][v], B[3][v], B[4][v], B[5][v]]))
+
+    # use alpha6/beta6 here (not alpha/beta)
+    terms = [Duv * alpha6[u] * beta6[v] for (u, v), Duv in reads]
+    while len(terms) > 1:
+        terms = [terms[i] if i+1 >= len(terms) else (terms[i] + terms[i+1]) for i in range(0, len(terms), 2)]
+    return terms[0]
 
   # free eval axes for the transformed 6×6 tile
   c6x = ctx.new_range(6, AxisType.LOOP)
@@ -294,13 +324,9 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   # bufferize X̂ into its OWN tile namespace (don’t reuse TYx/TXx here!)
   
   XHAT = Xhat_expr.bufferize(TYh, TXh, c6x, r6x,
-            arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+            arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
   # ---- Ĝ branch axes (separate free indices!) ----
-  c6g = ctx.new_range(6, AxisType.LOOP)
-  r6g = ctx.new_range(6, AxisType.LOOP)
-
-  # ---- Ĝ branch axes (free indices for GHAT) ----
   c6g = ctx.new_range(6, AxisType.LOOP)
   r6g = ctx.new_range(6, AxisType.LOOP)
 
@@ -312,7 +338,7 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   KXO = ctx.new_range(3, AxisType.LOOP)
   w_like = w_like.substitute({ky:KYO, kx:KXO})
   print("THE RESULT OF SUBSTITUTION", w_like)
-  w_f32 = w_like.bufferize(KYO, KXO, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+  w_f32 = w_like.bufferize(KYO, KXO, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   # cast once (fractions in G)
  #w_f32 = w_buf.cast(dtypes.float) if w_buf.dtype != dtypes.float else w_buf
 
@@ -320,43 +346,34 @@ def winowrite(ctx: IndexingContext, redu: UOp):
               G: list[list[float]],
               outer_axes: tuple[UOp, ...] = ()) -> UOp:
     """
-    Build GHAT[ug,vg] = sum_{p,q} G[ug,p] * g[p,q] * G[vg,q]
-    as a REDUCE-free expression using one-hot masks (Kronecker factoring).
-
-    - kernel_buf: weight buffer (… , 3, 3) with any outer axes before (p,q)
-    - ug, vg: 6-point LOOP ranges (free axes of GHAT)
-    - G: Winograd G matrix (6x3)
-    - outer_axes: any ranges to index into kernel_buf before (p,q)
+    GHAT[ug,vg] = Σ_{p,q<3} G[ug,p] * g[outer...,p,q] * G[vg,q]
+    Builds a REDUCE-free expression using selects. kx,ky are *not* propagated.
     """
-    N = len(G)      # 6
-    K = len(G[0])   # 3
+    N, K = len(G), len(G[0])          # 6, 3
 
-    # 1) read g[p,q] with constant indices (and pass-through any outer axes)
+    # 1) read g[p,q] once with const indices; include outer axes if present
     if outer_axes:
-      reads = [ ((p,q), kernel_buf.index(*outer_axes, _ci(p), _ci(q)))
-                for p in range(K) for q in range(K) ]
+      reads = [((p,q), kernel_buf.index(*outer_axes, _ci(p), _ci(q)))
+              for p in range(K) for q in range(K)]
     else:
-      reads = [ ((p,q), kernel_buf.index(_ci(p), _ci(q)))
-                for p in range(K) for q in range(K) ]
+      reads = [((p,q), kernel_buf.index(_ci(p), _ci(q)))
+              for p in range(K) for q in range(K)]
 
-    # 2) α_p(ug) = sum_i 1_{ug==i} * G[i,p], β_q(vg) = sum_j 1_{vg==j} * G[j,q]
-    alpha = [ sum(one_hot(ug, i) * _cf(G[i][p]) for i in range(N)) for p in range(K) ]
-    beta  = [ sum(one_hot(vg, j) * _cf(G[j][q]) for j in range(N)) for q in range(K) ]
+    # 2) α_p(ug) and β_q(vg) via selects (no one-hot multiplies)
+    alpha = [ selectN(ug, [G[0][p], G[1][p], G[2][p], G[3][p], G[4][p], G[5][p]]) for p in range(K) ]
+    beta  = [ selectN(vg, [G[0][q], G[1][q], G[2][q], G[3][q], G[4][q], G[5][q]]) for q in range(K) ]
 
-    # 3) GHAT term-wise (no reduce):  g[p,q] * α_p(ug) * β_q(vg)
+    # 3) expand Σ_{p,q} g[p,q]*α_p*β_q with pairwise sums (shallow tree)
     terms = [ g_pq * alpha[p] * beta[q] for (p,q), g_pq in reads ]
-
-    # 4) pairwise-sum fold to keep the add tree shallow
     while len(terms) > 1:
-      terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1])
-              for i in range(0, len(terms), 2)]
+      terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1]) for i in range(0, len(terms), 2)]
     return terms[0] if terms else _cf(0.0)
   print(w_axes)
   # pure Kronecker build: GHAT[c6g, r6g] = sum_{p,q} G[c6g,p]*g[p,q]*G[r6g,q]
   Ghat_expr = ghat_kron(w_f32, c6g, r6g, winograd_G) #, outer_axes=w_axes)
 
   # bufferize GHAT only on its two free axes (outer axes are *not* free here)
-  GHAT = Ghat_expr.bufferize(c6g, r6g, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+  GHAT = Ghat_expr.bufferize(c6g, r6g, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
   # G_r   = (w_like.cast(dtypes.float) * 3).reduce(kx, arg=Ops.ADD, dtype=dtypes.float)
   # Ghat_expr = (G_r * 3).reduce(ky, arg=Ops.ADD, dtype=dtypes.float)
@@ -390,9 +407,13 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   # 2) build selector polynomials α_p(o4y) and β_q(o4x) from A = A^T^T (4×6)
   A = winograd_At   # shape 4×6
   # α_p(o4y) = Σ_i 1_{o4y==i} * A[i,p]  (for p=0..5)
-  alpha = [ sum(one_hot(o4y, i) * _cf(A[i][p]) for i in range(4)) for p in range(6) ]
-  # β_q(o4x) = Σ_j 1_{o4x==j} * A[j,q]  (for q=0..5)
-  beta  = [ sum(one_hot(o4x, j) * _cf(A[j][q]) for j in range(4)) for q in range(6) ]
+  alpha = []
+  for p in range(6):
+    alpha.append(selectN(o4y, [A[0][p], A[1][p], A[2][p], A[3][p]]))
+
+  beta = []
+  for q in range(6):
+    beta.append(selectN(o4x, [A[0][q], A[1][q], A[2][q], A[3][q]]))
 
   # 3) assemble Y(o4y,o4x) = Σ_{p,q} M̂[p,q] * α_p(o4y) * β_q(o4x)  (NO REDUCE nodes)
   terms = [ M_pq * alpha[p] * beta[q] for (p,q), M_pq in M_reads ]
@@ -403,7 +424,7 @@ def winowrite(ctx: IndexingContext, redu: UOp):
 
   YTILE = out.bufferize(
       TYw, TXw, o4y, o4x,
-      arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL)
+      arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)
   )
 
   # 5) Map the consumer's loops to these tile axes and RETURN an INDEX (no free ranges left)
