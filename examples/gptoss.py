@@ -145,7 +145,8 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
 def load_model(path:Path, params:dict[str, int|float]) -> Transformer:
   # build model
   feed_forward = functools.partial(MixtureFeedForward, params.pop("num_experts"), params.pop("activated_experts"))
-  model = Transformer(**params, feed_forward=feed_forward)
+  # todo: fix jit=True
+  model = Transformer(**params, jit=False, feed_forward=feed_forward)
 
   # set head dim and add bias to each attention projection
   for i in range(len(model.layers)):
@@ -202,18 +203,15 @@ if __name__ == "__main__":
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
-  ic(toks)
   print(outputted, end="", flush=True)
 
   tok_tensor = None
   for i in range(args.count):
-    ic(start_pos, type(start_pos))
     GlobalCounters.reset()
 
     if args.timing: print("")
     st = GlobalCounters.time_sum_s
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
-    ic(next_tok)
     with Timing("total ", enabled=args.timing, on_exit=lambda x: f", {1e9/x:.2f} tok/s, {GlobalCounters.global_mem/x:.2f} GB/s, param {param_bytes/x:.2f} GB/s"):
       with Timing("enqueue in ", on_exit=(lambda et: (f", {(GlobalCounters.time_sum_s-st)*1e3:.2f} ms on {Device.DEFAULT}") +
                   f", {GlobalCounters.global_ops*1e-9:.2f} GOPS, {GlobalCounters.global_mem*1e-9:.2f} GB" +

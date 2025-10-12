@@ -1,7 +1,7 @@
 from typing import Union, Optional, Any
 import collections, math
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -115,8 +115,7 @@ class TransformerBlock:
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     if self.sliding_window:
       seqlen = x.shape[1]
-      ic(seqlen, start_pos, self.sliding_window)
-      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window+1)
+      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
       mask = sliding_mask if mask is None else mask+sliding_mask
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
@@ -189,11 +188,8 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
-    ic(start_pos, start_pos+seqlen)
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
-    for layer in self.layers:
-      h = layer(h, start_pos, freqs_cis, mask)
-      ic(h.numpy())
+    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 
