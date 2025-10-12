@@ -231,7 +231,7 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   ix = (ox_base % 4).simplify()
   tx = ((ox_base + 3)// 4).simplify()
   ty = ((oy_base + 3)// 4).simplify()
-  print(f"oyb: {oy_add}, oxb: {ox_add}")
+  #print(f"oyb: {oy_add}, oxb: {ox_add}")
 
   # Tile loops (outer)
   # TY = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
@@ -276,8 +276,8 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   TXh = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
   # build the Kron *reading from X_vu* with the SAME tile ranges (TYx,TXx); only (u,v) vary as consts
   def kron_from_Xvu(B, c6x, r6x):
-      N = len(B)
-      reads = [ ((u,v), X_vu.index(TYh, TXh, _ci(u), _ci(v))) for u in range(N) for v in range(N) ]
+      N = len(B) #TXh, TYh
+      reads = [ ((u,v), X_vu.index(TXh, TYh, _ci(u), _ci(v))) for u in range(N) for v in range(N) ]
       alpha = [ sum(one_hot(c6x,i)*_cf(B[i][u]) for i in range(N)) for u in range(N) ]
       beta  = [ sum(one_hot(r6x,j)*_cf(B[j][v]) for j in range(N)) for v in range(N) ]
       terms = [ Duv * alpha[u] * beta[v] for (u,v), Duv in reads ]
@@ -300,28 +300,85 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   c6g = ctx.new_range(6, AxisType.LOOP)
   r6g = ctx.new_range(6, AxisType.LOOP)
 
+  # ---- Ĝ branch axes (free indices for GHAT) ----
+  c6g = ctx.new_range(6, AxisType.LOOP)
+  r6g = ctx.new_range(6, AxisType.LOOP)
 
-  G_r   = (w_like.cast(dtypes.float) * 3).reduce(kx, arg=Ops.ADD, dtype=dtypes.float)
-  Ghat_expr = (G_r * 3).reduce(ky, arg=Ops.ADD, dtype=dtypes.float)
+  # discover outer axes of the weight INDEX (everything except ky,kx)
+  w_buf = w_like.src[0]
+  w_axes = tuple(ax for ax in w_like.src[1:] if ax not in {ky, kx})
 
-  # Bufferize Ĝ on (c6g, r6g). Still no oy/ox/ix/iy here.
-  GHAT = Ghat_expr.bufferize(c6g, r6g,
-          arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+  KYO = ctx.new_range(3, AxisType.LOOP)
+  KXO = ctx.new_range(3, AxisType.LOOP)
+  w_like = w_like.substitute({ky:KYO, kx:KXO})
+  print("THE RESULT OF SUBSTITUTION", w_like)
+  w_f32 = w_like.bufferize(KYO, KXO, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+  # cast once (fractions in G)
+ #w_f32 = w_buf.cast(dtypes.float) if w_buf.dtype != dtypes.float else w_buf
+
+  def ghat_kron(kernel_buf: UOp, ug: UOp, vg: UOp,
+              G: list[list[float]],
+              outer_axes: tuple[UOp, ...] = ()) -> UOp:
+    """
+    Build GHAT[ug,vg] = sum_{p,q} G[ug,p] * g[p,q] * G[vg,q]
+    as a REDUCE-free expression using one-hot masks (Kronecker factoring).
+
+    - kernel_buf: weight buffer (… , 3, 3) with any outer axes before (p,q)
+    - ug, vg: 6-point LOOP ranges (free axes of GHAT)
+    - G: Winograd G matrix (6x3)
+    - outer_axes: any ranges to index into kernel_buf before (p,q)
+    """
+    N = len(G)      # 6
+    K = len(G[0])   # 3
+
+    # 1) read g[p,q] with constant indices (and pass-through any outer axes)
+    if outer_axes:
+      reads = [ ((p,q), kernel_buf.index(*outer_axes, _ci(p), _ci(q)))
+                for p in range(K) for q in range(K) ]
+    else:
+      reads = [ ((p,q), kernel_buf.index(_ci(p), _ci(q)))
+                for p in range(K) for q in range(K) ]
+
+    # 2) α_p(ug) = sum_i 1_{ug==i} * G[i,p], β_q(vg) = sum_j 1_{vg==j} * G[j,q]
+    alpha = [ sum(one_hot(ug, i) * _cf(G[i][p]) for i in range(N)) for p in range(K) ]
+    beta  = [ sum(one_hot(vg, j) * _cf(G[j][q]) for j in range(N)) for q in range(K) ]
+
+    # 3) GHAT term-wise (no reduce):  g[p,q] * α_p(ug) * β_q(vg)
+    terms = [ g_pq * alpha[p] * beta[q] for (p,q), g_pq in reads ]
+
+    # 4) pairwise-sum fold to keep the add tree shallow
+    while len(terms) > 1:
+      terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1])
+              for i in range(0, len(terms), 2)]
+    return terms[0] if terms else _cf(0.0)
+  print(w_axes)
+  # pure Kronecker build: GHAT[c6g, r6g] = sum_{p,q} G[c6g,p]*g[p,q]*G[r6g,q]
+  Ghat_expr = ghat_kron(w_f32, c6g, r6g, winograd_G) #, outer_axes=w_axes)
+
+  # bufferize GHAT only on its two free axes (outer axes are *not* free here)
+  GHAT = Ghat_expr.bufferize(c6g, r6g, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+
+  # G_r   = (w_like.cast(dtypes.float) * 3).reduce(kx, arg=Ops.ADD, dtype=dtypes.float)
+  # Ghat_expr = (G_r * 3).reduce(ky, arg=Ops.ADD, dtype=dtypes.float)
+
+  # # Bufferize Ĝ on (c6g, r6g). Still no oy/ox/ix/iy here.
+  # GHAT = Ghat_expr.bufferize(c6g, r6g,
+  #         arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
 
   # ---- Final stage: fresh reducers + A/At with ix/iy only here ----
   c6r = ctx.new_range(6, AxisType.REDUCE)
   r6r = ctx.new_range(6, AxisType.REDUCE)
 
-  Mhat = XHAT.index(ty, tx, c6r, r6r) * GHAT.index(c6r, r6r)
+  Mhat = XHAT.index(ty, tx, ix, iy) * GHAT.index(ix, iy)#* GHAT.index(ix, iy)
 
   A_ix  = synth_mat(list(zip(*winograd_At)), ix,  r6r)  # ix appears ONLY here
   At_iy = synth_mat(winograd_At,             c6r, iy)   # iy appears ONLY here
   A_ix = 3
   At_iy = 3
-  out = ((Mhat * A_ix).reduce(r6r, arg=Ops.ADD, dtype=dtypes.float) * At_iy)\
+  out = ((Mhat).reduce(r6r, arg=Ops.ADD, dtype=dtypes.float))\
         .reduce(c6r, arg=Ops.ADD, dtype=dtypes.float)
 
-  return out
+  return Mhat
 
 winograd_rewrite = PatternMatcher([
  (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
