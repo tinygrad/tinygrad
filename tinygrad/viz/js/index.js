@@ -253,8 +253,8 @@ async function renderProfiler() {
           const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
           const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
           buf_shapes.set(key, shape); temp.set(key, shape);
-          timestamps.push(ts); valueMap.set(ts, y);
-          x += 1; y += nbytes;
+          timestamps.push(ts);
+          x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
           timestamps.push(ts); valueMap.set(ts, y);
