@@ -913,8 +913,6 @@ jobs:
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
-      - name: find tinymesa?
-        run: python -c "import ctypes.util; print(ctypes.util.find_library('tinymesa_cpu'))"
       - name: Check Device.DEFAULT and print some source
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
