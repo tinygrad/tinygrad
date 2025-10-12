@@ -115,10 +115,6 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
-# def synth_mat(mat: list[list[int|float]], o: UOp, r: UOp, dtype=dtypes.float) -> UOp:
-#   rows = len(mat)
-#   cols = len(mat[0]) if rows else 0
-#   assert rows > 0 and cols > 0, "synth_mat: expected non-empty matrix"
 
 #   # make a (rows x cols) constant table (values don't matter for plumbing tests)
 #   ones = UOp.const(dtype, 1.0).reshape((1, 1)).expand((rows, cols)).contiguous()
@@ -142,41 +138,6 @@ def synth_mat(mat: list[list[int|float]], o: UOp, r: UOp, dtype=dtypes.float) ->
 def _ci(i: int) -> UOp:  return UOp.const(dtypes.index, i)
 def _cf(x: float) -> UOp: return UOp.const(dtypes.float, float(x))
 
-def one_hot(axis: UOp, i: int) -> UOp:
-  # WHERE(CMEQ(axis,i), 1.0, 0.0)
-  return UOp(Ops.WHERE, dtypes.float,
-             src=(UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(i))), _cf(1.0), _cf(0.0)))
-
-def nmode_kron(buf: UOp, axes: list[UOp], B: list[list[float]], outer_axes: list[UOp]) -> UOp:
-  """
-  Y[axes] = sum_{p0..p_{k-1}} ( Π_m B[axes[m], p_m] ) * D[p0..p_{k-1}]
-  """
-  N, k = len(B), len(axes)
-  # 1) all constant reads of D (N^k)
-  if outer_axes != []:
-    grid = [ (pt, buf.index(*map(_ci, pt), *outer_axes)) for pt in product(range(N), repeat=k) ]
-  else:
-    grid = [ (pt, buf.index(*map(_ci, pt))) for pt in product(range(N), repeat=k) ]
-  # 2) per-axis masked coeff tables α^{(m)}_p(axis_m) = sum_i 1_{axis_m==i} * B[i,p]
-  alpha = [
-    [ sum( one_hot(axes[m], i) * _cf(B[i][p]) for i in range(N) )
-      for p in range(N) ]
-    for m in range(k)
-  ]
-  # 3) term for each tuple p: D[p] * Π_m α^{(m)}_{p_m}(axis_m)
-  terms = [ D * _prod(alpha[m][pt[m]] for m in range(k)) for pt, D in grid ]
-  # 4) fold the sum (pairwise to keep trees shallow)
-  while len(terms) > 1:
-    terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1]) for i in range(0,len(terms),2)]
-  return terms[0] if terms else _cf(0.0)
-
-def _prod(xs):
-  it = iter(xs)
-  acc = next(it, None)
-  if acc is None: return _cf(1.0)
-  for x in it: acc = acc * x
-  return acc
-
 def winoguard(redu):
  #TODO - Can we make this simpler?
  if redu.arg is not Ops.ADD or redu.src[0].op is not Ops.MUL: return None
@@ -194,6 +155,47 @@ def winoguard(redu):
  if len(oa) >= 2 and not ob: return (0, oa)
  if len(ob) >= 2 and not oa: return (1, ob)
  return None
+
+  # shallow add tree to keep codegen nice
+def pairwise_sum(xs):
+  while len(xs) > 1:
+    xs = [ xs[i] if i+1>=len(xs) else (xs[i] + xs[i+1]) for i in range(0, len(xs), 2) ]
+  return xs[0] if xs else _cf(0.0)
+
+# Generic left/right transform application:
+# For axes axis_L, axis_R and coefficient tables L_rows (len(axis_L) x K)
+# and R_rows (len(axis_R) x J), compute:
+#   out = sum_{k=0..K-1} sum_{j=0..J-1} read_fn(k,j) * L[axis_L,k] * R[axis_R,j]
+def kron_apply(read_fn, axis_L: UOp, axis_R: UOp,
+                L_rows: list[list[float]], R_rows: list[list[float]]):
+  K = len(L_rows[0])
+  J = len(R_rows[0])
+  # Build selector polynomials once
+  alpha = [ selectN(axis_L, [L_rows[i][k] for i in range(len(L_rows))]) for k in range(K) ]
+  beta  = [ selectN(axis_R, [R_rows[i][j] for i in range(len(R_rows))]) for j in range(J) ]
+  terms = [ read_fn(k,j) * alpha[k] * beta[j] for k in range(K) for j in range(J) ]
+  return pairwise_sum(terms)
+
+def selectN(axis: UOp, coeffs: list[float]) -> UOp:
+  n = len(coeffs)
+  assert n in (4, 6)
+  if n == 4:
+    i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
+    i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
+    i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
+    s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
+    s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
+    return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, s23))
+  else:
+    i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
+    i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
+    i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
+    i3 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(3)))
+    i4 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(4)))
+    s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
+    s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
+    s45 = UOp(Ops.WHERE, dtypes.float, src=(i4, _cf(coeffs[4]), _cf(coeffs[5])))
+    return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, UOp(Ops.WHERE, dtypes.float, src=(i3, s23, s45))))
 
 def winowrite(ctx: IndexingContext, redu: UOp):
   #TODO - Add where filters so index does not read garbage - or do we?
@@ -229,65 +231,15 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   ox_base = ox_add.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify()
   iy = (oy_base % 4).simplify()
   ix = (ox_base % 4).simplify()
-  tx = ((ox_base + 3)// 4).simplify()
-  ty = ((oy_base + 3)// 4).simplify()
-  #print(f"oyb: {oy_add}, oxb: {ox_add}")
-
-  # Tile loops (outer)
-  # TY = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
-  # TX = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
-
-  # # ---- X̂ branch axes (disjoint) ----
-  # c6x = ctx.new_range(6, AxisType.LOOP)
-  # r6x = ctx.new_range(6, AxisType.LOOP)
-  # u6x = ctx.new_range(6, AxisType.REDUCE)
-  # v6x = ctx.new_range(6, AxisType.REDUCE)
-  # RU = ctx.new_range(6, AxisType.LOOP)
-  # UX = ctx.new_range(6, AxisType.LOOP)
-  
-  # # Build mats for X̂ using ONLY these axes
-  # B_ur_x = synth_mat(list(zip(*winograd_Bt)), r6x, u6x)
-  # Bt_cv_x = synth_mat(winograd_Bt,           v6x, c6x)      # reduce v6x, index c6x
-
-  # X_vu = act_like.substitute({oy_add: TY*4 + RU, ox_add: TX*4 + UX}).cast(dtypes.float).bufferize(TY, TX, RU, UX, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
-  # # Xhat_expr = ((X_vu * B_ur_x).reduce(u6x, arg=Ops.ADD, dtype=dtypes.float) * Bt_cv_x)\
-  # #             .reduce(v6x, arg=Ops.ADD, dtype=dtypes.float)
-  # #Xhat_expr = nmode_kron(X_vu, [c6x, r6x], Bt)
-  # # TY1 = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
-  # # TX1 = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
-  # Xhat_expr = X_vu.index(TY, TX, c6x, r6x) + 1
-  # Xhat_expr = nmode_kron(X_vu, [c6x, r6x], Bt, [TY, TX])
-  
-
-  # # Bufferize X̂ on (TY, TX, c6x, r6x). No oy/ox/ix/iy here.
-  # XHAT = Xhat_expr.bufferize(TY, TX, c6x, r6x,
-  #         arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
+  tx = (ox_base// 4).simplify()
+  ty = (oy_base// 4).simplify()
 
   TYx = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
   TXx = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
   RU  = ctx.new_range(6, AxisType.LOOP)
   UX  = ctx.new_range(6, AxisType.LOOP)
 
-  def selectN(axis: UOp, coeffs: list[float]) -> UOp:
-    n = len(coeffs)
-    assert n in (4, 6)
-    if n == 4:
-      i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
-      i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
-      i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
-      s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
-      s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
-      return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, s23))
-    else:
-      i0 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(0)))
-      i1 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(1)))
-      i2 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(2)))
-      i3 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(3)))
-      i4 = UOp(Ops.CMPEQ, dtypes.bool, src=(axis, _ci(4)))
-      s01 = UOp(Ops.WHERE, dtypes.float, src=(i0, _cf(coeffs[0]), _cf(coeffs[1])))
-      s23 = UOp(Ops.WHERE, dtypes.float, src=(i2, _cf(coeffs[2]), _cf(coeffs[3])))
-      s45 = UOp(Ops.WHERE, dtypes.float, src=(i4, _cf(coeffs[4]), _cf(coeffs[5])))
-      return UOp(Ops.WHERE, dtypes.float, src=(i1, s01, UOp(Ops.WHERE, dtypes.float, src=(i3, s23, s45))))
+  
   # bufferize the “data” branch in 2×2×6×6 tile space
   X_vu = act_like.substitute({oy_add: TYx*4 + RU, ox_add: TXx*4 + UX}) \
                 .cast(dtypes.float) \
@@ -295,34 +247,18 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   TYh = ctx.new_range((int(oy_base.vmax+1)+3)//4, AxisType.LOOP)
   TXh = ctx.new_range((int(ox_base.vmax+1)+3)//4, AxisType.LOOP)
   # build the Kron *reading from X_vu* with the SAME tile ranges (TYx,TXx); only (u,v) vary as consts
-  def kron_from_Xvu(B, c6x, r6x):
-    N = len(B)
-    # read from X_vu with the SAME tile axis order used when bufferizing: (TYh, TXh, u, v)
-    reads = [((u, v), X_vu.index(TYh, TXh, _ci(u), _ci(v))) for u in range(N) for v in range(N)]
-
-    # α_p(c6x), β_q(r6x)
-    alpha6 = []
-    for u in range(6):
-        alpha6.append(selectN(c6x, [B[0][u], B[1][u], B[2][u], B[3][u], B[4][u], B[5][u]]))
-
-    beta6 = []
-    for v in range(6):
-        beta6.append(selectN(r6x, [B[0][v], B[1][v], B[2][v], B[3][v], B[4][v], B[5][v]]))
-
-    # use alpha6/beta6 here (not alpha/beta)
-    terms = [Duv * alpha6[u] * beta6[v] for (u, v), Duv in reads]
-    while len(terms) > 1:
-        terms = [terms[i] if i+1 >= len(terms) else (terms[i] + terms[i+1]) for i in range(0, len(terms), 2)]
-    return terms[0]
 
   # free eval axes for the transformed 6×6 tile
+
   c6x = ctx.new_range(6, AxisType.LOOP)
   r6x = ctx.new_range(6, AxisType.LOOP)
 
-  Xhat_expr = kron_from_Xvu(Bt, c6x, r6x)
+  # X̂ = Bt * X * Btᵀ   (read from the 6x6 tile-bufferized activation X_vu)
+  Xhat_expr = kron_apply(
+      lambda u,v: X_vu.index(TYh, TXh, _ci(u), _ci(v)),
+      c6x, r6x, winograd_Bt, winograd_Bt)
 
   # bufferize X̂ into its OWN tile namespace (don’t reuse TYx/TXx here!)
-  
   XHAT = Xhat_expr.bufferize(TYh, TXh, c6x, r6x,
             arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
@@ -342,58 +278,14 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   # cast once (fractions in G)
  #w_f32 = w_buf.cast(dtypes.float) if w_buf.dtype != dtypes.float else w_buf
 
-  def ghat_kron(kernel_buf: UOp, ug: UOp, vg: UOp,
-              G: list[list[float]],
-              outer_axes: tuple[UOp, ...] = ()) -> UOp:
-    """
-    GHAT[ug,vg] = Σ_{p,q<3} G[ug,p] * g[outer...,p,q] * G[vg,q]
-    Builds a REDUCE-free expression using selects. kx,ky are *not* propagated.
-    """
-    N, K = len(G), len(G[0])          # 6, 3
-
-    # 1) read g[p,q] once with const indices; include outer axes if present
-    if outer_axes:
-      reads = [((p,q), kernel_buf.index(*outer_axes, _ci(p), _ci(q)))
-              for p in range(K) for q in range(K)]
-    else:
-      reads = [((p,q), kernel_buf.index(_ci(p), _ci(q)))
-              for p in range(K) for q in range(K)]
-
-    # 2) α_p(ug) and β_q(vg) via selects (no one-hot multiplies)
-    alpha = [ selectN(ug, [G[0][p], G[1][p], G[2][p], G[3][p], G[4][p], G[5][p]]) for p in range(K) ]
-    beta  = [ selectN(vg, [G[0][q], G[1][q], G[2][q], G[3][q], G[4][q], G[5][q]]) for q in range(K) ]
-
-    # 3) expand Σ_{p,q} g[p,q]*α_p*β_q with pairwise sums (shallow tree)
-    terms = [ g_pq * alpha[p] * beta[q] for (p,q), g_pq in reads ]
-    while len(terms) > 1:
-      terms = [terms[i] if i+1>=len(terms) else (terms[i] + terms[i+1]) for i in range(0, len(terms), 2)]
-    return terms[0] if terms else _cf(0.0)
-  print(w_axes)
   # pure Kronecker build: GHAT[c6g, r6g] = sum_{p,q} G[c6g,p]*g[p,q]*G[r6g,q]
-  Ghat_expr = ghat_kron(w_f32, c6g, r6g, winograd_G) #, outer_axes=w_axes)
-
+  # Ĝ = G * g * Gᵀ   (g is 3×3 from w_f32)
+  Ghat_expr = kron_apply(
+      lambda p,q: w_f32.index(_ci(p), _ci(q)),
+      c6g, r6g, winograd_G, winograd_G)
   # bufferize GHAT only on its two free axes (outer axes are *not* free here)
   GHAT = Ghat_expr.bufferize(c6g, r6g, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
-  # G_r   = (w_like.cast(dtypes.float) * 3).reduce(kx, arg=Ops.ADD, dtype=dtypes.float)
-  # Ghat_expr = (G_r * 3).reduce(ky, arg=Ops.ADD, dtype=dtypes.float)
-
-  # # Bufferize Ĝ on (c6g, r6g). Still no oy/ox/ix/iy here.
-  # GHAT = Ghat_expr.bufferize(c6g, r6g,
-  #         arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
-
-  # ---- Final stage: fresh reducers + A/At with ix/iy only here ----
-  # c6r = ctx.new_range(6, AxisType.REDUCE)
-  # r6r = ctx.new_range(6, AxisType.REDUCE)
-
-  # Mhat = XHAT.index(ty, tx, ix, iy) * GHAT.index(ix, iy)#* GHAT.index(ix, iy)
-
-  # A_ix  = synth_mat(list(zip(*winograd_At)), ix,  r6r)  # ix appears ONLY here
-  # At_iy = synth_mat(winograd_At,             c6r, iy)   # iy appears ONLY here
-  # A_ix = 3
-  # At_iy = 3
-  # out = ((Mhat).reduce(r6r, arg=Ops.ADD, dtype=dtypes.float))\
-  #       .reduce(c6r, arg=Ops.ADD, dtype=dtypes.float)
 
   o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
   o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
@@ -401,149 +293,28 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   TYw = ctx.new_range(6, AxisType.LOOP)
   # 1) read all 36 entries of M̂[p,q] (X̂*Ĝ) once
   M_reads = [ ((p,q),
-              XHAT.index(TXw, TYw, _ci(p), _ci(q)) * GHAT.index(_ci(p), _ci(q)) )
+              XHAT.index(TYw, TXw, _ci(p), _ci(q)) * GHAT.index(_ci(p), _ci(q)) )
               for p in range(6) for q in range(6) ]
 
-  # 2) build selector polynomials α_p(o4y) and β_q(o4x) from A = A^T^T (4×6)
-  A = winograd_At
+  o4y = ctx.new_range(4, AxisType.LOOP)   # output row-in-tile
+  o4x = ctx.new_range(4, AxisType.LOOP)   # output col-in-tile
+  TXw = ctx.new_range(6, AxisType.LOOP)
+  TYw = ctx.new_range(6, AxisType.LOOP)
 
-  # 0) precompute β_q(o4x) and α_p(o4y) once
-  beta = [ selectN(o4x, [A[0][q], A[1][q], A[2][q], A[3][q]]) for q in range(6) ]   # 6 scalars
-  alpha = [ selectN(o4y, [A[0][p], A[1][p], A[2][p], A[3][p]]) for p in range(6) ]   # 6 scalars
-
-  # 1) materialize M[p,q] = XHAT(TXw,TYw,p,q) * GHAT(p,q)
-  #    (you already have M_reads, but we’ll also keep a 2D list for factoring)
-  M = [[None]*6 for _ in range(6)]
-  for (p,q), M_pq in M_reads:
-    M[p][q] = M_pq
-
-  # 2) first pass over q: S_p = Σ_q M[p,q] * β_q
-  def pairwise_sum(xs):
-    # shallow add tree to keep codegen nice
-    while len(xs) > 1:
-      xs = [ xs[i] if i+1>=len(xs) else (xs[i] + xs[i+1]) for i in range(0, len(xs), 2) ]
-    return xs[0] if xs else _cf(0.0)
-
-  S = []
-  for p in range(6):
-    terms = [ M[p][q] * beta[q] for q in range(6) ]
-    S.append(pairwise_sum(terms))
-
-  # 3) second pass over p: Y = Σ_p α_p * S_p
-  terms = [ alpha[p] * S[p] for p in range(6) ]
-  out   = pairwise_sum(terms)
-
+  # Y = A * (X̂ ⊙ Ĝ) * Aᵀ  → no explicit M/S temporaries needed
+  out = kron_apply(
+          lambda p,q: XHAT.index(TYw, TXw, _ci(p), _ci(q)) * GHAT.index(_ci(p), _ci(q)),
+          o4y, o4x, winograd_At, winograd_At)
+          
   YTILE = out.bufferize(TYw, TXw, o4y, o4x,
             arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   out = YTILE.index(ty, tx, iy, ix)
-  return out
-  
-
-  print("rng1", out.src[0], "rng2", out.src[1])
-  
   return out
 
 winograd_rewrite = PatternMatcher([
  (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
  ])
 
-B_data = [
-  [ 1,  1, -1],
-  [ 1,  1, -1],
-  [0, 0, 0]
-]
-# def pratice_rewrite(ctx: IndexingContext, redu: UOp):
-#   if redu.src[0].op is not Ops.MUL: return None
-#   mul = redu.src[0]
-#   #print("Choosing first")
-#   idx = mul.src[0]
-#   idx2 = mul.src[1]
-#   ky = idx.src[1]
-#   kx = idx.src[2]
-#   buf = idx.src[0]
-#   print(idx2.src[2])
-#   #print(f"ky: {ky}, kx: {kx}, buf: {buf}")
-#   # The where(invalid) pattern gets optimized in symbolic.py line 477 based on validity analysis
-#   cond = kx.eq(UOp.const(dtypes.index, 3))
-
-#   rp1, rp2, rp3 = [buf.index(UOp.const(dtypes.index, i), kx) for i in range(3)]
-#   # Guard the first index parameter: when kx==3 use 0, otherwise use invalid (gets optimized)
-#   guarded_first_idx = cond.where(UOp.const(dtypes.index, 0), UOp.invalid())
-#   return (buf.index(guarded_first_idx, ky) * idx2.replace(src=(idx2.src[0], UOp(Ops.CONST, dtypes.index, arg=0), idx2.src[2])))
-
-
-
-Bt =[                          # (6,6)
-  [4,  0, -5,  0, 1, 0],
-  [0, -4, -4,  1, 1, 0],
-  [0,  4, -4, -1, 1, 0],
-  [0, -2, -1,  2, 1, 0],
-  [0,  2, -1, -2, 1, 0],
-  [0,  4,  0, -5, 0, 1],
-]
-def pratice_rewrite(ctx: IndexingContext, redu: UOp):
-  # Expect MUL with activation-like INDEX on the left
-  if redu.src[0].op is not Ops.MUL: return None
-  mul = redu.src[0]
-  act_like = mul.src[1]
-  w_like = mul.src[0]
-  if act_like.op is not Ops.INDEX or len(act_like.src) < 3: return None
-
-  #print(f"act_like: {act_like}, w_like: {w_like}")
-  buf = w_like.src[0]
-  ky  = w_like.src[1]   # output row loop (iy)
-  kx  = act_like.src[2]   # output col loop (ix)
-  #print(f"ky: {ky}, kx: {kx}, buf: {buf}")
-  # print(f"ky: {ky}, kx: {kx}, buf: {buf}")
-  # # --- helpers ---
-  # def consti(i: int) -> UOp: return UOp.const(dtypes.index, i)
-  # def constf(x: float) -> UOp: return UOp.const(dtypes.float, x)
-
-  # one, zero, neg1 = constf(1.0), constf(0.0), constf(-1.0)
-
-  # # ***** 1) READ D WITH ONLY CONST INDICES (no SUBSTITUTE, no NOOP) *****
-  # # 3x3 toy -> nine scalar INDEX nodes
-  # D00 = buf.index(consti(0), consti(0))
-  # D01 = buf.index(consti(0), consti(1))
-  # D02 = buf.index(consti(0), consti(2))
-  # D10 = buf.index(consti(1), consti(0))
-  # D11 = buf.index(consti(1), consti(1))
-  # D12 = buf.index(consti(1), consti(2))
-  # D20 = buf.index(consti(2), consti(0))
-  # D21 = buf.index(consti(2), consti(1))
-  # D22 = buf.index(consti(2), consti(2))
-
-  # # ***** 2) B COEFFICIENTS AS LITERALS (no indexing B) *****
-  # # Your B_data (from the file) for rows is:
-  # #   rows 0,1: [1, 1, -1], row 2: [0,0,0]
-  # # We'll express these per-i (ky) using tiny masks (no tables).
-  # is_i01 = UOp(Ops.CMPLT, dtypes.bool, src=(ky, consti(2)))     # ky in {0,1}
-  # row_mask = UOp(Ops.WHERE, dtypes.float, src=(is_i01, one, zero))
-  # # row coeffs: for i∈{0,1} → [1,1,-1], for i=2 → [0,0,0]
-  # b_ip0 = row_mask * one
-  # b_ip1 = row_mask * one
-  # b_ip2 = row_mask * neg1
-
-  # # For columns, reuse the same pattern: j∈{0,1} → [1,1,-1], j=2 → [0,0,0]
-  # is_j01 = UOp(Ops.CMPLT, dtypes.bool, src=(kx, consti(2)))     # kx in {0,1}
-  # col_mask = UOp(Ops.WHERE, dtypes.float, src=(is_j01, one, zero))
-  # b_jq0 = col_mask * one
-  # b_jq1 = col_mask * one
-  # b_jq2 = col_mask * neg1
-
-  # # ***** 3) FORM C_q(i) = Σ_p B[i,p]*D[p,q] *****
-  # C0 = b_ip0*D00 + b_ip1*D10 + b_ip2*D20
-  # C1 = b_ip0*D01 + b_ip1*D11 + b_ip2*D21
-  # C2 = b_ip0*D02 + b_ip1*D12 + b_ip2*D22
-
-  # # ***** 4) FORM Y(i,j) = Σ_q C_q(i) * B[j,q] *****
-  # out = C0*b_jq0 + C1*b_jq1 + C2*b_jq2
-
-  return nmode_kron(buf, [ky, kx], Bt, [])
-
-practice = PatternMatcher([
- (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: pratice_rewrite(ctx, redu))
- ])
 # *****************
 # 3.5 cleanups
 
