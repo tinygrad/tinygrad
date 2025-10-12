@@ -1,6 +1,6 @@
 from typing import Callable, cast
 from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
-from tinygrad.helpers import DEBUG, unwrap
+from tinygrad.helpers import DEBUG, OSX, unwrap
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
@@ -192,7 +192,8 @@ class NIRRenderer(Renderer):
         self.r[u] = cast(mesa.nir_def, d)
 
     mesa.nir_validate_shader(self.b.shader, b"after render")
-    if DEBUG >= 4: mesa.nir_print_shader(self.b.shader, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(None), "stdout"))
+    if DEBUG >= 4: mesa.nir_print_shader(self.b.shader, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')),
+                                                                                                    "__stdoutp" if OSX else "stdout"))
     mesa.nir_serialize(blob:=mesa.struct_blob(), self.b.shader, False)
     ret = base64.b64encode(ctypes.string_at(blob.data, blob.size)).decode()
 
