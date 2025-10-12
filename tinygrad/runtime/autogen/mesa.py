@@ -13,7 +13,7 @@ def brew_prefix():
 PATHS_TO_TRY = [
   (BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'),
   f'{BASE}/libtinymesa{EXT}',
-  f'{brew_prefix()}/libtinymesa_cpu.dylib',
+  f'{brew_prefix()}/lib/libtinymesa_cpu.dylib',
 ]
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
