@@ -1,6 +1,6 @@
 import base64, ctypes, pathlib, tempfile, hashlib, subprocess
 from tinygrad.device import Compiler
-from tinygrad.helpers import cpu_objdump
+from tinygrad.helpers import OSX, cpu_objdump
 import tinygrad.runtime.autogen.mesa as mesa
 try: import tinygrad.runtime.autogen.llvm as llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
@@ -23,6 +23,7 @@ class LVPCompiler(NIRCompiler):
     shader, ctx, cache = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext(), mesa.struct_lp_cached_code()
     gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), cache)
     module, builder = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
+    if OSX: llvm.LLVMSetTarget(module, b"aarch64-none-unknown-elf");
 
     params = mesa.struct_lp_build_tgsi_params(mesa.struct_lp_type(floating=True, sign=True, width=32, length=4),
       resources_type=mesa.lp_build_jit_resources_type(gallivm), mask=ctypes.pointer(mesa.struct_lp_build_mask_context()))
