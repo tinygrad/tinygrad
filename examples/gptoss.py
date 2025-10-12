@@ -1,5 +1,11 @@
+# blogs
 # https://huggingface.co/blog/faster-transformers
 # https://magazine.sebastianraschka.com/p/from-gpt-2-to-gpt-oss-analyzing-the
+# https://cameronrwolfe.substack.com/p/gpt-oss
+# implementations
+# openai - https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py
+# hf - https://github.com/huggingface/transformers/blob/v4.57.0/src/transformers/models/gpt_oss/modeling_gpt_oss.py
+
 import argparse, functools, os, sys
 from pathlib import Path
 from tinygrad import Tensor, nn, dtypes, Device
@@ -33,32 +39,6 @@ class MixtureFeedForward:
     self.up_proj_bias = Tensor.zeros(num_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
     self.down_proj = Tensor.zeros(num_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
     self.down_proj_bias = Tensor.zeros(num_experts, dim, dtype=dtypes.bfloat16)
-
-  # def __call__(self, x:Tensor) -> Tensor:
-  #   assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
-  #   ic(x.shape)
-
-  #   # Select top-k experts
-  #   g = self.gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
-  #   g = g.squeeze() # (B,T,E) -> (E,)
-  #   probs, sel = g.topk(self.activated_experts) # (E,) -> (E,) (E,)
-  #   ic(probs.shape, sel.shape)
-
-  #   # expert weights
-  #   w1, b1 = self.up_proj[sel].transpose(1, 2), self.up_proj_bias[sel] # (E,D,D2) (E,D2)
-  #   w2, b2 = self.down_proj[sel].transpose(1, 2), self.down_proj_bias[sel] # (E,D,D) (E,D)
-  #   ic(w1.shape, b1.shape, w2.shape, b2.shape)
-
-
-
-  #   # out = (swiglu(x @ w1 + b1) @ w2 + b2).reshape(1, 1, -1)
-  #   out = swiglu(Tensor.einsum("beck,bk->bec", w1, g) + b1)
-  #   ic(out.shape)
-  #   out = Tensor.einsum("beck,bek->bec", w2, out) + b2
-  #   ic(out.shape)
-  #   out = Tensor.einsum("bec,be->bc", out, probs)
-  #   ic(out.shape)
-  #   return out
 
   def __call__(self, x: Tensor) -> Tensor:
     assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
@@ -183,18 +163,20 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   model_info = MODELS[args.size]
+  model_path = Path(args.weights) if args.weights else download_weights(model_info["model"], model_info["total_num_weights"])
+  ic(model_path)
 
   if getenv("TORCH"):
     from transformers import GptOssForCausalLM
-    model = GptOssForCausalLM.from_pretrained(model_info["model"])
-    tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
-    inputs = tokenizer("Hello", return_tensors="pt")
-    generate_ids = model.generate(inputs.input_ids, max_length=30)
+    # hf takes a lot longer to load model than in tinygrad because tinygrad is lazy and hf is not
+    model = GptOssForCausalLM.from_pretrained(model_path, cache_dir=model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
+    input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"]
+    generate_ids = model.generate(input_ids, max_length=args.count)
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
     exit(0)
 
-  model_path = Path(args.weights) if args.weights else download_weights(model_info["model"], model_info["total_num_weights"])
   transformer = load_model(model_path, model_info["params"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"])
   param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(transformer))
@@ -204,6 +186,7 @@ if __name__ == "__main__":
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
   print(outputted, end="", flush=True)
+  # ic(tokenizer.apply_chat_template([{"role": "assistant", "content": args.prompt}], tokenize=False, add_system_prompt=False, add_generation_prompt=False))
 
   tok_tensor = None
   for i in range(args.count):
