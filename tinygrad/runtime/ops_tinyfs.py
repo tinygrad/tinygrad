@@ -29,7 +29,7 @@ class TinyFSDevice(Compiled):
     self.start_event.wait()
 
     # connection pools
-    self.conn_pools = {}
+    self.conn_pools: dict[str, asyncio.Queue] = {}
     self.conn_pools_lock = asyncio.Lock()
 
   def finalize(self):
