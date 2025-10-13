@@ -153,7 +153,7 @@ CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), Co
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 FUSE_ATTENTION = ContextVar("FUSE_ATTENTION", 0)
 EMULATE = ContextVar("EMULATE", "")
-CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(aff(0)) if (aff:=getattr(os, "sched_getaffinity", None)) else (os.cpu_count() or 1)))
+CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if (aff:=getattr(os, "sched_getaffinity", None)) else (os.cpu_count() or 1)))
 CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 1)
 VIZ = PROFILE = ContextVar("VIZ", 0)
 SPEC = ContextVar("SPEC", 0)
@@ -352,10 +352,10 @@ def capstone_flatdump(lib: bytes):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
 
-def wait_cond(cb, value=True, timeout_ms=10000, msg="") -> bool:
+def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)
   while int(time.perf_counter() * 1000) - start_time < timeout_ms:
-    if (val:=cb()) == value: return val
+    if (val:=cb(*args)) == value: return val
   raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")
 
 # *** ctypes helpers
