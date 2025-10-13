@@ -73,7 +73,7 @@ class NAKCompiler(NIRCompiler):
   def compile(self, src) -> bytes:
     shader = deserialize(src, self.nir_options)
     mesa.nak_preprocess_nir(shader, self.cc)
-    ret = bytearray(bytes((out:=mesa.nak_compile_shader(shader, False, self.cc, 0, None).contents).info) + ctypes.string_at(out.code, out.code_size))
+    ret = bytes((out:=mesa.nak_compile_shader(shader, False, self.cc, 0, None).contents).info) + ctypes.string_at(out.code, out.code_size)
     mesa.nak_shader_bin_destroy(out)
     mesa.ralloc_free(shader)
     return ret

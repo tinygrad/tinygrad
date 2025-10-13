@@ -196,7 +196,7 @@ class NVProgram(HCQProgram):
     self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[va_addr, size]]
 
     if (NAK:=isinstance(dev.compiler, NAKCompiler)):
-      image, self.cbuf_0= memoryview(lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer(lib)):]), []
+      image, self.cbuf_0 = memoryview(bytearray(lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer_copy(lib)):])), []
       self.regs_usage, self.shmem_usage, self.lcmem_usage = info.num_gprs, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
     elif MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)

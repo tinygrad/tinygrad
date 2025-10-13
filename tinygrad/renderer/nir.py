@@ -205,20 +205,16 @@ class NIRRenderer(Renderer):
 
 class NAKRenderer(NIRRenderer):
   device = "NV"
-  def __init__(self, dev=None, nir_options=None, device="NV"):
-    if dev: self.dev = dev
-    else: self.__dict__['nir_options'] = nir_options
+  def __init__(self, dev=None, nir_options=None):
+    self.dev, self._nir_options = dev, nir_options
     super().__init__()
 
-  @classmethod
-  def with_opts(cls, opts): return cls(nir_options=opts)
-
-  def __reduce__(self): return NAKRenderer.with_opts, (self.nir_options,)
+  def __reduce__(self): return NAKRenderer, (None, self.nir_options,)
 
   @property
   def nir_options(self):
-    self.__dict__['nir_options'] = self.dev.compiler.nir_options
-    return self.__dict__['nir_options']
+    if self._nir_options is None: self._nir_options = self.dev.compiler.nir_options
+    return self._nir_options
 
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
