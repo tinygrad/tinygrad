@@ -1,6 +1,5 @@
 import base64, ctypes, pathlib, tempfile, hashlib, subprocess
 from tinygrad.device import Compiler
-from tinygrad.helpers import OSX
 import tinygrad.runtime.autogen.mesa as mesa
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
