@@ -3,7 +3,7 @@ import functools, math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
 from tinygrad.uop.ops import sym_infer, AxisType, pyrender
 from tinygrad.device import Device, Buffer, Compiler
-from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
+from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str, with_timeout
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
@@ -54,16 +54,8 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:lis
     if early_stop is not None and early_stop < min(tms): break
   return tms
 
-class TimeoutException(Exception): pass
-def timeout_handler(signum, frame):
-  if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
-  raise TimeoutException()
-
+@with_timeout(getenv("BEAM_TIMEOUT_SEC", 10))
 def _try_compile_linearized_w_idx(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
-  if hasattr(signal, "alarm"):
-    signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
-    # set timeout
-    signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
   try:
     p = get_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].opts)
@@ -79,8 +71,6 @@ def _try_compile_linearized_w_idx(x:tuple[int,Scheduler], compiler:Compiler) -> 
     if DEBUG >= 4: traceback.print_exc()
   except Exception as e:
     if getenv("BEAM_STRICT_MODE"): raise e
-  finally:
-    if hasattr(signal, "alarm"): signal.alarm(0)
   return x[0], ret
 
 # workers should not open devices and should ignore ctrl c and should not launch VIZ
