@@ -1349,7 +1349,7 @@ class Tensor(MathTrait):
       self.replace(mask.where(val, self))
       return
 
-    norm_indices, indices_parsed, adv_dim_count = self._normalize_indices(indices)
+    norm_indices, indices_parsed, _ = self._normalize_indices(indices)
     alias_with_self = isinstance(v, Tensor) and self.uop in v.uop.backward_slice_with_self
     if alias_with_self: v = v.contiguous()
 
