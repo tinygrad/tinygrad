@@ -18,6 +18,8 @@ const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#f
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
   ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
+const colored = n => d3.create("span").call(s=>s.selectAll("span").data(parseColors(n)).join("span").style("color",d=>d.color).text(d=>d.st)).node();
+
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
@@ -285,11 +287,11 @@ async function renderProfiler() {
         const html = document.createElement("div");
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         const info = html.appendChild(tabulate(rows).node());
-        if (producer != null) {
-          html.appendChild(document.createElement("br"));
-          const p = html.appendChild(document.createElement("p"));
-          p.innerHTML = "Produced by "+(parseColors(producer).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join(""));
-        }
+        const link = [];
+        if (producer != null) link.push(["Producer", colored(producer)]);
+        for (const cname of consumers) link.push(["Consumer ", colored(cname)]) // TODO: the timestamp?
+        html.appendChild(document.createElement("br"));
+        html.appendChild(tabulate(link).node());
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
