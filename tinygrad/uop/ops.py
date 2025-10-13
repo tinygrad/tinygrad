@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import textwrap
 from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
@@ -821,22 +820,23 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def _upat_to_uop(p: UPat, **kwargs: UOp) -> UOp:
+  dtype = least_upper_dtype(*{v.dtype for v in kwargs.values()})
+  op = getattr(p, "op", None)
+  if p.src is None:
+    if op == (Ops.CONST,): return UOp.const(dtype, p.arg)
+    if op is None:
+      assert p.name is not None
+      return kwargs[p.name]
+    raise RuntimeError("can't map upat to uop")
+  uops = tuple(_upat_to_uop(child, **kwargs) for child in p.src[0])
+  if isinstance(op, tuple): return UOp(op[0], dtype=dtype, src=uops)
+  raise RuntimeError("can't map upat to uop")
+
 def fixup_pm_function(fxn: Callable|tuple|UPat) -> Callable:
   if isinstance(fxn, UPat):
-    def upat_to_uop(p=fxn, **kwargs):
-      dtype = least_upper_dtype(*{v.dtype for v in kwargs.values()})
-      op = getattr(p, "op", None)
-      if p.src is None:
-        if op == (Ops.CONST,): return UOp.const(dtype, p.arg)
-        if op is None: return kwargs.get(p.name)
-        raise RuntimeError("can't map upat to uop")
-      uops = tuple(upat_to_uop(child, **kwargs) for child in p.src[0])
-      if isinstance(op, tuple) and op[0] in (Ops.MUL, Ops.AND): return UOp(op[0], dtype=dtype, src=uops)
-      raise RuntimeError("can't map upat to uop")
-    src = textwrap.dedent(inspect.getsource(upat_to_uop))
-    g = {"fxn": fxn, "Ops": Ops, "UOp": UOp, "dtypes": dtypes, "least_upper_dtype": least_upper_dtype}
-    exec(compile(src, "<gen>", "exec"), g) # pylint: disable=W0122
-    return cast(Callable, g["upat_to_uop"])
+    g = {"Ops": Ops, "UOp": UOp, "least_upper_dtype": least_upper_dtype, "_upat_to_uop": _upat_to_uop}
+    return types.FunctionType(_upat_to_uop.__code__, g, argdefs=(fxn,))
   if isinstance(fxn, tuple): return types.FunctionType(*fxn)
   return fxn
 

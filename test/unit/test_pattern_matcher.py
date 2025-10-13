@@ -233,12 +233,19 @@ class TestAlgebraic(unittest.TestCase):
     expr = UOp.const(dtypes.bool, True)*UOp.const(dtypes.bool, True)
     self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True)&UOp.const(dtypes.bool, True))
 
+  def test_mul_is_or(self):
+    pm = PatternMatcher([
+      (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), UPat.var('x') | UPat.var('y')),
+    ])
+    expr = UOp.const(dtypes.bool, True)*UOp.const(dtypes.bool, True)
+    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True)| UOp.const(dtypes.bool, True))
+
   def test_div_neg_1(self):
     pm = PatternMatcher([
       (UPat.var("x") // -1, UPat.var("x") * -1), # x//-1 -> x * -1
     ])
-    expr = UOp.const(dtypes.float, 4)//-1
-    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.float, 4) * -1)
+    expr = UOp.const(dtypes.int, 4)//-1
+    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.int, 4) * -1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
