@@ -1572,8 +1572,8 @@ class Tensor(MathTrait):
     def __setitem__(self, indices, v: Tensor | ConstType) -> None:
 
         if isinstance(self.device, str) and self.device.startswith("DISK"):
-            # self.realize()._getitem(indices).assign(v)
-            self.scatter(0, indices, v)
+            self.realize()._getitem(indices).assign(v)
+
             return
         # NOTE: check that setitem target is valid first
         if not unwrap(self.uop.st).contiguous:
@@ -1586,12 +1586,12 @@ class Tensor(MathTrait):
             raise NotImplementedError(
                 "setitem with requires_grad is not supported")
 
-        # 1D test
+        # 1D test [WIP]
         if len(self.shape) == 1 and v.shape == ():
-            if not hasattr(self, 'mask'):
-                self.mask = Tensor.arange(self.shape[0])
 
-            cond = (self.mask == indices)
+            mask = Tensor.arange(self.shape[0])
+
+            cond = (mask == indices)
             res = cond.where(v, self)
 
         else:
@@ -1599,6 +1599,7 @@ class Tensor(MathTrait):
 
         # if shapes match and data is not shared it's a copy and we assign to self
         if res.shape == self.shape and res.uop is not self.uop:
+            # removed assign in addition to realize; it also triggered separate kernel creation
             self.replace(res)
 
         else:  # no copy, basic setitem
