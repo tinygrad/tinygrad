@@ -3,7 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
-from tinygrad.uop.symbolic import symbolic, pm_simplify_valid
+from tinygrad.uop.symbolic import symbolic, pm_simplify_valid #, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
@@ -65,8 +65,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
-  valid: UOp = functools.reduce(operator.and_, [graph_rewrite(((r >= s) & (r < (sh-e))), symbolic+pm_simplify_valid) for r,sh,(s,e) in
-    zip(ctx.range_map[x][1], x.shape, x.arg) if not (s == 0 and e == 0)])
+  valid: UOp = functools.reduce(operator.and_, [r.get_valid() for r in ctx.range_map[x][0]], UOp.const(dtypes.bool, True))
   ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
@@ -115,6 +114,10 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       # TODO: why is multiple graph_rewrites faster than one here?
       rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh+s))).where(r-s, UOp.invalid()),
         symbolic+pm_simplify_valid, name="pad") for r,sh,(s,e) in zip(rngs, in_shape, arg))
+      # TODO: the .where(r-s, i) is not inside the graph_rewrite so that `convert_pad_to_where_to_keep_behavior_local`
+      #       wraps the pad with only the newly added valid
+      # rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh+s))),
+      #   symbolic+pm_simplify_valid, name="pad").where(r-s, uop.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
       acc = 1
       axes_in:list[UOp] = []
@@ -128,6 +131,8 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
       rngs = graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid, name="reshape").src
+      # rngs = graph_rewrite(graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid, name="reshape"),
+      # pm_drop_and_clauses, name="reshape drop ands").src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 

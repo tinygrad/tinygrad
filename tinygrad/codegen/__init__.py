@@ -3,6 +3,7 @@ import functools
 from dataclasses import dataclass
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
+from tinygrad.uop.symbolic import pm_drop_and_clauses
 from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
@@ -54,7 +55,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
+    ret.append(RewriteStep(sym+pm_flatten_range+pm_drop_and_clauses, name="initial symbolic"))
 
     # optimize (schedule) the AST
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
