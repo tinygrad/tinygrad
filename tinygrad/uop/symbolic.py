@@ -470,6 +470,11 @@ def reduce_mul_chain(r:UOp):
   if len(outside) == 0: return None
   return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
+def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
+  if not (dropped_clauses:=[c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]): return None
+  return functools.reduce(operator.and_, [c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses], UOp.const(dtypes.bool, True)).where(x, i)
+pm_drop_and_clauses = PatternMatcher([(UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), drop_and_clauses)])
+
 pm_simplify_valid = PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
@@ -515,7 +520,7 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
   # # Where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
   (UPat.var("c1").where(UPat(Ops.LOAD, src=(UPat().index(UPat.var("c2").where(UPat(), invalid_pat)).or_casted(),), allow_any_len=True, name="l"), 0),
-    lambda c1,c2,l,i: l.replace(src=(l.src[0],)+l.src[1:]) if any(c in list(c2.split_uop(Ops.AND)) for c in c1.split_uop(Ops.AND)) else None),
+    lambda c1,c2,l,i: l.replace(src=(l.src[0],)+l.src[1:]) if all(c in list(c2.split_uop(Ops.AND)) for c in c1.split_uop(Ops.AND)) else None),
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
   (UPat(Ops.BARRIER, name="root"),
     lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
