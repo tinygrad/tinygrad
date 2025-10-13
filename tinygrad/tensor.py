@@ -1337,27 +1337,27 @@ class Tensor(MathTrait):
     """
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
-    
+
     tensors = [self, *args]
-    
+
     # For single tensor, return as-is
     if len(tensors) == 1:
-        return tensors[0]
-    
+      return tensors[0]
+
     # Calculate output shape
     output_shape = list(self.shape)
     output_shape[dim] = sum(t.shape[dim] for t in tensors)
     output_shape = tuple(output_shape)
-    
+
     # The key optimization: avoid PAD+ADD chain
     # Instead of padding each tensor and then adding them together,
     # we create a more direct concatenation operation
-    
+
     # Implementation strategy:
     # 1. Calculate cumulative offsets for each tensor along the concatenation dimension
     # 2. Create a result tensor with the output shape
     # 3. Use efficient memory operations to copy each tensor to its correct position
-    
+
     # For now, we use the existing implementation as a fallback
     # In a full implementation, we would create custom UOps for efficient concatenation
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
