@@ -63,6 +63,8 @@ load_store_indexing = PatternMatcher([
                                   UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes a pattern in reduce_collapse
   (UPat.var("c")<(UPat.var("x", dtypes.index)+UPat.var("y")), lambda x,y,c: (-x < -(c-y)) if no_load(y) and no_load(c) and not no_load(x) else None),
+  (((UPat.var("x", dtypes.index)*UPat.cvar("c1", vec=False)+UPat.var("y")) % UPat.cvar("d", vec=False))<UPat.cvar("c2", vec=False),
+    lambda x,y,c1,d,c2: x<=y if c1.arg==d.arg-1 and x.vmin>=0 and y.vmin>=0 and x.vmax<=(d.arg-c2.arg) else None),
 ])
 
 # ***** load/store grouping *****
