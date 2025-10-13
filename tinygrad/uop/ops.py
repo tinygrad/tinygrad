@@ -639,8 +639,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     with Context(TRACK_MATCH_STATS=0, SPEC=0):
-      ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
-    return ret.arg if ret.op is Ops.NOOP else str(ret)
+      graph_rewrite(s:=self.simplify() if simplify else self, renderer if pm is None else pm, ctx:={})
+      return ctx.get(s, str(s))
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -1106,30 +1106,33 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
          Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
+def add_rendered(ctx, x, s):
+  ctx[x] = s
+  return x
 renderer = PatternMatcher([
-  (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg[0])),
-  (UPat((Ops.SPECIAL), name="x"), lambda x: UOp(Ops.NOOP, arg=x.arg)),
-  (UPat(Ops.RANGE, name="x"), lambda x: UOp(Ops.NOOP, arg=f"r{range_str(x)}")),
-  (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=str(x.arg))),
-  (UPat(Ops.UNROLL, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UNROLL({x.src[0].arg}, {x.arg})")),
-  (UPat(Ops.CAST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"({str(x.dtype)[7:]})({x.src[0].arg})")),
-  (UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
-  #(UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}[={x.src[1].arg}]")),
-  (UPat(Ops.NEG, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(-{x.src[0].arg})")),
-  (UPat(Ops.RECIP, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"(1/{x.src[0].arg})")),
-  (UPat(Ops.MAX, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"max({x.src[0].arg}, {x.src[1].arg})")),
-  (UPat(Ops.MULACC, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}*{x.src[1].arg}+{x.src[2].arg})")),
-  (UPat(Ops.WHERE, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[1].arg} if {x.src[0].arg} else {x.src[2].arg})")),
-  (UPat(set(syms.keys()), src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"({x.src[0].arg}{syms[x.op]}{x.src[1].arg})")),
-  (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda x:
-   UOp(Ops.NOOP, arg=''.join([f"[{strip_parens(y.arg)}]" for y in x.src[1:]])) if all(y.op is Ops.NOOP for y in x.src[1:]) else None),
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.NOOP), name="x"),
-   lambda x: UOp(Ops.NOOP, arg=f"{{{','.join([y.arg for y in x.src])}}}" if not all_same(x.src) else f"{{{x.src[0].arg}, ...}}")),
+  (UPat((Ops.DEFINE_VAR,), name="x"), lambda ctx,x: add_rendered(ctx, x, x.arg[0])),
+  (UPat((Ops.SPECIAL), name="x"), lambda ctx,x: add_rendered(ctx, x, x.arg)),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: add_rendered(ctx, x, f"r{range_str(x)}")),
+  (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda ctx,x: add_rendered(ctx, x, str(x.arg))),
+  (UPat(Ops.UNROLL, name="x"), lambda ctx,x: add_rendered(ctx, x, f"UNROLL({ctx[x.src[0]]}, {x.arg})")),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({str(x.dtype)[7:]})({ctx[x.src[0]]})")),
+  (UPat(Ops.BIND, name="x"), lambda ctx,x: add_rendered(ctx, x, ctx[x.src[0]])),
+  #(UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda ctx,x: add_rendered(ctx, x, f"{ctx[x.src[0]]}[={ctx[x.src[1]]}]")),
+  (UPat(Ops.NEG, name="x"), lambda ctx,x: add_rendered(ctx, x, f"(-{ctx[x.src[0]]})")),
+  (UPat(Ops.RECIP, name="x"), lambda ctx,x: add_rendered(ctx, x, f"(1/{ctx[x.src[0]]})")),
+  (UPat(Ops.MAX, name="x"), lambda ctx,x: add_rendered(ctx, x, f"max({ctx[x.src[0]]}, {ctx[x.src[1]]})")),
+  (UPat(Ops.MULACC, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[0]]}*{ctx[x.src[1]]}+{ctx[x.src[2]]})")),
+  (UPat(Ops.WHERE, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})")),
+  (UPat(set(syms.keys()), name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[0]]}{syms[x.op]}{ctx[x.src[1]]})")),
+  (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda ctx,x:
+   add_rendered(ctx, x, ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])) if all(y in ctx for y in x.src[1:]) else None),
+  (UPat(Ops.VECTORIZE, name="x"),
+   lambda ctx,x: add_rendered(ctx, x, f"{{{','.join([ctx[y] for y in x.src])}}}" if not all_same(x.src) else f"{{{ctx[x.src[0]]}, ...}}")),
 ])
-renderer_infer = PatternMatcher([
-  (UPat(Ops.MOD, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cmod({x.src[0].arg}, {x.src[1].arg})")),
-  (UPat(Ops.IDIV, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"cdiv({x.src[0].arg}, {x.src[1].arg})")),
-  *renderer.patterns
+# renderer comes BEFORE this PatternMatcher because the string in the dictionary will be overwritten otherwise
+renderer_infer = renderer + PatternMatcher([
+  (UPat(Ops.MOD, name="x"), lambda ctx,x: add_rendered(ctx, x, f"cmod({ctx[x.src[0]]}, {ctx[x.src[1]]})")),
+  (UPat(Ops.IDIV, name="x"), lambda ctx,x: add_rendered(ctx, x, f"cdiv({ctx[x.src[0]]}, {ctx[x.src[1]]})")),
 ])
 
 sugar = { Ops.SINK: "sink", Ops.STORE: "store", Ops.LOAD: "load", Ops.SQRT: "sqrt", Ops.INDEX: "index", Ops.REDUCE: "reduce",
