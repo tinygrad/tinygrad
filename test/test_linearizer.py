@@ -70,7 +70,8 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     # RANGE -> ALU -> RANGE -> ALU + LOAD -> STORE
     assert any(x.op in GroupOp.ALU for x in uops[ranges[0]:ranges[1]])
-    assert not any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
+    # the index of the load doesnt depend on the second range
+    assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
     assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[1]:])
 
   def test_range_outer_op_before_phi(self):
