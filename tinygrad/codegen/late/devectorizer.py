@@ -11,7 +11,7 @@ from tinygrad.renderer import Renderer
 # ***** image load valid simplification *****
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
-  if (idx:=uop_given_valid(valid, start_idx)) is None: return buf.index(UOp.invalid())
+  idx = uop_given_valid(valid, start_idx)
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid))
 
   # wait for it to be image indexed before running simplification

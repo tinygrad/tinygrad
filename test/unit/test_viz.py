@@ -30,6 +30,7 @@ class BaseTestViz(unittest.TestCase):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
     Buffer.profile_events.clear()
+    cpu_events.clear()
     self.tms = TRACK_MATCH_STATS.value
     self.profile = PROFILE.value
     TRACK_MATCH_STATS.value = 2
@@ -461,6 +462,22 @@ class TestVizMemoryLayout(BaseTestViz):
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(len(ret["events"]), 4)
+
+  def test_free_last(self):
+    bufs = []
+    for _ in range(3):
+      bufs.append(_alloc(1))
+      profile_marker("alloc")
+    device = bufs[0].device
+    while bufs:
+      b = bufs.pop()
+      del b
+      profile_marker("free")
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    ret = profile["layout"][f"{device} Memory"]
+    self.assertEqual(ret["peak"], 3)
+    self.assertEqual(len(ret["events"]), 6)
+    self.assertEqual(len(profile["markers"]), 6)
 
 if __name__ == "__main__":
   unittest.main()

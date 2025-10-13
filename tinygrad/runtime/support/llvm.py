@@ -16,7 +16,7 @@ elif OSX:
 else:
   LLVM_PATH = ctypes.util.find_library('LLVM')
   # use newer LLVM if possible
-  for ver in reversed(range(14, 20+1)):
+  for ver in reversed(range(14, 21+1)):
     if LLVM_PATH is not None: break
     LLVM_PATH = ctypes.util.find_library(f'LLVM-{ver}')
   if LLVM_PATH is None:

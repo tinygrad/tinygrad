@@ -1,15 +1,17 @@
+from typing import TypeVar
 from tinygrad.uop import Ops
-from tinygrad.helpers import T
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, ConstType
 
+TMathTrait = TypeVar("TMathTrait", bound="MathTrait")
 class MathTrait:
   # required to implement
-  def alu(self:T, op:Ops, *src) -> T: raise NotImplementedError
-  def const_like(self:T, b) -> T: raise NotImplementedError
+  def alu(self:TMathTrait, op:Ops, *src:TMathTrait) -> TMathTrait: raise NotImplementedError
+  def const_like(self:TMathTrait, b:ConstType) -> TMathTrait: raise NotImplementedError
 
   # great functions you get!
-  def ufix(self, x): return self.const_like(x) if not isinstance(x, MathTrait) else x
-  def _binop(self, op, x, reverse): return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
+  def ufix(self:TMathTrait, x:ConstType|TMathTrait) -> TMathTrait: return self.const_like(x) if not isinstance(x, MathTrait) else x
+  def _binop(self:TMathTrait, op:Ops, x:TMathTrait|ConstType, reverse:bool) -> TMathTrait:
+    return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
   def logical_not(self): return self.ne(True)
   def neg(self):
     if (dtype:=getattr(self, 'dtype')) is None: raise TypeError(f"MathTraits __neg__ requires a dtype, {self=}")
