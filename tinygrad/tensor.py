@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
@@ -13,7 +13,7 @@ from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, MathTrait, ide
   srender
 from tinygrad.uop.spec import tensor_uop_spec, type_verify
 from tinygrad.device import Device, Buffer
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.realize import run_schedule, capturing
 from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
@@ -1139,57 +1139,103 @@ class Tensor(MathTrait):
 
   # ***** movement high level ops *****
 
-  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
-    # wrap single index into a list
+  def _normalize_indices(self, indices) -> tuple[tuple, list[dict]]:
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    x, indices = self, list(indices)
-
-    # fill ellipsis or rest of indices with slice(None)
-    if len(ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
-    # NOTE: None adds a dim later
+    indices = list(indices)
+    if (ellipsis_idx := [dim for dim, i in enumerate(indices) if i is Ellipsis]) and len(ellipsis_idx) > 1:
+      raise IndexError("indices can only have a single ellipsis")
     num_indices = len(indices) - len(ellipsis_idx) - sum(1 for i in indices if i is None)
     if num_indices > self.ndim: raise IndexError(f"too many {num_indices=} for {self.ndim=}")
     fill_idx = ellipsis_idx[0] if ellipsis_idx else len(indices)
     indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_indices)
+    # NOTE: None adds a dim later
 
-    indices_parsed, dim = [], 0
+    indices_parsed: list[dict] = []
+    dim = adv_dim = 0
     for index in indices:
       size = 1 if index is None else self.shape[dim]
-      boundary, stride = [0, size], 1  # defaults
+      boundary, stride, py_slice = [0, size], 1, None
+      is_adv = False
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
+          index = (index < 0).where(index+size, index).to(self.device)
+          is_adv = True
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
-        case int() | UOp(): # sint
+          is_adv = True
+        case int() | UOp():
           if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
-          # TODO: is this right for (negative) symbolic?
           boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
+          if isinstance(index, int): is_adv = True
         case slice():
           if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
           start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
           step = 1 if index.step is None else index.step
           boundary, stride = [start, stop], step
-          if all(isinstance(s, int) for s in (start,stop,step)):
-            # handle int slicing
-            # if we're slicing a symbolic dimension into a int dimension, we can slice untill the bind size
-            # TODO: right now this is using vmax instead of the bind size because jit doesnt update the bound value of the returned tensor
+          if all(isinstance(s, int) for s in (start, stop, step)):
             if isinstance(size, UOp): size = int(size.vmax)
-            *boundary, stride = index.indices(cast(SupportsIndex, size))
+            start_i, stop_i, step_i = index.indices(cast(SupportsIndex, size))
+            py_slice = slice(start_i, stop_i, step_i)
+            boundary = [start_i, stop_i]
+            stride = step_i
             if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
             elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-            # update size for slice
             size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          elif resolve(step == 1, False) and all(isinstance(s,sint) for s in (start, stop)) and resolve((stop-start) > 0, False):
-            # simple symbolic slice
+            if isinstance(self.shape[dim], int) and stride == 1 and boundary[0] == 0 and boundary[1] == self.shape[dim]:
+              is_adv = False
+            else:
+              is_adv = True
+          elif resolve(step == 1, False) and all(isinstance(s, sint) for s in (start, stop)) and resolve((stop-start) > 0, False):
             size = cast(sint, cast(UOp, (stop - start)).ssimplify())
+            is_adv = True
           else: raise TypeError(f"slice {index=} is not supported")
-        case None: pass # do nothing
-        case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-      indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
+        case None:
+          pass
+        case _:
+          raise IndexError(f"{type(index).__name__} indexing is not supported")
+      indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride,
+                             "dim":(dim if index is not None else None), "adv_dim":(adv_dim if is_adv else None),
+                             "py_slice":py_slice})
       if index is not None: dim += 1
+      if is_adv: adv_dim += 1
+    return tuple(indices), indices_parsed, adv_dim
+
+  def _indices_to_advanced(self, indices:tuple, indices_parsed:list[dict], adv_dim_count:int) -> tuple|None:
+    if adv_dim_count == 0: return None
+    if any(isinstance(info["index"], Tensor) for info in indices_parsed): return None
+    adv_indices: list[Any] = []
+    for raw, info in zip(indices, indices_parsed):
+      idx, dim, adv_dim = info["index"], info["dim"], info["adv_dim"]
+      if idx is None:
+        adv_indices.append(None)
+        continue
+      if adv_dim is None:
+        adv_indices.append(raw)
+        continue
+      if isinstance(idx, slice):
+        py_slice = info["py_slice"]
+        if dim is None or py_slice is None: return None
+        dim_size = self.shape[dim]
+        if not isinstance(dim_size, int): return None
+        arr = Tensor.arange(dim_size, dtype=dtypes.int32, device=self.device)[py_slice]
+      elif isinstance(idx, int):
+        if dim is None: return None
+        dim_size = self.shape[dim]
+        if not isinstance(dim_size, int): return None
+        idx_val = idx if idx >= 0 else idx + dim_size
+        arr = Tensor([idx_val], device=self.device, dtype=dtypes.int32)
+      else:
+        return None
+      shape = [1]*adv_dim_count
+      shape[adv_dim] = arr.shape[0]
+      adv_indices.append(arr.reshape(tuple(shape)))
+    return tuple(adv_indices)
+
+  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+    indices, indices_parsed, _ = self._normalize_indices(indices)
+    x = self
 
     # movement op indexing
     if mops := [i for i in indices_parsed if i['index'] is not None]:
@@ -1303,13 +1349,42 @@ class Tensor(MathTrait):
       self.replace(mask.where(val, self))
       return
 
-    res = self._getitem(indices, v)
-    # if shapes match and data is not shared it's a copy and we assign to self
-    if res.shape == self.shape and res.uop is not self.uop:
-      self.assign(res)
-    else: # no copy, basic setitem
-      v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
-      res.assign(v)
+    norm_indices, indices_parsed, adv_dim_count = self._normalize_indices(indices)
+    alias_with_self = isinstance(v, Tensor) and self.uop in v.uop.backward_slice_with_self
+    if alias_with_self: v = v.contiguous()
+
+    used_dims = [info for info in indices_parsed if info["dim"] is not None]
+    has_user_adv = any(isinstance(info["index"], Tensor) for info in indices_parsed)
+    if len(used_dims) == self.ndim and all(
+      isinstance(info["index"], slice) and info["py_slice"] is not None and isinstance(self.shape[info["dim"]], int) and
+      info["py_slice"].start == 0 and info["py_slice"].stop == self.shape[info["dim"]] and info["py_slice"].step == 1
+      for info in used_dims
+    ):
+      replacement = v.cast(self.dtype)._broadcast_to(self.shape).contiguous()
+      if replacement.uop is not self.uop: self.assign(replacement)
+      if capturing: self.realize()
+      return
+
+    data_indices = tuple(idx for idx in norm_indices if idx is not None)
+    data_parsed = [info for info in indices_parsed if info["index"] is not None]
+    data_adv_count = sum(1 for info in data_parsed if info["adv_dim"] is not None)
+    adv_indices = self._indices_to_advanced(data_indices, data_parsed, data_adv_count) if data_parsed else None
+    if adv_indices is not None:
+      updated = self._getitem(adv_indices, v)
+      if updated.shape != self.shape:
+        raise RuntimeError("advanced setitem did not return full tensor")
+      if updated.uop is not self.uop: self.assign(updated)
+      if capturing: self.realize()
+      return
+    if has_user_adv:
+      updated = self._getitem(norm_indices, v)
+      if updated.shape != self.shape:
+        raise RuntimeError("advanced setitem did not return full tensor")
+      if updated.uop is not self.uop: self.assign(updated)
+      if capturing: self.realize()
+      return
+
+    raise NotImplementedError("setitem with symbolic indices is not supported")
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
