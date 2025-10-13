@@ -158,7 +158,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   producers:dict[int, int] = {}
   consumers:dict[int, list[int]] = {}
   for _,_,_,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec":
+    if isinstance(e, ProfilePointEvent) and e.name == "exec" and e.arg["bufs"]:
       exec_repr = enum_str(e.key, scache) # this is a lookup for the ExecItem
       producers[e.arg["bufs"][0]] = exec_repr
       for b in e.arg["bufs"][1:]: consumers.setdefault(b, []).append(exec_repr)
