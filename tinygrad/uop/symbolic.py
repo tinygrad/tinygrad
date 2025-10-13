@@ -471,7 +471,10 @@ def reduce_mul_chain(r:UOp):
   return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
 def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
-  if not (dropped_clauses:=[c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]): return None
+  dropped_clauses = [c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]
+  # we double check the dropped clauses, if it might be a loaded index in which case we can't drop it
+  dropped_clauses = [c for c in dropped_clauses if not any(u.op is Ops.LOAD and u in x.backward_slice_with_self for u in c.backward_slice_with_self)]
+  if not dropped_clauses: return None
   return functools.reduce(operator.and_, [c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses], UOp.const(dtypes.bool, True)).where(x, i)
 pm_drop_and_clauses = PatternMatcher([(UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), drop_and_clauses)])
 
