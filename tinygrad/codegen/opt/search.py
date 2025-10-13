@@ -54,7 +54,6 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:lis
     if early_stop is not None and early_stop < min(tms): break
   return tms
 
-@with_timeout(getenv("BEAM_TIMEOUT_SEC", 10))
 def _try_compile_linearized_w_idx(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[ProgramSpec, bytes, float]|None]:
   ret = None
   try:
@@ -138,7 +137,7 @@ def beam_search(lin:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=Tr
     while not exiting:
       acted_lins: list[Scheduler] = flatten([get_kernel_actions(lin, include_0=False).values() for lin,_ in beam])
       timed_lins: list[tuple[Scheduler, float]] = []
-      _compile_fn = functools.partial(_try_compile_linearized_w_idx, compiler=dev.compiler)
+      _compile_fn = functools.partial(with_timeout(getenv("BEAM_TIMEOUT_SEC", 10))(_try_compile_linearized_w_idx), compiler=dev.compiler)
       least_compute_ops = math.inf
       for i,proc in (map(_compile_fn, enumerate(acted_lins)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(acted_lins))):
         if proc is None: continue
