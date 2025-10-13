@@ -250,8 +250,11 @@ async function renderProfiler() {
       for (let j=0; j<eventsLen; j++) {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
-          const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
-          const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
+          const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz, producer = strings[optional(u32())];
+          const consumerCount = u32();
+          const consumers = [];
+          for (let i=0; i<consumerCount; i++) { consumers.push(strings[u32()]); }
+          const shape = {x:[x], y:[y], dtype, sz, nbytes, key, producer, consumers};
           buf_shapes.set(key, shape); temp.set(key, shape);
           timestamps.push(ts);
           x += 1; y += nbytes; valueMap.set(ts, y);
@@ -276,12 +279,17 @@ async function renderProfiler() {
       timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
-      for (const [num, {dtype, sz, nbytes, y, x:steps}] of buf_shapes) {
+      for (const [num, {dtype, sz, nbytes, y, x:steps, producer, consumers}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
         const html = document.createElement("div");
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         const info = html.appendChild(tabulate(rows).node());
+        if (producer != null) {
+          html.appendChild(document.createElement("br"));
+          const p = html.appendChild(document.createElement("p"));
+          p.innerHTML = "Produced by "+(parseColors(producer).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join(""));
+        }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
@@ -607,7 +615,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

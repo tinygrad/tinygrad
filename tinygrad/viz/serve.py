@@ -166,7 +166,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
       safe_sz = min(1_000_000_000_000, e.arg["sz"])
-      parts = [struct.pack("<BIIIQI", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz, producers.get(e.key, 0))]
+      parts = [struct.pack("<BIIIQI", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz, option(producers.get(e.key)))]
       parts.append(struct.pack("<I", len(cc:=consumers.get(e.key, []))))
       for x in cc: parts.append(struct.pack("<I", x))
       events.append(b"".join(parts))
