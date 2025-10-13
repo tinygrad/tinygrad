@@ -18,7 +18,7 @@ class NIRCompiler(Compiler):
 
 class LVPCompiler(CPULLVMCompiler, NIRCompiler):
   def __init__(self, cache_key="lvp"):
-    CPULLVMCompiler.__init__(self, model="Medium")
+    CPULLVMCompiler.__init__(self)
     NIRCompiler.__init__(self, f"compile_{cache_key}")
 
   def __del__(self): pass #NIRCompiler.__del__(self)
