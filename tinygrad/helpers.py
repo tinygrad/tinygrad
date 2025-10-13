@@ -105,7 +105,7 @@ def timeout_handler(signum,frame):
   raise TimeoutException()
 
 def with_timeout(seconds:int=5):
-  def dec(fn):
+  def dec(fn:Callable[...,T]):
     def wrap(*args, **kwargs):
       if hasattr(signal, "alarm"):
         signal.signal(getattr(signal, "SIGALRM"), timeout_handler)

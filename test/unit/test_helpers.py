@@ -1,7 +1,8 @@
-import ctypes, gzip, unittest, timeit
+import ctypes, gzip, unittest, timeit, time
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address, get_contraction
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
+from tinygrad.helpers import TimeoutException, with_timeout
 from tinygrad.tensor import Tensor, get_shape
 import numpy as np
 
@@ -419,6 +420,26 @@ class TestIsNumpyNdarray(unittest.TestCase):
     self.assertFalse(is_numpy_ndarray(Tensor(np.array([1, 2, 3]))))
   def test_tensor_numpy(self):
     self.assertTrue(is_numpy_ndarray(Tensor([1, 2, 3]).numpy()))
+
+class TestTimeout(unittest.TestCase):
+  def test_return(self):
+    @with_timeout()
+    def slow():
+      time.sleep(10)
+    with self.assertRaises(TimeoutException):
+      slow()
+
+  @unittest.skip("todo")
+  def test_generator(self):
+    @with_timeout()
+    def gen(dur:int):
+      for _ in range(10):
+        time.sleep(dur)
+        yield 1
+    with self.assertRaises(TimeoutException):
+      list(gen(10))
+    list(gen(0.5))
+    list(gen(1))
 
 if __name__ == '__main__':
   unittest.main()
