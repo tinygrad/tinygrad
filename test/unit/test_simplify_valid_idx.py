@@ -5,6 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.symbolic import simplify_valid
 from tinygrad.helpers import Context
+from .test_uop_symbolic import check_uop_against_string
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
@@ -49,8 +50,8 @@ class TestValidIdxSimplification(unittest.TestCase):
     with Context(NOOPT=1):
       load = full_rewrite_to_sink(load.sink()).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
-    self.assertEqual(idx.render(simplify=False), sidx)
-    self.assertEqual(valid.render(simplify=False), svalid)
+    check_uop_against_string(self, idx, sidx)
+    check_uop_against_string(self, valid, svalid)
 
   def test_cumsum(self):
     gidx0 = Special("gidx0", 5)
@@ -218,10 +219,10 @@ class TestImageSimplification(unittest.TestCase):
     self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
     idx0, idx1 = idx.src[0], idx.src[1]
-    self.assertEqual(idx0.render(simplify=False), sidx0)
-    self.assertEqual(idx1.render(simplify=False), sidx1)
+    check_uop_against_string(self, idx0, sidx0)
+    check_uop_against_string(self, idx1, sidx1)
     if svalid is not None:
-      self.assertEqual(load.src[0].src[2].render(simplify=False), svalid)
+      check_uop_against_string(self, load.src[0].src[2], svalid)
     else:
       self.assertEqual(len(load.src[0].src), 2, "svalid is None but load still has a valid")
 
