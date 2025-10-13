@@ -19,7 +19,6 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
   rela = [(sh, sh.name[5:], _to_carray(sh, libc.Elf64_Rela)) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
   symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
-  progbits.sort(key=lambda sh: sh.name != ".ltext") # LLVM 20 JIT puts .ltext after .rodata
 
   # Prealloc image for all fixed addresses.
   image = bytearray(max([sh.header.sh_addr + sh.header.sh_size for sh in progbits if sh.header.sh_addr != 0] + [0]))
@@ -32,11 +31,12 @@ def elf_loader(blob:bytes, force_section_align:int=1) -> tuple[memoryview, list[
   # Relocations
   relocs = []
   for sh, trgt_sh_name, c_rels in rel + rela:
-    if trgt_sh_name not in [sh.name for sh in progbits]: continue
+    if trgt_sh_name == ".eh_frame": continue
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
     rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
-    relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value if sym.st_shndx else _strtab(sh_strtab, sym.st_name),
-                rtype, raddend) for roff, sym, rtype, raddend in rels]
+    for roff, sym, r_type_, r_addend in rels:
+      if sym.st_shndx == 0: raise RuntimeError(f'Attempting to relocate against an undefined symbol {repr(_strtab(sh_strtab, sym.st_name))}')
+    relocs += [(target_image_off + roff, sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 
   return memoryview(image), sections, relocs
 
@@ -60,6 +60,5 @@ def jit_loader(obj: bytes) -> bytes:
   image, _, relocs = elf_loader(obj)
   # This is needed because we have an object file, not a .so that has all internal references (like loads of constants from .rodata) resolved.
   for ploc,tgt,r_type,r_addend in relocs:
-    if isinstance(tgt, str): raise RuntimeError(f'Attempting to relocate against an undefined symbol {tgt}')
     image[ploc:ploc+4] = struct.pack("<I", relocate(struct.unpack("<I", image[ploc:ploc+4])[0], ploc, tgt+r_addend, r_type))
   return bytes(image)

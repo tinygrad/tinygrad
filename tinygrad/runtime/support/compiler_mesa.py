@@ -1,7 +1,9 @@
 import base64, ctypes, pathlib, tempfile, hashlib, subprocess
 from tinygrad.device import Compiler
-from tinygrad.helpers import OSX, cpu_objdump
+from tinygrad.helpers import OSX
 import tinygrad.runtime.autogen.mesa as mesa
+from tinygrad.runtime.support.elf import jit_loader
+from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 try: import tinygrad.runtime.autogen.llvm as llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
@@ -16,14 +18,17 @@ class NIRCompiler(Compiler):
     super().__init__(cache_key)
   def __del__(self): mesa.glsl_type_singleton_decref()
 
-class LVPCompiler(NIRCompiler):
-  def __init__(self, cache_key="lvp"): super().__init__(f"compile_{cache_key}")
+class LVPCompiler(CPULLVMCompiler, NIRCompiler):
+  def __init__(self, cache_key="lvp"):
+    CPULLVMCompiler.__init__(self)
+    NIRCompiler.__init__(self, f"compile_{cache_key}")
+
+  def __del__(self): NIRCompiler.__del__(self)
 
   def compile(self, src) -> bytes:
-    shader, ctx, cache = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext(), mesa.struct_lp_cached_code()
-    gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), cache)
-    module, builder = ctypes.cast(gallivm.contents.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.contents.builder, llvm.LLVMBuilderRef)
-    if OSX: llvm.LLVMSetTarget(module, b"aarch64-none-unknown-elf")
+    shader, ctx = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext()
+    gallivm = mesa.gallivm_create(None, mesa.lp_context_ref(ctypes.cast(ctx, ctypes.POINTER(mesa.struct_LLVMOpaqueContext)), True), None).contents
+    module, builder = ctypes.cast(gallivm.module, llvm.LLVMModuleRef), ctypes.cast(gallivm.builder, llvm.LLVMBuilderRef)
 
     params = mesa.struct_lp_build_tgsi_params(mesa.struct_lp_type(floating=True, sign=True, width=32, length=4),
       resources_type=mesa.lp_build_jit_resources_type(gallivm), mask=ctypes.pointer(mesa.struct_lp_build_mask_context()))
@@ -40,14 +45,14 @@ class LVPCompiler(NIRCompiler):
     mesa.lp_build_nir_soa(gallivm, shader, params, None)
     llvm.LLVMBuildRetVoid(builder)
     mesa.gallivm_verify_function(gallivm, ctypes.cast(fn, mesa.LLVMValueRef))
-    mesa.gallivm_compile_module(gallivm)
-    mesa.gallivm_jit_function(gallivm, ctypes.cast(fn, mesa.LLVMValueRef), shader.contents.info.name)
-    ret = ctypes.string_at(cache.data, cache.data_size)
+    mesa.lp_passmgr_run(gallivm.passmgr, gallivm.module, ctypes.cast(self.target_machine, mesa.LLVMTargetMachineRef), gallivm.module_name)
+    obj_buf = expect(llvm.LLVMTargetMachineEmitToMemoryBuffer(self.target_machine, module, llvm.LLVMObjectFile, err:=cerr(),
+                                                              ctypes.pointer(buf:=llvm.LLVMMemoryBufferRef())), err, buf)
+    obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
+
     mesa.gallivm_destroy(gallivm)
     mesa.ralloc_free(shader)
-    return ret
-
-  def disassemble(self, lib:bytes): cpu_objdump(lib)
+    return jit_loader(obj)
 
 class NAKCompiler(NIRCompiler):
   def __init__(self, arch, warps_per_sm, cache_key="nak"):

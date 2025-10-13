@@ -1,5 +1,5 @@
 from __future__ import annotations
-import platform, sys, ctypes, functools, time, mmap, threading, queue, struct
+import platform, sys, ctypes, functools, time, mmap, threading, queue
 from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec, DMACPURef, CompilerPairT
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
@@ -10,7 +10,6 @@ from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
 from tinygrad.runtime.support.compiler_mesa import LVPCompiler
 from tinygrad.uop.ops import sint
-from tinygrad.runtime.support.elf import elf_loader
 
 class CPUSignal(HCQSignal):
   def _sleep(self, time_spent_waiting_ms:int):
@@ -87,9 +86,6 @@ class CPUProgram(HCQProgram):
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      if LVP:
-        (lib, _, rels), addr = elf_loader(lib), ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem))
-        for L,S,_,A in rels: lib[L:L+8] = bytes(ctypes.CDLL(ctypes.util.find_library('m'))[S]) if isinstance(S, str) else struct.pack("<Q", S+A+addr)
       self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 
