@@ -1123,7 +1123,9 @@ renderer = PatternMatcher([
   (UPat(Ops.MAX, name="x"), lambda ctx,x: add_rendered(ctx, x, f"max({ctx[x.src[0]]}, {ctx[x.src[1]]})")),
   (UPat(Ops.MULACC, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[0]]}*{ctx[x.src[1]]}+{ctx[x.src[2]]})")),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})")),
-  (UPat(set(syms.keys()), name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[0]]}{syms[x.op]}{ctx[x.src[1]]})")),
+  (UPat(set(syms.keys()), name="x"), lambda ctx,x: add_rendered(ctx, x, f"({strip_parens(ctx[x.src[0]]) if x.src[0].op == x.op and x.op in
+    {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[0]]}{syms[x.op]}{strip_parens(ctx[x.src[1]]) if x.src[1].op == x.op and x.op in
+      {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[1]]})")),
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda ctx,x:
    add_rendered(ctx, x, ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])) if all(y in ctx for y in x.src[1:]) else None),
   (UPat(Ops.VECTORIZE, name="x"),
