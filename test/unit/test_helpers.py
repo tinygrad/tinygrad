@@ -424,7 +424,7 @@ class TestIsNumpyNdarray(unittest.TestCase):
 @unittest.skipIf(sys.platform == "win32", "not supported on Windows")
 class TestTimeout(unittest.TestCase):
   def test_return(self):
-    @with_timeout(seconds=0.2)
+    @with_timeout(seconds=1)
     def slow(): time.sleep(10)
     with self.assertRaises(TimeoutException):
       slow()
