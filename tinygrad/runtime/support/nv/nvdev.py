@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, time, functools, re, gzip, struct
+import ctypes, time, functools, re, gzip, struct, ast
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits, to_mv
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
@@ -163,13 +163,13 @@ class NVDev(PCIDevImplBase):
         name, hi, lo = m.groups()
 
         reg = next((r for r in self.reg_names if name.startswith(r+"_")), None)
-        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), eval(lo), eval(hi))
-        else: self.reg_offsets[name] = (eval(lo), eval(hi))
+        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), ast.literal_eval(lo), ast.literal_eval(hi))
+        else: self.reg_offsets[name] = (ast.literal_eval(lo), ast.literal_eval(hi))
         continue
 
       if m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
         fn = m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()
-        name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {fn}")
+        name, value = m.groups()[0], ast.literal_eval(f"lambda {m.groups()[1]}: {fn}")
       elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)(?![^\n]*:)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
       else: continue
 

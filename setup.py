@@ -57,7 +57,7 @@ setup(name='tinygrad',
         'arm': ["unicorn"],
         'triton': ["triton-nightly>=2.1.0.dev20231014192330"],
         'linting': [
-            "pylint==3.3.9",
+            "pylint",
             "mypy==1.18.1",
             "typing-extensions",
             "pre-commit",

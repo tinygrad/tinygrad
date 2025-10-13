@@ -713,7 +713,7 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBIface(PCIIface):
-  def __init__(self, dev, dev_id):
+  def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     self.dev = dev
     self.usb = ASM24Controller()
     self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))

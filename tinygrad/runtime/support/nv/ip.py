@@ -558,7 +558,7 @@ class NV_GSP(NV_IP):
         self.nvdev.wreg(addr, (self.nvdev.rreg(addr) & ~mask) | (val & mask))
       elif op == 0x2: # reg poll
         addr, mask, val, _, _ = next(cmd_iter), next(cmd_iter), next(cmd_iter), next(cmd_iter), next(cmd_iter)
-        wait_cond(lambda: (self.nvdev.rreg(addr) & mask), value=val, msg=f"Register {addr:#x} not equal to {val:#x} after polling")
+        wait_cond(lambda a, m: (self.nvdev.rreg(a) & m), addr, mask, value=val, msg=f"Register {addr:#x} not equal to {val:#x} after polling")
       elif op == 0x3: time.sleep(next(cmd_iter) / 1e6) # delay us
       elif op == 0x4: # save reg
         addr, index = next(cmd_iter), next(cmd_iter)
