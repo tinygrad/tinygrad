@@ -5,14 +5,9 @@ import z3
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.codegen import full_rewrite
 from tinygrad.helpers import Context
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer, track_rewrites
-from tinygrad.uop.symbolic import sym
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
+from tinygrad.uop.symbolic import sym, commutative
 from tinygrad.uop.spec import uops_to_z3
-
-@track_rewrites(name="simplify symbolic uop")
-def render(v) -> UOp:
-  v_simplified = graph_rewrite(v, sym)
-  return v_simplified
 
 def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.index): return UOp.variable(name,min_val,max_val,dtype)
 def uconst(val): return UOp.const(dtypes.index, val)
@@ -33,11 +28,16 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(solver.check(expr1 != expr2), z3.unsat, "simplified expression not equal to original")
 
   def helper_test_variable(self, v, n, m, s, test_z3:bool=True):
-    v_simplified = render(v)
+    v_simplified = graph_rewrite(v, sym, name="simplify symbolic uop")
     if test_z3: self.check_equal_z3(v, v_simplified)
-    rendered, nmin, nmax = v_simplified.render(simplify=False), v_simplified.vmin, v_simplified.vmax
-    if isinstance(s, tuple): self.assertIn(rendered, s)
-    else: self.assertEqual(rendered, s)
+    nmin, nmax = v_simplified.vmin, v_simplified.vmax
+    sym_vars = {v.render():v for v in v_simplified.toposort() if v.op in (Ops.DEFINE_VAR, Ops.RANGE, Ops.SPECIAL)}
+    s_eval = eval(s, sym_vars)
+    if isinstance(s_eval, int) and v_simplified.dtype==dtypes.index: s_eval = UOp.const(dtypes.index, s_eval)
+    elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
+    s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
+    print(s_eval)
+    self.assertIs(s_eval, v_simplified, f"eval did not match simplified: {s_eval} != {v_simplified} for {s}")
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
 
