@@ -209,7 +209,7 @@ class MemoryManager:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, free_pts=True)
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
+    for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         assert pt.valid(pte_id), f"PTE not mapped: {pt.entry(pte_id):#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
