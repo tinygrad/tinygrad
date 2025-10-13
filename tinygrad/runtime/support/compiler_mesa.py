@@ -1,7 +1,6 @@
 import base64, ctypes, pathlib, tempfile, hashlib, subprocess
 from tinygrad.device import Compiler
 import tinygrad.runtime.autogen.mesa as mesa
-from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 try: import tinygrad.runtime.autogen.llvm as llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
@@ -19,10 +18,10 @@ class NIRCompiler(Compiler):
 
 class LVPCompiler(CPULLVMCompiler, NIRCompiler):
   def __init__(self, cache_key="lvp"):
-    CPULLVMCompiler.__init__(self)
+    CPULLVMCompiler.__init__(self, model="Medium")
     NIRCompiler.__init__(self, f"compile_{cache_key}")
 
-  def __del__(self): NIRCompiler.__del__(self)
+  def __del__(self): pass #NIRCompiler.__del__(self)
 
   def compile(self, src) -> bytes:
     shader, ctx = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext()
@@ -51,7 +50,7 @@ class LVPCompiler(CPULLVMCompiler, NIRCompiler):
 
     mesa.gallivm_destroy(gallivm)
     mesa.ralloc_free(shader)
-    return jit_loader(obj)
+    return obj
 
 class NAKCompiler(NIRCompiler):
   def __init__(self, arch, warps_per_sm, cache_key="nak"):

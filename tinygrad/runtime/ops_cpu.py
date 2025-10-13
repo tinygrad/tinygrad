@@ -9,6 +9,7 @@ from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
 from tinygrad.runtime.support.compiler_mesa import LVPCompiler
+from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
@@ -86,6 +87,7 @@ class CPUProgram(HCQProgram):
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
+      if LVP: lib = jit_loader(lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m'])
       self.mem.write(lib)
       if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
 

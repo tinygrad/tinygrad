@@ -30,14 +30,14 @@ def expect(x, err, ret=None):
 class LLVMCompiler(Compiler):
   jit = True
   target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86', 'riscv64': 'riscv64'}[platform.machine()]
-  def __init__(self, processor:str, feats:str):
+  def __init__(self, processor:str, feats:str, model:str="Default"):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{self.target_arch}{component}')()
 
     triple = {'AArch64': b'aarch64-none-unknown-elf', 'X86': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[self.target_arch]
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
     if DEBUG >= 3: print(f"LLVM init for {processor!r} with {feats!r}")
     self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor.encode(), feats.encode(),
-                                                       llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
+                                                       llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, getattr(llvm, f"LLVMCodeModel{model}"))
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if (opt:=bool(getenv("LLVMOPT", "1"))):
@@ -80,7 +80,7 @@ class LLVMCompiler(Compiler):
   def disassemble(self, lib:bytes): capstone_flatdump(lib)
 
 class CPULLVMCompiler(LLVMCompiler):
-  def __init__(self):
+  def __init__(self, model:str="Default"):
     # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
-    super().__init__(cpu.decode(), feats.decode())
+    super().__init__(cpu.decode(), feats.decode(), model)
