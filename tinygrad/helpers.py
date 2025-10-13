@@ -105,26 +105,21 @@ def timeout_handler(signum,frame):
   raise TimeoutException()
 
 def with_timeout(seconds:int=5):
-  def dec(fn:Callable[...,T]):
+  def cb(f:Callable[[], T]) -> T:
+    if hasattr(signal, "alarm"):
+      signal.signal(signal.SIGALRM, timeout_handler)
+      signal.alarm(seconds)
+    try: return f()
+    finally:
+      if hasattr(signal, "alarm"): signal.alarm(0)
+  def dec(fn:Callable[..., T]):
     def wrap(*args, **kwargs):
-      if hasattr(signal, "alarm"):
-        signal.signal(getattr(signal, "SIGALRM"), timeout_handler)
-        signal.alarm(seconds)
-      try:
-        ret = fn(*args, **kwargs)
-      finally:
-        if hasattr(signal, "alarm"): signal.alarm(0)
+      ret = cb(lambda: fn(*args, **kwargs))
       if not isinstance(ret, Generator): return ret
       def gen():
         while True:
-          if hasattr(signal, "alarm"):
-            signal.signal(getattr(signal, "SIGALRM"), timeout_handler)
-            signal.alarm(seconds)
-          try:
-            yield next(ret)
+          try: yield cb(lambda: next(ret))
           except StopIteration: return
-          finally:
-            if hasattr(signal, "alarm"): signal.alarm(0)
       return gen()
     return wrap
   return dec

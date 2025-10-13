@@ -1,4 +1,4 @@
-import ctypes, gzip, unittest, timeit, time, sys, itertools
+import ctypes, gzip, unittest, timeit, time, sys
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address, get_contraction
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
