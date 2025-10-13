@@ -104,24 +104,24 @@ def timeout_handler(signum,frame):
   if DEBUG >= 2: print("*** TIMEOUT")
   raise TimeoutException()
 
+def run_with_timeout(f:Callable[[], T], seconds:int) -> T:
+  if hasattr(signal, "alarm"):
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(seconds)
+  try: return f()
+  finally:
+    if hasattr(signal, "alarm"): signal.alarm(0)
+
 def with_timeout(seconds:int=5):
-  def cb(f:Callable[[], T]) -> T:
-    if hasattr(signal, "alarm"):
-      signal.signal(signal.SIGALRM, timeout_handler)
-      signal.alarm(seconds)
-    try: return f()
-    finally:
-      if hasattr(signal, "alarm"): signal.alarm(0)
-  def dec(fn:Callable[..., T]):
-    def wrap(*args, **kwargs):
-      ret = cb(lambda: fn(*args, **kwargs))
-      if not isinstance(ret, Generator): return ret
-      def gen():
-        while True:
-          try: yield cb(lambda: next(ret))
-          except StopIteration: return
-      return gen()
-    return wrap
+  def timeout_fn(fn:Callable[..., T], *args, **kwargs):
+    ret = run_with_timeout(functools.partial(fn, *args, **kwargs), seconds)
+    if not isinstance(ret, Generator): return ret
+    def gen():
+      while True:
+        try: yield run_with_timeout(ret.__next__, seconds)
+        except StopIteration: return
+    return gen()
+  def dec(fn:Callable[..., T]): return functools.partial(timeout_fn, fn)
   return dec
 
 def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t

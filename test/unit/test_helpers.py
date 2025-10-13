@@ -424,14 +424,14 @@ class TestIsNumpyNdarray(unittest.TestCase):
 @unittest.skipIf(sys.platform == "win32", "not supported on Windows")
 class TestTimeout(unittest.TestCase):
   def test_return(self):
-    @with_timeout()
+    @with_timeout(seconds=1)
     def slow():
       time.sleep(10)
     with self.assertRaises(TimeoutException):
       slow()
 
   def _test_generator(self, dur:int, cnt:int):
-    @with_timeout(2)
+    @with_timeout(seconds=2)
     def gen():
       for _ in range(cnt):
         time.sleep(dur)
@@ -446,7 +446,7 @@ class TestTimeout(unittest.TestCase):
     self.assertListEqual(self._test_generator(dur=0.5, cnt=5), [1]*5)
 
   def test_generator_alt(self):
-    @with_timeout(2)
+    @with_timeout(seconds=2)
     def gen():
       time.sleep(1)
       yield 1
