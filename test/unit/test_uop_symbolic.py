@@ -9,6 +9,14 @@ from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.symbolic import sym, commutative
 from tinygrad.uop.spec import uops_to_z3
 
+def check_uop_against_string(self, v:UOp, s:str):
+  sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.DEFINE_VAR, Ops.RANGE, Ops.SPECIAL)}
+  s_eval = eval(s, sym_vars)
+  if isinstance(s_eval, int) and v.dtype==dtypes.index: s_eval = UOp.const(dtypes.index, s_eval)
+  elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
+  s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
+  self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v} for {s}")
+
 def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.index): return UOp.variable(name,min_val,max_val,dtype)
 def uconst(val): return UOp.const(dtypes.index, val)
 def usum(ops): return functools.reduce(lambda x,y: x+y, ops)
@@ -31,13 +39,8 @@ class TestSymbolic(unittest.TestCase):
     v_simplified = graph_rewrite(v, sym, name="simplify symbolic uop")
     if test_z3: self.check_equal_z3(v, v_simplified)
     nmin, nmax = v_simplified.vmin, v_simplified.vmax
+    check_uop_against_string(self, v_simplified, s)
     # eval the test string and see if we get the same uop
-    sym_vars = {v.render():v for v in v_simplified.toposort() if v.op in (Ops.DEFINE_VAR, Ops.RANGE, Ops.SPECIAL)}
-    s_eval = eval(s, sym_vars)
-    if isinstance(s_eval, int) and v_simplified.dtype==dtypes.index: s_eval = UOp.const(dtypes.index, s_eval)
-    elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
-    s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
-    self.assertIs(s_eval, v_simplified, f"eval did not match simplified: {s_eval} != {v_simplified} for {s}")
     self.assertEqual(nmin, n)
     self.assertEqual(nmax, m)
 
