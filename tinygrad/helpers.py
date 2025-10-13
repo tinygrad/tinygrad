@@ -111,9 +111,21 @@ def with_timeout(seconds:int=5):
         signal.signal(getattr(signal, "SIGALRM"), timeout_handler)
         signal.alarm(seconds)
       try:
-        return fn(*args, **kwargs)
+        ret = fn(*args, **kwargs)
       finally:
         if hasattr(signal, "alarm"): signal.alarm(0)
+      if not isinstance(ret, Generator): return ret
+      def gen():
+        while True:
+          if hasattr(signal, "alarm"):
+            signal.signal(getattr(signal, "SIGALRM"), timeout_handler)
+            signal.alarm(seconds)
+          try:
+            yield next(ret)
+          except StopIteration: return
+          finally:
+            if hasattr(signal, "alarm"): signal.alarm(0)
+      return gen()
     return wrap
   return dec
 

@@ -1,4 +1,4 @@
-import ctypes, gzip, unittest, timeit, time
+import ctypes, gzip, unittest, timeit, time, sys, itertools
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address, get_contraction
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
@@ -421,6 +421,7 @@ class TestIsNumpyNdarray(unittest.TestCase):
   def test_tensor_numpy(self):
     self.assertTrue(is_numpy_ndarray(Tensor([1, 2, 3]).numpy()))
 
+@unittest.skipIf(sys.platform == "win32", "not supported on Windows")
 class TestTimeout(unittest.TestCase):
   def test_return(self):
     @with_timeout()
@@ -429,17 +430,32 @@ class TestTimeout(unittest.TestCase):
     with self.assertRaises(TimeoutException):
       slow()
 
-  @unittest.skip("todo")
-  def test_generator(self):
-    @with_timeout()
-    def gen(dur:int):
-      for _ in range(10):
+  def _test_generator(self, dur:int, cnt:int):
+    @with_timeout(2)
+    def gen():
+      for _ in range(cnt):
         time.sleep(dur)
         yield 1
+    return list(gen())
+
+  def test_generator_long(self):
     with self.assertRaises(TimeoutException):
-      list(gen(10))
-    list(gen(0.5))
-    list(gen(1))
+      self._test_generator(dur=5, cnt=2)
+
+  def test_generator_multiple_short(self):
+    self.assertListEqual(self._test_generator(dur=0.5, cnt=5), [1]*5)
+
+  def test_generator_alt(self):
+    @with_timeout(2)
+    def gen():
+      time.sleep(1)
+      yield 1
+      time.sleep(10)
+      yield 2
+    ret = []
+    with self.assertRaises(TimeoutException):
+      for x in gen(): ret.append(x)
+    self.assertListEqual(ret, [1])
 
 if __name__ == '__main__':
   unittest.main()
