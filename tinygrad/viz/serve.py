@@ -155,11 +155,21 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
+  producers:dict[int, int] = {}
+  consumers:dict[int, list[int]] = {}
+  for _,_,_,e in dev_events:
+    if isinstance(e, ProfilePointEvent) and e.name == "exec":
+      exec_repr = enum_str(e.key, scache) # this is a lookup for the ExecItem
+      producers[e.arg["bufs"][0]] = exec_repr
+      for b in e.arg["bufs"][1:]: consumers.setdefault(b, []).append(exec_repr)
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
       safe_sz = min(1_000_000_000_000, e.arg["sz"])
-      events.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
+      parts = [struct.pack("<BIIIQI", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz, producers.get(e.key, 0))]
+      parts.append(struct.pack("<I", len(cc:=consumers.get(e.key, []))))
+      for x in cc: parts.append(struct.pack("<I", x))
+      events.append(b"".join(parts))
       dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
       temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
       mem += nbytes
