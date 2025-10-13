@@ -206,7 +206,7 @@ class NVProgram(HCQProgram):
     if not NAK:
       # For MOCKGPU, the lib is PTX code, so some values are emulated.
       self.regs_usage, self.shmem_usage, self.lcmem_usage, cbuf0_size = 0, 0x400, 0x240, 0 if not MOCKGPU else 0x160
-      for sh in sections:
+      for sh in sections: # pylint: disable=possibly-used-before-assignment
         if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
         if sh.name == f".text.{self.name}": prog_addr, prog_sz = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size
         elif m:=re.match(r'\.nv\.constant(\d+)', sh.name):
@@ -218,7 +218,7 @@ class NVProgram(HCQProgram):
             elif sh.name == ".nv.info" and param == 0x2f: self.regs_usage = struct.unpack_from("II", data)[1] # EIATTR_REGCOUNT
 
       # Apply relocs
-      for apply_image_offset, rel_sym_offset, typ, _ in relocs:
+      for apply_image_offset, rel_sym_offset, typ, _ in relocs: # pylint: disable=possibly-used-before-assignment
         # These types are CUDA-specific, applying them here
         if typ == 2: image[apply_image_offset:apply_image_offset+8] = struct.pack('<Q', self.lib_gpu.va_addr + rel_sym_offset) # R_CUDA_64
         elif typ == 0x38: image[apply_image_offset+4:apply_image_offset+8] = struct.pack('<I', (self.lib_gpu.va_addr + rel_sym_offset) & 0xffffffff)
