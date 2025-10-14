@@ -34,11 +34,11 @@ def resolve(x:UOp|bool, default:bool=True):
 def _suop(lst, uop_fxn, python_fxn):
   uops, nums = partition(lst, lambda x: isinstance(x, UOp))
   return ssimplify(functools.reduce(uop_fxn, uops + ([python_fxn(nums)] if nums else [])))
-def smax(*lst): return _suop(argfix(*lst), UOp.maximum, max)
-def smin(*lst): return _suop(argfix(*lst), UOp.minimum, min)
-def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
+def smax(*lst) -> sint: return _suop(argfix(*lst), UOp.maximum, max)
+def smin(*lst) -> sint: return _suop(argfix(*lst), UOp.minimum, min)
+def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
 
-def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
+def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 def range_str(u:UOp) -> str: return '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
@@ -344,7 +344,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.index.vec(count), src=(), arg=Invalid)
-  def valid(self, cond): return cond.where(self, UOp.invalid(self.dtype.count))
+  def valid(self, cond): return self if cond.op is Ops.WHERE and cond.arg else cond.where(self, UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:
     assert self.dtype.scalar() is dtypes.index, "Can only call get_idx on index dtype"
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
@@ -845,16 +845,14 @@ class PatternMatcher:
       if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
-# *** non-blocking UOp tracker ***
-
-ucount = itertools.count()
-uop_fields:dict[int, tuple] = {}
-def track_uop(u:UOp): return u.trace_num
-
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[int|float]] = dict()
+
+# TRACK_MATCH_STATS>=2 or VIZ=1 saves all matches
+ucount = itertools.count()
+uop_fields:dict[int, tuple] = {}
 
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
@@ -912,7 +910,7 @@ def track_matches(func):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
       if not tracked_ctxs: add_trace_group(TracingKey(f"default {func.__name__}"))
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, track_uop(args[0]), [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
     with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
       ret = func(*args, **kwargs)
@@ -934,14 +932,14 @@ class TrackedPatternMatcher(PatternMatcher):
       try: ret = match(uop, ctx)
       except Exception:
         if TRACK_MATCH_STATS >= 2 and active_rewrites:
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1]))),p.location,0))
+          active_rewrites[-1].matches.append((uop.trace_num, UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1])).trace_num,p.location,0))
         raise
       if ret is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
         if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location, et))
+          active_rewrites[-1].matches.append((uop.trace_num, ret.trace_num, p.location, et))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
