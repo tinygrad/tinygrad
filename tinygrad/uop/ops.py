@@ -1106,35 +1106,30 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
          Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
-def add_rendered(ctx, x, s):
-  ctx[x] = s
-  return x
 renderer = PatternMatcher([
-  (UPat((Ops.DEFINE_VAR,), name="x"), lambda ctx,x: add_rendered(ctx, x, x.arg[0])),
-  (UPat((Ops.SPECIAL), name="x"), lambda ctx,x: add_rendered(ctx, x, x.arg)),
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: add_rendered(ctx, x, f"r{range_str(x)}")),
-  (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda ctx,x: add_rendered(ctx, x, str(x.arg))),
-  (UPat(Ops.UNROLL, name="x"), lambda ctx,x: add_rendered(ctx, x, f"UNROLL({ctx[x.src[0]]}, {x.arg})")),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({str(x.dtype)[7:]})({ctx[x.src[0]]})")),
-  (UPat(Ops.BIND, name="x"), lambda ctx,x: add_rendered(ctx, x, ctx[x.src[0]])),
+  (UPat((Ops.DEFINE_VAR,), name="x"), lambda ctx,x: ctx.update({x: x.arg[0]})),
+  (UPat((Ops.SPECIAL), name="x"), lambda ctx,x: ctx.update({x: x.arg})),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx.update({x: f"r{range_str(x)}"})),
+  (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda ctx,x: ctx.update({x: str(x.arg)})),
+  (UPat(Ops.UNROLL, name="x"), lambda ctx,x: ctx.update({x: f"UNROLL({ctx[x.src[0]]}, {x.arg})"})),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: ctx.update({x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"})),
+  (UPat(Ops.BIND, name="x"), lambda ctx,x: ctx.update({x: ctx[x.src[0]]})),
   #(UPat(Ops.BIND, src=UPat(Ops.NOOP), name="x"), lambda ctx,x: add_rendered(ctx, x, f"{ctx[x.src[0]]}[={ctx[x.src[1]]}]")),
-  (UPat(Ops.NEG, name="x"), lambda ctx,x: add_rendered(ctx, x, f"(-{ctx[x.src[0]]})")),
-  (UPat(Ops.RECIP, name="x"), lambda ctx,x: add_rendered(ctx, x, f"(1/{ctx[x.src[0]]})")),
-  (UPat(Ops.MAX, name="x"), lambda ctx,x: add_rendered(ctx, x, f"max({ctx[x.src[0]]}, {ctx[x.src[1]]})")),
-  (UPat(Ops.MULACC, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[0]]}*{ctx[x.src[1]]}+{ctx[x.src[2]]})")),
-  (UPat(Ops.WHERE, name="x"), lambda ctx,x: add_rendered(ctx, x, f"({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})")),
-  (UPat(set(syms.keys()), name="x"), lambda ctx,x: add_rendered(ctx, x, f"({strip_parens(ctx[x.src[0]]) if x.src[0].op == x.op and x.op in
-    {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[0]]}{syms[x.op]}{strip_parens(ctx[x.src[1]]) if x.src[1].op == x.op and x.op in
-      {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[1]]})")),
+  (UPat(Ops.NEG, name="x"), lambda ctx,x: ctx.update({x: f"(-{ctx[x.src[0]]})"})),
+  (UPat(Ops.RECIP, name="x"), lambda ctx,x: ctx.update({x: f"(1/{ctx[x.src[0]]})"})),
+  (UPat(Ops.MAX, name="x"), lambda ctx,x: ctx.update({x: f"max({ctx[x.src[0]]}, {ctx[x.src[1]]})"})),
+  (UPat(Ops.MULACC, name="x"), lambda ctx,x: ctx.update({x: f"({ctx[x.src[0]]}*{ctx[x.src[1]]}+{ctx[x.src[2]]})"})),
+  (UPat(Ops.WHERE, name="x"), lambda ctx,x: ctx.update({x: f"({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})"})),
+  (UPat(set(syms.keys()), name="x"), lambda ctx,x: ctx.update({x: f"({strip_parens(ctx[x.src[0]]) if x.src[0].op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[0]]}{syms[x.op]}{strip_parens(ctx[x.src[1]]) if x.src[1].op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[1]]})"})),
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda ctx,x:
-   add_rendered(ctx, x, ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])) if all(y in ctx for y in x.src[1:]) else None),
+   ctx.update({x: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])}) if all(y in ctx for y in x.src[1:]) else None),
   (UPat(Ops.VECTORIZE, name="x"),
-   lambda ctx,x: add_rendered(ctx, x, f"{{{','.join([ctx[y] for y in x.src])}}}" if not all_same(x.src) else f"{{{ctx[x.src[0]]}, ...}}")),
+   lambda ctx,x: ctx.update({x: f"{{{','.join([ctx[y] for y in x.src])}}}" if not all_same(x.src) else f"{{{ctx[x.src[0]]}, ...}}"})),
 ])
 # renderer comes BEFORE this PatternMatcher because the string in the dictionary will be overwritten otherwise
 renderer_infer = renderer + PatternMatcher([
-  (UPat(Ops.MOD, name="x"), lambda ctx,x: add_rendered(ctx, x, f"cmod({ctx[x.src[0]]}, {ctx[x.src[1]]})")),
-  (UPat(Ops.IDIV, name="x"), lambda ctx,x: add_rendered(ctx, x, f"cdiv({ctx[x.src[0]]}, {ctx[x.src[1]]})")),
+  (UPat(Ops.MOD, name="x"), lambda ctx,x: ctx.update({x: f"cmod({ctx[x.src[0]]}, {ctx[x.src[1]]})"})),
+  (UPat(Ops.IDIV, name="x"), lambda ctx,x: ctx.update({x: f"cdiv({ctx[x.src[0]]}, {ctx[x.src[1]]})"})),
 ])
 
 sugar = { Ops.SINK: "sink", Ops.STORE: "store", Ops.LOAD: "load", Ops.SQRT: "sqrt", Ops.INDEX: "index", Ops.REDUCE: "reduce",
