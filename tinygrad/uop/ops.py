@@ -821,15 +821,11 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
 
 def _upat_to_uop(p: UPat, **kwargs: UOp) -> UOp:
   dtype = least_upper_dtype(*{v.dtype for v in kwargs.values()})
-  op = getattr(p, "op", None)
   if p.src is None:
-    if op == (Ops.CONST,): return UOp.const(dtype, p.arg)
-    if op is None:
-      assert p.name is not None
-      return kwargs[p.name]
-    raise RuntimeError("can't map upat to uop")
-  uops = tuple(_upat_to_uop(child, **kwargs) for child in p.src[0])
-  if isinstance(op, tuple): return UOp(op[0], dtype=dtype, src=uops)
+    if p.op == (Ops.CONST,): return UOp.const(dtype, p.arg)
+    if p.op is None and p.name is not None: return kwargs[p.name]
+  if p.src is not None and p.op:
+    return UOp(p.op[0], dtype=dtype, src=(tuple(_upat_to_uop(c, **kwargs) for c in p.src[0])))
   raise RuntimeError("can't map upat to uop")
 
 def fixup_pm_function(fxn: Callable|tuple|UPat) -> Callable:
