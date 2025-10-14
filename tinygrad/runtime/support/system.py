@@ -59,7 +59,10 @@ class _System:
     except OSError: return None
 
   @functools.cached_property
-  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
+  def iokit(self):
+    iokit = ctypes.CDLL(ctypes.util.find_library("IOKit"))
+    iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
+    return iokit
 
   @functools.cached_property
   def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))

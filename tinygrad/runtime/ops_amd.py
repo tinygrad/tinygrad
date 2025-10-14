@@ -746,80 +746,39 @@ class USBIface(PCIIface):
 
   def sleep(self, timeout): pass
 
-# class APLPCIDevice:
-#   def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
-#     if not (mdict:=iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
-#     if not (service:=iokit.IOServiceGetMatchingService(kIOMasterPortDefault, mdict)): raise RuntimeError(f'service tinygpu is not running')
-
-#     self.task = ctypes.cast(libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
-#     if iokit.IOServiceOpen(service, self.task, ctypes.c_uint32(0), ctypes.byref(conn:=io_connect_t(0))): raise RuntimeError(f"IOServiceOpen failed")
-#     self.conn = conn
-#     self.bars = {bar: self._map_memory(bar) for bar in bars}
-
-#   def read_config(self, offset:int, size:int): return 0
-#   def write_config(self, offset:int, value:int, size:int): pass
-#   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-#     return self.bars[bar].view(offset=off, size=size, fmt=fmt)
-
-#   def _map_memory(self, type:int) -> MMIOInterface:
-#     if iokit.IOConnectMapMemory64(self.conn, ctypes.c_uint32(type), self.task, ctypes.byref(addr:=ctypes.c_uint64(0)),
-#       ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({type=}) failed")
-#     return MMIOInterface(addr.value, size.value)
-
 class APLIface(PCIIface):
   def __init__(self, dev, dev_id):
-    self.dev = dev
-
-    System.iokit.IOServiceNameMatching.argtypes = [ctypes.c_char_p]
-    System.iokit.IOServiceNameMatching.restype = ctypes.c_void_p
-
-    System.iokit.IOServiceGetMatchingService.argtypes = [ctypes.c_uint, ctypes.c_void_p]
-    System.iokit.IOServiceGetMatchingService.restype = ctypes.c_uint
-    
     if not (mdict:=System.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
-    if not (service:=System.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), mdict)): raise RuntimeError(f'service tinygpu is not running')
+    if not (service:=System.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
+      raise RuntimeError(f'Service "tinygpu" is not running')
 
     self.task = ctypes.cast(System.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
-    if System.iokit.IOServiceOpen(service, self.task, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))): raise RuntimeError(f"IOServiceOpen failed")
+    if System.iokit.IOServiceOpen(service, self.task, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
+      raise RuntimeError(f"IOServiceOpen failed")
     self.conn = conn
     self.bars = {bar: self._map_memory(bar) for bar in [0, 2, 5]}
-    self.vram_bar = 0
-
-    # print(self.bars[0][0x212000])
-
     self._setup_adev(f"usb4:{dev_id}", self.map_bar(0), self.map_bar(2, fmt='Q'), self.map_bar(5, fmt='I'))
 
-  def read_config(self, offset:int, size:int): return 0
-  def write_config(self, offset:int, value:int, size:int): pass
-  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-    return self.bars[bar].view(offset=off, size=size, fmt=fmt)
+  def map_bar(self, bar:int, off:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(offset=off, size=size, fmt=fmt)
 
   def _map_memory(self, type:int) -> MMIOInterface:
     if System.iokit.IOConnectMapMemory64(self.conn, ctypes.c_uint32(type), self.task, ctypes.byref(addr:=ctypes.c_uint64(0)),
       ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({type=}) failed")
     return MMIOInterface(addr.value, size.value)
-  
+
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
-    if host or (uncached or cpu_access): # host or gtt-like memory.
+    if host or uncached or cpu_access: # cpu access memory goes here, since bar is small.
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       assert size >= mmap.PAGESIZE, "Size must be at least one page"
-      view = self._map_memory(type=size).view(fmt='Q')
-      paddrs = []
-      nxt = 0
-      while view[nxt + 1] != 0:
-        paddrs.append((view[nxt], view[nxt + 1]))
-        nxt += 2
 
-      print(paddrs)
+      sysmem = self._map_memory(type=size).view(fmt='Q')
+      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
 
       mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]),
-        view=view.view(fmt='B'), owner=self.dev)
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True), view=sysmem.view(fmt='B'), owner=self.dev)
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    vw = self.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], addr=mapping.va_addr, size=mapping.size) if cpu_access else None
-    return HCQBuffer(mapping.va_addr, size, view=vw,
-      meta=PCIAllocationMeta(mapping, has_cpu_mapping=cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
+    return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
 
 class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface, APLIface))
