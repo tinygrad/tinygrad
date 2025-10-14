@@ -135,22 +135,52 @@ winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0,
 #   return sum(acc[idx(I,shp)] * sel(axes, I) for I in product(*(range(s) for s in shp))).bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
 
+# def kron(buf, B, outer_axes_shape, ctx):
+#   # 1) get the real buffer shape and split outer vs inner (in-tile) dims
+#   full_shape = tuple(int(s) for s in buf.shape)                   # <- not buf.src[0]
+#   inner_shape = full_shape[len(outer_axes_shape):]
+#   outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
+#   # 2) free axes only for the inner dims
+#   axes = [ctx.new_range(s, AxisType.LOOP) for s in inner_shape]
+
+#   # 3) index T only over the inner dims; prepend the (varying) outer axes once
+#   T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I])
+#        for I in product(*(range(s) for s in inner_shape))]
+
+#   # 4) tiny row-major flattener
+#   idx = lambda I,S:(lambda o=0,st=1:[(o:=o+i*st,st:=st*s)[0] for i,s in zip(reversed(I),reversed(S))] and o)()
+
+#   # 5) repeatedly apply the same 2D B along each inner axis (n-mode)
+#   tensordot = lambda T,S,k,M: (
+#     [sum(T[idx(pre+(i,)+suf,S)] * UOp.const(dtypes.float, float(M[j][i])) for i in range(S[k]))
+#      for pre in product(*(range(s) for s in S[:k])) for j in range(len(M))
+#      for suf in product(*(range(s) for s in S[k+1:]))],
+#     S[:k] + (len(M),) + S[k+1:]
+#   )
+#   acc, shp = T, tuple(inner_shape)
+#   for k in range(len(inner_shape)):
+#     acc, shp = tensordot(acc, shp, k, B)
+
+#   # 6) expose result as polynomial in the free inner axes
+#   onehot = lambda A,I:(lambda m=UOp.const(dtypes.float,1.0):[
+#       m:=m*ax.eq(UOp.const(dtypes.index,i)).where(UOp.const(dtypes.float,1.0), UOp.const(dtypes.float,0.0))
+#     for ax,i in zip(A,I)] and m)()
+#   expr = sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))
+
+#   # 7) bufferize on (outer, inner) axes
+#   #mock
+  
+#   # expr = (axes[0] + axes[1]).cast(dtypes.float).bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+#   return expr.bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+
 def kron(buf, B, outer_axes_shape, ctx):
-  # 1) get the real buffer shape and split outer vs inner (in-tile) dims
-  full_shape = tuple(int(s) for s in buf.shape)                   # <- not buf.src[0]
+  full_shape = tuple(int(s) for s in buf.shape)
   inner_shape = full_shape[len(outer_axes_shape):]
   outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
-  # 2) free axes only for the inner dims
-  axes = [ctx.new_range(s, AxisType.LOOP) for s in inner_shape]
 
-  # 3) index T only over the inner dims; prepend the (varying) outer axes once
   T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I])
        for I in product(*(range(s) for s in inner_shape))]
-
-  # 4) tiny row-major flattener
   idx = lambda I,S:(lambda o=0,st=1:[(o:=o+i*st,st:=st*s)[0] for i,s in zip(reversed(I),reversed(S))] and o)()
-
-  # 5) repeatedly apply the same 2D B along each inner axis (n-mode)
   tensordot = lambda T,S,k,M: (
     [sum(T[idx(pre+(i,)+suf,S)] * UOp.const(dtypes.float, float(M[j][i])) for i in range(S[k]))
      for pre in product(*(range(s) for s in S[:k])) for j in range(len(M))
@@ -161,36 +191,14 @@ def kron(buf, B, outer_axes_shape, ctx):
   for k in range(len(inner_shape)):
     acc, shp = tensordot(acc, shp, k, B)
 
-  # 6) expose result as polynomial in the free inner axes
+  # <<< FIX: make free axes from the *output* inner shape >>>
+  axes = [ctx.new_range(s, AxisType.LOOP) for s in shp]
+
   onehot = lambda A,I:(lambda m=UOp.const(dtypes.float,1.0):[
       m:=m*ax.eq(UOp.const(dtypes.index,i)).where(UOp.const(dtypes.float,1.0), UOp.const(dtypes.float,0.0))
     for ax,i in zip(A,I)] and m)()
   expr = sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))
-
-  # 7) bufferize on (outer, inner) axes
-  #mock
-  
-  # expr = (axes[0] + axes[1]).cast(dtypes.float).bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   return expr.bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-
-def kron_buf(read_fn, outer_axes, axes_L, axes_R, L_mats, R_mats, bufopts):
-  # balanced sum
-  def add(xs):
-    while len(xs) > 1: xs = [xs[i] if i+1>=len(xs) else xs[i]+xs[i+1] for i in range(0, len(xs), 2)]
-    return xs[0] if xs else UOp.const(dtypes.float, 0.0)
-
-  def sel(ax, coeffs): return add([ax.eq(i).where(UOp.const(dtypes.float, float(c)), 0.0) for i, c in enumerate(coeffs)])
-
-  axes_L, axes_R, L_mats, R_mats = list(axes_L), list(axes_R), list(L_mats), list(R_mats)
-  al = [[sel(ax, [L[r][k] for r in range(len(L))]) for k in range(len(L[0]))] for ax, L in zip(axes_L, L_mats)]
-  be = [[sel(ax, [R[r][j] for r in range(len(R))]) for j in range(len(R[0]))] for ax, R in zip(axes_R, R_mats)]
-  one = UOp.const(dtypes.float, 1.0)
-  terms = [read_fn(k,j) *
-           (add([al[i][k[i]] for i in range(len(al))]) if al else one) *
-           (add([be[t][j[t]] for t in range(len(be))]) if be else one)
-           for k in (product(*[range(len(cols)) for cols in al]) if al else [()])
-           for j in (product(*[range(len(cols)) for cols in be]) if be else [()])]
-  return add(terms).bufferize(*(tuple(outer_axes)+tuple(axes_L)+tuple(axes_R)), arg=bufopts)
 
 def winoguard(redu):
  # Check structure: REDUCE(ADD) of MUL with size-3 axes (winograd conv pattern)
@@ -232,7 +240,10 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   sub_map = {add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}
   X_vu = (act_like.substitute(sub_map).cast(dtypes.float).bufferize(*tile_ranges, *inner6, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)))
 
-  XHAT = kron(X_vu, winograd_Bt, (2,2), ctx)
+  tile_shape = tuple((int(b.vmax+1)+3)//4 for b in o_bases)
+
+
+  XHAT = kron(X_vu, winograd_Bt, tile_shape, ctx)
 
   # ND: 3-per-dim reduce ranges for the kernel spatial dims
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in range(len(o_bases))]
@@ -246,7 +257,7 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   inner6_1      = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
   MHAT = (XHAT.index(*tile_ranges_1, *inner6_1) * GHAT.index(*inner6_1)).bufferize(*(tile_ranges_1+inner6_1), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
-  YTILE = kron(MHAT, winograd_At, (2,2), ctx)
+  YTILE = kron(MHAT, winograd_At, tile_shape, ctx)
 
   return YTILE.index(*[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases])
 winograd_rewrite = PatternMatcher([
