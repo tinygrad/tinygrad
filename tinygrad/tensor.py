@@ -4476,6 +4476,21 @@ class Tensor(MathTrait):
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+  
+  def matrix_rank(self, atol=None, rtol=1e-5):
+    import numpy as np
+    A = self.numpy().astype(float)
+    S = np.linalg.svd(A, compute_uv=False) #Breaks down matrix
+    S_max = S.max()
+    
+    if atol==None:
+      atol = S_max * max(self.shape) * 1e-12 
+    tol = max(atol, rtol * S_max)
+
+    #Returns num of nonzero vals
+    return (S > tol).sum()
+
+
 
 P = ParamSpec("P")
 T = TypeVar("T")
