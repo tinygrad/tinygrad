@@ -4487,7 +4487,7 @@ class Tensor(MathTrait):
   
   def matrix_rank(self, atol=None, rtol=1e-5):
     import numpy as np
-    A = self.numpy().astype(float)
+    A = self.to("CPU").numpy().astype(float)
     S = np.linalg.svd(A, compute_uv=False) #Breaks down matrix
     S_max = S.max()
     
@@ -4497,8 +4497,6 @@ class Tensor(MathTrait):
 
     #Returns num of nonzero vals
     return (S > tol).sum()
-
-
 
 P = ParamSpec("P")
 T = TypeVar("T")

@@ -964,9 +964,5 @@ class TestMatrixRank(unittest.TestCase):
     A = Tensor([[1,2,3],[4,5,6]], dtype=float)
     assert A.matrix_rank() == 2
 
-
-
-
-
 if __name__ == '__main__':
   unittest.main()
