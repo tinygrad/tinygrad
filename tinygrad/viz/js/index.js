@@ -286,7 +286,8 @@ async function renderProfiler() {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
         const html = document.createElement("div");
-        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
+        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)],
+                      ["Timeline", `${formatTime(x[0])} - ${formatTime(x.at(-1))}`]];
         const info = html.appendChild(tabulate(rows).node());
         const link = [];
         const pk = kernels.get(producer)?.shift();
