@@ -175,7 +175,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  # TODO: remove this
+  # TODO: remove this. it's used by the jit and split_reduceop
   @recursive_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
@@ -261,7 +261,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if self.src[0]._shape is None: return tuple(ssimplify(s) for s in self.arg)
 
     # movement ops change the shape. this is the logic from the old ShapeTracker
-    # NOTE: ssimplify is required because the shape needs to be canonical
+    # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
       ps = self.src[0]._shape
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape on {self}")
@@ -525,7 +525,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, no_reshape_is_no_op=True)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, no_reshape_is_no_op=True)
 
-  # in these two, we
+  # in these two, we have custom logic to check if they are a no-op
   def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg) if arg != tuple(range(len(self.shape))) else self
   def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg) if any(arg) and len(arg) == len(self.shape) else self
 
