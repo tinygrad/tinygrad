@@ -256,9 +256,7 @@ async function renderProfiler() {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
           const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz, producer = strings[optional(u32())];
-          const consumerCount = u32();
-          const consumers = [];
-          for (let i=0; i<consumerCount; i++) { consumers.push(strings[u32()]); }
+          const consumers = Array.from({ length: u32() }, () => strings[u32()]);
           const shape = {x:[x], y:[y], dtype, sz, nbytes, key, producer, consumers};
           buf_shapes.set(key, shape); temp.set(key, shape);
           timestamps.push(ts);
@@ -312,7 +310,6 @@ async function renderProfiler() {
           }
           div.appendChild(tabulate(rows).node());
         }
-
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
