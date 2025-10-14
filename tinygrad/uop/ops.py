@@ -267,31 +267,33 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape on {self}")
       match self.op:
         case Ops.RESHAPE:
-          if prod(ps) != prod(self.arg): raise RuntimeError(f"bad reshape: {ps} -> {self.arg}")
+          if not all(x >= 0 for x in self.arg): raise ValueError(f"shape can't contain negative numbers {self.arg}")
+          if prod(ps) != prod(self.arg): raise ValueError(f"bad reshape: {ps} -> {self.arg}")
           return tuple(ssimplify(s) for s in self.arg)
         case Ops.EXPAND:
-          if len(ps) != len(self.arg) or not all(s==ns or s==1 for s,ns in zip(ps, self.arg)): raise RuntimeError(f"bad expand: {ps} -> {self.arg}")
+          if len(ps) != len(self.arg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.arg)):
+            raise ValueError(f"bad expand: {ps} -> {self.arg}")
           return tuple(ssimplify(s) for s in self.arg)
         case Ops.PERMUTE:
-          if sorted(self.arg) != list(range(len(ps))): raise RuntimeError(f"invalid permutation {self.arg} of len {len(ps)}")
+          if sorted(self.arg) != list(range(len(ps))): raise ValueError(f"invalid permutation {self.arg} of len {len(ps)}")
           return tuple(ps[i] for i in self.arg)
         case Ops.PAD:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.arg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.arg): raise RuntimeError(f"invalid pad {self.arg}")
+          if len(ps) != len(self.arg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.arg): raise ValueError(f"invalid pad {self.arg}")
           return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.arg))
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
           if len(ps) != len(self.arg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.arg)):
-            raise RuntimeError(f"invalid shrink {self.arg} for {ps}")
+            raise ValueError(f"invalid shrink {self.arg} for {ps}")
           return tuple(ssimplify(e-s) for s,e in self.arg)
         case Ops.FLIP:
-          if len(ps) != len(self.arg) or not all(isinstance(x, bool) for x in self.arg): raise RuntimeError(f"bad flip on {ps}, {self.arg}")
+          if len(ps) != len(self.arg) or not all(isinstance(x, bool) for x in self.arg): raise ValueError(f"bad flip on {ps}, {self.arg}")
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE_AXIS | Ops.WMMA:
           axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
-          if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) for x in axis_arg):
-            raise RuntimeError(f"invalid type for axis: {axis_arg}")
+          if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
+            raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all inputs with shape must match
@@ -510,19 +512,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
     return self
 
-  def _mop(self, op:Ops, arg) -> UOp:
+  def _mop(self, op:Ops, arg, no_reshape_is_no_op:bool=False) -> UOp:
     ret = UOp(op, self.dtype, (self,), arg)
-    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
+    # for all movement ops, we check shape property
+    if ret.shape == self.shape and no_reshape_is_no_op: return self
     return ret
-
   def forced_reshape(self, arg:tuple[sint, ...], **kwargs): return UOp(Ops.RESHAPE, kwargs.pop("dtype", self.dtype), src=(self,), arg=arg)
 
-  def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
-  def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
-  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
-  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
-  def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg)
-  def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg)
+  # in these four, if the shape doesn't change we can return self
+  def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=True)
+  def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, no_reshape_is_no_op=True)
+  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, no_reshape_is_no_op=True)
+  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, no_reshape_is_no_op=True)
+
+  # in these two, we
+  def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg) if arg != tuple(range(len(self.shape))) else self
+  def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg) if any(arg) and len(arg) == len(self.shape) else self
 
   # *** uop UNIQUE ***
 
