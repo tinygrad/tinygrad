@@ -1104,6 +1104,12 @@ _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
          Ops.MUL: "*", Ops.CMPLT: "<", Ops.CMPNE: "!=", Ops.AND: "&", Ops.OR: "|", Ops.XOR: "^"}
+precedence = collections.defaultdict(int, { Ops.MUL:1, Ops.IDIV:1, Ops.MOD:1, Ops.ADD:2, Ops.SUB:2, Ops.SHL:3,
+  Ops.SHR:3, Ops.AND:4, Ops.XOR:5, Ops.OR:6, Ops.CMPLT:7, Ops.CMPNE:7, Ops.WHERE:100, Ops.MULACC:100, Ops.RECIP:100})
+def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
+  return code_for_op(strip_parens(left) if precedence[x.src[0].op]<=precedence[x.op] else left, strip_parens(right) if
+    precedence[x.src[1].op]<precedence[x.op] else right)
+
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR,), name="x"), lambda ctx,x: ctx.update({x: x.arg[0]})),
   (UPat((Ops.SPECIAL), name="x"), lambda ctx,x: ctx.update({x: x.arg})),
@@ -1118,7 +1124,9 @@ renderer = PatternMatcher([
   (UPat(Ops.MAX, name="x"), lambda ctx,x: ctx.update({x: f"max({ctx[x.src[0]]}, {ctx[x.src[1]]})"})),
   (UPat(Ops.MULACC, name="x"), lambda ctx,x: ctx.update({x: f"({ctx[x.src[0]]}*{ctx[x.src[1]]}+{ctx[x.src[2]]})"})),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x: ctx.update({x: f"({ctx[x.src[1]]} if {ctx[x.src[0]]} else {ctx[x.src[2]]})"})),
-  (UPat(set(syms.keys()), name="x"), lambda ctx,x: ctx.update({x: f"({strip_parens(ctx[x.src[0]]) if x.src[0].op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[0]]}{syms[x.op]}{strip_parens(ctx[x.src[1]]) if x.src[1].op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR, Ops.OR, Ops.AND} else ctx[x.src[1]]})"})),
+  # all of these operators are left associative, so we can strip based on precedence
+  (UPat(set(syms.keys()), name="x"), lambda ctx,x: ctx.update({x: strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]],
+    lambda a,b: f"({a}{syms[x.op]}{b})")})),
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda ctx,x:
    ctx.update({x: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])}) if all(y in ctx for y in x.src[1:]) else None),
   (UPat(Ops.VECTORIZE, name="x"),
