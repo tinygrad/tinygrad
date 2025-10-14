@@ -28,7 +28,7 @@ class TLSFAllocator:
 
     # self.blocks is more like a linked list, where each entry is a contiguous block.
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
-    self._insert_block(0, size)
+    if size > 0: self._insert_block(0, size)
 
   @functools.cache
   def lv1(self, size): return size.bit_length()
