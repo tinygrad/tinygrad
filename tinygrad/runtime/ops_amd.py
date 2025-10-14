@@ -755,7 +755,7 @@ class APLIface(PCIIface):
     self.task = ctypes.cast(System.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
     if System.iokit.IOServiceOpen(service, self.task, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
       raise RuntimeError(f"IOServiceOpen failed")
-    self.conn = conn
+    self.dev, self.conn = dev, conn
     self.bars = {bar: self._map_memory(bar) for bar in [0, 2, 5]}
     self._setup_adev(f"usb4:{dev_id}", self.map_bar(0), self.map_bar(2, fmt='Q'), self.map_bar(5, fmt='I'))
 
@@ -779,6 +779,8 @@ class APLIface(PCIIface):
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
     return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
+
+  def sleep(self, timeout): pass
 
 class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface, APLIface))
