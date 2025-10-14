@@ -26,6 +26,9 @@ def test_tokenize(samp) -> bool:
     print("simple:  ", color_tokens(simple_tokens))
     print("official:", color_tokens(base_tokens) + "\n")
     return False
+  if simple_tokenizer.decode(simple_tokens) != txt:
+    print(f"decode mismatch at {idx}")
+    return False
   return True
 
 # use ALLOW_FAILED=-1 to go over the entire dataset without printing.
