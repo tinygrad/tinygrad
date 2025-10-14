@@ -223,8 +223,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
     return ShapeTracker.from_shape(shape)
 
-  @functools.cached_property
-  def shape(self) -> tuple[sint, ...]:
+  @recursive_property
+  def _shape(self) -> tuple[sint, ...]|None:
     # some ops init the shape
     match self.op:
       case Ops.CONST: return ()
@@ -246,7 +246,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
           if sorted(self.arg) != list(range(len(ps))): raise RuntimeError(f"invalid permutation {self.arg} of len {len(ps)}")
           return tuple(ps[i] for i in self.arg)
         case Ops.PAD:
-          if len(ps) != len(self.arg) or not all(b>=0 and e>=0 for b,e in self.arg): raise RuntimeError(f"invalid pad {self.arg}")
+          # TODO: why do i need resolve here?
+          if len(ps) != len(self.arg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.arg): raise RuntimeError(f"invalid pad {self.arg}")
           return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.arg))
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
@@ -259,13 +260,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # elementwise ops keep the shape the same
     if self.op in GroupOp.Elementwise-{Ops.BITCAST}:
-      input_shapes = [x.shape for x in self.src]
+      input_shapes = [x._shape for x in self.src if x._shape is not None]
+      if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
       return input_shapes[0]
 
-    # TODO: finish this and remove self.st.shape
-    assert self.st is not None, f"{self.op} doesn't have a shape"
-    return unwrap(self.st).shape
+    # keep old behavior and get from st
+    if (st:=self.st) is None: return None
+    return st.shape
+
+  @property
+  def shape(self) -> tuple[sint, ...]:
+    if (ret:=self._shape) is None: raise RuntimeError(f"shape requested, but {self.op} doesn't have a shape")
+    return ret
+
   @property
   def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
 
