@@ -4490,7 +4490,8 @@ class Tensor(MathTrait):
     S = np.linalg.svd(A, compute_uv=False) #Breaks down matrix
     S_max = S.max()
     if atol is None:
-      atol = S_max * max(self.shape) * 1e-15
+      eps = np.finfo(S.dtype).eps
+      atol = S_max * max(self.shape) * eps
     tol = max(atol, rtol * S_max)
     #Returns num of nonzero vals
     return (S > tol).sum()
