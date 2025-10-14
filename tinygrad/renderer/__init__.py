@@ -7,7 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, Gro
 from tinygrad.dtype import AddrSpace, PtrDType
 if TYPE_CHECKING:
   from tinygrad.codegen.opt.tc import TensorCore
-  from tinygrad.codegen.opt.kernel import Opt
+  from tinygrad.codegen.opt import Opt
 
 @dataclass(frozen=True)
 class Estimates:
