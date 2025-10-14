@@ -3177,6 +3177,7 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
+  @unittest.skip("we have test_linalg, no need to test here. TODO: should be in torch backend tests")
   def test_svd(self):
     # test for tiny backend. real svd tests are in test_linalg
     A = torch.randn(5, 5)
