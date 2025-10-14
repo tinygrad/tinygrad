@@ -950,7 +950,6 @@ class TestIdxUpcast(unittest.TestCase):
     # Modified example from issue 3271
     a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
     a.realize()
-
 class TestMatrixRank(unittest.TestCase):
   def test_identity_mat(self):
     ##Identity matrix should have rank of n, for an nxn
@@ -958,11 +957,9 @@ class TestMatrixRank(unittest.TestCase):
     I = Tensor.eye(n)
     rank = I.matrix_rank()
     assert rank == n
-  
   def test_rectangle_mat(self):
-    ##Testing that the code works on rectangular matrices
-    A = Tensor([[1,2,3],[4,5,6]], dtype=float)
+  ##Testing that the code works on rectangular matrices
+    A = Tensor([[1,2,3],[4,5,6]])
     assert A.matrix_rank() == 2
-
 if __name__ == '__main__':
   unittest.main()
