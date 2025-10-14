@@ -730,8 +730,8 @@ class Tensor(MathTrait):
     ```
     """
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    x = Tensor.ones(n, **kwargs).diag()
-    return x if m is None else x.pad((None, (0, m-n))) if m > n else x.shrink((None, (0, m)))
+    import numpy as np
+    return Tensor(np.eye(n, m or n, dtype=np.float32), **kwargs)
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
@@ -4488,6 +4488,8 @@ class Tensor(MathTrait):
     import numpy as np
     A = self.realize().to("CPU").numpy().astype(float)
     S = np.linalg.svd(A, compute_uv=False) #Breaks down matrix
+    print("A:\n", A)
+    print("S:", S)
     S_max = S.max()
     if atol is None:
       eps = np.finfo(S.dtype).eps
