@@ -55,9 +55,10 @@ class SimpleTokenizer:
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
   B, H, T, Hd = x.shape
-  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  assert isinstance(Hd, int) and (Hd & 1) == 0, "RoPE requires an even head dimension"
   half = Hd // 2
-  angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+  t_start_pos = start_pos if isinstance(start_pos, int) else Tensor(start_pos)
+  angles = (Tensor.arange(T, dtype="float32") + t_start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
   # contiguous here allows RoPE to be pruned in the JIT
   cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype).contiguous(), angles.sin().reshape(1, 1, T, half).cast(x.dtype).contiguous()
   x_pairs = x.reshape(B, H, T, half, 2)
