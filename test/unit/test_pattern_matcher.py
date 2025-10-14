@@ -230,15 +230,29 @@ class TestAlgebraic(unittest.TestCase):
     pm = PatternMatcher([
       (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), UPat.var('x') & UPat.var('y')),
     ])
-    expr = UOp.const(dtypes.bool, True)*UOp.const(dtypes.bool, True)
-    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True)&UOp.const(dtypes.bool, True))
+    expr = UOp.const(dtypes.bool, True) * UOp.const(dtypes.bool, True)
+    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True) & UOp.const(dtypes.bool, True))
 
-  def test_mul_is_or(self):
+  def test_and_is_mul(self):
     pm = PatternMatcher([
-      (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), UPat.var('x') | UPat.var('y')),
+      (UPat.var('x', dtype=dtypes.bool) & UPat.var('y', dtype=dtypes.bool), UPat.var('x') * UPat.var('y')),
     ])
-    expr = UOp.const(dtypes.bool, True)*UOp.const(dtypes.bool, True)
-    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True)| UOp.const(dtypes.bool, True))
+    expr = UOp.const(dtypes.bool, True) & UOp.const(dtypes.bool, True)
+    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True) * UOp.const(dtypes.bool, True))
+
+  def test_div_is_or(self):
+    pm = PatternMatcher([
+      (UPat.var('x', dtype=dtypes.bool) / UPat.var('y', dtype=dtypes.bool), UPat.var('x') | UPat.var('y')),
+    ])
+    expr = UOp.const(dtypes.bool, True) / UOp.const(dtypes.bool, True)
+    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True) | UOp.const(dtypes.bool, True))
+
+  def test_or_is_div(self):
+    pm = PatternMatcher([
+      (UPat.var('x', dtype=dtypes.bool) | UPat.var('y', dtype=dtypes.bool), UPat.var('x') / UPat.var('y')),
+    ])
+    expr = UOp.const(dtypes.bool, True) | UOp.const(dtypes.bool, True)
+    self.assertEqual(pm.rewrite(expr), UOp.const(dtypes.bool, True) / UOp.const(dtypes.bool, True))
 
   def test_div_neg_1(self):
     pm = PatternMatcher([
