@@ -257,8 +257,8 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          timestamps.push(ts);
-          x += 1; y -= free.nbytes; valueMap.set(ts, y);
+          timestamps.push(ts); valueMap.set(ts, y);
+          x += 1; y -= free.nbytes;
           free.x.push(x);
           free.y.push(free.y.at(-1));
           temp.delete(key);
@@ -333,6 +333,7 @@ async function renderProfiler() {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
+    const paths = [];
     for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
@@ -340,18 +341,18 @@ async function renderProfiler() {
         if (e.width == null) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          ctx.beginPath();
-          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          const p = new Path2D();
+          p.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
-            ctx.lineTo(x[i], offsetY+e.y0[i]);
+            p.lineTo(x[i], offsetY+e.y0[i]);
             let arg = e.arg;
             if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), 'B')}`}
             visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
-          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
-          ctx.closePath();
-          ctx.fillStyle = e.fillColor; ctx.fill();
-          if (focusedShape && e.arg?.key === focusedShape) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(); }
+          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
+          p.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill(p);
+          if (focusedShape && e.arg?.key === focusedShape) { paths.push(p); }
           continue;
         }
         // contiguous rect
@@ -400,11 +401,13 @@ async function renderProfiler() {
       }
     }
     // draw markers
+    ctx.textBaseline = "top";
     for (const m of markers) {
       const x = xscale(m.ts);
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
+    for (const p of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(p); }
   }
 
   function resize() {

@@ -7,8 +7,7 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes
-from tinygrad.helpers import fetch
+import ctypes, ctypes.util
 
 
 class AsDictMixin:
@@ -156,7 +155,7 @@ class FunctionFactoryStub:
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-_libraries['FIXME_STUB'] = ctypes.CDLL(str(fetch('https://github.com/ROCm/rocprof-trace-decoder/raw/5420409ad0963b2d76450add067b9058493ccbd0/releases/linux_glibc_2_28_x86_64/librocprof-trace-decoder.so'))) #  ctypes.CDLL('FIXME_STUB')
+_libraries['FIXME_STUB'] = ctypes.CDLL(ctypes.util.find_library('rocprof-trace-decoder')) #  ctypes.CDLL('FIXME_STUB')
 
 
 

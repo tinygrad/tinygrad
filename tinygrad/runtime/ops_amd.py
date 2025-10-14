@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
@@ -670,7 +670,7 @@ class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=[0x744c, 0x7480, 0x7550], bars=[0, 2, 5], vram_bar=0,
+    super().__init__(dev, dev_id, vendor=0x1002, devices=[0x744c, 0x7480, 0x7550, 0x7590], bars=[0, 2, 5], vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size)
     self._setup_adev(self.pci_dev.pcibus, self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I'))
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
@@ -713,7 +713,7 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBIface(PCIIface):
-  def __init__(self, dev, dev_id):
+  def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     self.dev = dev
     self.usb = ASM24Controller()
     self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
@@ -875,13 +875,12 @@ class AMDDevice(HCQCompiled):
   def _at_profile_finalize(self):
     if self.sqtt_enabled:
       wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
-      wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_stop(len(self.sqtt_buffers), wptrs_buf) \
                                                       .signal(self.timeline_signal, self.next_timeline()).submit(self)
       self.synchronize()
       if DEBUG >= 2: print(f'{self.device}: Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):
-        wptr = ((struct.unpack('<I', wptrs[i*4:i*4+4])[0] & 0x1FFFFFFF) - (((buf0.va_addr//32) & 0x1FFFFFFF) if self.target < (12,0,0) else 0)) * 32
+        wptr = ((wptrs_buf.cpu_view().view(fmt='I')[i] & 0x1FFFFFFF) - (((buf0.va_addr//32) & 0x1FFFFFFF) if self.target < (12,0,0) else 0)) * 32
         if DEBUG >= 2: print(f'\t{self.device}: SE {i} blob size {wptr:#x}')
         assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
         # When sqtt buffer overflows, wptr stops at the last dword
