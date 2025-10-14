@@ -4491,7 +4491,7 @@ class Tensor(MathTrait):
     S_max = S.max()
     if atol is None:
       eps = np.finfo(S.dtype).eps
-      atol = S_max * max(self.shape) * eps
+      atol = S_max * max(A.shape) * eps
     tol = max(atol, rtol * S_max)
     #Returns num of nonzero vals
     return (S > tol).sum()
