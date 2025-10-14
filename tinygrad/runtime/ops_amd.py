@@ -784,11 +784,11 @@ class APLIface(PCIIface):
 
 class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface, APLIface))
-  def is_usb(self) -> bool: return isinstance(self.iface, (USBIface, APLIface))
+  def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface(APLIface, KFDIface, PCIIface, USBIface)
+    self.iface = self._select_iface(KFDIface, PCIIface, USBIface, APLIface)
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
