@@ -145,8 +145,7 @@ class MathTrait:
 
   def ne(self:TMT, x:TMT|ConstType): return self.alu(Ops.CMPNE, self.ufix(x))
   def eq(self:TMT, x:TMT|ConstType): return self.ne(x).logical_not()
-  # TODO: make typing of __ne__ work
-  def __ne__(self, x): return self.ne(x)
+  def __ne__(self:TMT, x:TMT|ConstType): return self.ne(x)  # type: ignore[override]
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
   def lshift(self:TMT, x:TMT|int, reverse:bool=False): return self._binop(Ops.SHL, x, reverse)
