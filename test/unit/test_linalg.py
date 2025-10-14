@@ -26,18 +26,22 @@ class TestLinAlg(unittest.TestCase):
       orthogonality_helper(V)
       reconstruction_helper([U,s_diag,V],a)
 
-  def test_svd_nonfull(self):
-    sizes = [(2,2),(5,3),(3,5),(2,2,2,2,3)]
-    for size in sizes:
-      a = Tensor.randn(size).realize()
-      U,S,V = a.svd(full_matrices=False)
-      b_shape,m,n = size[0:-2],size[-2],size[-1]
-      k = min(m,n)
-      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)).expand(b_shape + (k,k)))
-      #reduced U,V is only orthogonal along smaller dim
-      if (m < n): orthogonality_helper(U),orthogonality_helper(V)
-      else: orthogonality_helper(U.transpose(-2,-1)),orthogonality_helper(V.transpose(-2,-1))
-      reconstruction_helper([U,s_diag,V],a)
+  def _test_svd_nonfull(self, size):
+    a = Tensor.randn(size).realize()
+    U,S,V = a.svd(full_matrices=False)
+    b_shape,m,n = size[0:-2],size[-2],size[-1]
+    k = min(m,n)
+    s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)).expand(b_shape + (k,k)))
+    #reduced U,V is only orthogonal along smaller dim
+    if (m < n): orthogonality_helper(U),orthogonality_helper(V)
+    else: orthogonality_helper(U.transpose(-2,-1)),orthogonality_helper(V.transpose(-2,-1))
+    reconstruction_helper([U,s_diag,V],a)
+
+  # faster for parallel pytest
+  def test_svd_nonfull_2_2(self): self._test_svd_nonfull((2,2))
+  def test_svd_nonfull_5_3(self): self._test_svd_nonfull((5,3))
+  def test_svd_nonfull_3_5(self): self._test_svd_nonfull((3,5))
+  def test_svd_nonfull_2_2_2_2_3(self): self._test_svd_nonfull((2,2,2,2,3))
 
   @unittest.skip("very big. recommend wrapping with TinyJit around inner function")
   def test_svd_large(self):
