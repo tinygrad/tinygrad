@@ -850,7 +850,7 @@ class PatternMatcher:
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[int|float]] = dict()
 
-# TRACK_MATCH_STATS>=3 saves the UOp fields
+# TRACK_MATCH_STATS>=2 or VIZ=1 saves all matches
 ucount = itertools.count()
 uop_fields:dict[int, tuple] = {}
 
