@@ -115,16 +115,72 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
+
+
+# def kron(buf, B, outer_axes, ctx):
+#   shape = buf.src[0]
+#   axes = [ctx.new_range(s, AxisType.LOOP) for s in shape[len(outer_axes):]]
+#   T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I])
+#        for I in product(*(range(s) for s in shape))]
+#   idx = lambda I,S:(lambda o=0,st=1:[(o:=o+i*st,st:=st*s)[0] for i,s in zip(reversed(I),reversed(S))] and o)()
+#   tensordot = lambda T,S,k,M: (
+#     [sum(T[idx(pre+(i,)+suf,S)] * UOp.const(dtypes.float, float(M[j][i])) for i in range(S[k]))
+#      for pre in product(*(range(s) for s in S[:k])) for j in range(len(M))
+#      for suf in product(*(range(s) for s in S[k+1:]))],
+#     S[:k] + (len(M),) + S[k+1:]
+#   )
+#   acc, shp = T, tuple(shape)
+#   for k in range(len(shape)): acc, shp = tensordot(acc, shp, k, B)
+#   sel = lambda axes,I:(lambda m=UOp.const(dtypes.float,1.0): [m:=m*ax.eq(UOp.const(dtypes.index,i)).where(UOp.const(dtypes.float,1.0), UOp.const(dtypes.float,0.0)) for ax,i in zip(axes,I)] and m)()
+#   return sum(acc[idx(I,shp)] * sel(axes, I) for I in product(*(range(s) for s in shp))).bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+
+
+def kron(buf, B, outer_axes, ctx):
+  # 1) get the real buffer shape and split outer vs inner (in-tile) dims
+  full_shape = tuple(int(s) for s in buf.shape)                   # <- not buf.src[0]
+  inner_shape = full_shape[len(outer_axes):]
+
+  # 2) free axes only for the inner dims
+  axes = [ctx.new_range(s, AxisType.LOOP) for s in inner_shape]
+
+  # 3) index T only over the inner dims; prepend the (varying) outer axes once
+  T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I])
+       for I in product(*(range(s) for s in inner_shape))]
+
+  # 4) tiny row-major flattener
+  idx = lambda I,S:(lambda o=0,st=1:[(o:=o+i*st,st:=st*s)[0] for i,s in zip(reversed(I),reversed(S))] and o)()
+
+  # 5) repeatedly apply the same 2D B along each inner axis (n-mode)
+  tensordot = lambda T,S,k,M: (
+    [sum(T[idx(pre+(i,)+suf,S)] * UOp.const(dtypes.float, float(M[j][i])) for i in range(S[k]))
+     for pre in product(*(range(s) for s in S[:k])) for j in range(len(M))
+     for suf in product(*(range(s) for s in S[k+1:]))],
+    S[:k] + (len(M),) + S[k+1:]
+  )
+  acc, shp = T, tuple(inner_shape)
+  for k in range(len(inner_shape)):
+    acc, shp = tensordot(acc, shp, k, B)
+
+  # 6) expose result as polynomial in the free inner axes
+  onehot = lambda A,I:(lambda m=UOp.const(dtypes.float,1.0):[
+      m:=m*ax.eq(UOp.const(dtypes.index,i)).where(UOp.const(dtypes.float,1.0), UOp.const(dtypes.float,0.0))
+    for ax,i in zip(A,I)] and m)()
+  expr = sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))
+
+  # 7) bufferize on (outer, inner) axes
+  #mock
+  
+  # expr = (axes[0] + axes[1]).cast(dtypes.float).bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  return expr.bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+
 def kron_buf(read_fn, outer_axes, axes_L, axes_R, L_mats, R_mats, bufopts):
   # balanced sum
   def add(xs):
     while len(xs) > 1: xs = [xs[i] if i+1>=len(xs) else xs[i]+xs[i+1] for i in range(0, len(xs), 2)]
     return xs[0] if xs else UOp.const(dtypes.float, 0.0)
-  # N-way selector: sum_i (axis==i ? coeffs[i] : 0)
-  def sel(ax, coeffs):
-    z = UOp.const(dtypes.float, 0.0)
-    return add([UOp(Ops.WHERE, dtypes.float, src=(UOp(Ops.CMPEQ, dtypes.bool, src=(ax, UOp.const(dtypes.index, i))),
-                                                  UOp.const(dtypes.float, float(c)), z)) for i, c in enumerate(coeffs)])
+
+  def sel(ax, coeffs): return add([ax.eq(i).where(UOp.const(dtypes.float, float(c)), 0.0) for i, c in enumerate(coeffs)])
+
   axes_L, axes_R, L_mats, R_mats = list(axes_L), list(axes_R), list(L_mats), list(R_mats)
   al = [[sel(ax, [L[r][k] for r in range(len(L))]) for k in range(len(L[0]))] for ax, L in zip(axes_L, L_mats)]
   be = [[sel(ax, [R[r][j] for r in range(len(R))]) for j in range(len(R[0]))] for ax, R in zip(axes_R, R_mats)]
@@ -137,7 +193,7 @@ def kron_buf(read_fn, outer_axes, axes_L, axes_R, L_mats, R_mats, bufopts):
   return add(terms).bufferize(*(tuple(outer_axes)+tuple(axes_L)+tuple(axes_R)), arg=bufopts)
 
 def winoguard(redu):
- #TODO - Can we make this simpler?
+ # Check structure: REDUCE(ADD) of MUL with size-3 axes (winograd conv pattern)
  if redu.arg is not Ops.ADD or redu.src[0].op is not Ops.MUL: return None
  three_axes = {ax for ax in redu.src[1:] if ax.op is Ops.RANGE and int(ax.vmax+1) == 3}
  def collect_pairs(node, axes, out):
@@ -155,20 +211,12 @@ def winoguard(redu):
  return None
 
 def winowrite(ctx: IndexingContext, redu: UOp):
-  #TODO - Add where filters so index does not read garbage - or do we?
-  #TODO - Generalize to n-dimensions
-  #TODO - Merge synth_mat with reduce and mul to create kron product
-  #TODO - Fix test errors
-  # 1) Use winoguard to find the activation branch and candidate (loop, reduce) axis pairs.
-  #TODO - Breaks with 3D and Cin
   guard = winoguard(redu)
-  if guard is None:
-    return None
+  if guard is None: return None
   act_branch, axis_pairs = guard
   act_like, w_like = redu.src[0].src
   if act_branch == 1:
     act_like, w_like = w_like, act_like
-  act_buf = act_like.src[0]
   (_, ky, oy_add), (_, kx, ox_add), *_ = axis_pairs
   oy_base, ox_base = (e.substitute({ky: ky.const_like(0), kx: kx.const_like(0)}).simplify() for e in (oy_add, ox_add))
   iy, ix, tx, ty = (oy_base % 4).simplify(), (ox_base % 4).simplify(), (ox_base//4).simplify(), (oy_base//4).simplify()
@@ -182,15 +230,15 @@ def winowrite(ctx: IndexingContext, redu: UOp):
                 .cast(dtypes.float) \
                 .bufferize(TYx, TXx, RU, UX, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
   # X̂, buffered on (TYh, TXh, c6x, r6x)
-  XHAT = kron_buf(
-    lambda k,j: X_vu.index(TYh, TXh, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
-    (TYh, TXh), (c6x,), (r6x,), (winograd_Bt,), (winograd_Bt,),
-    BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  # XHAT = kron_buf(
+  #   lambda k,j: X_vu.index(TYh, TXh, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
+  #   (TYh, TXh), (c6x,), (r6x,), (winograd_Bt,), (winograd_Bt,),
+  #   BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+
+  XHAT = kron(X_vu, winograd_Bt, (TYh, TXh), ctx)
   w_f32 = w_like.substitute({ky:KYO, kx:KXO}).bufferize(KYO, KXO, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-  GHAT = kron_buf(
-    lambda k,j: w_f32.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
-    (), (c6g,), (r6g,), (winograd_G,), (winograd_G,),
-    BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  GHAT = kron(w_f32, winograd_G, (), ctx)
+  
   YTILE = kron_buf(
     lambda k,j: XHAT.index(TYw, TXw, UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])) *
                 GHAT.index(UOp.const(dtypes.index, k[0]), UOp.const(dtypes.index, j[0])),
