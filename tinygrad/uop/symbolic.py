@@ -530,8 +530,8 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
   # # Where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
   (UPat.var("c1").where(UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l"), 0), where_on_load),
-  # (UPat.var("c1").where(0, UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l")),
-  #   lambda l,c1,buf,x: where_on_load(l,c1.logical_not(),buf,x)),
+  (UPat.var("c1").where(0, UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l")),
+    lambda l,c1,buf,x: where_on_load(l,c1.logical_not(),buf,x)),
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
   (UPat(Ops.BARRIER, name="root"),
     lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
