@@ -226,8 +226,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
+      # late ops don't have shape
+      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.IF | Ops.BARRIER | \
+           Ops.VECTORIZE | Ops.VCONST | Ops.SUBSTITUTE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL:
+        return None
+
       # some ops init the shape
-      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.VECTORIZE | Ops.VCONST | Ops.SUBSTITUTE | Ops.GEP: return None
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
@@ -254,7 +258,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # NOTE: ssimplify is required because the shape needs to be canonical
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
       ps = self.src[0]._shape
-      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape")
+      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape on {self}")
       match self.op:
         case Ops.RESHAPE:
           if prod(ps) != prod(self.arg): raise RuntimeError(f"bad reshape: {ps} -> {self.arg}")
@@ -284,7 +288,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
             raise RuntimeError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
-    # elementwise ops keep the shape the same. all with shape must match
+    # elementwise ops keep the shape the same. all inputs with shape must match
     if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.SINK, Ops.ALLREDUCE}):
       input_shapes = [x._shape for x in self.src if x._shape is not None]
       if len(input_shapes) == 0: return None
@@ -362,7 +366,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __getitem__(self, idx): return self.index(idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    return UOp.const(self.dtype, b, device=self._device, shape=self.shape if self.st is not None else None)
+    return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
