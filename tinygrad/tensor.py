@@ -731,9 +731,11 @@ class Tensor(MathTrait):
     """
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
     m = n if m is None else m
-    x = Tensor.zeros((n, m), **kwargs)
-    for i in range(min(n, m)):
-        x[i, i] = 1
+    x = Tensor.zeros((n, m), **kwargs).contiguous()  # ensure contiguous memory
+    diag_len = min(n, m)
+    if diag_len > 0:
+      idx = Tensor.arange(diag_len, dtype=dtypes.int32)
+      x[idx, idx] = 1  # vectorized diagonal assignment
     return x
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
@@ -4491,8 +4493,6 @@ class Tensor(MathTrait):
     import numpy as np
     A = self.realize().to("CPU").numpy().astype(float)
     S = np.linalg.svd(A, compute_uv=False) #Breaks down matrix
-    print("A:\n", A)
-    print("S:", S)
     S_max = S.max()
     if atol is None:
       eps = np.finfo(S.dtype).eps
