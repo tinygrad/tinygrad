@@ -241,7 +241,8 @@ async function renderProfiler() {
         }
         const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
         const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
-        kernels.set(e.name, { shapeRef, info:e.info, st:e.st, dur:e.dur });
+        if (!kernels.has(e.name)) kernels.set(e.name, []);
+        kernels.get(e.name).push({ shapeRef, info:e.info, st:e.st, dur:e.dur });
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -290,12 +291,12 @@ async function renderProfiler() {
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         const info = html.appendChild(tabulate(rows).node());
         const link = [];
-        if (producer != null) link.push(["Producer", producer]);
-        for (const cname of consumers) link.push(["Consumer ", cname]);
-        for (const [type, kname] of link) {
+        const pk = kernels.get(producer)?.shift();
+        if (producer != null) link.push(["Producer", producer, pk]);
+        for (const cname of consumers) link.push(["Consumer ", cname, kernels.get(cname)?.find(s => s.st > x[0])]);
+        for (const [type, kname, k] of link) {
           html.appendChild(document.createElement("br"));
           const div = html.appendChild(document.createElement("div"));
-          const k = kernels.get(kname);
           const name = colored(kname);
           const rows = [[type, name]];
           if (k != null) {
@@ -306,7 +307,6 @@ async function renderProfiler() {
               name.style.cursor = "pointer";
               name.onclick = () => { setCtxWithHistory(k.shapeRef.ctx, k.shapeRef.step); }
             }
-            const pk = kernels.get(producer);
             if (pk != null) {
               const idle = k.st-(pk.st+pk.dur);
               if (idle > 0) rows.push(["Idle", formatTime(idle)]);

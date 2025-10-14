@@ -493,5 +493,11 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(len(first_alloc["consumers"]), 2)
     assert first_alloc["producer"].startswith("E") # elementwise kernel
 
+  def test_dedup_producers(self):
+    for _ in range(3):
+      a = Tensor.empty(1)
+      a.uop.buffer.ensure_allocated()
+      a.add(1).realize()
+
 if __name__ == "__main__":
   unittest.main()
