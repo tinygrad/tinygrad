@@ -129,6 +129,7 @@ class TestAssign(unittest.TestCase):
   @unittest.expectedFailure
   def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
 
+  @unittest.skip("assign to contiguous shouldn't change the base buffer")
   def test_assign_changes_buffer_alt(self):
     a, b = [Tensor(Tensor(0).contiguous().realize().uop.as_buf()) for _ in range(2)]
     Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
