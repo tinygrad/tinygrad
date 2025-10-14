@@ -458,7 +458,7 @@ class AMDProgram(HCQProgram):
       if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
       else: raise RuntimeError(f"unknown AMD reloc {typ}")
 
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
