@@ -233,12 +233,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Movement:
       ps = self.src[0].shape
       match self.op:
-        #case Ops.RESHAPE:
-          #if prod(ps) != prod(self.arg): raise RuntimeError(f"bad reshape: {ps} -> {self.arg}")
-          #return self.arg
+        case Ops.RESHAPE:
+          if prod(ps) != prod(self.arg): raise RuntimeError(f"bad reshape: {ps} -> {self.arg}")
+          return tuple(ssimplify(s) for s in self.arg)
         case Ops.EXPAND:
           if len(ps) != len(self.arg) or not all(s==ns or s==1 for s,ns in zip(ps, self.arg)): raise RuntimeError(f"bad expand: {ps} -> {self.arg}")
-          return self.arg
+          return tuple(ssimplify(s) for s in self.arg)
         case Ops.PERMUTE:
           if sorted(self.arg) != list(range(len(ps))): raise RuntimeError(f"invalid permutation {self.arg} of len {len(ps)}")
           return tuple(ps[i] for i in self.arg)
@@ -250,7 +250,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
           if not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.arg)):
             raise RuntimeError(f"invalid shrink {self.arg} for {ps}")
           return tuple(ssimplify(e-s) for s,e in self.arg)
-        # TODO: finish this and remove self.st.shape
+        case Ops.FLIP: return ps
+    # TODO: finish this and remove self.st.shape
     assert self.st is not None, f"{self.op} doesn't have a shape"
     return unwrap(self.st).shape
   @property
