@@ -381,7 +381,7 @@ async function renderProfiler() {
           for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
           p.closePath();
           ctx.fillStyle = e.fillColor; ctx.fill(p);
-          if (focusedShape && e.arg?.key === focusedShape.key) { paths.push(p); }
+          if (e.arg?.key != null && e.arg.key === focusedShape?.key) { paths.push(p); }
           continue;
         }
         // contiguous rect
