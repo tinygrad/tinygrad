@@ -411,6 +411,59 @@ class Tensor(MathTrait):
     """
     return self.replace(self.shard(devices, axis))
 
+  CHUNK_SIZE = 2**20
+  def load(self, size:int) -> Tensor:
+    """
+    Load a tensor from storage.
+
+    self should be a tensor of the hash to load
+    """
+    # TODO: this should work locally as well
+    assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
+    h = self.contiguous().flatten()
+    assert h.shape[0] == 16, "expected hash"
+
+    base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
+    tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
+    data, level_chunks = h, 0
+    for i in reversed(range(tree_depth + 1)):
+      data = data.to("tinyfs:load")
+
+      # if not last level, its still hashes
+      if i > 0 or tree_depth == 0:
+        level_chunks = max(1, math.ceil(base_chunks / (Tensor.CHUNK_SIZE // 16)**(i-1)))
+        pad_amt = 16 * level_chunks
+      else: pad_amt = Tensor.CHUNK_SIZE * level_chunks
+      if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
+      data = data[:pad_amt].contiguous()
+      if i != 0: data = data.to(self.device)
+
+    return data[:size]
+
+  def store(self) -> Tensor:
+    """
+    Store a tensor to storage.
+    """
+    # TODO: this should work locally as well
+    data = self.contiguous().flatten().bitcast(dtypes.uint8)
+
+    # pad to a multiple of 1mb
+    if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
+    size = data.shape[0]
+
+    base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
+    tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
+
+    to_device = "CPU" if isinstance(self.device, str) and self.device.startswith("DISK") else self.device
+
+    level_chunks = base_chunks
+    for _ in range(tree_depth + 1):
+      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(to_device)
+      if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
+      level_chunks = math.ceil(data.shape[0] / Tensor.CHUNK_SIZE)
+
+    return data[:16].contiguous()
+
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
     if y.op is Ops.BIND: return Tensor(y, **kwargs, requires_grad=False)
