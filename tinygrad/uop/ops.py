@@ -233,7 +233,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         return None
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if len(self.src) and self.src[0].op is Ops.DEVICE else None
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
@@ -298,7 +298,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
     # elementwise ops keep the shape the same. all inputs with shape must match
     if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.SINK, Ops.ALLREDUCE}):
-      input_shapes = [x._shape for x in self.src if x._shape is not None]
+      # TODO: remove this hack for 3 op assign
+      input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
       if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
       return input_shapes[0]
