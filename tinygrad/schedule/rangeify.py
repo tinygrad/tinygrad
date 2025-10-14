@@ -207,7 +207,7 @@ pm_cleanups = pm_mops+PatternMatcher([
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
-  if isinstance(b.device, str) and b.device.startswith("DISK"):
+  if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
     rngs = b.src[1:]
     size = prod(shape := [int(r.vmax+1) for r in rngs])
 

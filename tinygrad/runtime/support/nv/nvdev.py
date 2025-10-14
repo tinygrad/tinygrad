@@ -152,6 +152,8 @@ class NVDev(PCIDevImplBase):
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
   def include(self, file:str):
+    def _do_eval(s:str): return eval(s) # pylint: disable=eval-used
+
     regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0, 'NV_PFSP': 0x0,
       'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
       'NV_VIRTUAL_FUNCTION':0xb80000}
@@ -163,13 +165,13 @@ class NVDev(PCIDevImplBase):
         name, hi, lo = m.groups()
 
         reg = next((r for r in self.reg_names if name.startswith(r+"_")), None)
-        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), eval(lo), eval(hi))
-        else: self.reg_offsets[name] = (eval(lo), eval(hi))
+        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), _do_eval(lo), _do_eval(hi))
+        else: self.reg_offsets[name] = (_do_eval(lo), _do_eval(hi))
         continue
 
       if m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
         fn = m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()
-        name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {fn}")
+        name, value = m.groups()[0], _do_eval(f"lambda {m.groups()[1]}: {fn}")
       elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)(?![^\n]*:)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
       else: continue
 
