@@ -177,24 +177,28 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @recursive_property
   def st(self) -> ShapeTracker|None:
+    # these ops aren't shaped
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
                                                    Ops.MSELECT, Ops.BUFFER, Ops.BUFFERIZE, Ops.VECTORIZE, Ops.STORE}:
       return None
     if self.op is Ops.INDEX and self.src[0].op is Ops.ASSIGN and self.src[0].src[1].op is Ops.KERNEL: return None
     if self.op is Ops.BARRIER: return None
     if self.op in GroupOp.Block: return None
-    from tinygrad.shape.shapetracker import ShapeTracker
-    # MovementOps define a new ShapeTracker from the arg
-    if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([int(r.vmax+1) for r in self.src[1:]]))
-    # allow reshape from nothing
-    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
+
+    # MovementOps apply the arg on ShapeTracker
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
+
+    shape = None
+    if self.op is Ops.BUFFERIZE: shape = tuple([int(r.vmax+1) for r in self.src[1:]])
+    # allow reshape from nothing
+    if self.op is Ops.RESHAPE and self.src[0].st is None: shape = self.arg
     # CONST with a DEVICE has a shape of ()
-    if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
-    if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
-    if self.op is Ops.STORE and self.dtype is not dtypes.void: return self.src[0].src[0].st
-    # BufferOps and ASSIGN flow ShapeTracker from a direct edge
-    if self.op in {Ops.STORE, Ops.ASSIGN, Ops.LOAD}: return self.src[0].st
+    if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: shape = ()
+    if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): shape = (self.dtype.size,)
+    if self.op is Ops.STORE and self.dtype is not dtypes.void: shape = self.src[0].src[0].shape
+
+    from tinygrad.shape.shapetracker import ShapeTracker
+    if shape is not None: return ShapeTracker.from_shape(shape)
 
     # BUFFER/BUFFER_VIEW and KERNEL only have a size
     if self.op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return ShapeTracker.from_shape((self.size,))
