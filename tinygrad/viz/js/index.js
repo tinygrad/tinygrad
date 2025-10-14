@@ -202,6 +202,7 @@ async function renderProfiler() {
   // color by key (name/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
+  const kernels = new Map();
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
@@ -240,6 +241,7 @@ async function renderProfiler() {
         }
         const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
         const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
+        kernels.set(e.name, { shapeRef, info:e.info, st:e.st });
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -287,11 +289,27 @@ async function renderProfiler() {
         const html = document.createElement("div");
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         const info = html.appendChild(tabulate(rows).node());
-        const link = [];
-        if (producer != null) link.push(["Producer", colored(producer)]);
-        for (const cname of consumers) link.push(["Consumer ", colored(cname)]) // TODO: the timestamp?
-        html.appendChild(document.createElement("br"));
-        html.appendChild(tabulate(link).node());
+        if (producer != null) {
+          html.appendChild(document.createElement("br"));
+          const div = html.appendChild(document.createElement("div"));
+          const k = kernels.get(producer);
+          const name = colored(producer);
+          const rows = [["Producer", name]];
+          if (k != null) {
+            const metadata = k.info?.split("\n")[1];
+            if (metadata != null && metadata !== "()") rows.push(["Metadata", metadata]);
+            rows.push(["Timestamp", formatTime(k.st)]);
+            if (k.shapeRef != null) {
+              name.style.cursor = "pointer";
+              name.onclick = () => { setCtxWithHistory(k.shapeRef.ctx, k.shapeRef.step); }
+            }
+          }
+          div.appendChild(tabulate(rows).node());
+        }
+        // if (producer != null) link.push(["Producer", colored(producer)]);
+        // for (const cname of consumers) link.push(["Consumer ", colored(cname)]) // TODO: the timestamp?
+        // html.appendChild(document.createElement("br"));
+        // html.appendChild(tabulate(link).node());
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
