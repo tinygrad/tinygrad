@@ -287,8 +287,8 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def load_pickle(path:pathlib.Path|None) -> list:
-  if path is None or not path.exists(): return []
+def load_pickle(fp:str) -> list:
+  if not (path:=pathlib.Path(fp)).exists(): return []
   with path.open("rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
@@ -296,8 +296,8 @@ class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--kernels', type=load_pickle, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  parser.add_argument('--profile', type=load_pickle, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -308,9 +308,8 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_metadata(load_pickle(args.kernels))
-
-  profile_ret = get_profile(load_pickle(args.profile))
+  ctxs = get_metadata(args.kernels)
+  profile_ret = get_profile(args.profile)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

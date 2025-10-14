@@ -10,14 +10,14 @@ MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000,
 class _System:
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
 
-  def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib()) is not None else None
+  def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib) is not None else None
 
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
 
   def system_paddrs(self, vaddr:int, size:int) -> list[int]:
-    self.pagemap().seek(vaddr // mmap.PAGESIZE * 8)
-    return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap().read(size//mmap.PAGESIZE*8, binary=True))]
+    self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
+    return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
@@ -36,17 +36,17 @@ class _System:
       if vendor == target_vendor and device in target_devices: result.append(pcibus)
     return sorted(result)
 
-  @functools.cache
+  @functools.cached_property
   def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
-  @functools.cache
+  @functools.cached_property
   def pagemap(self) -> FileIOInterface:
     if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
       os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
       assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
     return FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
-  @functools.cache
+  @functools.cached_property
   def vfio(self) -> FileIOInterface|None:
     try:
       if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
@@ -90,7 +90,7 @@ class PCIDevice:
                                 " to allow python accessing device or run with sudo") from e
           raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled on your system.") from e
 
-    if getenv("VFIO", 0) and (vfio_fd:=System.vfio()) is not None:
+    if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
       iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
