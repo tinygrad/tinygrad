@@ -241,7 +241,7 @@ async function renderProfiler() {
         }
         const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
         const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
-        kernels.set(e.name, { shapeRef, info:e.info, st:e.st });
+        kernels.set(e.name, { shapeRef, info:e.info, st:e.st, dur:e.dur });
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -292,7 +292,6 @@ async function renderProfiler() {
         const link = [];
         if (producer != null) link.push(["Producer", producer]);
         for (const cname of consumers) link.push(["Consumer ", cname]);
-
         for (const [type, kname] of link) {
           html.appendChild(document.createElement("br"));
           const div = html.appendChild(document.createElement("div"));
@@ -306,6 +305,11 @@ async function renderProfiler() {
             if (k.shapeRef != null) {
               name.style.cursor = "pointer";
               name.onclick = () => { setCtxWithHistory(k.shapeRef.ctx, k.shapeRef.step); }
+            }
+            const pk = kernels.get(producer);
+            if (pk != null) {
+              const idle = k.st-(pk.st+pk.dur);
+              if (idle > 0) rows.push(["Idle", formatTime(idle)]);
             }
           }
           div.appendChild(tabulate(rows).node());
