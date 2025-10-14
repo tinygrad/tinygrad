@@ -845,16 +845,14 @@ class PatternMatcher:
       if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
-# *** non-blocking UOp tracker ***
-
-ucount = itertools.count()
-uop_fields:dict[int, tuple] = {}
-def track_uop(u:UOp): return u.trace_num
-
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
 match_stats:dict[UPat, list[int|float]] = dict()
+
+# TRACK_MATCH_STATS>=3 saves the UOp fields
+ucount = itertools.count()
+uop_fields:dict[int, tuple] = {}
 
 @dataclass(frozen=True)
 class TrackedGraphRewrite:
@@ -912,7 +910,7 @@ def track_matches(func):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
       if not tracked_ctxs: add_trace_group(TracingKey(f"default {func.__name__}"))
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, track_uop(args[0]), [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
     with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
       ret = func(*args, **kwargs)
@@ -934,14 +932,14 @@ class TrackedPatternMatcher(PatternMatcher):
       try: ret = match(uop, ctx)
       except Exception:
         if TRACK_MATCH_STATS >= 2 and active_rewrites:
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1]))),p.location,0))
+          active_rewrites[-1].matches.append((uop.trace_num, UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1])).trace_num,p.location,0))
         raise
       if ret is not None and ret is not uop:
         match_stats[p][0] += 1
         match_stats[p][3] += (et:=time.perf_counter()-st)
         if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
         if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-          active_rewrites[-1].matches.append((track_uop(uop), track_uop(ret), p.location, et))
+          active_rewrites[-1].matches.append((uop.trace_num, ret.trace_num, p.location, et))
         return ret
       match_stats[p][2] += time.perf_counter()-st
     return None
