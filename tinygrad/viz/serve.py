@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
+import pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import subprocess, ctypes, pathlib
 from contextlib import redirect_stdout
 from decimal import Decimal
@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, Generator
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
+from tinygrad.helpers import Context
 from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
@@ -221,6 +222,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
+@Context(ALLOW_DEVICE_USAGE=1)     # disassemblers require the device's compiler
 def get_disassembly(ctx:list[str]):
   if not isinstance(prg:=traces[int(ctx[0])][0].ret, ProgramSpec): return
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
@@ -304,7 +306,7 @@ if __name__ == "__main__":
     if s.connect_ex(((HOST:="http://127.0.0.1").replace("http://", ""), PORT:=getenv("PORT", 8000))) == 0:
       raise RuntimeError(f"{HOST}:{PORT} is occupied! use PORT= to change.")
   stop_reloader = threading.Event()
-  multiprocessing.current_process().name = "VizProcess"    # disallow opening of devices
+  Context(ALLOW_DEVICE_USAGE=0).__enter__()    # disallow opening of devices
   st = time.perf_counter()
   print("*** viz is starting")
 
