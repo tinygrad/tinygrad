@@ -233,7 +233,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         return None
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if len(self.src) and self.src[0].op is Ops.DEVICE else None
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
