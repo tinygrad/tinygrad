@@ -390,7 +390,6 @@ class TestMultiTensor(unittest.TestCase):
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
-  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 

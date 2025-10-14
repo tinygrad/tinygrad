@@ -103,7 +103,7 @@ earliest_rewrites = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.arg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
 ])
 
 # *****************
@@ -207,7 +207,7 @@ pm_cleanups = pm_mops+PatternMatcher([
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
-  if isinstance(b.device, str) and b.device.startswith("DISK"):
+  if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
     rngs = b.src[1:]
     size = prod(shape := [int(r.vmax+1) for r in rngs])
 

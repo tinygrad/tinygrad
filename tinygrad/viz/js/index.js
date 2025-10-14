@@ -18,6 +18,9 @@ const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#f
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
   ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
+const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof n === "string" ? parseColors(n) : n).join("span")
+                       .style("color", d => d.color).text(d => d.st)).node();
+
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
@@ -174,7 +177,7 @@ function tabulate(rows) {
 var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
-  d3.select(".metadata").html("");
+  d3.select(".metadata").node().replaceChildren(focusedShape?.html ?? "");
   // layout once!
   if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
@@ -236,8 +239,7 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const htmlLabel = label.map(({color, st}) => `<span style="color:${color}">${st}</span>`).join('');
-        const arg = { tooltipText:htmlLabel+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
+        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -257,8 +259,8 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          timestamps.push(ts);
-          x += 1; y -= free.nbytes; valueMap.set(ts, y);
+          timestamps.push(ts); valueMap.set(ts, y);
+          x += 1; y -= free.nbytes;
           free.x.push(x);
           free.y.push(free.y.at(-1));
           temp.delete(key);
@@ -333,6 +335,7 @@ async function renderProfiler() {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
+    const paths = [];
     for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
@@ -340,18 +343,18 @@ async function renderProfiler() {
         if (e.width == null) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          ctx.beginPath();
-          ctx.moveTo(x[0], offsetY+e.y0[0]);
+          const p = new Path2D();
+          p.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
-            ctx.lineTo(x[i], offsetY+e.y0[i]);
+            p.lineTo(x[i], offsetY+e.y0[i]);
             let arg = e.arg;
             if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), 'B')}`}
             visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
-          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
-          ctx.closePath();
-          ctx.fillStyle = e.fillColor; ctx.fill();
-          if (focusedShape && e.arg?.key === focusedShape) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(); }
+          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
+          p.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill(p);
+          if (focusedShape && e.arg?.key === focusedShape.key) { paths.push(p); }
           continue;
         }
         // contiguous rect
@@ -400,11 +403,13 @@ async function renderProfiler() {
       }
     }
     // draw markers
+    ctx.textBaseline = "top";
     for (const m of markers) {
       const x = xscale(m.ts);
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
+    for (const p of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(p); }
   }
 
   function resize() {
@@ -445,7 +450,7 @@ async function renderProfiler() {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
-    if (foundRect?.key != focusedShape) { focusedShape = foundRect?.key; render(zoomLevel); }
+    if (foundRect?.key != focusedShape?.key) { focusedShape = foundRect; render(zoomLevel); }
     return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
   });
 
@@ -589,7 +594,7 @@ async function main() {
       const ul = ctxList.appendChild(document.createElement("ul"));
       ul.id = `ctx-${i}`;
       const p = ul.appendChild(document.createElement("p"));
-      p.innerHTML = parseColors(name).map(c => `<span style="color: ${c.color}">${c.st}</span>`).join("");
+      p.appendChild(colored(name));
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
@@ -703,9 +708,7 @@ async function main() {
         metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
         const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
         for (const line of diff) {
-          const span = diffCode.appendChild(document.createElement("span"));
-          span.style.color = line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5";
-          span.innerText = line;
+          diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
           diffCode.appendChild(document.createElement("br"));
         }
         diffCode.className = "wrap";

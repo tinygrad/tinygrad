@@ -105,8 +105,8 @@ class CPUAllocator(HCQAllocatorBase):
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview:
-   self.dev.synchronize()
-   return to_mv(src.va_addr, src.size)
+    self.dev.synchronize()
+    return to_mv(src.va_addr, src.size)
   def _as_dmaref(self, buf):
     self.dev.synchronize()
     return DMACPURef(buf.va_addr, buf.size)

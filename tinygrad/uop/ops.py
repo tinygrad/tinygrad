@@ -35,11 +35,11 @@ def resolve(x:UOp|bool, default:bool=True):
 def _suop(lst, uop_fxn, python_fxn):
   uops, nums = partition(lst, lambda x: isinstance(x, UOp))
   return ssimplify(functools.reduce(uop_fxn, uops + ([python_fxn(nums)] if nums else [])))
-def smax(*lst): return _suop(argfix(*lst), UOp.maximum, max)
-def smin(*lst): return _suop(argfix(*lst), UOp.minimum, min)
-def srender(x) -> str: return x.render() if isinstance(x, UOp) else str(x)
+def smax(*lst) -> sint: return _suop(argfix(*lst), UOp.maximum, max)
+def smin(*lst) -> sint: return _suop(argfix(*lst), UOp.minimum, min)
+def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
 
-def ssimplify(uop): return uop.ssimplify() if isinstance(uop, UOp) else uop
+def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 def range_str(u:UOp) -> str: return '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
@@ -251,11 +251,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self, tracked=False):
+  def simplify(self, tracked=False, full_symbolic=True):
     # late import!
-    from tinygrad.uop.symbolic import symbolic
+    from tinygrad.uop.symbolic import symbolic, commutative
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      return graph_rewrite(self, symbolic if full_symbolic else commutative, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def _eval(self, dtype, expected_type:Type[T]) -> T:
     assert self.dtype in dtype, f"eval with wrong dtype {self}"
