@@ -289,12 +289,16 @@ async function renderProfiler() {
         const html = document.createElement("div");
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         const info = html.appendChild(tabulate(rows).node());
-        if (producer != null) {
+        const link = [];
+        if (producer != null) link.push(["Producer", producer]);
+        for (const cname of consumers) link.push(["Consumer ", cname]);
+
+        for (const [type, kname] of link) {
           html.appendChild(document.createElement("br"));
           const div = html.appendChild(document.createElement("div"));
-          const k = kernels.get(producer);
-          const name = colored(producer);
-          const rows = [["Producer", name]];
+          const k = kernels.get(kname);
+          const name = colored(kname);
+          const rows = [[type, name]];
           if (k != null) {
             const metadata = k.info?.split("\n")[1];
             if (metadata != null && metadata !== "()") rows.push(["Metadata", metadata]);
@@ -306,10 +310,7 @@ async function renderProfiler() {
           }
           div.appendChild(tabulate(rows).node());
         }
-        // if (producer != null) link.push(["Producer", colored(producer)]);
-        // for (const cname of consumers) link.push(["Consumer ", colored(cname)]) // TODO: the timestamp?
-        // html.appendChild(document.createElement("br"));
-        // html.appendChild(tabulate(link).node());
+
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
