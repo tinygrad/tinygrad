@@ -4486,10 +4486,10 @@ class Tensor(MathTrait):
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
   def matrix_rank(self, atol=None, rtol=1e-5):
     import numpy as np
-    A = self.realise().to("CPU").numpy().astype(float)
+    A = self.realize().to("CPU").numpy().astype(float)
     S = np.linalg.svd(A, compute_uv=False) #Breaks down matrix
     S_max = S.max()
-    if atol==None:
+    if atol is None:
       atol = S_max * max(self.shape) * 1e-15
     tol = max(atol, rtol * S_max)
     #Returns num of nonzero vals
