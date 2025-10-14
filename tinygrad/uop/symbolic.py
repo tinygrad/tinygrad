@@ -480,12 +480,6 @@ pm_simplify_valid = PatternMatcher([
   (UPat.var("c").where(UPat.var("x", dtype=dtypes.index), invalid_pat), lambda c,x,i: c.where(uop_given_valid(c, x, try_simplex=False), i)),
 ])
 
-pm_where_folding = PatternMatcher([  # ** where folding **
-  (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), lambda cond,t,f: cond.where(
-  t.substitute_until_index({c:UOp.const(dtypes.bool, True) for c in cond.split_uop(Ops.AND)}),
-  f.substitute_until_index({cond:UOp.const(dtypes.bool, False)}))),
-])
-
 # this is symbolic 2.0
 REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP}
 REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP}
@@ -543,4 +537,7 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   ((UPat.var("x")*UPat.cvar("c", vec=False)).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
+  (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), lambda cond,t,f: cond.where(
+    t.substitute_until_index({c:UOp.const(dtypes.bool, True) for c in cond.split_uop(Ops.AND)}),
+    f.substitute_until_index({cond:UOp.const(dtypes.bool, False)}))),
 ])
