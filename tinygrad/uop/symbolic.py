@@ -474,10 +474,13 @@ def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if not (dropped_clauses:=[c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]): return None
   return functools.reduce(operator.and_, [c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses], UOp.const(dtypes.bool, True)).where(x, i)
 pm_drop_and_clauses = PatternMatcher([(UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), drop_and_clauses)])
-def gate_load(l, c1, buf, x, c2, i):
+def where_on_load(l, c1, buf, x, c2, i):
   # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
-  if not (moved_clauses := [c for c in c1.split_uop(Ops.AND) if all(r in x.ranges for r in c.ranges)]): return None
-  remaining_clause = functools.reduce(operator.and_, [c for c in c1.split_uop(Ops.AND) if c not in moved_clauses], UOp.const(dtypes.bool, True))
+  duplicate_clauses = [c for c in c1.split_uop(Ops.AND) if c in c2.split_uop(Ops.AND)]
+  moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)]
+  if not (removed:=moved_clauses+duplicate_clauses): return None
+  # aditionally we can drop the clause if it already exists in the load
+  remaining_clause = functools.reduce(operator.and_, [c for c in c1.split_uop(Ops.AND) if c not in removed], UOp.const(dtypes.bool, True))
   return remaining_clause.where(UOp.load(buf.index(x.valid(functools.reduce(operator.and_, moved_clauses, c2)), *l.src[1:])), 0)
 
 pm_simplify_valid = PatternMatcher([
@@ -525,7 +528,7 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
   # # Where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
   (UPat.var("c1").where(UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("c2").where(UPat.var("x"), invalid_pat)).or_casted(),), name="l"), 0),
-    gate_load),
+    where_on_load),
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
   (UPat(Ops.BARRIER, name="root"),
     lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
