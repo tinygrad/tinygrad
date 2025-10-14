@@ -2682,8 +2682,8 @@ class TestOps(unittest.TestCase):
       a.cat(a)
 
   def test_cat_loop_split_threshold(self):
-    a_np = np.arange(96).reshape(3, 32)
-    b_np = np.arange(96, 192).reshape(3, 32)
+    a_np = np.arange(96, dtype=np.float32).reshape(3, 32)
+    b_np = np.arange(96, 192, dtype=np.float32).reshape(3, 32)
     a = Tensor(a_np)
     b = Tensor(b_np)
     with Context(CAT_LOOP_SPLIT=16):
