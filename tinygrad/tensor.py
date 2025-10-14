@@ -5,7 +5,9 @@ from contextlib import ContextDecorator
 from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
-from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
+from tinygrad.helpers import (
+  argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup, CAT_LOOP_SPLIT,
+)
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG, is_numpy_ndarray, FUSE_ATTENTION
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
@@ -1389,9 +1391,72 @@ class Tensor(MathTrait):
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
+    if len(tensors) == 1: return tensors[0]
+    dim_sizes = [t.shape[dim] for t in tensors]
+    split = int(CAT_LOOP_SPLIT.value)
+    if split > 0 and all_int(dim_sizes):
+      total = sum(dim_sizes)
+      if total > split: return Tensor._cat_loop_split(tensors, dim, split)
+    return Tensor._cat_pad_sum(tensors, dim)
+
+  @staticmethod
+  def _cat_pad_sum(tensors:list[Tensor], dim:int) -> Tensor:
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return functools.reduce(Tensor.add, tensors)
+    padded = [t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)]) for i,t in enumerate(tensors)]
+    return functools.reduce(Tensor.add, padded) if len(padded) > 1 else padded[0]
+
+  @staticmethod
+  def _cat_loop_split(tensors:list[Tensor], dim:int, chunk_size:int) -> Tensor:
+    dim_sizes_raw = [t.shape[dim] for t in tensors]
+    dim_sizes_tuple = tuple(dim_sizes_raw)
+    assert all_int(dim_sizes_tuple), "loop split requires concrete sizes"
+    dim_sizes = list(dim_sizes_tuple)
+    dim_cumsum = list(itertools.accumulate(dim_sizes, initial=0))
+    total: int = dim_cumsum[-1]
+    assert chunk_size > 0, "chunk_size must be positive"
+    segments: list[tuple[Tensor, int]] = list(zip(tensors, dim_cumsum[:-1]))
+    chunk_tensors: list[Tensor] = []
+    for chunk_idx in range(ceildiv(total, chunk_size)):
+      chunk_start = chunk_idx * chunk_size
+      chunk_len = min(chunk_size, total - chunk_start)
+      chunk = Tensor._cat_loop_chunk(segments, dim, chunk_start, chunk_len)
+      if chunk_len < chunk_size:
+        chunk = chunk.pad([(0, chunk_size - chunk_len) if axis == dim else None for axis in range(chunk.ndim)])
+      chunk_tensors.append(chunk.unsqueeze(dim))
+    combined = chunk_tensors[0] if len(chunk_tensors) == 1 else Tensor.cat(chunk_tensors[0], *chunk_tensors[1:], dim=dim)
+    combined_dim = cast(int, combined.shape[dim])
+    combined_next = cast(int, combined.shape[dim+1])
+    new_shape = combined.shape[:dim] + (combined_dim * combined_next,) + combined.shape[dim+2:]
+    combined = combined.reshape(new_shape)
+    if total < cast(int, new_shape[dim]):
+      shrink: list[tuple[int, int]|None] = [None for _ in range(combined.ndim)]
+      shrink[dim] = (0, total)
+      combined = combined.shrink(tuple(shrink))
+    return combined
+
+  @staticmethod
+  def _cat_loop_chunk(segments:list[tuple[Tensor, int]], dim:int, chunk_start:int, chunk_len:int) -> Tensor:
+    chunk_parts: list[Tensor] = []
+    for tensor, base_offset in segments:
+      seg_start = base_offset
+      seg_len = cast(int, tensor.shape[dim])
+      seg_end = base_offset + seg_len
+      if seg_end <= chunk_start or seg_start >= chunk_start + chunk_len: continue
+      intersect_start = max(chunk_start, seg_start)
+      intersect_end = min(chunk_start + chunk_len, seg_end)
+      tensor_start = intersect_start - seg_start
+      tensor_end = intersect_end - seg_start
+      shrink = tuple((tensor_start, tensor_end) if axis == dim else None for axis in range(tensor.ndim))
+      part = tensor.shrink(shrink)
+      left_pad = intersect_start - chunk_start
+      right_pad = chunk_len - (left_pad + cast(int, part.shape[dim]))
+      pads = [(left_pad, right_pad) if axis == dim else None for axis in range(part.ndim)]
+      chunk_parts.append(part.pad(pads) if left_pad or right_pad else part)
+    if not chunk_parts:
+      base_shape = list(segments[0][0].shape)
+      base_shape[dim] = chunk_len
+      return Tensor.zeros(*base_shape, device=segments[0][0].device, dtype=segments[0][0].dtype)
+    return functools.reduce(Tensor.add, chunk_parts) if len(chunk_parts) > 1 else chunk_parts[0]
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """

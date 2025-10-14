@@ -2681,6 +2681,15 @@ class TestOps(unittest.TestCase):
       a = Tensor(3.14)
       a.cat(a)
 
+  def test_cat_loop_split_threshold(self):
+    a_np = np.arange(96).reshape(3, 32)
+    b_np = np.arange(96, 192).reshape(3, 32)
+    a = Tensor(a_np)
+    b = Tensor(b_np)
+    with Context(CAT_LOOP_SPLIT=16):
+      res = a.cat(b, dim=1).realize()
+    np.testing.assert_allclose(res.numpy(), np.concatenate([a_np, b_np], axis=1))
+
   def test_multicat(self):
     for dim in range(-1, 2):
       helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
