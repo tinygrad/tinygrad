@@ -186,12 +186,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op in GroupOp.Block: return None
 
     # MovementOps apply the arg on ShapeTracker
+    # allow reshape from nothing
+    #if self.op is Ops.RESHAPE and self.src[0].st is None: shape = self.arg
     if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
 
     shape = None
     if self.op is Ops.BUFFERIZE: shape = tuple([int(r.vmax+1) for r in self.src[1:]])
-    # allow reshape from nothing
-    if self.op is Ops.RESHAPE and self.src[0].st is None: shape = self.arg
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: shape = ()
     if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): shape = (self.dtype.size,)
