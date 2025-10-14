@@ -730,8 +730,11 @@ class Tensor(MathTrait):
     ```
     """
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    import numpy as np
-    return Tensor(np.eye(n, m or n, dtype=np.float32), **kwargs)
+    m = n if m is None else m
+    x = Tensor.zeros((n, m), **kwargs)
+    for i in range(min(n, m)):
+        x[i, i] = 1
+    return x
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
