@@ -1,8 +1,6 @@
 from typing import Optional, Any
 import unittest, math
 import numpy as np
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View # noqa F401
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Timing
 from tinygrad.dtype import dtypes, DType, AddrSpace
@@ -491,15 +489,6 @@ class TestUOpMethod(unittest.TestCase):
     x = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     self.assertIs(x.replace(arg=None).arg, None)
     with self.assertRaises(AssertionError): x.replace(field="a")
-
-  def test_device(self):
-    x = UOp(Ops.VIEW, dtypes.int, (UOp.new_buffer(Device.DEFAULT, 1, dtypes.int), UOp.const(dtypes.int, 1)), ShapeTracker.from_shape(()))
-    self.assertEqual(x.device, Device.DEFAULT)
-    # NOTE: CONST doesn't have device
-    buffer, const = x.src
-    self.assertEqual(buffer.device, Device.DEFAULT)
-    self.assertEqual(const._device, None)
-    with self.assertRaises(AssertionError): const.device
 
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):

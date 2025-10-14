@@ -2,6 +2,15 @@ import collections, functools, dataclasses
 from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
+class BumpAllocator:
+  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
+  def alloc(self, size:int, alignment:int=1) -> int:
+    if round_up(self.ptr, alignment) + size > self.size:
+      if not self.wrap: raise RuntimeError("Out of memory")
+      self.ptr = 0
+    self.ptr = (res:=round_up(self.ptr, alignment)) + size
+    return res + self.base
+
 class TLSFAllocator:
   """
   The allocator is based on the Two-Level Segregated Fit (TLSF) algorithm. The allocator maintains 2 level of buckets:
@@ -21,10 +30,10 @@ class TLSFAllocator:
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
     self._insert_block(0, size)
 
-  @functools.cache
+  @functools.cache # pylint: disable=method-cache-max-size-none
   def lv1(self, size): return size.bit_length()
 
-  @functools.cache
+  @functools.cache # pylint: disable=method-cache-max-size-none
   def lv2(self, size): return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - self.l2_cnt))
 
   def _insert_block(self, start:int, size:int, prev:int|None=None):
@@ -200,7 +209,7 @@ class MemoryManager:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, free_pts=True)
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
+    for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         assert pt.valid(pte_id), f"PTE not mapped: {pt.entry(pte_id):#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)

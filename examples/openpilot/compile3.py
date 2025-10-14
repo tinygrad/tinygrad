@@ -1,4 +1,4 @@
-import os, sys, pickle, time
+import os, sys, pickle, time, re
 import numpy as np
 if "FLOAT16" not in os.environ: os.environ["FLOAT16"] = "1"
 if "IMAGE" not in os.environ: os.environ["IMAGE"] = "2"
@@ -52,6 +52,8 @@ def compile(onnx_file):
       kernel_count += 1
       read_image_count += ei.prg.p.src.count("read_image")
       gated_read_image_count += ei.prg.p.src.count("?read_image")
+      for v in [m.group(1) for m in re.finditer(r'(val\d+)\s*=\s*read_imagef\(', ei.prg.p.src)]:
+        if len(re.findall(fr'[\?\:]{v}\.[xyzw]', ei.prg.p.src)) > 0: gated_read_image_count += 1
   print(f"{kernel_count=},  {read_image_count=}, {gated_read_image_count=}")
   if (allowed_kernel_count:=getenv("ALLOWED_KERNEL_COUNT", -1)) != -1:
     assert kernel_count == allowed_kernel_count, f"different kernels! {kernel_count=}, {allowed_kernel_count=}"
@@ -77,13 +79,20 @@ def test_vs_compile(run, new_inputs, test_val=None):
             **{k:Tensor(v, device="NPY").realize() for k,v in new_inputs_numpy.items() if 'img' not in k}}
 
   # run 20 times
+  step_times = []
   for _ in range(20):
     st = time.perf_counter()
     out = run(**inputs)
     mt = time.perf_counter()
     val = out.numpy()
     et = time.perf_counter()
-    print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {(et-st)*1e3:6.2f} ms")
+    step_times.append((et-st)*1e3)
+    print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
+
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+    min_time = min(step_times)
+    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
+
   print(out, val.shape, val.dtype)
   if test_val is not None: np.testing.assert_equal(test_val, val)
   print("**** test done ****")

@@ -39,10 +39,6 @@ if __name__ == "__main__":
       step_times.append(t:=(time.perf_counter_ns() - st)*1e-6)
     print(f"jitted:  {t:7.4f} ms")
 
-  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
-    min_time = min(step_times)
-    assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
-
   suffix = ""
   if IMAGE.value < 2: suffix += f"_image{IMAGE.value}" # image=2 has no suffix for compatibility
   if getenv("FLOAT16") == 1: suffix += "_float16"

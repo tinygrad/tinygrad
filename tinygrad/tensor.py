@@ -6,7 +6,7 @@ from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, Suppor
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG, is_numpy_ndarray, RANGEIFY, FUSE_ATTENTION
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG, is_numpy_ndarray, FUSE_ATTENTION
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, MathTrait, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, \
@@ -18,7 +18,6 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
-from tinygrad.schedule.kernelize import get_kernelize_map
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -228,11 +227,11 @@ class Tensor(MathTrait):
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
 
-    if RANGEIFY and any(isinstance(x._device, tuple) for x in big_sink.toposort()):
+    if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
       _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")
       big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
 
-    becomes_map = get_rangeify_map(big_sink) if RANGEIFY else get_kernelize_map(big_sink)
+    becomes_map = get_rangeify_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
@@ -411,6 +410,59 @@ class Tensor(MathTrait):
     Shards the tensor across the given devices in place.
     """
     return self.replace(self.shard(devices, axis))
+
+  CHUNK_SIZE = 2**20
+  def load(self, size:int) -> Tensor:
+    """
+    Load a tensor from storage.
+
+    self should be a tensor of the hash to load
+    """
+    # TODO: this should work locally as well
+    assert self.dtype == dtypes.uint8, "hash is expected to be uint8"
+    h = self.contiguous().flatten()
+    assert h.shape[0] == 16, "expected hash"
+
+    base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
+    tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
+    data, level_chunks = h, 0
+    for i in reversed(range(tree_depth + 1)):
+      data = data.to("tinyfs:load")
+
+      # if not last level, its still hashes
+      if i > 0 or tree_depth == 0:
+        level_chunks = max(1, math.ceil(base_chunks / (Tensor.CHUNK_SIZE // 16)**(i-1)))
+        pad_amt = 16 * level_chunks
+      else: pad_amt = Tensor.CHUNK_SIZE * level_chunks
+      if (tsize := data.shape[0]) < pad_amt: data = data.pad((0, pad_amt - tsize))
+      data = data[:pad_amt].contiguous()
+      if i != 0: data = data.to(self.device)
+
+    return data[:size]
+
+  def store(self) -> Tensor:
+    """
+    Store a tensor to storage.
+    """
+    # TODO: this should work locally as well
+    data = self.contiguous().flatten().bitcast(dtypes.uint8)
+
+    # pad to a multiple of 1mb
+    if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
+    size = data.shape[0]
+
+    base_chunks = math.ceil(size / Tensor.CHUNK_SIZE)
+    tree_depth = math.ceil(math.log(base_chunks, Tensor.CHUNK_SIZE // 16))
+
+    to_device = "CPU" if isinstance(self.device, str) and self.device.startswith("DISK") else self.device
+
+    level_chunks = base_chunks
+    for _ in range(tree_depth + 1):
+      data = data.to("tinyfs:store")[:level_chunks * 16].contiguous().to(to_device)
+      if (tsize := data.shape[0]) % Tensor.CHUNK_SIZE != 0: data = data.pad((0, Tensor.CHUNK_SIZE - tsize % Tensor.CHUNK_SIZE))
+      level_chunks = math.ceil(data.shape[0] / Tensor.CHUNK_SIZE)
+
+    return data[:16].contiguous()
 
   @staticmethod
   def from_uop(y:UOp, **kwargs) -> Tensor:
@@ -2485,17 +2537,20 @@ class Tensor(MathTrait):
     if IMAGE: return self.image_conv2d(weight, bias, groups, stride, dilation, padding, dtype)
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     padding_ = self._resolve_pool_pads(padding, len(HW))
-    assert groups*cin == cin_ and len(self.shape) == len(weight.shape), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"  # noqa: E501
+    assert groups*cin == cin_ and len(self.shape) == len(weight.shape),\
+        f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
 
     # conv2d is a pooling op (with padding)
     x = self.pad(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
     if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO:
       # normal conv
-      x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])  # noqa: E501
+      x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW)\
+        .permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
       # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-      ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW)).sum([-1-i for i in range(1+len(oyx))], keepdim=True, dtype=dtype).reshape(bs, cout, *oyx)  # noqa: E501
+      ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW))\
+        .sum([-1-i for i in range(1+len(oyx))], keepdim=True, dtype=dtype).reshape(bs, cout, *oyx)
       return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
     HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
@@ -2506,7 +2561,8 @@ class Tensor(MathTrait):
     # TODO: stride == dilation
     # use padding to round up to 4x4 output tiles
     # (bs, cin_, tyx, HWI)
-    d = self.pad(sum([[padding_[i*2], padding_[i*2+1] + (-(dim + sum(padding_[i * 2:(i + 1) * 2]) - 2) % 4)] for i, dim in enumerate(self.shape[-len(HW):])], []))._pool(HWI, HWO)  # noqa: E501
+    pads = [[padding_[i*2], padding_[i*2+1] + (-(dim + sum(padding_[i * 2:(i + 1) * 2]) - 2) % 4)] for i, dim in enumerate(self.shape[-len(HW):])]
+    d = self.pad(sum(pads, []))._pool(HWI, HWO)
     # move HW to the front: # (HWI, bs, cin_, tyx)
     d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))
     tyx = d.shape[-len(HWI):]  # dim of tiling

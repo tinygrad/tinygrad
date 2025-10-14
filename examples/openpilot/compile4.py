@@ -2,9 +2,7 @@ import sys
 from tinygrad import Tensor, fetch, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.nn.onnx import OnnxRunner
-from tinygrad.schedule.kernelize import get_kernelize_map
 from tinygrad.schedule.rangeify import get_rangeify_map
-from tinygrad.helpers import RANGEIFY
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import run_schedule
 
@@ -35,7 +33,7 @@ if __name__ == "__main__":
         if not in_target_path[s]:
           independent_set[s] = None
   independent = UOp.sink(*independent_set.keys())
-  kernelized = (get_rangeify_map if RANGEIFY else get_kernelize_map)(independent)
+  kernelized = get_rangeify_map(independent)
   independent = independent.substitute(kernelized)
   schedule, var_vals = create_schedule_with_vars(independent)
   run_schedule(schedule)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator
 
@@ -23,10 +23,13 @@ def argfix(*x):
     if len(x) != 1: raise ValueError(f"bad arg {x}")
     return tuple(x[0])
   return x
-def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
+# https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
+def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
 def all_same(items:tuple[T, ...]|list[T]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-def colored(st, color:str|None, background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
+def colored(st, color:str|None, background=False): # replace the termcolor library
+  colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
+  return f"\u001b[{10*background+60*(color.upper() == color)+30+colors.index(color.lower())}m{st}\u001b[0m" if color is not None else st
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
 def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,pr in [(1, "s "),(1e3, "ms")] if t > 10/d), f"{t * 1e6:{w}.2f}us")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
@@ -82,6 +85,13 @@ def word_wrap(x, wrap=80):
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 
+# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
+def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
+  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
+  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
+  except ValueError: return None
+  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
+
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
@@ -89,7 +99,7 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def unwrap_class_type(cls_t:T): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
+def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
@@ -133,7 +143,6 @@ JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVa
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
 TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
-FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 1), ContextVar("FUSE_CONV_BW", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
 PICKLE_BUFFERS, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("LRU", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
@@ -142,9 +151,9 @@ DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), 
 QUANTIZE, VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
-RANGEIFY, FUSE_ATTENTION = ContextVar("RANGEIFY", 1), ContextVar("FUSE_ATTENTION", 0)
+FUSE_ATTENTION = ContextVar("FUSE_ATTENTION", 0)
 EMULATE = ContextVar("EMULATE", "")
-CPU_COUNT = ContextVar("CPU_COUNT", max(1, (os.cpu_count() or 1) // (4 if ARCH_X86 else 2))) # take 1/2 of the cores, accounting HT
+CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if (aff:=getattr(os, "sched_getaffinity", None)) else (os.cpu_count() or 1)))
 CPU_LLVM, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("AMD_LLVM", 1)
 VIZ = PROFILE = ContextVar("VIZ", 0)
 SPEC = ContextVar("SPEC", 0)
@@ -212,11 +221,12 @@ class TracingKey:
 class ProfileEvent: pass
 
 @dataclass
-class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+class ProfileRangeEvent(ProfileEvent):
+  device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
 
 @dataclass(frozen=True)
-class ProfilePointEvent(ProfileEvent): device:str; name:str; key:Any; arg:dict=field(default_factory=dict); \
-    ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
+class ProfilePointEvent(ProfileEvent):
+  device:str; name:str; key:Any; arg:dict=field(default_factory=dict); ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
@@ -275,7 +285,8 @@ def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
     cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)", tuple(key.values()) + (val if prepickled else pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)",
+              tuple(key.values()) + (val if prepickled else pickle.dumps(val),))
   conn.commit()
   cur.close()
   return val
@@ -341,10 +352,10 @@ def capstone_flatdump(lib: bytes):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
 
-def wait_cond(cb, value=True, timeout_ms=10000, msg="") -> bool:
+def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)
   while int(time.perf_counter() * 1000) - start_time < timeout_ms:
-    if (val:=cb()) == value: return val
+    if (val:=cb(*args)) == value: return val
   raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")
 
 # *** ctypes helpers

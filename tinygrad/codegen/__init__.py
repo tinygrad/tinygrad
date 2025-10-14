@@ -1,13 +1,12 @@
 from typing import Any, Callable
 import functools
 from dataclasses import dataclass
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, RANGEIFY
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
 from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
-from tinygrad.codegen.lowerer import pm_lowerer, get_index
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic
@@ -16,7 +15,6 @@ from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_ex
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
@@ -32,12 +30,6 @@ class RewriteStep:
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
-rewrites_for_views = [
-  RewriteStep(view_left, name="Main View Left"),
-  RewriteStep(view_right, name="Main View Right"),
-  RewriteStep(view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel"),
-]
-
 rewrites_for_linearizer = [
   RewriteStep(block_create, ctx=BlockContext.from_sink, name="Linearizer: Create Blocks", bottom_up=True),
   RewriteStep(pm_blockend_merge, name="Linearizer: Merge Blockends"),
@@ -46,25 +38,20 @@ rewrites_for_linearizer = [
 
 def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, optimize, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value, RANGEIFY.value)
+  return _get_rewrites_for_renderer(opts, optimize, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL,
-                               _RANGEIFY) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
 
   if optimize:
-    # view pushing
-    if not _RANGEIFY: ret.extend(rewrites_for_views)
 
     # lowerer first
     if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
-    ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
     # split ranges
-    if _RANGEIFY:
-      ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
+    ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
     ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))

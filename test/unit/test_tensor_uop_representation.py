@@ -6,7 +6,6 @@ from tinygrad.uop.ops import UPat, Ops, UOp
 realized_pattern = UPat(Ops.BUFFER)
 # after realization, base tensor uops become RESHAPE(BUFFER)
 buffer_view_pattern = UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),))
-const_pattern = UPat(Ops.CONST, src=(UPat(Ops.VIEW, src=(UPat(Ops.DEVICE),),)))
 def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pat}"
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.uop, pat)
 

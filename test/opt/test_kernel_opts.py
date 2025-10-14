@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import CI, RANGEIFY
+from tinygrad.helpers import CI
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 
 # TODO: write a clean version of this
@@ -351,7 +351,6 @@ class TestKernelOpts(unittest.TestCase):
     ] + [[Opt(OptOps.THREAD, 0, 4)] if Device[Device.DEFAULT].renderer.global_max[0] >= 4 else []]
       + [[Opt(OptOps.THREAD, 0, 8)] if Device[Device.DEFAULT].renderer.global_max[0] >= 8 else []])
 
-  @unittest.skipUnless(RANGEIFY>=1, "Kernel only fuses with rangeify")
   def test_double_sum_group(self):
     a = Tensor.rand(4, 4, 4)
     r = a.sum((1, 2)).sum()
