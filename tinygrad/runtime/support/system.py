@@ -58,6 +58,12 @@ class _System:
       return vfio_fd
     except OSError: return None
 
+  @functools.cached_property
+  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
+
+  @functools.cached_property
+  def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))
+
   def flock_acquire(self, name:str) -> int:
     import fcntl # to support windows
 

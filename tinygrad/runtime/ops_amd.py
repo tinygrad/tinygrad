@@ -458,7 +458,7 @@ class AMDProgram(HCQProgram):
       if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
       else: raise RuntimeError(f"unknown AMD reloc {typ}")
 
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
@@ -746,13 +746,88 @@ class USBIface(PCIIface):
 
   def sleep(self, timeout): pass
 
+# class APLPCIDevice:
+#   def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+#     if not (mdict:=iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
+#     if not (service:=iokit.IOServiceGetMatchingService(kIOMasterPortDefault, mdict)): raise RuntimeError(f'service tinygpu is not running')
+
+#     self.task = ctypes.cast(libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
+#     if iokit.IOServiceOpen(service, self.task, ctypes.c_uint32(0), ctypes.byref(conn:=io_connect_t(0))): raise RuntimeError(f"IOServiceOpen failed")
+#     self.conn = conn
+#     self.bars = {bar: self._map_memory(bar) for bar in bars}
+
+#   def read_config(self, offset:int, size:int): return 0
+#   def write_config(self, offset:int, value:int, size:int): pass
+#   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
+#     return self.bars[bar].view(offset=off, size=size, fmt=fmt)
+
+#   def _map_memory(self, type:int) -> MMIOInterface:
+#     if iokit.IOConnectMapMemory64(self.conn, ctypes.c_uint32(type), self.task, ctypes.byref(addr:=ctypes.c_uint64(0)),
+#       ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({type=}) failed")
+#     return MMIOInterface(addr.value, size.value)
+
+class APLIface(PCIIface):
+  def __init__(self, dev, dev_id):
+    self.dev = dev
+
+    System.iokit.IOServiceNameMatching.argtypes = [ctypes.c_char_p]
+    System.iokit.IOServiceNameMatching.restype = ctypes.c_void_p
+
+    System.iokit.IOServiceGetMatchingService.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+    System.iokit.IOServiceGetMatchingService.restype = ctypes.c_uint
+    
+    if not (mdict:=System.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
+    if not (service:=System.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), mdict)): raise RuntimeError(f'service tinygpu is not running')
+
+    self.task = ctypes.cast(System.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
+    if System.iokit.IOServiceOpen(service, self.task, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))): raise RuntimeError(f"IOServiceOpen failed")
+    self.conn = conn
+    self.bars = {bar: self._map_memory(bar) for bar in [0, 2, 5]}
+    self.vram_bar = 0
+
+    # print(self.bars[0][0x212000])
+
+    self._setup_adev(f"usb4:{dev_id}", self.map_bar(0), self.map_bar(2, fmt='Q'), self.map_bar(5, fmt='I'))
+
+  def read_config(self, offset:int, size:int): return 0
+  def write_config(self, offset:int, value:int, size:int): pass
+  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
+    return self.bars[bar].view(offset=off, size=size, fmt=fmt)
+
+  def _map_memory(self, type:int) -> MMIOInterface:
+    if System.iokit.IOConnectMapMemory64(self.conn, ctypes.c_uint32(type), self.task, ctypes.byref(addr:=ctypes.c_uint64(0)),
+      ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({type=}) failed")
+    return MMIOInterface(addr.value, size.value)
+  
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
+    if host or (uncached or cpu_access): # host or gtt-like memory.
+      vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
+      assert size >= mmap.PAGESIZE, "Size must be at least one page"
+      view = self._map_memory(type=size).view(fmt='Q')
+      paddrs = []
+      nxt = 0
+      while view[nxt + 1] != 0:
+        paddrs.append((view[nxt], view[nxt + 1]))
+        nxt += 2
+
+      print(paddrs)
+
+      mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]),
+        view=view.view(fmt='B'), owner=self.dev)
+
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
+    vw = self.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], addr=mapping.va_addr, size=mapping.size) if cpu_access else None
+    return HCQBuffer(mapping.va_addr, size, view=vw,
+      meta=PCIAllocationMeta(mapping, has_cpu_mapping=cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
+
 class AMDDevice(HCQCompiled):
-  def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))
-  def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
+  def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface, APLIface))
+  def is_usb(self) -> bool: return isinstance(self.iface, (USBIface, APLIface))
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface(KFDIface, PCIIface, USBIface)
+    self.iface = self._select_iface(APLIface, KFDIface, PCIIface, USBIface)
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
@@ -819,7 +894,7 @@ class AMDDevice(HCQCompiled):
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(cpu_access=True, nolru=True)) for _ in range(self.se_cnt)]
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True)) for _ in range(self.se_cnt)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
       self.sqtt_next_cmd_id = itertools.count(0)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
