@@ -307,10 +307,8 @@ async function renderProfiler() {
               name.style.cursor = "pointer";
               name.onclick = () => { setCtxWithHistory(k.shapeRef.ctx, k.shapeRef.step); }
             }
-            if (pk != null) {
-              const idle = k.st-(pk.st+pk.dur);
-              if (idle > 0) rows.push(["Idle", formatTime(idle)]);
-            }
+            const idle = k.st-(pk != null ? pk.st+pk.dur : x[0]);
+            if (idle > 0) rows.push(["Idle", formatTime(idle)]);
           }
           div.appendChild(tabulate(rows).node());
         }
