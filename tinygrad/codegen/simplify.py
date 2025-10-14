@@ -99,10 +99,6 @@ pm_reduce_collapse = PatternMatcher([
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast().or_broadcasted(name="b")),
    lambda x,gate,b=None: gate.broadcast(x.dtype.count).where(x, 0) if b is not None else gate.where(x, 0)),
-  # WHERE on LOAD becomes gate
-  (UPat.var("gate").where(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load(), 0), lambda buf,idx,gate: buf.index(idx.valid(gate)).load()),
-  (UPat.var("gate").where(0, UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).load()),
-    lambda buf,idx,gate: buf.index(idx.valid(gate.logical_not())).load()),
   # reduce on gated load becomes can substitute the range and remove the reduce
   (UPat.var("buf").index(UPat.var("idx").eq(UPat(Ops.RANGE, name="r").or_casted()).where(UPat.var("expr"), invalid_pat)).load()
     .reduce(arg=Ops.ADD, allow_any_len=True), lambda buf,r,idx,expr,i:
