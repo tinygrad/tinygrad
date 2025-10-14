@@ -175,6 +175,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
+  # TODO: remove this
   @recursive_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
@@ -309,7 +310,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
 
   @property
-  def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return prod([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
 
   # determine what ranges this is in
   @recursive_property
