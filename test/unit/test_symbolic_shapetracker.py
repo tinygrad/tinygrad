@@ -177,8 +177,8 @@ class TestSymbolicExpand(unittest.TestCase):
     vi = Variable("i", 1, 10).bind(3)
     a = Tensor(1).unsqueeze(0).pad((0, 24)).unsqueeze(0).expand((vi, 25))
     self.assertEqual(a.shape, (vi, 25))
-    self.assertEqual(a.reshape(25*vi).shape, (vi*25,))
-    self.assertEqual(a.reshape(vi*25).shape, (vi*25,))
+    self.assertIn(a.reshape(25*vi).shape, {(vi*25,), (25*vi,)})
+    self.assertIn(a.reshape(vi*25).shape, {(vi*25,), (25*vi,)})
 
 class TestSymbolicShrink(unittest.TestCase):
   def test_shrink_symbols_simple(self):

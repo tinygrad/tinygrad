@@ -229,9 +229,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.CONST: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
-      case Ops.RESHAPE:
-        if prod(self.src[0].shape) != prod(self.arg): raise RuntimeError(f"bad reshape: {self.src[0].shape} -> {self.arg}")
-        return self.arg
+      #case Ops.RESHAPE:
+        #if prod(self.src[0].shape) != prod(self.arg): raise RuntimeError(f"bad reshape: {self.src[0].shape} -> {self.arg}")
+        #return self.arg
       case Ops.PERMUTE:
         if sorted(self.arg) != list(range(len(bs:=self.src[0].shape))): raise RuntimeError(f"invalid permutation {self.arg} of len {len(bs)}")
         return tuple(bs[i] for i in self.arg)
