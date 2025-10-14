@@ -34,12 +34,20 @@ class _Device:
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
-    for device in ALL_DEVICES:
+    devices = ALL_DEVICES
+    # Prefer CPU when LLVM is set and no explicit device overrides are set
+    if os.getenv('LLVM') is not None:
+      dev_override = getenv("DEV", "").upper()
+      if not dev_override:
+        any_dev_env = any(os.getenv(d) == '1' for d in self._devices if d not in ["DISK", "TINYFS", "NPY"])
+        if not any_dev_env and "CPU" in devices:
+          devices = ["CPU"] + [d for d in devices if d != "CPU"]
+    for device in devices:
       with contextlib.suppress(Exception): yield self[device].device
   @functools.cached_property
   def DEFAULT(self) -> str:
     dev = [dev] if (dev:=getenv("DEV", "").upper()) else []
-    from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and getenv(d) == 1])
+    from_env = dedup(dev + [d for d in self._devices if d not in ["DISK", "TINYFS", "NPY"] and os.getenv(d) == '1'])
     assert len(from_env) < 2, f"multiple devices set in env: {from_env}"
     if len(from_env) == 1: return from_env[0]
     try:
@@ -282,6 +290,12 @@ class Compiled:
   def __init__(self, device:str, allocator:Allocator, compilers:Sequence[CompilerPairT]|None, runtime, graph=None, group_id=None):
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
     self.compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
+
+    # Compatibility alias for CPU device: if LLVM is set and CPU_LLVM is not,
+    # propagate LLVM -> CPU_LLVM so existing LLVM=0/1 continues to work for CPU.
+    # This is intentionally scoped to CPU devices only.
+    if self.device.startswith('CPU') and 'CPU_LLVM' not in os.environ and (ll := os.getenv('LLVM')) is not None:
+      os.environ['CPU_LLVM'] = ll
 
     envnames = [self._get_compiler_envvar(c) for r,c in self.compilers]
     enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 1)
