@@ -511,6 +511,8 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
   # ** load/store folding **
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat().where(UPat(), invalid_pat),)).or_casted(),), allow_any_len=True, name="x"), lambda x,i:
+    x.replace(src=(x.src[0], x.const_like(0))+x.src[1:]) if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index"))), allow_any_len=True, name="store"),
