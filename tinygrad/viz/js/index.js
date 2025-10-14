@@ -174,7 +174,7 @@ function tabulate(rows) {
 var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 async function renderProfiler() {
   displayGraph("profiler");
-  d3.select(".metadata").html("");
+  d3.select(".metadata").node().replaceChildren(focusedShape?.html ?? "");
   // layout once!
   if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
@@ -352,7 +352,7 @@ async function renderProfiler() {
           for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
           p.closePath();
           ctx.fillStyle = e.fillColor; ctx.fill(p);
-          if (focusedShape && e.arg?.key === focusedShape) { paths.push(p); }
+          if (focusedShape && e.arg?.key === focusedShape.key) { paths.push(p); }
           continue;
         }
         // contiguous rect
@@ -448,7 +448,7 @@ async function renderProfiler() {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
-    if (foundRect?.key != focusedShape) { focusedShape = foundRect?.key; render(zoomLevel); }
+    if (foundRect?.key != focusedShape?.key) { focusedShape = foundRect; render(zoomLevel); }
     return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
   });
 
