@@ -477,7 +477,9 @@ def where_on_load(l, c1, buf, x):
   c2 = x.get_valid()
   duplicate_clauses = [c for c in c1.split_uop(Ops.AND) if c in c2.split_uop(Ops.AND)]
   # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
-  moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges) and l not in c.toposort()]
+  # also no data dependent loads!
+  moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
+    and not c.op_in_backward_slice_with_self(Ops.LOAD)]
   if not (removed:=moved_clauses+duplicate_clauses): return None
   # aditionally we can drop the clause on the where if it already exists in the load
   remaining_clause = functools.reduce(operator.and_, [c for c in c1.split_uop(Ops.AND) if c not in removed], UOp.const(dtypes.bool, True))
