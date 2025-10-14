@@ -29,14 +29,12 @@ class SimpleTokenizer:
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
-    parts = [word[i:i+1] for i in range(len(word))]
+    parts = [bytes([b]) for b in word]
+    # greedily merge any parts that we can
     while True:
-      min_tid, min_idx = 2**32, -1
-      for idx, (p1, p2) in enumerate(zip(parts[:-1], parts[1:])):
-        tid = self._normal_tokens.get(p1 + p2, min_tid)
-        if tid < min_tid: min_tid, min_idx = tid, idx
-      if min_idx == -1: break
-      parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx+1]] + parts[min_idx+2:]
+      i = min([(sys.maxsize, -1)] + [(self._normal_tokens.get(parts[j]+parts[j+1], sys.maxsize), j) for j in range(len(parts)-1)])[1]
+      if i == -1: break
+      parts[i:i+2] = [parts[i] + parts[i+1]]
     try: return [self._normal_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
