@@ -227,7 +227,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # some ops init the shape
-      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.VECTORIZE | Ops.VCONST | Ops.SUBSTITUTE: return None
+      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.VECTORIZE | Ops.VCONST | Ops.SUBSTITUTE | Ops.GEP: return None
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
@@ -235,9 +235,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD: return self.src[0]._shape
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.FUSE: return self.src[0]._shape
 
       # ops with custom handling
+      case Ops.KERNEL: return self.arg.ast._shape
       case Ops.STORE:
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
         if self.dtype is not dtypes.void: return self.src[0].src[0].shape
@@ -249,7 +250,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
         return ps
 
-    # movement ops change the shape
+    # movement ops change the shape. this is the logic from the old ShapeTracker
     # NOTE: ssimplify is required because the shape needs to be canonical
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
       ps = self.src[0]._shape
@@ -284,19 +285,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all with shape must match
-    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN}):
+    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.SINK, Ops.ALLREDUCE}):
       input_shapes = [x._shape for x in self.src if x._shape is not None]
       if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
       return input_shapes[0]
 
-    #raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
-    # keep old behavior and get from st
-    if (st:=self.st) is None:
-      #print(f"none on {self.op}")
-      return None
-    #print(f"proc on {self.op} {self.dtype} -> {st.shape}")
-    return st.shape
+    # all Ops must be explicitly handled
+    raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
 
   @property
   def shape(self) -> tuple[sint, ...]:
