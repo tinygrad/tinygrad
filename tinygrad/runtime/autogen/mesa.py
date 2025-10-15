@@ -8,7 +8,7 @@
 #
 import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers
 def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
+  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa'], stderr=subprocess.DEVNULL).decode().strip()
   except Exception: return ''
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
