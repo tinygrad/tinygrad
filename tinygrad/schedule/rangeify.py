@@ -126,7 +126,7 @@ def kron(buf, B, outer_axes_shape, ctx):
     pre, post = S[:k], S[k+1:]
     contract = lambda pr, j, su: sum(T[idx((*pr, i, *su), S)] * M[j][i] for i in range(S[k]))
     return ([contract(pr, j, su) for pr in product(*map(range, pre)) for j in range(len(M)) for su in product(*map(range, post))], pre + (len(M),) + post)
-  #apply B/A/G along all dimensions
+  #apply B/A/G along all dimensions - kron or n-mode product
   acc, shp = T, tuple(inner_shape)
   for k in range(len(inner_shape)): acc, shp = tensordot(acc, shp, k, B)
   axes = [ctx.new_range(s, AxisType.LOOP) for s in shp]
@@ -137,18 +137,13 @@ def kron(buf, B, outer_axes_shape, ctx):
     .bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
 def winoguard(redu: UOp):
-  # expect REDUCE(ADD) over a MUL
-  if redu.arg is not Ops.ADD or redu.src[0].op is not Ops.MUL: return None
-  three = {ax for ax in redu.src[1:] if ax.op is Ops.RANGE and int(ax.vmax+1) == 3}
+  three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3} #assuming all
 
   def collect(root):
     need, out = set(three), []
-    for n in root.toposort():
-      if n.op is Ops.ADD and len(n.src) == 2:
-        for loop, other in ((n.src[0], n.src[1]), (n.src[1], n.src[0])):
-          if loop.op is Ops.RANGE and loop.arg[1] is AxisType.LOOP:
-            if (k := [x for x in need if x in other.toposort()]) and len(k) == 1:
-              out.append((k[0], n)); need.remove(k[0]); break
+    for n in (n for n in root.toposort(lambda s: s.op is not Ops.BUFFERIZE and s.op is not Ops.BUFFER) if n.op is Ops.ADD):
+        for loop, red in ((n.src[0], n.src[1]), (n.src[1], n.src[0])):
+          if loop not in need and red in need: out.append((red, n)); need.remove(red); break #a reduce and anything that is NOT a reduce in our contex
     return out
 
   lhs, rhs = redu.src[0].src
@@ -168,7 +163,6 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   remainder = list(set(redu.src[1:]) - set(k_axes))
   rem_shape = tuple([ax.vmax+1 for ax in remainder])
   
-
   tile_ranges = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases];
   inner6 = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
   rem_ranges = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in remainder]
@@ -194,7 +188,7 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   return kron(MHAT, winograd_At, tile_shape, ctx).index(*[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases])
 
 winograd_rewrite = PatternMatcher([
- (UPat(Ops.REDUCE, name="redu"), lambda ctx, redu: winowrite(ctx, redu))
+ ((UPat.var("x")*UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, x, y, redu: winowrite(ctx, redu))
  ])
 
 # *****************
