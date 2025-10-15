@@ -748,21 +748,14 @@ class USBIface(PCIIface):
 
 class APLIface(PCIIface):
   def __init__(self, dev, dev_id):
-    if not (mdict:=System.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
-    if not (service:=System.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
-      raise RuntimeError('Service "tinygpu" is not running')
-
-    self.task = ctypes.cast(System.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
-    if System.iokit.IOServiceOpen(service, self.task, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
-      raise RuntimeError("IOServiceOpen failed")
-    self.dev, self.conn = dev, conn
+    self.dev, self.conn = dev, System.macos_tinygpu_conn
     self.bars = {bar: self._map_memory(bar) for bar in [0, 2, 5]}
     self._setup_adev(f"usb4:{dev_id}", self.map_bar(0), self.map_bar(2, fmt='Q'), self.map_bar(5, fmt='I'))
 
   def map_bar(self, bar:int, off:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(offset=off, size=size, fmt=fmt)
 
   def _map_memory(self, typ:int) -> MMIOInterface:
-    if System.iokit.IOConnectMapMemory64(self.conn, ctypes.c_uint32(typ), self.task, ctypes.byref(addr:=ctypes.c_uint64(0)),
+    if System.iokit.IOConnectMapMemory64(self.conn, ctypes.c_uint32(typ), System.mach_task_self, ctypes.byref(addr:=ctypes.c_uint64(0)),
       ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({typ=}) failed")
     return MMIOInterface(addr.value, size.value)
 

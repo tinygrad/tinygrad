@@ -4,6 +4,14 @@
 #include <Availability.h>
 #include <DriverKit/IOService.iig>
 #include <PCIDriverKit/IOPCIDevice.iig>
+#include <DriverKit/IOMemoryMap.iig>
+#include <DriverKit/IODMACommand.iig>
+
+struct TinyGPUCreateDMAResp
+{
+	IOBufferMemoryDescriptor* sharedBuf;
+	IODMACommand* dmaCmd;
+};
 
 class TinyGPUDriver: public IOService
 {
@@ -19,7 +27,7 @@ public:
 	virtual kern_return_t NewUserClient(uint32_t in_type, IOUserClient** out_user_client) override;
 
 	kern_return_t MapBar(uint32_t bar, IOMemoryDescriptor** memory) LOCALONLY;
-	kern_return_t CreateDMA(size_t size, IOMemoryDescriptor** memory) LOCALONLY;
+	kern_return_t CreateDMA(size_t size, TinyGPUCreateDMAResp* dmaDesc) LOCALONLY;
 };
 
 #endif /* TinyGPUDriver_h */

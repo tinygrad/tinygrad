@@ -141,11 +141,12 @@ kern_return_t TinyGPUDriver::MapBar(uint32_t bar, IOMemoryDescriptor** memory)
 	return err;
 }
 
-kern_return_t TinyGPUDriver::CreateDMA(size_t size, IOMemoryDescriptor** memory)
+kern_return_t TinyGPUDriver::CreateDMA(size_t size, TinyGPUCreateDMAResp* dmaDesc)
 {
 	kern_return_t err = 0;
-	IOBufferMemoryDescriptor* sharedBuf;
-	IODMACommand* dmaCmd;
+	IOMemoryMap* memoryMap = nullptr;
+	IOBufferMemoryDescriptor* sharedBuf = nullptr;
+	IODMACommand* dmaCmd = nullptr;
 	uint64_t flags = kIOMemoryDirectionInOut;
 	uint32_t segCount = 32;
 	IOAddressSegment segments[32];
@@ -173,13 +174,13 @@ kern_return_t TinyGPUDriver::CreateDMA(size_t size, IOMemoryDescriptor** memory)
 		goto error;
 	}
 
-	// debug
+	// pass addresses to userland
 	{
+		// debug
 		for (int i = 0; i < segCount; i++) {
 			os_log(OS_LOG_DEFAULT, "tinygpu: new dma mapping (sz=0x%zx) %d 0x%llx 0x%llx", size, i, segments[i].address, segments[i].length);
 		}
 
-		IOMemoryMap* memoryMap;
 		err = sharedBuf->CreateMapping(0, 0, 0, IOVMPageSize, IOVMPageSize, &memoryMap); // one page should be fine
 		if (err) {
 			os_log(OS_LOG_DEFAULT, "tinygpu: failed to map memory, err=%d", err);
@@ -194,11 +195,29 @@ kern_return_t TinyGPUDriver::CreateDMA(size_t size, IOMemoryDescriptor** memory)
 		}
 		addr[segCount * 2] = 0;
 		addr[segCount * 2 + 1] = 0;
+
+		// free memoryMap
+		memoryMap->release();
+		memoryMap = nullptr;
 	}
 
-	*memory = sharedBuf;
+	dmaDesc->sharedBuf = sharedBuf;
+	dmaDesc->dmaCmd = dmaCmd;
 	return 0;
 
 error:
+	if (memoryMap) {
+		memoryMap->release();
+		memoryMap = nullptr;
+	}
+	if (dmaCmd) {
+		dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions);
+		dmaCmd->release();
+		dmaCmd = nullptr;
+	}
+	if (sharedBuf) {
+		sharedBuf->release();
+		sharedBuf = nullptr;
+	}
 	return err;
 }

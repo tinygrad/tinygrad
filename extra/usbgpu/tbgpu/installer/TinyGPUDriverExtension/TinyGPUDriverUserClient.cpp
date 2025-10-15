@@ -6,7 +6,7 @@
 
 struct TinyGPUDriverUserClient_IVars
 {
-	OSSharedPtr<TinyGPUDriver> m_provider = nullptr;
+	OSSharedPtr<TinyGPUDriver> provider = nullptr;
 };
 
 bool TinyGPUDriverUserClient::init()
@@ -27,7 +27,7 @@ bool TinyGPUDriverUserClient::init()
 void TinyGPUDriverUserClient::free()
 {
 	if (ivars != nullptr) {
-		ivars->m_provider.reset();
+		ivars->provider.reset();
 	}
 
 	IOSafeDeleteNULL(ivars, TinyGPUDriverUserClient_IVars, 1);
@@ -49,11 +49,11 @@ kern_return_t TinyGPUDriverUserClient::Start_Impl(IOService* in_provider)
 		goto error;
 	}
 
-	ivars->m_provider = OSSharedPtr(OSDynamicCast(TinyGPUDriver, in_provider), OSRetain);
+	ivars->provider = OSSharedPtr(OSDynamicCast(TinyGPUDriver, in_provider), OSRetain);
 	return 0;
 
 error:
-	ivars->m_provider.reset();
+	ivars->provider.reset();
 	return err;
 }
 
@@ -73,15 +73,22 @@ kern_return_t IMPL(TinyGPUDriverUserClient, CopyClientMemoryForType)
 		return kIOReturnBadArgument;
 	}
 
-	if (ivars->m_provider.get() == nullptr) {
+	if (ivars->provider.get() == nullptr) {
 		return kIOReturnNotAttached;
 	}
 
 	if (type < 6) {
 		uint32_t bar = (uint32_t)type;
-		return ivars->m_provider->MapBar(bar, memory);
+		return ivars->provider->MapBar(bar, memory);
 	}
 
 	// dma page buffer
-	return ivars->m_provider->CreateDMA(type, memory);
+	TinyGPUCreateDMAResp buf;
+	kern_return_t err = ivars->provider->CreateDMA(type, &buf);
+	if (err) {
+		return err;
+	}
+
+	*memory = buf.sharedBuf;
+	return 0;
 }

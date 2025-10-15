@@ -59,13 +59,23 @@ class _System:
     except OSError: return None
 
   @functools.cached_property
-  def iokit(self):
-    iokit = ctypes.CDLL(ctypes.util.find_library("IOKit"))
-    iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
-    return iokit
+  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
 
   @functools.cached_property
   def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))
+
+  @functools.cached_property
+  def mach_task_self(self): return ctypes.cast(self.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
+
+  @functools.cached_property
+  def macos_tinygpu_conn(self):
+    self.iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
+    if not (mdict:=self.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
+    if not (service:=self.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
+      raise RuntimeError('Service "tinygpu" is not running')
+    if self.iokit.IOServiceOpen(service, self.mach_task_self, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
+      raise RuntimeError("IOServiceOpen failed")
+    return conn
 
   def flock_acquire(self, name:str) -> int:
     import fcntl # to support windows
