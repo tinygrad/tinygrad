@@ -224,15 +224,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
     return ShapeTracker.from_shape(shape)
 
-  @functools.cached_property
-  def marg(self):
-    match self.op:
-      # TODO: replace these args with srcs
-      case Ops.RESHAPE | Ops.EXPAND: return tuple([ssimplify(x) for x in self.arg])
-      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in self.arg])
-      case Ops.PERMUTE | Ops.FLIP: return self.arg
-      case _: raise RuntimeError(f"{self.op} is not a MovementOp")
-
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
@@ -517,6 +508,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
 
   # *** uop movement ops ***
+
+  @functools.cached_property
+  def marg(self):
+    match self.op:
+      # TODO: replace these args with srcs
+      case Ops.RESHAPE | Ops.EXPAND: return tuple([ssimplify(x) for x in self.arg])
+      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in self.arg])
+      case Ops.PERMUTE | Ops.FLIP: return self.arg
+      case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
   @property
   def base(self) -> UOp:
