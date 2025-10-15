@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 # -*- coding: utf-8 -*-
 #
-# TARGET arch is: ['-DHAVE_ENDIAN_H', '-DHAVE_STRUCT_TIMESPEC', '-DHAVE_PTHREAD', '-I/tmp/mesa-mesa-25.2.4/src', '-I/tmp/mesa-mesa-25.2.4/include', '-I/tmp/mesa-mesa-25.2.4/gen', '-I/tmp/mesa-mesa-25.2.4/src/compiler/nir', '-I/tmp/mesa-mesa-25.2.4/src/gallium/auxiliary', '-I/tmp/mesa-mesa-25.2.4/src/gallium/include', '-I/usr/lib/llvm-20/include']
+# TARGET arch is: ['-DHAVE_ENDIAN_H', '-DHAVE_STRUCT_TIMESPEC', '-DHAVE_PTHREAD', '-I/tmp/mesa-mesa-25.2.4/src', '-I/tmp/mesa-mesa-25.2.4/include', '-I/tmp/mesa-mesa-25.2.4/gen', '-I/tmp/mesa-mesa-25.2.4/src/compiler/nir', '-I/tmp/mesa-mesa-25.2.4/src/gallium/auxiliary', '-I/tmp/mesa-mesa-25.2.4/src/gallium/include', '-I/tmp/mesa-mesa-25.2.4/src/freedreno/common', '-I/usr/lib/llvm-20/include']
 # WORD_SIZE is: 8
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
@@ -17380,6 +17380,1579 @@ try:
     lp_build_const_func_pointer_from_type.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(None), LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError:
     pass
+class struct_ir3_ra_reg_set(Structure):
+    pass
+
+class struct_ir3_shader(Structure):
+    pass
+
+class struct_ir3_compiler_options(Structure):
+    pass
+
+struct_ir3_compiler_options._pack_ = 1 # source:False
+struct_ir3_compiler_options._fields_ = [
+    ('push_ubo_with_preamble', ctypes.c_bool),
+    ('disable_cache', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('bindless_fb_read_descriptor', ctypes.c_int32),
+    ('bindless_fb_read_slot', ctypes.c_int32),
+    ('storage_16bit', ctypes.c_bool),
+    ('storage_8bit', ctypes.c_bool),
+    ('lower_base_vertex', ctypes.c_bool),
+    ('shared_push_consts', ctypes.c_bool),
+    ('dual_color_blend_by_location', ctypes.c_bool),
+    ('PADDING_1', ctypes.c_ubyte * 7),
+    ('uche_trap_base', ctypes.c_uint64),
+]
+
+class struct_ir3_compiler(Structure):
+    pass
+
+class struct_fd_device(Structure):
+    pass
+
+class struct_fd_dev_id(Structure):
+    pass
+
+class struct_disk_cache(Structure):
+    pass
+
+
+# values for enumeration 'c__EA_type_t'
+c__EA_type_t__enumvalues = {
+    0: 'TYPE_F16',
+    1: 'TYPE_F32',
+    2: 'TYPE_U16',
+    3: 'TYPE_U32',
+    4: 'TYPE_S16',
+    5: 'TYPE_S32',
+    6: 'TYPE_ATOMIC_U64',
+    6: 'TYPE_U8',
+    7: 'TYPE_U8_32',
+}
+TYPE_F16 = 0
+TYPE_F32 = 1
+TYPE_U16 = 2
+TYPE_U32 = 3
+TYPE_S16 = 4
+TYPE_S32 = 5
+TYPE_ATOMIC_U64 = 6
+TYPE_U8 = 6
+TYPE_U8_32 = 7
+c__EA_type_t = ctypes.c_uint32 # enum
+class struct_ir3_compiler_delay_slots(Structure):
+    pass
+
+struct_ir3_compiler_delay_slots._pack_ = 1 # source:False
+struct_ir3_compiler_delay_slots._fields_ = [
+    ('alu_to_alu', ctypes.c_uint32),
+    ('non_alu', ctypes.c_uint32),
+    ('cat3_src2_read', ctypes.c_uint32),
+]
+
+struct_ir3_compiler._pack_ = 1 # source:False
+struct_ir3_compiler._fields_ = [
+    ('dev', ctypes.POINTER(struct_fd_device)),
+    ('dev_id', ctypes.POINTER(struct_fd_dev_id)),
+    ('gen', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('shader_count', ctypes.c_uint32),
+    ('disk_cache', ctypes.POINTER(struct_disk_cache)),
+    ('nir_options', struct_nir_shader_compiler_options),
+    ('options', struct_ir3_compiler_options),
+    ('is_64bit', ctypes.c_bool),
+    ('flat_bypass', ctypes.c_bool),
+    ('levels_add_one', ctypes.c_bool),
+    ('unminify_coords', ctypes.c_bool),
+    ('txf_ms_with_isaml', ctypes.c_bool),
+    ('array_index_add_half', ctypes.c_bool),
+    ('samgq_workaround', ctypes.c_bool),
+    ('tess_use_shared', ctypes.c_bool),
+    ('mergedregs', ctypes.c_bool),
+    ('PADDING_1', ctypes.c_ubyte),
+    ('max_const_pipeline', ctypes.c_uint16),
+    ('max_const_geom', ctypes.c_uint16),
+    ('max_const_frag', ctypes.c_uint16),
+    ('max_const_safe', ctypes.c_uint16),
+    ('max_const_compute', ctypes.c_uint16),
+    ('compute_lb_size', ctypes.c_uint32),
+    ('instr_align', ctypes.c_uint32),
+    ('const_upload_unit', ctypes.c_uint32),
+    ('threadsize_base', ctypes.c_uint32),
+    ('wave_granularity', ctypes.c_uint32),
+    ('max_waves', ctypes.c_uint32),
+    ('reg_size_vec4', ctypes.c_uint32),
+    ('local_mem_size', ctypes.c_uint32),
+    ('branchstack_size', ctypes.c_uint32),
+    ('pvtmem_per_fiber_align', ctypes.c_uint32),
+    ('has_clip_cull', ctypes.c_bool),
+    ('has_pvtmem', ctypes.c_bool),
+    ('has_isam_ssbo', ctypes.c_bool),
+    ('has_isam_v', ctypes.c_bool),
+    ('has_ssbo_imm_offsets', ctypes.c_bool),
+    ('has_getfiberid', ctypes.c_bool),
+    ('mov_half_shared_quirk', ctypes.c_bool),
+    ('has_movs', ctypes.c_bool),
+    ('has_shfl', ctypes.c_bool),
+    ('has_bitwise_triops', ctypes.c_bool),
+    ('PADDING_2', ctypes.c_ubyte * 2),
+    ('num_predicates', ctypes.c_uint32),
+    ('bitops_can_write_predicates', ctypes.c_bool),
+    ('has_branch_and_or', ctypes.c_bool),
+    ('has_predication', ctypes.c_bool),
+    ('predtf_nop_quirk', ctypes.c_bool),
+    ('prede_nop_quirk', ctypes.c_bool),
+    ('PADDING_3', ctypes.c_ubyte * 3),
+    ('max_variable_workgroup_size', ctypes.c_uint32),
+    ('has_dp2acc', ctypes.c_bool),
+    ('has_dp4acc', ctypes.c_bool),
+    ('has_compliant_dp4acc', ctypes.c_bool),
+    ('PADDING_4', ctypes.c_ubyte),
+    ('bool_type', c__EA_type_t),
+    ('has_shared_regfile', ctypes.c_bool),
+    ('has_preamble', ctypes.c_bool),
+    ('shared_consts_base_offset', ctypes.c_uint16),
+    ('PADDING_5', ctypes.c_ubyte * 4),
+    ('shared_consts_size', ctypes.c_uint64),
+    ('geom_shared_consts_size_quirk', ctypes.c_uint64),
+    ('has_fs_tex_prefetch', ctypes.c_bool),
+    ('stsc_duplication_quirk', ctypes.c_bool),
+    ('load_shader_consts_via_preamble', ctypes.c_bool),
+    ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool),
+    ('has_scalar_alu', ctypes.c_bool),
+    ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool),
+    ('has_early_preamble', ctypes.c_bool),
+    ('has_rpt_bary_f', ctypes.c_bool),
+    ('has_alias_tex', ctypes.c_bool),
+    ('has_alias_rt', ctypes.c_bool),
+    ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool),
+    ('PADDING_6', ctypes.c_ubyte),
+    ('delay_slots', struct_ir3_compiler_delay_slots),
+]
+
+struct_fd_dev_id._pack_ = 1 # source:False
+struct_fd_dev_id._fields_ = [
+    ('gpu_id', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('chip_id', ctypes.c_uint64),
+]
+
+try:
+    ir3_compiler_destroy = _libraries['FIXME_STUB'].ir3_compiler_destroy
+    ir3_compiler_destroy.restype = None
+    ir3_compiler_destroy.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+class struct_fd_dev_info(Structure):
+    pass
+
+class union_fd_dev_info_0(Union):
+    pass
+
+union_fd_dev_info_0._pack_ = 1 # source:False
+union_fd_dev_info_0._fields_ = [
+    ('num_sp_cores', ctypes.c_uint32),
+    ('num_ccu', ctypes.c_uint32),
+]
+
+class struct_fd_dev_info_a6xx(Structure):
+    pass
+
+class struct_fd_dev_info_1_magic(Structure):
+    pass
+
+struct_fd_dev_info_1_magic._pack_ = 1 # source:False
+struct_fd_dev_info_1_magic._fields_ = [
+    ('PC_POWER_CNTL', ctypes.c_uint32),
+    ('TPL1_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('GRAS_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('SP_CHICKEN_BITS', ctypes.c_uint32),
+    ('UCHE_CLIENT_PF', ctypes.c_uint32),
+    ('PC_MODE_CNTL', ctypes.c_uint32),
+    ('SP_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('RB_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('RB_DBG_ECO_CNTL_blit', ctypes.c_uint32),
+    ('HLSQ_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('RB_UNKNOWN_8E01', ctypes.c_uint32),
+    ('VPC_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('UCHE_UNKNOWN_0E12', ctypes.c_uint32),
+    ('RB_CCU_DBG_ECO_CNTL', ctypes.c_uint32),
+]
+
+class struct_fd_dev_info_1_1(Structure):
+    pass
+
+struct_fd_dev_info_1_1._pack_ = 1 # source:False
+struct_fd_dev_info_1_1._fields_ = [
+    ('reg', ctypes.c_uint32),
+    ('value', ctypes.c_uint32),
+]
+
+struct_fd_dev_info_a6xx._pack_ = 1 # source:False
+struct_fd_dev_info_a6xx._fields_ = [
+    ('reg_size_vec4', ctypes.c_uint32),
+    ('instr_cache_size', ctypes.c_uint32),
+    ('has_hw_multiview', ctypes.c_bool),
+    ('has_fs_tex_prefetch', ctypes.c_bool),
+    ('supports_multiview_mask', ctypes.c_bool),
+    ('concurrent_resolve', ctypes.c_bool),
+    ('has_z24uint_s8uint', ctypes.c_bool),
+    ('tess_use_shared', ctypes.c_bool),
+    ('has_legacy_pipeline_shading_rate', ctypes.c_bool),
+    ('storage_16bit', ctypes.c_bool),
+    ('indirect_draw_wfm_quirk', ctypes.c_bool),
+    ('depth_bounds_require_depth_test_quirk', ctypes.c_bool),
+    ('has_tex_filter_cubic', ctypes.c_bool),
+    ('has_separate_chroma_filter', ctypes.c_bool),
+    ('has_sample_locations', ctypes.c_bool),
+    ('has_cp_reg_write', ctypes.c_bool),
+    ('has_8bpp_ubwc', ctypes.c_bool),
+    ('has_lpac', ctypes.c_bool),
+    ('has_getfiberid', ctypes.c_bool),
+    ('mov_half_shared_quirk', ctypes.c_bool),
+    ('has_movs', ctypes.c_bool),
+    ('has_dp2acc', ctypes.c_bool),
+    ('has_dp4acc', ctypes.c_bool),
+    ('enable_lrz_fast_clear', ctypes.c_bool),
+    ('has_lrz_dir_tracking', ctypes.c_bool),
+    ('lrz_track_quirk', ctypes.c_bool),
+    ('has_lrz_feedback', ctypes.c_bool),
+    ('has_per_view_viewport', ctypes.c_bool),
+    ('has_gmem_fast_clear', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('sysmem_per_ccu_depth_cache_size', ctypes.c_uint32),
+    ('sysmem_per_ccu_color_cache_size', ctypes.c_uint32),
+    ('gmem_ccu_color_cache_fraction', ctypes.c_uint32),
+    ('prim_alloc_threshold', ctypes.c_uint32),
+    ('vs_max_inputs_count', ctypes.c_uint32),
+    ('supports_double_threadsize', ctypes.c_bool),
+    ('has_sampler_minmax', ctypes.c_bool),
+    ('broken_ds_ubwc_quirk', ctypes.c_bool),
+    ('has_scalar_alu', ctypes.c_bool),
+    ('has_early_preamble', ctypes.c_bool),
+    ('has_isam_v', ctypes.c_bool),
+    ('has_ssbo_imm_offsets', ctypes.c_bool),
+    ('has_coherent_ubwc_flag_caches', ctypes.c_bool),
+    ('has_attachment_shading_rate', ctypes.c_bool),
+    ('has_ubwc_linear_mipmap_fallback', ctypes.c_bool),
+    ('predtf_nop_quirk', ctypes.c_bool),
+    ('prede_nop_quirk', ctypes.c_bool),
+    ('has_sad', ctypes.c_bool),
+    ('is_a702', ctypes.c_bool),
+    ('PADDING_1', ctypes.c_ubyte * 2),
+    ('magic', struct_fd_dev_info_1_magic),
+    ('magic_raw', struct_fd_dev_info_1_1 * 64),
+    ('max_sets', ctypes.c_uint32),
+    ('line_width_min', ctypes.c_float),
+    ('line_width_max', ctypes.c_float),
+    ('has_bin_mask', ctypes.c_bool),
+    ('PADDING_2', ctypes.c_ubyte * 3),
+]
+
+class struct_fd_dev_info_a7xx(Structure):
+    pass
+
+struct_fd_dev_info_a7xx._pack_ = 1 # source:False
+struct_fd_dev_info_a7xx._fields_ = [
+    ('stsc_duplication_quirk', ctypes.c_bool),
+    ('has_event_write_sample_count', ctypes.c_bool),
+    ('has_64b_ssbo_atomics', ctypes.c_bool),
+    ('cmdbuf_start_a725_quirk', ctypes.c_bool),
+    ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool),
+    ('load_shader_consts_via_preamble', ctypes.c_bool),
+    ('has_gmem_vpc_attr_buf', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('sysmem_vpc_attr_buf_size', ctypes.c_uint32),
+    ('gmem_vpc_attr_buf_size', ctypes.c_uint32),
+    ('supports_uav_ubwc', ctypes.c_bool),
+    ('ubwc_unorm_snorm_int_compatible', ctypes.c_bool),
+    ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool),
+    ('gs_vpc_adjacency_quirk', ctypes.c_bool),
+    ('enable_tp_ubwc_flag_hint', ctypes.c_bool),
+    ('storage_8bit', ctypes.c_bool),
+    ('ubwc_all_formats_compatible', ctypes.c_bool),
+    ('has_compliant_dp4acc', ctypes.c_bool),
+    ('has_generic_clear', ctypes.c_bool),
+    ('r8g8_faulty_fast_clear_quirk', ctypes.c_bool),
+    ('ubwc_coherency_quirk', ctypes.c_bool),
+    ('has_persistent_counter', ctypes.c_bool),
+    ('has_primitive_shading_rate', ctypes.c_bool),
+    ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool),
+    ('has_ray_intersection', ctypes.c_bool),
+    ('has_sw_fuse', ctypes.c_bool),
+    ('has_rt_workaround', ctypes.c_bool),
+    ('has_alias_rt', ctypes.c_bool),
+    ('has_abs_bin_mask', ctypes.c_bool),
+    ('new_control_regs', ctypes.c_bool),
+]
+
+struct_fd_dev_info._pack_ = 1 # source:False
+struct_fd_dev_info._anonymous_ = ('_0',)
+struct_fd_dev_info._fields_ = [
+    ('chip', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('tile_align_w', ctypes.c_uint32),
+    ('tile_align_h', ctypes.c_uint32),
+    ('gmem_align_w', ctypes.c_uint32),
+    ('gmem_align_h', ctypes.c_uint32),
+    ('tile_max_w', ctypes.c_uint32),
+    ('tile_max_h', ctypes.c_uint32),
+    ('num_vsc_pipes', ctypes.c_uint32),
+    ('cs_shared_mem_size', ctypes.c_uint32),
+    ('wave_granularity', ctypes.c_int32),
+    ('highest_bank_bit', ctypes.c_uint32),
+    ('ubwc_swizzle', ctypes.c_uint32),
+    ('macrotile_mode', ctypes.c_uint32),
+    ('fibers_per_sp', ctypes.c_uint32),
+    ('threadsize_base', ctypes.c_uint32),
+    ('max_waves', ctypes.c_uint32),
+    ('compute_lb_size', ctypes.c_uint32),
+    ('_0', union_fd_dev_info_0),
+    ('a6xx', struct_fd_dev_info_a6xx),
+    ('a7xx', struct_fd_dev_info_a7xx),
+]
+
+try:
+    ir3_compiler_create = _libraries['FIXME_STUB'].ir3_compiler_create
+    ir3_compiler_create.restype = ctypes.POINTER(struct_ir3_compiler)
+    ir3_compiler_create.argtypes = [ctypes.POINTER(struct_fd_device), ctypes.POINTER(struct_fd_dev_id), ctypes.POINTER(struct_fd_dev_info), ctypes.POINTER(struct_ir3_compiler_options)]
+except AttributeError:
+    pass
+try:
+    ir3_disk_cache_init = _libraries['FIXME_STUB'].ir3_disk_cache_init
+    ir3_disk_cache_init.restype = None
+    ir3_disk_cache_init.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+try:
+    ir3_disk_cache_init_shader_key = _libraries['FIXME_STUB'].ir3_disk_cache_init_shader_key
+    ir3_disk_cache_init_shader_key.restype = None
+    ir3_disk_cache_init_shader_key.argtypes = [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader)]
+except AttributeError:
+    pass
+class struct_ir3_shader_variant(Structure):
+    pass
+
+try:
+    ir3_retrieve_variant = _libraries['FIXME_STUB'].ir3_retrieve_variant
+    ir3_retrieve_variant.restype = ctypes.POINTER(struct_ir3_shader_variant)
+    ir3_retrieve_variant.argtypes = [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    ir3_store_variant = _libraries['FIXME_STUB'].ir3_store_variant
+    ir3_store_variant.restype = None
+    ir3_store_variant.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_disk_cache_retrieve = _libraries['FIXME_STUB'].ir3_disk_cache_retrieve
+    ir3_disk_cache_retrieve.restype = ctypes.c_bool
+    ir3_disk_cache_retrieve.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_disk_cache_store = _libraries['FIXME_STUB'].ir3_disk_cache_store
+    ir3_disk_cache_store.restype = None
+    ir3_disk_cache_store.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_get_compiler_options = _libraries['FIXME_STUB'].ir3_get_compiler_options
+    ir3_get_compiler_options.restype = ctypes.POINTER(struct_nir_shader_compiler_options)
+    ir3_get_compiler_options.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+try:
+    ir3_compile_shader_nir = _libraries['FIXME_STUB'].ir3_compile_shader_nir
+    ir3_compile_shader_nir.restype = ctypes.c_int32
+    ir3_compile_shader_nir.argtypes = [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_pointer_size = _libraries['FIXME_STUB'].ir3_pointer_size
+    ir3_pointer_size.restype = ctypes.c_uint32
+    ir3_pointer_size.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+
+# values for enumeration 'ir3_shader_debug'
+ir3_shader_debug__enumvalues = {
+    1: 'IR3_DBG_SHADER_VS',
+    2: 'IR3_DBG_SHADER_TCS',
+    4: 'IR3_DBG_SHADER_TES',
+    8: 'IR3_DBG_SHADER_GS',
+    16: 'IR3_DBG_SHADER_FS',
+    32: 'IR3_DBG_SHADER_CS',
+    64: 'IR3_DBG_DISASM',
+    128: 'IR3_DBG_OPTMSGS',
+    256: 'IR3_DBG_FORCES2EN',
+    512: 'IR3_DBG_NOUBOOPT',
+    1024: 'IR3_DBG_NOFP16',
+    2048: 'IR3_DBG_NOCACHE',
+    4096: 'IR3_DBG_SPILLALL',
+    8192: 'IR3_DBG_NOPREAMBLE',
+    16384: 'IR3_DBG_SHADER_INTERNAL',
+    32768: 'IR3_DBG_FULLSYNC',
+    65536: 'IR3_DBG_FULLNOP',
+    131072: 'IR3_DBG_NOEARLYPREAMBLE',
+    262144: 'IR3_DBG_NODESCPREFETCH',
+    524288: 'IR3_DBG_EXPANDRPT',
+    1048576: 'IR3_DBG_ASM_ROUNDTRIP',
+    2097152: 'IR3_DBG_SCHEDMSGS',
+    4194304: 'IR3_DBG_RAMSGS',
+    8388608: 'IR3_DBG_NOALIASTEX',
+    16777216: 'IR3_DBG_NOALIASRT',
+}
+IR3_DBG_SHADER_VS = 1
+IR3_DBG_SHADER_TCS = 2
+IR3_DBG_SHADER_TES = 4
+IR3_DBG_SHADER_GS = 8
+IR3_DBG_SHADER_FS = 16
+IR3_DBG_SHADER_CS = 32
+IR3_DBG_DISASM = 64
+IR3_DBG_OPTMSGS = 128
+IR3_DBG_FORCES2EN = 256
+IR3_DBG_NOUBOOPT = 512
+IR3_DBG_NOFP16 = 1024
+IR3_DBG_NOCACHE = 2048
+IR3_DBG_SPILLALL = 4096
+IR3_DBG_NOPREAMBLE = 8192
+IR3_DBG_SHADER_INTERNAL = 16384
+IR3_DBG_FULLSYNC = 32768
+IR3_DBG_FULLNOP = 65536
+IR3_DBG_NOEARLYPREAMBLE = 131072
+IR3_DBG_NODESCPREFETCH = 262144
+IR3_DBG_EXPANDRPT = 524288
+IR3_DBG_ASM_ROUNDTRIP = 1048576
+IR3_DBG_SCHEDMSGS = 2097152
+IR3_DBG_RAMSGS = 4194304
+IR3_DBG_NOALIASTEX = 8388608
+IR3_DBG_NOALIASRT = 16777216
+ir3_shader_debug = ctypes.c_uint32 # enum
+ir3_shader_override_path = None # Variable ctypes.POINTER(ctypes.c_char)
+try:
+    shader_debug_enabled = _libraries['FIXME_STUB'].shader_debug_enabled
+    shader_debug_enabled.restype = ctypes.c_bool
+    shader_debug_enabled.argtypes = [gl_shader_stage, ctypes.c_bool]
+except AttributeError:
+    pass
+class struct_ir3(Structure):
+    pass
+
+class struct_ir3_instruction(Structure):
+    pass
+
+struct_ir3._pack_ = 1 # source:False
+struct_ir3._fields_ = [
+    ('compiler', ctypes.POINTER(struct_ir3_compiler)),
+    ('type', gl_shader_stage),
+    ('inputs_count', ctypes.c_uint32),
+    ('inputs_sz', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('inputs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('baryfs_count', ctypes.c_uint32),
+    ('baryfs_sz', ctypes.c_uint32),
+    ('baryfs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('a0_users_count', ctypes.c_uint32),
+    ('a0_users_sz', ctypes.c_uint32),
+    ('a0_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('a1_users_count', ctypes.c_uint32),
+    ('a1_users_sz', ctypes.c_uint32),
+    ('a1_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('astc_srgb_count', ctypes.c_uint32),
+    ('astc_srgb_sz', ctypes.c_uint32),
+    ('astc_srgb', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('tg4_count', ctypes.c_uint32),
+    ('tg4_sz', ctypes.c_uint32),
+    ('tg4', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('block_list', struct_list_head),
+    ('array_list', struct_list_head),
+    ('instr_count', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+class struct_ir3_block(Structure):
+    pass
+
+class struct_ir3_register(Structure):
+    pass
+
+
+# values for enumeration 'c__EA_opc_t'
+c__EA_opc_t__enumvalues = {
+    0: 'OPC_NOP',
+    2: 'OPC_JUMP',
+    3: 'OPC_CALL',
+    4: 'OPC_RET',
+    5: 'OPC_KILL',
+    6: 'OPC_END',
+    7: 'OPC_EMIT',
+    8: 'OPC_CUT',
+    9: 'OPC_CHMASK',
+    10: 'OPC_CHSH',
+    11: 'OPC_FLOW_REV',
+    16: 'OPC_BKT',
+    17: 'OPC_STKS',
+    18: 'OPC_STKR',
+    19: 'OPC_XSET',
+    20: 'OPC_XCLR',
+    21: 'OPC_GETONE',
+    22: 'OPC_DBG',
+    23: 'OPC_SHPS',
+    24: 'OPC_SHPE',
+    25: 'OPC_GETLAST',
+    29: 'OPC_PREDT',
+    30: 'OPC_PREDF',
+    31: 'OPC_PREDE',
+    40: 'OPC_BR',
+    41: 'OPC_BRAO',
+    42: 'OPC_BRAA',
+    43: 'OPC_BRAC',
+    44: 'OPC_BANY',
+    45: 'OPC_BALL',
+    46: 'OPC_BRAX',
+    47: 'OPC_DEMOTE',
+    128: 'OPC_MOV',
+    129: 'OPC_MOVP',
+    130: 'OPC_MOVS',
+    131: 'OPC_MOVMSK',
+    132: 'OPC_SWZ',
+    133: 'OPC_GAT',
+    134: 'OPC_SCT',
+    168: 'OPC_MOV_IMMED',
+    169: 'OPC_MOV_CONST',
+    170: 'OPC_MOV_GPR',
+    171: 'OPC_MOV_RELGPR',
+    172: 'OPC_MOV_RELCONST',
+    173: 'OPC_MOVS_IMMED',
+    174: 'OPC_MOVS_A0',
+    178: 'OPC_BALLOT_MACRO',
+    179: 'OPC_ANY_MACRO',
+    180: 'OPC_ALL_MACRO',
+    181: 'OPC_ELECT_MACRO',
+    182: 'OPC_READ_COND_MACRO',
+    183: 'OPC_READ_FIRST_MACRO',
+    184: 'OPC_SHPS_MACRO',
+    185: 'OPC_READ_GETLAST_MACRO',
+    186: 'OPC_SCAN_MACRO',
+    188: 'OPC_SCAN_CLUSTERS_MACRO',
+    256: 'OPC_ADD_F',
+    257: 'OPC_MIN_F',
+    258: 'OPC_MAX_F',
+    259: 'OPC_MUL_F',
+    260: 'OPC_SIGN_F',
+    261: 'OPC_CMPS_F',
+    262: 'OPC_ABSNEG_F',
+    263: 'OPC_CMPV_F',
+    265: 'OPC_FLOOR_F',
+    266: 'OPC_CEIL_F',
+    267: 'OPC_RNDNE_F',
+    268: 'OPC_RNDAZ_F',
+    269: 'OPC_TRUNC_F',
+    272: 'OPC_ADD_U',
+    273: 'OPC_ADD_S',
+    274: 'OPC_SUB_U',
+    275: 'OPC_SUB_S',
+    276: 'OPC_CMPS_U',
+    277: 'OPC_CMPS_S',
+    278: 'OPC_MIN_U',
+    279: 'OPC_MIN_S',
+    280: 'OPC_MAX_U',
+    281: 'OPC_MAX_S',
+    282: 'OPC_ABSNEG_S',
+    284: 'OPC_AND_B',
+    285: 'OPC_OR_B',
+    286: 'OPC_NOT_B',
+    287: 'OPC_XOR_B',
+    289: 'OPC_CMPV_U',
+    290: 'OPC_CMPV_S',
+    304: 'OPC_MUL_U24',
+    305: 'OPC_MUL_S24',
+    306: 'OPC_MULL_U',
+    307: 'OPC_BFREV_B',
+    308: 'OPC_CLZ_S',
+    309: 'OPC_CLZ_B',
+    310: 'OPC_SHL_B',
+    311: 'OPC_SHR_B',
+    312: 'OPC_ASHR_B',
+    313: 'OPC_BARY_F',
+    314: 'OPC_MGEN_B',
+    315: 'OPC_GETBIT_B',
+    316: 'OPC_SETRM',
+    317: 'OPC_CBITS_B',
+    318: 'OPC_SHB',
+    319: 'OPC_MSAD',
+    320: 'OPC_FLAT_B',
+    384: 'OPC_MAD_U16',
+    385: 'OPC_MADSH_U16',
+    386: 'OPC_MAD_S16',
+    387: 'OPC_MADSH_M16',
+    388: 'OPC_MAD_U24',
+    389: 'OPC_MAD_S24',
+    390: 'OPC_MAD_F16',
+    391: 'OPC_MAD_F32',
+    392: 'OPC_SEL_B16',
+    393: 'OPC_SEL_B32',
+    394: 'OPC_SEL_S16',
+    395: 'OPC_SEL_S32',
+    396: 'OPC_SEL_F16',
+    397: 'OPC_SEL_F32',
+    398: 'OPC_SAD_S16',
+    399: 'OPC_SAD_S32',
+    400: 'OPC_SHRM',
+    401: 'OPC_SHLM',
+    402: 'OPC_SHRG',
+    403: 'OPC_SHLG',
+    404: 'OPC_ANDG',
+    405: 'OPC_DP2ACC',
+    406: 'OPC_DP4ACC',
+    407: 'OPC_WMM',
+    408: 'OPC_WMM_ACCU',
+    512: 'OPC_RCP',
+    513: 'OPC_RSQ',
+    514: 'OPC_LOG2',
+    515: 'OPC_EXP2',
+    516: 'OPC_SIN',
+    517: 'OPC_COS',
+    518: 'OPC_SQRT',
+    521: 'OPC_HRSQ',
+    522: 'OPC_HLOG2',
+    523: 'OPC_HEXP2',
+    640: 'OPC_ISAM',
+    641: 'OPC_ISAML',
+    642: 'OPC_ISAMM',
+    643: 'OPC_SAM',
+    644: 'OPC_SAMB',
+    645: 'OPC_SAML',
+    646: 'OPC_SAMGQ',
+    647: 'OPC_GETLOD',
+    648: 'OPC_CONV',
+    649: 'OPC_CONVM',
+    650: 'OPC_GETSIZE',
+    651: 'OPC_GETBUF',
+    652: 'OPC_GETPOS',
+    653: 'OPC_GETINFO',
+    654: 'OPC_DSX',
+    655: 'OPC_DSY',
+    656: 'OPC_GATHER4R',
+    657: 'OPC_GATHER4G',
+    658: 'OPC_GATHER4B',
+    659: 'OPC_GATHER4A',
+    660: 'OPC_SAMGP0',
+    661: 'OPC_SAMGP1',
+    662: 'OPC_SAMGP2',
+    663: 'OPC_SAMGP3',
+    664: 'OPC_DSXPP_1',
+    665: 'OPC_DSYPP_1',
+    666: 'OPC_RGETPOS',
+    667: 'OPC_RGETINFO',
+    668: 'OPC_BRCST_ACTIVE',
+    669: 'OPC_QUAD_SHUFFLE_BRCST',
+    670: 'OPC_QUAD_SHUFFLE_HORIZ',
+    671: 'OPC_QUAD_SHUFFLE_VERT',
+    672: 'OPC_QUAD_SHUFFLE_DIAG',
+    673: 'OPC_TCINV',
+    675: 'OPC_DSXPP_MACRO',
+    676: 'OPC_DSYPP_MACRO',
+    768: 'OPC_LDG',
+    769: 'OPC_LDL',
+    770: 'OPC_LDP',
+    771: 'OPC_STG',
+    772: 'OPC_STL',
+    773: 'OPC_STP',
+    774: 'OPC_LDIB',
+    775: 'OPC_G2L',
+    776: 'OPC_L2G',
+    777: 'OPC_PREFETCH',
+    778: 'OPC_LDLW',
+    779: 'OPC_STLW',
+    782: 'OPC_RESFMT',
+    783: 'OPC_RESINFO',
+    784: 'OPC_ATOMIC_ADD',
+    785: 'OPC_ATOMIC_SUB',
+    786: 'OPC_ATOMIC_XCHG',
+    787: 'OPC_ATOMIC_INC',
+    788: 'OPC_ATOMIC_DEC',
+    789: 'OPC_ATOMIC_CMPXCHG',
+    790: 'OPC_ATOMIC_MIN',
+    791: 'OPC_ATOMIC_MAX',
+    792: 'OPC_ATOMIC_AND',
+    793: 'OPC_ATOMIC_OR',
+    794: 'OPC_ATOMIC_XOR',
+    795: 'OPC_LDGB',
+    796: 'OPC_STGB',
+    797: 'OPC_STIB',
+    798: 'OPC_LDC',
+    799: 'OPC_LDLV',
+    800: 'OPC_PIPR',
+    801: 'OPC_PIPC',
+    802: 'OPC_EMIT2',
+    803: 'OPC_ENDLS',
+    804: 'OPC_GETSPID',
+    805: 'OPC_GETWID',
+    806: 'OPC_GETFIBERID',
+    807: 'OPC_SHFL',
+    808: 'OPC_STC',
+    809: 'OPC_RESINFO_B',
+    810: 'OPC_LDIB_B',
+    811: 'OPC_STIB_B',
+    812: 'OPC_ATOMIC_B_ADD',
+    813: 'OPC_ATOMIC_B_SUB',
+    814: 'OPC_ATOMIC_B_XCHG',
+    815: 'OPC_ATOMIC_B_INC',
+    816: 'OPC_ATOMIC_B_DEC',
+    817: 'OPC_ATOMIC_B_CMPXCHG',
+    818: 'OPC_ATOMIC_B_MIN',
+    819: 'OPC_ATOMIC_B_MAX',
+    820: 'OPC_ATOMIC_B_AND',
+    821: 'OPC_ATOMIC_B_OR',
+    822: 'OPC_ATOMIC_B_XOR',
+    823: 'OPC_ATOMIC_S_ADD',
+    824: 'OPC_ATOMIC_S_SUB',
+    825: 'OPC_ATOMIC_S_XCHG',
+    826: 'OPC_ATOMIC_S_INC',
+    827: 'OPC_ATOMIC_S_DEC',
+    828: 'OPC_ATOMIC_S_CMPXCHG',
+    829: 'OPC_ATOMIC_S_MIN',
+    830: 'OPC_ATOMIC_S_MAX',
+    831: 'OPC_ATOMIC_S_AND',
+    832: 'OPC_ATOMIC_S_OR',
+    833: 'OPC_ATOMIC_S_XOR',
+    834: 'OPC_ATOMIC_G_ADD',
+    835: 'OPC_ATOMIC_G_SUB',
+    836: 'OPC_ATOMIC_G_XCHG',
+    837: 'OPC_ATOMIC_G_INC',
+    838: 'OPC_ATOMIC_G_DEC',
+    839: 'OPC_ATOMIC_G_CMPXCHG',
+    840: 'OPC_ATOMIC_G_MIN',
+    841: 'OPC_ATOMIC_G_MAX',
+    842: 'OPC_ATOMIC_G_AND',
+    843: 'OPC_ATOMIC_G_OR',
+    844: 'OPC_ATOMIC_G_XOR',
+    845: 'OPC_LDG_A',
+    846: 'OPC_STG_A',
+    847: 'OPC_SPILL_MACRO',
+    848: 'OPC_RELOAD_MACRO',
+    849: 'OPC_LDC_K',
+    850: 'OPC_STSC',
+    851: 'OPC_LDG_K',
+    852: 'OPC_PUSH_CONSTS_LOAD_MACRO',
+    858: 'OPC_RAY_INTERSECTION',
+    859: 'OPC_RESBASE',
+    896: 'OPC_BAR',
+    897: 'OPC_FENCE',
+    898: 'OPC_SLEEP',
+    899: 'OPC_ICINV',
+    900: 'OPC_DCCLN',
+    901: 'OPC_DCINV',
+    902: 'OPC_DCFLU',
+    903: 'OPC_LOCK',
+    904: 'OPC_UNLOCK',
+    905: 'OPC_ALIAS',
+    906: 'OPC_CCINV',
+    1024: 'OPC_META_INPUT',
+    1026: 'OPC_META_SPLIT',
+    1027: 'OPC_META_COLLECT',
+    1028: 'OPC_META_TEX_PREFETCH',
+    1029: 'OPC_META_PARALLEL_COPY',
+    1030: 'OPC_META_PHI',
+    1031: 'OPC_META_RAW',
+}
+OPC_NOP = 0
+OPC_JUMP = 2
+OPC_CALL = 3
+OPC_RET = 4
+OPC_KILL = 5
+OPC_END = 6
+OPC_EMIT = 7
+OPC_CUT = 8
+OPC_CHMASK = 9
+OPC_CHSH = 10
+OPC_FLOW_REV = 11
+OPC_BKT = 16
+OPC_STKS = 17
+OPC_STKR = 18
+OPC_XSET = 19
+OPC_XCLR = 20
+OPC_GETONE = 21
+OPC_DBG = 22
+OPC_SHPS = 23
+OPC_SHPE = 24
+OPC_GETLAST = 25
+OPC_PREDT = 29
+OPC_PREDF = 30
+OPC_PREDE = 31
+OPC_BR = 40
+OPC_BRAO = 41
+OPC_BRAA = 42
+OPC_BRAC = 43
+OPC_BANY = 44
+OPC_BALL = 45
+OPC_BRAX = 46
+OPC_DEMOTE = 47
+OPC_MOV = 128
+OPC_MOVP = 129
+OPC_MOVS = 130
+OPC_MOVMSK = 131
+OPC_SWZ = 132
+OPC_GAT = 133
+OPC_SCT = 134
+OPC_MOV_IMMED = 168
+OPC_MOV_CONST = 169
+OPC_MOV_GPR = 170
+OPC_MOV_RELGPR = 171
+OPC_MOV_RELCONST = 172
+OPC_MOVS_IMMED = 173
+OPC_MOVS_A0 = 174
+OPC_BALLOT_MACRO = 178
+OPC_ANY_MACRO = 179
+OPC_ALL_MACRO = 180
+OPC_ELECT_MACRO = 181
+OPC_READ_COND_MACRO = 182
+OPC_READ_FIRST_MACRO = 183
+OPC_SHPS_MACRO = 184
+OPC_READ_GETLAST_MACRO = 185
+OPC_SCAN_MACRO = 186
+OPC_SCAN_CLUSTERS_MACRO = 188
+OPC_ADD_F = 256
+OPC_MIN_F = 257
+OPC_MAX_F = 258
+OPC_MUL_F = 259
+OPC_SIGN_F = 260
+OPC_CMPS_F = 261
+OPC_ABSNEG_F = 262
+OPC_CMPV_F = 263
+OPC_FLOOR_F = 265
+OPC_CEIL_F = 266
+OPC_RNDNE_F = 267
+OPC_RNDAZ_F = 268
+OPC_TRUNC_F = 269
+OPC_ADD_U = 272
+OPC_ADD_S = 273
+OPC_SUB_U = 274
+OPC_SUB_S = 275
+OPC_CMPS_U = 276
+OPC_CMPS_S = 277
+OPC_MIN_U = 278
+OPC_MIN_S = 279
+OPC_MAX_U = 280
+OPC_MAX_S = 281
+OPC_ABSNEG_S = 282
+OPC_AND_B = 284
+OPC_OR_B = 285
+OPC_NOT_B = 286
+OPC_XOR_B = 287
+OPC_CMPV_U = 289
+OPC_CMPV_S = 290
+OPC_MUL_U24 = 304
+OPC_MUL_S24 = 305
+OPC_MULL_U = 306
+OPC_BFREV_B = 307
+OPC_CLZ_S = 308
+OPC_CLZ_B = 309
+OPC_SHL_B = 310
+OPC_SHR_B = 311
+OPC_ASHR_B = 312
+OPC_BARY_F = 313
+OPC_MGEN_B = 314
+OPC_GETBIT_B = 315
+OPC_SETRM = 316
+OPC_CBITS_B = 317
+OPC_SHB = 318
+OPC_MSAD = 319
+OPC_FLAT_B = 320
+OPC_MAD_U16 = 384
+OPC_MADSH_U16 = 385
+OPC_MAD_S16 = 386
+OPC_MADSH_M16 = 387
+OPC_MAD_U24 = 388
+OPC_MAD_S24 = 389
+OPC_MAD_F16 = 390
+OPC_MAD_F32 = 391
+OPC_SEL_B16 = 392
+OPC_SEL_B32 = 393
+OPC_SEL_S16 = 394
+OPC_SEL_S32 = 395
+OPC_SEL_F16 = 396
+OPC_SEL_F32 = 397
+OPC_SAD_S16 = 398
+OPC_SAD_S32 = 399
+OPC_SHRM = 400
+OPC_SHLM = 401
+OPC_SHRG = 402
+OPC_SHLG = 403
+OPC_ANDG = 404
+OPC_DP2ACC = 405
+OPC_DP4ACC = 406
+OPC_WMM = 407
+OPC_WMM_ACCU = 408
+OPC_RCP = 512
+OPC_RSQ = 513
+OPC_LOG2 = 514
+OPC_EXP2 = 515
+OPC_SIN = 516
+OPC_COS = 517
+OPC_SQRT = 518
+OPC_HRSQ = 521
+OPC_HLOG2 = 522
+OPC_HEXP2 = 523
+OPC_ISAM = 640
+OPC_ISAML = 641
+OPC_ISAMM = 642
+OPC_SAM = 643
+OPC_SAMB = 644
+OPC_SAML = 645
+OPC_SAMGQ = 646
+OPC_GETLOD = 647
+OPC_CONV = 648
+OPC_CONVM = 649
+OPC_GETSIZE = 650
+OPC_GETBUF = 651
+OPC_GETPOS = 652
+OPC_GETINFO = 653
+OPC_DSX = 654
+OPC_DSY = 655
+OPC_GATHER4R = 656
+OPC_GATHER4G = 657
+OPC_GATHER4B = 658
+OPC_GATHER4A = 659
+OPC_SAMGP0 = 660
+OPC_SAMGP1 = 661
+OPC_SAMGP2 = 662
+OPC_SAMGP3 = 663
+OPC_DSXPP_1 = 664
+OPC_DSYPP_1 = 665
+OPC_RGETPOS = 666
+OPC_RGETINFO = 667
+OPC_BRCST_ACTIVE = 668
+OPC_QUAD_SHUFFLE_BRCST = 669
+OPC_QUAD_SHUFFLE_HORIZ = 670
+OPC_QUAD_SHUFFLE_VERT = 671
+OPC_QUAD_SHUFFLE_DIAG = 672
+OPC_TCINV = 673
+OPC_DSXPP_MACRO = 675
+OPC_DSYPP_MACRO = 676
+OPC_LDG = 768
+OPC_LDL = 769
+OPC_LDP = 770
+OPC_STG = 771
+OPC_STL = 772
+OPC_STP = 773
+OPC_LDIB = 774
+OPC_G2L = 775
+OPC_L2G = 776
+OPC_PREFETCH = 777
+OPC_LDLW = 778
+OPC_STLW = 779
+OPC_RESFMT = 782
+OPC_RESINFO = 783
+OPC_ATOMIC_ADD = 784
+OPC_ATOMIC_SUB = 785
+OPC_ATOMIC_XCHG = 786
+OPC_ATOMIC_INC = 787
+OPC_ATOMIC_DEC = 788
+OPC_ATOMIC_CMPXCHG = 789
+OPC_ATOMIC_MIN = 790
+OPC_ATOMIC_MAX = 791
+OPC_ATOMIC_AND = 792
+OPC_ATOMIC_OR = 793
+OPC_ATOMIC_XOR = 794
+OPC_LDGB = 795
+OPC_STGB = 796
+OPC_STIB = 797
+OPC_LDC = 798
+OPC_LDLV = 799
+OPC_PIPR = 800
+OPC_PIPC = 801
+OPC_EMIT2 = 802
+OPC_ENDLS = 803
+OPC_GETSPID = 804
+OPC_GETWID = 805
+OPC_GETFIBERID = 806
+OPC_SHFL = 807
+OPC_STC = 808
+OPC_RESINFO_B = 809
+OPC_LDIB_B = 810
+OPC_STIB_B = 811
+OPC_ATOMIC_B_ADD = 812
+OPC_ATOMIC_B_SUB = 813
+OPC_ATOMIC_B_XCHG = 814
+OPC_ATOMIC_B_INC = 815
+OPC_ATOMIC_B_DEC = 816
+OPC_ATOMIC_B_CMPXCHG = 817
+OPC_ATOMIC_B_MIN = 818
+OPC_ATOMIC_B_MAX = 819
+OPC_ATOMIC_B_AND = 820
+OPC_ATOMIC_B_OR = 821
+OPC_ATOMIC_B_XOR = 822
+OPC_ATOMIC_S_ADD = 823
+OPC_ATOMIC_S_SUB = 824
+OPC_ATOMIC_S_XCHG = 825
+OPC_ATOMIC_S_INC = 826
+OPC_ATOMIC_S_DEC = 827
+OPC_ATOMIC_S_CMPXCHG = 828
+OPC_ATOMIC_S_MIN = 829
+OPC_ATOMIC_S_MAX = 830
+OPC_ATOMIC_S_AND = 831
+OPC_ATOMIC_S_OR = 832
+OPC_ATOMIC_S_XOR = 833
+OPC_ATOMIC_G_ADD = 834
+OPC_ATOMIC_G_SUB = 835
+OPC_ATOMIC_G_XCHG = 836
+OPC_ATOMIC_G_INC = 837
+OPC_ATOMIC_G_DEC = 838
+OPC_ATOMIC_G_CMPXCHG = 839
+OPC_ATOMIC_G_MIN = 840
+OPC_ATOMIC_G_MAX = 841
+OPC_ATOMIC_G_AND = 842
+OPC_ATOMIC_G_OR = 843
+OPC_ATOMIC_G_XOR = 844
+OPC_LDG_A = 845
+OPC_STG_A = 846
+OPC_SPILL_MACRO = 847
+OPC_RELOAD_MACRO = 848
+OPC_LDC_K = 849
+OPC_STSC = 850
+OPC_LDG_K = 851
+OPC_PUSH_CONSTS_LOAD_MACRO = 852
+OPC_RAY_INTERSECTION = 858
+OPC_RESBASE = 859
+OPC_BAR = 896
+OPC_FENCE = 897
+OPC_SLEEP = 898
+OPC_ICINV = 899
+OPC_DCCLN = 900
+OPC_DCINV = 901
+OPC_DCFLU = 902
+OPC_LOCK = 903
+OPC_UNLOCK = 904
+OPC_ALIAS = 905
+OPC_CCINV = 906
+OPC_META_INPUT = 1024
+OPC_META_SPLIT = 1026
+OPC_META_COLLECT = 1027
+OPC_META_TEX_PREFETCH = 1028
+OPC_META_PARALLEL_COPY = 1029
+OPC_META_PHI = 1030
+OPC_META_RAW = 1031
+c__EA_opc_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'ir3_instruction_flags'
+ir3_instruction_flags__enumvalues = {
+    1: 'IR3_INSTR_SY',
+    2: 'IR3_INSTR_SS',
+    4: 'IR3_INSTR_JP',
+    8: 'IR3_INSTR_EQ',
+    16: 'IR3_INSTR_UL',
+    32: 'IR3_INSTR_3D',
+    64: 'IR3_INSTR_A',
+    128: 'IR3_INSTR_O',
+    256: 'IR3_INSTR_P',
+    512: 'IR3_INSTR_S',
+    1024: 'IR3_INSTR_S2EN',
+    2048: 'IR3_INSTR_SAT',
+    4096: 'IR3_INSTR_B',
+    8192: 'IR3_INSTR_NONUNIF',
+    16384: 'IR3_INSTR_A1EN',
+    32768: 'IR3_INSTR_U',
+    65536: 'IR3_INSTR_MARK',
+    65536: 'IR3_INSTR_SHARED_SPILL',
+    131072: 'IR3_INSTR_UNUSED',
+    262144: 'IR3_INSTR_NEEDS_HELPERS',
+    524288: 'IR3_INSTR_V',
+    1048576: 'IR3_INSTR_INV_1D',
+    2097152: 'IR3_INSTR_IMM_OFFSET',
+}
+IR3_INSTR_SY = 1
+IR3_INSTR_SS = 2
+IR3_INSTR_JP = 4
+IR3_INSTR_EQ = 8
+IR3_INSTR_UL = 16
+IR3_INSTR_3D = 32
+IR3_INSTR_A = 64
+IR3_INSTR_O = 128
+IR3_INSTR_P = 256
+IR3_INSTR_S = 512
+IR3_INSTR_S2EN = 1024
+IR3_INSTR_SAT = 2048
+IR3_INSTR_B = 4096
+IR3_INSTR_NONUNIF = 8192
+IR3_INSTR_A1EN = 16384
+IR3_INSTR_U = 32768
+IR3_INSTR_MARK = 65536
+IR3_INSTR_SHARED_SPILL = 65536
+IR3_INSTR_UNUSED = 131072
+IR3_INSTR_NEEDS_HELPERS = 262144
+IR3_INSTR_V = 524288
+IR3_INSTR_INV_1D = 1048576
+IR3_INSTR_IMM_OFFSET = 2097152
+ir3_instruction_flags = ctypes.c_uint32 # enum
+class union_ir3_instruction_0(Union):
+    pass
+
+class struct_ir3_instruction_0_cat0(Structure):
+    pass
+
+struct_ir3_instruction_0_cat0._pack_ = 1 # source:False
+struct_ir3_instruction_0_cat0._fields_ = [
+    ('inv1', ctypes.c_char),
+    ('inv2', ctypes.c_char),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('immed', ctypes.c_int32),
+    ('target', ctypes.POINTER(struct_ir3_block)),
+    ('target_label', ctypes.POINTER(ctypes.c_char)),
+    ('idx', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+class struct_ir3_instruction_0_cat1(Structure):
+    pass
+
+
+# values for enumeration 'c__EA_round_t'
+c__EA_round_t__enumvalues = {
+    0: 'ROUND_ZERO',
+    1: 'ROUND_EVEN',
+    2: 'ROUND_POS_INF',
+    3: 'ROUND_NEG_INF',
+}
+ROUND_ZERO = 0
+ROUND_EVEN = 1
+ROUND_POS_INF = 2
+ROUND_NEG_INF = 3
+c__EA_round_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'c__EA_reduce_op_t'
+c__EA_reduce_op_t__enumvalues = {
+    0: 'REDUCE_OP_ADD_U',
+    1: 'REDUCE_OP_ADD_F',
+    2: 'REDUCE_OP_MUL_U',
+    3: 'REDUCE_OP_MUL_F',
+    4: 'REDUCE_OP_MIN_U',
+    5: 'REDUCE_OP_MIN_S',
+    6: 'REDUCE_OP_MIN_F',
+    7: 'REDUCE_OP_MAX_U',
+    8: 'REDUCE_OP_MAX_S',
+    9: 'REDUCE_OP_MAX_F',
+    10: 'REDUCE_OP_AND_B',
+    11: 'REDUCE_OP_OR_B',
+    12: 'REDUCE_OP_XOR_B',
+}
+REDUCE_OP_ADD_U = 0
+REDUCE_OP_ADD_F = 1
+REDUCE_OP_MUL_U = 2
+REDUCE_OP_MUL_F = 3
+REDUCE_OP_MIN_U = 4
+REDUCE_OP_MIN_S = 5
+REDUCE_OP_MIN_F = 6
+REDUCE_OP_MAX_U = 7
+REDUCE_OP_MAX_S = 8
+REDUCE_OP_MAX_F = 9
+REDUCE_OP_AND_B = 10
+REDUCE_OP_OR_B = 11
+REDUCE_OP_XOR_B = 12
+c__EA_reduce_op_t = ctypes.c_uint32 # enum
+struct_ir3_instruction_0_cat1._pack_ = 1 # source:False
+struct_ir3_instruction_0_cat1._fields_ = [
+    ('src_type', c__EA_type_t),
+    ('dst_type', c__EA_type_t),
+    ('round', c__EA_round_t),
+    ('reduce_op', c__EA_reduce_op_t),
+]
+
+class struct_ir3_instruction_0_cat2(Structure):
+    pass
+
+
+# values for unnamed enumeration
+__enumvalues = {
+    0: 'IR3_COND_LT',
+    1: 'IR3_COND_LE',
+    2: 'IR3_COND_GT',
+    3: 'IR3_COND_GE',
+    4: 'IR3_COND_EQ',
+    5: 'IR3_COND_NE',
+}
+IR3_COND_LT = 0
+IR3_COND_LE = 1
+IR3_COND_GT = 2
+IR3_COND_GE = 3
+IR3_COND_EQ = 4
+IR3_COND_NE = 5
+struct_ir3_instruction_0_cat2._pack_ = 1 # source:False
+struct_ir3_instruction_0_cat2._fields_ = [
+    ('condition', ctypes.c_int),
+]
+
+class struct_ir3_instruction_0_cat3(Structure):
+    pass
+
+struct_ir3_instruction_0_cat3._pack_ = 1 # source:False
+struct_ir3_instruction_0_cat3._fields_ = [
+    ('signedness', ctypes.c_int),
+    ('packed', ctypes.c_int),
+    ('swapped', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+class struct_ir3_instruction_0_cat5(Structure):
+    pass
+
+struct_ir3_instruction_0_cat5._pack_ = 1 # source:False
+struct_ir3_instruction_0_cat5._fields_ = [
+    ('samp', ctypes.c_uint32),
+    ('tex', ctypes.c_uint32),
+    ('tex_base', ctypes.c_uint32, 3),
+    ('cluster_size', ctypes.c_uint32, 4),
+    ('PADDING_0', ctypes.c_uint32, 25),
+    ('type', c__EA_type_t),
+]
+
+class struct_ir3_instruction_0_cat6(Structure):
+    pass
+
+
+# values for enumeration 'c_uint32'
+c_uint32__enumvalues = {
+    1: 'SHFL_XOR',
+    2: 'SHFL_UP',
+    3: 'SHFL_DOWN',
+    6: 'SHFL_RUP',
+    7: 'SHFL_RDOWN',
+}
+SHFL_XOR = 1
+SHFL_UP = 2
+SHFL_DOWN = 3
+SHFL_RUP = 6
+SHFL_RDOWN = 7
+c_uint32 = ctypes.c_uint32 # enum
+struct_ir3_instruction_0_cat6._pack_ = 1 # source:False
+struct_ir3_instruction_0_cat6._fields_ = [
+    ('type', c__EA_type_t),
+    ('dst_offset', ctypes.c_int32),
+    ('iim_val', ctypes.c_int32),
+    ('d', ctypes.c_uint32, 3),
+    ('typed', ctypes.c_uint32, 1),
+    ('base', ctypes.c_uint32, 3),
+    ('shfl_mode', c_uint32, 3),
+    ('PADDING_0', ctypes.c_uint32, 22),
+]
+
+class struct_ir3_instruction_0_cat7(Structure):
+    pass
+
+
+# values for enumeration 'c__EA_ir3_alias_scope'
+c__EA_ir3_alias_scope__enumvalues = {
+    0: 'ALIAS_TEX',
+    1: 'ALIAS_RT',
+    2: 'ALIAS_MEM',
+}
+ALIAS_TEX = 0
+ALIAS_RT = 1
+ALIAS_MEM = 2
+c__EA_ir3_alias_scope = ctypes.c_uint32 # enum
+struct_ir3_instruction_0_cat7._pack_ = 1 # source:False
+struct_ir3_instruction_0_cat7._fields_ = [
+    ('w', ctypes.c_uint32, 1),
+    ('r', ctypes.c_uint32, 1),
+    ('l', ctypes.c_uint32, 1),
+    ('g', ctypes.c_uint32, 1),
+    ('PADDING_0', ctypes.c_uint32, 28),
+    ('alias_scope', c__EA_ir3_alias_scope),
+    ('alias_table_size_minus_one', ctypes.c_uint32),
+    ('alias_type_float', ctypes.c_bool),
+    ('PADDING_1', ctypes.c_ubyte * 3),
+]
+
+class struct_ir3_instruction_0_split(Structure):
+    pass
+
+struct_ir3_instruction_0_split._pack_ = 1 # source:False
+struct_ir3_instruction_0_split._fields_ = [
+    ('off', ctypes.c_int32),
+]
+
+class struct_ir3_instruction_0_end(Structure):
+    pass
+
+struct_ir3_instruction_0_end._pack_ = 1 # source:False
+struct_ir3_instruction_0_end._fields_ = [
+    ('outidxs', ctypes.POINTER(ctypes.c_uint32)),
+]
+
+class struct_ir3_instruction_0_phi(Structure):
+    pass
+
+struct_ir3_instruction_0_phi._pack_ = 1 # source:False
+struct_ir3_instruction_0_phi._fields_ = [
+    ('nphi', ctypes.POINTER(None)),
+    ('comp', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+class struct_ir3_instruction_0_prefetch(Structure):
+    pass
+
+struct_ir3_instruction_0_prefetch._pack_ = 1 # source:False
+struct_ir3_instruction_0_prefetch._fields_ = [
+    ('samp', ctypes.c_uint32),
+    ('tex', ctypes.c_uint32),
+    ('input_offset', ctypes.c_uint32),
+    ('samp_base', ctypes.c_uint32, 3),
+    ('tex_base', ctypes.c_uint32, 3),
+    ('PADDING_0', ctypes.c_uint32, 26),
+]
+
+class struct_ir3_instruction_0_input(Structure):
+    pass
+
+struct_ir3_instruction_0_input._pack_ = 1 # source:False
+struct_ir3_instruction_0_input._fields_ = [
+    ('inidx', ctypes.c_int32),
+    ('sysval', gl_system_value),
+]
+
+class struct_ir3_instruction_0_push_consts(Structure):
+    pass
+
+struct_ir3_instruction_0_push_consts._pack_ = 1 # source:False
+struct_ir3_instruction_0_push_consts._fields_ = [
+    ('src_base', ctypes.c_uint32),
+    ('src_size', ctypes.c_uint32),
+    ('dst_base', ctypes.c_uint32),
+]
+
+class struct_ir3_instruction_0_raw(Structure):
+    pass
+
+struct_ir3_instruction_0_raw._pack_ = 1 # source:False
+struct_ir3_instruction_0_raw._fields_ = [
+    ('value', ctypes.c_uint64),
+]
+
+union_ir3_instruction_0._pack_ = 1 # source:False
+union_ir3_instruction_0._fields_ = [
+    ('cat0', struct_ir3_instruction_0_cat0),
+    ('cat1', struct_ir3_instruction_0_cat1),
+    ('cat2', struct_ir3_instruction_0_cat2),
+    ('cat3', struct_ir3_instruction_0_cat3),
+    ('cat5', struct_ir3_instruction_0_cat5),
+    ('cat6', struct_ir3_instruction_0_cat6),
+    ('cat7', struct_ir3_instruction_0_cat7),
+    ('split', struct_ir3_instruction_0_split),
+    ('end', struct_ir3_instruction_0_end),
+    ('phi', struct_ir3_instruction_0_phi),
+    ('prefetch', struct_ir3_instruction_0_prefetch),
+    ('input', struct_ir3_instruction_0_input),
+    ('push_consts', struct_ir3_instruction_0_push_consts),
+    ('raw', struct_ir3_instruction_0_raw),
+    ('PADDING_0', ctypes.c_ubyte * 24),
+]
+
+struct_ir3_instruction._pack_ = 1 # source:False
+struct_ir3_instruction._anonymous_ = ('_0',)
+struct_ir3_instruction._fields_ = [
+    ('block', ctypes.POINTER(struct_ir3_block)),
+    ('opc', c__EA_opc_t),
+    ('flags', ir3_instruction_flags),
+    ('repeat', ctypes.c_ubyte),
+    ('nop', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('srcs_count', ctypes.c_uint32),
+    ('dsts_count', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('dsts', ctypes.POINTER(ctypes.POINTER(struct_ir3_register))),
+    ('srcs', ctypes.POINTER(ctypes.POINTER(struct_ir3_register))),
+    ('_0', union_ir3_instruction_0),
+    ('ip', ctypes.c_uint32),
+    ('PADDING_2', ctypes.c_ubyte * 4),
+    ('data', ctypes.POINTER(None)),
+    ('uses', ctypes.POINTER(struct_set)),
+    ('use_count', ctypes.c_int32),
+    ('PADDING_3', ctypes.c_ubyte * 4),
+    ('address', ctypes.POINTER(struct_ir3_register)),
+    ('deps_count', ctypes.c_uint32),
+    ('deps_sz', ctypes.c_uint32),
+    ('deps', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('barrier_class', ctypes.c_int),
+    ('barrier_conflict', ctypes.c_int),
+    ('node', struct_list_head),
+    ('rpt_node', struct_list_head),
+    ('serialno', ctypes.c_uint32),
+    ('line', ctypes.c_int32),
+]
+
+struct_ir3_block._pack_ = 1 # source:False
+struct_ir3_block._fields_ = [
+    ('node', struct_list_head),
+    ('shader', ctypes.POINTER(struct_ir3)),
+    ('nblock', ctypes.POINTER(struct_nir_block)),
+    ('instr_list', struct_list_head),
+    ('successors', ctypes.POINTER(struct_ir3_block) * 2),
+    ('divergent_condition', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('predecessors_count', ctypes.c_uint32),
+    ('predecessors_sz', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('predecessors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+    ('physical_predecessors_count', ctypes.c_uint32),
+    ('physical_predecessors_sz', ctypes.c_uint32),
+    ('physical_predecessors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+    ('physical_successors_count', ctypes.c_uint32),
+    ('physical_successors_sz', ctypes.c_uint32),
+    ('physical_successors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+    ('start_ip', ctypes.c_uint16),
+    ('end_ip', ctypes.c_uint16),
+    ('reconvergence_point', ctypes.c_bool),
+    ('in_early_preamble', ctypes.c_bool),
+    ('PADDING_2', ctypes.c_ubyte * 2),
+    ('keeps_count', ctypes.c_uint32),
+    ('keeps_sz', ctypes.c_uint32),
+    ('keeps', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('data', ctypes.POINTER(None)),
+    ('index', ctypes.c_uint32),
+    ('PADDING_3', ctypes.c_ubyte * 4),
+    ('imm_dom', ctypes.POINTER(struct_ir3_block)),
+    ('dom_children_count', ctypes.c_uint32),
+    ('dom_children_sz', ctypes.c_uint32),
+    ('dom_children', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+    ('dom_pre_index', ctypes.c_uint32),
+    ('dom_post_index', ctypes.c_uint32),
+    ('loop_depth', ctypes.c_uint32),
+    ('PADDING_4', ctypes.c_ubyte * 4),
+]
+
+class struct_ir3_merge_set(Structure):
+    pass
+
+
+# values for enumeration 'ir3_register_flags'
+ir3_register_flags__enumvalues = {
+    1: 'IR3_REG_CONST',
+    2: 'IR3_REG_IMMED',
+    4: 'IR3_REG_HALF',
+    8: 'IR3_REG_SHARED',
+    16: 'IR3_REG_RELATIV',
+    32: 'IR3_REG_R',
+    64: 'IR3_REG_FNEG',
+    128: 'IR3_REG_FABS',
+    256: 'IR3_REG_SNEG',
+    512: 'IR3_REG_SABS',
+    1024: 'IR3_REG_BNOT',
+    2048: 'IR3_REG_EI',
+    4096: 'IR3_REG_SSA',
+    8192: 'IR3_REG_ARRAY',
+    16384: 'IR3_REG_KILL',
+    32768: 'IR3_REG_FIRST_KILL',
+    65536: 'IR3_REG_UNUSED',
+    131072: 'IR3_REG_EARLY_CLOBBER',
+    262144: 'IR3_REG_LAST_USE',
+    524288: 'IR3_REG_PREDICATE',
+    1048576: 'IR3_REG_RT',
+    2097152: 'IR3_REG_ALIAS',
+    4194304: 'IR3_REG_FIRST_ALIAS',
+}
+IR3_REG_CONST = 1
+IR3_REG_IMMED = 2
+IR3_REG_HALF = 4
+IR3_REG_SHARED = 8
+IR3_REG_RELATIV = 16
+IR3_REG_R = 32
+IR3_REG_FNEG = 64
+IR3_REG_FABS = 128
+IR3_REG_SNEG = 256
+IR3_REG_SABS = 512
+IR3_REG_BNOT = 1024
+IR3_REG_EI = 2048
+IR3_REG_SSA = 4096
+IR3_REG_ARRAY = 8192
+IR3_REG_KILL = 16384
+IR3_REG_FIRST_KILL = 32768
+IR3_REG_UNUSED = 65536
+IR3_REG_EARLY_CLOBBER = 131072
+IR3_REG_LAST_USE = 262144
+IR3_REG_PREDICATE = 524288
+IR3_REG_RT = 1048576
+IR3_REG_ALIAS = 2097152
+IR3_REG_FIRST_ALIAS = 4194304
+ir3_register_flags = ctypes.c_uint32 # enum
+class union_ir3_register_0(Union):
+    pass
+
+class struct_ir3_register_0_array(Structure):
+    pass
+
+struct_ir3_register_0_array._pack_ = 1 # source:False
+struct_ir3_register_0_array._fields_ = [
+    ('id', ctypes.c_uint16),
+    ('offset', ctypes.c_int16),
+    ('base', ctypes.c_uint16),
+]
+
+union_ir3_register_0._pack_ = 1 # source:False
+union_ir3_register_0._fields_ = [
+    ('iim_val', ctypes.c_int32),
+    ('uim_val', ctypes.c_uint32),
+    ('fim_val', ctypes.c_float),
+    ('array', struct_ir3_register_0_array),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+]
+
+struct_ir3_register._pack_ = 1 # source:False
+struct_ir3_register._anonymous_ = ('_0',)
+struct_ir3_register._fields_ = [
+    ('flags', ir3_register_flags),
+    ('name', ctypes.c_uint32),
+    ('wrmask', ctypes.c_uint32, 16),
+    ('size', ctypes.c_uint32, 16),
+    ('num', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('_0', union_ir3_register_0),
+    ('instr', ctypes.POINTER(struct_ir3_instruction)),
+    ('def', ctypes.POINTER(struct_ir3_register)),
+    ('tied', ctypes.POINTER(struct_ir3_register)),
+    ('spill_slot', ctypes.c_uint32),
+    ('next_use', ctypes.c_uint32),
+    ('merge_set_offset', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('merge_set', ctypes.POINTER(struct_ir3_merge_set)),
+    ('interval_start', ctypes.c_uint32),
+    ('interval_end', ctypes.c_uint32),
+]
+
+struct_ir3_merge_set._pack_ = 1 # source:False
+struct_ir3_merge_set._fields_ = [
+    ('preferred_reg', ctypes.c_uint16),
+    ('size', ctypes.c_uint16),
+    ('alignment', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('interval_start', ctypes.c_uint32),
+    ('spill_slot', ctypes.c_uint32),
+    ('regs_count', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('regs', ctypes.POINTER(ctypes.POINTER(struct_ir3_register))),
+]
+
+try:
+    ir3_debug_print = _libraries['FIXME_STUB'].ir3_debug_print
+    ir3_debug_print.restype = None
+    ir3_debug_print.argtypes = [ctypes.POINTER(struct_ir3), ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_debug_hash_key = _libraries['FIXME_STUB'].ir3_shader_debug_hash_key
+    ir3_shader_debug_hash_key.restype = ir3_shader_debug
+    ir3_shader_debug_hash_key.argtypes = []
+except AttributeError:
+    pass
+try:
+    ir3_shader_debug_as_string = _libraries['FIXME_STUB'].ir3_shader_debug_as_string
+    ir3_shader_debug_as_string.restype = ctypes.POINTER(ctypes.c_char)
+    ir3_shader_debug_as_string.argtypes = []
+except AttributeError:
+    pass
 __all__ = \
     ['ACCESS_CAN_REORDER', 'ACCESS_CAN_SPECULATE', 'ACCESS_COHERENT',
     'ACCESS_CP_GE_COHERENT_AMD', 'ACCESS_FMASK_LOWERED_AMD',
@@ -17388,9 +18961,10 @@ __all__ = \
     'ACCESS_NON_READABLE', 'ACCESS_NON_TEMPORAL',
     'ACCESS_NON_UNIFORM', 'ACCESS_NON_WRITEABLE', 'ACCESS_RESTRICT',
     'ACCESS_SMEM_AMD', 'ACCESS_USES_FORMAT_AMD', 'ACCESS_VOLATILE',
-    'COMPARE_FUNC_ALWAYS', 'COMPARE_FUNC_EQUAL',
-    'COMPARE_FUNC_GEQUAL', 'COMPARE_FUNC_GREATER',
-    'COMPARE_FUNC_LEQUAL', 'COMPARE_FUNC_LESS', 'COMPARE_FUNC_NEVER',
+    'ALIAS_MEM', 'ALIAS_RT', 'ALIAS_TEX', 'COMPARE_FUNC_ALWAYS',
+    'COMPARE_FUNC_EQUAL', 'COMPARE_FUNC_GEQUAL',
+    'COMPARE_FUNC_GREATER', 'COMPARE_FUNC_LEQUAL',
+    'COMPARE_FUNC_LESS', 'COMPARE_FUNC_NEVER',
     'COMPARE_FUNC_NOTEQUAL', 'DERIVATIVE_GROUP_LINEAR',
     'DERIVATIVE_GROUP_NONE', 'DERIVATIVE_GROUP_QUADS',
     'FRAG_DEPTH_LAYOUT_ANY', 'FRAG_DEPTH_LAYOUT_GREATER',
@@ -17420,6 +18994,30 @@ __all__ = \
     'GLSL_TYPE_SAMPLER', 'GLSL_TYPE_STRUCT', 'GLSL_TYPE_SUBROUTINE',
     'GLSL_TYPE_TEXTURE', 'GLSL_TYPE_UINT', 'GLSL_TYPE_UINT16',
     'GLSL_TYPE_UINT64', 'GLSL_TYPE_UINT8', 'GLSL_TYPE_VOID',
+    'IR3_COND_EQ', 'IR3_COND_GE', 'IR3_COND_GT', 'IR3_COND_LE',
+    'IR3_COND_LT', 'IR3_COND_NE', 'IR3_DBG_ASM_ROUNDTRIP',
+    'IR3_DBG_DISASM', 'IR3_DBG_EXPANDRPT', 'IR3_DBG_FORCES2EN',
+    'IR3_DBG_FULLNOP', 'IR3_DBG_FULLSYNC', 'IR3_DBG_NOALIASRT',
+    'IR3_DBG_NOALIASTEX', 'IR3_DBG_NOCACHE', 'IR3_DBG_NODESCPREFETCH',
+    'IR3_DBG_NOEARLYPREAMBLE', 'IR3_DBG_NOFP16', 'IR3_DBG_NOPREAMBLE',
+    'IR3_DBG_NOUBOOPT', 'IR3_DBG_OPTMSGS', 'IR3_DBG_RAMSGS',
+    'IR3_DBG_SCHEDMSGS', 'IR3_DBG_SHADER_CS', 'IR3_DBG_SHADER_FS',
+    'IR3_DBG_SHADER_GS', 'IR3_DBG_SHADER_INTERNAL',
+    'IR3_DBG_SHADER_TCS', 'IR3_DBG_SHADER_TES', 'IR3_DBG_SHADER_VS',
+    'IR3_DBG_SPILLALL', 'IR3_INSTR_3D', 'IR3_INSTR_A',
+    'IR3_INSTR_A1EN', 'IR3_INSTR_B', 'IR3_INSTR_EQ',
+    'IR3_INSTR_IMM_OFFSET', 'IR3_INSTR_INV_1D', 'IR3_INSTR_JP',
+    'IR3_INSTR_MARK', 'IR3_INSTR_NEEDS_HELPERS', 'IR3_INSTR_NONUNIF',
+    'IR3_INSTR_O', 'IR3_INSTR_P', 'IR3_INSTR_S', 'IR3_INSTR_S2EN',
+    'IR3_INSTR_SAT', 'IR3_INSTR_SHARED_SPILL', 'IR3_INSTR_SS',
+    'IR3_INSTR_SY', 'IR3_INSTR_U', 'IR3_INSTR_UL', 'IR3_INSTR_UNUSED',
+    'IR3_INSTR_V', 'IR3_REG_ALIAS', 'IR3_REG_ARRAY', 'IR3_REG_BNOT',
+    'IR3_REG_CONST', 'IR3_REG_EARLY_CLOBBER', 'IR3_REG_EI',
+    'IR3_REG_FABS', 'IR3_REG_FIRST_ALIAS', 'IR3_REG_FIRST_KILL',
+    'IR3_REG_FNEG', 'IR3_REG_HALF', 'IR3_REG_IMMED', 'IR3_REG_KILL',
+    'IR3_REG_LAST_USE', 'IR3_REG_PREDICATE', 'IR3_REG_R',
+    'IR3_REG_RELATIV', 'IR3_REG_RT', 'IR3_REG_SABS', 'IR3_REG_SHARED',
+    'IR3_REG_SNEG', 'IR3_REG_SSA', 'IR3_REG_UNUSED',
     'LLVMArrayTypeKind', 'LLVMAtomicRMWBinOp',
     'LLVMAtomicRMWBinOpAdd', 'LLVMAtomicRMWBinOpAnd',
     'LLVMAtomicRMWBinOpFAdd', 'LLVMAtomicRMWBinOpFMax',
@@ -17552,8 +19150,78 @@ __all__ = \
     'NIR_MEMORY_RELEASE', 'NIR_OP_IS_2SRC_COMMUTATIVE',
     'NIR_OP_IS_ASSOCIATIVE', 'NIR_OP_IS_SELECTION',
     'NUM_TOTAL_VARYING_SLOTS', 'NV_DEVICE_TYPE_DIS',
-    'NV_DEVICE_TYPE_IGP', 'NV_DEVICE_TYPE_SOC', 'PIPE_BUFFER',
-    'PIPE_FORMAT_A16_FLOAT', 'PIPE_FORMAT_A16_SINT',
+    'NV_DEVICE_TYPE_IGP', 'NV_DEVICE_TYPE_SOC', 'OPC_ABSNEG_F',
+    'OPC_ABSNEG_S', 'OPC_ADD_F', 'OPC_ADD_S', 'OPC_ADD_U',
+    'OPC_ALIAS', 'OPC_ALL_MACRO', 'OPC_ANDG', 'OPC_AND_B',
+    'OPC_ANY_MACRO', 'OPC_ASHR_B', 'OPC_ATOMIC_ADD', 'OPC_ATOMIC_AND',
+    'OPC_ATOMIC_B_ADD', 'OPC_ATOMIC_B_AND', 'OPC_ATOMIC_B_CMPXCHG',
+    'OPC_ATOMIC_B_DEC', 'OPC_ATOMIC_B_INC', 'OPC_ATOMIC_B_MAX',
+    'OPC_ATOMIC_B_MIN', 'OPC_ATOMIC_B_OR', 'OPC_ATOMIC_B_SUB',
+    'OPC_ATOMIC_B_XCHG', 'OPC_ATOMIC_B_XOR', 'OPC_ATOMIC_CMPXCHG',
+    'OPC_ATOMIC_DEC', 'OPC_ATOMIC_G_ADD', 'OPC_ATOMIC_G_AND',
+    'OPC_ATOMIC_G_CMPXCHG', 'OPC_ATOMIC_G_DEC', 'OPC_ATOMIC_G_INC',
+    'OPC_ATOMIC_G_MAX', 'OPC_ATOMIC_G_MIN', 'OPC_ATOMIC_G_OR',
+    'OPC_ATOMIC_G_SUB', 'OPC_ATOMIC_G_XCHG', 'OPC_ATOMIC_G_XOR',
+    'OPC_ATOMIC_INC', 'OPC_ATOMIC_MAX', 'OPC_ATOMIC_MIN',
+    'OPC_ATOMIC_OR', 'OPC_ATOMIC_SUB', 'OPC_ATOMIC_S_ADD',
+    'OPC_ATOMIC_S_AND', 'OPC_ATOMIC_S_CMPXCHG', 'OPC_ATOMIC_S_DEC',
+    'OPC_ATOMIC_S_INC', 'OPC_ATOMIC_S_MAX', 'OPC_ATOMIC_S_MIN',
+    'OPC_ATOMIC_S_OR', 'OPC_ATOMIC_S_SUB', 'OPC_ATOMIC_S_XCHG',
+    'OPC_ATOMIC_S_XOR', 'OPC_ATOMIC_XCHG', 'OPC_ATOMIC_XOR',
+    'OPC_BALL', 'OPC_BALLOT_MACRO', 'OPC_BANY', 'OPC_BAR',
+    'OPC_BARY_F', 'OPC_BFREV_B', 'OPC_BKT', 'OPC_BR', 'OPC_BRAA',
+    'OPC_BRAC', 'OPC_BRAO', 'OPC_BRAX', 'OPC_BRCST_ACTIVE',
+    'OPC_CALL', 'OPC_CBITS_B', 'OPC_CCINV', 'OPC_CEIL_F',
+    'OPC_CHMASK', 'OPC_CHSH', 'OPC_CLZ_B', 'OPC_CLZ_S', 'OPC_CMPS_F',
+    'OPC_CMPS_S', 'OPC_CMPS_U', 'OPC_CMPV_F', 'OPC_CMPV_S',
+    'OPC_CMPV_U', 'OPC_CONV', 'OPC_CONVM', 'OPC_COS', 'OPC_CUT',
+    'OPC_DBG', 'OPC_DCCLN', 'OPC_DCFLU', 'OPC_DCINV', 'OPC_DEMOTE',
+    'OPC_DP2ACC', 'OPC_DP4ACC', 'OPC_DSX', 'OPC_DSXPP_1',
+    'OPC_DSXPP_MACRO', 'OPC_DSY', 'OPC_DSYPP_1', 'OPC_DSYPP_MACRO',
+    'OPC_ELECT_MACRO', 'OPC_EMIT', 'OPC_EMIT2', 'OPC_END',
+    'OPC_ENDLS', 'OPC_EXP2', 'OPC_FENCE', 'OPC_FLAT_B', 'OPC_FLOOR_F',
+    'OPC_FLOW_REV', 'OPC_G2L', 'OPC_GAT', 'OPC_GATHER4A',
+    'OPC_GATHER4B', 'OPC_GATHER4G', 'OPC_GATHER4R', 'OPC_GETBIT_B',
+    'OPC_GETBUF', 'OPC_GETFIBERID', 'OPC_GETINFO', 'OPC_GETLAST',
+    'OPC_GETLOD', 'OPC_GETONE', 'OPC_GETPOS', 'OPC_GETSIZE',
+    'OPC_GETSPID', 'OPC_GETWID', 'OPC_HEXP2', 'OPC_HLOG2', 'OPC_HRSQ',
+    'OPC_ICINV', 'OPC_ISAM', 'OPC_ISAML', 'OPC_ISAMM', 'OPC_JUMP',
+    'OPC_KILL', 'OPC_L2G', 'OPC_LDC', 'OPC_LDC_K', 'OPC_LDG',
+    'OPC_LDGB', 'OPC_LDG_A', 'OPC_LDG_K', 'OPC_LDIB', 'OPC_LDIB_B',
+    'OPC_LDL', 'OPC_LDLV', 'OPC_LDLW', 'OPC_LDP', 'OPC_LOCK',
+    'OPC_LOG2', 'OPC_MADSH_M16', 'OPC_MADSH_U16', 'OPC_MAD_F16',
+    'OPC_MAD_F32', 'OPC_MAD_S16', 'OPC_MAD_S24', 'OPC_MAD_U16',
+    'OPC_MAD_U24', 'OPC_MAX_F', 'OPC_MAX_S', 'OPC_MAX_U',
+    'OPC_META_COLLECT', 'OPC_META_INPUT', 'OPC_META_PARALLEL_COPY',
+    'OPC_META_PHI', 'OPC_META_RAW', 'OPC_META_SPLIT',
+    'OPC_META_TEX_PREFETCH', 'OPC_MGEN_B', 'OPC_MIN_F', 'OPC_MIN_S',
+    'OPC_MIN_U', 'OPC_MOV', 'OPC_MOVMSK', 'OPC_MOVP', 'OPC_MOVS',
+    'OPC_MOVS_A0', 'OPC_MOVS_IMMED', 'OPC_MOV_CONST', 'OPC_MOV_GPR',
+    'OPC_MOV_IMMED', 'OPC_MOV_RELCONST', 'OPC_MOV_RELGPR', 'OPC_MSAD',
+    'OPC_MULL_U', 'OPC_MUL_F', 'OPC_MUL_S24', 'OPC_MUL_U24',
+    'OPC_NOP', 'OPC_NOT_B', 'OPC_OR_B', 'OPC_PIPC', 'OPC_PIPR',
+    'OPC_PREDE', 'OPC_PREDF', 'OPC_PREDT', 'OPC_PREFETCH',
+    'OPC_PUSH_CONSTS_LOAD_MACRO', 'OPC_QUAD_SHUFFLE_BRCST',
+    'OPC_QUAD_SHUFFLE_DIAG', 'OPC_QUAD_SHUFFLE_HORIZ',
+    'OPC_QUAD_SHUFFLE_VERT', 'OPC_RAY_INTERSECTION', 'OPC_RCP',
+    'OPC_READ_COND_MACRO', 'OPC_READ_FIRST_MACRO',
+    'OPC_READ_GETLAST_MACRO', 'OPC_RELOAD_MACRO', 'OPC_RESBASE',
+    'OPC_RESFMT', 'OPC_RESINFO', 'OPC_RESINFO_B', 'OPC_RET',
+    'OPC_RGETINFO', 'OPC_RGETPOS', 'OPC_RNDAZ_F', 'OPC_RNDNE_F',
+    'OPC_RSQ', 'OPC_SAD_S16', 'OPC_SAD_S32', 'OPC_SAM', 'OPC_SAMB',
+    'OPC_SAMGP0', 'OPC_SAMGP1', 'OPC_SAMGP2', 'OPC_SAMGP3',
+    'OPC_SAMGQ', 'OPC_SAML', 'OPC_SCAN_CLUSTERS_MACRO',
+    'OPC_SCAN_MACRO', 'OPC_SCT', 'OPC_SEL_B16', 'OPC_SEL_B32',
+    'OPC_SEL_F16', 'OPC_SEL_F32', 'OPC_SEL_S16', 'OPC_SEL_S32',
+    'OPC_SETRM', 'OPC_SHB', 'OPC_SHFL', 'OPC_SHLG', 'OPC_SHLM',
+    'OPC_SHL_B', 'OPC_SHPE', 'OPC_SHPS', 'OPC_SHPS_MACRO', 'OPC_SHRG',
+    'OPC_SHRM', 'OPC_SHR_B', 'OPC_SIGN_F', 'OPC_SIN', 'OPC_SLEEP',
+    'OPC_SPILL_MACRO', 'OPC_SQRT', 'OPC_STC', 'OPC_STG', 'OPC_STGB',
+    'OPC_STG_A', 'OPC_STIB', 'OPC_STIB_B', 'OPC_STKR', 'OPC_STKS',
+    'OPC_STL', 'OPC_STLW', 'OPC_STP', 'OPC_STSC', 'OPC_SUB_S',
+    'OPC_SUB_U', 'OPC_SWZ', 'OPC_TCINV', 'OPC_TRUNC_F', 'OPC_UNLOCK',
+    'OPC_WMM', 'OPC_WMM_ACCU', 'OPC_XCLR', 'OPC_XOR_B', 'OPC_XSET',
+    'PIPE_BUFFER', 'PIPE_FORMAT_A16_FLOAT', 'PIPE_FORMAT_A16_SINT',
     'PIPE_FORMAT_A16_SNORM', 'PIPE_FORMAT_A16_UINT',
     'PIPE_FORMAT_A16_UNORM', 'PIPE_FORMAT_A1B5G5R5_UINT',
     'PIPE_FORMAT_A1B5G5R5_UNORM', 'PIPE_FORMAT_A1R5G5B5_UINT',
@@ -17808,14 +19476,21 @@ __all__ = \
     'PIPE_TEXTURE_1D_ARRAY', 'PIPE_TEXTURE_2D',
     'PIPE_TEXTURE_2D_ARRAY', 'PIPE_TEXTURE_3D', 'PIPE_TEXTURE_CUBE',
     'PIPE_TEXTURE_CUBE_ARRAY', 'PIPE_TEXTURE_RECT',
-    'RALLOC_PRINT_INFO_SUMMARY_ONLY', 'SCOPE_DEVICE',
-    'SCOPE_INVOCATION', 'SCOPE_NONE', 'SCOPE_QUEUE_FAMILY',
-    'SCOPE_SHADER_CALL', 'SCOPE_SUBGROUP', 'SCOPE_WORKGROUP',
-    'SUBGROUP_SIZE_API_CONSTANT', 'SUBGROUP_SIZE_FULL_SUBGROUPS',
-    'SUBGROUP_SIZE_REQUIRE_128', 'SUBGROUP_SIZE_REQUIRE_16',
-    'SUBGROUP_SIZE_REQUIRE_32', 'SUBGROUP_SIZE_REQUIRE_4',
-    'SUBGROUP_SIZE_REQUIRE_64', 'SUBGROUP_SIZE_REQUIRE_8',
-    'SUBGROUP_SIZE_UNIFORM', 'SUBGROUP_SIZE_VARYING',
+    'RALLOC_PRINT_INFO_SUMMARY_ONLY', 'REDUCE_OP_ADD_F',
+    'REDUCE_OP_ADD_U', 'REDUCE_OP_AND_B', 'REDUCE_OP_MAX_F',
+    'REDUCE_OP_MAX_S', 'REDUCE_OP_MAX_U', 'REDUCE_OP_MIN_F',
+    'REDUCE_OP_MIN_S', 'REDUCE_OP_MIN_U', 'REDUCE_OP_MUL_F',
+    'REDUCE_OP_MUL_U', 'REDUCE_OP_OR_B', 'REDUCE_OP_XOR_B',
+    'ROUND_EVEN', 'ROUND_NEG_INF', 'ROUND_POS_INF', 'ROUND_ZERO',
+    'SCOPE_DEVICE', 'SCOPE_INVOCATION', 'SCOPE_NONE',
+    'SCOPE_QUEUE_FAMILY', 'SCOPE_SHADER_CALL', 'SCOPE_SUBGROUP',
+    'SCOPE_WORKGROUP', 'SHFL_DOWN', 'SHFL_RDOWN', 'SHFL_RUP',
+    'SHFL_UP', 'SHFL_XOR', 'SUBGROUP_SIZE_API_CONSTANT',
+    'SUBGROUP_SIZE_FULL_SUBGROUPS', 'SUBGROUP_SIZE_REQUIRE_128',
+    'SUBGROUP_SIZE_REQUIRE_16', 'SUBGROUP_SIZE_REQUIRE_32',
+    'SUBGROUP_SIZE_REQUIRE_4', 'SUBGROUP_SIZE_REQUIRE_64',
+    'SUBGROUP_SIZE_REQUIRE_8', 'SUBGROUP_SIZE_UNIFORM',
+    'SUBGROUP_SIZE_VARYING',
     'SYSTEM_VALUE_BARYCENTRIC_LINEAR_CENTROID',
     'SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD',
     'SYSTEM_VALUE_BARYCENTRIC_LINEAR_PIXEL',
@@ -17891,6 +19566,8 @@ __all__ = \
     'TGSI_TEXTURE_SHADOW2D', 'TGSI_TEXTURE_SHADOW2D_ARRAY',
     'TGSI_TEXTURE_SHADOWCUBE', 'TGSI_TEXTURE_SHADOWCUBE_ARRAY',
     'TGSI_TEXTURE_SHADOWRECT', 'TGSI_TEXTURE_UNKNOWN',
+    'TYPE_ATOMIC_U64', 'TYPE_F16', 'TYPE_F32', 'TYPE_S16', 'TYPE_S32',
+    'TYPE_U16', 'TYPE_U32', 'TYPE_U8', 'TYPE_U8_32',
     'UTIL_FORMAT_COLORSPACE_RGB', 'UTIL_FORMAT_COLORSPACE_SRGB',
     'UTIL_FORMAT_COLORSPACE_YUV', 'UTIL_FORMAT_COLORSPACE_ZS',
     'UTIL_FORMAT_LAYOUT_ASTC', 'UTIL_FORMAT_LAYOUT_ATC',
@@ -17969,11 +19646,11 @@ __all__ = \
     'blob_write_uint32', 'blob_write_uint64', 'blob_write_uint8',
     'c__EA_LLVMAtomicRMWBinOp', 'c__EA_LLVMIntPredicate',
     'c__EA_LLVMTypeKind', 'c__EA_gl_system_value',
-    'c__EA_gl_varying_slot', 'c__EA_mesa_scope',
-    'c__EA_nir_address_format', 'c__EA_nir_alu_type',
-    'c__EA_nir_atomic_op', 'c__EA_nir_cf_node_type',
-    'c__EA_nir_cmat_signed', 'c__EA_nir_cursor_option',
-    'c__EA_nir_depth_layout',
+    'c__EA_gl_varying_slot', 'c__EA_ir3_alias_scope',
+    'c__EA_mesa_scope', 'c__EA_nir_address_format',
+    'c__EA_nir_alu_type', 'c__EA_nir_atomic_op',
+    'c__EA_nir_cf_node_type', 'c__EA_nir_cmat_signed',
+    'c__EA_nir_cursor_option', 'c__EA_nir_depth_layout',
     'c__EA_nir_deref_instr_has_complex_use_options',
     'c__EA_nir_deref_type', 'c__EA_nir_divergence_options',
     'c__EA_nir_instr_type', 'c__EA_nir_intrinsic_index_flag',
@@ -17996,12 +19673,14 @@ __all__ = \
     'c__EA_nir_ray_query_value', 'c__EA_nir_resource_data_intel',
     'c__EA_nir_rounding_mode', 'c__EA_nir_selection_control',
     'c__EA_nir_var_declaration_type', 'c__EA_nir_variable_mode',
-    'c__Ea_GLSL_PRECISION_NONE', 'c__Ea_LP_JIT_BUFFER_BASE',
-    'c__Ea_LP_JIT_IMAGE_BASE', 'c__Ea_LP_JIT_RES_CONSTANTS',
-    'c__Ea_LP_JIT_SAMPLER_MIN_LOD', 'c__Ea_LP_JIT_TEXTURE_BASE',
+    'c__EA_opc_t', 'c__EA_reduce_op_t', 'c__EA_round_t',
+    'c__EA_type_t', 'c__Ea_GLSL_PRECISION_NONE',
+    'c__Ea_LP_JIT_BUFFER_BASE', 'c__Ea_LP_JIT_IMAGE_BASE',
+    'c__Ea_LP_JIT_RES_CONSTANTS', 'c__Ea_LP_JIT_SAMPLER_MIN_LOD',
+    'c__Ea_LP_JIT_TEXTURE_BASE',
     'c__Ea_LP_JIT_VERTEX_HEADER_VERTEX_ID',
     'c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY', 'c_bool', 'c_uint32',
-    'c_uint64', 'compare_func', 'decode_type_from_blob',
+    'c_uint32', 'c_uint64', 'compare_func', 'decode_type_from_blob',
     'encode_type_to_blob', 'func_pointer',
     'gallivm_add_global_mapping', 'gallivm_compile_module',
     'gallivm_create', 'gallivm_create_target_library_info',
@@ -18116,6 +19795,14 @@ __all__ = \
     'glsl_vec2_type', 'glsl_vec4_type', 'glsl_vec_type',
     'glsl_vector_type', 'glsl_void_type', 'glsl_without_array',
     'glsl_without_array_or_matrix', 'int64_t', 'intptr_t',
+    'ir3_compile_shader_nir', 'ir3_compiler_create',
+    'ir3_compiler_destroy', 'ir3_debug_print', 'ir3_disk_cache_init',
+    'ir3_disk_cache_init_shader_key', 'ir3_disk_cache_retrieve',
+    'ir3_disk_cache_store', 'ir3_get_compiler_options',
+    'ir3_instruction_flags', 'ir3_pointer_size', 'ir3_register_flags',
+    'ir3_retrieve_variant', 'ir3_shader_debug',
+    'ir3_shader_debug_as_string', 'ir3_shader_debug_hash_key',
+    'ir3_shader_override_path', 'ir3_store_variant',
     'linear_alloc_child', 'linear_alloc_child_array',
     'linear_asprintf', 'linear_asprintf_append',
     'linear_asprintf_rewrite_tail', 'linear_context',
@@ -19756,10 +21443,10 @@ __all__ = \
     'ralloc_vasprintf_append', 'ralloc_vasprintf_rewrite_tail',
     'reralloc_array_size', 'reralloc_size', 'rerzalloc_array_size',
     'rerzalloc_size', 'rzalloc_array_size', 'rzalloc_size',
-    'should_print_nir', 'should_skip_nir', 'size_t',
-    'struct_LLVMOpaqueBasicBlock', 'struct_LLVMOpaqueBuilder',
-    'struct_LLVMOpaqueContext', 'struct_LLVMOpaqueDIBuilder',
-    'struct_LLVMOpaqueExecutionEngine',
+    'shader_debug_enabled', 'should_print_nir', 'should_skip_nir',
+    'size_t', 'struct_LLVMOpaqueBasicBlock',
+    'struct_LLVMOpaqueBuilder', 'struct_LLVMOpaqueContext',
+    'struct_LLVMOpaqueDIBuilder', 'struct_LLVMOpaqueExecutionEngine',
     'struct_LLVMOpaqueMCJITMemoryManager',
     'struct_LLVMOpaqueMetadata', 'struct_LLVMOpaqueModule',
     'struct_LLVMOpaqueTargetData',
@@ -19773,10 +21460,28 @@ __all__ = \
     'struct_c__SA_nir_input_to_output_deps_0',
     'struct_c__SA_nir_output_clipper_var_groups',
     'struct_c__SA_nir_output_deps', 'struct_c__SA_nir_output_deps_0',
-    'struct_exec_list', 'struct_exec_node', 'struct_gallivm_state',
-    'struct_gc_ctx', 'struct_glsl_cmat_description',
-    'struct_glsl_struct_field', 'struct_glsl_struct_field_0_0',
-    'struct_glsl_type', 'struct_hash_entry', 'struct_hash_table',
+    'struct_disk_cache', 'struct_exec_list', 'struct_exec_node',
+    'struct_fd_dev_id', 'struct_fd_dev_info',
+    'struct_fd_dev_info_1_1', 'struct_fd_dev_info_1_magic',
+    'struct_fd_dev_info_a6xx', 'struct_fd_dev_info_a7xx',
+    'struct_fd_device', 'struct_gallivm_state', 'struct_gc_ctx',
+    'struct_glsl_cmat_description', 'struct_glsl_struct_field',
+    'struct_glsl_struct_field_0_0', 'struct_glsl_type',
+    'struct_hash_entry', 'struct_hash_table', 'struct_ir3',
+    'struct_ir3_block', 'struct_ir3_compiler',
+    'struct_ir3_compiler_delay_slots', 'struct_ir3_compiler_options',
+    'struct_ir3_instruction', 'struct_ir3_instruction_0_cat0',
+    'struct_ir3_instruction_0_cat1', 'struct_ir3_instruction_0_cat2',
+    'struct_ir3_instruction_0_cat3', 'struct_ir3_instruction_0_cat5',
+    'struct_ir3_instruction_0_cat6', 'struct_ir3_instruction_0_cat7',
+    'struct_ir3_instruction_0_end', 'struct_ir3_instruction_0_input',
+    'struct_ir3_instruction_0_phi',
+    'struct_ir3_instruction_0_prefetch',
+    'struct_ir3_instruction_0_push_consts',
+    'struct_ir3_instruction_0_raw', 'struct_ir3_instruction_0_split',
+    'struct_ir3_merge_set', 'struct_ir3_ra_reg_set',
+    'struct_ir3_register', 'struct_ir3_register_0_array',
+    'struct_ir3_shader', 'struct_ir3_shader_variant',
     'struct_linear_ctx', 'struct_list_head',
     'struct_lp_bld_tgsi_system_values', 'struct_lp_build_context',
     'struct_lp_build_coro_suspend_info', 'struct_lp_build_fn',
@@ -19868,13 +21573,14 @@ __all__ = \
     'struct_util_format_description', 'tess_primitive_mode',
     'tgsi_texture_type', 'u_printf_info', 'uint16_t', 'uint32_t',
     'uint64_t', 'uint8_t', 'union_c__UA_nir_const_value',
-    'union_glsl_struct_field_0', 'union_glsl_type_fields',
-    'union_lp_descriptor_0', 'union_lp_jit_buffer_0',
-    'union_lp_jit_texture_0', 'union_nak_shader_info_0',
-    'union_nir_cursor_0', 'union_nir_deref_instr_0',
-    'union_nir_deref_instr_1', 'union_nir_parallel_copy_entry_dest',
-    'union_nir_variable_data_0', 'union_shader_info_0',
-    'union_util_format_description_0', 'util_format_colorspace',
-    'util_format_layout', 'va_list']
+    'union_fd_dev_info_0', 'union_glsl_struct_field_0',
+    'union_glsl_type_fields', 'union_ir3_instruction_0',
+    'union_ir3_register_0', 'union_lp_descriptor_0',
+    'union_lp_jit_buffer_0', 'union_lp_jit_texture_0',
+    'union_nak_shader_info_0', 'union_nir_cursor_0',
+    'union_nir_deref_instr_0', 'union_nir_deref_instr_1',
+    'union_nir_parallel_copy_entry_dest', 'union_nir_variable_data_0',
+    'union_shader_info_0', 'union_util_format_description_0',
+    'util_format_colorspace', 'util_format_layout', 'va_list']
 lvp_nir_options = gzip.decompress(base64.b64decode('H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA'))
 def __getattr__(nm): raise AttributeError() if dll else FileNotFoundError(f'libtinymesa not found (MESA_PATH={BASE}). See https://github.com/sirhcm/tinymesa (tinymesa-32dc66c, mesa-25.2.4)')

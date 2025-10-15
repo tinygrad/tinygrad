@@ -510,10 +510,11 @@ generate_mesa() {
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_jit_types.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_flow.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_const.h \
+    $MESA_SRC/src/freedreno/ir3/ir3_compiler.h \
     $MESA_SRC/src/compiler/glsl_types.h \
     $MESA_SRC/src/util/blob.h \
     $MESA_SRC/src/util/ralloc.h \
-    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/gen -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/src/gallium/auxiliary -I$MESA_SRC/src/gallium/include -I$(llvm-config-20 --includedir)" \
+    --clang-args="-DHAVE_ENDIAN_H -DHAVE_STRUCT_TIMESPEC -DHAVE_PTHREAD -I$MESA_SRC/src -I$MESA_SRC/include -I$MESA_SRC/gen -I$MESA_SRC/src/compiler/nir -I$MESA_SRC/src/gallium/auxiliary -I$MESA_SRC/src/gallium/include  -I$MESA_SRC/src/freedreno/common -I$(llvm-config-20 --includedir)" \
     -l $TINYMESA_SO \
     -o $BASE/mesa.py
 
@@ -537,6 +538,7 @@ EOF
   sed -i "s/('\(\w\+\)', pipe_shader_type, 8)/('\1', ctypes.c_ubyte)/" $BASE/mesa.py
   sed -i "s/\([0-9]\+\)()/\1/" $BASE/mesa.py
   sed -i "s/\(struct_nir_builder._pack_\) = 1/\1 = 0/" $BASE/mesa.py
+  sed -i "s/(\('\w\+'\), ),/(\1, ctypes.c_int),/" $BASE/mesa.py
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
