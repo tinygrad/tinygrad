@@ -7,18 +7,17 @@
 # LONGDOUBLE_SIZE is: 16
 #
 import ctypes, ctypes.util, os
-PATHS_TO_TRY = [
-  '/opt/rocm/lib/libamd_comgr.so',
-  os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so',
-  '/usr/local/lib/libamd_comgr.dylib',
-  '/opt/homebrew/lib/libamd_comgr.dylib',
-]
 def _try_dlopen_amd_comgr():
   library = ctypes.util.find_library("amd_comgr")
   if library: return ctypes.CDLL(library)
-  for candidate in PATHS_TO_TRY:
-    try: return ctypes.CDLL(candidate)
-    except OSError: pass
+  try: return _try_dlopen_amd_comgr()
+  except OSError: pass
+  try: return ctypes.CDLL(os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so')
+  except OSError: pass
+  try: return ctypes.CDLL('/usr/local/lib/libamd_comgr.dylib')
+  except OSError: pass
+  try: return ctypes.CDLL('/opt/homebrew/lib/libamd_comgr.dylib')
+  except OSError: pass
   return None
 
 

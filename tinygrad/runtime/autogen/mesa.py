@@ -10,18 +10,17 @@ import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as he
 def brew_path(nm):
   try: return f"{subprocess.check_output(['brew', '--prefix', nm]).decode().strip()}/lib/lib{nm}.dylib"
   except Exception: return 'failed'
-PATHS_TO_TRY = [
-  (BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'),
-  f'{BASE}/libtinymesa{EXT}',
-  brew_path('tinymesa_cpu'),
-  brew_path('tinymesa'),
-]
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
   if library: return ctypes.CDLL(library)
-  for candidate in PATHS_TO_TRY:
-    try: return ctypes.CDLL(candidate)
-    except OSError: pass
+  try: return ctypes.CDLL((BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'))
+  except OSError: pass
+  try: return ctypes.CDLL(f'{BASE}/libtinymesa{EXT}')
+  except OSError: pass
+  try: return ctypes.CDLL(brew_path('tinymesa_cpu'))
+  except OSError: pass
+  try: return ctypes.CDLL(brew_path('tinymesa'))
+  except OSError: pass
   return None
 
 
