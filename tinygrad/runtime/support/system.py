@@ -19,7 +19,21 @@ class _System:
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
-  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
+  def alloc_sysmem(self, sz:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
+    if OSX:
+      szo = round_up(sz, 0x1000)
+      sz = round_up(sz, mmap.PAGESIZE)
+      if System.iokit.IOConnectMapMemory64(System.macos_tinygpu_conn, ctypes.c_uint32(sz), System.mach_task_self,
+        ctypes.byref(addr:=ctypes.c_uint64(0)), ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({sz=}) failed")
+      sysmem = MMIOInterface(addr.value, size.value).view(fmt='Q')
+      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
+      paddrs_p = []
+      if contiguous: assert len(paddrs) == 1
+      for p, sz in paddrs:
+        for i in range(0, sz, 0x1000): paddrs_p.append(p + i)
+      if data is not None: to_mv(sysmem.addr, len(data))[:] = data
+      return sysmem.addr, paddrs_p[:szo//0x1000]
+
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
@@ -143,7 +157,9 @@ class PCIDevice:
     return MMIOInterface(loc, sz, fmt=fmt)
 
 class APLPCIDevice(PCIDevice):
-  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None): self.pcibus, self.bars = pcibus, {b: self.map_mem(b) for b in bars}
+  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    self.pcibus, self.bars = pcibus, {b: self.map_mem(b) for b in bars}
+    self.bar_info = {b:(0, 0x10000000) for b in bars}
   def map_mem(self, typ:int) -> MMIOInterface:
     if System.iokit.IOConnectMapMemory64(System.macos_tinygpu_conn, ctypes.c_uint32(typ), System.mach_task_self,
       ctypes.byref(addr:=ctypes.c_uint64(0)), ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({typ=}) failed")
@@ -207,7 +223,7 @@ class APLPCIIfaceBase(LNXPCIIfaceBase):
     self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
-    if host or uncached or cpu_access: # cpu access memory goes here, since bar is small.
+    if host or ((uncached or cpu_access) and not contiguous) : # cpu access memory goes here, since bar is small.
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       assert size >= mmap.PAGESIZE, "Size must be at least one page"
 
@@ -215,10 +231,11 @@ class APLPCIIfaceBase(LNXPCIIfaceBase):
       paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
 
       mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True), view=sysmem.view(fmt='B'), owner=self.dev)
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]), view=sysmem.view(fmt='B'), owner=self.dev)
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
+    vw = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
+    return HCQBuffer(mapping.va_addr, size, view=vw, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 

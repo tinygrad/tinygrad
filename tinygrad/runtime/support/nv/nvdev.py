@@ -87,7 +87,7 @@ class NVDev(PCIDevImplBase):
     # 5           PTE_64K / PTE_4K                    20:16 / 20:12
     bits, shifts = (56, [12, 21, 29, 38, 47, 56]) if self.mmu_ver == 3 else (48, [12, 21, 29, 38, 47])
     self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts, va_base=0,
-      palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]])
+      palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=True)
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
@@ -135,7 +135,8 @@ class NVDev(PCIDevImplBase):
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
 
   def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:
-    va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
+    sz = ctypes.sizeof(type(struct))
+    va, paddrs = System.alloc_sysmem(sz, contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
     return type(struct).from_address(va), paddrs[0]
 
@@ -146,6 +147,8 @@ class NVDev(PCIDevImplBase):
   def extract_fw(self, file:str, dname:str) -> bytes:
     # Extracts the firmware binary from the given header
     tname = file.replace("kgsp", "kgspGet")
+    # print(self.chip_name)
+    self.chip_name = "GB202"
     text = self._download(f"src/nvidia/generated/g_bindata_{tname}_{self.chip_name}.c")
     info, sl = text[text[:text.index(dnm:=f'{file}_{self.chip_name}_{dname}')].rindex("COMPRESSION:"):][:16], text[text.index(dnm) + len(dnm) + 7:]
     image = bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))

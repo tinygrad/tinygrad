@@ -113,7 +113,9 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
     else:
       cmdq_addr = dev.cmdq_allocator.alloc(len(self._q) * 4)
       cmdq_wptr = (cmdq_addr - dev.cmdq_page.va_addr) // 4
-      dev.cmdq[cmdq_wptr : cmdq_wptr + len(self._q)] = array.array('I', self._q)
+      # print(hex(dev.cmdq.addr), hex(cmdq_wptr))
+      # dev.cmdq[cmdq_wptr : cmdq_wptr + len(self._q)] = array.array('I', self._q)
+      for i in range(len(self._q)): dev.cmdq[cmdq_wptr + i] = self._q[i]
 
     gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self._q) << 42) | (1 << 41)
     gpfifo.controls.GPPut = (gpfifo.put_value + 1) % gpfifo.entries_count
@@ -135,7 +137,7 @@ class NVComputeQueue(NVCommandQueue):
     qmd_buf.cpu_view().view(size=prg.qmd.mv.nbytes, fmt='B')[:] = prg.qmd.mv
     assert qmd_buf.va_addr < (1 << 40), f"large qmd addr {qmd_buf.va_addr:x}"
 
-    qmd = QMD(dev=prg.dev, addr=cast(int, qmd_buf.va_addr)) # Save qmd for later update
+    qmd = QMD(dev=prg.dev, addr=cast(int, qmd_buf.cpu_view().addr)) # Save qmd for later update
 
     self.bind_sints_to_mem(*global_size, mem=qmd_buf.cpu_view(), fmt='I', offset=qmd.field_offset('cta_raster_width' if qmd.ver<4 else 'grid_width'))
     self.bind_sints_to_mem(*(local_size[:2]), mem=qmd_buf.cpu_view(), fmt='H', offset=qmd.field_offset('cta_thread_dimension0'))
@@ -156,10 +158,14 @@ class NVComputeQueue(NVCommandQueue):
       for i in range(2):
         if self.active_qmd.read(f'release{i}_enable') == 0:
           self.active_qmd.write(**{f'release{i}_enable': 1})
-          self.bind_sints_to_mem(signal.value_addr, mem=self.active_qmd_buf.cpu_view(), fmt='Q', mask=0xfffffffff,
+          self.bind_sints_to_mem(signal.value_addr & 0xffffffff, mem=self.active_qmd_buf.cpu_view(), fmt='I', mask=0xfffffffff,
             offset=self.active_qmd.field_offset(f'release{i}_address_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_addr_lower'))
-          self.bind_sints_to_mem(value, mem=self.active_qmd_buf.cpu_view(), fmt='Q',
+          self.bind_sints_to_mem(signal.value_addr >> 32, mem=self.active_qmd_buf.cpu_view(), fmt='I', mask=0xfffffffff,
+            offset=self.active_qmd.field_offset(f'release{i}_address_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_addr_lower') + 4)
+          self.bind_sints_to_mem(value & 0xffffffff, mem=self.active_qmd_buf.cpu_view(), fmt='I',
             offset=self.active_qmd.field_offset(f'release{i}_payload_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_payload_lower'))
+          self.bind_sints_to_mem(value >> 32, mem=self.active_qmd_buf.cpu_view(), fmt='I',
+            offset=self.active_qmd.field_offset(f'release{i}_payload_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_payload_lower') + 4)
           return self
 
     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
@@ -201,7 +207,7 @@ class NVProgram(HCQProgram):
     elif MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
-    self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
+    self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x4000, buf_spec:=BufferSpec(nolru=True))
     prog_addr = self.lib_gpu.va_addr
     if not NAK:
       # For MOCKGPU, the lib is PTX code, so some values are emulated.
@@ -230,7 +236,8 @@ class NVProgram(HCQProgram):
     # Ensure device has enough local memory to run the program
     self.dev._ensure_has_local_memory(self.lcmem_usage)
 
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
+    self.dev.allocator._copyin(self.lib_gpu, image)
+    self.dev.synchronize()
 
     if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
       if not NAK: self.cbuf_0[188:192], self.cbuf_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
@@ -455,13 +462,12 @@ class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
     super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2204, 0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
-    System.reserve_hugepages(64)
+    # System.reserve_hugepages(64)
 
-    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
+    # self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
     self.dev_impl:NVDev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1),
-      self.pci_dev.read_config(pci.PCI_VENDOR_ID, 4), self.pci_dev.read_config(pci.PCI_SUBSYSTEM_VENDOR_ID, 4),
-      self.pci_dev.read_config(pci.PCI_REVISION_ID, 1), self.pci_dev.bar_info)
-    self.root, self.gpu_instance, self.p2p_base_addr = 0xc1000000, 0, self.pci_dev.bar_info[1][0]
+      0x2d0510de, 0x1430196e, 0xa1, self.pci_dev.bar_info)
+    self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
     # Setup classes for the GPU
@@ -519,7 +525,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
 
     self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
     self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=cast(int, self.cmdq_page.va_addr), wrap=True)
-    self.cmdq = MMIOInterface(cast(int, self.cmdq_page.va_addr), 0x200000, fmt='I')
+    self.cmdq = self.cmdq_page.cpu_view().view(fmt='I')
 
     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
       'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
@@ -552,8 +558,8 @@ class NVDevice(HCQCompiled[HCQSignal]):
       nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS(workSubmitToken=-1))
     self.iface.setup_gpfifo_vm(gpfifo)
 
-    return GPFifo(ring=MMIOInterface(gpfifo_area.va_addr + offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken,
-                  controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.va_addr + offset + entries * 8))
+    return GPFifo(ring=gpfifo_area.cpu_view().view(offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken,
+                  controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.cpu_view().addr + offset + entries * 8))
 
   def _query_gpu_info(self, *reqs):
     nvrs = [getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_'+r.upper(), getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_LITTER_'+r.upper(), None)) for r in reqs]
