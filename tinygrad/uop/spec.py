@@ -82,13 +82,10 @@ assign_spec = PatternMatcher([
 # *** this is the spec of a Tensor in UOp ***
 
 tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
-  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
-   # naturally correct
-   lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
-   # "make things that can't be images not images" can change the buffer dtype
-   # this is fine as long as it's a realized buffer or const and base dtypes match.
-   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base \
-       and x.base.op in {Ops.BUFFER,Ops.ASSIGN,Ops.CONST})),
+  # new movement op spec
+  (UPat({Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK}, name="mv", src=(UPat.var("x"),), allow_any_len=True),
+   lambda mv,x: mv.arg == None and all(y.dtype is dtypes.index for y in mv.src[1:])),
+  (UPat({Ops.FLIP, Ops.PERMUTE}, name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),

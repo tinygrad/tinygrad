@@ -100,7 +100,7 @@ earliest_rewrites = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.arg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
 ])
 
 # *****************
@@ -254,6 +254,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE doesn't have indexing, that's implied by the ranges it closes
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
+# TODO: remove forced_reshape. it's only needed for the tags
 
 def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
@@ -271,7 +272,7 @@ def bufferize_to_store(x:UOp):
     mops = []
     walk = assign_mops
     while walk is not assign_mops.base:
-      mops.append((walk.op, walk.arg))
+      mops.append((walk.op, walk.marg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
     return ret.forced_reshape(shape).replace(tag=x.tag)
@@ -293,7 +294,7 @@ def bufferize_to_store(x:UOp):
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
   # store has the other dtype here
   # TODO: how is this unified?
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
