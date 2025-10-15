@@ -135,7 +135,7 @@ class PageTableTraverseContext:
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
     if self.free_pts and pt != self.dev.mm.root_page_table and all(not pt.valid(i) for i in range(self._pt_pte_cnt(self.pt_stack[-1][0].lv))):
-      self.dev.mm.pfree(pt.paddr)
+      self.dev.mm.pfree(pt.paddr, ptable=True)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
       return True
@@ -258,4 +258,4 @@ class MemoryManager:
     if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
-  def pfree(self, paddr:int): self.pa_allocator.free(paddr)
+  def pfree(self, paddr:int, ptable=False): (self.ptable_allocator if self.reserve_ptable and ptable else self.pa_allocator).free(paddr)
