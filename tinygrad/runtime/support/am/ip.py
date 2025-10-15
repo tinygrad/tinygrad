@@ -417,8 +417,8 @@ class AM_PSP(AM_IP):
 
   def _prep_msg1(self, data:memoryview):
     assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
-    data = pad_bytes(bytes(data) + b'\x00' * 4, 16) # HACK: apple's memcpy requires 16-bytes alignment
-    self.msg1_view[:len(data)] = data
+    padded_data = pad_bytes(bytes(data) + b'\x00' * 4, 16) # HACK: apple's memcpy requires 16-bytes alignment
+    self.msg1_view[:len(padded_data)] = padded_data
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw:int, compid:int):
