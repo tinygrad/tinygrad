@@ -195,7 +195,7 @@ class LNXPCIIfaceBase:
     if b.owner is not None and b.owner._is_cpu():
       System.lock_memory(cast(int, b.va_addr), b.size)
       paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, True
-    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
+    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, LNXPCIIfaceBase):
       paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
       snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
@@ -222,4 +222,4 @@ class APLPCIIfaceBase(LNXPCIIfaceBase):
 
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
-PCIIfaceBase = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
+PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
