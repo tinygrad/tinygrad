@@ -82,6 +82,7 @@ assign_spec = PatternMatcher([
 # *** this is the spec of a Tensor in UOp ***
 
 tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
+  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)), lambda mv,x: True),
   (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
    # naturally correct
    lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or

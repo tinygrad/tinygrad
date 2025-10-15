@@ -477,11 +477,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
-      arg_acc:list[sint] = list(itertools.accumulate(self.arg, operator.mul, initial=1))
+      arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
       # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
       # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
       return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
-    if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
+    if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
     return src_axis
 
   def _unshard(self, axis:int) -> UOp:

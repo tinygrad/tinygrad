@@ -300,7 +300,7 @@ pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.src[0].marg).rtag(m.tag)),
 ])
 
 # *****************
@@ -449,7 +449,7 @@ add_tags = PatternMatcher([
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   x = src
   while x is not src.base:
-    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.arg))
+    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
     else: return None
     x = x.src[0]
