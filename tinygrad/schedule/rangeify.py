@@ -293,7 +293,7 @@ def bufferize_to_store(x:UOp):
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
   # store has the other dtype here
   # TODO: how is this unified?
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),

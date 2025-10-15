@@ -529,17 +529,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # for all movement ops, we check shape property
     if ret.shape == self.shape and no_reshape_is_no_op: return self
     return ret
-  def forced_reshape(self, arg:tuple[sint, ...], **kwargs): return UOp(Ops.RESHAPE, kwargs.pop("dtype", self.dtype), src=(self,), arg=arg)
 
   # in these four, if the shape doesn't change we can return self
+  def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=False)
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=True)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, no_reshape_is_no_op=True)
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, no_reshape_is_no_op=True)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, no_reshape_is_no_op=True)
 
   # in these two, we have custom logic to check if they are a no-op
-  def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg) if arg != tuple(range(len(self.shape))) else self
-  def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg) if any(arg) and len(arg) == len(self.shape) else self
+  def permute(self, arg:tuple[int, ...]): return UOp(Ops.PERMUTE, self.dtype, (self,), arg) if arg != tuple(range(len(self.shape))) else self
+  def flip(self, arg:tuple[bool, ...]): return UOp(Ops.FLIP, self.dtype, (self,), arg) if any(arg) and len(arg) == len(self.shape) else self
 
   # *** uop UNIQUE ***
 
