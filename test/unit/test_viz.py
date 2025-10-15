@@ -14,7 +14,7 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
     sink = graph_rewrite(sink, TrackedPatternMatcher(pm.patterns), name=names[i] if names else None)
   return sink
 
-# real VIZ=1 loads the trace from a file, just do it in memory
+# real VIZ=1 loads the trace from a file, we just keep it in memory for tests
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt, RewriteTrace
 from tinygrad.viz import serve
 serve.trace = RewriteTrace(tracked_keys, tracked_ctxs, uop_fields)
