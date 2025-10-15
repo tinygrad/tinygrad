@@ -630,9 +630,9 @@ async function main() {
     ret = cache[ckey];
   }
   // ** Disassembly view
-  if (ckey.startsWith("/disasm")) {
+  if (ckey.startsWith("/render")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    displayGraph("disasm");
+    displayGraph("render");
     const root = document.createElement("div");
     root.className = "raw-text";
     const metadata = document.querySelector(".metadata");
@@ -666,8 +666,8 @@ async function main() {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "24px").style("height", "100%");
         return [s.label.trim(), div.node()];
       })).node());
-    } else root.appendChild(codeBlock(ret.src, "x86asm"));
-    return document.querySelector(".disasm").replaceChildren(root);
+    } else root.appendChild(codeBlock(ret.src, ret.lang));
+    return document.querySelector(".render").replaceChildren(root);
   }
   // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
@@ -691,7 +691,7 @@ async function main() {
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = ctx.fmt != null ? [ctx.fmt, "cpp"] : [ret[currentRewrite].uop, "python"];
+  const [code, lang] = [ret[currentRewrite].uop, "python"];
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
   // ** rewrite steps
   if (step.match_count >= 1) {
