@@ -1,6 +1,6 @@
 import ctypes, time, contextlib, functools
 from typing import Literal
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes, round_up
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
 
