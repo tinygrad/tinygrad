@@ -17380,6 +17380,239 @@ try:
     lp_build_const_func_pointer_from_type.argtypes = [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(None), LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError:
     pass
+class struct_fd_dev_info(Structure):
+    pass
+
+class union_fd_dev_info_0(Union):
+    pass
+
+union_fd_dev_info_0._pack_ = 1 # source:False
+union_fd_dev_info_0._fields_ = [
+    ('num_sp_cores', ctypes.c_uint32),
+    ('num_ccu', ctypes.c_uint32),
+]
+
+class struct_fd_dev_info_a6xx(Structure):
+    pass
+
+class struct_fd_dev_info_1_magic(Structure):
+    pass
+
+struct_fd_dev_info_1_magic._pack_ = 1 # source:False
+struct_fd_dev_info_1_magic._fields_ = [
+    ('PC_POWER_CNTL', ctypes.c_uint32),
+    ('TPL1_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('GRAS_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('SP_CHICKEN_BITS', ctypes.c_uint32),
+    ('UCHE_CLIENT_PF', ctypes.c_uint32),
+    ('PC_MODE_CNTL', ctypes.c_uint32),
+    ('SP_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('RB_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('RB_DBG_ECO_CNTL_blit', ctypes.c_uint32),
+    ('HLSQ_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('RB_UNKNOWN_8E01', ctypes.c_uint32),
+    ('VPC_DBG_ECO_CNTL', ctypes.c_uint32),
+    ('UCHE_UNKNOWN_0E12', ctypes.c_uint32),
+    ('RB_CCU_DBG_ECO_CNTL', ctypes.c_uint32),
+]
+
+class struct_fd_dev_info_1_1(Structure):
+    pass
+
+struct_fd_dev_info_1_1._pack_ = 1 # source:False
+struct_fd_dev_info_1_1._fields_ = [
+    ('reg', ctypes.c_uint32),
+    ('value', ctypes.c_uint32),
+]
+
+struct_fd_dev_info_a6xx._pack_ = 1 # source:False
+struct_fd_dev_info_a6xx._fields_ = [
+    ('reg_size_vec4', ctypes.c_uint32),
+    ('instr_cache_size', ctypes.c_uint32),
+    ('has_hw_multiview', ctypes.c_bool),
+    ('has_fs_tex_prefetch', ctypes.c_bool),
+    ('supports_multiview_mask', ctypes.c_bool),
+    ('concurrent_resolve', ctypes.c_bool),
+    ('has_z24uint_s8uint', ctypes.c_bool),
+    ('tess_use_shared', ctypes.c_bool),
+    ('has_legacy_pipeline_shading_rate', ctypes.c_bool),
+    ('storage_16bit', ctypes.c_bool),
+    ('indirect_draw_wfm_quirk', ctypes.c_bool),
+    ('depth_bounds_require_depth_test_quirk', ctypes.c_bool),
+    ('has_tex_filter_cubic', ctypes.c_bool),
+    ('has_separate_chroma_filter', ctypes.c_bool),
+    ('has_sample_locations', ctypes.c_bool),
+    ('has_cp_reg_write', ctypes.c_bool),
+    ('has_8bpp_ubwc', ctypes.c_bool),
+    ('has_lpac', ctypes.c_bool),
+    ('has_getfiberid', ctypes.c_bool),
+    ('mov_half_shared_quirk', ctypes.c_bool),
+    ('has_movs', ctypes.c_bool),
+    ('has_dp2acc', ctypes.c_bool),
+    ('has_dp4acc', ctypes.c_bool),
+    ('enable_lrz_fast_clear', ctypes.c_bool),
+    ('has_lrz_dir_tracking', ctypes.c_bool),
+    ('lrz_track_quirk', ctypes.c_bool),
+    ('has_lrz_feedback', ctypes.c_bool),
+    ('has_per_view_viewport', ctypes.c_bool),
+    ('has_gmem_fast_clear', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('sysmem_per_ccu_depth_cache_size', ctypes.c_uint32),
+    ('sysmem_per_ccu_color_cache_size', ctypes.c_uint32),
+    ('gmem_ccu_color_cache_fraction', ctypes.c_uint32),
+    ('prim_alloc_threshold', ctypes.c_uint32),
+    ('vs_max_inputs_count', ctypes.c_uint32),
+    ('supports_double_threadsize', ctypes.c_bool),
+    ('has_sampler_minmax', ctypes.c_bool),
+    ('broken_ds_ubwc_quirk', ctypes.c_bool),
+    ('has_scalar_alu', ctypes.c_bool),
+    ('has_early_preamble', ctypes.c_bool),
+    ('has_isam_v', ctypes.c_bool),
+    ('has_ssbo_imm_offsets', ctypes.c_bool),
+    ('has_coherent_ubwc_flag_caches', ctypes.c_bool),
+    ('has_attachment_shading_rate', ctypes.c_bool),
+    ('has_ubwc_linear_mipmap_fallback', ctypes.c_bool),
+    ('predtf_nop_quirk', ctypes.c_bool),
+    ('prede_nop_quirk', ctypes.c_bool),
+    ('has_sad', ctypes.c_bool),
+    ('is_a702', ctypes.c_bool),
+    ('PADDING_1', ctypes.c_ubyte * 2),
+    ('magic', struct_fd_dev_info_1_magic),
+    ('magic_raw', struct_fd_dev_info_1_1 * 64),
+    ('max_sets', ctypes.c_uint32),
+    ('line_width_min', ctypes.c_float),
+    ('line_width_max', ctypes.c_float),
+    ('has_bin_mask', ctypes.c_bool),
+    ('PADDING_2', ctypes.c_ubyte * 3),
+]
+
+class struct_fd_dev_info_a7xx(Structure):
+    pass
+
+struct_fd_dev_info_a7xx._pack_ = 1 # source:False
+struct_fd_dev_info_a7xx._fields_ = [
+    ('stsc_duplication_quirk', ctypes.c_bool),
+    ('has_event_write_sample_count', ctypes.c_bool),
+    ('has_64b_ssbo_atomics', ctypes.c_bool),
+    ('cmdbuf_start_a725_quirk', ctypes.c_bool),
+    ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool),
+    ('load_shader_consts_via_preamble', ctypes.c_bool),
+    ('has_gmem_vpc_attr_buf', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('sysmem_vpc_attr_buf_size', ctypes.c_uint32),
+    ('gmem_vpc_attr_buf_size', ctypes.c_uint32),
+    ('supports_uav_ubwc', ctypes.c_bool),
+    ('ubwc_unorm_snorm_int_compatible', ctypes.c_bool),
+    ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool),
+    ('gs_vpc_adjacency_quirk', ctypes.c_bool),
+    ('enable_tp_ubwc_flag_hint', ctypes.c_bool),
+    ('storage_8bit', ctypes.c_bool),
+    ('ubwc_all_formats_compatible', ctypes.c_bool),
+    ('has_compliant_dp4acc', ctypes.c_bool),
+    ('has_generic_clear', ctypes.c_bool),
+    ('r8g8_faulty_fast_clear_quirk', ctypes.c_bool),
+    ('ubwc_coherency_quirk', ctypes.c_bool),
+    ('has_persistent_counter', ctypes.c_bool),
+    ('has_primitive_shading_rate', ctypes.c_bool),
+    ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool),
+    ('has_ray_intersection', ctypes.c_bool),
+    ('has_sw_fuse', ctypes.c_bool),
+    ('has_rt_workaround', ctypes.c_bool),
+    ('has_alias_rt', ctypes.c_bool),
+    ('has_abs_bin_mask', ctypes.c_bool),
+    ('new_control_regs', ctypes.c_bool),
+]
+
+struct_fd_dev_info._pack_ = 1 # source:False
+struct_fd_dev_info._anonymous_ = ('_0',)
+struct_fd_dev_info._fields_ = [
+    ('chip', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('tile_align_w', ctypes.c_uint32),
+    ('tile_align_h', ctypes.c_uint32),
+    ('gmem_align_w', ctypes.c_uint32),
+    ('gmem_align_h', ctypes.c_uint32),
+    ('tile_max_w', ctypes.c_uint32),
+    ('tile_max_h', ctypes.c_uint32),
+    ('num_vsc_pipes', ctypes.c_uint32),
+    ('cs_shared_mem_size', ctypes.c_uint32),
+    ('wave_granularity', ctypes.c_int32),
+    ('highest_bank_bit', ctypes.c_uint32),
+    ('ubwc_swizzle', ctypes.c_uint32),
+    ('macrotile_mode', ctypes.c_uint32),
+    ('fibers_per_sp', ctypes.c_uint32),
+    ('threadsize_base', ctypes.c_uint32),
+    ('max_waves', ctypes.c_uint32),
+    ('compute_lb_size', ctypes.c_uint32),
+    ('_0', union_fd_dev_info_0),
+    ('a6xx', struct_fd_dev_info_a6xx),
+    ('a7xx', struct_fd_dev_info_a7xx),
+]
+
+class struct_fd_dev_id(Structure):
+    pass
+
+struct_fd_dev_id._pack_ = 1 # source:False
+struct_fd_dev_id._fields_ = [
+    ('gpu_id', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('chip_id', ctypes.c_uint64),
+]
+
+try:
+    fd_dev_gpu_id = _libraries['FIXME_STUB'].fd_dev_gpu_id
+    fd_dev_gpu_id.restype = uint32_t
+    fd_dev_gpu_id.argtypes = [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError:
+    pass
+try:
+    fd_dev_info_raw = _libraries['FIXME_STUB'].fd_dev_info_raw
+    fd_dev_info_raw.restype = ctypes.POINTER(struct_fd_dev_info)
+    fd_dev_info_raw.argtypes = [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError:
+    pass
+try:
+    fd_dev_is_supported = _libraries['FIXME_STUB'].fd_dev_is_supported
+    fd_dev_is_supported.restype = uint8_t
+    fd_dev_is_supported.argtypes = [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError:
+    pass
+try:
+    fd_dev_info = _libraries['FIXME_STUB'].fd_dev_info
+    fd_dev_info.restype = struct_fd_dev_info
+    fd_dev_info.argtypes = [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError:
+    pass
+try:
+    fd_dev_info_raw_by_name = _libraries['FIXME_STUB'].fd_dev_info_raw_by_name
+    fd_dev_info_raw_by_name.restype = ctypes.POINTER(struct_fd_dev_info)
+    fd_dev_info_raw_by_name.argtypes = [ctypes.POINTER(ctypes.c_char)]
+except AttributeError:
+    pass
+try:
+    fd_dev_gen = _libraries['FIXME_STUB'].fd_dev_gen
+    fd_dev_gen.restype = uint8_t
+    fd_dev_gen.argtypes = [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError:
+    pass
+try:
+    fd_dev_64b = _libraries['FIXME_STUB'].fd_dev_64b
+    fd_dev_64b.restype = ctypes.c_bool
+    fd_dev_64b.argtypes = [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError:
+    pass
+try:
+    fd_dev_name = _libraries['FIXME_STUB'].fd_dev_name
+    fd_dev_name.restype = ctypes.POINTER(ctypes.c_char)
+    fd_dev_name.argtypes = [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError:
+    pass
+try:
+    fd_dev_info_apply_dbg_options = _libraries['FIXME_STUB'].fd_dev_info_apply_dbg_options
+    fd_dev_info_apply_dbg_options.restype = None
+    fd_dev_info_apply_dbg_options.argtypes = [ctypes.POINTER(struct_fd_dev_info)]
+except AttributeError:
+    pass
 class struct_ir3_ra_reg_set(Structure):
     pass
 
@@ -17633,9 +17866,6 @@ struct_ir3_compiler_options._fields_ = [
 class struct_fd_device(Structure):
     pass
 
-class struct_fd_dev_id(Structure):
-    pass
-
 class struct_disk_cache(Structure):
     pass
 
@@ -17752,188 +17982,12 @@ struct_ir3_compiler._fields_ = [
     ('delay_slots', struct_ir3_compiler_delay_slots),
 ]
 
-struct_fd_dev_id._pack_ = 1 # source:False
-struct_fd_dev_id._fields_ = [
-    ('gpu_id', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('chip_id', ctypes.c_uint64),
-]
-
 try:
     ir3_compiler_destroy = _libraries['FIXME_STUB'].ir3_compiler_destroy
     ir3_compiler_destroy.restype = None
     ir3_compiler_destroy.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
 except AttributeError:
     pass
-class struct_fd_dev_info(Structure):
-    pass
-
-class union_fd_dev_info_0(Union):
-    pass
-
-union_fd_dev_info_0._pack_ = 1 # source:False
-union_fd_dev_info_0._fields_ = [
-    ('num_sp_cores', ctypes.c_uint32),
-    ('num_ccu', ctypes.c_uint32),
-]
-
-class struct_fd_dev_info_a6xx(Structure):
-    pass
-
-class struct_fd_dev_info_1_magic(Structure):
-    pass
-
-struct_fd_dev_info_1_magic._pack_ = 1 # source:False
-struct_fd_dev_info_1_magic._fields_ = [
-    ('PC_POWER_CNTL', ctypes.c_uint32),
-    ('TPL1_DBG_ECO_CNTL', ctypes.c_uint32),
-    ('GRAS_DBG_ECO_CNTL', ctypes.c_uint32),
-    ('SP_CHICKEN_BITS', ctypes.c_uint32),
-    ('UCHE_CLIENT_PF', ctypes.c_uint32),
-    ('PC_MODE_CNTL', ctypes.c_uint32),
-    ('SP_DBG_ECO_CNTL', ctypes.c_uint32),
-    ('RB_DBG_ECO_CNTL', ctypes.c_uint32),
-    ('RB_DBG_ECO_CNTL_blit', ctypes.c_uint32),
-    ('HLSQ_DBG_ECO_CNTL', ctypes.c_uint32),
-    ('RB_UNKNOWN_8E01', ctypes.c_uint32),
-    ('VPC_DBG_ECO_CNTL', ctypes.c_uint32),
-    ('UCHE_UNKNOWN_0E12', ctypes.c_uint32),
-    ('RB_CCU_DBG_ECO_CNTL', ctypes.c_uint32),
-]
-
-class struct_fd_dev_info_1_1(Structure):
-    pass
-
-struct_fd_dev_info_1_1._pack_ = 1 # source:False
-struct_fd_dev_info_1_1._fields_ = [
-    ('reg', ctypes.c_uint32),
-    ('value', ctypes.c_uint32),
-]
-
-struct_fd_dev_info_a6xx._pack_ = 1 # source:False
-struct_fd_dev_info_a6xx._fields_ = [
-    ('reg_size_vec4', ctypes.c_uint32),
-    ('instr_cache_size', ctypes.c_uint32),
-    ('has_hw_multiview', ctypes.c_bool),
-    ('has_fs_tex_prefetch', ctypes.c_bool),
-    ('supports_multiview_mask', ctypes.c_bool),
-    ('concurrent_resolve', ctypes.c_bool),
-    ('has_z24uint_s8uint', ctypes.c_bool),
-    ('tess_use_shared', ctypes.c_bool),
-    ('has_legacy_pipeline_shading_rate', ctypes.c_bool),
-    ('storage_16bit', ctypes.c_bool),
-    ('indirect_draw_wfm_quirk', ctypes.c_bool),
-    ('depth_bounds_require_depth_test_quirk', ctypes.c_bool),
-    ('has_tex_filter_cubic', ctypes.c_bool),
-    ('has_separate_chroma_filter', ctypes.c_bool),
-    ('has_sample_locations', ctypes.c_bool),
-    ('has_cp_reg_write', ctypes.c_bool),
-    ('has_8bpp_ubwc', ctypes.c_bool),
-    ('has_lpac', ctypes.c_bool),
-    ('has_getfiberid', ctypes.c_bool),
-    ('mov_half_shared_quirk', ctypes.c_bool),
-    ('has_movs', ctypes.c_bool),
-    ('has_dp2acc', ctypes.c_bool),
-    ('has_dp4acc', ctypes.c_bool),
-    ('enable_lrz_fast_clear', ctypes.c_bool),
-    ('has_lrz_dir_tracking', ctypes.c_bool),
-    ('lrz_track_quirk', ctypes.c_bool),
-    ('has_lrz_feedback', ctypes.c_bool),
-    ('has_per_view_viewport', ctypes.c_bool),
-    ('has_gmem_fast_clear', ctypes.c_bool),
-    ('PADDING_0', ctypes.c_ubyte),
-    ('sysmem_per_ccu_depth_cache_size', ctypes.c_uint32),
-    ('sysmem_per_ccu_color_cache_size', ctypes.c_uint32),
-    ('gmem_ccu_color_cache_fraction', ctypes.c_uint32),
-    ('prim_alloc_threshold', ctypes.c_uint32),
-    ('vs_max_inputs_count', ctypes.c_uint32),
-    ('supports_double_threadsize', ctypes.c_bool),
-    ('has_sampler_minmax', ctypes.c_bool),
-    ('broken_ds_ubwc_quirk', ctypes.c_bool),
-    ('has_scalar_alu', ctypes.c_bool),
-    ('has_early_preamble', ctypes.c_bool),
-    ('has_isam_v', ctypes.c_bool),
-    ('has_ssbo_imm_offsets', ctypes.c_bool),
-    ('has_coherent_ubwc_flag_caches', ctypes.c_bool),
-    ('has_attachment_shading_rate', ctypes.c_bool),
-    ('has_ubwc_linear_mipmap_fallback', ctypes.c_bool),
-    ('predtf_nop_quirk', ctypes.c_bool),
-    ('prede_nop_quirk', ctypes.c_bool),
-    ('has_sad', ctypes.c_bool),
-    ('is_a702', ctypes.c_bool),
-    ('PADDING_1', ctypes.c_ubyte * 2),
-    ('magic', struct_fd_dev_info_1_magic),
-    ('magic_raw', struct_fd_dev_info_1_1 * 64),
-    ('max_sets', ctypes.c_uint32),
-    ('line_width_min', ctypes.c_float),
-    ('line_width_max', ctypes.c_float),
-    ('has_bin_mask', ctypes.c_bool),
-    ('PADDING_2', ctypes.c_ubyte * 3),
-]
-
-class struct_fd_dev_info_a7xx(Structure):
-    pass
-
-struct_fd_dev_info_a7xx._pack_ = 1 # source:False
-struct_fd_dev_info_a7xx._fields_ = [
-    ('stsc_duplication_quirk', ctypes.c_bool),
-    ('has_event_write_sample_count', ctypes.c_bool),
-    ('has_64b_ssbo_atomics', ctypes.c_bool),
-    ('cmdbuf_start_a725_quirk', ctypes.c_bool),
-    ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool),
-    ('load_shader_consts_via_preamble', ctypes.c_bool),
-    ('has_gmem_vpc_attr_buf', ctypes.c_bool),
-    ('PADDING_0', ctypes.c_ubyte),
-    ('sysmem_vpc_attr_buf_size', ctypes.c_uint32),
-    ('gmem_vpc_attr_buf_size', ctypes.c_uint32),
-    ('supports_uav_ubwc', ctypes.c_bool),
-    ('ubwc_unorm_snorm_int_compatible', ctypes.c_bool),
-    ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool),
-    ('gs_vpc_adjacency_quirk', ctypes.c_bool),
-    ('enable_tp_ubwc_flag_hint', ctypes.c_bool),
-    ('storage_8bit', ctypes.c_bool),
-    ('ubwc_all_formats_compatible', ctypes.c_bool),
-    ('has_compliant_dp4acc', ctypes.c_bool),
-    ('has_generic_clear', ctypes.c_bool),
-    ('r8g8_faulty_fast_clear_quirk', ctypes.c_bool),
-    ('ubwc_coherency_quirk', ctypes.c_bool),
-    ('has_persistent_counter', ctypes.c_bool),
-    ('has_primitive_shading_rate', ctypes.c_bool),
-    ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool),
-    ('has_ray_intersection', ctypes.c_bool),
-    ('has_sw_fuse', ctypes.c_bool),
-    ('has_rt_workaround', ctypes.c_bool),
-    ('has_alias_rt', ctypes.c_bool),
-    ('has_abs_bin_mask', ctypes.c_bool),
-    ('new_control_regs', ctypes.c_bool),
-]
-
-struct_fd_dev_info._pack_ = 1 # source:False
-struct_fd_dev_info._anonymous_ = ('_0',)
-struct_fd_dev_info._fields_ = [
-    ('chip', ctypes.c_ubyte),
-    ('PADDING_0', ctypes.c_ubyte * 3),
-    ('tile_align_w', ctypes.c_uint32),
-    ('tile_align_h', ctypes.c_uint32),
-    ('gmem_align_w', ctypes.c_uint32),
-    ('gmem_align_h', ctypes.c_uint32),
-    ('tile_max_w', ctypes.c_uint32),
-    ('tile_max_h', ctypes.c_uint32),
-    ('num_vsc_pipes', ctypes.c_uint32),
-    ('cs_shared_mem_size', ctypes.c_uint32),
-    ('wave_granularity', ctypes.c_int32),
-    ('highest_bank_bit', ctypes.c_uint32),
-    ('ubwc_swizzle', ctypes.c_uint32),
-    ('macrotile_mode', ctypes.c_uint32),
-    ('fibers_per_sp', ctypes.c_uint32),
-    ('threadsize_base', ctypes.c_uint32),
-    ('max_waves', ctypes.c_uint32),
-    ('compute_lb_size', ctypes.c_uint32),
-    ('_0', union_fd_dev_info_0),
-    ('a6xx', struct_fd_dev_info_a6xx),
-    ('a7xx', struct_fd_dev_info_a7xx),
-]
-
 try:
     ir3_compiler_create = _libraries['FIXME_STUB'].ir3_compiler_create
     ir3_compiler_create.restype = ctypes.POINTER(struct_ir3_compiler)
@@ -20719,7 +20773,10 @@ __all__ = \
     'c__Ea_LP_JIT_VERTEX_HEADER_VERTEX_ID',
     'c__Ea_RALLOC_PRINT_INFO_SUMMARY_ONLY', 'c_bool', 'c_uint32',
     'c_uint32', 'c_uint64', 'compare_func', 'decode_type_from_blob',
-    'encode_type_to_blob', 'func_pointer',
+    'encode_type_to_blob', 'fd_dev_64b', 'fd_dev_gen',
+    'fd_dev_gpu_id', 'fd_dev_info', 'fd_dev_info_apply_dbg_options',
+    'fd_dev_info_raw', 'fd_dev_info_raw_by_name',
+    'fd_dev_is_supported', 'fd_dev_name', 'func_pointer',
     'gallivm_add_global_mapping', 'gallivm_compile_module',
     'gallivm_create', 'gallivm_create_target_library_info',
     'gallivm_destroy', 'gallivm_dispose_target_library_info',

@@ -510,6 +510,7 @@ generate_mesa() {
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_jit_types.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_flow.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_const.h \
+    $MESA_SRC/src/freedreno/common/freedreno_dev_info.h \
     $MESA_SRC/src/freedreno/ir3/ir3_compiler.h \
     $MESA_SRC/src/freedreno/ir3/ir3_shader.h \
     $MESA_SRC/src/compiler/glsl_types.h \
