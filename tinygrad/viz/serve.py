@@ -251,8 +251,14 @@ class Handler(BaseHTTPRequestHandler):
     elif (query:=parse_qs(url.query)):
       if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
       else:
-        try: return self.stream_json(get_details(traces[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
-        except KeyError: status_code = 404
+        try:
+          ctx_idx = int(query["ctx"][0])
+          step_idx = int(query["idx"][0])
+          if ctx_idx not in traces: raise KeyError("Context not found")
+          context_data = traces[ctx_idx]
+          if step_idx >= len(context_data[1]): raise IndexError("Step index out of range")
+          return self.stream_json(get_details(context_data[1][step_idx], ctx_idx))
+        except (KeyError, IndexError, ValueError): status_code = 404
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404

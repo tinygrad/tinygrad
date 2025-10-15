@@ -136,25 +136,22 @@ def kron(buf, B, outer_axes_shape, ctx):
   return sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))\
     .bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
-def winoguard(redu: UOp):
-  three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3} #assuming all
+def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
+  three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
+  #dfs to check if conv with 3^n kernel and stride = dilation = 1 exists.
+  def collect(root: UOp):
+    need, ks, os = set(three), [], []
+    for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):
+      for loop, red in ((a, b), (b, a)): 
+        if red in need and loop.op is Ops.RANGE and loop not in need: ks.append(red); os.append(n); need.remove(red); break
+    return ks, os
+  kL, oL = collect(lhs); kR, oR = collect(rhs)
+  #identify activation and weight if they exist
+  return (lhs, rhs, kL, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oR) if (len(kR) >= 2 and not oL) else None) 
 
-  def collect(root):
-    need, out = set(three), []
-    for n in (n for n in root.toposort(lambda s: s.op is not Ops.BUFFERIZE and s.op is not Ops.BUFFER) if n.op is Ops.ADD):
-        for loop, red in ((n.src[0], n.src[1]), (n.src[1], n.src[0])):
-          if loop not in need and red in need: out.append((red, n)); need.remove(red); break #a reduce and anything that is NOT a reduce in our contex
-    return out
-
-  lhs, rhs = redu.src[0].src
-  act_like, w_like, pairs = max([(lhs, rhs, collect(lhs)), (rhs, lhs, collect(rhs))], key=lambda x: len(x[2]))
-  if len(pairs) < 2: return None
-  k_axes, o_adds = zip(*pairs)
-  return act_like, w_like, list(k_axes), list(o_adds)
-
-def winowrite(ctx: IndexingContext, redu: UOp):
+def winowrite(ctx: IndexingContext, x:UOp, y:UOp, redu: UOp):
   #TODO: Check Padding, Check Commutative Substitution
-  guard = winoguard(redu)
+  guard = winoguard(x, y, redu)
   if guard is None: return None
   act_like, w_like, k_axes, o_adds = guard
   o_bases = [o_adds[i].substitute({k: k.const_like(0)}) for i, k in enumerate(k_axes)]
@@ -188,7 +185,7 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   return kron(MHAT, winograd_At, tile_shape, ctx).index(*[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases])
 
 winograd_rewrite = PatternMatcher([
- ((UPat.var("x")*UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, x, y, redu: winowrite(ctx, redu))
+ ((UPat.var("x")*UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, x, y, redu: winowrite(ctx, x, y, redu))
  ])
 
 # *****************
