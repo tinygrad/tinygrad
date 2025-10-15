@@ -84,3 +84,24 @@ class NAKCompiler(NIRCompiler):
       with open(fn, "wb") as f: f.write(lib[ctypes.sizeof(mesa.struct_nak_shader_info):])
       print(system(f"nvdisasm -b SM{self.arch[3:]} {fn}"))
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
+
+class IR3Compiler(NIRCompiler):
+  def __init__(self, chip_id, cache_key="ir3"):
+    self.dev_id = mesa.struct_fd_dev_id(((chip_id >> 24) & 0xFF) * 100 + ((chip_id >> 16) & 0xFF) * 10 + ((chip_id >>  8) & 0xFF), chip_id)
+    self.cc = mesa.ir3_compiler_create(None, self.dev_id, mesa.fd_dev_info(self.dev_id), mesa.struct_ir3_compiler_options(disable_cache=True)).contents
+    self.nir_options = bytes(mesa.ir3_get_compiler_options(self.cc).contents)
+    super().__init__(f"compile_{cache_key}")
+
+  def __del__(self): pass
+
+  def __reduce__(self): return IR3Compiler, (self.dev_id.gpu_id, self.dev_id.chip_id)
+
+  def compile(self, src) -> bytes:
+    nir_shader = deserialize(src, self.nir_options)
+    shader = mesa.ir3_shader_from_nir(self.cc, nir_shader, mesa.struct_ir3_shader_options(), None).contents
+    input(f"shader.nir.info: {ctypes.addressof(shader.nir.contents.info):X}\nshader: {ctypes.addressof(shader):X}")
+    v = mesa.struct_ir3_shader_variant(shader_id=shader.id, key=mesa.struct_ir3_shader_key(), type=shader.type, shader_options=shader.options,
+      compiler=self.cc, mergedregs=self.cc.mergedregs, num_ssbos=(info:=shader.nir.contents.info).num_ssbos, num_uavs=info.num_ssbos+info.num_images)
+    v.cs.req_local_mem = shader.cs.req_local_mem
+    assert mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
+    return ctypes.string_at(mesa.ir3_shader_assemble(v), v.contents.info.size)
