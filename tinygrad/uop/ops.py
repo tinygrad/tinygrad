@@ -264,7 +264,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
       ps = self.src[0]._shape
-      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape on {self}")
+      # TODO: WMMA is used for both axis WMMA and op WMMA. fix this and remove this hack. tested by BERT on AMD LLVM
+      if ps is None and self.op is Ops.WMMA: return None
+      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape")
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.arg): raise ValueError(f"shape can't contain negative numbers {self.arg}")
