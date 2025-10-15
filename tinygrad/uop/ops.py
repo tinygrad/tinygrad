@@ -224,14 +224,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
     return ShapeTracker.from_shape(shape)
 
-  @functools.cached_property
-  def marg(self):
-    match self.op:
-      case Ops.RESHAPE | Ops.EXPAND: return tuple(ssimplify(x) for x in self.src[1:])
-      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in zip(self.src[1::2], self.src[2::2])])
-      case Ops.PERMUTE | Ops.FLIP: return self.arg
-      case _: raise RuntimeError(f"{self.op} is not a MovementOp")
-
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
@@ -520,9 +512,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def marg(self):
     match self.op:
-      # TODO: replace these args with srcs
-      case Ops.RESHAPE | Ops.EXPAND: return tuple([ssimplify(x) for x in self.arg])
-      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in self.arg])
+      case Ops.RESHAPE | Ops.EXPAND: return tuple(ssimplify(x) for x in self.src[1:])
+      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in zip(self.src[1::2], self.src[2::2])])
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
@@ -533,7 +524,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self
 
   def _mop(self, op:Ops, arg:tuple[sint, ...], no_reshape_is_no_op:bool=False) -> UOp:
-    ret = UOp(op, self.dtype, (self,)+tuple([x if isinstance(x, UOp) else UOp.const(dtypes.index, x) for x in arg]))
+    ret = UOp(op, self.dtype, (self,)+tuple([(x if isinstance(x, UOp) else UOp.const(dtypes.index, x)).simplify() for x in arg]))
     # for all movement ops, we check shape property
     if ret.shape == self.shape and no_reshape_is_no_op: return self
     return ret

@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, GroupOp
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):
@@ -55,7 +55,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     if t0 not in grads: continue
     lgrads: tuple[UOp|None, ...]|None = cast(tuple[UOp, ...]|None, pm_gradient.rewrite(t0, ctx=grads[t0]))
     if lgrads is None: raise RuntimeError(f"failed to compute gradient for {t0.op}\n\nin {str(t0)[0:1000]}...")
-    assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
+    assert t0.op in GroupOp.Movement or len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)} on {t0.op}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
       if k in grads: grads[k] = grads[k] + v
