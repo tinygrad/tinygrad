@@ -9,7 +9,7 @@ from tinygrad.renderer import Renderer
 # import all pattern matchers here
 from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_remove_image_invalid
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
@@ -54,7 +54,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_split_ranges+pm_flatten_range, ctx=lambda _: {}, name="split ranges"))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    ret.append(RewriteStep(sym+pm_flatten_range, name="initial symbolic"))
+    ret.append(RewriteStep(sym+pm_flatten_range+pm_remove_image_invalid, name="initial symbolic"))
 
     # optimize (schedule) the AST
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
@@ -62,7 +62,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **
-  ret.append(RewriteStep(sym+migrate_indexing, name="postopt symbolic"))
+  ret.append(RewriteStep(sym+migrate_indexing+pm_move_where_on_load, name="postopt symbolic"))
 
   # expand
   ret.append(RewriteStep(sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander"))
