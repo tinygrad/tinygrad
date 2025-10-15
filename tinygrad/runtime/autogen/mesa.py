@@ -17386,6 +17386,231 @@ class struct_ir3_ra_reg_set(Structure):
 class struct_ir3_shader(Structure):
     pass
 
+class struct_ir3_compiler(Structure):
+    pass
+
+class struct_ir3_shader_variant(Structure):
+    pass
+
+class struct_ir3_shader_options(Structure):
+    pass
+
+
+# values for enumeration 'ir3_wavesize_option'
+ir3_wavesize_option__enumvalues = {
+    0: 'IR3_SINGLE_ONLY',
+    1: 'IR3_SINGLE_OR_DOUBLE',
+    2: 'IR3_DOUBLE_ONLY',
+}
+IR3_SINGLE_ONLY = 0
+IR3_SINGLE_OR_DOUBLE = 1
+IR3_DOUBLE_ONLY = 2
+ir3_wavesize_option = ctypes.c_uint32 # enum
+
+# values for enumeration 'ir3_push_consts_type'
+ir3_push_consts_type__enumvalues = {
+    0: 'IR3_PUSH_CONSTS_NONE',
+    1: 'IR3_PUSH_CONSTS_PER_STAGE',
+    2: 'IR3_PUSH_CONSTS_SHARED',
+    3: 'IR3_PUSH_CONSTS_SHARED_PREAMBLE',
+}
+IR3_PUSH_CONSTS_NONE = 0
+IR3_PUSH_CONSTS_PER_STAGE = 1
+IR3_PUSH_CONSTS_SHARED = 2
+IR3_PUSH_CONSTS_SHARED_PREAMBLE = 3
+ir3_push_consts_type = ctypes.c_uint32 # enum
+class struct_ir3_const_allocations(Structure):
+    pass
+
+class struct_ir3_const_allocation(Structure):
+    pass
+
+struct_ir3_const_allocation._pack_ = 1 # source:False
+struct_ir3_const_allocation._fields_ = [
+    ('offset_vec4', ctypes.c_uint32),
+    ('size_vec4', ctypes.c_uint32),
+    ('reserved_size_vec4', ctypes.c_uint32),
+    ('reserved_align_vec4', ctypes.c_uint32),
+]
+
+struct_ir3_const_allocations._pack_ = 1 # source:False
+struct_ir3_const_allocations._fields_ = [
+    ('consts', struct_ir3_const_allocation * 12),
+    ('max_const_offset_vec4', ctypes.c_uint32),
+    ('reserved_vec4', ctypes.c_uint32),
+]
+
+class struct_ir3_shader_nir_options(Structure):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('robust_modes', nir_variable_mode),
+     ]
+
+struct_ir3_shader_options._pack_ = 1 # source:False
+struct_ir3_shader_options._fields_ = [
+    ('api_wavesize', ir3_wavesize_option),
+    ('real_wavesize', ir3_wavesize_option),
+    ('push_consts_type', ir3_push_consts_type),
+    ('push_consts_base', ctypes.c_uint32),
+    ('push_consts_dwords', ctypes.c_uint32),
+    ('const_allocs', struct_ir3_const_allocations),
+    ('nir_options', struct_ir3_shader_nir_options),
+    ('fragdata_dynamic_remap', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+class struct_ir3_stream_output_info(Structure):
+    pass
+
+class struct_ir3_stream_output(Structure):
+    pass
+
+struct_ir3_stream_output._pack_ = 1 # source:False
+struct_ir3_stream_output._fields_ = [
+    ('register_index', ctypes.c_uint32, 6),
+    ('start_component', ctypes.c_uint32, 2),
+    ('num_components', ctypes.c_uint32, 3),
+    ('output_buffer', ctypes.c_uint32, 3),
+    ('dst_offset', ctypes.c_uint32, 16),
+    ('stream', ctypes.c_uint32, 2),
+]
+
+struct_ir3_stream_output_info._pack_ = 1 # source:False
+struct_ir3_stream_output_info._fields_ = [
+    ('num_outputs', ctypes.c_uint32),
+    ('stride', ctypes.c_uint16 * 4),
+    ('streams_written', ctypes.c_ubyte),
+    ('buffer_to_stream', ctypes.c_ubyte * 4),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('output', struct_ir3_stream_output * 128),
+]
+
+class union_ir3_shader_0(Union):
+    pass
+
+class struct_ir3_shader_0_cs(Structure):
+    pass
+
+struct_ir3_shader_0_cs._pack_ = 1 # source:False
+struct_ir3_shader_0_cs._fields_ = [
+    ('req_local_mem', ctypes.c_uint32),
+    ('force_linear_dispatch', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+]
+
+class struct_ir3_shader_0_vs(Structure):
+    pass
+
+struct_ir3_shader_0_vs._pack_ = 1 # source:False
+struct_ir3_shader_0_vs._fields_ = [
+    ('passthrough_tcs_compiled', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('passthrough_tcs', ctypes.POINTER(struct_ir3_shader) * 32),
+]
+
+union_ir3_shader_0._pack_ = 1 # source:False
+union_ir3_shader_0._fields_ = [
+    ('cs', struct_ir3_shader_0_cs),
+    ('vs', struct_ir3_shader_0_vs),
+]
+
+class union_c__UA_pthread_mutex_t(Union):
+    pass
+
+class struct___pthread_mutex_s(Structure):
+    pass
+
+class struct___pthread_internal_list(Structure):
+    pass
+
+struct___pthread_internal_list._pack_ = 1 # source:False
+struct___pthread_internal_list._fields_ = [
+    ('__prev', ctypes.POINTER(struct___pthread_internal_list)),
+    ('__next', ctypes.POINTER(struct___pthread_internal_list)),
+]
+
+struct___pthread_mutex_s._pack_ = 1 # source:False
+struct___pthread_mutex_s._fields_ = [
+    ('__lock', ctypes.c_int32),
+    ('__count', ctypes.c_uint32),
+    ('__owner', ctypes.c_int32),
+    ('__nusers', ctypes.c_uint32),
+    ('__kind', ctypes.c_int32),
+    ('__spins', ctypes.c_int16),
+    ('__elision', ctypes.c_int16),
+    ('__list', struct___pthread_internal_list),
+]
+
+union_c__UA_pthread_mutex_t._pack_ = 1 # source:False
+union_c__UA_pthread_mutex_t._fields_ = [
+    ('__data', struct___pthread_mutex_s),
+    ('__size', ctypes.c_char * 40),
+    ('__align', ctypes.c_int64),
+    ('PADDING_0', ctypes.c_ubyte * 32),
+]
+
+class struct_ir3_shader_key(Structure):
+    pass
+
+class union_ir3_shader_key_0(Union):
+    pass
+
+class struct_ir3_shader_key_0_0(Structure):
+    pass
+
+struct_ir3_shader_key_0_0._pack_ = 1 # source:False
+struct_ir3_shader_key_0_0._fields_ = [
+    ('ucp_enables', ctypes.c_uint32, 8),
+    ('has_per_samp', ctypes.c_uint32, 1),
+    ('sample_shading', ctypes.c_uint32, 1),
+    ('msaa', ctypes.c_uint32, 1),
+    ('rasterflat', ctypes.c_uint32, 1),
+    ('tessellation', ctypes.c_uint32, 2),
+    ('has_gs', ctypes.c_uint32, 1),
+    ('tcs_store_primid', ctypes.c_uint32, 1),
+    ('safe_constlen', ctypes.c_uint32, 1),
+    ('force_dual_color_blend', ctypes.c_uint32, 1),
+    ('PADDING_0', ctypes.c_uint16, 14),
+]
+
+union_ir3_shader_key_0._pack_ = 1 # source:False
+union_ir3_shader_key_0._anonymous_ = ('_0',)
+union_ir3_shader_key_0._fields_ = [
+    ('_0', struct_ir3_shader_key_0_0),
+    ('global', ctypes.c_uint32),
+]
+
+struct_ir3_shader_key._pack_ = 1 # source:False
+struct_ir3_shader_key._anonymous_ = ('_0',)
+struct_ir3_shader_key._fields_ = [
+    ('_0', union_ir3_shader_key_0),
+    ('vsamples', ctypes.c_uint32),
+    ('fsamples', ctypes.c_uint32),
+    ('vastc_srgb', ctypes.c_uint16),
+    ('fastc_srgb', ctypes.c_uint16),
+    ('vsampler_swizzles', ctypes.c_uint16 * 16),
+    ('fsampler_swizzles', ctypes.c_uint16 * 16),
+]
+
+struct_ir3_shader._pack_ = 1 # source:False
+struct_ir3_shader._anonymous_ = ('_0',)
+struct_ir3_shader._fields_ = [
+    ('type', gl_shader_stage),
+    ('id', ctypes.c_uint32),
+    ('variant_count', ctypes.c_uint32),
+    ('initial_variants_done', ctypes.c_bool),
+    ('compiler', ctypes.POINTER(struct_ir3_compiler)),
+    ('options', struct_ir3_shader_options),
+    ('nir_finalized', ctypes.c_bool),
+    ('nir', ctypes.POINTER(struct_nir_shader)),
+    ('stream_output', struct_ir3_stream_output_info),
+    ('_0', union_ir3_shader_0),
+    ('variants', ctypes.POINTER(struct_ir3_shader_variant)),
+    ('variants_lock', union_c__UA_pthread_mutex_t),
+    ('cache_key', ctypes.c_ubyte * 20),
+    ('key_mask', struct_ir3_shader_key),
+]
+
 class struct_ir3_compiler_options(Structure):
     pass
 
@@ -17404,9 +17629,6 @@ struct_ir3_compiler_options._fields_ = [
     ('PADDING_1', ctypes.c_ubyte * 7),
     ('uche_trap_base', ctypes.c_uint64),
 ]
-
-class struct_ir3_compiler(Structure):
-    pass
 
 class struct_fd_device(Structure):
     pass
@@ -17730,152 +17952,133 @@ try:
     ir3_disk_cache_init_shader_key.argtypes = [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader)]
 except AttributeError:
     pass
-class struct_ir3_shader_variant(Structure):
+class struct_fd_bo(Structure):
     pass
 
-try:
-    ir3_retrieve_variant = _libraries['FIXME_STUB'].ir3_retrieve_variant
-    ir3_retrieve_variant.restype = ctypes.POINTER(struct_ir3_shader_variant)
-    ir3_retrieve_variant.argtypes = [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(None)]
-except AttributeError:
-    pass
-try:
-    ir3_store_variant = _libraries['FIXME_STUB'].ir3_store_variant
-    ir3_store_variant.restype = None
-    ir3_store_variant.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_ir3_shader_variant)]
-except AttributeError:
-    pass
-try:
-    ir3_disk_cache_retrieve = _libraries['FIXME_STUB'].ir3_disk_cache_retrieve
-    ir3_disk_cache_retrieve.restype = ctypes.c_bool
-    ir3_disk_cache_retrieve.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
-except AttributeError:
-    pass
-try:
-    ir3_disk_cache_store = _libraries['FIXME_STUB'].ir3_disk_cache_store
-    ir3_disk_cache_store.restype = None
-    ir3_disk_cache_store.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
-except AttributeError:
-    pass
-try:
-    ir3_get_compiler_options = _libraries['FIXME_STUB'].ir3_get_compiler_options
-    ir3_get_compiler_options.restype = ctypes.POINTER(struct_nir_shader_compiler_options)
-    ir3_get_compiler_options.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
-except AttributeError:
-    pass
-try:
-    ir3_compile_shader_nir = _libraries['FIXME_STUB'].ir3_compile_shader_nir
-    ir3_compile_shader_nir.restype = ctypes.c_int32
-    ir3_compile_shader_nir.argtypes = [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
-except AttributeError:
-    pass
-try:
-    ir3_pointer_size = _libraries['FIXME_STUB'].ir3_pointer_size
-    ir3_pointer_size.restype = ctypes.c_uint32
-    ir3_pointer_size.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
-except AttributeError:
-    pass
-
-# values for enumeration 'ir3_shader_debug'
-ir3_shader_debug__enumvalues = {
-    1: 'IR3_DBG_SHADER_VS',
-    2: 'IR3_DBG_SHADER_TCS',
-    4: 'IR3_DBG_SHADER_TES',
-    8: 'IR3_DBG_SHADER_GS',
-    16: 'IR3_DBG_SHADER_FS',
-    32: 'IR3_DBG_SHADER_CS',
-    64: 'IR3_DBG_DISASM',
-    128: 'IR3_DBG_OPTMSGS',
-    256: 'IR3_DBG_FORCES2EN',
-    512: 'IR3_DBG_NOUBOOPT',
-    1024: 'IR3_DBG_NOFP16',
-    2048: 'IR3_DBG_NOCACHE',
-    4096: 'IR3_DBG_SPILLALL',
-    8192: 'IR3_DBG_NOPREAMBLE',
-    16384: 'IR3_DBG_SHADER_INTERNAL',
-    32768: 'IR3_DBG_FULLSYNC',
-    65536: 'IR3_DBG_FULLNOP',
-    131072: 'IR3_DBG_NOEARLYPREAMBLE',
-    262144: 'IR3_DBG_NODESCPREFETCH',
-    524288: 'IR3_DBG_EXPANDRPT',
-    1048576: 'IR3_DBG_ASM_ROUNDTRIP',
-    2097152: 'IR3_DBG_SCHEDMSGS',
-    4194304: 'IR3_DBG_RAMSGS',
-    8388608: 'IR3_DBG_NOALIASTEX',
-    16777216: 'IR3_DBG_NOALIASRT',
-}
-IR3_DBG_SHADER_VS = 1
-IR3_DBG_SHADER_TCS = 2
-IR3_DBG_SHADER_TES = 4
-IR3_DBG_SHADER_GS = 8
-IR3_DBG_SHADER_FS = 16
-IR3_DBG_SHADER_CS = 32
-IR3_DBG_DISASM = 64
-IR3_DBG_OPTMSGS = 128
-IR3_DBG_FORCES2EN = 256
-IR3_DBG_NOUBOOPT = 512
-IR3_DBG_NOFP16 = 1024
-IR3_DBG_NOCACHE = 2048
-IR3_DBG_SPILLALL = 4096
-IR3_DBG_NOPREAMBLE = 8192
-IR3_DBG_SHADER_INTERNAL = 16384
-IR3_DBG_FULLSYNC = 32768
-IR3_DBG_FULLNOP = 65536
-IR3_DBG_NOEARLYPREAMBLE = 131072
-IR3_DBG_NODESCPREFETCH = 262144
-IR3_DBG_EXPANDRPT = 524288
-IR3_DBG_ASM_ROUNDTRIP = 1048576
-IR3_DBG_SCHEDMSGS = 2097152
-IR3_DBG_RAMSGS = 4194304
-IR3_DBG_NOALIASTEX = 8388608
-IR3_DBG_NOALIASRT = 16777216
-ir3_shader_debug = ctypes.c_uint32 # enum
-ir3_shader_override_path = None # Variable ctypes.POINTER(ctypes.c_char)
-try:
-    shader_debug_enabled = _libraries['FIXME_STUB'].shader_debug_enabled
-    shader_debug_enabled.restype = ctypes.c_bool
-    shader_debug_enabled.argtypes = [gl_shader_stage, ctypes.c_bool]
-except AttributeError:
-    pass
 class struct_ir3(Structure):
     pass
 
-class struct_ir3_instruction(Structure):
+class struct_ir3_const_state(Structure):
     pass
 
-struct_ir3._pack_ = 1 # source:False
-struct_ir3._fields_ = [
-    ('compiler', ctypes.POINTER(struct_ir3_compiler)),
-    ('type', gl_shader_stage),
-    ('inputs_count', ctypes.c_uint32),
-    ('inputs_sz', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
-    ('inputs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
-    ('baryfs_count', ctypes.c_uint32),
-    ('baryfs_sz', ctypes.c_uint32),
-    ('baryfs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
-    ('a0_users_count', ctypes.c_uint32),
-    ('a0_users_sz', ctypes.c_uint32),
-    ('a0_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
-    ('a1_users_count', ctypes.c_uint32),
-    ('a1_users_sz', ctypes.c_uint32),
-    ('a1_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
-    ('astc_srgb_count', ctypes.c_uint32),
-    ('astc_srgb_sz', ctypes.c_uint32),
-    ('astc_srgb', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
-    ('tg4_count', ctypes.c_uint32),
-    ('tg4_sz', ctypes.c_uint32),
-    ('tg4', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
-    ('block_list', struct_list_head),
-    ('array_list', struct_list_head),
-    ('instr_count', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
+class struct_ir3_disasm_info(Structure):
+    pass
+
+struct_ir3_disasm_info._pack_ = 1 # source:False
+struct_ir3_disasm_info._fields_ = [
+    ('write_disasm', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 7),
+    ('nir', ctypes.POINTER(ctypes.c_char)),
+    ('disasm', ctypes.POINTER(ctypes.c_char)),
 ]
 
-class struct_ir3_block(Structure):
+class struct_ir3_imm_const_state(Structure):
     pass
 
-class struct_ir3_register(Structure):
+struct_ir3_imm_const_state._pack_ = 1 # source:False
+struct_ir3_imm_const_state._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('count', ctypes.c_uint32),
+    ('values', ctypes.POINTER(ctypes.c_uint32)),
+]
+
+class struct_ir3_info(Structure):
+    pass
+
+struct_ir3_info._pack_ = 1 # source:False
+struct_ir3_info._fields_ = [
+    ('size', ctypes.c_uint32),
+    ('constant_data_offset', ctypes.c_uint32),
+    ('sizedwords', ctypes.c_uint16),
+    ('instrs_count', ctypes.c_uint16),
+    ('preamble_instrs_count', ctypes.c_uint16),
+    ('nops_count', ctypes.c_uint16),
+    ('mov_count', ctypes.c_uint16),
+    ('cov_count', ctypes.c_uint16),
+    ('stp_count', ctypes.c_uint16),
+    ('ldp_count', ctypes.c_uint16),
+    ('max_reg', ctypes.c_byte),
+    ('max_half_reg', ctypes.c_byte),
+    ('max_const', ctypes.c_int16),
+    ('max_waves', ctypes.c_byte),
+    ('subgroup_size', ctypes.c_ubyte),
+    ('double_threadsize', ctypes.c_bool),
+    ('multi_dword_ldp_stp', ctypes.c_bool),
+    ('early_preamble', ctypes.c_bool),
+    ('uses_ray_intersection', ctypes.c_bool),
+    ('ss', ctypes.c_uint16),
+    ('sy', ctypes.c_uint16),
+    ('sstall', ctypes.c_uint16),
+    ('systall', ctypes.c_uint16),
+    ('last_baryf', ctypes.c_uint16),
+    ('last_helper', ctypes.c_uint16),
+    ('instrs_per_cat', ctypes.c_uint16 * 8),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+]
+
+class struct_ir3_shader_output(Structure):
+    pass
+
+struct_ir3_shader_output._pack_ = 1 # source:False
+struct_ir3_shader_output._fields_ = [
+    ('slot', ctypes.c_ubyte),
+    ('regid', ctypes.c_ubyte),
+    ('view', ctypes.c_ubyte),
+    ('aliased_components', ctypes.c_ubyte, 4),
+    ('half', ctypes.c_ubyte, 1),
+    ('PADDING_0', ctypes.c_uint8, 3),
+]
+
+class struct_ir3_shader_variant_1(Structure):
+    pass
+
+struct_ir3_shader_variant_1._pack_ = 1 # source:False
+struct_ir3_shader_variant_1._fields_ = [
+    ('slot', ctypes.c_ubyte),
+    ('regid', ctypes.c_ubyte),
+    ('compmask', ctypes.c_ubyte),
+    ('inloc', ctypes.c_ubyte),
+    ('sysval', ctypes.c_bool, 1),
+    ('bary', ctypes.c_bool, 1),
+    ('rasterflat', ctypes.c_bool, 1),
+    ('half', ctypes.c_bool, 1),
+    ('flat', ctypes.c_bool, 1),
+    ('PADDING_0', ctypes.c_uint8, 3),
+]
+
+class struct_ir3_ibo_mapping(Structure):
+    pass
+
+struct_ir3_ibo_mapping._pack_ = 1 # source:False
+struct_ir3_ibo_mapping._fields_ = [
+    ('ssbo_to_tex', ctypes.c_ubyte * 32),
+    ('image_to_tex', ctypes.c_ubyte * 32),
+    ('tex_to_image', ctypes.c_ubyte * 32),
+    ('num_tex', ctypes.c_ubyte),
+    ('tex_base', ctypes.c_ubyte),
+]
+
+class struct_ir3_shader_variant_astc_srgb(Structure):
+    pass
+
+struct_ir3_shader_variant_astc_srgb._pack_ = 1 # source:False
+struct_ir3_shader_variant_astc_srgb._fields_ = [
+    ('base', ctypes.c_uint32),
+    ('count', ctypes.c_uint32),
+    ('orig_idx', ctypes.c_uint32 * 16),
+]
+
+class struct_ir3_shader_variant_tg4(Structure):
+    pass
+
+struct_ir3_shader_variant_tg4._pack_ = 1 # source:False
+struct_ir3_shader_variant_tg4._fields_ = [
+    ('base', ctypes.c_uint32),
+    ('count', ctypes.c_uint32),
+    ('orig_idx', ctypes.c_uint32 * 16),
+]
+
+class struct_ir3_sampler_prefetch(Structure):
     pass
 
 
@@ -18437,6 +18640,350 @@ OPC_META_PARALLEL_COPY = 1029
 OPC_META_PHI = 1030
 OPC_META_RAW = 1031
 c__EA_opc_t = ctypes.c_uint32 # enum
+struct_ir3_sampler_prefetch._pack_ = 1 # source:False
+struct_ir3_sampler_prefetch._fields_ = [
+    ('src', ctypes.c_ubyte),
+    ('bindless', ctypes.c_bool),
+    ('samp_id', ctypes.c_ubyte),
+    ('tex_id', ctypes.c_ubyte),
+    ('samp_bindless_id', ctypes.c_uint16),
+    ('tex_bindless_id', ctypes.c_uint16),
+    ('dst', ctypes.c_ubyte),
+    ('wrmask', ctypes.c_ubyte),
+    ('half_precision', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte),
+    ('tex_opc', c__EA_opc_t),
+]
+
+
+# values for enumeration 'ir3_bary'
+ir3_bary__enumvalues = {
+    0: 'IJ_PERSP_PIXEL',
+    1: 'IJ_PERSP_SAMPLE',
+    2: 'IJ_PERSP_CENTROID',
+    3: 'IJ_PERSP_CENTER_RHW',
+    4: 'IJ_LINEAR_PIXEL',
+    5: 'IJ_LINEAR_CENTROID',
+    6: 'IJ_LINEAR_SAMPLE',
+    7: 'IJ_COUNT',
+}
+IJ_PERSP_PIXEL = 0
+IJ_PERSP_SAMPLE = 1
+IJ_PERSP_CENTROID = 2
+IJ_PERSP_CENTER_RHW = 3
+IJ_LINEAR_PIXEL = 4
+IJ_LINEAR_CENTROID = 5
+IJ_LINEAR_SAMPLE = 6
+IJ_COUNT = 7
+ir3_bary = ctypes.c_uint32 # enum
+class union_ir3_shader_variant_4(Union):
+    pass
+
+class struct_ir3_shader_variant_4_tess(Structure):
+    pass
+
+
+# values for enumeration 'gl_tess_spacing'
+gl_tess_spacing__enumvalues = {
+    0: 'TESS_SPACING_UNSPECIFIED',
+    1: 'TESS_SPACING_EQUAL',
+    2: 'TESS_SPACING_FRACTIONAL_ODD',
+    3: 'TESS_SPACING_FRACTIONAL_EVEN',
+}
+TESS_SPACING_UNSPECIFIED = 0
+TESS_SPACING_EQUAL = 1
+TESS_SPACING_FRACTIONAL_ODD = 2
+TESS_SPACING_FRACTIONAL_EVEN = 3
+gl_tess_spacing = ctypes.c_uint32 # enum
+struct_ir3_shader_variant_4_tess._pack_ = 1 # source:False
+struct_ir3_shader_variant_4_tess._fields_ = [
+    ('primitive_mode', tess_primitive_mode),
+    ('tcs_vertices_out', ctypes.c_ubyte),
+    ('spacing', gl_tess_spacing, 2),
+    ('ccw', ctypes.c_bool, 1),
+    ('point_mode', ctypes.c_bool, 1),
+    ('PADDING_0', ctypes.c_uint32, 20),
+]
+
+class struct_ir3_shader_variant_4_gs(Structure):
+    pass
+
+struct_ir3_shader_variant_4_gs._pack_ = 1 # source:False
+struct_ir3_shader_variant_4_gs._fields_ = [
+    ('output_primitive', ctypes.c_uint16),
+    ('vertices_out', ctypes.c_uint16),
+    ('invocations', ctypes.c_ubyte),
+    ('vertices_in', ctypes.c_ubyte, 3),
+    ('PADDING_0', ctypes.c_uint8, 5),
+]
+
+class struct_ir3_shader_variant_4_fs(Structure):
+    pass
+
+struct_ir3_shader_variant_4_fs._pack_ = 1 # source:False
+struct_ir3_shader_variant_4_fs._fields_ = [
+    ('early_fragment_tests', ctypes.c_bool, 1),
+    ('color_is_dual_source', ctypes.c_bool, 1),
+    ('uses_fbfetch_output', ctypes.c_bool, 1),
+    ('fbfetch_coherent', ctypes.c_bool, 1),
+    ('PADDING_0', ctypes.c_uint32, 28),
+    ('depth_layout', c_uint64),
+]
+
+class struct_ir3_shader_variant_4_cs(Structure):
+    pass
+
+struct_ir3_shader_variant_4_cs._pack_ = 1 # source:False
+struct_ir3_shader_variant_4_cs._fields_ = [
+    ('req_local_mem', ctypes.c_uint32),
+    ('force_linear_dispatch', ctypes.c_bool),
+    ('PADDING_0', ctypes.c_ubyte * 3),
+    ('local_invocation_id', ctypes.c_uint32),
+    ('work_group_id', ctypes.c_uint32),
+]
+
+union_ir3_shader_variant_4._pack_ = 1 # source:False
+union_ir3_shader_variant_4._fields_ = [
+    ('tess', struct_ir3_shader_variant_4_tess),
+    ('gs', struct_ir3_shader_variant_4_gs),
+    ('fs', struct_ir3_shader_variant_4_fs),
+    ('cs', struct_ir3_shader_variant_4_cs),
+]
+
+struct_ir3_shader_variant._pack_ = 1 # source:False
+struct_ir3_shader_variant._anonymous_ = ('_0',)
+struct_ir3_shader_variant._fields_ = [
+    ('bo', ctypes.POINTER(struct_fd_bo)),
+    ('id', ctypes.c_uint32),
+    ('shader_id', ctypes.c_uint32),
+    ('key', struct_ir3_shader_key),
+    ('binning_pass', ctypes.c_bool),
+    ('binning', ctypes.POINTER(struct_ir3_shader_variant)),
+    ('nonbinning', ctypes.POINTER(struct_ir3_shader_variant)),
+    ('ir', ctypes.POINTER(struct_ir3)),
+    ('next', ctypes.POINTER(struct_ir3_shader_variant)),
+    ('type', gl_shader_stage),
+    ('compiler', ctypes.POINTER(struct_ir3_compiler)),
+    ('name', ctypes.POINTER(ctypes.c_char)),
+    ('constant_data', ctypes.POINTER(None)),
+    ('disasm_info', struct_ir3_disasm_info),
+    ('bin', ctypes.POINTER(ctypes.c_uint32)),
+    ('const_state', ctypes.POINTER(struct_ir3_const_state)),
+    ('imm_state', struct_ir3_imm_const_state),
+    ('info', struct_ir3_info),
+    ('sha1_str', ctypes.c_char * 41),
+    ('shader_options', struct_ir3_shader_options),
+    ('constant_data_size', ctypes.c_uint32),
+    ('branchstack', ctypes.c_uint32),
+    ('loops', ctypes.c_uint32),
+    ('instrlen', ctypes.c_uint32),
+    ('constlen', ctypes.c_uint32),
+    ('pvtmem_size', ctypes.c_uint32),
+    ('pvtmem_per_wave', ctypes.c_bool),
+    ('multi_pos_output', ctypes.c_bool),
+    ('dual_src_blend', ctypes.c_bool),
+    ('early_preamble', ctypes.c_bool),
+    ('shared_size', ctypes.c_uint32),
+    ('frag_face', ctypes.c_bool),
+    ('color0_mrt', ctypes.c_bool),
+    ('fragcoord_compmask', ctypes.c_ubyte),
+    ('outputs_count', ctypes.c_uint32),
+    ('outputs', struct_ir3_shader_output * 34),
+    ('writes_pos', ctypes.c_bool),
+    ('writes_smask', ctypes.c_bool),
+    ('writes_psize', ctypes.c_bool),
+    ('writes_viewport', ctypes.c_bool),
+    ('writes_stencilref', ctypes.c_bool),
+    ('writes_shading_rate', ctypes.c_bool),
+    ('output_size', ctypes.c_uint32),
+    ('input_size', ctypes.c_uint32),
+    ('output_loc', ctypes.c_uint32 * 45),
+    ('inputs_count', ctypes.c_uint32),
+    ('inputs', struct_ir3_shader_variant_1 * 34),
+    ('reads_primid', ctypes.c_bool),
+    ('reads_shading_rate', ctypes.c_bool),
+    ('reads_smask', ctypes.c_bool),
+    ('total_in', ctypes.c_uint32),
+    ('sysval_in', ctypes.c_uint32),
+    ('varying_in', ctypes.c_uint32),
+    ('image_mapping', struct_ir3_ibo_mapping),
+    ('num_samp', ctypes.c_int32),
+    ('fb_read', ctypes.c_bool),
+    ('has_ssbo', ctypes.c_bool),
+    ('bindless_tex', ctypes.c_bool),
+    ('bindless_samp', ctypes.c_bool),
+    ('bindless_ibo', ctypes.c_bool),
+    ('bindless_ubo', ctypes.c_bool),
+    ('need_pixlod', ctypes.c_bool),
+    ('need_full_quad', ctypes.c_bool),
+    ('need_driver_params', ctypes.c_bool),
+    ('no_earlyz', ctypes.c_bool),
+    ('has_kill', ctypes.c_bool),
+    ('per_samp', ctypes.c_bool),
+    ('post_depth_coverage', ctypes.c_bool),
+    ('empty', ctypes.c_bool),
+    ('writes_only_color', ctypes.c_bool),
+    ('mergedregs', ctypes.c_bool),
+    ('clip_mask', ctypes.c_ubyte),
+    ('cull_mask', ctypes.c_ubyte),
+    ('astc_srgb', struct_ir3_shader_variant_astc_srgb),
+    ('tg4', struct_ir3_shader_variant_tg4),
+    ('num_sampler_prefetch', ctypes.c_uint32),
+    ('sampler_prefetch', struct_ir3_sampler_prefetch * 4),
+    ('prefetch_bary_type', ir3_bary),
+    ('prefetch_end_of_quad', ctypes.c_bool),
+    ('local_size', ctypes.c_uint16 * 3),
+    ('local_size_variable', ctypes.c_bool),
+    ('has_barrier', ctypes.c_bool),
+    ('num_ssbos', ctypes.c_uint32),
+    ('num_uavs', ctypes.c_uint32),
+    ('_0', union_ir3_shader_variant_4),
+    ('vtxid_base', ctypes.c_uint32),
+    ('stream_output', struct_ir3_stream_output_info),
+]
+
+try:
+    ir3_retrieve_variant = _libraries['FIXME_STUB'].ir3_retrieve_variant
+    ir3_retrieve_variant.restype = ctypes.POINTER(struct_ir3_shader_variant)
+    ir3_retrieve_variant.argtypes = [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(None)]
+except AttributeError:
+    pass
+try:
+    ir3_store_variant = _libraries['FIXME_STUB'].ir3_store_variant
+    ir3_store_variant.restype = None
+    ir3_store_variant.argtypes = [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_disk_cache_retrieve = _libraries['FIXME_STUB'].ir3_disk_cache_retrieve
+    ir3_disk_cache_retrieve.restype = ctypes.c_bool
+    ir3_disk_cache_retrieve.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_disk_cache_store = _libraries['FIXME_STUB'].ir3_disk_cache_store
+    ir3_disk_cache_store.restype = None
+    ir3_disk_cache_store.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_get_compiler_options = _libraries['FIXME_STUB'].ir3_get_compiler_options
+    ir3_get_compiler_options.restype = ctypes.POINTER(struct_nir_shader_compiler_options)
+    ir3_get_compiler_options.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+try:
+    ir3_compile_shader_nir = _libraries['FIXME_STUB'].ir3_compile_shader_nir
+    ir3_compile_shader_nir.restype = ctypes.c_int32
+    ir3_compile_shader_nir.argtypes = [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_pointer_size = _libraries['FIXME_STUB'].ir3_pointer_size
+    ir3_pointer_size.restype = ctypes.c_uint32
+    ir3_pointer_size.argtypes = [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+
+# values for enumeration 'ir3_shader_debug'
+ir3_shader_debug__enumvalues = {
+    1: 'IR3_DBG_SHADER_VS',
+    2: 'IR3_DBG_SHADER_TCS',
+    4: 'IR3_DBG_SHADER_TES',
+    8: 'IR3_DBG_SHADER_GS',
+    16: 'IR3_DBG_SHADER_FS',
+    32: 'IR3_DBG_SHADER_CS',
+    64: 'IR3_DBG_DISASM',
+    128: 'IR3_DBG_OPTMSGS',
+    256: 'IR3_DBG_FORCES2EN',
+    512: 'IR3_DBG_NOUBOOPT',
+    1024: 'IR3_DBG_NOFP16',
+    2048: 'IR3_DBG_NOCACHE',
+    4096: 'IR3_DBG_SPILLALL',
+    8192: 'IR3_DBG_NOPREAMBLE',
+    16384: 'IR3_DBG_SHADER_INTERNAL',
+    32768: 'IR3_DBG_FULLSYNC',
+    65536: 'IR3_DBG_FULLNOP',
+    131072: 'IR3_DBG_NOEARLYPREAMBLE',
+    262144: 'IR3_DBG_NODESCPREFETCH',
+    524288: 'IR3_DBG_EXPANDRPT',
+    1048576: 'IR3_DBG_ASM_ROUNDTRIP',
+    2097152: 'IR3_DBG_SCHEDMSGS',
+    4194304: 'IR3_DBG_RAMSGS',
+    8388608: 'IR3_DBG_NOALIASTEX',
+    16777216: 'IR3_DBG_NOALIASRT',
+}
+IR3_DBG_SHADER_VS = 1
+IR3_DBG_SHADER_TCS = 2
+IR3_DBG_SHADER_TES = 4
+IR3_DBG_SHADER_GS = 8
+IR3_DBG_SHADER_FS = 16
+IR3_DBG_SHADER_CS = 32
+IR3_DBG_DISASM = 64
+IR3_DBG_OPTMSGS = 128
+IR3_DBG_FORCES2EN = 256
+IR3_DBG_NOUBOOPT = 512
+IR3_DBG_NOFP16 = 1024
+IR3_DBG_NOCACHE = 2048
+IR3_DBG_SPILLALL = 4096
+IR3_DBG_NOPREAMBLE = 8192
+IR3_DBG_SHADER_INTERNAL = 16384
+IR3_DBG_FULLSYNC = 32768
+IR3_DBG_FULLNOP = 65536
+IR3_DBG_NOEARLYPREAMBLE = 131072
+IR3_DBG_NODESCPREFETCH = 262144
+IR3_DBG_EXPANDRPT = 524288
+IR3_DBG_ASM_ROUNDTRIP = 1048576
+IR3_DBG_SCHEDMSGS = 2097152
+IR3_DBG_RAMSGS = 4194304
+IR3_DBG_NOALIASTEX = 8388608
+IR3_DBG_NOALIASRT = 16777216
+ir3_shader_debug = ctypes.c_uint32 # enum
+ir3_shader_override_path = None # Variable ctypes.POINTER(ctypes.c_char)
+try:
+    shader_debug_enabled = _libraries['FIXME_STUB'].shader_debug_enabled
+    shader_debug_enabled.restype = ctypes.c_bool
+    shader_debug_enabled.argtypes = [gl_shader_stage, ctypes.c_bool]
+except AttributeError:
+    pass
+class struct_ir3_instruction(Structure):
+    pass
+
+struct_ir3._pack_ = 1 # source:False
+struct_ir3._fields_ = [
+    ('compiler', ctypes.POINTER(struct_ir3_compiler)),
+    ('type', gl_shader_stage),
+    ('inputs_count', ctypes.c_uint32),
+    ('inputs_sz', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('inputs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('baryfs_count', ctypes.c_uint32),
+    ('baryfs_sz', ctypes.c_uint32),
+    ('baryfs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('a0_users_count', ctypes.c_uint32),
+    ('a0_users_sz', ctypes.c_uint32),
+    ('a0_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('a1_users_count', ctypes.c_uint32),
+    ('a1_users_sz', ctypes.c_uint32),
+    ('a1_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('astc_srgb_count', ctypes.c_uint32),
+    ('astc_srgb_sz', ctypes.c_uint32),
+    ('astc_srgb', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('tg4_count', ctypes.c_uint32),
+    ('tg4_sz', ctypes.c_uint32),
+    ('tg4', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+    ('block_list', struct_list_head),
+    ('array_list', struct_list_head),
+    ('instr_count', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+class struct_ir3_block(Structure):
+    pass
+
+class struct_ir3_register(Structure):
+    pass
+
 
 # values for enumeration 'ir3_instruction_flags'
 ir3_instruction_flags__enumvalues = {
@@ -18953,6 +19500,481 @@ try:
     ir3_shader_debug_as_string.argtypes = []
 except AttributeError:
     pass
+class struct_ir3_driver_params_cs(Structure):
+    pass
+
+struct_ir3_driver_params_cs._pack_ = 1 # source:False
+struct_ir3_driver_params_cs._fields_ = [
+    ('num_work_groups_x', ctypes.c_uint32),
+    ('num_work_groups_y', ctypes.c_uint32),
+    ('num_work_groups_z', ctypes.c_uint32),
+    ('work_dim', ctypes.c_uint32),
+    ('base_group_x', ctypes.c_uint32),
+    ('base_group_y', ctypes.c_uint32),
+    ('base_group_z', ctypes.c_uint32),
+    ('subgroup_size', ctypes.c_uint32),
+    ('local_group_size_x', ctypes.c_uint32),
+    ('local_group_size_y', ctypes.c_uint32),
+    ('local_group_size_z', ctypes.c_uint32),
+    ('subgroup_id_shift', ctypes.c_uint32),
+    ('workgroup_id_x', ctypes.c_uint32),
+    ('workgroup_id_y', ctypes.c_uint32),
+    ('workgroup_id_z', ctypes.c_uint32),
+    ('__pad', ctypes.c_uint32),
+]
+
+class struct_ir3_driver_params_vs(Structure):
+    pass
+
+class struct_ir3_driver_params_vs_0(Structure):
+    pass
+
+struct_ir3_driver_params_vs_0._pack_ = 1 # source:False
+struct_ir3_driver_params_vs_0._fields_ = [
+    ('x', ctypes.c_uint32),
+    ('y', ctypes.c_uint32),
+    ('z', ctypes.c_uint32),
+    ('w', ctypes.c_uint32),
+]
+
+struct_ir3_driver_params_vs._pack_ = 1 # source:False
+struct_ir3_driver_params_vs._fields_ = [
+    ('draw_id', ctypes.c_uint32),
+    ('vtxid_base', ctypes.c_uint32),
+    ('instid_base', ctypes.c_uint32),
+    ('vtxcnt_max', ctypes.c_uint32),
+    ('is_indexed_draw', ctypes.c_uint32),
+    ('ucp', struct_ir3_driver_params_vs_0 * 8),
+    ('__pad_37_39', ctypes.c_uint32 * 3),
+]
+
+class struct_ir3_driver_params_tcs(Structure):
+    pass
+
+struct_ir3_driver_params_tcs._pack_ = 1 # source:False
+struct_ir3_driver_params_tcs._fields_ = [
+    ('default_outer_level_x', ctypes.c_uint32),
+    ('default_outer_level_y', ctypes.c_uint32),
+    ('default_outer_level_z', ctypes.c_uint32),
+    ('default_outer_level_w', ctypes.c_uint32),
+    ('default_inner_level_x', ctypes.c_uint32),
+    ('default_inner_level_y', ctypes.c_uint32),
+    ('__pad_06_07', ctypes.c_uint32 * 2),
+]
+
+class struct_ir3_driver_params_fs(Structure):
+    pass
+
+struct_ir3_driver_params_fs._pack_ = 1 # source:False
+struct_ir3_driver_params_fs._fields_ = [
+    ('subgroup_size', ctypes.c_uint32),
+    ('__pad_01_03', ctypes.c_uint32 * 3),
+    ('frag_invocation_count', ctypes.c_uint32),
+    ('__pad_05_07', ctypes.c_uint32 * 3),
+    ('frag_size', ctypes.c_uint32),
+    ('__pad_09', ctypes.c_uint32),
+    ('frag_offset', ctypes.c_uint32),
+    ('__pad_11_12', ctypes.c_uint32 * 2),
+]
+
+class struct_ir3_ubo_info(Structure):
+    pass
+
+struct_ir3_ubo_info._pack_ = 1 # source:False
+struct_ir3_ubo_info._fields_ = [
+    ('global_base', ctypes.POINTER(struct_nir_def)),
+    ('block', ctypes.c_uint32),
+    ('bindless_base', ctypes.c_uint16),
+    ('bindless', ctypes.c_bool),
+    ('global', ctypes.c_bool),
+]
+
+class struct_ir3_ubo_range(Structure):
+    pass
+
+struct_ir3_ubo_range._pack_ = 1 # source:False
+struct_ir3_ubo_range._fields_ = [
+    ('ubo', struct_ir3_ubo_info),
+    ('offset', ctypes.c_uint32),
+    ('start', ctypes.c_uint32),
+    ('end', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+]
+
+class struct_ir3_ubo_analysis_state(Structure):
+    pass
+
+struct_ir3_ubo_analysis_state._pack_ = 1 # source:False
+struct_ir3_ubo_analysis_state._fields_ = [
+    ('range', struct_ir3_ubo_range * 32),
+    ('num_enabled', ctypes.c_uint32),
+    ('size', ctypes.c_uint32),
+]
+
+class struct_ir3_driver_ubo(Structure):
+    pass
+
+struct_ir3_driver_ubo._pack_ = 1 # source:False
+struct_ir3_driver_ubo._fields_ = [
+    ('idx', ctypes.c_int32),
+    ('size', ctypes.c_uint32),
+]
+
+
+# values for enumeration 'ir3_const_alloc_type'
+ir3_const_alloc_type__enumvalues = {
+    0: 'IR3_CONST_ALLOC_PUSH_CONSTS',
+    1: 'IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET',
+    2: 'IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS',
+    3: 'IR3_CONST_ALLOC_DRIVER_PARAMS',
+    4: 'IR3_CONST_ALLOC_UBO_RANGES',
+    5: 'IR3_CONST_ALLOC_PREAMBLE',
+    6: 'IR3_CONST_ALLOC_GLOBAL',
+    7: 'IR3_CONST_ALLOC_UBO_PTRS',
+    8: 'IR3_CONST_ALLOC_IMAGE_DIMS',
+    9: 'IR3_CONST_ALLOC_TFBO',
+    10: 'IR3_CONST_ALLOC_PRIMITIVE_PARAM',
+    11: 'IR3_CONST_ALLOC_PRIMITIVE_MAP',
+    12: 'IR3_CONST_ALLOC_MAX',
+}
+IR3_CONST_ALLOC_PUSH_CONSTS = 0
+IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET = 1
+IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS = 2
+IR3_CONST_ALLOC_DRIVER_PARAMS = 3
+IR3_CONST_ALLOC_UBO_RANGES = 4
+IR3_CONST_ALLOC_PREAMBLE = 5
+IR3_CONST_ALLOC_GLOBAL = 6
+IR3_CONST_ALLOC_UBO_PTRS = 7
+IR3_CONST_ALLOC_IMAGE_DIMS = 8
+IR3_CONST_ALLOC_TFBO = 9
+IR3_CONST_ALLOC_PRIMITIVE_PARAM = 10
+IR3_CONST_ALLOC_PRIMITIVE_MAP = 11
+IR3_CONST_ALLOC_MAX = 12
+ir3_const_alloc_type = ctypes.c_uint32 # enum
+try:
+    ir3_const_can_upload = _libraries['FIXME_STUB'].ir3_const_can_upload
+    ir3_const_can_upload.restype = ctypes.c_bool
+    ir3_const_can_upload.argtypes = [ctypes.POINTER(struct_ir3_const_allocations), ir3_const_alloc_type, uint32_t]
+except AttributeError:
+    pass
+class struct_ir3_const_image_dims(Structure):
+    pass
+
+struct_ir3_const_image_dims._pack_ = 1 # source:False
+struct_ir3_const_image_dims._fields_ = [
+    ('mask', ctypes.c_uint32),
+    ('count', ctypes.c_uint32),
+    ('off', ctypes.c_uint32 * 32),
+]
+
+struct_ir3_const_state._pack_ = 1 # source:False
+struct_ir3_const_state._fields_ = [
+    ('num_ubos', ctypes.c_uint32),
+    ('num_app_ubos', ctypes.c_uint32),
+    ('num_driver_params', ctypes.c_uint32),
+    ('consts_ubo', struct_ir3_driver_ubo),
+    ('driver_params_ubo', struct_ir3_driver_ubo),
+    ('primitive_map_ubo', struct_ir3_driver_ubo),
+    ('primitive_param_ubo', struct_ir3_driver_ubo),
+    ('allocs', struct_ir3_const_allocations),
+    ('image_dims', struct_ir3_const_image_dims),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('ubo_state', struct_ir3_ubo_analysis_state),
+    ('push_consts_type', ir3_push_consts_type),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+]
+
+try:
+    ir3_tess_mode = _libraries['FIXME_STUB'].ir3_tess_mode
+    ir3_tess_mode.restype = ctypes.c_uint32
+    ir3_tess_mode.argtypes = [tess_primitive_mode]
+except AttributeError:
+    pass
+try:
+    ir3_tess_factor_stride = _libraries['FIXME_STUB'].ir3_tess_factor_stride
+    ir3_tess_factor_stride.restype = uint32_t
+    ir3_tess_factor_stride.argtypes = [ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    ir3_shader_key_equal = _libraries['FIXME_STUB'].ir3_shader_key_equal
+    ir3_shader_key_equal.restype = ctypes.c_bool
+    ir3_shader_key_equal.argtypes = [ctypes.POINTER(struct_ir3_shader_key), ctypes.POINTER(struct_ir3_shader_key)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_key_changes_fs = _libraries['FIXME_STUB'].ir3_shader_key_changes_fs
+    ir3_shader_key_changes_fs.restype = ctypes.c_bool
+    ir3_shader_key_changes_fs.argtypes = [ctypes.POINTER(struct_ir3_shader_key), ctypes.POINTER(struct_ir3_shader_key)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_key_changes_vs = _libraries['FIXME_STUB'].ir3_shader_key_changes_vs
+    ir3_shader_key_changes_vs.restype = ctypes.c_bool
+    ir3_shader_key_changes_vs.argtypes = [ctypes.POINTER(struct_ir3_shader_key), ctypes.POINTER(struct_ir3_shader_key)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_stage = _libraries['FIXME_STUB'].ir3_shader_stage
+    ir3_shader_stage.restype = ctypes.POINTER(ctypes.c_char)
+    ir3_shader_stage.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_has_binning_vs = _libraries['FIXME_STUB'].ir3_has_binning_vs
+    ir3_has_binning_vs.restype = ctypes.c_bool
+    ir3_has_binning_vs.argtypes = [ctypes.POINTER(struct_ir3_shader_key)]
+except AttributeError:
+    pass
+try:
+    ir3_const_state = _libraries['FIXME_STUB'].ir3_const_state
+    ir3_const_state.restype = ctypes.POINTER(struct_ir3_const_state)
+    ir3_const_state.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_const_state_mut = _libraries['FIXME_STUB'].ir3_const_state_mut
+    ir3_const_state_mut.restype = ctypes.POINTER(struct_ir3_const_state)
+    ir3_const_state_mut.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_max_const_compute = _libraries['FIXME_STUB'].ir3_max_const_compute
+    ir3_max_const_compute.restype = ctypes.c_uint32
+    ir3_max_const_compute.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+try:
+    _ir3_max_const = _libraries['FIXME_STUB']._ir3_max_const
+    _ir3_max_const.restype = ctypes.c_uint32
+    _ir3_max_const.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_bool]
+except AttributeError:
+    pass
+try:
+    ir3_max_const = _libraries['FIXME_STUB'].ir3_max_const
+    ir3_max_const.restype = ctypes.c_uint32
+    ir3_max_const.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_const_ensure_imm_size = _libraries['FIXME_STUB'].ir3_const_ensure_imm_size
+    ir3_const_ensure_imm_size.restype = ctypes.c_bool
+    ir3_const_ensure_imm_size.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    ir3_const_imm_index_to_reg = _libraries['FIXME_STUB'].ir3_const_imm_index_to_reg
+    ir3_const_imm_index_to_reg.restype = uint16_t
+    ir3_const_imm_index_to_reg.argtypes = [ctypes.POINTER(struct_ir3_const_state), ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    ir3_const_find_imm = _libraries['FIXME_STUB'].ir3_const_find_imm
+    ir3_const_find_imm.restype = uint16_t
+    ir3_const_find_imm.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), uint32_t]
+except AttributeError:
+    pass
+try:
+    ir3_const_add_imm = _libraries['FIXME_STUB'].ir3_const_add_imm
+    ir3_const_add_imm.restype = uint16_t
+    ir3_const_add_imm.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), uint32_t]
+except AttributeError:
+    pass
+try:
+    ir3_const_reg = _libraries['FIXME_STUB'].ir3_const_reg
+    ir3_const_reg.restype = ctypes.c_uint32
+    ir3_const_reg.argtypes = [ctypes.POINTER(struct_ir3_const_state), ir3_const_alloc_type, ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    ir3_exceeds_safe_constlen = _libraries['FIXME_STUB'].ir3_exceeds_safe_constlen
+    ir3_exceeds_safe_constlen.restype = ctypes.c_bool
+    ir3_exceeds_safe_constlen.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_assemble = _libraries['FIXME_STUB'].ir3_shader_assemble
+    ir3_shader_assemble.restype = ctypes.POINTER(None)
+    ir3_shader_assemble.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_create_variant = _libraries['FIXME_STUB'].ir3_shader_create_variant
+    ir3_shader_create_variant.restype = ctypes.POINTER(struct_ir3_shader_variant)
+    ir3_shader_create_variant.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_key), ctypes.c_bool]
+except AttributeError:
+    pass
+try:
+    ir3_shader_get_variant = _libraries['FIXME_STUB'].ir3_shader_get_variant
+    ir3_shader_get_variant.restype = ctypes.POINTER(struct_ir3_shader_variant)
+    ir3_shader_get_variant.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_key), ctypes.c_bool, ctypes.c_bool, ctypes.POINTER(ctypes.c_bool)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_from_nir = _libraries['FIXME_STUB'].ir3_shader_from_nir
+    ir3_shader_from_nir.restype = ctypes.POINTER(struct_ir3_shader)
+    ir3_shader_from_nir.argtypes = [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_ir3_shader_options), ctypes.POINTER(struct_ir3_stream_output_info)]
+except AttributeError:
+    pass
+try:
+    ir3_trim_constlen = _libraries['FIXME_STUB'].ir3_trim_constlen
+    ir3_trim_constlen.restype = uint32_t
+    ir3_trim_constlen.argtypes = [ctypes.POINTER(ctypes.POINTER(struct_ir3_shader_variant)), ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_passthrough_tcs = _libraries['FIXME_STUB'].ir3_shader_passthrough_tcs
+    ir3_shader_passthrough_tcs.restype = ctypes.POINTER(struct_ir3_shader)
+    ir3_shader_passthrough_tcs.argtypes = [ctypes.POINTER(struct_ir3_shader), ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    ir3_shader_destroy = _libraries['FIXME_STUB'].ir3_shader_destroy
+    ir3_shader_destroy.restype = None
+    ir3_shader_destroy.argtypes = [ctypes.POINTER(struct_ir3_shader)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_disasm = _libraries['FIXME_STUB'].ir3_shader_disasm
+    ir3_shader_disasm.restype = None
+    ir3_shader_disasm.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct__IO_FILE)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_outputs = _libraries['FIXME_STUB'].ir3_shader_outputs
+    ir3_shader_outputs.restype = uint64_t
+    ir3_shader_outputs.argtypes = [ctypes.POINTER(struct_ir3_shader)]
+except AttributeError:
+    pass
+try:
+    ir3_glsl_type_size = _libraries['FIXME_STUB'].ir3_glsl_type_size
+    ir3_glsl_type_size.restype = ctypes.c_int32
+    ir3_glsl_type_size.argtypes = [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
+except AttributeError:
+    pass
+try:
+    ir3_shader_get_subgroup_size = _libraries['FIXME_STUB'].ir3_shader_get_subgroup_size
+    ir3_shader_get_subgroup_size.restype = None
+    ir3_shader_get_subgroup_size.argtypes = [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_options), gl_shader_stage, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    ir3_key_clear_unused = _libraries['FIXME_STUB'].ir3_key_clear_unused
+    ir3_key_clear_unused.restype = None
+    ir3_key_clear_unused.argtypes = [ctypes.POINTER(struct_ir3_shader_key), ctypes.POINTER(struct_ir3_shader)]
+except AttributeError:
+    pass
+try:
+    ir3_find_output = _libraries['FIXME_STUB'].ir3_find_output
+    ir3_find_output.restype = ctypes.c_int32
+    ir3_find_output.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), gl_varying_slot]
+except AttributeError:
+    pass
+try:
+    ir3_next_varying = _libraries['FIXME_STUB'].ir3_next_varying
+    ir3_next_varying.restype = ctypes.c_int32
+    ir3_next_varying.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_int32]
+except AttributeError:
+    pass
+try:
+    ir3_find_input = _libraries['FIXME_STUB'].ir3_find_input
+    ir3_find_input.restype = ctypes.c_int32
+    ir3_find_input.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), gl_varying_slot]
+except AttributeError:
+    pass
+try:
+    ir3_find_input_loc = _libraries['FIXME_STUB'].ir3_find_input_loc
+    ir3_find_input_loc.restype = ctypes.c_uint32
+    ir3_find_input_loc.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), gl_varying_slot]
+except AttributeError:
+    pass
+class struct_ir3_shader_linkage(Structure):
+    pass
+
+class struct_ir3_shader_linkage_0(Structure):
+    pass
+
+struct_ir3_shader_linkage_0._pack_ = 1 # source:False
+struct_ir3_shader_linkage_0._fields_ = [
+    ('slot', ctypes.c_ubyte),
+    ('regid', ctypes.c_ubyte),
+    ('compmask', ctypes.c_ubyte),
+    ('loc', ctypes.c_ubyte),
+]
+
+struct_ir3_shader_linkage._pack_ = 1 # source:False
+struct_ir3_shader_linkage._fields_ = [
+    ('max_loc', ctypes.c_ubyte),
+    ('cnt', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('varmask', ctypes.c_uint32 * 4),
+    ('var', struct_ir3_shader_linkage_0 * 32),
+    ('primid_loc', ctypes.c_ubyte),
+    ('viewid_loc', ctypes.c_ubyte),
+    ('clip0_loc', ctypes.c_ubyte),
+    ('clip1_loc', ctypes.c_ubyte),
+]
+
+try:
+    ir3_link_add = _libraries['FIXME_STUB'].ir3_link_add
+    ir3_link_add.restype = None
+    ir3_link_add.argtypes = [ctypes.POINTER(struct_ir3_shader_linkage), uint8_t, uint8_t, uint8_t, uint8_t]
+except AttributeError:
+    pass
+try:
+    ir3_link_shaders = _libraries['FIXME_STUB'].ir3_link_shaders
+    ir3_link_shaders.restype = None
+    ir3_link_shaders.argtypes = [ctypes.POINTER(struct_ir3_shader_linkage), ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_bool]
+except AttributeError:
+    pass
+try:
+    ir3_get_output_regid = _libraries['FIXME_STUB'].ir3_get_output_regid
+    ir3_get_output_regid.restype = uint32_t
+    ir3_get_output_regid.argtypes = [ctypes.POINTER(struct_ir3_shader_output)]
+except AttributeError:
+    pass
+try:
+    ir3_find_output_regid = _libraries['FIXME_STUB'].ir3_find_output_regid
+    ir3_find_output_regid.restype = uint32_t
+    ir3_find_output_regid.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    print_raw = _libraries['FIXME_STUB'].print_raw
+    print_raw.restype = None
+    print_raw.argtypes = [ctypes.POINTER(struct__IO_FILE), ctypes.POINTER(ctypes.c_uint32), size_t]
+except AttributeError:
+    pass
+try:
+    ir3_link_stream_out = _libraries['FIXME_STUB'].ir3_link_stream_out
+    ir3_link_stream_out.restype = None
+    ir3_link_stream_out.argtypes = [ctypes.POINTER(struct_ir3_shader_linkage), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_find_sysval_regid = _libraries['FIXME_STUB'].ir3_find_sysval_regid
+    ir3_find_sysval_regid.restype = uint32_t
+    ir3_find_sysval_regid.argtypes = [ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError:
+    pass
+try:
+    ir3_shader_halfregs = _libraries['FIXME_STUB'].ir3_shader_halfregs
+    ir3_shader_halfregs.restype = uint32_t
+    ir3_shader_halfregs.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_num_uavs = _libraries['FIXME_STUB'].ir3_shader_num_uavs
+    ir3_shader_num_uavs.restype = uint32_t
+    ir3_shader_num_uavs.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
+try:
+    ir3_shader_branchstack_hw = _libraries['FIXME_STUB'].ir3_shader_branchstack_hw
+    ir3_shader_branchstack_hw.restype = uint32_t
+    ir3_shader_branchstack_hw.argtypes = [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError:
+    pass
 __all__ = \
     ['ACCESS_CAN_REORDER', 'ACCESS_CAN_SPECULATE', 'ACCESS_COHERENT',
     'ACCESS_CP_GE_COHERENT_AMD', 'ACCESS_FMASK_LOWERED_AMD',
@@ -18994,8 +20016,18 @@ __all__ = \
     'GLSL_TYPE_SAMPLER', 'GLSL_TYPE_STRUCT', 'GLSL_TYPE_SUBROUTINE',
     'GLSL_TYPE_TEXTURE', 'GLSL_TYPE_UINT', 'GLSL_TYPE_UINT16',
     'GLSL_TYPE_UINT64', 'GLSL_TYPE_UINT8', 'GLSL_TYPE_VOID',
-    'IR3_COND_EQ', 'IR3_COND_GE', 'IR3_COND_GT', 'IR3_COND_LE',
-    'IR3_COND_LT', 'IR3_COND_NE', 'IR3_DBG_ASM_ROUNDTRIP',
+    'IJ_COUNT', 'IJ_LINEAR_CENTROID', 'IJ_LINEAR_PIXEL',
+    'IJ_LINEAR_SAMPLE', 'IJ_PERSP_CENTER_RHW', 'IJ_PERSP_CENTROID',
+    'IJ_PERSP_PIXEL', 'IJ_PERSP_SAMPLE', 'IR3_COND_EQ', 'IR3_COND_GE',
+    'IR3_COND_GT', 'IR3_COND_LE', 'IR3_COND_LT', 'IR3_COND_NE',
+    'IR3_CONST_ALLOC_DRIVER_PARAMS',
+    'IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET', 'IR3_CONST_ALLOC_GLOBAL',
+    'IR3_CONST_ALLOC_IMAGE_DIMS',
+    'IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS', 'IR3_CONST_ALLOC_MAX',
+    'IR3_CONST_ALLOC_PREAMBLE', 'IR3_CONST_ALLOC_PRIMITIVE_MAP',
+    'IR3_CONST_ALLOC_PRIMITIVE_PARAM', 'IR3_CONST_ALLOC_PUSH_CONSTS',
+    'IR3_CONST_ALLOC_TFBO', 'IR3_CONST_ALLOC_UBO_PTRS',
+    'IR3_CONST_ALLOC_UBO_RANGES', 'IR3_DBG_ASM_ROUNDTRIP',
     'IR3_DBG_DISASM', 'IR3_DBG_EXPANDRPT', 'IR3_DBG_FORCES2EN',
     'IR3_DBG_FULLNOP', 'IR3_DBG_FULLSYNC', 'IR3_DBG_NOALIASRT',
     'IR3_DBG_NOALIASTEX', 'IR3_DBG_NOCACHE', 'IR3_DBG_NODESCPREFETCH',
@@ -19004,46 +20036,50 @@ __all__ = \
     'IR3_DBG_SCHEDMSGS', 'IR3_DBG_SHADER_CS', 'IR3_DBG_SHADER_FS',
     'IR3_DBG_SHADER_GS', 'IR3_DBG_SHADER_INTERNAL',
     'IR3_DBG_SHADER_TCS', 'IR3_DBG_SHADER_TES', 'IR3_DBG_SHADER_VS',
-    'IR3_DBG_SPILLALL', 'IR3_INSTR_3D', 'IR3_INSTR_A',
-    'IR3_INSTR_A1EN', 'IR3_INSTR_B', 'IR3_INSTR_EQ',
+    'IR3_DBG_SPILLALL', 'IR3_DOUBLE_ONLY', 'IR3_INSTR_3D',
+    'IR3_INSTR_A', 'IR3_INSTR_A1EN', 'IR3_INSTR_B', 'IR3_INSTR_EQ',
     'IR3_INSTR_IMM_OFFSET', 'IR3_INSTR_INV_1D', 'IR3_INSTR_JP',
     'IR3_INSTR_MARK', 'IR3_INSTR_NEEDS_HELPERS', 'IR3_INSTR_NONUNIF',
     'IR3_INSTR_O', 'IR3_INSTR_P', 'IR3_INSTR_S', 'IR3_INSTR_S2EN',
     'IR3_INSTR_SAT', 'IR3_INSTR_SHARED_SPILL', 'IR3_INSTR_SS',
     'IR3_INSTR_SY', 'IR3_INSTR_U', 'IR3_INSTR_UL', 'IR3_INSTR_UNUSED',
-    'IR3_INSTR_V', 'IR3_REG_ALIAS', 'IR3_REG_ARRAY', 'IR3_REG_BNOT',
-    'IR3_REG_CONST', 'IR3_REG_EARLY_CLOBBER', 'IR3_REG_EI',
-    'IR3_REG_FABS', 'IR3_REG_FIRST_ALIAS', 'IR3_REG_FIRST_KILL',
-    'IR3_REG_FNEG', 'IR3_REG_HALF', 'IR3_REG_IMMED', 'IR3_REG_KILL',
+    'IR3_INSTR_V', 'IR3_PUSH_CONSTS_NONE',
+    'IR3_PUSH_CONSTS_PER_STAGE', 'IR3_PUSH_CONSTS_SHARED',
+    'IR3_PUSH_CONSTS_SHARED_PREAMBLE', 'IR3_REG_ALIAS',
+    'IR3_REG_ARRAY', 'IR3_REG_BNOT', 'IR3_REG_CONST',
+    'IR3_REG_EARLY_CLOBBER', 'IR3_REG_EI', 'IR3_REG_FABS',
+    'IR3_REG_FIRST_ALIAS', 'IR3_REG_FIRST_KILL', 'IR3_REG_FNEG',
+    'IR3_REG_HALF', 'IR3_REG_IMMED', 'IR3_REG_KILL',
     'IR3_REG_LAST_USE', 'IR3_REG_PREDICATE', 'IR3_REG_R',
     'IR3_REG_RELATIV', 'IR3_REG_RT', 'IR3_REG_SABS', 'IR3_REG_SHARED',
     'IR3_REG_SNEG', 'IR3_REG_SSA', 'IR3_REG_UNUSED',
-    'LLVMArrayTypeKind', 'LLVMAtomicRMWBinOp',
-    'LLVMAtomicRMWBinOpAdd', 'LLVMAtomicRMWBinOpAnd',
-    'LLVMAtomicRMWBinOpFAdd', 'LLVMAtomicRMWBinOpFMax',
-    'LLVMAtomicRMWBinOpFMin', 'LLVMAtomicRMWBinOpFSub',
-    'LLVMAtomicRMWBinOpMax', 'LLVMAtomicRMWBinOpMin',
-    'LLVMAtomicRMWBinOpNand', 'LLVMAtomicRMWBinOpOr',
-    'LLVMAtomicRMWBinOpSub', 'LLVMAtomicRMWBinOpUDecWrap',
-    'LLVMAtomicRMWBinOpUIncWrap', 'LLVMAtomicRMWBinOpUMax',
-    'LLVMAtomicRMWBinOpUMin', 'LLVMAtomicRMWBinOpUSubCond',
-    'LLVMAtomicRMWBinOpUSubSat', 'LLVMAtomicRMWBinOpXchg',
-    'LLVMAtomicRMWBinOpXor', 'LLVMAtomicRMWBinOp__enumvalues',
-    'LLVMBFloatTypeKind', 'LLVMBasicBlockRef', 'LLVMBuilderRef',
-    'LLVMDoubleTypeKind', 'LLVMFP128TypeKind', 'LLVMFloatTypeKind',
-    'LLVMFunctionTypeKind', 'LLVMHalfTypeKind', 'LLVMIntEQ',
-    'LLVMIntNE', 'LLVMIntPredicate', 'LLVMIntPredicate__enumvalues',
-    'LLVMIntSGE', 'LLVMIntSGT', 'LLVMIntSLE', 'LLVMIntSLT',
-    'LLVMIntUGE', 'LLVMIntUGT', 'LLVMIntULE', 'LLVMIntULT',
-    'LLVMIntegerTypeKind', 'LLVMLabelTypeKind',
-    'LLVMMCJITMemoryManagerRef', 'LLVMMetadataTypeKind',
-    'LLVMModuleRef', 'LLVMPPC_FP128TypeKind', 'LLVMPointerTypeKind',
-    'LLVMScalableVectorTypeKind', 'LLVMStructTypeKind',
-    'LLVMTargetExtTypeKind', 'LLVMTargetLibraryInfoRef',
-    'LLVMTargetMachineRef', 'LLVMTokenTypeKind', 'LLVMTypeKind',
-    'LLVMTypeKind__enumvalues', 'LLVMTypeRef', 'LLVMValueRef',
-    'LLVMVectorTypeKind', 'LLVMVoidTypeKind', 'LLVMX86_AMXTypeKind',
-    'LLVMX86_FP80TypeKind', 'LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV',
+    'IR3_SINGLE_ONLY', 'IR3_SINGLE_OR_DOUBLE', 'LLVMArrayTypeKind',
+    'LLVMAtomicRMWBinOp', 'LLVMAtomicRMWBinOpAdd',
+    'LLVMAtomicRMWBinOpAnd', 'LLVMAtomicRMWBinOpFAdd',
+    'LLVMAtomicRMWBinOpFMax', 'LLVMAtomicRMWBinOpFMin',
+    'LLVMAtomicRMWBinOpFSub', 'LLVMAtomicRMWBinOpMax',
+    'LLVMAtomicRMWBinOpMin', 'LLVMAtomicRMWBinOpNand',
+    'LLVMAtomicRMWBinOpOr', 'LLVMAtomicRMWBinOpSub',
+    'LLVMAtomicRMWBinOpUDecWrap', 'LLVMAtomicRMWBinOpUIncWrap',
+    'LLVMAtomicRMWBinOpUMax', 'LLVMAtomicRMWBinOpUMin',
+    'LLVMAtomicRMWBinOpUSubCond', 'LLVMAtomicRMWBinOpUSubSat',
+    'LLVMAtomicRMWBinOpXchg', 'LLVMAtomicRMWBinOpXor',
+    'LLVMAtomicRMWBinOp__enumvalues', 'LLVMBFloatTypeKind',
+    'LLVMBasicBlockRef', 'LLVMBuilderRef', 'LLVMDoubleTypeKind',
+    'LLVMFP128TypeKind', 'LLVMFloatTypeKind', 'LLVMFunctionTypeKind',
+    'LLVMHalfTypeKind', 'LLVMIntEQ', 'LLVMIntNE', 'LLVMIntPredicate',
+    'LLVMIntPredicate__enumvalues', 'LLVMIntSGE', 'LLVMIntSGT',
+    'LLVMIntSLE', 'LLVMIntSLT', 'LLVMIntUGE', 'LLVMIntUGT',
+    'LLVMIntULE', 'LLVMIntULT', 'LLVMIntegerTypeKind',
+    'LLVMLabelTypeKind', 'LLVMMCJITMemoryManagerRef',
+    'LLVMMetadataTypeKind', 'LLVMModuleRef', 'LLVMPPC_FP128TypeKind',
+    'LLVMPointerTypeKind', 'LLVMScalableVectorTypeKind',
+    'LLVMStructTypeKind', 'LLVMTargetExtTypeKind',
+    'LLVMTargetLibraryInfoRef', 'LLVMTargetMachineRef',
+    'LLVMTokenTypeKind', 'LLVMTypeKind', 'LLVMTypeKind__enumvalues',
+    'LLVMTypeRef', 'LLVMValueRef', 'LLVMVectorTypeKind',
+    'LLVMVoidTypeKind', 'LLVMX86_AMXTypeKind', 'LLVMX86_FP80TypeKind',
+    'LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV',
     'LP_BLD_TEX_MODIFIER_EXPLICIT_LOD',
     'LP_BLD_TEX_MODIFIER_LOD_BIAS', 'LP_BLD_TEX_MODIFIER_LOD_ZERO',
     'LP_BLD_TEX_MODIFIER_NONE', 'LP_BLD_TEX_MODIFIER_PROJECTED',
@@ -19557,6 +20593,8 @@ __all__ = \
     'SYSTEM_VALUE_WORKGROUP_SIZE', 'SYSTEM_VALUE_WORK_DIM',
     'TESS_PRIMITIVE_ISOLINES', 'TESS_PRIMITIVE_QUADS',
     'TESS_PRIMITIVE_TRIANGLES', 'TESS_PRIMITIVE_UNSPECIFIED',
+    'TESS_SPACING_EQUAL', 'TESS_SPACING_FRACTIONAL_EVEN',
+    'TESS_SPACING_FRACTIONAL_ODD', 'TESS_SPACING_UNSPECIFIED',
     'TGSI_TEXTURE_1D', 'TGSI_TEXTURE_1D_ARRAY', 'TGSI_TEXTURE_2D',
     'TGSI_TEXTURE_2D_ARRAY', 'TGSI_TEXTURE_2D_ARRAY_MSAA',
     'TGSI_TEXTURE_2D_MSAA', 'TGSI_TEXTURE_3D', 'TGSI_TEXTURE_BUFFER',
@@ -19631,7 +20669,7 @@ __all__ = \
     'VARYING_SLOT_VAR8_16BIT', 'VARYING_SLOT_VAR9',
     'VARYING_SLOT_VAR9_16BIT', 'VARYING_SLOT_VIEWPORT',
     'VARYING_SLOT_VIEWPORT_MASK', 'VARYING_SLOT_VIEW_INDEX',
-    '_nir_mul_imm', '_nir_select_from_array_helper',
+    '_ir3_max_const', '_nir_mul_imm', '_nir_select_from_array_helper',
     '_nir_shader_variable_has_mode', '_nir_src_set_parent',
     'blob_align', 'blob_copy_bytes', 'blob_finish',
     'blob_finish_get_buffer', 'blob_init', 'blob_init_fixed',
@@ -19693,7 +20731,8 @@ __all__ = \
     'gl_access_qualifier', 'gl_derivative_group', 'gl_shader_stage',
     'gl_shader_stage__enumvalues', 'gl_subgroup_size',
     'gl_system_value', 'gl_system_value__enumvalues',
-    'gl_varying_slot', 'gl_varying_slot__enumvalues',
+    'gl_tess_spacing', 'gl_varying_slot',
+    'gl_varying_slot__enumvalues',
     'glsl_apply_signedness_to_base_type', 'glsl_array_size',
     'glsl_array_type', 'glsl_atomic_size', 'glsl_atomic_uint_type',
     'glsl_bare_sampler_type', 'glsl_bare_shadow_sampler_type',
@@ -19794,15 +20833,35 @@ __all__ = \
     'glsl_uvec4_type', 'glsl_uvec_type', 'glsl_varying_count',
     'glsl_vec2_type', 'glsl_vec4_type', 'glsl_vec_type',
     'glsl_vector_type', 'glsl_void_type', 'glsl_without_array',
-    'glsl_without_array_or_matrix', 'int64_t', 'intptr_t',
+    'glsl_without_array_or_matrix', 'int64_t', 'intptr_t', 'ir3_bary',
     'ir3_compile_shader_nir', 'ir3_compiler_create',
-    'ir3_compiler_destroy', 'ir3_debug_print', 'ir3_disk_cache_init',
+    'ir3_compiler_destroy', 'ir3_const_add_imm',
+    'ir3_const_alloc_type', 'ir3_const_can_upload',
+    'ir3_const_ensure_imm_size', 'ir3_const_find_imm',
+    'ir3_const_imm_index_to_reg', 'ir3_const_reg', 'ir3_const_state',
+    'ir3_const_state_mut', 'ir3_debug_print', 'ir3_disk_cache_init',
     'ir3_disk_cache_init_shader_key', 'ir3_disk_cache_retrieve',
-    'ir3_disk_cache_store', 'ir3_get_compiler_options',
-    'ir3_instruction_flags', 'ir3_pointer_size', 'ir3_register_flags',
-    'ir3_retrieve_variant', 'ir3_shader_debug',
-    'ir3_shader_debug_as_string', 'ir3_shader_debug_hash_key',
-    'ir3_shader_override_path', 'ir3_store_variant',
+    'ir3_disk_cache_store', 'ir3_exceeds_safe_constlen',
+    'ir3_find_input', 'ir3_find_input_loc', 'ir3_find_output',
+    'ir3_find_output_regid', 'ir3_find_sysval_regid',
+    'ir3_get_compiler_options', 'ir3_get_output_regid',
+    'ir3_glsl_type_size', 'ir3_has_binning_vs',
+    'ir3_instruction_flags', 'ir3_key_clear_unused', 'ir3_link_add',
+    'ir3_link_shaders', 'ir3_link_stream_out', 'ir3_max_const',
+    'ir3_max_const_compute', 'ir3_next_varying', 'ir3_pointer_size',
+    'ir3_push_consts_type', 'ir3_register_flags',
+    'ir3_retrieve_variant', 'ir3_shader_assemble',
+    'ir3_shader_branchstack_hw', 'ir3_shader_create_variant',
+    'ir3_shader_debug', 'ir3_shader_debug_as_string',
+    'ir3_shader_debug_hash_key', 'ir3_shader_destroy',
+    'ir3_shader_disasm', 'ir3_shader_from_nir',
+    'ir3_shader_get_subgroup_size', 'ir3_shader_get_variant',
+    'ir3_shader_halfregs', 'ir3_shader_key_changes_fs',
+    'ir3_shader_key_changes_vs', 'ir3_shader_key_equal',
+    'ir3_shader_num_uavs', 'ir3_shader_outputs',
+    'ir3_shader_override_path', 'ir3_shader_passthrough_tcs',
+    'ir3_shader_stage', 'ir3_store_variant', 'ir3_tess_factor_stride',
+    'ir3_tess_mode', 'ir3_trim_constlen', 'ir3_wavesize_option',
     'linear_alloc_child', 'linear_alloc_child_array',
     'linear_asprintf', 'linear_asprintf_append',
     'linear_asprintf_rewrite_tail', 'linear_context',
@@ -21431,7 +22490,7 @@ __all__ = \
     'nir_vector_insert_imm', 'nir_vectorize_cb',
     'nir_vertex_divergence_analysis', 'nir_verts_in_output_prim',
     'nir_zero_initialize_shared_memory', 'nv_device_type',
-    'nv_device_uuid', 'pipe_format', 'pipe_shader_type',
+    'nv_device_uuid', 'pipe_format', 'pipe_shader_type', 'print_raw',
     'ralloc_adopt', 'ralloc_array_size', 'ralloc_asprintf',
     'ralloc_asprintf_append', 'ralloc_asprintf_rewrite_tail',
     'ralloc_context', 'ralloc_free', 'ralloc_memdup', 'ralloc_parent',
@@ -21454,6 +22513,7 @@ __all__ = \
     'struct_LLVMOpaqueTargetMachine', 'struct_LLVMOpaqueType',
     'struct_LLVMOpaqueValue', 'struct__IO_FILE', 'struct__IO_codecvt',
     'struct__IO_marker', 'struct__IO_wide_data',
+    'struct___pthread_internal_list', 'struct___pthread_mutex_s',
     'struct___va_list_tag', 'struct_blob', 'struct_blob_reader',
     'struct_c__SA_linear_opts',
     'struct_c__SA_nir_input_to_output_deps',
@@ -21461,7 +22521,7 @@ __all__ = \
     'struct_c__SA_nir_output_clipper_var_groups',
     'struct_c__SA_nir_output_deps', 'struct_c__SA_nir_output_deps_0',
     'struct_disk_cache', 'struct_exec_list', 'struct_exec_node',
-    'struct_fd_dev_id', 'struct_fd_dev_info',
+    'struct_fd_bo', 'struct_fd_dev_id', 'struct_fd_dev_info',
     'struct_fd_dev_info_1_1', 'struct_fd_dev_info_1_magic',
     'struct_fd_dev_info_a6xx', 'struct_fd_dev_info_a7xx',
     'struct_fd_device', 'struct_gallivm_state', 'struct_gc_ctx',
@@ -21470,6 +22530,13 @@ __all__ = \
     'struct_hash_entry', 'struct_hash_table', 'struct_ir3',
     'struct_ir3_block', 'struct_ir3_compiler',
     'struct_ir3_compiler_delay_slots', 'struct_ir3_compiler_options',
+    'struct_ir3_const_allocation', 'struct_ir3_const_allocations',
+    'struct_ir3_const_image_dims', 'struct_ir3_const_state',
+    'struct_ir3_disasm_info', 'struct_ir3_driver_params_cs',
+    'struct_ir3_driver_params_fs', 'struct_ir3_driver_params_tcs',
+    'struct_ir3_driver_params_vs', 'struct_ir3_driver_params_vs_0',
+    'struct_ir3_driver_ubo', 'struct_ir3_ibo_mapping',
+    'struct_ir3_imm_const_state', 'struct_ir3_info',
     'struct_ir3_instruction', 'struct_ir3_instruction_0_cat0',
     'struct_ir3_instruction_0_cat1', 'struct_ir3_instruction_0_cat2',
     'struct_ir3_instruction_0_cat3', 'struct_ir3_instruction_0_cat5',
@@ -21481,7 +22548,20 @@ __all__ = \
     'struct_ir3_instruction_0_raw', 'struct_ir3_instruction_0_split',
     'struct_ir3_merge_set', 'struct_ir3_ra_reg_set',
     'struct_ir3_register', 'struct_ir3_register_0_array',
-    'struct_ir3_shader', 'struct_ir3_shader_variant',
+    'struct_ir3_sampler_prefetch', 'struct_ir3_shader',
+    'struct_ir3_shader_0_cs', 'struct_ir3_shader_0_vs',
+    'struct_ir3_shader_key', 'struct_ir3_shader_key_0_0',
+    'struct_ir3_shader_linkage', 'struct_ir3_shader_linkage_0',
+    'struct_ir3_shader_nir_options', 'struct_ir3_shader_options',
+    'struct_ir3_shader_output', 'struct_ir3_shader_variant',
+    'struct_ir3_shader_variant_1', 'struct_ir3_shader_variant_4_cs',
+    'struct_ir3_shader_variant_4_fs',
+    'struct_ir3_shader_variant_4_gs',
+    'struct_ir3_shader_variant_4_tess',
+    'struct_ir3_shader_variant_astc_srgb',
+    'struct_ir3_shader_variant_tg4', 'struct_ir3_stream_output',
+    'struct_ir3_stream_output_info', 'struct_ir3_ubo_analysis_state',
+    'struct_ir3_ubo_info', 'struct_ir3_ubo_range',
     'struct_linear_ctx', 'struct_list_head',
     'struct_lp_bld_tgsi_system_values', 'struct_lp_build_context',
     'struct_lp_build_coro_suspend_info', 'struct_lp_build_fn',
@@ -21573,9 +22653,11 @@ __all__ = \
     'struct_util_format_description', 'tess_primitive_mode',
     'tgsi_texture_type', 'u_printf_info', 'uint16_t', 'uint32_t',
     'uint64_t', 'uint8_t', 'union_c__UA_nir_const_value',
-    'union_fd_dev_info_0', 'union_glsl_struct_field_0',
-    'union_glsl_type_fields', 'union_ir3_instruction_0',
-    'union_ir3_register_0', 'union_lp_descriptor_0',
+    'union_c__UA_pthread_mutex_t', 'union_fd_dev_info_0',
+    'union_glsl_struct_field_0', 'union_glsl_type_fields',
+    'union_ir3_instruction_0', 'union_ir3_register_0',
+    'union_ir3_shader_0', 'union_ir3_shader_key_0',
+    'union_ir3_shader_variant_4', 'union_lp_descriptor_0',
     'union_lp_jit_buffer_0', 'union_lp_jit_texture_0',
     'union_nak_shader_info_0', 'union_nir_cursor_0',
     'union_nir_deref_instr_0', 'union_nir_deref_instr_1',

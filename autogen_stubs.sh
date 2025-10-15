@@ -511,6 +511,7 @@ generate_mesa() {
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_flow.h \
     $MESA_SRC/src/gallium/auxiliary/gallivm/lp_bld_const.h \
     $MESA_SRC/src/freedreno/ir3/ir3_compiler.h \
+    $MESA_SRC/src/freedreno/ir3/ir3_shader.h \
     $MESA_SRC/src/compiler/glsl_types.h \
     $MESA_SRC/src/util/blob.h \
     $MESA_SRC/src/util/ralloc.h \
@@ -535,6 +536,7 @@ EOF
   sed -i "s/ctypes.glsl_base_type/glsl_base_type/" $BASE/mesa.py
   # bitfield bug in clang2py
   sed -i "s/('fp_fast_math', ctypes.c_bool, 9)/('fp_fast_math', ctypes.c_uint32, 9)/" $BASE/mesa.py
+  sed -i "s/ctypes.gl_tess_spacing/ctypes.c_bool/" $BASE/mesa.py
   sed -i "s/('\(\w\+\)', pipe_shader_type, 8)/('\1', ctypes.c_ubyte)/" $BASE/mesa.py
   sed -i "s/\([0-9]\+\)()/\1/" $BASE/mesa.py
   sed -i "s/\(struct_nir_builder._pack_\) = 1/\1 = 0/" $BASE/mesa.py
