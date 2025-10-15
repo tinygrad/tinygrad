@@ -201,7 +201,7 @@ class NVProgram(HCQProgram):
     elif MOCKGPU: image, sections, relocs = memoryview(bytearray(lib) + b'\x00' * (4 - len(lib)%4)).cast("I"), [], [] # type: ignore
     else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
-    self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x1000, buf_spec:=BufferSpec(cpu_access=True))
+    self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x1000, buf_spec:=BufferSpec(nolru=True))
     prog_addr = self.lib_gpu.va_addr
     if not NAK:
       # For MOCKGPU, the lib is PTX code, so some values are emulated.
@@ -229,8 +229,8 @@ class NVProgram(HCQProgram):
 
     # Ensure device has enough local memory to run the program
     self.dev._ensure_has_local_memory(self.lcmem_usage)
-
-    ctypes.memmove(self.lib_gpu.va_addr, mv_address(image), image.nbytes)
+    self.dev.allocator._copyin(self.lib_gpu, image)
+    self.dev.synchronize()
 
     if dev.iface.compute_class >= nv_gpu.BLACKWELL_COMPUTE_A:
       if not NAK: self.cbuf_0[188:192], self.cbuf_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
