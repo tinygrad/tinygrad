@@ -35,11 +35,11 @@ def get_metadata(trace_bufs:list[tuple]) -> list[dict]:
       traces[i:=len(traces)] = (k, v, uop_fields)
       steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
                 "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
-      ret.append(r:={"name":k.display_name, "steps":steps})
+      ret.append({"name":k.display_name, "steps":steps})
       # program spec metadata
       if isinstance(k.ret, ProgramSpec):
-        steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
-        r["fmt"] = k.ret.src
+        steps.append({"name":"View Program", "query":f"/render?ctx={i}&fmt=src"})
+        steps.append({"name":"View Disassembly", "query":f"/render?ctx={i}&fmt=asm"})
       for key in k.keys: ref_map[key] = i
   return ret
 
@@ -221,8 +221,9 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
-def get_disassembly(ctx:list[str]):
+def get_render(ctx:list[str], fmt:list[str]):
   if not isinstance(prg:=traces[int(ctx[0])][0].ret, ProgramSpec): return
+  if fmt[0] == "src": return json.dumps({"src":prg.src, "lang":"cpp"}).encode()
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
   disasm_str = buf.getvalue()
@@ -231,7 +232,7 @@ def get_disassembly(ctx:list[str]):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
     ret = get_llvm_mca(disasm_str, mtriple, mcpu)
-  else: ret = {"src":disasm_str}
+  else: ret = {"src":disasm_str, "lang":"x86asm"}
   return json.dumps(ret).encode()
 
 # ** HTTP server
@@ -249,7 +250,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
+      if url.path == "/render": ret, content_type = get_render(**query), "application/json"
       else:
         try: return self.stream_json(get_details(traces[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
         except KeyError: status_code = 404
