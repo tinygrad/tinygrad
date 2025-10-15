@@ -327,8 +327,8 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI
-    if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX")
-    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
+    if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX") and not getenv("NV_NAK")
+    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not getenv("CPU_LVP")
     return device in {"AMD", "PYTHON", "NULL"}
   if dtype in dtypes.fp8s: return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
