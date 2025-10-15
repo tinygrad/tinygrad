@@ -158,7 +158,7 @@ class PCIDevImplBase:
 @dataclasses.dataclass
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
-class PCIIfaceBase:
+class LNXPCIIfaceBase:
   dev_impl:PCIDevImplBase
   gpus:ClassVar[list[str]] = []
 
@@ -202,7 +202,7 @@ class PCIIfaceBase:
 
     self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, system=True, snooped=snooped, uncached=uncached)
 
-class APLIfaceBase(PCIIfaceBase):
+class APLPCIIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
     self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
 
@@ -221,3 +221,5 @@ class APLIfaceBase(PCIIfaceBase):
     return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
 
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
+
+PCIIfaceBase = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
