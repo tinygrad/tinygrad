@@ -128,8 +128,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
         axes_out.append(combined_axes % s)
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-      rngs = graph_rewrite(graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid, name="reshape"),
-        pm_drop_and_clauses, name="reshape drop ands").src
+      rngs = graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape").src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
@@ -211,7 +210,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     rngs = out_rngs  # rngs is the input ranges  # pylint: disable=possibly-used-before-assignment
 
     # apply movement ops
-    if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.arg, rngs)
+    if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape): ending_ranges[x] = True
 

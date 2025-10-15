@@ -20,8 +20,8 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   # can drop valid if idx is out of bound when valid is False
   drop_stmt = []
   for stmt in valid.split_uop(Ops.AND):
-    try: X, is_upper_bound, c = parse_valid(stmt)
-    except ValueError: return None
+    if (res:=parse_valid(stmt)) is None: continue
+    X, is_upper_bound, c = res
 
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
