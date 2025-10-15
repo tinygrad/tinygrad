@@ -16,10 +16,11 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
   return sink
 
 # real VIZ=1 pickles these tracked values
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
-traces = [(tracked_keys, tracked_ctxs, uop_fields)]
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt, RewriteTrace
+from tinygrad.viz import serve
+serve.trace = RewriteTrace(tracked_keys, tracked_ctxs, uop_fields)
 from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
-def get_viz_list(): return get_metadata(traces)
+def get_viz_list(): return get_metadata(serve.trace)
 def get_viz_details(rewrite_idx:int, step:int) -> Generator[dict, None, None]:
   lst = get_viz_list()
   assert len(lst) > rewrite_idx, "only loaded {len(lst)} traces, expecting at least {idx}"

@@ -1043,6 +1043,9 @@ class TrackedPatternMatcher(PatternMatcher):
       match_stats[p][2] += time.perf_counter()-st
     return None
 
+@dataclass(frozen=True)
+class RewriteTrace: keys:list[TracingKey]; rewrites:list[list[TrackedGraphRewrite]]; uop_fields:dict[int, tuple] # noqa: E702
+
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
   import atexit
@@ -1051,7 +1054,7 @@ if TRACK_MATCH_STATS or PROFILE:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        pickle.dump([(tracked_keys, tracked_ctxs, uop_fields)], f)
+        pickle.dump(RewriteTrace(tracked_keys, tracked_ctxs, uop_fields), f)
     if VIZ: return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
       ret = [0,0,0.0,0.0]
