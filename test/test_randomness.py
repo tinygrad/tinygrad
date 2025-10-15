@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 from test.helpers import not_support_multi_device
 
 import numpy as np
@@ -100,7 +101,7 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "fails with PTX")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):

@@ -31,9 +31,9 @@ def split_reduceop(reduce:UOp, x:UOp):
   #   ~2**10 should be enough if GROUP is used
   # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
   # split is moved to the end to provide maximum locality for the second phase reduce.
-  real_strides = unwrap(x.st).real_strides(ignore_valid=True)
+  is_expanded = unwrap(x.st).is_expanded()
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
-                             if x.shape[i]%d==0 and real_strides[i]!=0]): return None
+                             if x.shape[i]%d==0 and not is_expanded[i]]): return None
   dim_to_split, divisor = split_candidates[0]
   splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
@@ -46,10 +46,11 @@ earliest_rewrites = PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
 
   # merge adjacent RESHAPES, safe because they are not tagged
-  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, name="x"), lambda x,x2: x.replace(src=(x2.src[0],)) if x.tag is None and x2.tag is None else None),
+  (UPat(Ops.RESHAPE, name="x2").f(Ops.RESHAPE, allow_any_len=True, name="x"),
+   lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
-  (UPat(Ops.BUFFER).f(Ops.RESHAPE, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
+  (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
 
   # split_reduceop
   (UPat(Ops.REDUCE_AXIS, name="reduce", src=(UPat.var("x"),)), split_reduceop),
@@ -60,7 +61,7 @@ earliest_rewrites = PatternMatcher([
    lambda reduce,x: reduce.const_like(identity_element(reduce.arg[0], reduce.dtype)) if x.size == 0 and reduce.size != 0 else None),
 
   # handle size 0
-  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x.st is not None and x.size == 0 else None),
+  (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if x._shape is not None and x.size == 0 else None),
 
   # remove contiguous on movement ops before a copy on disk
   (UPat(GroupOp.Movement-{Ops.SHRINK, Ops.RESHAPE}, name="x").f(Ops.CONTIGUOUS).f(Ops.COPY, allow_any_len=True, name="copy"),
@@ -92,9 +93,6 @@ earliest_rewrites = PatternMatcher([
 
    # realize before assign if input permutes the target buffer
    (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), find_permutes),
-
-  # contiguous buffer is buffer, this is for *correctness* of assign, not just speed
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat(Ops.BUFFER),)), lambda root: root.src[0].forced_reshape(root.shape).rtag(root.tag)),
 ])
 
 # *****************
@@ -103,7 +101,7 @@ earliest_rewrites = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
 ])
 
 # *****************
@@ -207,7 +205,7 @@ pm_cleanups = pm_mops+PatternMatcher([
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
-  if isinstance(b.device, str) and b.device.startswith("DISK"):
+  if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
     rngs = b.src[1:]
     size = prod(shape := [int(r.vmax+1) for r in rngs])
 
@@ -274,7 +272,7 @@ def bufferize_to_store(x:UOp):
     mops = []
     walk = assign_mops
     while walk is not assign_mops.base:
-      mops.append((walk.op, walk.arg))
+      mops.append((walk.op, walk.marg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
     return ret.forced_reshape(shape).replace(tag=x.tag)
@@ -296,14 +294,14 @@ def bufferize_to_store(x:UOp):
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
   # store has the other dtype here
   # TODO: how is this unified?
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).forced_reshape(shape, dtype=x.dtype)
+  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.src[0].arg).rtag(m.tag)),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
 ])
 
 # *****************
@@ -437,12 +435,13 @@ split_kernels = PatternMatcher([
 
 def tag_uop(ctx:list[UOp], x:UOp):
   if x.tag is not None: return None
+  if x.dtype.scalar() == dtypes.index: return None
   ctx.append(x)
   return x.replace(tag=(len(ctx)-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
   (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND,
-                     Ops.MSTACK, Ops.MSELECT}.union(GroupOp.Movement), name="x"), tag_uop),
+                     Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
   (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
 ])
 
@@ -452,7 +451,7 @@ add_tags = PatternMatcher([
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   x = src
   while x is not src.base:
-    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.arg))
+    if x.op is Ops.PERMUTE: contig = contig.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: contig = contig.reshape(x.src[0].shape)
     else: return None
     x = x.src[0]

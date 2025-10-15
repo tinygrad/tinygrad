@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT
-from tinygrad.helpers import getenv, to_mv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
@@ -130,8 +130,9 @@ class AMDComputeQueue(HWQueue):
       self.wreg(self.gc.regSQ_THREAD_TRACE_USERDATA_2, *data_ints[i:i+2])
 
   def sqtt_config(self, tracing:bool):
-    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1,
-              rt_freq=self.soc.SQ_TT_RT_FREQ_4096_CLK, util_timer=self.soc.SQ_TT_UTIL_TIMER_250_CLK, mode=int(tracing))
+    trace_ctrl = {'rt_freq': self.soc.SQ_TT_RT_FREQ_4096_CLK} if self.dev.target < (12,0,0) else {}
+    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1, util_timer=1,
+      mode=int(tracing), **trace_ctrl)
 
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
   def sqtt_start(self, buf0s:list[HCQBuffer], se_mask:int):
@@ -140,24 +141,35 @@ class AMDComputeQueue(HWQueue):
     # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
     for se in range(len(buf0s)):
       self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
-      buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr>>12)
-      self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size>>12)
-      self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, base_lo=buf0_lo)
+      buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
+      if self.dev.target >= (12,0,0):
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, size=buf0s[se].size >> 12)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_LO, base_lo=buf0_lo)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_HI, base_hi=buf0_hi)
+      else:
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size >> 12)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, base_lo=buf0_lo)
       # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
       # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
       # and on amdgpu/non-AM it also does weird things with dispatch order inside se: around 7 times out of 10 it starts from the last cu, but
       # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
       # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
       # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
-      self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT, simd_sel=0, wgp_sel=0, sa_sel=0)
+      cs_wtype = (1 << 6) if self.dev.target >= (12,0,0) else self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT
+      self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=cs_wtype, simd_sel=0, wgp_sel=0, sa_sel=0)
       reg_include = self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_SHDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
-                    self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
-      token_exclude = 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
+                    self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
+      token_exclude = (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT) if self.dev.target < (12,0,0) else 0
+
+      # disable tracing
       if not (se_mask >> se) & 0b1:
-        token_exclude |= 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
+        # gfx12 doesn't have enums with all fields, so it's hardcoded, but it's the same as gfx11.
+        token_exclude |= (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
                          1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
-                         1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
-      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1)
+                         1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) if self.dev.target < (12,0,0) else 0x927
+
+      token_mask = {} if self.dev.target < (12,0,0) else {'exclude_barrier_wait': 1}
+      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1, **token_mask)
       # Enable SQTT
       self.sqtt_config(tracing=True)
     # Restore global broadcasting
@@ -178,9 +190,6 @@ class AMDComputeQueue(HWQueue):
       # Wait for FINISH_PENDING==0
       self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
                 self.gc.regSQ_THREAD_TRACE_STATUS.addr[0], 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_pending'), 4)
-      # Wait for FINISH_DONE!=0
-      self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
-                self.gc.regSQ_THREAD_TRACE_STATUS.addr[0], 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_done'), 4)
       # Disable SQTT
       self.sqtt_config(tracing=False)
       # Wait for BUSY==0
@@ -449,7 +458,7 @@ class AMDProgram(HCQProgram):
       if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
       else: raise RuntimeError(f"unknown AMD reloc {typ}")
 
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(cpu_access=True, nolru=True))
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
@@ -661,7 +670,7 @@ class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=[0x744c, 0x7480, 0x7550], bars=[0, 2, 5], vram_bar=0,
+    super().__init__(dev, dev_id, vendor=0x1002, devices=[0x744c, 0x7480, 0x7550, 0x7590], bars=[0, 2, 5], vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size)
     self._setup_adev(self.pci_dev.pcibus, self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I'))
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
@@ -704,7 +713,7 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBIface(PCIIface):
-  def __init__(self, dev, dev_id):
+  def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     self.dev = dev
     self.usb = ASM24Controller()
     self.bars = setup_pci_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
@@ -804,13 +813,13 @@ class AMDDevice(HCQCompiled):
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
     if self.sqtt_enabled:
-      if self.target[0] != 11: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
+      if self.target[0] < 11: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
       if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
         raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(cpu_access=True, nolru=True)) for _ in range(self.se_cnt)]
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True)) for _ in range(self.se_cnt)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
       self.sqtt_next_cmd_id = itertools.count(0)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
@@ -866,13 +875,12 @@ class AMDDevice(HCQCompiled):
   def _at_profile_finalize(self):
     if self.sqtt_enabled:
       wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
-      wptrs = to_mv(wptrs_buf.va_addr, wptrs_buf.size)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_stop(len(self.sqtt_buffers), wptrs_buf) \
                                                       .signal(self.timeline_signal, self.next_timeline()).submit(self)
       self.synchronize()
       if DEBUG >= 2: print(f'{self.device}: Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):
-        wptr = ((struct.unpack('<I', wptrs[i*4:i*4+4])[0] & 0x1FFFFFFF) - ((buf0.va_addr//32) & 0x1FFFFFFF)) * 32
+        wptr = ((wptrs_buf.cpu_view().view(fmt='I')[i] & 0x1FFFFFFF) - (((buf0.va_addr//32) & 0x1FFFFFFF) if self.target < (12,0,0) else 0)) * 32
         if DEBUG >= 2: print(f'\t{self.device}: SE {i} blob size {wptr:#x}')
         assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
         # When sqtt buffer overflows, wptr stops at the last dword

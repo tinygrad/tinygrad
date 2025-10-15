@@ -124,6 +124,7 @@ class NV_FLCN(NV_IP):
     def __patch(cmd_id, cmd):
       patched_image = bytearray(image)
 
+      dmem_offset = 0
       hdr = nv.FALCON_APPLICATION_INTERFACE_HEADER_V1.from_buffer_copy(image[(app_hdr_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.InterfaceOffset):])
       ents = (nv.FALCON_APPLICATION_INTERFACE_ENTRY_V1 * hdr.entryCount).from_buffer_copy(image[app_hdr_off + ctypes.sizeof(hdr):])
       for i in range(hdr.entryCount):
@@ -334,7 +335,7 @@ class NV_GSP(NV_IP):
     # Fill up arguments
     queue_args = nv.MESSAGE_QUEUE_INIT_ARGUMENTS(sharedMemPhysAddr=queues_sysmem[0], pageTableEntryCount=pte_cnt, cmdQueueOffset=pt_size,
       statQueueOffset=pt_size + queue_size)
-    rm_args, self.rm_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_ARGUMENTS_CACHED(bDmemStack=True, messageQueueInitArguments=queue_args))
+    _, self.rm_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_ARGUMENTS_CACHED(bDmemStack=True, messageQueueInitArguments=queue_args))
 
     # Build command queue header
     self.cmd_q_va, self.stat_q_va = queues_va + pt_size, queues_va + pt_size + queue_size
@@ -481,7 +482,7 @@ class NV_GSP(NV_IP):
       params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
       params.instanceMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
 
-      method_va, method_sysmem = System.alloc_sysmem(0x5000, contiguous=True)
+      _, method_sysmem = System.alloc_sysmem(0x5000, contiguous=True)
       params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
 
       if client is not None and client != self.priv_root and params.hObjectError != 0:
@@ -557,7 +558,7 @@ class NV_GSP(NV_IP):
         self.nvdev.wreg(addr, (self.nvdev.rreg(addr) & ~mask) | (val & mask))
       elif op == 0x2: # reg poll
         addr, mask, val, _, _ = next(cmd_iter), next(cmd_iter), next(cmd_iter), next(cmd_iter), next(cmd_iter)
-        wait_cond(lambda: (self.nvdev.rreg(addr) & mask), value=val, msg=f"Register {addr:#x} not equal to {val:#x} after polling")
+        wait_cond(lambda a, m: (self.nvdev.rreg(a) & m), addr, mask, value=val, msg=f"Register {addr:#x} not equal to {val:#x} after polling")
       elif op == 0x3: time.sleep(next(cmd_iter) / 1e6) # delay us
       elif op == 0x4: # save reg
         addr, index = next(cmd_iter), next(cmd_iter)

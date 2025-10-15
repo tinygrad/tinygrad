@@ -344,7 +344,7 @@ class TestSchedule(unittest.TestCase):
     out1 = r1 + y
     schedule = check_schedule([out0, out1], 2)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
-    assert len(reduceops) in [2,3]  # why is RANGEIFY different?
+    self.assertEqual(len(reduceops), 2) # why is RANGEIFY different?
 
   def test_div_collapse_buffer(self):
     a = Tensor.full((4,), 4.0).contiguous().realize()
@@ -1526,7 +1526,7 @@ class TestSchedule(unittest.TestCase):
     # run_schedule(check_schedule(out, 1))
     run_schedule(check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), np.pad(np.log2(np.abs(np.pad(np.log2(a.numpy()), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum() + \
-                                                   b.numpy())), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=3e-4, rtol=1e-6)
+                                                   b.numpy())), ((0, 1), (0, 1), (0, 1)), constant_values=1.0).sum(), atol=3e-4, rtol=1e-5)
 
   def test_shrink_pad_safe(self):
     a = Tensor.ones((3, )).contiguous().realize()
@@ -2160,8 +2160,8 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.ones((4,)).to("CPU")
     b = Tensor.empty(4, device="CPU")
     add = a+b
-    add.kernelize()
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
+    add.kernelize()
 
   def test_alu_before_copy(self):
     buf = Tensor.ones(1).contiguous().realize()

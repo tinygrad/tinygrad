@@ -223,7 +223,7 @@ class InstanceNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, num_features:int, eps=1e-5, affine=True):
+  def __init__(self, num_features:int, eps:float=1e-5, affine:bool=True):
     self.num_features, self.eps = num_features, eps
     self.weight: Tensor|None = Tensor.ones(num_features) if affine else None
     self.bias: Tensor|None = Tensor.zeros(num_features) if affine else None
@@ -249,16 +249,16 @@ class LayerNorm:
   print(t.mean().item(), t.std().item())
   ```
   """
-  def __init__(self, normalized_shape:int|tuple[int, ...], eps=1e-5, elementwise_affine=True):
+  def __init__(self, normalized_shape:int|tuple[int, ...], eps:float=1e-5, elementwise_affine:bool=True):
     self.normalized_shape: tuple[int, ...] = make_tuple(normalized_shape, 1)
-    self.axis, self.eps, self.elementwise_affine = tuple(-1-i for i in range(len(self.normalized_shape))), eps, elementwise_affine
+    self.axis, self.eps = tuple(-1-i for i in range(len(self.normalized_shape))), eps
     self.weight: Tensor|None = Tensor.ones(*self.normalized_shape) if elementwise_affine else None
     self.bias: Tensor|None = Tensor.zeros(*self.normalized_shape) if elementwise_affine else None
 
   def __call__(self, x:Tensor) -> Tensor:
     assert self.normalized_shape == x.shape[-len(self.normalized_shape):], f"last dimensions of {x.shape} must match {self.normalized_shape}"
     x = x.layernorm(eps=self.eps, axis=self.axis)
-    if not self.elementwise_affine: return x
+    if self.weight is None or self.bias is None: return x
     return x * self.weight + self.bias
 
 class LayerNorm2d(LayerNorm):
