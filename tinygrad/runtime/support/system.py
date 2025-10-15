@@ -211,7 +211,7 @@ class APLIfaceBase(PCIIfaceBase):
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       assert size >= mmap.PAGESIZE, "Size must be at least one page"
 
-      sysmem = self.pci_dev.map_mem(size).view(fmt='Q')
+      sysmem = cast(APLPCIDevice, self.pci_dev).map_mem(size).view(fmt='Q')
       paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
 
       mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
