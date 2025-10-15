@@ -116,7 +116,7 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
-def kron(buf, B, outer_axes_shape, ctx, submap):
+def kron(buf, B, outer_axes_shape, ctx):
   full_shape = tuple(int(s) for s in buf.shape) #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
   inner_shape = full_shape[len(outer_axes_shape):]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
   T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I]) for I in product(*(range(s) for s in inner_shape))]
@@ -165,18 +165,31 @@ def winowrite(ctx: IndexingContext, redu: UOp):
   o_bases = [o_adds[i].substitute({k: k.const_like(0)}) for i, k in enumerate(k_axes)]
   tile_shape = tuple((int(b.vmax+1)+3)//4 for b in o_bases)
 
+  remainder = list(set(redu.src[1:]) - set(k_axes))
+  rem_shape = tuple([ax.vmax+1 for ax in remainder])
+  
+
   tile_ranges = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases];
   inner6 = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
+  rem_ranges = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in remainder]
 
-  X_vu = (act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}).cast(dtypes.float).bufferize(*tile_ranges, *inner6, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)))
-  XHAT = kron(X_vu, winograd_Bt, tile_shape, ctx)
+  X_vu = act_like.substitute(
+  {add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)} |
+  {R: r for R, r in zip(remainder, rem_ranges)}
+).cast(dtypes.float).bufferize(*rem_ranges, *tile_ranges, *inner6, 
+                               arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  XHAT = kron(X_vu, winograd_Bt, tile_shape+rem_shape, ctx)
 
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in range(len(o_bases))]
-  w = w_like.substitute({k: r for k, r in zip(k_axes, kranges)}).bufferize(*kranges, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-  GHAT = kron(w, winograd_G, (), ctx)  # outer_axes=()
+  rem_ranges1 = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in remainder]
+  w = w_like.substitute({k: r for k, r in zip(k_axes, kranges)} | {R: r for R, r in zip(remainder, rem_ranges1)}).bufferize(*rem_ranges1, *kranges, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  GHAT = kron(w, winograd_G, rem_shape, ctx)  # outer_axes=()
   
+  print(f"XHAT: {XHAT.shape}")
+  print(f"GHAT: {GHAT.shape}")
   tile_ranges_1 = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases]; inner6_1      = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
-  MHAT = (XHAT.index(*tile_ranges_1, *inner6_1) * GHAT.index(*inner6_1)).bufferize(*(tile_ranges_1+inner6_1), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  mhat_redu = (XHAT.index(*remainder, *tile_ranges_1, *inner6_1) * GHAT.index(*remainder, *inner6_1)).reduce(*remainder, arg=Ops.ADD)
+  MHAT = (mhat_redu).bufferize(*(tile_ranges_1+inner6_1), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
   return kron(MHAT, winograd_At, tile_shape, ctx).index(*[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases])
 
