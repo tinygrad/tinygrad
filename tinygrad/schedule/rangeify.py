@@ -300,7 +300,7 @@ pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
-   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.src[0].marg).rtag(m.tag)),
+   lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
 ])
 
 # *****************

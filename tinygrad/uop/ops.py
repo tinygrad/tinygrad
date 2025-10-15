@@ -258,7 +258,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
       # TODO: disallow reshape from nothing. tested by TestOpenClip.test_multigpu_clip_score
       case Ops.RESHAPE:
-        if self.src[0]._shape is None: return tuple(ssimplify(s) for s in self.arg)
+        if self.src[0]._shape is None: return self.marg
 
     # movement ops change the shape. this is the logic from the old ShapeTracker
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
