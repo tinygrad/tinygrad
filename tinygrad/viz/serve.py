@@ -51,9 +51,10 @@ class GraphRewriteDetails(TypedDict):
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
 def pystr(u:UOp, i:int) -> str:
-  try:
-    return "\n".join(pyrender(u)) if isinstance(trace.keys[i].ret, ProgramSpec) else str(u)
-  except Exception: return "issue in pyrender"
+  if isinstance(trace.keys[i].ret, ProgramSpec):
+    try: return "\n".join(pyrender(u))
+    except Exception: pass
+  return str(u)
 
 def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
