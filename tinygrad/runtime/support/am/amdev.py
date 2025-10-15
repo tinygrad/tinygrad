@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, os, hashlib
+import ctypes, collections, dataclasses, functools, os, hashlib, array
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -168,7 +168,7 @@ class AMDev(PCIDevImplBase):
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
       first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
-      palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
+      palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)], reserve_ptable=not self.large_bar)
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
@@ -217,14 +217,25 @@ class AMDev(PCIDevImplBase):
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
 
+  def _read_vram(self, addr, size) -> bytes:
+    assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
+    res = []
+    for caddr in range(addr, addr + size, 4):
+      self.wreg(0x06, caddr >> 31)
+      self.wreg(0x00, (caddr & 0x7FFFFFFF) | 0x80000000)
+      res.append(self.rreg(0x01))
+    return bytes(array.array('I', res))
+
   def _run_discovery(self):
     # NOTE: Fixed register to query memory size without known ip bases to find the discovery table.
     #       The table is located at the end of VRAM - 64KB and is 10KB in size.
     mmRCC_CONFIG_MEMSIZE = 0xde3
     self.vram_size = self.rreg(mmRCC_CONFIG_MEMSIZE) << 20
+    self.large_bar = self.vram.nbytes >= self.vram_size
     tmr_offset, tmr_size = self.vram_size - (64 << 10), (10 << 10)
 
-    self.bhdr = am.struct_binary_header.from_buffer(bytearray(self.vram.view(tmr_offset, tmr_size)[:]))
+    disc_tbl = self.vram.view(tmr_offset, tmr_size)[:] if self.large_bar else self._read_vram(tmr_offset, tmr_size)
+    self.bhdr = am.struct_binary_header.from_buffer(bytearray(disc_tbl))
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert self.bhdr.binary_signature == am.BINARY_SIGNATURE and ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, "discovery signatures mismatch"
 
