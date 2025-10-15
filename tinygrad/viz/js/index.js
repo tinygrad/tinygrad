@@ -542,14 +542,6 @@ function appendTd(tr, value, unit=null) {
   tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
 }
 
-function appendRow(table, name, value, unit=null, cls="main-row") {
-  const tr = table.appendChild(document.createElement("tr"));
-  tr.className = cls;
-  tr.appendChild(document.createElement("td")).innerText = name;
-  appendTd(tr, value, unit);
-  return tr;
-}
-
 function setActive(e) {
   if (e == null) return;
   e.classList.add("active");
@@ -718,8 +710,8 @@ async function main() {
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
   const metadata = document.querySelector(".metadata");
-  const [code, lang] = [ret[currentRewrite].uop, "python"];
-  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeBlock(code, lang, { wrap:false }));
+  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }),
+                           codeBlock(ret[currentRewrite].uop, "python", { wrap:false }));
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
