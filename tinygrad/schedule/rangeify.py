@@ -100,7 +100,7 @@ earliest_rewrites = PatternMatcher([
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.arg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
 ])
 
 # *****************
@@ -271,7 +271,7 @@ def bufferize_to_store(x:UOp):
     mops = []
     walk = assign_mops
     while walk is not assign_mops.base:
-      mops.append((walk.op, walk.arg))
+      mops.append((walk.op, walk.marg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
     return ret.forced_reshape(shape).replace(tag=x.tag)
