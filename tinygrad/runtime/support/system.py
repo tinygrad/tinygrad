@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno, itertools
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
@@ -57,6 +57,25 @@ class _System:
 
       return vfio_fd
     except OSError: return None
+
+  @functools.cached_property
+  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
+
+  @functools.cached_property
+  def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))
+
+  @functools.cached_property
+  def mach_task_self(self): return ctypes.cast(self.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
+
+  @functools.cached_property
+  def macos_tinygpu_conn(self):
+    self.iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
+    if not (mdict:=self.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
+    if not (service:=self.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
+      raise RuntimeError('Service "tinygpu" is not running')
+    if self.iokit.IOServiceOpen(service, self.mach_task_self, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
+      raise RuntimeError("IOServiceOpen failed")
+    return conn
 
   def flock_acquire(self, name:str) -> int:
     import fcntl # to support windows
@@ -123,13 +142,23 @@ class PCIDevice:
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
 
+class APLPCIDevice(PCIDevice):
+  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None): self.pcibus, self.bars = pcibus, {b: self.map_mem(b) for b in bars}
+  def map_mem(self, typ:int) -> MMIOInterface:
+    if System.iokit.IOConnectMapMemory64(System.macos_tinygpu_conn, ctypes.c_uint32(typ), System.mach_task_self,
+      ctypes.byref(addr:=ctypes.c_uint64(0)), ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({typ=}) failed")
+    return MMIOInterface(addr.value, size.value)
+  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(off, size, fmt)
+  def read_config(self, offset:int, size:int): return 0
+  def write_config(self, offset:int, value:int, size:int): pass
+
 class PCIDevImplBase:
   mm: MemoryManager
 
 @dataclasses.dataclass
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
-class PCIIfaceBase:
+class LNXPCIIfaceBase:
   dev_impl:PCIDevImplBase
   gpus:ClassVar[list[str]] = []
 
@@ -166,9 +195,31 @@ class PCIIfaceBase:
     if b.owner is not None and b.owner._is_cpu():
       System.lock_memory(cast(int, b.va_addr), b.size)
       paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, True
-    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, PCIIfaceBase):
+    elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, LNXPCIIfaceBase):
       paddrs = [(paddr if b.meta.mapping.system else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
       snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
     self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, system=True, snooped=snooped, uncached=uncached)
+
+class APLPCIIfaceBase(LNXPCIIfaceBase):
+  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
+    self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
+    if host or uncached or cpu_access: # cpu access memory goes here, since bar is small.
+      vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
+      assert size >= mmap.PAGESIZE, "Size must be at least one page"
+
+      sysmem = cast(APLPCIDevice, self.pci_dev).map_mem(size).view(fmt='Q')
+      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
+
+      mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True), view=sysmem.view(fmt='B'), owner=self.dev)
+
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
+    return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
+
+  def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
+
+PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
