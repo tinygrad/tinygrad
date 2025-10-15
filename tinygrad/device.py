@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator, Sequence, cast
+from typing import Any, Generic, TypeVar, Iterator, Sequence, cast, Generator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
 from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
@@ -357,7 +357,7 @@ if PROFILE:
     from tinygrad.uop.ops import launch_viz
     launch_viz("PROFILE", fn)
 
-if __name__ == "__main__":
+def enumerate_devices_str() -> Generator[str, None, None]:
   from tinygrad import Tensor, Device
 
   for device in ALL_DEVICES:
@@ -376,4 +376,7 @@ if __name__ == "__main__":
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
-    print(f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}")
+    yield f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}"
+
+if __name__ == "__main__":
+  for s in enumerate_devices_str(): print(s)

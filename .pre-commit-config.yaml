@@ -20,21 +20,15 @@ repos:
         language: system
         always_run: true
         pass_filenames: false
-      - id: tests
-        name: subset of tests
-        entry: env PYTHONPATH="." python3 -m pytest -n=4 test/test_ops.py test/test_dtype.py test/test_schedule.py test/test_assign.py
-        language: system
-        always_run: true
-        pass_filenames: false
       - id: example
-        name: multi device tests
+        name: test all devices
         entry: python3 test/external/external_test_example.py
         language: system
         always_run: true
         pass_filenames: false
-      - id: pylint
-        name: pylint
-        entry: python3 -m pylint tinygrad/
+      - id: tests
+        name: subset of tests
+        entry: env PYTHONPATH="." python3 -m pytest -n=8 test/test_ops.py test/test_dtype.py test/test_schedule.py test/test_assign.py
         language: system
         always_run: true
         pass_filenames: false
