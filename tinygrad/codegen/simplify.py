@@ -67,6 +67,10 @@ pm_split_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
+def split_reduce(cut:UOp, t:UOp, f:UOp, r:UOp):
+  new_range1, new_range2 = UOp.range(cut, r.arg[0]+2000, r.arg[1]), UOp.range(r.src[0]-cut, r.arg[0]+2001, r.arg[1])
+  return t.substitute({r:new_range1}).reduce(new_range1, arg=Ops.ADD) + f.substitute({r:new_range2+cut}).reduce(new_range2, arg=Ops.ADD)
+
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
 
 def reduce_rangeless(red:UOp):
@@ -142,5 +146,6 @@ pm_reduce_unparented = PatternMatcher([
 
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
+  ((UPat(Ops.RANGE, name="r") < UPat.cvar("cut")).where(UPat.var("t"), UPat.var("f")).reduce(UPat.var("r"), arg=Ops.ADD), split_reduce),
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
 ])
