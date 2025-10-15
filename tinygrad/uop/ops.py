@@ -175,6 +175,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
+  # TODO: remove this. it's used by the jit and split_reduceop
   @recursive_property
   def st(self) -> ShapeTracker|None:
     if self.op is Ops.INDEX and self.src[0].op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.MSTACK,
@@ -187,8 +188,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([int(r.vmax+1) for r in self.src[1:]]))
     # allow reshape from nothing
-    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
-    if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
+    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.marg)
+    if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.marg)
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
@@ -223,12 +224,98 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
         shape = tuple(1 if i in axis_arg else s for i,s in enumerate(shape))
     return ShapeTracker.from_shape(shape)
 
+  @recursive_property
+  def _shape(self) -> tuple[sint, ...]|None:
+    match self.op:
+      # late ops don't have shape
+      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.IF | Ops.BARRIER | \
+           Ops.VECTORIZE | Ops.VCONST | Ops.SUBSTITUTE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.PRECAST:
+        return None
+
+      # some ops init the shape
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
+      case Ops.BUFFER: return (self.arg,)
+      case Ops.BUFFER_VIEW: return (self.arg[0],)
+      case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
+      case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
+
+      # passthrough ops
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.FUSE: return self.src[0]._shape
+
+      # ops with custom handling
+      case Ops.KERNEL: return self.arg.ast._shape
+      case Ops.STORE:
+        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
+        if self.dtype is not dtypes.void: return self.src[0].src[0].shape
+        return None
+
+      # TODO: disallow shape changing bitcast
+      case Ops.BITCAST:
+        ps = self.src[0]._shape
+        if ps is None: return None
+        if (output_sz:=self.dtype.itemsize) != (input_sz:=self.src[0].dtype.itemsize): return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),)
+        return ps
+
+      # TODO: disallow reshape from nothing. tested by TestOpenClip.test_multigpu_clip_score
+      case Ops.RESHAPE:
+        if self.src[0]._shape is None: return self.marg
+
+    # movement ops change the shape. this is the logic from the old ShapeTracker
+    # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
+    if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
+      ps = self.src[0]._shape
+      # TODO: WMMA is used for both axis WMMA and op WMMA. fix this and remove this hack. tested by BERT on AMD LLVM
+      if ps is None and self.op is Ops.WMMA: return None
+      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape")
+      match self.op:
+        case Ops.RESHAPE:
+          if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
+          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          return self.marg
+        case Ops.EXPAND:
+          if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
+            raise ValueError(f"bad expand: {ps} -> {self.marg}")
+          return self.marg
+        case Ops.PERMUTE:
+          if sorted(self.marg) != list(range(len(ps))): raise ValueError(f"invalid permutation {self.marg} of len {len(ps)}")
+          return tuple(ps[i] for i in self.marg)
+        case Ops.PAD:
+          # TODO: why do i need resolve here?
+          if len(ps) != len(self.marg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.marg): raise ValueError(f"invalid pad {self.marg}")
+          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
+        case Ops.SHRINK:
+          # TODO: why do i need resolve here?
+          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.marg)):
+            raise ValueError(f"invalid shrink {self.marg} for {ps}")
+          return tuple(ssimplify(e-s) for s,e in self.marg)
+        case Ops.FLIP:
+          if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
+          return ps
+        case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
+        case Ops.REDUCE_AXIS | Ops.WMMA:
+          axis_arg = self.arg[1] if self.op is Ops.REDUCE_AXIS else self.arg[7]
+          if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
+            raise ValueError(f"invalid type for axis: {axis_arg}")
+          return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
+
+    # elementwise ops keep the shape the same. all inputs with shape must match
+    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.SINK, Ops.ALLREDUCE}):
+      # TODO: remove this hack for 3 op assign
+      input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
+      if len(input_shapes) == 0: return None
+      if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
+      return input_shapes[0]
+
+    # all Ops must be explicitly handled
+    raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
+
   @property
   def shape(self) -> tuple[sint, ...]:
-    assert self.st is not None, f"{self.op} doesn't have a shape"
-    return unwrap(self.st).shape
+    if (ret:=self._shape) is None: raise RuntimeError(f"shape requested, but {self.op} doesn't have a shape")
+    return ret
+
   @property
-  def size(self) -> int: return self.arg[0] if self.op is Ops.BUFFER_VIEW else self.arg if self.op is Ops.BUFFER else unwrap(self.st).size
+  def size(self) -> int: return prod([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
 
   # determine what ranges this is in
   @recursive_property
@@ -290,7 +377,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __getitem__(self, idx): return self.index(idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
-    return UOp.const(self.dtype, b, device=self._device, shape=self.shape if self.st is not None else None)
+    return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -390,11 +477,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
-      arg_acc:list[sint] = list(itertools.accumulate(self.arg, operator.mul, initial=1))
+      arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
       # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
       # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
       return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
-    if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
+    if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
     return src_axis
 
   def _unshard(self, axis:int) -> UOp:
@@ -422,25 +509,37 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop movement ops ***
 
+  @functools.cached_property
+  def marg(self):
+    match self.op:
+      # TODO: replace these args with srcs
+      case Ops.RESHAPE | Ops.EXPAND: return tuple([ssimplify(x) for x in self.arg])
+      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in self.arg])
+      case Ops.PERMUTE | Ops.FLIP: return self.arg
+      case _: raise RuntimeError(f"{self.op} is not a MovementOp")
+
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
     if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
     return self
 
-  def _mop(self, op:Ops, arg) -> UOp:
+  def _mop(self, op:Ops, arg, no_reshape_is_no_op:bool=False) -> UOp:
     ret = UOp(op, self.dtype, (self,), arg)
-    if self.st == ret.st: return self  # ignore NOOPs, also check ret.st
+    # for all movement ops, we check shape property
+    if ret.shape == self.shape and no_reshape_is_no_op: return self
     return ret
 
-  def forced_reshape(self, arg:tuple[sint, ...], **kwargs): return UOp(Ops.RESHAPE, kwargs.pop("dtype", self.dtype), src=(self,), arg=arg)
+  # in these four, if the shape doesn't change we can return self
+  def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=False)
+  def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=True)
+  def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, no_reshape_is_no_op=True)
+  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, no_reshape_is_no_op=True)
+  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, no_reshape_is_no_op=True)
 
-  def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg)
-  def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg)
-  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg)
-  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg)
-  def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg)
-  def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg)
+  # in these two, we have custom logic to check if they are a no-op
+  def permute(self, arg:tuple[int, ...]): return UOp(Ops.PERMUTE, self.dtype, (self,), arg) if arg != tuple(range(len(self.shape))) else self
+  def flip(self, arg:tuple[bool, ...]): return UOp(Ops.FLIP, self.dtype, (self,), arg) if any(arg) and len(arg) == len(self.shape) else self
 
   # *** uop UNIQUE ***
 
@@ -944,6 +1043,9 @@ class TrackedPatternMatcher(PatternMatcher):
       match_stats[p][2] += time.perf_counter()-st
     return None
 
+@dataclass(frozen=True)
+class RewriteTrace: keys:list[TracingKey]; rewrites:list[list[TrackedGraphRewrite]]; uop_fields:dict[int, tuple] # noqa: E702
+
 if TRACK_MATCH_STATS or PROFILE:
   PatternMatcher = TrackedPatternMatcher  # type: ignore
   import atexit
@@ -952,7 +1054,7 @@ if TRACK_MATCH_STATS or PROFILE:
     if TRACK_MATCH_STATS >= 2:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
-        pickle.dump([(tracked_keys, tracked_ctxs, uop_fields)], f)
+        pickle.dump(RewriteTrace(tracked_keys, tracked_ctxs, uop_fields), f)
     if VIZ: return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
       ret = [0,0,0.0,0.0]

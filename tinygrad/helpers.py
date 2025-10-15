@@ -84,6 +84,7 @@ def word_wrap(x, wrap=80):
   i = 0
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
+def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
@@ -154,7 +155,7 @@ ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), Conte
 FUSE_ATTENTION = ContextVar("FUSE_ATTENTION", 0)
 EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
-CPU_LLVM, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("AMD_LLVM", 1)
+CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 1)
 VIZ = PROFILE = ContextVar("VIZ", 0)
 SPEC = ContextVar("SPEC", 0)
 # TODO: disable by default due to speed

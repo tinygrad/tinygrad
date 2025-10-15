@@ -1,6 +1,6 @@
 import ctypes, time, contextlib, functools
 from typing import Literal
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
 
@@ -417,7 +417,8 @@ class AM_PSP(AM_IP):
 
   def _prep_msg1(self, data:memoryview):
     assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
-    self.msg1_view[:len(data)+4] = bytes(data) + b'\x00' * 4
+    padded_data = pad_bytes(bytes(data) + b'\x00' * 4, 16) # HACK: apple's memcpy requires 16-bytes alignment
+    self.msg1_view[:len(padded_data)] = padded_data
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw:int, compid:int):

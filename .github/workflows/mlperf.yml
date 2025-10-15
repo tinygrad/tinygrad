@@ -12,7 +12,7 @@ jobs:
   run_script_job:
     runs-on: [self-hosted, Linux, tinybox]
     if: github.repository_owner == 'tinygrad'
-    timeout-minutes: 360
+    timeout-minutes: 720
 
     steps:
     - name: Checkout Code
