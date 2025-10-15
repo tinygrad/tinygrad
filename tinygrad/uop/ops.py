@@ -509,12 +509,20 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop movement ops ***
 
+  # like gep, but might return an integer
+  def sgep(self, i:int) -> sint:
+    match self.op:
+      case Ops.CONST: return self.arg
+      case Ops.VCONST: return self.arg[i]
+      case Ops.VECTORIZE: return self.src[i].ssimplify()
+      case _: raise RuntimeError(f"no sgep on {self.op}")
+
   @functools.cached_property
   def marg(self):
     match self.op:
       # TODO: replace these args with srcs
-      case Ops.RESHAPE | Ops.EXPAND: return tuple([ssimplify(x) for x in self.arg])
-      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in self.arg])
+      case Ops.RESHAPE | Ops.EXPAND: return tuple(self.src[1].sgep(i) for i in range(self.src[1].dtype.count))
+      case Ops.PAD | Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
@@ -524,8 +532,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.MULTI: return self.src[0].base  # MULTI is really a VIEW
     return self
 
-  def _mop(self, op:Ops, arg, no_reshape_is_no_op:bool=False) -> UOp:
-    ret = UOp(op, self.dtype, (self,), arg)
+  def _mop(self, op:Ops, *args, no_reshape_is_no_op:bool=False) -> UOp:
+    usrcs = []
+    for arg in args:
+      if len(arg) == 0: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(0)))
+      elif all(isinstance(x, int) for x in arg): usrcs.append(UOp.const(dtypes.index.vec(len(arg)), arg))
+      else: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(len(arg)),
+                         tuple(UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in arg)).simplify())
+    ret = UOp(op, self.dtype, (self,)+tuple(usrcs))
     # for all movement ops, we check shape property
     if ret.shape == self.shape and no_reshape_is_no_op: return self
     return ret
@@ -534,8 +548,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=False)
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=True)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, no_reshape_is_no_op=True)
-  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, no_reshape_is_no_op=True)
-  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, no_reshape_is_no_op=True)
+  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, *zip(*arg), no_reshape_is_no_op=True)
+  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, *zip(*arg), no_reshape_is_no_op=True)
 
   # in these two, we have custom logic to check if they are a no-op
   def permute(self, arg:tuple[int, ...]): return UOp(Ops.PERMUTE, self.dtype, (self,), arg) if arg != tuple(range(len(self.shape))) else self

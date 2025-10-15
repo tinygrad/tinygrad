@@ -147,6 +147,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   ending_ranges: dict[UOp, bool] = {}
   for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+    if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
     ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
     # if this element has weight and it's ending a range, we (force) realize it
