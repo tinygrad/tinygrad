@@ -2,7 +2,8 @@ import functools
 from typing import cast
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
-from tinygrad.renderer.cstyle import Renderer, CStyleLanguage, AMDRenderer
+from tinygrad.renderer.cstyle import Renderer, CStyleLanguage
+from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import cpu_profile, EMULATE
 
@@ -33,7 +34,8 @@ class NullDevice(Compiled):
   def __init__(self, device:str):
     renderer:functools.partial|type[Renderer]
     match cast(str, EMULATE.value):
-      case "AMD": renderer = functools.partial(AMDRenderer, "gfx1100")
+      case "AMD": renderer = functools.partial(AMDLLVMRenderer, "gfx1100")
+      case "AMD_RDNA4": renderer = functools.partial(AMDLLVMRenderer, "gfx1201")
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
     super().__init__(device, NullAllocator(self), [(renderer, Compiler)], functools.partial(NullProgram, device), NullGraph)
