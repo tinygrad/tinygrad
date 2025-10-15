@@ -309,7 +309,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  get_rewrites = get_rewrites(trace:=args.kernels)
+  ctxs = get_rewrites(trace:=args.kernels)
   profile_ret = get_profile(args.profile)
 
   server = TCPServerWithReuse(('', PORT), Handler)
