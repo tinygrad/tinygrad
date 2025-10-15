@@ -188,8 +188,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([int(r.vmax+1) for r in self.src[1:]]))
     # allow reshape from nothing
-    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.arg)
-    if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.arg)
+    if self.op is Ops.RESHAPE and self.src[0].st is None: return ShapeTracker.from_shape(self.marg)
+    if self.op in GroupOp.Movement: return unwrap(self.src[0].st).mop(self.op, self.marg)
     # CONST with a DEVICE has a shape of ()
     if self.op is Ops.CONST and len(self.src) and self.src[0].op is Ops.DEVICE: return ShapeTracker.from_shape(())
     if self.op is Ops.STORE and isinstance(self.dtype, PtrDType): return ShapeTracker.from_shape((self.dtype.size,))
@@ -258,7 +258,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
       # TODO: disallow reshape from nothing. tested by TestOpenClip.test_multigpu_clip_score
       case Ops.RESHAPE:
-        if self.src[0]._shape is None: return tuple(ssimplify(s) for s in self.arg)
+        if self.src[0]._shape is None: return self.marg
 
     # movement ops change the shape. this is the logic from the old ShapeTracker
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
@@ -269,27 +269,27 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape")
       match self.op:
         case Ops.RESHAPE:
-          if not all(x >= 0 for x in self.arg): raise ValueError(f"shape can't contain negative numbers {self.arg}")
-          if prod(ps) != prod(self.arg): raise ValueError(f"bad reshape: {ps} -> {self.arg}")
-          return tuple(ssimplify(s) for s in self.arg)
+          if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
+          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          return self.marg
         case Ops.EXPAND:
-          if len(ps) != len(self.arg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.arg)):
-            raise ValueError(f"bad expand: {ps} -> {self.arg}")
-          return tuple(ssimplify(s) for s in self.arg)
+          if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
+            raise ValueError(f"bad expand: {ps} -> {self.marg}")
+          return self.marg
         case Ops.PERMUTE:
-          if sorted(self.arg) != list(range(len(ps))): raise ValueError(f"invalid permutation {self.arg} of len {len(ps)}")
-          return tuple(ps[i] for i in self.arg)
+          if sorted(self.marg) != list(range(len(ps))): raise ValueError(f"invalid permutation {self.marg} of len {len(ps)}")
+          return tuple(ps[i] for i in self.marg)
         case Ops.PAD:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.arg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.arg): raise ValueError(f"invalid pad {self.arg}")
-          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.arg))
+          if len(ps) != len(self.marg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.marg): raise ValueError(f"invalid pad {self.marg}")
+          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.arg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.arg)):
-            raise ValueError(f"invalid shrink {self.arg} for {ps}")
-          return tuple(ssimplify(e-s) for s,e in self.arg)
+          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.marg)):
+            raise ValueError(f"invalid shrink {self.marg} for {ps}")
+          return tuple(ssimplify(e-s) for s,e in self.marg)
         case Ops.FLIP:
-          if len(ps) != len(self.arg) or not all(isinstance(x, bool) for x in self.arg): raise ValueError(f"bad flip on {ps}, {self.arg}")
+          if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE_AXIS | Ops.WMMA:
@@ -477,11 +477,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
-      arg_acc:list[sint] = list(itertools.accumulate(self.arg, operator.mul, initial=1))
+      arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
       # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
       # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
       return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
-    if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
+    if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
     return src_axis
 
   def _unshard(self, axis:int) -> UOp:
@@ -509,6 +509,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop movement ops ***
 
+  @functools.cached_property
+  def marg(self):
+    match self.op:
+      # TODO: replace these args with srcs
+      case Ops.RESHAPE | Ops.EXPAND: return tuple([ssimplify(x) for x in self.arg])
+      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in self.arg])
+      case Ops.PERMUTE | Ops.FLIP: return self.arg
+      case _: raise RuntimeError(f"{self.op} is not a MovementOp")
+
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
@@ -520,17 +529,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # for all movement ops, we check shape property
     if ret.shape == self.shape and no_reshape_is_no_op: return self
     return ret
-  def forced_reshape(self, arg:tuple[sint, ...], **kwargs): return UOp(Ops.RESHAPE, kwargs.pop("dtype", self.dtype), src=(self,), arg=arg)
 
   # in these four, if the shape doesn't change we can return self
+  def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=False)
   def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, no_reshape_is_no_op=True)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, no_reshape_is_no_op=True)
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, no_reshape_is_no_op=True)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, no_reshape_is_no_op=True)
 
   # in these two, we have custom logic to check if they are a no-op
-  def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg) if arg != tuple(range(len(self.shape))) else self
-  def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg) if any(arg) and len(arg) == len(self.shape) else self
+  def permute(self, arg:tuple[int, ...]): return UOp(Ops.PERMUTE, self.dtype, (self,), arg) if arg != tuple(range(len(self.shape))) else self
+  def flip(self, arg:tuple[bool, ...]): return UOp(Ops.FLIP, self.dtype, (self,), arg) if any(arg) and len(arg) == len(self.shape) else self
 
   # *** uop UNIQUE ***
 
