@@ -146,7 +146,7 @@ def fix_group_for_reduce(x:UOp):
   buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(reduce_gfr[0].arg[0], AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
 
   # gate with an if on the store + do the final reduce
-  buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
+  buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x<1 for x in reduce_gfr]), buf))
   return buf.reduce(*reduce_loop, arg=x.arg)
 
 pm_pre_expander = PatternMatcher([
