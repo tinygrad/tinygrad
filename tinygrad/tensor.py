@@ -730,13 +730,8 @@ class Tensor(MathTrait):
     ```
     """
     if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    m = n if m is None else m
-    x = Tensor.zeros((n, m), **kwargs).contiguous()  # ensure contiguous memory
-    diag_len = min(n, m)
-    if diag_len > 0:
-      idx = Tensor.arange(diag_len, dtype=dtypes.int32)
-      x[idx, idx] = 1  # vectorized diagonal assignment
-    return x
+    x = Tensor.ones(n, **kwargs).diag()
+    return x if m is None else x.pad((None, (0, m-n))) if m > n else x.shrink((None, (0, m)))
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """

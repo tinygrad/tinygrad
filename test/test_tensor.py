@@ -954,7 +954,10 @@ class TestMatrixRank(unittest.TestCase):
   def test_identity_mat(self):
     ##Identity matrix should have rank of n, for an nxn
     n = 3
-    I = Tensor.eye(n)
+    I =  Tensor([[1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1]], dtype=dtypes.float, requires_grad=True)
+
     rank = I.matrix_rank()
     assert rank == n
   def test_rectangle_mat(self):
