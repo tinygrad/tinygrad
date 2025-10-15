@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno, itertools
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
@@ -142,6 +142,16 @@ class PCIDevice:
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
 
+class APLPCIDevice(PCIDevice):
+  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None): self.pcibus, self.bars = pcibus, {b: self.map_mem(b) for b in bars}
+  def map_mem(self, typ:int) -> MMIOInterface:
+    if System.iokit.IOConnectMapMemory64(System.macos_tinygpu_conn, ctypes.c_uint32(typ), System.mach_task_self,
+      ctypes.byref(addr:=ctypes.c_uint64(0)), ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({typ=}) failed")
+    return MMIOInterface(addr.value, size.value)
+  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(off, size, fmt)
+  def read_config(self, offset:int, size:int): return 0
+  def write_config(self, offset:int, value:int, size:int): pass
+
 class PCIDevImplBase:
   mm: MemoryManager
 
@@ -191,3 +201,21 @@ class PCIIfaceBase:
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
     self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, system=True, snooped=snooped, uncached=uncached)
+
+class APLIfaceBase(PCIIfaceBase):
+  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
+    self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
+    if host or uncached or cpu_access: # cpu access memory goes here, since bar is small.
+      vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
+      assert size >= mmap.PAGESIZE, "Size must be at least one page"
+
+      sysmem = self.pci_dev.map_mem(size).view(fmt='Q')
+      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
+
+      mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True), view=sysmem.view(fmt='B'), owner=self.dev)
+
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
+    return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)

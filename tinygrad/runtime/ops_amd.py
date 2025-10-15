@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT
-from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored, OSX
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
@@ -16,7 +16,7 @@ from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, setup_pci_bars
-from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.system import System, PCIIfaceBase, APLIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -666,7 +666,7 @@ class KFDIface:
 
     raise RuntimeError("\n".join(report))
 
-class PCIIface(PCIIfaceBase):
+class PCIIface(APLIfaceBase if OSX else PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id):
@@ -746,42 +746,13 @@ class USBIface(PCIIface):
 
   def sleep(self, timeout): pass
 
-class APLIface(PCIIface):
-  def __init__(self, dev, dev_id):
-    self.dev, self.conn = dev, System.macos_tinygpu_conn
-    self.bars = {bar: self._map_memory(bar) for bar in [0, 2, 5]}
-    self._setup_adev(f"usb4:{dev_id}", self.map_bar(0), self.map_bar(2, fmt='Q'), self.map_bar(5, fmt='I'))
-
-  def map_bar(self, bar:int, off:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(offset=off, size=size, fmt=fmt)
-
-  def _map_memory(self, typ:int) -> MMIOInterface:
-    if System.iokit.IOConnectMapMemory64(self.conn, ctypes.c_uint32(typ), System.mach_task_self, ctypes.byref(addr:=ctypes.c_uint64(0)),
-      ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({typ=}) failed")
-    return MMIOInterface(addr.value, size.value)
-
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
-    if host or uncached or cpu_access: # cpu access memory goes here, since bar is small.
-      vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      assert size >= mmap.PAGESIZE, "Size must be at least one page"
-
-      sysmem = self._map_memory(size).view(fmt='Q')
-      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
-
-      mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True), view=sysmem.view(fmt='B'), owner=self.dev)
-
-    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
-
-  def sleep(self, timeout): pass
-
 class AMDDevice(HCQCompiled):
-  def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface, APLIface))
+  def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))
   def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface(KFDIface, PCIIface, APLIface, USBIface)
+    self.iface = self._select_iface(KFDIface, PCIIface, USBIface)
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
