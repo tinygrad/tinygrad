@@ -26,15 +26,10 @@ patch_dlopen() {
   path=$1; shift
   name=$1; shift
   cat <<EOF | sed -i "/import ctypes.*/r /dev/stdin" $path
-PATHS_TO_TRY = [
-$(for p in "$@"; do echo "  $p,"; done)
-]
 def _try_dlopen_$name():
   library = ctypes.util.find_library("$name")
   if library: return ctypes.CDLL(library)
-  for candidate in PATHS_TO_TRY:
-    try: return ctypes.CDLL(candidate)
-    except OSError: pass
+$(for p in "$@"; do echo "  try: return ctypes.CDLL($p)"; echo "  except OSError: pass"; done)
   return None
 EOF
 }
