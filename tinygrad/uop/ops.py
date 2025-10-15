@@ -266,7 +266,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
       # TODO: disallow reshape from nothing. tested by TestOpenClip.test_multigpu_clip_score
       case Ops.RESHAPE:
-        if self.src[0]._shape is None: return tuple(ssimplify(s) for s in self.arg)
+        if self.src[0]._shape is None: return self.marg
 
     # movement ops change the shape. this is the logic from the old ShapeTracker
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
@@ -485,11 +485,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
       if src_axis is None: return None
-      arg_acc:list[sint] = list(itertools.accumulate(self.arg, operator.mul, initial=1))
+      arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
       # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
       # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
       return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
-    if self.op is Ops.PERMUTE: return self.arg.index(src_axis) if src_axis is not None else None
+    if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
     return src_axis
 
   def _unshard(self, axis:int) -> UOp:
@@ -517,6 +517,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   # *** uop movement ops ***
 
+  @functools.cached_property
+  def marg(self):
+    match self.op:
+      # TODO: replace these args with srcs
+      case Ops.RESHAPE | Ops.EXPAND: return tuple([ssimplify(x) for x in self.arg])
+      case Ops.PAD | Ops.SHRINK: return tuple([(ssimplify(x), ssimplify(y)) for x,y in self.arg])
+      case Ops.PERMUTE | Ops.FLIP: return self.arg
+      case _: raise RuntimeError(f"{self.op} is not a MovementOp")
+
   @property
   def base(self) -> UOp:
     if self.op in GroupOp.Movement: return self.src[0].base
@@ -536,7 +545,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, tuple(flatten(arg)), no_reshape_is_no_op=True)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, tuple(flatten(arg)), no_reshape_is_no_op=True)
 
-  # in these two, we have custom logic to check if they are a no-op, and they have an arg
+  # in these two, we have custom logic to check if they are a no-op
   def permute(self, arg:tuple[int, ...]): return UOp(Ops.PERMUTE, self.dtype, (self,), arg) if arg != tuple(range(len(self.shape))) else self
   def flip(self, arg:tuple[bool, ...]): return UOp(Ops.FLIP, self.dtype, (self,), arg) if any(arg) and len(arg) == len(self.shape) else self
 
