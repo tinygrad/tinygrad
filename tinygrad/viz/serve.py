@@ -27,7 +27,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 # ** list all saved rewrites
 
 ref_map:dict[Any, int] = {}
-def get_metadata(t:RewriteTrace) -> list[dict]:
+def get_rewrites(t:RewriteTrace) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
     steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc),
@@ -94,7 +94,7 @@ def _reconstruct(a:int):
   arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
   return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
 
-def get_details(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
+def get_full_rewrite(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
   yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink)), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
@@ -252,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
     elif (query:=parse_qs(url.query)):
       if url.path == "/render": ret, content_type = get_render(**query), "application/json"
       else:
-        try: return self.stream_json(get_details(trace.rewrites[i:=int(query["ctx"][0])][int(query["idx"][0])], i))
+        try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=int(query["ctx"][0])][int(query["idx"][0])], i))
         except KeyError: status_code = 404
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
@@ -309,7 +309,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_metadata(trace:=args.kernels)
+  get_rewrites = get_rewrites(trace:=args.kernels)
   profile_ret = get_profile(args.profile)
 
   server = TCPServerWithReuse(('', PORT), Handler)
