@@ -219,3 +219,5 @@ class APLIfaceBase(PCIIfaceBase):
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
     return HCQBuffer(mapping.va_addr, size, view=None, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), owner=self.dev)
+
+  def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
