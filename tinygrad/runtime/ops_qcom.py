@@ -9,6 +9,8 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
+from tinygrad.renderer.nir import IR3Renderer
+from tinygrad.runtime.support.compiler_mesa import IR3Compiler
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -355,7 +357,8 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
+    compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device)),
+                 (functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, info.chip_id))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
                      functools.partial(QCOMComputeQueue, self), None)
 

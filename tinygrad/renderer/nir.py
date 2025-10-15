@@ -209,19 +209,20 @@ class NIRRenderer(Renderer):
 
     return ret
 
-class NAKRenderer(NIRRenderer):
-  device = "NV"
+class NIRRendererWithOpts(NIRRenderer):
   def __init__(self, dev=None, nir_options=None):
     self.dev, self._nir_options = dev, nir_options
     super().__init__()
 
-  def __reduce__(self): return NAKRenderer, (None, self.nir_options,)
+  def __reduce__(self): return self.__class__, (None, self.nir_options)
 
   @property
   def nir_options(self):
     if self._nir_options is None: self._nir_options = self.dev.compiler.nir_options
     return self._nir_options
 
+class NAKRenderer(NIRRendererWithOpts):
+  device = "NV"
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
        lambda self, b, dtype, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
@@ -241,3 +242,10 @@ class LVPRenderer(NIRRenderer):
     super().prerender(uops)
     self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
 
+class IR3Renderer(NIRRendererWithOpts):
+  device = "QCOM"
+  param = LVPRenderer.param
+
+  def prerender(self, uops:list[UOp]):
+    super().prerender(uops)
+    self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
