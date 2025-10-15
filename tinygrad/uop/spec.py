@@ -82,13 +82,13 @@ assign_spec = PatternMatcher([
 # *** this is the spec of a Tensor in UOp ***
 
 tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
-  (UPat(GroupOp.Movement, name="mv", src=(UPat.var("x"),)),
-   # naturally correct
-   lambda mv,x: (isinstance(mv.arg, tuple) and mv.dtype == x.dtype) or
-   # "make things that can't be images not images" can change the buffer dtype
-   # this is fine as long as it's a realized buffer or const and base dtypes match.
-   ((isinstance(mv.dtype, ImageDType) or isinstance(x.dtype, ImageDType)) and x.dtype.base == mv.dtype.base \
-       and x.base.op in {Ops.BUFFER,Ops.ASSIGN,Ops.CONST})),
+  (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
+
+  # inputs to movement ops
+  (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
+  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
