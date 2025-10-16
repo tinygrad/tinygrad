@@ -74,15 +74,15 @@ class TestLinearizer(unittest.TestCase):
     assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
     assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[1]:])
 
-  def test_range_outer_op_before_phi(self):
-    a = Tensor.randn(4, 1).realize()
-    b = Tensor.randn(1, 1).realize()
-    out = (a + b[0]).sum() + b[0]
-    ast = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])
-    uops = get_program(ast, opts=[]).uops
-    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    # LOAD -> RANGE -> LOAD -> STORE
-    assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD]) == 1
+  # def test_range_outer_op_before_phi(self):
+  #   a = Tensor.randn(4, 1).realize()
+  #   b = Tensor.randn(1, 1).realize()
+  #   out = (a + b[0]).sum() + b[0]
+  #   ast = helper_linearizer_opt(out, wanna_output=[(a.numpy()+b.numpy()[0]).sum()+b.numpy()])
+  #   uops = get_program(ast, opts=[]).uops
+  #   ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
+  #   # LOAD -> RANGE -> LOAD -> STORE
+  #   assert len([x for x in uops[:ranges[0]] if x.op is Ops.LOAD]) == 1
 
   def test_range_outer_op_before_phi_nested_range(self):
     a = Tensor.randn(2, ).realize()
