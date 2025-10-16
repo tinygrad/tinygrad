@@ -157,6 +157,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
+  buf_ei:dict[int, list[ProfilePointEvent]] = {}
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
@@ -166,8 +167,11 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
       temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
       mem += nbytes
       if mem > peak: peak = mem
+    if e.name == "exec" and e.arg["bufs"]:
+      for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
     if e.name == "free":
-      events.append(struct.pack("<BII", 0, int(e.ts)-start_ts, e.key))
+      kernel_names = [enum_str(ei.key, scache) for ei in buf_ei.pop(e.key, [])]
+      events.append(struct.pack(f"<BIII{len(kernel_names)}I", 0, int(e.ts) - start_ts, e.key, len(kernel_names), *kernel_names))
       mem -= temp.pop(e.key)
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
