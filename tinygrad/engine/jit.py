@@ -9,6 +9,7 @@ from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
+from tinygrad.schedule.rangeify import mop_cleanup
 from dataclasses import dataclass
 from weakref import WeakKeyDictionary
 
@@ -224,7 +225,7 @@ def _prepare_jit_inputs(args, kwargs):
   input_buffers: list[Buffer] = flatten([rb.bufs if isinstance(rb:=lb.base.realized, MultiBuffer) else [rb]
                                          for lb in lbs if lb.base.realized is not None])
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
-  st_varval_dtype_device = [(*(lb.substitute({lb.base:UOp(Ops.NOOP)}).unbind_all()), lb.dtype, lb.device) for lb in lbs]
+  st_varval_dtype_device = [(*(lb.substitute({lb.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), lb.dtype, lb.device) for lb in lbs]
   _var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varval_dtype_device]
