@@ -5,7 +5,6 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
@@ -159,7 +158,7 @@ class CapturedJit(Generic[ReturnType]):
   input_replace: dict[tuple[int, int], int]
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
   expected_names: list[int|str]
-  expected_st_vars_dtype_device: list[tuple[ShapeTracker, tuple[Variable, ...], DType, str]]
+  expected_st_vars_dtype_device: list[tuple[UOp, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
     # TODO: free_intermediates here? replan_buffers_memory_layout here?

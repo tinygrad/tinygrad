@@ -11,7 +11,6 @@ from hypothesis import assume, given, settings, strategies as strat
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
@@ -2251,7 +2250,7 @@ class TestBufferUOp(unittest.TestCase):
   def test_buffer_has_buffer(self):
     buf = Tensor.empty(10)
     self.assertIsNotNone(buf.uop.buffer)
-    self.assertEqual(buf.uop.st, ShapeTracker.from_shape((10,)))
+    self.assertEqual(buf.uop.shape, (10,))
     # the device Buffer remains unallocated until it's we run the schedule
     self.assertFalse(buf.uop.buffer.is_allocated())
     add = buf+1

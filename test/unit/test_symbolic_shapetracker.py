@@ -46,22 +46,16 @@ class TestSymbolic(unittest.TestCase):
     j = Variable("j", 1, 5).bind(3)
     k = Variable("k", 1, 5).bind(3)
     t = Tensor.rand(5, 4)[:i].cat(Tensor.rand(5, 4)[:j], dim=0).cat(Tensor.rand(5, 4)[:k], dim=0)
-    st = t.uop.st
-    self.assert_tuple_equal(st.shape, (i+j+k, 4))
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
+    self.assert_tuple_equal(t.shape, (i+j+k, 4))
     t = Tensor.rand(5, 3)[:i].cat(Tensor.rand(5, 3)[:i], dim=0).cat(Tensor.rand(3, 3), dim=0)
-    st = t.uop.st
-    self.assert_tuple_equal(st.shape, (2*i+3, 3))
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
+    self.assert_tuple_equal(t.shape, (2*i+3, 3))
 
   def test_cat_dim1_strides(self):
     i = Variable("i", 1, 5).bind(4)
     j = Variable("j", 1, 5).bind(4)
     k = Variable("k", 1, 5).bind(4)
     t = Tensor.rand(3, 5)[:, :i].cat(Tensor.rand(3, 5)[:, :j], dim=1).cat(Tensor.rand(3, 5)[:, :k], dim=1)
-    st = t.uop.st
-    self.assert_tuple_equal(st.shape, (3, i+j+k))
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
+    self.assert_tuple_equal(t.shape, (3, i+j+k))
 
 class TestSymbolicVarVals(unittest.TestCase):
   def assert_equal(self, x, y): self.assertFalse(x != y)
@@ -110,12 +104,10 @@ class TestShapeTrackerUnbind(unittest.TestCase):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(2)
     t = Tensor.rand(3, 4).shrink(((0,bv),(0,4)))
-    unbound_st, var_val = t.uop.st.unbind()
-    assert unbound_st == ShapeTracker((View.create(shape=(v, 4)),))
+    unbound_st, var_val = t.uop.unbind_all()
     assert var_val == {v: 2}
     t = Tensor.rand(3, 4).shrink(((bv, bv+1), (0, 4)))
-    unbound_st, var_val = t.uop.st.unbind()
-    assert unbound_st == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
+    unbound_st, var_val = t.uop.unbind_all()
     assert var_val == {v: 2}
 
 class TestSymbolicReshape(unittest.TestCase):
