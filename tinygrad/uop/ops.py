@@ -351,11 +351,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def __bool__(self): return self._eval((dtypes.bool,), bool)
   def __int__(self): return self._eval(dtypes.ints, int)
   def __float__(self): return self._eval(dtypes.floats, float)
-  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None):
+  def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
-      return graph_rewrite(self, _substitute, dvars, bottom_up=True, name=name)
+      return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
 
   # *** uop tracing stuff ***
 
@@ -647,6 +647,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def unbind(self) -> tuple[Variable, int]:
     assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
+  def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
+    ret:dict[Variable, int] = {}
+    return graph_rewrite(self, pm_unbind, ctx=ret), ret
   @property
   def val(self) -> int: return self.unbind()[1]
   def vars(self) -> set[UOp]:
@@ -1219,6 +1222,12 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+
+def do_unbind(ctx:dict[Variable, int], x:UOp):
+  v,i = x.unbind()
+  ctx[v] = i
+  return v
+pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
 
 # for debug
 syms = { Ops.ADD: "+", Ops.SUB: "-", Ops.IDIV: "//", Ops.MOD: "%", Ops.SHL: "<<", Ops.SHR: ">>",
