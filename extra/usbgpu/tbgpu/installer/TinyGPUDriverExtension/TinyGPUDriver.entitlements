@@ -6,7 +6,11 @@
 	<array>
 		<dict>
 			<key>IOPCIMatch</key>
-			<string>0x70001002&amp;0xF000FFFF</string>
+			<string>0x00001002&amp;0x0000FFFF</string>
+		</dict>
+		<dict>
+			<key>IOPCIMatch</key>
+			<string>0x000010de&amp;0x0000FFFF</string>
 		</dict>
 	</array>
 	<key>com.apple.developer.driverkit.allow-any-userclient-access</key>

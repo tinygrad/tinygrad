@@ -56,7 +56,7 @@ class TinyGPUViewModel: NSObject {
 	}
 #endif
 
-	private let dextIdentifier: String = Bundle.main.bundleIdentifier! + ".Driver"
+	private let dextIdentifier: String = "org.tinygrad.tinygpu.edriver"
 
 	public var dextLoadingState: String {
 		switch state {
