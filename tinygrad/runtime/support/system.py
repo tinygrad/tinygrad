@@ -72,18 +72,15 @@ class _System:
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
-  def alloc_sysmem(self, sz:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
     if OSX:
-      szo = round_up(sz, 0x1000)
-      sz = round_up(sz, mmap.PAGESIZE)
-      sysmem = System.iokit_pci_memmap(sz).view(fmt='Q')
+      sysmem = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE)).view(fmt='Q')
       paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
       if contiguous: assert len(paddrs) == 1
-      paged_paddrs = [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:szo//0x1000]
+      paged_paddrs = [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:round_up(size, 0x1000)//0x1000]
       if data is not None: to_mv(sysmem.addr, len(data))[:] = data
-      return sysmem.addr, paged_paddrs[:szo//0x1000]
+      return sysmem.addr, paged_paddrs
 
-    size = sz
     assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
     flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
@@ -92,7 +89,7 @@ class _System:
     return va, self.system_paddrs(va, size)
 
   def pci_reset(self, gpu):
-    if OSX: System.iokit_pci_rpc(2)
+    if OSX: System.iokit_pci_rpc(__TinyGPURPCReset:=2)
     else: os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{gpu}/reset'")
 
   def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
@@ -173,8 +170,8 @@ class APLPCIDevice(PCIDevice):
     self.pcibus, self.bars = pcibus, {b: System.iokit_pci_memmap(b) for b in bars}
     self.bar_info = {b:(0, self.bars[b].nbytes-1 if b in self.bars else 0, 0) for b in range(6)} # NOTE: fake bar info for nv.
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(off, size, fmt)
-  def read_config(self, offset:int, size:int): return System.iokit_pci_rpc(0, offset, size)[0]
-  def write_config(self, offset:int, value:int, size:int): System.iokit_pci_rpc(1, offset, size, value)
+  def read_config(self, offset:int, size:int): return System.iokit_pci_rpc(__TinyGPURPCReadCfg:=0, offset, size)[0]
+  def write_config(self, offset:int, value:int, size:int): System.iokit_pci_rpc(__TinyGPURPCWriteCfg:=1, offset, size, value)
 
 class PCIDevImplBase:
   mm: MemoryManager
@@ -230,13 +227,10 @@ class APLPCIIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
     self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
-    if host or ((uncached or cpu_access) and not contiguous) : # cpu access memory goes here, since bar is small.
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
+    if host or ((uncached or cpu_access) and not force_devmem) : # cpu access memory goes here, since bar is small.
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       assert size >= mmap.PAGESIZE, "Size must be at least one page"
-
-      # sysmem = cast(APLPCIDevice, self.pci_dev).map_mem(size).view(fmt='Q')
-      # paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
 
       addr, paddrs = System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
       paddrs = [(paddr, 0x1000) for paddr in paddrs]

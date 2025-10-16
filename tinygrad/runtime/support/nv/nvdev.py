@@ -137,8 +137,7 @@ class NVDev(PCIDevImplBase):
     self.large_bar = self.vram.nbytes >= self.vram_size
 
   def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:
-    sz = ctypes.sizeof(type(struct))
-    va, paddrs = System.alloc_sysmem(sz, contiguous=True)
+    va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
     to_mv(va, sz)[:] = bytes(struct)
     return type(struct).from_address(va), paddrs[0]
 
