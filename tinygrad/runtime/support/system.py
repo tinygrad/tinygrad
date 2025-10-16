@@ -74,19 +74,18 @@ class _System:
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[MMIOInterface, list[int]]:
     if OSX:
-      sysmem = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE)).view(fmt='Q')
-      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
-      if contiguous: assert len(paddrs) == 1
+      sysmem_view = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE))
+      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem_view.view(fmt='Q')[0::2], sysmem_view.view(fmt='Q')[1::2])))
+      assert not contiguous or len(paddrs) == 1, "not contiguous, but required"
       paged_paddrs = [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:round_up(size, 0x1000)//0x1000]
-      if data is not None: to_mv(sysmem.addr, len(data))[:] = data
-      return sysmem.addr, paged_paddrs
+    else:
+      assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
+      flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
+      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
+      sysmem_view, paged_paddrs = MMIOInterface(va, size), self.system_paddrs(va, size)
 
-    assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-    flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
-    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
-
-    if data is not None: to_mv(va, len(data))[:] = data
-    return MMIOInterface(va, size), self.system_paddrs(va, size)
+    if data is not None: sysmem_view[:len(data)] = data
+    return sysmem_view, paged_paddrs
 
   def pci_reset(self, gpu):
     if OSX: System.iokit_pci_rpc(__TinyGPURPCReset:=2)
@@ -194,18 +193,18 @@ class LNXPCIIfaceBase:
     self.pci_dev, self.dev, self.vram_bar = PCIDevice(cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
     self.p2p_base_addr = self.pci_dev.bar_info[vram_bar][0]
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
-    if host or (uncached and cpu_access): # host or gtt-like memory.
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
+    # NOTE: logic on macos is different, since bar is small
+    should_use_sysmem = host or (((uncached or cpu_access) if OSX else (uncached and cpu_access)) and not force_devmem)
+    if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      paddrs = [(paddr, mmap.PAGESIZE) for paddr in System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)[1]]
-      mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]),
-        view=MMIOInterface(mapping.va_addr, size, fmt='B'), owner=self.dev)
+      memview, paddrs = System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
+      mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], system=True, snooped=True, uncached=True)
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    if cpu_access: self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], addr=mapping.va_addr, size=mapping.size)
-    return HCQBuffer(mapping.va_addr, size, view=MMIOInterface(mapping.va_addr, size, fmt='B') if cpu_access else None,
-      meta=PCIAllocationMeta(mapping, has_cpu_mapping=cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
+    barview = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
+    return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
@@ -226,22 +225,6 @@ class LNXPCIIfaceBase:
 class APLPCIIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
     self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
-
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    if host or ((uncached or cpu_access) and not force_devmem) : # cpu access memory goes here, since bar is small.
-      vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      assert size >= mmap.PAGESIZE, "Size must be at least one page"
-
-      addr, paddrs = System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
-      paddrs = [(paddr, 0x1000) for paddr in paddrs]
-      mapping = self.dev_impl.mm.map_range(vaddr, size, paddrs, system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0][0]),
-        view=MMIOInterface(addr, size, fmt='B'), owner=self.dev)
-
-    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
-    vw = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
-    return HCQBuffer(mapping.va_addr, size, view=vw, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=mapping.paddrs[0][0]), owner=self.dev)
-
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
 PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
