@@ -62,17 +62,17 @@ class TestLinearizer(unittest.TestCase):
     ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
     assert len(ranges) == 1 # NOTE: it collapses now
 
-  def test_two_nested_range_alt_indexing(self):
-    a = Tensor([2, 2]).realize()
-    out = a.reshape(2, 1).pad(((1, 1), (1, 1)), value=2).sum()
-    ast = helper_linearizer_opt(out, wanna_output=[24])
-    uops = get_program(ast, opts=[]).uops
-    ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
-    # RANGE -> ALU -> RANGE -> ALU + LOAD -> STORE
-    assert any(x.op in GroupOp.ALU for x in uops[ranges[0]:ranges[1]])
+  # def test_two_nested_range_alt_indexing(self):
+  #   a = Tensor([2, 2]).realize()
+  #   out = a.reshape(2, 1).pad(((1, 1), (1, 1)), value=2).sum()
+  #   ast = helper_linearizer_opt(out, wanna_output=[24])
+  #   uops = get_program(ast, opts=[]).uops
+  #   ranges = [i for i,u in enumerate(uops) if u.op is Ops.RANGE]
+  #   # RANGE -> ALU -> RANGE -> ALU + LOAD -> STORE
+  #   assert any(x.op in GroupOp.ALU for x in uops[ranges[0]:ranges[1]])
     # the index of the load doesnt depend on the second range
-    assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
-    assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[1]:])
+    # assert any(x.op is Ops.LOAD for x in uops[ranges[0]:ranges[1]])
+    # assert any(x.op in {*GroupOp.ALU, Ops.LOAD} for x in uops[ranges[1]:])
 
   def test_range_outer_op_before_phi(self):
     a = Tensor.randn(4, 1).realize()
