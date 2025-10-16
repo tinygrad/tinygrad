@@ -279,9 +279,9 @@ generate_llvm() {
     --clang-args="$(llvm-config-14 --cflags)" \
     -o "$BASE/llvm.py"
 
-  sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.llvm as llvm_support, tinygrad.helpers as helpers\g" "$BASE/llvm.py"
+  sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.llvm as llvm_support\g" "$BASE/llvm.py"
   sed -i "s\FIXME_STUB\llvm\g" "$BASE/llvm.py"
-  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(llvm_support.LLVM_PATH, ctypes.RTLD_GLOBAL if helpers.OSX else ctypes.DEFAULT_MODE)\g" "$BASE/llvm.py"
+  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(llvm_support.LLVM_PATH)\g" "$BASE/llvm.py"
 
   fixup "$BASE/llvm.py"
 }
