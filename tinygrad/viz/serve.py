@@ -157,7 +157,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
-  buf_ei:dict[int, ProfilePointEvent] = {}
+  buf_ei:dict[int, list[ProfilePointEvent]] = {}
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
