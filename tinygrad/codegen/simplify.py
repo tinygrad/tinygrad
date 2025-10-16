@@ -72,11 +72,11 @@ def split_reduce(red:UOp):
   consumer_map = red.get_consumer_map()
   for r in red.src[1:]:
     cuts = [c for c in consumer_map[r] if c.op is Ops.CMPLT]
-    if len(cuts)!=1: return None
+    if not cuts: return None
     cut = cuts[0]
     if cut.src[0] is not r or cut.src[1].op is not Ops.CONST: continue
     new_r1, new_r2 = UOp.range(cut.src[1], r.arg[0]+2000, r.arg[1]), UOp.range(r.src[0]-cut.src[1], r.arg[0]+2001, r.arg[1])
-    new_red = (red.src[0].substitute({r:new_r1}).reduce(new_r1, arg=Ops.ADD)+red.src[0].substitute({r:new_r2+cut.src[1]}).reduce(new_r2, arg=Ops.ADD))
+    new_red = red.src[0].substitute({r:new_r1}).reduce(new_r1, arg=Ops.ADD)+red.src[0].substitute({r:new_r2+cut.src[1]}).reduce(new_r2, arg=Ops.ADD)
     remaining_reds = [x for x in red.src[1:] if x is not r]
     return graph_rewrite(new_red.reduce(*remaining_reds, arg=Ops.ADD) if remaining_reds else new_red, sym, name="split_reduce")
 
