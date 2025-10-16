@@ -1,6 +1,6 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno, itertools
 from typing import cast, ClassVar
-from tinygrad.helpers import round_up, to_mv, getenv, OSX, temp
+from tinygrad.helpers import round_up, getenv, OSX, temp
 from tinygrad.runtime.autogen import libc, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
@@ -59,7 +59,7 @@ class _System:
     if (self.iokit.IOConnectCallMethod(self.macos_tinygpu_conn, sel, in_scalars, len(args), None, ctypes.c_size_t(0),
         out_scalars:=(ctypes.c_uint64*16)(), ctypes.byref(outcnt:=ctypes.c_uint32(16)), None, ctypes.byref(ctypes.c_size_t(0)))):
       raise RuntimeError(f"IOConnectCallMethod({sel=}, {args=}) failed")
-    return out_scalars[:1]
+    return out_scalars[:outcnt.value]
 
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
 
