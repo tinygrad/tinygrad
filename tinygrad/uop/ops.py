@@ -647,6 +647,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def unbind(self) -> tuple[Variable, int]:
     assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
+  def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
+    def do_unbind(ctx:dict[Variable, int], x:UOp):
+      v,i = x.unbind()
+      ctx[v] = i
+      return v
+    pm_unbind = PatternMatcher([(UPat(Ops.BIND, name="x"), do_unbind)])
+    ret:dict[Variable, int] = {}
+    return graph_rewrite(self, pm_unbind, ctx=ret), ret
   @property
   def val(self) -> int: return self.unbind()[1]
   def vars(self) -> set[UOp]:
