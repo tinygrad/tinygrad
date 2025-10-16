@@ -10,6 +10,9 @@ def get_example_inputs(graph_inputs:dict[str, OnnxValue], config={}):
   """
   Generate example input tensors based on the provided ONNX graph input specifications.
 
+  NOTE: This is not guaranteed to be reliable. It's a best-effort helper
+  that uses heuristics to guess input shapes and values.
+
   Example:
     from tinygrad.nn.onnx import OnnxRunner
     from extra.onnx_helpers import get_example_inputs
@@ -64,8 +67,8 @@ def _get_tinygrad_and_ort_np_outputs(onnx_file, inputs):
   ort_out = dict(zip(out_names, out_values))
 
   tinygrad_out = run_onnx(inputs)
-  Tensor.realize(*tinygrad_out.values())
-  tinygrad_out = {k:v.numpy() for k,v in tinygrad_out.items()}
+  Tensor.realize(*(x for x in tinygrad_out.values() if x is not None))
+  tinygrad_out = {k:v.numpy() if v is not None else None for k,v in tinygrad_out.items()}
   return tinygrad_out, ort_out
 
 def validate(onnx_file, inputs, rtol=1e-5, atol=1e-5):
@@ -94,11 +97,12 @@ def validate_all_intermediates(onnx_file, inputs, rtol=1e-5, atol=1e-5):
       tinygrad_out = output["tinygrad"]
       ort_out = output["onnxruntime"]
       try:
-        np.testing.assert_allclose(tinygrad_out, ort_out, rtol=rtol, atol=atol, err_msg=f"{i}: {op=} {node_name=} {output_name=}")
+        if tinygrad_out is None: assert ort_out is None, f"None outputs are not equal {tinygrad_out=} {ort_out=}"
+        else: np.testing.assert_allclose(tinygrad_out, ort_out, rtol=rtol, atol=atol)
         print(f"Validated {i}: {op=} {node_name=} {output_name=}")
       except AssertionError as e:
         print(f"FAILED {i}: {op=} {node_name=} {output_name=}")
-        print(e)
+        print(str(e).strip() + "\n")
 
 def generate_node_output_report(onnx_file, inputs):
   """
@@ -128,27 +132,33 @@ def generate_node_output_report(onnx_file, inputs):
   import tempfile
 
   # rewrite the model to output all the node outputs
-  # infer shapes here fills the shapes and dtypes of intermediate values which graphsurgeon requires when assigning them as outputs
+  # `infer_shapes` here tries to fill the shapes and dtypes of intermediate values which graphsurgeon requires when assigning them as outputs
   inferred_model = onnx.shape_inference.infer_shapes(onnx.load(onnx_file))
   model = gs.import_onnx(inferred_model)
   model_nodes = model.nodes
   node_outputs = [n.outputs for n in model.nodes]
-  model.outputs = [each_output for outputs in node_outputs for each_output in outputs]
+  model.outputs = [
+      each_output for outputs in node_outputs for each_output in outputs
+      if not (each_output.dtype is None and each_output.shape is None)  # output with None dtype and None shape is likely a `None` value
+  ]
   rewritten_model = gs.export_onnx(model)
+
   # TODO: remove this once ORT supports 1.18.0
   if getattr(rewritten_model, "ir_version", 0) > 10:
     rewritten_model.ir_version = 10
-  with tempfile.NamedTemporaryFile(delete=False, suffix=".onnx") as f:
-    onnx.save(rewritten_model, f.name)
-    rewritten_model = f.name
 
-  tinygrad_out, ort_out = _get_tinygrad_and_ort_np_outputs(rewritten_model, inputs)
+  with tempfile.NamedTemporaryFile(suffix=".onnx") as f:
+    onnx.save(rewritten_model, f.name)
+    rewritten_model_path = f.name
+    tinygrad_out, ort_out = _get_tinygrad_and_ort_np_outputs(rewritten_model_path, inputs)
 
   report = []
   for node in model_nodes:
     outputs = []
     for each_output in node.outputs:
-      name = each_output.name or "unnamed"
+      if each_output.dtype is None and each_output.shape is None:
+        continue
+      name = each_output.name
       tinygrad_output = tinygrad_out[name]
       ort_output = ort_out[name]
       outputs.append({"name": name, "tinygrad": tinygrad_output, "onnxruntime": ort_output})
