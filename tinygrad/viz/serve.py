@@ -152,12 +152,17 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     events.append(struct.pack("<IIIfI", enum_str(name, scache), option(ref), st-start_ts, dur, enum_str(info or "", scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
+def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
+  kernel_names = [enum_str(ei.key, scache) for ei in execs]
+  return struct.pack(f"<BIII{len(kernel_names)}I", 0, ts, key, len(kernel_names), *kernel_names)
+
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
   buf_ei:dict[int, list[ProfilePointEvent]] = {}
+
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
@@ -170,9 +175,9 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
     if e.name == "exec" and e.arg["bufs"]:
       for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
     if e.name == "free":
-      kernel_names = [enum_str(ei.key, scache) for ei in buf_ei.pop(e.key, [])]
-      events.append(struct.pack(f"<BIII{len(kernel_names)}I", 0, int(e.ts) - start_ts, e.key, len(kernel_names), *kernel_names))
+      events.append(encode_mem_free(e.key, int(e.ts) - start_ts, buf_ei.pop(e.key, []), scache))
       mem -= temp.pop(e.key)
+  for t in temp: events.append(encode_mem_free(t, end_ts-start_ts, buf_ei.pop(t, []), scache))
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 

@@ -272,10 +272,6 @@ async function renderProfiler() {
           }
         }
       }
-      for (const [_, v] of temp) {
-        v.x.push(x);
-        v.y.push(v.y.at(-1));
-      }
       timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
