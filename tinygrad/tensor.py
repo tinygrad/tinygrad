@@ -1351,8 +1351,9 @@ class Tensor(MathTrait):
     if isinstance(v, get_args(ConstType)): v = Tensor(v, device=self.device, dtype=self.dtype)
     if not isinstance(v, Tensor): raise TypeError(f"can't set a {type(v).__name__} to a Tensor")
     if self.requires_grad or v.requires_grad: raise NotImplementedError("setitem with requires_grad is not supported")
-
-    res = self.realize()._getitem(indices, v)
+    self.realize()
+    if not self.uop.is_contiguous(): raise RuntimeError("setitem target needs to be contiguous")
+    res = self._getitem(indices, v)
     # if shapes match and data is not shared it's a copy and we assign to self
     if res.shape == self.shape and res.uop is not self.uop:
       self.assign(res).realize()

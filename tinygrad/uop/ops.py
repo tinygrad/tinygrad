@@ -178,7 +178,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.IF | Ops.BARRIER | \
+      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.VCONST | Ops.SUBSTITUTE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.PRECAST:
         return None
 
@@ -496,6 +496,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # for all movement ops, we check shape property
     if ret.shape == self.shape and same_shape_noop: return self
     return ret
+
+  def is_contiguous(self):
+    if self.op is Ops.RESHAPE: return self.src[0].is_contiguous()
+    return self.op is Ops.BUFFER
 
   # in these four, if the shape doesn't change we can return self
   def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=False)
