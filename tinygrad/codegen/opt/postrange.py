@@ -97,7 +97,7 @@ class Scheduler:
     new_rng = UOp.range(amount, self.maxarg+1, new_type) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} {amount} {str(new_type).split('.')[1].lower()}")
+    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
@@ -200,13 +200,14 @@ class Scheduler:
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
-        altrng = self.rngs[opt.arg]
+        altrng:UOp = self.rngs[opt.arg]
       except IndexError:
         raise KernelOptError
       check(rng.arg[-1] == AxisType.GLOBAL and altrng.arg[-1] == AxisType.GLOBAL, "swap only for globals")
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
-                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)})
-      self.ast = graph_rewrite(self.ast, remove_tags)
+                                      altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)},
+                                      name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}")
+      self.ast = graph_rewrite(self.ast, remove_tags, name="swap remove tags")
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 
