@@ -1522,6 +1522,7 @@ class Tensor(MathTrait):
     """
     if size < 0: raise RuntimeError(f'size must be >= 0 but got {size=}')
     if step <= 0: raise RuntimeError(f'step must be > 0 but got {step=}')
+    step = min(step, self.shape[dim] - size + 1)
     if size > self.shape[dim]: raise RuntimeError(f'maximum size for tensor at dimension {dim} is {self.shape[dim]} but size is {size}')
     dim = self._resolve_dim(dim)
     perm_to_last = tuple(i for i in range(self.ndim) if i != dim) + (dim,)
