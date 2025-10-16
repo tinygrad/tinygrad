@@ -72,7 +72,7 @@ class _System:
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
-  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[int, list[int]]:
+  def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[MMIOInterface, list[int]]:
     if OSX:
       sysmem = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE)).view(fmt='Q')
       paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem[0::2], sysmem[1::2])))
@@ -86,7 +86,7 @@ class _System:
     va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
 
     if data is not None: to_mv(va, len(data))[:] = data
-    return va, self.system_paddrs(va, size)
+    return MMIOInterface(va, size), self.system_paddrs(va, size)
 
   def pci_reset(self, gpu):
     if OSX: System.iokit_pci_rpc(__TinyGPURPCReset:=2)

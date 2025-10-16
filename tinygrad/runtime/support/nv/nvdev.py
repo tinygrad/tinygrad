@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
-from tinygrad.helpers import getenv, DEBUG, fetch, getbits, to_mv
+from tinygrad.helpers import getenv, DEBUG, fetch, getbits
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
@@ -137,9 +137,9 @@ class NVDev(PCIDevImplBase):
     self.large_bar = self.vram.nbytes >= self.vram_size
 
   def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:
-    va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
-    to_mv(va, sz)[:] = bytes(struct)
-    return type(struct).from_address(va), paddrs[0]
+    view, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
+    view[:sz] = bytes(struct)
+    return type(struct).from_address(view.addr), paddrs[0]
 
   def _download(self, file:str) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
