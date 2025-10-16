@@ -370,15 +370,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.RANGE, dtype=dtypes.index, src=(sint_to_uop(end),), arg=arg)
   def r(self, op:Ops, axis:tuple[int, ...]):
     axis = tuple(sorted([x for x in axis if resolve(self.shape[x] != 1)]))
-    if len(axis) == 0: return self
-    # move any non reduce axis before the first reduce axis
-    move_early, rest = partition(range(axis[0], len(self.shape)), lambda i: i not in axis and resolve(self.shape[i] != 1))
-    permaxis = tuple(range(axis[0])) + tuple(move_early) + tuple(rest)
-    ret = self.permute(permaxis)
-    new_axis = tuple([x for x in range(axis[0]+len(move_early), len(self.shape)) if resolve(ret.shape[x] != 1)])
-    assert len(axis) == len(new_axis)
-    ret = UOp(Ops.REDUCE_AXIS, self.dtype, (ret,), (op, new_axis))
-    return ret.reshape(tuple([x if i not in axis else 1 for i,x in enumerate(self.shape)]))
+    return UOp(Ops.REDUCE_AXIS, self.dtype, (self,), (op, axis)) if len(axis) else self
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.index.vec(count), src=(), arg=Invalid)
   def valid(self, cond): return self if cond.op is Ops.WHERE and cond.arg else cond.where(self, UOp.invalid(self.dtype.count))
