@@ -8,9 +8,50 @@ from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
 class _System:
+  @functools.cached_property
+  def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
+
+  @functools.cached_property
+  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
+
+  @functools.cached_property
+  def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))
+
+  @functools.cached_property
+  def mach_task_self(self): return ctypes.cast(self.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
+
+  @functools.cached_property
+  def pagemap(self) -> FileIOInterface:
+    if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
+      os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
+      assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
+    return FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
+
+  @functools.cached_property
+  def vfio(self) -> FileIOInterface|None:
+    try:
+      if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
+
+      FileIOInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
+      vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
+      vfio.VFIO_CHECK_EXTENSION(vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
+
+      return vfio_fd
+    except OSError: return None
+
+  @functools.cached_property
+  def macos_tinygpu_conn(self):
+    self.iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
+    if not (mdict:=self.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
+    if not (service:=self.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
+      raise RuntimeError('Service "tinygpu" is not running')
+    if self.iokit.IOServiceOpen(service, self.mach_task_self, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
+      raise RuntimeError("IOServiceOpen failed")
+    return conn
+
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
 
-  def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.atomic_lib) is not None else None
+  def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.libsys if OSX else self.atomic_lib) is not None else None
 
   def lock_memory(self, addr:int, size:int):
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
@@ -35,47 +76,6 @@ class _System:
       device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
       if vendor == target_vendor and device in target_devices: result.append(pcibus)
     return sorted(result)
-
-  @functools.cached_property
-  def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
-
-  @functools.cached_property
-  def pagemap(self) -> FileIOInterface:
-    if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
-      os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
-      assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
-    return FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
-
-  @functools.cached_property
-  def vfio(self) -> FileIOInterface|None:
-    try:
-      if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
-
-      FileIOInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
-      vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
-      vfio.VFIO_CHECK_EXTENSION(vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
-
-      return vfio_fd
-    except OSError: return None
-
-  @functools.cached_property
-  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
-
-  @functools.cached_property
-  def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))
-
-  @functools.cached_property
-  def mach_task_self(self): return ctypes.cast(self.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
-
-  @functools.cached_property
-  def macos_tinygpu_conn(self):
-    self.iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
-    if not (mdict:=self.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
-    if not (service:=self.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
-      raise RuntimeError('Service "tinygpu" is not running')
-    if self.iokit.IOServiceOpen(service, self.mach_task_self, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
-      raise RuntimeError("IOServiceOpen failed")
-    return conn
 
   def flock_acquire(self, name:str) -> int:
     import fcntl # to support windows
