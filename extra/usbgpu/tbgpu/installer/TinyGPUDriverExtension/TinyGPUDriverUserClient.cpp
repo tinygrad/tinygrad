@@ -62,8 +62,41 @@ kern_return_t TinyGPUDriverUserClient::Stop_Impl(IOService* in_provider)
 	return Stop(in_provider, SUPERDISPATCH);
 }
 
-kern_return_t TinyGPUDriverUserClient::ExternalMethod(uint64_t in_selector, IOUserClientMethodArguments* in_arguments, const IOUserClientMethodDispatch* in_dispatch, OSObject* in_target, void* in_reference)
+kern_return_t TinyGPUDriverUserClient::ExternalMethod(uint64_t selector, IOUserClientMethodArguments* args, const IOUserClientMethodDispatch* in_dispatch, OSObject* in_target, void* in_reference)
 {
+	kern_return_t err = 0;
+
+	os_log(OS_LOG_DEFAULT, "tinygpu: rpc (%llu) in:%d, out:%d", selector, args->scalarInputCount, args->scalarOutputCount);
+
+	if (selector == TinyGPURPC::ReadCfg) {
+		if (args->scalarInputCount != 2 or args->scalarOutputCount < 1) return kIOReturnBadArgument;
+
+		uint32_t off = uint32_t(args->scalarInput[0]);
+		uint32_t size = uint32_t(args->scalarInput[1]);
+
+		uint32_t val = 0;
+		err = ivars->provider->CfgRead(off, size, &val);
+		os_log(OS_LOG_DEFAULT, "tinygpu: read cfg off:%x sz:%d, val:%x", off, size, val);
+
+		if (!err) {
+			args->scalarOutput[0] = val;
+			args->scalarOutputCount = 1;
+		}
+		return err;
+	} else if (selector == TinyGPURPC::WriteCfg) {
+		if (args->scalarInputCount != 3) return kIOReturnBadArgument;
+
+		uint32_t off = uint32_t(args->scalarInput[0]);
+		uint32_t size = uint32_t(args->scalarInput[1]);
+		uint32_t val = uint32_t(args->scalarInput[2]);
+
+		os_log(OS_LOG_DEFAULT, "tinygpu: wr cfg off:%x sz:%d, val:%x", off, size, val);
+		return ivars->provider->CfgWrite(off, size, val);
+	} else if (selector == TinyGPURPC::Reset) {
+		os_log(OS_LOG_DEFAULT, "tinygpu: reset");
+		return ivars->provider->ResetDevice();
+	}
+
 	return kIOReturnUnsupported;
 }
 
