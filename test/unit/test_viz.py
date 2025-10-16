@@ -490,5 +490,14 @@ class TestVizMemoryLayout(BaseTestViz):
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
     self.assertEqual(len(user_cnt), len(programs))
 
+  def test_inflight_buf(self):
+    a = Tensor.empty(1, device="NULL")
+    n = 4
+    for i in range(n): (a+i).realize()
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    buffers = profile["layout"]["NULL Memory"]["events"]
+    user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
+    self.assertEqual(max(user_cnt), n)
+
 if __name__ == "__main__":
   unittest.main()
