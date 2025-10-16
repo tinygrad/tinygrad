@@ -91,6 +91,8 @@ pm_reduce_collapse = PatternMatcher([
   # fold the range
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(UPat.var("r"), arg=Ops.ADD),
    lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
+  (((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.cvar("val"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
+   lambda r,lower,upper,val: (upper.minimum(r.src[0])-lower.maximum(0)).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
    lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
   # REDUCE on ADD
@@ -102,8 +104,8 @@ pm_reduce_collapse = PatternMatcher([
   ((UPat.var("idx")!=(UPat(Ops.RANGE, name="r").or_casted())).where(0, UPat.var("expr")).reduce(UPat.var("r"), arg=Ops.ADD),
    lambda r,idx,expr: (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)),
   # AND on WHERE
-  ((UPat.var("x") & UPat.var("y")).where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
-    lambda x,y,c,r: x.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)),
+  ((UPat(Ops.DEFINE_VAR, name="x") & UPat.var("y")).where(UPat.cvar("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # remove REDUCEs that no longer have a RANGE in the src
   (UPat(Ops.REDUCE, name="red"), reduce_rangeless),
 ])+sym
