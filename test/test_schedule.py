@@ -2160,8 +2160,8 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.ones((4,)).to("CPU")
     b = Tensor.empty(4, device="CPU")
     add = a+b
-    add.kernelize()
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
+    add.kernelize()
 
   def test_alu_before_copy(self):
     buf = Tensor.ones(1).contiguous().realize()

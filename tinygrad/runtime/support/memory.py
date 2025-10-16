@@ -258,4 +258,4 @@ class MemoryManager:
     if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
-  def pfree(self, paddr:int, ptable=False): self.ptable_allocator if self.reserve_ptable and ptable else self.pa_allocator.free(paddr)
+  def pfree(self, paddr:int, ptable=False): (self.ptable_allocator if self.reserve_ptable and ptable else self.pa_allocator).free(paddr)

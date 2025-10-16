@@ -131,8 +131,7 @@ class TestIndexing(unittest.TestCase):
     # llama3 is 128256
     vocab_size, embed_size = (10, 3) if CI else (32000, 4096)
     emb = nn.Embedding(vocab_size, embed_size)
-    # TODO: why is a new realize needed here
-    emb_w = emb.weight.realize().numpy()
+    emb_w = emb.weight.numpy()
     x = Tensor([1,2,3,4])
     with Context(NOOPT=noopt):
       GlobalCounters.reset()

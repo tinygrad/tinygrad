@@ -527,6 +527,7 @@ class TestTinygrad(unittest.TestCase):
     self.assertListEqual(t.shrink_to(16).tolist(), list(range(16)))
     t = t.reshape(4, 8).contiguous().realize()
     self.assertListEqual(t.shrink_to(2, 2).tolist(), [[0, 1], [8, 9]])
+    self.assertListEqual(t.shrink_to(None, 2).tolist(), t.shrink_to(4, 2).tolist())
     with self.assertRaises(ValueError): t.shrink_to(2)
     with self.assertRaises(ValueError): t.shrink_to(2, 2, 2)
 
@@ -636,8 +637,10 @@ class TestZeroShapeTensor(unittest.TestCase):
 
     np.testing.assert_equal(Tensor([1, 2]).pad_to(4).numpy(), [1, 2, 0, 0])
     np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3).numpy(), [[1, 2, 0], [0, 0, 0]])
-    with self.assertRaises(TypeError): Tensor([1, 2]).pad_to(2, 3)
-    with self.assertRaises(TypeError): Tensor([[1, 2]]).pad_to(3)
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(1, 3).numpy(), [[1, 2, 0]])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(None, 3).numpy(), [[1, 2, 0]])
+    with self.assertRaises(ValueError): Tensor([1, 2]).pad_to(2, 3)
+    with self.assertRaises(ValueError): Tensor([[1, 2]]).pad_to(3)
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
@@ -834,7 +837,6 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
-  @unittest.skip("not accurate")
   def test_complex_backward(self):
     x = Tensor.rand(3, requires_grad=True).realize()
     y = Tensor.rand(3, requires_grad=True).realize()
@@ -846,11 +848,12 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
+    self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
+    self.assertSetEqual(set(m.name for m in si.metadata), {"__mul__", "sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]
-    self.assertEqual(len(bw), 1)
-    self.assertEqual(bw[0].name, "sigmoid")
+    self.assertEqual(len(bw), 2)
+    self.assertEqual(bw[0].name, "__mul__")
+    self.assertEqual(bw[1].name, "sigmoid")
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):
