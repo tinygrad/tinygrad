@@ -269,7 +269,8 @@ if __name__ == "__main__":
 
   # load in weights
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
-    load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], verbose=False, strict=False, realize=False)
+    model_bin = fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt')
+    load_state_dict(model, torch_load(model_bin)['state_dict'], verbose=False, strict=False, realize=False)
 
     if args.fp16:
       for k,v in get_state_dict(model).items():

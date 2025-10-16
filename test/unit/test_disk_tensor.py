@@ -418,5 +418,32 @@ class TestPathTensor(unittest.TestCase):
       Tensor(pathlib.Path(test_file)).tolist()
     os.chmod(test_file, 0o644)
     assert Tensor(pathlib.Path(test_file)).tolist(), list(range(10))
+
+class TestDiskTensorMovement(unittest.TestCase):
+  def setUp(self):
+    self.fn = pathlib.Path(temp("custom_disk_range"))
+    self.fn.unlink(missing_ok=True)
+    Tensor.arange(100, dtype=dtypes.uint8).to(f"disk:{str(self.fn)}").realize()
+
+  def test_simple_read(self):
+    t = Tensor(self.fn)
+    self.assertTrue(Tensor.all(t.to(None) == Tensor.arange(100, dtype=dtypes.uint8)).item())
+
+  def test_slice_read(self):
+    t = Tensor(self.fn)
+    self.assertListEqual(t[16:18].tolist(), [16,17])
+
+  # TODO: fix this! at least assert on it
+  @unittest.expectedFailure
+  def test_slice_read_cat(self):
+    t = Tensor(self.fn)
+    self.assertListEqual(Tensor.cat(t[16:18], t[20:22]).tolist(), [16,17,20,21])
+
+  # TODO: fix this! at least assert on it
+  @unittest.expectedFailure
+  def test_slice_sum(self):
+    t = Tensor(self.fn)
+    self.assertListEqual((t[16:18]+t[20:22]).tolist(), [16+20,17+21])
+
 if __name__ == "__main__":
   unittest.main()

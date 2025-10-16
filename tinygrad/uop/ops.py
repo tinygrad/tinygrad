@@ -389,7 +389,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     assert self.dtype.scalar() is dtypes.index, "Can only call get_valid on index dtype"
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
-  def contiguous(self, *args, **kwargs): return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
+
+  def is_contiguous(self):
+    # TODO: this is is_realized
+    if self.op is Ops.RESHAPE: return self.src[0].is_contiguous()
+    return self.op is Ops.BUFFER
+
+  def contiguous(self, *args, **kwargs):
+    if self.is_contiguous(): return self
+    return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
@@ -496,10 +504,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # for all movement ops, we check shape property
     if ret.shape == self.shape and same_shape_noop: return self
     return ret
-
-  def is_contiguous(self):
-    if self.op is Ops.RESHAPE: return self.src[0].is_contiguous()
-    return self.op is Ops.BUFFER
 
   # in these four, if the shape doesn't change we can return self
   def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=False)
