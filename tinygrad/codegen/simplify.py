@@ -151,6 +151,7 @@ pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
   (UPat(Ops.REDUCE, src=(UPat.var("v"),), allow_any_len=True, name="red"), lambda v,red: v.reduce(
     *[r for r in red.src[1:] if r is not UOp.const(dtypes.index, 0)], arg=red.arg)),
+  (UPat(Ops.REDUCE, src=(UPat.var("v"),)), lambda v:v),
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
 ])
 
