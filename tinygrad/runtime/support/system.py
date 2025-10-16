@@ -209,7 +209,7 @@ class LNXPCIIfaceBase:
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
     if not b.meta.mapping.system: self.dev_impl.mm.vfree(b.meta.mapping)
-    if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
+    if b.owner == self.dev and b.meta.has_cpu_mapping and not OSX: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
     if b.owner is not None and b.owner._is_cpu():
