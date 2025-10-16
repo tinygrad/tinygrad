@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -12,6 +12,12 @@ from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTI
 # creation can recurse a lot
 import sys
 sys.setrecursionlimit(10000)
+
+# movement op on INDEX as a PatternMatcher
+pm_mops = PatternMatcher([
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
+])
 
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
@@ -31,7 +37,12 @@ def split_reduceop(reduce:UOp, x:UOp):
   #   ~2**10 should be enough if GROUP is used
   # 256 split maximum should be "negligible reduce" for low prod(reduce.shape), 8 split minimum.
   # split is moved to the end to provide maximum locality for the second phase reduce.
-  is_expanded = unwrap(x.st).is_expanded()
+
+  # get expanded by rangeifying the UOp x
+  indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else UOp.const(dtypes.index, 0) for i,s in enumerate(x.shape)])
+  range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
+  is_expanded = [i not in range_nums for i in range(len(x.shape))]
+
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and not is_expanded[i]]): return None
   dim_to_split, divisor = split_candidates[0]
@@ -95,15 +106,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
    # realize before assign if input permutes the target buffer
    (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), find_permutes),
-])
-
-# *****************
-# 3a. rangeify (movement)
-
-# movement op on INDEX as a PatternMatcher
-pm_mops = PatternMatcher([
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
 ])
 
 # *****************
