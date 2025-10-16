@@ -67,9 +67,19 @@ pm_split_ranges = PatternMatcher([
 
 # **** reduce simplification ****
 
-def split_reduce(cut:UOp, t:UOp, f:UOp, r:UOp):
-  new_range1, new_range2 = UOp.range(cut, r.arg[0]+2000, r.arg[1]), UOp.range(r.src[0]-cut, r.arg[0]+2001, r.arg[1])
-  return t.substitute({r:new_range1}).reduce(new_range1, arg=Ops.ADD) + f.substitute({r:new_range2+cut}).reduce(new_range2, arg=Ops.ADD)
+def split_reduce(red:UOp):
+  if red.arg is not Ops.ADD: return None
+  consumer_map = red.get_consumer_map()
+  for r in red.src[1:]:
+    cuts = [c for c in consumer_map[r] if c.op is Ops.CMPLT]
+    if len(cuts)!=1: return None
+    cut = cuts[0]
+    if cut.src[0] is not r or cut.src[1].op is not Ops.CONST: continue
+    print(r)
+    new_r1, new_r2 = UOp.range(cut.src[1], r.arg[0]+2000, r.arg[1]), UOp.range(r.src[0]-cut.src[1], r.arg[0]+2001, r.arg[1])
+    new_red = (red.src[0].substitute({r:new_r1}).reduce(new_r1, arg=Ops.ADD)+red.src[0].substitute({r:new_r2+cut.src[1]}).reduce(new_r2, arg=Ops.ADD))
+    remaining_reds = [x for x in red.src[1:] if x is not r]
+    return graph_rewrite(new_red.reduce(*remaining_reds, arg=Ops.ADD) if remaining_reds else new_red, sym, name="split_reduce")
 
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
 
@@ -145,6 +155,6 @@ pm_reduce_unparented = PatternMatcher([
 
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
-  ((UPat(Ops.RANGE, name="r") < UPat.cvar("cut")).where(UPat.var("t"), UPat.var("f")).reduce(UPat.var("r"), arg=Ops.ADD), split_reduce),
+  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), split_reduce),
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
 ])
