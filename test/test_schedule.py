@@ -2395,7 +2395,7 @@ class TestUOpBecome(unittest.TestCase):
     a = Tensor.empty(16)
     b = (a.reshape(1, 1, 4, 1, 4)+0).reshape(1, 1, 4, 4).shrink(((0, 1), (0, 1), (0, 3), (0, 3)))+0
     c = (a.reshape(1, 1, 4, 4)+0).shrink(((0, 1), (0, 1), (0, 3), (0, 3)))+0
-    check_schedule([b, c], 2) # TODO: 0?
+    check_schedule([b, c], 0)
     assert all_same([x.uop.base.realized for x in [a,b,c]])
 
   def test_setitem_becomes_subbuffer(self):
