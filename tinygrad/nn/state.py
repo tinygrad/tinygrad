@@ -242,6 +242,8 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     for zi in myzip.filelist:
       if base_name is None: base_name = zi.filename.split('/', 1)[0]
       if zi.filename.startswith(f'{base_name}/data/'): header_offsets[zi.filename.split("/")[-1]] = zi.header_offset
+    # sadly there's no way to get the start of the file in the zip without reading the header
+    # at least here we read them in parallel
     header_contents = [t[v+26:v+30].bitcast(dtypes.uint16).to('CPU') for v in header_offsets.values()]
     Tensor.realize(*header_contents)
     for (n,o),c in zip(header_offsets.items(), header_contents):
