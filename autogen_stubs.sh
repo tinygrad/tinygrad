@@ -524,8 +524,10 @@ generate_mesa() {
   echo "lvp_nir_options = gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))" >> $BASE/mesa.py
   cat <<EOF | sed -i "/import ctypes.*/r /dev/stdin" $BASE/mesa.py
 def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
-  except Exception: return ''
+  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa_cpu']).decode().strip()
+  except Exception:
+    try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
+    except Exception: return ''
 EOF
   sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
   sed -i "s/import ctypes/import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers/" $BASE/mesa.py
