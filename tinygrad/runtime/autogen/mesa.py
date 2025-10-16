@@ -6,8 +6,11 @@
 # POINTER_SIZE is: 8
 # LONGDOUBLE_SIZE is: 16
 #
-import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers, tinygrad.runtime.support.llvm as llvm_support
-ctypes.CDLL(llvm_support.LLVM_PATH, ctypes.RTLD_GLOBAL)
+import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers
+try:
+  import tinygrad.runtime.support.llvm as llvm_support
+  ctypes.CDLL(llvm_support.LLVM_PATH, ctypes.RTLD_GLOBAL)
+except FileNotFoundError: pass
 def brew_prefix():
   try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
   except Exception: return ''
