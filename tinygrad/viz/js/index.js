@@ -283,15 +283,16 @@ async function renderProfiler() {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
         const html = document.createElement("div");
-        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)],
-                      ["Users", users.length]];
+        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
+        if (users != null) rows.push(["Users", users.length]);
         const info = html.appendChild(tabulate(rows).node());
-        html.appendChild(document.createElement("br"));
-        for (let u=0; u<users.length; u++) {
-          const p = html.appendChild(document.createElement("p"));
-          if (u === 0) p.appendChild(colored(`Produced by ${users[u]}`));
-          else if (u === 1) p.appendChild(colored(`Consumed by\n${users[u]}`));
-          else p.appendChild(colored(users[u]));
+        for (let u=0; u<users?.length; u++) {
+          const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
+          const name = users[u]; p.appendChild(colored(`[${u}] ${name}`));
+          p.onclick = () => {
+            const cid = ctxs.findIndex(c => c.name === name);
+            if (cid != null) setCtxWithHistory(cid-1);
+          }
         }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
