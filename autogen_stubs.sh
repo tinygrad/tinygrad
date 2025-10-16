@@ -520,13 +520,13 @@ generate_mesa() {
   LVP_NIR_OPTIONS=$(./extra/mesa/lvp_nir_options.sh $MESA_SRC)
 
   fixup $BASE/mesa.py
-  patch_dlopen $BASE/mesa.py tinymesa_cpu "(BASE:=os.getenv('MESA_PATH', f\"/usr{'/local/' if helpers.OSX else '/'}lib\"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so')" "f'{BASE}/libtinymesa{EXT}'" "f'{brew_prefix()}/lib/libtinymesa_cpu.dylib'"
+  patch_dlopen $BASE/mesa.py tinymesa_cpu "(BASE:=os.getenv('MESA_PATH', f\"/usr{'/local/' if helpers.OSX else '/'}lib\"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so')" "f'{BASE}/libtinymesa{EXT}'" "brew_path()"
   echo "lvp_nir_options = gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))" >> $BASE/mesa.py
   cat <<EOF | sed -i "/import ctypes.*/r /dev/stdin" $BASE/mesa.py
-def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa_cpu']).decode().strip()
+def brew_path():
+  try: return f"{subprocess.check_output(['brew', '--prefix', 'tinymesa_cpu']).decode().strip()}/lib/libtinymesa_cpu.dylib"
   except Exception:
-    try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
+    try: return f"{subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()}/lib/libtinymesa.dylib"
     except Exception: return ''
 EOF
   sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
@@ -539,7 +539,7 @@ EOF
   sed -i "s/('\(\w\+\)', pipe_shader_type, 8)/('\1', ctypes.c_ubyte)/" $BASE/mesa.py
   sed -i "s/\([0-9]\+\)()/\1/" $BASE/mesa.py
   sed -i "s/\(struct_nir_builder._pack_\) = 1/\1 = 0/" $BASE/mesa.py
-  python3 -c "import tinygrad.runtime.autogen.mesa"
+  MESA_PATH=$TINYMESA_DIR python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
 if [ "$1" == "opencl" ]; then generate_opencl

@@ -7,15 +7,15 @@
 # LONGDOUBLE_SIZE is: 16
 #
 import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers
-def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa_cpu']).decode().strip()
+def brew_path():
+  try: return f"{subprocess.check_output(['brew', '--prefix', 'tinymesa_cpu']).decode().strip()}/lib/libtinymesa_cpu.dylib"
   except Exception:
-    try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
+    try: return f"{subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()}/lib/libtinymesa.dylib"
     except Exception: return ''
 PATHS_TO_TRY = [
   (BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'),
   f'{BASE}/libtinymesa{EXT}',
-  f'{brew_prefix()}/lib/libtinymesa_cpu.dylib',
+  brew_path(),
 ]
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
