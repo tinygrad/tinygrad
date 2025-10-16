@@ -6,16 +6,16 @@
 	<dict>
 		<key>TinyGPUDriver</key>
 		<dict>
-			<key>IOPCIClassMatch</key>
-			<string>0x03000000</string>
-			<key>IOPCITunnelCompatible</key>
-			<true/>
 			<key>CFBundleIdentifier</key>
 			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			<key>IOClass</key>
 			<string>IOUserService</string>
 			<key>IOMatchCategory</key>
 			<string>TinyGPUDriver</string>
+			<key>IOPCIClassMatch</key>
+			<string>0x03000000</string>
+			<key>IOPCITunnelCompatible</key>
+			<true/>
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
 			<key>IOResourceMatch</key>
