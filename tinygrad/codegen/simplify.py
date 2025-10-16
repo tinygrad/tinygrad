@@ -80,7 +80,7 @@ def reduce_rangeless(red:UOp):
       ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
-pm_reduce_collapse = PatternMatcher([
+pm_reduce_collapse_initial = PatternMatcher([
   # lift x+y out of reduce on lt
   ((UPat.var("x")+UPat.var("y")).or_casted() < UPat.var("c"), lambda x,y,c: (x < (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
   # lift x*y out of reduce
@@ -88,6 +88,9 @@ pm_reduce_collapse = PatternMatcher([
    lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
   # lift x+y out of reduce on ne
   ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
+])
+
+pm_reduce_collapse = pm_reduce_collapse_initial+PatternMatcher([
   # fold the range
   ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(UPat.var("r"), arg=Ops.ADD),
    lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
@@ -119,8 +122,9 @@ def reduce_collapse(red:UOp):
       if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
         replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
+  red = graph_rewrite(collapse_fxn, pm_reduce_collapse_initial, name="reduce_collapse")
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
-  return sink.substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
+  return (sink if no_range(sink) else red) .substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
 
 def reduce_unparented(red:UOp):
   if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
