@@ -217,7 +217,7 @@ class TestProfiler(unittest.TestCase):
         Tensor.realize(a, b)
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
-    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent)]
+    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and not e.is_copy]
     self.assertEqual(len(exec_points), len(range_events), 2)
     self.assertEqual(len(dedup(e.key for e in exec_points)), 1)
     self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
