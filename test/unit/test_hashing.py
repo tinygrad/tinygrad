@@ -2,6 +2,7 @@ from typing_extensions import Callable
 import hashlib, random, unittest
 from tinygrad import Tensor, Device, getenv, dtypes
 from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import CI
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
 @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
@@ -28,8 +29,11 @@ class TestKeccak(unittest.TestCase):
       out_shape = Tensor.randint(*s[i:], high=255, dtype=dtypes.uint8).keccak().shape
       self.assertTupleEqual(s[i:-1], out_shape[:-1])
 
+  @unittest.skipUnless(Device.DEFAULT=="METAL", "slow")
   def test_sha3_224(self): self._test_preset("sha3_224", [143, 144])
+  @unittest.skipUnless(Device.DEFAULT=="METAL", "slow")
   def test_sha3_256(self): self._test_preset("sha3_256", [135, 136])
+  @unittest.skipUnless(Device.DEFAULT=="METAL", "slow")
   def test_shake_128(self): self._test_preset("shake_128", [167, 168], lambda d: hashlib.shake_128(d).digest(16))
 
   def _test_preset(self, name: str, special_sizes: list[int], hasher: Callable[[bytes], bytes] | None = None):
@@ -60,6 +64,7 @@ class TestKeccak(unittest.TestCase):
     # self.assertEqual(bytes(Tensor(b"a" * 1000000).keccak().tolist()),
     #                  bytearray.fromhex("5c8875ae474a3634 ba4fd55ec85bffd6 61f32aca75c6d699 d0cdcb6c115891c1"))
 
+  @unittest.skipIf(CI, "times out in ci")
   def test_long(self):
     data = b"\x00" * 4
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))

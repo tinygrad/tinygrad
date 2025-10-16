@@ -17,7 +17,11 @@ class TestKernelize(unittest.TestCase):
     a1 = a.sum(axis=1)
     a0 = a1.sum(axis=0)
     a0.kernelize()
-    self.assertIs(a1.uop.base.op, Ops.ASSIGN)
+    self.assertEqual(len([s for s in a0.uop.toposort() if s.op is Ops.KERNEL]), 2)
+    self.assertIs(a1.uop.base.op, Ops.REDUCE_AXIS)
+    # input Tensor and user contiguous kernelize
+    self.assertIs(a0.uop.base.op, Ops.ASSIGN)
+    self.assertIs(a.uop.base.op, Ops.ASSIGN)
 
   def test_two_reduce_w_add(self):
     a = Tensor.ones(16,16).contiguous()

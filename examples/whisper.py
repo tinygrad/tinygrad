@@ -109,7 +109,7 @@ class TextDecoder:
 
   def forward(self, x:Tensor, pos:Union[Variable, Literal[0]], encoded_audio:Tensor):
     seqlen = x.shape[-1]
-    x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None, None))
+    x = self.token_embedding(x) + self.positional_embedding.shrink(((pos, pos+seqlen), None))
     for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
     return self.output_tok(x)
 

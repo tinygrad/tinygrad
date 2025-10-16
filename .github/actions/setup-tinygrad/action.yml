@@ -41,6 +41,10 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
+  mesa:
+    description: "Install mesa"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -253,8 +257,13 @@ runs:
         git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
         mkdir build
         cd build
-        cmake .. -Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF \
-          -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+        CMAKE_ARGS="-Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        if [[ "${{ runner.os }}" == "macOS" ]]; then
+          CMAKE_ARGS="$CMAKE_ARGS -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib"
+        fi
+
+        cmake .. $CMAKE_ARGS
         ninja
     - name: Install gpuocelot
       if: inputs.ocelot == 'true'
@@ -284,3 +293,13 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
+
+    # **** mesa ****
+    - name: Install mesa (linux)
+      if: inputs.mesa == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: sudo curl -L https://github.com/sirhcm/tinymesa/releases/download/tinymesa-32dc66c/libtinymesa_cpu-mesa-25.2.4-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
+    - name: Install mesa (macOS)
+      if: inputs.mesa == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: brew install sirhcm/tinymesa/tinymesa

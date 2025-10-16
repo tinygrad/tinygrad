@@ -1,4 +1,6 @@
 import unittest
+import random
+from os import getenv
 from tinygrad import Tensor, TinyJit, Variable, dtypes
 from tinygrad.helpers import Context
 import numpy as np
@@ -164,6 +166,41 @@ class TestSetitem(unittest.TestCase):
     idx = Tensor.arange(0, idx_size)
     t[idx] = val
     self.assertEqual(t.tolist(), [val]*idx_size+[idx_size])
+
+  def test_setitem_advanced_indexing(self):
+    # Example from https://numpy.org/doc/stable/user/basics.indexing.html#combining-advanced-and-basic-indexing
+    t = Tensor.zeros(10,20,30,40,50).contiguous()
+    ind_1 = Tensor([5,3,7,8])
+    ind_2 = Tensor([[[0],[1],[2]],[[3],[4],[5]]])
+    v = Tensor.arange(2*3*4*10*30*50).reshape(2,3,4,10,30,50)
+    t[:, ind_1, :, ind_2, :] = v
+    n = np.zeros((10,20,30,40,50))
+    n[:, ind_1.numpy(), :, ind_2.numpy(), :] = v.numpy()
+    np.testing.assert_allclose(t.numpy(), n)
+
+  def test_setitem_2d_tensor_indexing(self):
+    t = Tensor.zeros(2).contiguous()
+    index = Tensor([[0, 1], [1,0]])
+    v = Tensor.arange(2*2).reshape(2, 2).contiguous()
+    t[index] = v
+    n = np.zeros((2,))
+    n[index.numpy()] = v.numpy()
+    np.testing.assert_allclose(t.numpy(), n)
+
+  @unittest.skip("slow")
+  def test_setitem_tensor_indexing_fuzz(self):
+    random.seed(getenv("SEED", 42))
+    for _ in range(getenv("ITERS", 100)):
+      size = random.randint(5, 10)
+      d0, d1, d2 = random.randint(1,5), random.randint(1,5), random.randint(1,5)
+      t = Tensor.zeros(size).contiguous()
+      n = np.zeros((size,))
+      index = Tensor.randint((d0, d1, d2), low=0, high=size)
+      v = Tensor.arange(d0*d1*d2).reshape(d0, d1, d2)
+      t[index] = v
+      n[index.numpy()] = v.numpy()
+      np.testing.assert_allclose(t.numpy(), n, err_msg=f"failed with index={index.numpy().tolist()} and v={v.numpy().tolist()}")
+
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):

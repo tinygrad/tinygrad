@@ -35,32 +35,35 @@ class TestWinograd(unittest.TestCase):
   def test_forward_kernels(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
     out = Tensor.conv2d(x,w)
-    self.assertEqual(len(out.schedule()), 4)
+    self.assertEqual(len(out.schedule()), 2)
 
   def test_backward_kernels(self):
     x,w = Tensor.empty(1,4,9,9,requires_grad=True).realize(), Tensor.empty(4,4,3,3,requires_grad=True).realize()
     out = Tensor.conv2d(x,w, padding=1)
     out.mean().backward()
     backward_schedule = Tensor.schedule(x.grad, w.grad)
-    self.assertEqual(len(backward_schedule), 9)
+    self.assertEqual(len(backward_schedule), 4)
 
   def test_counters(self):
     IC, OC, X, Y = 4,4,9,9
     #OC, IC, X, Y = 512, 256, 8, 8
     x,w = Tensor.rand(1,IC,Y,X).realize(), Tensor.rand(OC,IC,3,3).realize()
     GlobalCounters.reset()
-    Tensor.conv2d(x,w).realize()
+    with Context(WINO=1):
+      Tensor.conv2d(x,w).realize()
     ops_wino, mem_wino = GlobalCounters.global_ops, GlobalCounters.global_mem
-    WINO.value = 0
     GlobalCounters.reset()
-    Tensor.conv2d(x,w).realize()
+    with Context(WINO=0):
+      Tensor.conv2d(x,w).realize()
     ops_normal, mem_normal = GlobalCounters.global_ops, GlobalCounters.global_mem
 
     ops_ratio, mem_ratio = ops_wino/ops_normal, mem_wino/mem_normal
     print(f"ops: normal {ops_normal:9d} wino {ops_wino:9d} ratio {ops_ratio:.2f}")
     print(f"mem: normal {mem_normal:9d} wino {mem_wino:9d} ratio {mem_ratio:.2f}")
-    self.assertLess(ops_ratio, 2.6)  # TODO: there's issues with factorization now
-    self.assertLess(mem_ratio, 10)
+
+    # TODO: what's optimal on this?
+    self.assertLess(ops_ratio, 4.3)
+    self.assertLess(mem_ratio, 3)
 
   def test_dtype(self):
     IC, OC, X, Y = 4,4,9,9

@@ -121,7 +121,7 @@ class BufferCopy(Runner):
       getattr(src.allocator.dev, 'fd', None) is not None and dest.allocator.supports_copy_from_disk
     if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif src.device.startswith("DISK") and hasattr(dest.allocator, '_as_buffer'):
+    elif (src.device.startswith("DISK") or src.device.startswith("TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
       src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
     else:
@@ -140,13 +140,13 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, bytes, tuple[int, ...], bool], CompiledRunner] = {}
+method_cache: dict[tuple[str, type, bytes, tuple[int, ...], bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
-  ckey = (device, ast.key, context, False)
+  ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
-  bkey = (device.split(":")[0], ast.key, context, True)
+  bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
@@ -165,7 +165,9 @@ class ExecItem:
   def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
-    if PROFILE: cpu_events.append(ProfilePointEvent(self.prg.device, "exec", self.prg.display_name, {"metadata":self.metadata, "var_vals":var_vals}))
+    if PROFILE:
+      payload = {"metadata":self.metadata, "var_vals":var_vals, "bufs":[b.trace_num for b in bufs]}
+      cpu_events.append(ProfilePointEvent(self.prg.device, "exec", self.prg.display_name, payload))
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1

@@ -4,32 +4,7 @@ from dataclasses import dataclass
 from typing import cast, Sequence
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import resolve, UOp, Variable, sint, smax, smin, sint_to_uop, Ops, ssimplify
-from tinygrad.helpers import prod, all_int, argsort, flatten, ceildiv
-
-# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
-def get_contraction(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...]) -> list[list[int]]|None:
-  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
-  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
-  except ValueError: return None
-  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
-
-def get_contraction_with_reduce(old_shape:tuple[sint, ...], new_shape:tuple[sint, ...], reduce_axis:tuple[int, ...]) -> list[list[int]]|None:
-  if (contraction:=get_contraction(old_shape, new_shape)) is None: return None
-  # contraction returns the 1s as right justified as possible
-  # normally this contraction is good, but sometimes the reduce dim is empty. borrow from the next one, leaving one
-  # this ensures there's always ones available in the reduce dimension. this is also a valid contraction
-  for i in range(len(contraction)):
-    if i in reduce_axis and len(contraction[i]) == 0:
-      take_from = i+1
-      while take_from < len(contraction) and len(contraction[take_from]) == 0:
-        assert new_shape[take_from] == 1
-        take_from += 1
-      if take_from == len(contraction) or new_shape[take_from] != 1: return None # nothing to take
-      for j in range(take_from, i, -1):
-        assert len(contraction[j]) > 0
-        contraction[j-1] = contraction[j][:-1]
-        contraction[j] = contraction[j][-1:]
-  return contraction
+from tinygrad.helpers import prod, all_int, flatten
 
 @functools.cache
 def canonicalize_strides(shape:tuple[sint, ...], strides:tuple[sint, ...]) -> tuple[sint, ...]:
@@ -112,16 +87,17 @@ class View:
   mask:tuple[tuple[sint, sint], ...]|None
   contiguous:bool
 
-  def to_indexed_uops(self:View, idxs:Sequence[UOp]|None=None, vexpr:UOp=UOp.const(dtypes.bool, True)) -> tuple[UOp, UOp]:
-    """(idx, valid)"""
+  def to_valid_uop(self, idxs:Sequence[UOp]|None=None) -> UOp:
+    """valid.where(idx, INVALID)"""
     if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
     iexpr = sint_to_uop(self.offset)
+    where = UOp.const(dtypes.bool, True)
     for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      if resolve(sh != 1) and resolve(st != 0): iexpr = iexpr + idx*st
+      iexpr = iexpr + idx*sint_to_uop(st)
       if m is not None:
-        if resolve(m[0] != 0): vexpr = vexpr * (idx >= m[0])
-        if resolve(m[1] != sh): vexpr = vexpr * (idx < m[1])
-    return iexpr, vexpr
+        if resolve(m[0] != 0): where &= (idx >= sint_to_uop(m[0]))
+        if resolve(m[1] != sh): where &= (idx < sint_to_uop(m[1]))
+    return where.where(iexpr, UOp.invalid())
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
@@ -188,7 +164,6 @@ class View:
     if not all_int(vm1.shape):
       # if all strides are 0 and vm2 is unmasked, return vm1
       if all(x == 0 for x in vm2.strides+vm1.strides) and vm2.mask is None: return vm1
-      # TODO: handle more cases
       return None
 
     # Project vm1's offset and strides on to vm2.
@@ -201,59 +176,7 @@ class View:
         if not resolve((s1 := s1 - o)!=0): continue  # if s1 can possibly be 0
         terms[d2].append((d1, s1))
         strides[d1] += ssimplify(s1 * vm2.strides[d2])
-
-    # Merge dimensions in vm2 if required.
-    # NB: Merging too many dimensions can make it difficult to project vm2's mask, hence only combining when required.
-    idxs: list[UOp] = [UOp.variable(f"idx{i}", 0, s-1, dtypes.index) for i,s in enumerate(vm1.shape)]
-    merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
-    extents: list[tuple[sint, UOp]] = []
-    for term, s, o in zip(reversed(terms), reversed(vm2.shape), reversed(origin)):
-      merged_term += (sum([idxs[d1] * s1 for d1, s1 in term]) + o) * merged_size
-      merged_size *= s
-      if resolve(merged_term < merged_size, False) and resolve(0 <= merged_term, False):
-        extents.append((merged_size, merged_term))
-        merged_size, merged_term = 1, UOp.const(dtypes.index, 0)
-    if resolve(merged_term != 0): return None
-    if (vm2_shape := tuple(s for s,_ in reversed(extents))) != vm2.shape:
-      if (reshaped_vm2 := vm2.reshape(vm2_shape)) is None: return None
-      # NOTE: this != to prevent infinite loop
-      if reshaped_vm2.shape != vm2.shape: return reshaped_vm2 + vm1
-
-    if vm2.mask:
-      # Try to project vm2's mask on to vm1.
-      newb, newe, bad = [0] * len(vm1.shape), list(vm1.shape), False
-      for (b, e), o, term, (_, t) in zip(vm2.mask, origin, terms, reversed(extents)):
-        if resolve(b <= (t := t.simplify()).vmin and t.vmax < e, False): continue
-        if len(term) != 1:
-          if not term and newe:
-            # t should be a constant if no terms contribute to this dimension, but it might not be simplified
-            if t.vmin != t.vmax: return None
-            newe[0] = 0
-          else: bad = True
-          continue
-        d1, s1 = term[0]
-        newb[d1] = smax(newb[d1], ceildiv(b - o if s1 > 0 else e - o - 1, s1))
-        newe[d1] = smin(newe[d1], (b - o if s1 < 0 else e - o - 1) // s1 + 1)
-
-      # If any of vm1 was masked off, try again with that mask in place.
-      if any((b, e) != (0, s) for b, e, s in zip(newb, newe, vm1.shape)):
-        return vm2 + View.create(vm1.shape, vm1.strides, vm1.offset, tuple(zip(newb, newe)))
-      # Otherwise if vm2's mask was violated, then cannot merge.
-      if bad: return None
-
-    return View.create(vm1.shape, tuple(strides), ssimplify(sum(o * s for o, s in zip(origin, vm2.strides)) + vm2.offset))
-
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def invert(self, out_shape:tuple[sint, ...]) -> View|None:
-    ret = View.create(self.shape)
-    if self.mask: ret = ret.shrink(self.mask)
-    ret = ret.flip(tuple(x < 0 for x in self.strides)).permute(argsort(tuple(-x if x > 0 else x for x in self.strides)))
-    return ret if prod(ret.shape) == prod(out_shape) else None   # don't support shrink, expand, or stride != (-1, 1)
-
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def minify(self):
-    min_shape = tuple(x[0] for x in merge_dims(self.shape, self.strides, self.mask))
-    return nv if (nv := self.reshape(min_shape)) else self
+    return None
 
   def __unsafe_resize(self, arg: tuple[tuple[sint, sint], ...], mask=None) -> View:
     offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
@@ -311,10 +234,7 @@ class View:
 
     if not all(x >= 0 for x in new_shape): raise ValueError(f"shape can't contain negative numbers {new_shape}")
     # check for the same size
-    if all_int(self.shape):
-      # reshapes cannot introduce symbolic shape
-      assert all_int(new_shape), f"{self.shape=} -> {new_shape=} contains non int dims"
-      if prod(self.shape) != prod(new_shape): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
+    if resolve(prod(self.shape) != prod(new_shape), True): raise ValueError(f"size mismatched, can't reshape {self.shape=} -> {new_shape=}")
 
     if 0 in self.shape: return View.create(new_shape)
     if new_shape == () and self.mask and any(mx==my for (mx,my) in self.mask): return None
@@ -324,7 +244,6 @@ class View:
 
     r_strides, r_new_shape = [], reversed(new_shape)
     for merged_size, new_stride, real_size in reversed(merge_dims(self.shape, self.strides, self.mask)):
-      # TODO: write with get_contraction
       acc = 1
       # TODO: third resolve shouldn't be needed
       while resolve(acc <= merged_size) and resolve(acc != merged_size) and resolve((new_dim := next(r_new_shape, 0)) > 0):

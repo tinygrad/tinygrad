@@ -38,7 +38,7 @@ class TestTensorVariable(unittest.TestCase):
     vv = Variable("a", 1, 10).bind(2)
     vv2 = Variable("b", 1, 10).bind(2)
     t = Tensor.ones(10, 10).contiguous()[:vv2, :vv]
-    ret = t.mean(axis=1).reshape(2, 1).numpy()
+    ret = t.mean(axis=1)[:2].reshape(2, 1).numpy()
     assert np.all(ret == 1)
 
   def test_symbolic_mean_2d_add(self):
@@ -66,25 +66,25 @@ class TestTensorVariable(unittest.TestCase):
   def test_symbolic_arange(self):
     vv = Variable("a", 1, 10)
     ret = Tensor.arange(0, vv.bind(4))
-    self.assertListEqual(ret.reshape(4).tolist(), [0,1,2,3])
+    self.assertListEqual(ret[:4].tolist(), [0,1,2,3])
 
   def test_symbolic_arange_sym_start(self):
     vv = Variable("a", 1, 6)
     ret = Tensor.arange(vv.bind(4), 7)
-    self.assertListEqual(ret.reshape(3).tolist(), [4,5,6])
+    self.assertListEqual(ret[:3].tolist(), [4,5,6])
 
   # TODO: add vmin/vmax pattern for symbolic denominator
   @unittest.expectedFailure
   def test_symbolic_arange_sym_step(self):
     vv = Variable("step", 1, 3)
     ret = Tensor.arange(0, 10, vv.bind(2))
-    self.assertListEqual(ret.reshape(5).tolist(), [0,2,4,6,8])
+    self.assertListEqual(ret[:5].tolist(), [0,2,4,6,8])
 
   def test_symbolic_arange_two_vars(self):
     begin = Variable("b", 1, 5)
     end = Variable("e", 6, 10)
     ret = Tensor.arange(begin.bind(4), end.bind(7))
-    self.assertListEqual(ret.reshape(3).tolist(), [4,5,6])
+    self.assertListEqual(ret[:3].tolist(), [4,5,6])
 
   def test_variable_empty(self):
     v = Variable("i", 1, 10)

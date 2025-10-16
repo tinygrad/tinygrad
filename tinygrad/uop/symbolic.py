@@ -3,8 +3,8 @@ from typing import cast
 import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING
+from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast, Invalid
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 from tinygrad.uop.decompositions import xpow
 
 # ******** phase 1 of symbolic used to live in ops, it's the most generic folding rules ********
@@ -22,7 +22,28 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
-symbolic_simple = PatternMatcher([
+invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
+invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
+
+propagate_invalid = PatternMatcher([
+  # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
+  # propagate invalid, push it past children
+  *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i))
+    for op in GroupOp.Binary-GroupOp.Comparison),
+  *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: x.alu(alu.op,y)) for op in GroupOp.Comparison),
+  # invalid + y -> y same for other ops
+  *((invalid_pat.alu(op, UPat(dtype=dtypes.index)).named("alu"), lambda alu,i: i) for op in GroupOp.Binary-GroupOp.Comparison),
+  # i < y -> a_bool_value_that_will_never_be_used: we choose a random bool const
+  *((invalid_pat.alu(op, UPat(dtype=dtypes.index)), lambda i: UOp.const(dtypes.bool, True)) for op in GroupOp.Comparison),
+  # a.where(b.where(c, d), d) -> (a & b).where(c, d)
+  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
+  # order of gate&!cond matters!, and-clauses are only simplified left to right and we need to gate to be used to fold cond
+  (UPat.var("gate").where(invalid_gate, UPat.var("y")), lambda gate,cond,x,y,i: ((gate&cond.logical_not()).logical_not()).where(gate.where(x,y), i)),
+  # unswap the branches for the rule above
+  (UPat.var("gate").where(UPat.var("y"), invalid_gate).named("where"), lambda gate,cond,x,y,i: gate.logical_not().where(cond.where(x,i), y))
+])
+
+symbolic_simple = propagate_invalid + PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x
@@ -30,8 +51,6 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x") // UPat.var("x"), lambda x: x.const_like(1)), # x//x -> 1
   (UPat.var("x") // 1, lambda x: x),   # x//1 -> x
   (UPat.var("x") // -1, lambda x: -x), # x//-1 -> -x
-  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)), # x/x -> 1
-  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   ((UPat.var() % UPat.var("y")).named("base") % UPat.var("y"), lambda base,y: base),  # (x%y)%y = -> x%y (rewritten with base for speed)
   # 4 variations of (x%c)+(x//c)*c = x   TODO: add sorting to remove some variations
   (UPat.var("x")%UPat.cvar("c")+(UPat.var("x")//UPat.cvar("c"))*UPat.cvar("c"), lambda x,c: x), # (x%c)+(x//c)*c = x
@@ -55,10 +74,6 @@ symbolic_simple = PatternMatcher([
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)) != UPat.var("x"),
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
-  # x*0 -> 0 or 0*x -> 0
-  # if x is nan or inf it should render the nan value.
-  # NOTE: this can be wrong for loaded NaN
-  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # ** constant folding **
   # TODO: add const folding for Ops.THREEFRY
   (UPat(GroupOp.Unary, src=(UPat((Ops.VCONST, Ops.CONST)),), name="a"), lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg], False))),
@@ -70,15 +85,23 @@ symbolic_simple = PatternMatcher([
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
   (UPat.var('x', dtype=dtypes.bool).maximum(UPat.var('y', dtype=dtypes.bool)), lambda x,y: x|y),
+  # *** div rules ***
+  (UPat.cvar('x', arg=0) / 0, lambda x: x.const_like(float('nan'))),   # 0/0 -> nan
+  ((UPat.var("x") * 0) / 0, lambda x: x.const_like(float('nan'))),     # (x*0)/0 -> nan
+  # can be wrong if x or x2 is 0
+  (UPat.var("x") / UPat.var("x"), lambda x: x.const_like(1)),          # x/x -> 1
+  ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
+  # x*0 -> 0 or 0*x -> 0
+  # if x is nan or inf it should render the nan value.
+  # NOTE: this can be wrong for loaded NaN
+  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if x.op is Ops.CONST
+                                             and isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # *** cast/bitcast ***
   (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.arg)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_safe_cast(b.dtype, a.dtype) else None),
-  # if the intermediate cast doesnt narrow we can do it in one cast, we have to be carefull with bfloat16
-  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) and
-    not (a.dtype==dtypes.float and (b.dtype==dtypes.bfloat16 or x.dtype==dtypes.bfloat16)) else None),
   # ** pow **
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
@@ -95,37 +118,14 @@ symbolic_simple = PatternMatcher([
   # new decomp rules for threefry
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
   (((UPat.var('x',  dtypes.uint64)<<32) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))>>32, lambda x: x),
-  (UPat.var('b').where(UPat.var('x', dtypes.uint32).cast(dtypes.uint64), UPat.const(dtypes.uint64, 0)).cast(dtypes.uint32), lambda b,x: b.where(x,0))
+  (UPat.var('b').where(UPat.var('x', dtypes.uint32).cast(dtypes.uint64), UPat.const(dtypes.uint64, 0)).cast(dtypes.uint32), lambda b,x: b.where(x,0)),
+  # ** simple where folding **
+  # a conditional with the same results either way is a noop, also fold const conditionals
+  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
+  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
-
-def fold_unrolled_divs(divs:UOp, denominator: int, fac=1) -> UOp|None:
-  # div pattern in unrolled arange
-  # example: (x//4+(x+1)//4+(x+2)//4+(x+3)//4 -> x
-  seen_const, ans = [], None
-  for u in divs.split_uop(Ops.ADD):
-    if fac!=1:
-      if u.op is not Ops.MUL or u.src[1].op is not Ops.CONST or u.src[1].arg != fac: return None
-      u = u.src[0]
-    if u.op is Ops.CAST and u.src[0].dtype == dtypes.index: u = u.src[0]
-    if not (u.op is Ops.IDIV and u.src[1].op is Ops.CONST): return None
-    if denominator != u.src[1].arg: return None
-    if (s0:=u.src[0]).vmin < 0: return None
-    # assumed CONST is the last of an ADD
-    if s0.op is Ops.ADD and s0.src[1].op is Ops.CONST and s0.src[1].op is Ops.CONST:
-      seen_const.append(s0.src[1].arg)
-      s0 = s0.src[0]
-    else: seen_const.append(0)
-    if ans is None: ans = s0
-    if ans is not s0: return None
-  if ans is None: return None
-  # the first (denominator-len(seen_const)) terms may have been folded to 0 already
-  for i in range(denominator-len(seen_const)):
-    if ans is not None and 0 <= ans.vmin and ans.vmax + i < denominator: seen_const.append(i)
-  if sorted(seen_const)==list(range(denominator)):
-    return (fac*ans).cast(divs.dtype)
-  return None
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
@@ -173,18 +173,18 @@ def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we can fold if the expression has only one non-constant term and this term can only take on two values
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if ((c := y.arg) < 0): return None
   x,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
   if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
-    y1 = cmod(factors[0]*v.vmin+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)  # type: ignore
-    y2 = cmod(factors[0]*v.vmax+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)  # type: ignore
+    y1 = cmod(factors[0]*v.vmin+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)
+    y2 = cmod(factors[0]*v.vmax+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
     return (y2-y1)*(v-v.vmin) + y1
   return None
 
 def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or ((c := y.arg) < 0) or (x.dtype.count > 1): return None
+  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or ((c := y.arg) < 0): return None
   x,const = x.pop_const()
   terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
   # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
@@ -195,43 +195,51 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
 
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
-  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
-  if (gcd := math.gcd(y.arg, *factors)) == 1: return None
-  ret = sum(f//gcd * v for f,v in zip(factors, terms)).alu(d.op, y.const_like(y.arg//gcd))
+  gcd = UOp.gcd(*x.split_uop(Ops.ADD), y).simplify()
+  if gcd.op is Ops.CONST and gcd.arg==1: return None
+  ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
   return ret*gcd if d.op is Ops.MOD else ret
+
+def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
+  # (gcd*x+r)//(gcd*d) -> (x+(r%d)//gcd)//d + r//(gcd*d)
+  # (gcd*x+r)%(gcd*d) -> gcd*(x+(r%d)//gcd)%d + r%gcd
+  # These only work for floordiv (and the corresponding remainder)! Thats why we check the sign of x,y and new_x
+  if ((c := y.arg) < 0) or x.vmin<0: return None
+  x_no_const, const = x.pop_const()
+  gcd = UOp.gcd(*x_no_const.split_uop(Ops.ADD), y).simplify()
+  assert gcd.op is Ops.CONST
+  if gcd.arg==1: return None
+  new_x = unwrap(x_no_const.divide_exact(gcd)).simplify() + (const%c)//gcd
+  if new_x.vmin<0: return None
+  ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
+  return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
+
+def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # (d*x+y)//d -> x+y//d  or  (d*x+y)%d
+  # for mod we go further and take the remainder of all factors to reduce their size
+  # These only work for floordiv (and the corresponding remainder)! Thats why we check the sign of x,y and new_x
+  if y.vmin<0 or x.vmin<0: return None
+  quo, rem = [], []
+  for u in x.split_uop(Ops.ADD):
+    if (q:=u.divide_exact(y)) is not None: quo.append(q)
+    # if this is mod and y is a const, we can make the remainder factor sm
+    elif d.op is Ops.MOD and y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
+      rem.append(u.divides(c)*(c%y.arg))
+      quo.append(u.const_like(0))  # we append this so we can check if something changed
+    else: rem.append(u)
+  new_x = sum(rem)+x.const_like(0)
+  if len(quo)==0 or new_x.vmin<0: return None
+  return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  factors = [u.const_factor() for u in x.pop_const()[0].split_uop(Ops.ADD)]
-  # div is the smallest factor of the denominator (greater than 1) out of all "factors"
-  # TODO: there are better ways to pick `div`, this sometimes adds extra divisions
-  # TODO: add same optimization for mod
+  if ((c := y.arg) < 0): return None
+  factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
   div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if (1 < div < c) and (newxs:=(newx:=(x//div)).simplify()) is not newx and x.vmin>=0 and newx.vmin>=0: return newxs//(c//div)
-  return None
-
-def simplify_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and take out the quotient and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0) or (x.dtype.count > 1): return None
-  x_no_const,const = x.pop_const()
-  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x_no_const.split_uop(Ops.ADD)])
-  quotients, remainders = zip(*[divmod(f, c) for f in factors])
-  gcd = math.gcd(c, *remainders)  # gcd without const!
-  if const%c==const and gcd==1 and not any(r==0 or (r!=f and d.op is Ops.MOD) for r,f in zip(remainders, factors)): return None
-
-  quo, rem = x.const_like(const//c), x.const_like((const%c)//gcd)
-  for q,r,f,v in zip(quotients, remainders, factors, terms):
-    if d.op is Ops.IDIV and r!=0:
-      rem += f//gcd * v
-    else:
-      rem += r//gcd * v
-      quo += q * v
-
-  # if numerator before/after is negative, and it has remainder, don't simplify because C divmod is different from python divmod.
-  if (x.vmin < 0 or rem.vmin < 0) and remainders: return None
-  if d.op is Ops.MOD: return gcd*(rem % (c//gcd)) + const%gcd
-  return rem//(c//gcd)+quo
+  newxs = fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))
+  if newxs is None: newxs = factor_remainder(newx, x, y.const_like(div))
+  if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
+  return newxs//(c//div)
 
 def gep_through_wmma(gep:UOp, wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
@@ -292,10 +300,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
-  # a conditional with the same results either way is a noop, also fold const conditionals
-  (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
-  (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
-  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)),
+  # ** where folding **
+  (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)
+    if f.arg is not Invalid else None),
   # alu of two where with same conds can combine, only do if true branch or false branch is const
   (UPat(GroupOp.Binary, name="alu", src=(UPat.var("c").where(UPat.var("t"), UPat.var("f")), UPat.var("c").where(UPat.var("tt"), UPat.var("ff")))), \
    lambda alu,c,t,tt,f,ff: c.where(t.alu(alu.op, tt), f.alu(alu.op, ff)) if t.op == tt.op == Ops.CONST or f.op == ff.op == Ops.CONST else None),
@@ -328,9 +335,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("x") + UPat.cvar("c1")) + UPat.var("y"), lambda x,c1,y: (x+y)+c1),
   ((UPat.var("x") * UPat.cvar("c1")) * UPat.var("y"), lambda x,c1,y: (x*y)*c1),
   # *** rules from symbolic ***
-  # unrolled arange div folding
-  ((UPat()+(UPat()//UPat.cvar("d", vec=False)).or_casted()).named("divs"), lambda divs,d: fold_unrolled_divs(divs, d.arg)),
-  ((UPat()+((UPat()//UPat.cvar("d", vec=False)).or_casted()*UPat.cvar("c"))).named("divs"), lambda divs,d,c: fold_unrolled_divs(divs, d.arg, c.arg)),
   # generic lt folding
   (UPat.var("x", dtypes.index)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   (UPat.var("x", dtypes.index)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
@@ -345,21 +349,26 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")%UPat.var("end"), lambda r,end: r),
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")//UPat.var("end"), lambda r,end: r.const_like(0)),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
+  (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_congruence),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), divide_by_gcd),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), divide_by_gcd),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), gcd_with_remainder),
   (UPat(Ops.MOD, dtypes.index, name="m", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
   (UPat((Ops.IDIV), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), simplify_remainder),
-  (UPat.var("x") // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
-  (UPat.var("x") // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax <=0 else None),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), factor_remainder),
+  (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -((-x)//d) if x.vmax<=0 else None),
+  ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
+    lambda x,c,n,d: ((x+c.arg%d.arg)//d + c.arg//d.arg) if c.arg%d.arg!=c.arg and x.vmin>=0 and n.vmin>=0 and d.arg>0 else None),
   ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
   # ** mod **
   # mod folding
-  (UPat.var("x") % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
-  (UPat.var("x") % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
+  (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
+  (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
   # cast/long folding
+  # if the intermediate cast doesnt narrow we can do it in one cast
+  (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) else None),
   (UPat.var('x', dtypes.ints+(dtypes.index,)).cast(dtypes.ints+(dtypes.index,), name="a").cast(name="b"),
     lambda x,a,b: x.cast(b.dtype) if a.dtype.min<=x.vmin and x.vmax<=a.dtype.max else None),
   # try to do math in int instead of long
@@ -377,7 +386,7 @@ symbolic_flat = symbolic+PatternMatcher([
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 
-def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
+def parse_valid(valid:UOp) -> tuple[UOp, bool, int]|None:
   # if it's X <= c, returns X, True, c
   # if it's X >= c, returns X, False, c
 
@@ -386,64 +395,64 @@ def parse_valid(valid:UOp) -> tuple[UOp, bool, int]:
     (s0:=valid.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype): return s0.src[0], False, int(s0.src[1].vmin)
   # X < c -> X <= c-1
   if valid.op is Ops.CMPLT and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, int((valid.src[1]).vmax)-1
-  raise ValueError(f"not able to parse {valid=}")
+  return None
 
-def uop_given_valid(valid:UOp, uop:UOp) -> UOp|None:
-  # return None if valid is always False, otherwise the simplified uop (might be the same as input)
+def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
+  # return simplified uop (might be the same as input)
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
   for stmt in valid.split_uop(Ops.AND):
-    try: expr, is_upper, c = parse_valid(stmt)
-    except ValueError: return uop  # give up if we cannot parse the valid
+    if (res:=parse_valid(stmt)) is None: continue
+    expr, is_upper, c = res
     bounds[expr][int(is_upper)] = c
 
   # don't simplify any other gates, can lead to OOB, we substitute them back later
   uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
   # simplify uop given that valid is True
-  for expr,v in bounds.items():
+  all_candidates = []
+  for i,(expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     expr = expr.substitute(load_subs)  # make sure expr appears in same form in the uop
-    # some expr has lower bound > upper bound -> valid is an empty set and we return None
-    if v0 > v1: return None
-    # whole node became a const
-    if v0 == v1:
-      uop = uop.substitute({expr:expr.const_like(v0)}).simplify()
-      continue
-    # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
-    candidates = []
-    if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
-      # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-      candidates.append([(Xi, UOp.variable("fake", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
     # try checking the whole clause
-    if expr in uop.toposort(): candidates.append([(expr, UOp.variable("fake", v0, v1, expr.dtype))])
+    all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
 
-    for candidate in candidates:
-      # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-      newuops = [uop.substitute({X:newX}).simplify().substitute({newX:X}).simplify() for X,newX in candidate]
-      if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
-        if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
-        if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
-      elif all_same(newuops): uop = newuops[0]
+    if try_simplex:
+      # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
+      candidates = [[all_candidates[-1]]]
+      if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
+        # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
+        candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
 
+      for candidate in candidates:
+        # if every branch in candidate gives the same simplified uop, we can rewrite the uop
+        newuops = [uop.substitute({X:newX}) for X,newX in candidate]
+        if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
+        newuops = [u.simplify().substitute({newX:X}).simplify(full_symbolic=False) for (X,newX),u in zip(candidate,newuops)]
+        if uop.op is Ops.VECTORIZE and len(uop.src) == 2:
+          if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
+          if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
+        elif all_same(newuops): uop = newuops[0]
+
+  # try all the valids together (but only the whole expressions)
+  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
+    uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify(full_symbolic=False)
   # put the loads back in
   uop = uop.substitute({v:k for k,v in load_subs.items()})
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  try: return sum(-1 if parse_valid(v)[0] in other.toposort() else 0 for other in valids)
-  except ValueError: return 0
+  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
 def simplify_valid(valid:UOp) -> UOp|None:
+  if valid.op_in_backward_slice_with_self(Ops.LOAD): return None  # this should only be for indexing, skip if there's a LOAD
   ret:list[UOp] = []
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    # TODO: root cause this and test_simplify_valid_from_div
-    if stmt.op is Ops.CAST: return None
-    ret.append(newstmt if ret and (newstmt:=uop_given_valid(functools.reduce(operator.and_, ret), stmt)) is not None else stmt)
+    ret.append(uop_given_valid(functools.reduce(operator.and_, ret), stmt) if ret else stmt)
     if ret[-1] is not stmt: something_changed = True
   return functools.reduce(operator.and_, ret) if something_changed else None
 
@@ -460,12 +469,38 @@ def reduce_mul_chain(r:UOp):
   if len(outside) == 0: return None
   return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
+def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
+  if not (dropped_clauses:=[c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]): return None
+  return functools.reduce(operator.and_, [c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses], UOp.const(dtypes.bool, True)).where(x, i)
+pm_drop_and_clauses = PatternMatcher([(UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), drop_and_clauses)])
+
+def where_on_load(l, c1, buf, x):
+  c2 = x.get_valid()
+  duplicate_clauses = [c for c in c1.split_uop(Ops.AND) if c in c2.split_uop(Ops.AND)]
+  # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
+  # also no data dependent loads!
+  moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
+    and not c.op_in_backward_slice_with_self(Ops.LOAD)]
+  if not (removed:=moved_clauses+duplicate_clauses): return None
+  # aditionally we can drop the clause on the where if it already exists in the load
+  remaining_clause = functools.reduce(operator.and_, [c for c in c1.split_uop(Ops.AND) if c not in removed], UOp.const(dtypes.bool, True))
+  return remaining_clause.where(UOp.load(buf.index(x.get_idx().valid(functools.reduce(operator.and_, moved_clauses, c2)), *l.src[1:])), 0)
+pm_move_where_on_load = PatternMatcher([
+  (UPat.var("c1").where(UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l"), 0), where_on_load),
+  (UPat.var("c1").where(0, UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l")),
+    lambda l,c1,buf,x: where_on_load(l,c1.logical_not(),buf,x)),
+])
+
+pm_simplify_valid = PatternMatcher([
+  # simplify valid
+  (UPat(Ops.AND, name="valid"), simplify_valid),
+  (UPat.var("c").where(UPat.var("x", dtype=dtypes.index), invalid_pat), lambda c,x,i: c.where(uop_given_valid(c, x, try_simplex=False), i)),
+])
+
 # this is symbolic 2.0
 REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP}
 REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP}
-sym = symbolic_flat+PatternMatcher([
-  # simplify valid
-  (UPat(Ops.AND, name="valid"), simplify_valid),
+sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
   (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
@@ -489,21 +524,17 @@ sym = symbolic_flat+PatternMatcher([
   # ** where **
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
-  # a.where(b.where(c, d), d) -> (a & b).where(c, d)
-  (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
   # ** pow **
   ((UPat(Ops.POW, name="p"), lambda p: xpow(*p.src))),
-  # index true is index without op
-  (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"), UPat.const(dtypes.bool, True))), lambda b, idx: b.index(idx)),
   # ** load/store folding **
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index"))), allow_any_len=True, name="store"),
-   lambda index, gate, alt, store: UOp.store(index.src[0].index(index.src[1], gate), alt, *store.src[2:])),
+   lambda index, gate, alt, store: UOp.store(index.src[0].index(gate.where(index.src[1], UOp.invalid())), alt, *store.src[2:])),
   # fold gated LOAD/STORE
-  (UPat().index(UPat(), UPat.const(dtypes.bool, True)).named("idx"), lambda idx: idx.replace(src=idx.src[0:2])), # remove True
-  (UPat((Ops.LOAD, Ops.STORE), src=(UPat().index(UPat(), UPat.const(dtypes.bool, False)).or_casted(),), allow_any_len=True, name="x"),
-    lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # NULL pointer store does nothing. NULL pointer load produces 0
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat().index(UPat.const(dtypes.index, Invalid)).or_casted(),), allow_any_len=True, name="x"),
+    lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
+  # # Where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
   (UPat(Ops.BARRIER, name="root"),
     lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)

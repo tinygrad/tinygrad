@@ -145,7 +145,6 @@ hyp = {
   },
 }
 
-@Context(FUSE_ARANGE=getenv("FUSE_ARANGE", 1))
 def train_cifar():
 
   def set_seed(seed):
@@ -229,7 +228,8 @@ def train_cifar():
     if getenv("RANDOM_CROP", 1):
       X = random_crop(X, crop_size=32)
     if getenv("RANDOM_FLIP", 1):
-      X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X) # flip LR
+      # NOTE: RANGEIFY=1 needs this contiguous or the X[perms] is very slow
+      X = (Tensor.rand(X.shape[0],1,1,1) < 0.5).where(X.flip(-1), X).contiguous() # flip LR
     X, Y = X[perms], Y[perms]
     return X, Y, *cutmix(X, Y, perms, mask_size=hyp['net']['cutmix_size'])
 
