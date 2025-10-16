@@ -14,7 +14,7 @@ from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
-from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
+from tinygrad.codegen.late.control_flow import pm_control_flow_ends, pm_control_flow_starts, CFGContext, linearize
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
@@ -30,18 +30,12 @@ class RewriteStep:
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
-rewrites_for_linearizer = [
-  RewriteStep(block_create, ctx=BlockContext.from_sink, name="Linearizer: Create Blocks", bottom_up=True),
-  RewriteStep(pm_blockend_merge, name="Linearizer: Merge Blockends"),
-  RewriteStep(block_merge, name="Linearizer: Merge Blocks"),
-  RewriteStep(pm_finalize, name="Linearizer: Finalize")]
-
-def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool=True) -> list[RewriteStep]:
+def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
-  return _get_rewrites_for_renderer(opts, optimize, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
+  return _get_rewrites_for_renderer(opts, optimize, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
 
 @functools.cache
-def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
+def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
   # ** lowerer (rewrite_shapetracker_with_index) **
   ret: list[RewriteStep] = []
 
@@ -101,11 +95,15 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
-  # return the list (with optional linearizer)
-  return ret + (rewrites_for_linearizer if linearizer else [])
+  # add control flow to the graph
+  ret.append(RewriteStep(pm_control_flow_ends, name="add control flow ends"))
+  ret.append(RewriteStep(pm_control_flow_starts, CFGContext, name="add control flow starts", bottom_up=True))
 
-def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True, linearizer:bool=False) -> UOp:
-  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize, linearizer))
+  # return the list
+  return ret
+
+def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True) -> UOp:
+  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize))
 
 def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
@@ -118,7 +116,6 @@ def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   Returns:
     Linear program in UOps.
   """
-
-  lst = list(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None, linearizer=True).arg.lst)
+  lst = linearize(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None))
   if __debug__: type_verify(lst)
   return lst

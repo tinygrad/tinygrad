@@ -115,7 +115,7 @@ string_rewrite = PatternMatcher([
      if x.dtype.count > 1 else f"ld.{mem_type(x)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];"),
   (UPat(Ops.DEFINE_REG, src=()), lambda ctx: []),
   (UPat(Ops.RANGE, name="x"), lambda ctx, x: [f"mov.u32 {ctx.r[x]}, 0;", "LOOP_" + f"{ctx.r[x][1:]}:"]),
-  (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),)), lambda ctx, x, src0: [
+  (UPat(Ops.ENDRANGE, name="x", src=(UPat.var("src0"),), allow_any_len=True), lambda ctx, x, src0: [
     ctx.code_for_op[Ops.ADD](ctx.r[src0], ctx.r[src0], "1", dtypes.int, ctx.types[dtypes.int]),
     ctx.code_for_op[Ops.CMPLT](ctx.r[x], ctx.r[x.src[0]], ctx.r[src0.src[0]], dtypes.int, ctx.types[dtypes.int]),
     f"@{ctx.r[x]} bra LOOP_{ctx.r[src0][1:]};"]),

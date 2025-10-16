@@ -183,7 +183,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       return None
     if self.op is Ops.INDEX and self.src[0].op is Ops.ASSIGN and self.src[0].src[1].op is Ops.KERNEL: return None
     if self.op is Ops.BARRIER: return None
-    if self.op in GroupOp.Block: return None
     from tinygrad.shape.shapetracker import ShapeTracker
     # MovementOps define a new ShapeTracker from the arg
     if self.op is Ops.BUFFERIZE: return ShapeTracker.from_shape(tuple([int(r.vmax+1) for r in self.src[1:]]))
