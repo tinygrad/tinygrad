@@ -133,6 +133,10 @@ def kron(buf, B, outer_axes_shape, ctx):
   #mask to correspond each coordinate asked by the buffer to the transformed element
   def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0) 
   #sum all wheres together, and return buffer
+  print("[KRON] buf.shape=", tuple(int(s) for s in buf.shape),
+      "outer_axes_shape=", outer_axes_shape,
+      "inner_shape=", tuple(int(s) for s in buf.shape)[len(outer_axes_shape):])
+
   return sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))\
     .bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
 
@@ -140,49 +144,75 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
   #dfs to check if conv with 3^n kernel and stride = dilation = 1 exists.
   def collect(root: UOp):
-    need, ks, os = set(three), [], []
+    need, ks, ox, os = set(three), [], [], []
     for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):
       for loop, red in ((a, b), (b, a)): 
-        if red in need and loop.op is Ops.RANGE and loop not in need: ks.append(red); os.append(n); need.remove(red); break
-    return ks, os
-  kL, oL = collect(lhs); kR, oR = collect(rhs)
+        if red in need and loop.op is Ops.RANGE and loop not in need: ks.append(red); ox.append(loop); os.append(n); need.remove(red); break
+    return ks, ox, os
+  kL, oxl, oL = collect(lhs); kR, oxr, oR = collect(rhs)
   #identify activation and weight if they exist
-  return (lhs, rhs, kL, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oR) if (len(kR) >= 2 and not oL) else None) 
+  return (lhs, rhs, kL, oxl, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oxr, oR) if (len(kR) >= 2 and not oL) else None) 
 
-def winowrite(ctx: IndexingContext, x:UOp, y:UOp, redu: UOp):
-  #TODO: Check Padding, Check Commutative Substitution
+def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
+  # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
   guard = winoguard(x, y, redu)
   if guard is None: return None
-  act_like, w_like, k_axes, o_adds = guard
+  act_like, w_like, k_axes, o_axes, o_adds = guard
   o_bases = [o_adds[i].substitute({k: k.const_like(0)}) for i, k in enumerate(k_axes)]
   tile_shape = tuple((int(b.vmax+1)+3)//4 for b in o_bases)
+  reduce_ranges = list(redu.src[1:])
 
-  remainder = list(set(redu.src[1:]) - set(k_axes))
-  rem_shape = tuple([ax.vmax+1 for ax in remainder])
-  
+  #### Prep X tiles #### #NOTE: THIS WILL BREAK IN ARANGE?
+  other_reduces_x = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
+  other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes] #all loop like axes not tied to our core conv
+
+  print(f"other_reduces_x: {other_reduces_x}")
+  print(f"other_loops_x: {other_loops_x}")
+
+  #close X tiles over all appropriate loops as above  
   tile_ranges = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases];
   inner6 = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
-  rem_ranges = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in remainder]
+  other_reduce_ranges_x = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_reduces_x] 
+  other_loop_ranges_x = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
 
   X_vu = act_like.substitute(
   {add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)} |
-  {R: r for R, r in zip(remainder, rem_ranges)}
-).cast(dtypes.float).bufferize(*rem_ranges, *tile_ranges, *inner6, 
+  {R: r for R, r in zip(other_reduces_x, other_reduce_ranges_x)} |
+  {L: l for L, l in zip(other_loops_x, other_loop_ranges_x)}
+).cast(dtypes.float).bufferize(*other_reduce_ranges_x, *other_loop_ranges_x, *tile_ranges, *inner6, 
                                arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-  XHAT = kron(X_vu, winograd_Bt, tile_shape+rem_shape, ctx)
+  XHAT = kron(X_vu, winograd_Bt, tuple((int(ax.vmax+1) for ax in other_reduces_x))+tuple((int(ax.vmax+1) for ax in other_loops_x))+tile_shape, ctx) #ordering matters here so should double check
 
+  ### Prep W tiles ####
+  other_reduces_w = [ax for ax in w_like.ranges if ax not in k_axes and ax in reduce_ranges] #prolly redundant cuz shared with X
+  other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges] #weights have no output spatial axes
+
+  print(f"other_reduces_w: {other_reduces_w}")
+  print(f"other_loops_w: {other_loops_w}")
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in range(len(o_bases))]
-  rem_ranges1 = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in remainder]
-  w = w_like.substitute({k: r for k, r in zip(k_axes, kranges)} | {R: r for R, r in zip(remainder, rem_ranges1)}).bufferize(*rem_ranges1, *kranges, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
-  GHAT = kron(w, winograd_G, rem_shape, ctx)  # outer_axes=()
+  other_reduce_ranges_w = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_reduces_w]
+  other_loop_ranges_w = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
+  w = w_like.substitute({k: r for k, r in zip(k_axes, kranges)} | {R: r for R, r in zip(other_reduces_w, other_reduce_ranges_w)} | {L: l for L, l in zip(other_loops_w, other_loop_ranges_w)}).bufferize(*other_reduce_ranges_w, *other_loop_ranges_w, *kranges, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  GHAT = kron(w, winograd_G, tuple((int(ax.vmax+1) for ax in other_reduces_w))+tuple((int(ax.vmax+1) for ax in other_loops_w)), ctx)  # outer_axes=()
   
   print(f"XHAT: {XHAT.shape}")
   print(f"GHAT: {GHAT.shape}")
-  tile_ranges_1 = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases]; inner6_1      = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
-  mhat_redu = (XHAT.index(*remainder, *tile_ranges_1, *inner6_1) * GHAT.index(*remainder, *inner6_1)).reduce(*remainder, arg=Ops.ADD)
-  MHAT = (mhat_redu).bufferize(*(tile_ranges_1+inner6_1), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+  #Rinse and repeat for Mhat - get rid of the reduce ranges and only carry through loop ranges
 
-  return kron(MHAT, winograd_At, tile_shape, ctx).index(*[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases])
+  tile_ranges_1 = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases]
+  inner6_1      = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
+  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
+  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
+  other_reduce_ranges_mhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_reduces_x]
+
+  mhat_redu = (XHAT.index(*other_reduce_ranges_x, *other_loop_ranges_xhat, *tile_ranges_1, *inner6_1) * GHAT.index(*other_reduce_ranges_x, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduce_ranges_x, arg=Ops.ADD)
+  
+  MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges_1, *inner6_1, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)) # which loops come first?
+  print(f"MHAT: {MHAT.shape}")
+  print("CIN REDUCE RANGES:", other_reduce_ranges_x)
+  
+  return kron(MHAT, winograd_At, tuple((int(ax.vmax+1) for ax in other_loops_x))+tuple((int(ax.vmax+1) for ax in other_loops_w))+tile_shape, ctx)\
+    .index(*other_loops_x, *other_loops_w, *[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases]) #bring back the original loops
 
 winograd_rewrite = PatternMatcher([
  ((UPat.var("x")*UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, x, y, redu: winowrite(ctx, x, y, redu))
