@@ -3,6 +3,13 @@
 
 #include <DriverKit/IOUserClient.iig>
 
+enum TinyGPURPC
+{
+	ReadCfg,
+	WriteCfg,
+	Reset
+};
+
 class TinyGPUDriverUserClient : public IOUserClient
 {
 public:

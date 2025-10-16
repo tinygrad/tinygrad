@@ -810,6 +810,13 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
 
+  def test_assign(self):
+    x = Tensor.empty(10, 10).realize()
+    x.assign(Tensor.ones(10, 10).contiguous())
+    si = x.schedule()[-1]
+    self.assertEqual(len(si.metadata), 1)
+    self.assertEqual(si.metadata[0].name, "assign")
+
   def test_complex(self):
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)

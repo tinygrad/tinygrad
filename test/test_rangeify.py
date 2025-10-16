@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import Context, GlobalCounters
+from tinygrad.helpers import Context, GlobalCounters, CI
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 
 class TestRangeifyAssign(unittest.TestCase):
@@ -17,8 +17,22 @@ class TestRangeifyAssign(unittest.TestCase):
     self.assertListEqual(lst, lst3)
     self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
+class TestRangeifyEdgeCase(unittest.TestCase):
+  def test_matmul_relu_cat(self):
+    a = Tensor.ones(100, 512).contiguous().realize()
+    c = Tensor.ones(1, 512).contiguous().realize()
+    cm = Tensor.ones(512, 512)
+    c = c @ cm
+    c = c.relu()
+
+    res = Tensor.cat(a, c, dim=0)
+    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
+
+# *** non CI rangeify tests below this line ***
+
 N = 256
 
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeifyOpt(unittest.TestCase):
   def test_randperm(self):
     Tensor.randperm(10000).realize()
@@ -54,6 +68,7 @@ class TestRangeifyOpt(unittest.TestCase):
     A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
     A.sum().realize()
 
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
     # ranges 1 and 3 are merging
@@ -279,17 +294,6 @@ class TestRangeifyPM(unittest.TestCase):
     a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))
     b = self.base.pad(((0,1),(0,0))).pad(((0,0),(0,1)))
     self.assert_same(a, b)
-
-class TestRangeifyEdgeCase(unittest.TestCase):
-  def test_matmul_relu_cat(self):
-    a = Tensor.ones(100, 512).contiguous().realize()
-    c = Tensor.ones(1, 512).contiguous().realize()
-    cm = Tensor.ones(512, 512)
-    c = c @ cm
-    c = c.relu()
-
-    res = Tensor.cat(a, c, dim=0)
-    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
 if __name__ == '__main__':
   unittest.main()
