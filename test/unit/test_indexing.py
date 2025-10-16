@@ -5,8 +5,6 @@ import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, TinyJit
 from tinygrad.device import is_dtype_supported
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
 from tinygrad.helpers import CI, all_same, prod
 
 random.seed(42)
@@ -22,11 +20,13 @@ def consec(shape, start=1):
 # creates strided tensor with base set to reference tensor's base, equivalent to torch.set_()
 def set_(reference: Tensor, shape, strides, offset):
   raise NotImplementedError("need to implement without calling uop.view")
+  """
   if reference.uop.base.realized is None: reference.realize()
   assert reference.uop.base.realized, "base has to be realized before setting it to strided's base"
   strided = Tensor(reference.uop.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
   assert strided.uop.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
+  """
 
 def clone(original:Tensor): return original.clone()
 def copy_(src:Tensor, other:Tensor) -> Tensor: return src.clone()
