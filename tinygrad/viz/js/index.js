@@ -203,7 +203,6 @@ async function renderProfiler() {
   // color by key (name/device)
   const colorMap = new Map();
   data = {tracks:new Map(), axes:{}};
-  const kernels = new Map();
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
@@ -241,8 +240,6 @@ async function renderProfiler() {
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
         const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
-        if (!kernels.has(e.name)) kernels.set(e.name, []);
-        kernels.get(e.name).push({ shapeRef, info:e.info, st:e.st, dur:e.dur });
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -255,14 +252,14 @@ async function renderProfiler() {
       for (let j=0; j<eventsLen; j++) {
         const alloc = u8(), ts = u32(), key = u32();
         if (alloc) {
-          const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz, producer = strings[optional(u32())];
-          const consumers = Array.from({ length: u32() }, () => strings[u32()]);
-          const shape = {x:[x], y:[y], dtype, sz, nbytes, key, producer, consumers};
+          const dtype = strings[u32()], sz = u64(), nbytes = dtypeSize[dtype]*sz;
+          const shape = {x:[x], y:[y], dtype, sz, nbytes, key};
           buf_shapes.set(key, shape); temp.set(key, shape);
           timestamps.push(ts);
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
+          free.users = Array.from({ length: u32() }, () => strings[u32()]);
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -282,34 +279,19 @@ async function renderProfiler() {
       timestamps.push(dur);
       const height = heightScale(peak);
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
-      for (const [num, {dtype, sz, nbytes, y, x:steps, producer, consumers}] of buf_shapes) {
+      for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
         const html = document.createElement("div");
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)],
-                      ["Timeline", `${formatTime(x[0])} - ${formatTime(x.at(-1))}`]];
+                      ["Users", users.length]];
         const info = html.appendChild(tabulate(rows).node());
-        const link = [];
-        const pk = kernels.get(producer)?.shift();
-        if (producer != null) link.push(["Producer", producer, pk]);
-        for (const cname of consumers) link.push(["Consumer ", cname, kernels.get(cname)?.find(s => s.st > x[0])]);
-        for (const [type, kname, k] of link) {
-          html.appendChild(document.createElement("br"));
-          const div = html.appendChild(document.createElement("div"));
-          const name = colored(kname);
-          const rows = [[type, name]];
-          if (k != null) {
-            const metadata = k.info?.split("\n")[1];
-            if (metadata != null && metadata !== "()") rows.push(["Metadata", metadata]);
-            rows.push(["Timestamp", formatTime(k.st)]);
-            if (k.shapeRef != null) {
-              name.style.cursor = "pointer";
-              name.onclick = () => { setCtxWithHistory(k.shapeRef.ctx, k.shapeRef.step); }
-            }
-            const idle = k.st-(pk != null ? pk.st+pk.dur : x[0]);
-            if (idle > 0) rows.push(["Idle", formatTime(idle)]);
-          }
-          div.appendChild(tabulate(rows).node());
+        html.appendChild(document.createElement("br"));
+        for (let u=0; u<users.length; u++) {
+          const p = html.appendChild(document.createElement("p"));
+          if (u === 0) p.appendChild(colored(`Produced by ${users[u]}`));
+          else if (u === 1) p.appendChild(colored(`Consumed by\n${users[u]}`));
+          else p.appendChild(colored(users[u]));
         }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
@@ -381,7 +363,7 @@ async function renderProfiler() {
           for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
           p.closePath();
           ctx.fillStyle = e.fillColor; ctx.fill(p);
-          if (e.arg?.key != null && e.arg.key === focusedShape?.key) { paths.push(p); }
+          if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push(p); }
           continue;
         }
         // contiguous rect
@@ -628,7 +610,7 @@ async function main() {
         }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

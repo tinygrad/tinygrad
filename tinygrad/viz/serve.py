@@ -156,27 +156,23 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
-  producers:dict[int, int] = {}
-  consumers:dict[int, list[int]] = {}
-  for _,_,_,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec" and e.arg["bufs"]:
-      exec_repr = enum_str(e.key, scache) # this is a lookup for the ExecItem
-      producers[e.arg["bufs"][0]] = exec_repr
-      for b in e.arg["bufs"][1:]: consumers.setdefault(b, []).append(exec_repr)
+  buf_ei:dict[int, ProfilePointEvent] = {}
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
       safe_sz = min(1_000_000_000_000, e.arg["sz"])
-      parts = [struct.pack("<BIIIQI", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz, option(producers.get(e.key)))]
-      parts.append(struct.pack("<I", len(cc:=consumers.get(e.key, []))))
-      for x in cc: parts.append(struct.pack("<I", x))
-      events.append(b"".join(parts))
+      events.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
       dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
       temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
       mem += nbytes
       if mem > peak: peak = mem
+    if e.name == "exec" and e.arg["bufs"]:
+      for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
     if e.name == "free":
-      events.append(struct.pack("<BII", 0, int(e.ts)-start_ts, e.key))
+      if (eis:=buf_ei.get(e.key)) is not None:
+        for ei in eis: print(ei.key)
+      execs = [enum_str(ei.key, scache) for ei in buf_ei.pop(e.key, [])]
+      events.append(struct.pack(f"<BIII{len(execs)}I", 0, int(e.ts) - start_ts, e.key, len(execs), *execs))
       mem -= temp.pop(e.key)
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None

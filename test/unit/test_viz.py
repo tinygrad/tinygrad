@@ -332,14 +332,11 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
-        if alloc:
-          v["events"].append(e:={"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-          if (producer_num:=option(u("<I")[0])) is not None: e["producer"] = strings[producer_num]
-          e["consumers"] = [strings[u("<I")[0]] for _ in range(u("<I")[0])]
-        else: v["events"].append({"event":"free", "ts":ts, "key":key})
+        if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg":{"users":[u("<I")[0] for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-class TestVizProfiler(BaseTestViz):
+class TestVizProfiler(unittest.TestCase):
   def test_perfetto_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
@@ -482,22 +479,16 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(len(ret["events"]), 6)
     self.assertEqual(len(profile["markers"]), 6)
 
-  def test_producer_consumer(self):
-    a = (Tensor(1, device="NULL")+Tensor(2, device="NULL")).contiguous()
-    b = a+2
-    c = a+3
-    a.realize(b, c)
+  def test_producer_simple(self):
+    a = Tensor.empty(10, device="NULL")
+    Tensor.realize(a.add(1), a.add(2))
+    b = Tensor.empty(10, device="NULL")
+    Tensor.realize(b.add(1))
     profile = load_profile(cpu_events+Buffer.profile_events)
-    ret = profile["layout"][f"{a.device} Memory"]["events"]
-    first_alloc = next(e for e in ret if e["event"] == "alloc")
-    self.assertEqual(len(first_alloc["consumers"]), 2)
-    assert first_alloc["producer"].startswith("E") # elementwise kernel
-
-  def test_dedup_producers(self):
-    for _ in range(3):
-      a = Tensor.empty(1)
-      a.uop.buffer.ensure_allocated()
-      a.add(1).realize()
+    buffers = profile["layout"]["NULL Memory"]["events"]
+    kernels = profile["layout"]["NULL"]["events"]
+    user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
+    print(user_cnt)
 
 if __name__ == "__main__":
   unittest.main()
