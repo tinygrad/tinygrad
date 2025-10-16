@@ -171,8 +171,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_rand_recompute_arange(self):
     x = Tensor.rand(32)
-    with Context(DONT_GROUP_REDUCES=1):
-      check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
+    check_schedule(x, 3, [Tensor._device_rng_counters[x.device]])
 
   def test_empty_is_not_realized(self):
     a = Tensor.empty(10)
@@ -276,7 +275,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.randn(10,10,10).realize()
     b = Tensor.randn(10,10,1).realize()
     c = a.sum(axis=0, keepdim=True).permute(2,1,0) + b
-    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(c, 1))
+    run_schedule(check_schedule(c, 1))
     np.testing.assert_allclose(c.numpy(), np.sum(a.numpy(), axis=0, keepdims=True).transpose(2,1,0)+b.numpy())
 
   def test_binop_early_reshape_reduce_fusion(self):
@@ -1976,8 +1975,7 @@ class TestSwizzle(unittest.TestCase):
       a = Tensor.randint(32, 32).realize()
     r = (a+a).sum(1).sum(0)
     # double reduce collapses to a single reduce
-    with Context(DONT_GROUP_REDUCES=1):
-      run_schedule(check_schedule(r, 1))
+    run_schedule(check_schedule(r, 1))
     self.assertEqual(r.numpy(), (a.numpy()+a.numpy()).sum(1).sum(0))
 
   def test_single_swizzle(self):
@@ -1997,33 +1995,29 @@ class TestSwizzle(unittest.TestCase):
       b = Tensor.randint(4,).realize()
     # parallel reduce!
     add = a.sum(0)+b.sum(0)
-    with Context(DONT_GROUP_REDUCES=1):
-      run_schedule(check_schedule(add, 1))
+    run_schedule(check_schedule(add, 1))
     self.assertEqual(add.numpy(), a.numpy().sum(0)+b.numpy().sum(0))
 
-  @unittest.skip("TODO: how do we express the norm")
   def test_softmax_one_kernel(self):
     Tensor.manual_seed(0)
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
       a = Tensor.randn(32, 32).realize()
     t = a.softmax()
-    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1):
-      check_schedule(t, 1)
+    check_schedule(t, 1)
 
   def test_argmax_one_kernel(self):
     Tensor.manual_seed(0)
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
       a = Tensor.randn(10, 20).realize()
     t = a.argmax(0)
-    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): t.realize()
+    check_schedule(t, 1)
 
   def test_swizzle_reduceop(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4,4).realize()
     y = Tensor.randn(4,4,4).realize()
     out = x.reshape(4,4,1).expand(4,4,4).sum(axis=(1,))+y
-    with Context(DONT_REALIZE_EXPAND=1, DONT_GROUP_REDUCES=1):
-      run_schedule(check_schedule(out, 1))
+    run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), np.tile(x.numpy().reshape(4,4,1), (1,1,4)).sum(axis=1)+y.numpy())
 
   def test_permute_rewrite(self):
@@ -2031,7 +2025,7 @@ class TestSwizzle(unittest.TestCase):
     y = Tensor.randn(4, 1, 16).realize()
     z = Tensor.randn(4, 4, 1).realize()
     t = (x*y).sum(axis=(0, 2)).reshape(1, 4, 1).permute(0, 2, 1)+z
-    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): run_schedule(check_schedule(t, 1))
+    run_schedule(check_schedule(t, 1))
     t_np = (x.numpy()*y.numpy()).sum(axis=(0, 2)).reshape(1, 4, 1).transpose(0, 2, 1)+z.numpy()
     np.testing.assert_allclose(t.numpy(), t_np, atol=1e-6, rtol=1e-3)
 
@@ -2042,14 +2036,14 @@ class TestSwizzle(unittest.TestCase):
     a_reduce = a.sum(axis=(2,), keepdim=True).sum(axis=(1,))
     b_reduce = b.sum(axis=(0,))
     t = a_reduce+b_reduce
-    with Context(DONT_GROUP_REDUCES=1, DONT_REALIZE_EXPAND=1): run_schedule(check_schedule(t, 1))
+    run_schedule(check_schedule(t, 1))
 
   def test_parallel_reduce_possible(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 2, 2).realize()
     y = Tensor.randn(4, 2, 2).realize()
     t = x.sum(axis=1)+y.sum(axis=1)
-    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
+    run_schedule(check_schedule(t, 1))
     np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
 
   # kernels can only have 1 or n in each dim
@@ -2058,7 +2052,7 @@ class TestSwizzle(unittest.TestCase):
     x = Tensor.randn(4, 2, 2).realize()
     y = Tensor.randn(4, 3, 2).realize()
     t = x.sum(axis=1)+y.sum(axis=1)
-    with Context(DONT_GROUP_REDUCES=1): run_schedule(check_schedule(t, 1))
+    run_schedule(check_schedule(t, 1))
     np.testing.assert_allclose(t.numpy(), x.numpy().sum(axis=1)+y.numpy().sum(axis=1), atol=1e-6, rtol=1e-3)
 
   def test_unsafe_pad(self):
