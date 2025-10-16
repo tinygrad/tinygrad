@@ -333,7 +333,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg":{"users":[u("<I")[0] for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(unittest.TestCase):
@@ -478,6 +478,17 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(ret["peak"], 3)
     self.assertEqual(len(ret["events"]), 6)
     self.assertEqual(len(profile["markers"]), 6)
+
+  def test_producer_simple(self):
+    a = Tensor.empty(10, device="NULL")
+    Tensor.realize(a.add(1), a.add(2))
+    b = Tensor.empty(10, device="NULL")
+    Tensor.realize(b.add(1))
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    buffers = profile["layout"]["NULL Memory"]["events"]
+    programs = profile["layout"]["NULL"]["events"]
+    user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
+    self.assertEqual(len(user_cnt), len(programs))
 
 if __name__ == "__main__":
   unittest.main()

@@ -16,6 +16,10 @@
 			<string>IOUserService</string>
 			<key>IOMatchCategory</key>
 			<string>TinyGPUDriver</string>
+			<key>IOPCIPrimaryMatch</key>
+			<string>0x70001002&amp;0xF000FFFF</string>
+			<key>IOPCITunnelCompatible</key>
+			<true/>
 			<key>IOProviderClass</key>
 			<string>IOPCIDevice</string>
 			<key>IOResourceMatch</key>

@@ -1,6 +1,5 @@
 import gc
 from tinygrad import Tensor, UOp, Device, nn
-from tinygrad.shape.shapetracker import views_to_valid_uop
 from tinygrad.engine.realize import method_cache, get_program
 from tinygrad.schedule.indexing import apply_movement_op
 from test.test_tiny import TestTiny
@@ -69,7 +68,6 @@ if __name__ == "__main__":
 
     # these caches will keep uops alive
     method_cache.clear()
-    views_to_valid_uop.cache_clear()
     apply_movement_op.cache_clear()
     Tensor._device_seeds.clear()
     Tensor._device_rng_counters.clear()
