@@ -169,10 +169,8 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
     if e.name == "exec" and e.arg["bufs"]:
       for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
     if e.name == "free":
-      if (eis:=buf_ei.get(e.key)) is not None:
-        for ei in eis: print(ei.key)
-      execs = [enum_str(ei.key, scache) for ei in buf_ei.pop(e.key, [])]
-      events.append(struct.pack(f"<BIII{len(execs)}I", 0, int(e.ts) - start_ts, e.key, len(execs), *execs))
+      kernel_names = [enum_str(ei.key, scache) for ei in buf_ei.pop(e.key, [])]
+      events.append(struct.pack(f"<BIII{len(kernel_names)}I", 0, int(e.ts) - start_ts, e.key, len(kernel_names), *kernel_names))
       mem -= temp.pop(e.key)
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None

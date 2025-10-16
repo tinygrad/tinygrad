@@ -486,9 +486,9 @@ class TestVizMemoryLayout(BaseTestViz):
     Tensor.realize(b.add(1))
     profile = load_profile(cpu_events+Buffer.profile_events)
     buffers = profile["layout"]["NULL Memory"]["events"]
-    kernels = profile["layout"]["NULL"]["events"]
+    programs = profile["layout"]["NULL"]["events"]
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
-    print(user_cnt)
+    self.assertEqual(len(user_cnt), len(programs))
 
 if __name__ == "__main__":
   unittest.main()
