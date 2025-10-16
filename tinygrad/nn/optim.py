@@ -50,7 +50,7 @@ class Optimizer:
     if self.fused:
       # optimizer fusion just concatenates all the buffers, runs the _step, then splits them back up
       out, extra = self._step([Tensor.cat(*[t.flatten() for t in self.params], dim=0)],
-                              [Tensor.cat(*[unwrap(t.grad).flatten() for t in self.params], dim=0)])
+                              [Tensor.cat(*[unwrap(t.grad).contiguous().flatten() for t in self.params], dim=0)])
       updated_params = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
       updated_params, extra = self._step(self.params, [unwrap(t.grad) for t in self.params])
