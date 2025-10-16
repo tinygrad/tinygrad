@@ -87,7 +87,7 @@ kern_return_t TinyGPUDriver::Start_Impl(IOService* in_provider)
 		}
 		off = next;
 	}
-	ivars->pci->Reset(0);
+	ivars->pci->Reset(kIOPCIDeviceResetTypeHotReset);
 #endif
 
 	uint16_t commandRegister;
@@ -220,4 +220,40 @@ error:
 		sharedBuf = nullptr;
 	}
 	return err;
+}
+
+kern_return_t TinyGPUDriver::CfgRead(uint32_t off, uint32_t size, uint32_t* outVal)
+{
+  if (!ivars->pci || !outVal) return kIOReturnNotReady;
+
+  if (size == 1) {
+	uint8_t v8 = 0;
+	ivars->pci->ConfigurationRead8(off, &v8);
+	*outVal = v8;
+  } else if (size == 2) {
+	uint16_t v16 = 0;
+	ivars->pci->ConfigurationRead16(off, &v16);
+	*outVal = v16;
+  } else if (size == 4) {
+	uint32_t v32 = 0;
+	ivars->pci->ConfigurationRead32(off, &v32);
+	*outVal = v32;
+  }
+  return 0;
+}
+
+kern_return_t TinyGPUDriver::CfgWrite(uint32_t off, uint32_t size, uint32_t val)
+{
+  if (!ivars->pci) return kIOReturnNotReady;
+  if (size == 1) ivars->pci->ConfigurationWrite8 (off, (uint8_t)val);
+  else if (size == 2) ivars->pci->ConfigurationWrite16(off, (uint16_t)val);
+  else if (size == 4) ivars->pci->ConfigurationWrite32(off, (uint32_t)val);
+  return 0;
+}
+
+kern_return_t TinyGPUDriver::ResetDevice()
+{
+	if (!ivars->pci) return kIOReturnNotReady;
+	ivars->pci->Reset(kIOPCIDeviceResetTypeFunctionReset);
+	return 0;
 }

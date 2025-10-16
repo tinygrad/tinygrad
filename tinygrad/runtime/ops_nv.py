@@ -461,11 +461,12 @@ class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
     super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2204, 0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
       va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
-    # System.reserve_hugepages(64)
+    if not OSX: System.reserve_hugepages(64)
 
-    # self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
+    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
     self.dev_impl:NVDev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1),
-      0x2d0510de, 0x1430196e, 0xa1, self.pci_dev.bar_info)
+      self.pci_dev.read_config(pci.PCI_VENDOR_ID, 4), self.pci_dev.read_config(pci.PCI_SUBSYSTEM_VENDOR_ID, 4),
+      self.pci_dev.read_config(pci.PCI_REVISION_ID, 1), self.pci_dev.bar_info)
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
