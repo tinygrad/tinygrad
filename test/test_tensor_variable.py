@@ -93,7 +93,7 @@ class TestTensorVariable(unittest.TestCase):
     vb = v.bind(3)
     t = Tensor.empty(3, vb)
     assert t.uop.base.buffer.size == 30
-    assert t.uop.st.shape == (3, vb)
+    assert t.uop.shape == (3, vb)
 
 
 if __name__ == '__main__':

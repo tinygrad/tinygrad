@@ -501,10 +501,6 @@ class TestIndexing(unittest.TestCase):
     y = x[:, :, :, 1]
     z = y[:, 1:1, :]
     numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
-    # this isn't technically necessary, but matches NumPy stride calculations.
-    # NOTE: this is empty and shouldn't have strides
-    numpy_testing_assert_equal_helper((True, True, True), z.uop.st.is_expanded())
-    self.assertTrue(z.uop.st.contiguous)
 
   @unittest.skip("bool indexing not supported")
   def test_index_getitem_copy_bools_slices(self):
