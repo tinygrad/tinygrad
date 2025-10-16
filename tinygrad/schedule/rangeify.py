@@ -272,7 +272,7 @@ def bufferize_to_store(x:UOp):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype)
+    ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype).replace(tag=x.tag)
     mops = []
     walk = assign_mops
     while walk is not assign_mops.base:
@@ -284,7 +284,7 @@ def bufferize_to_store(x:UOp):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype)
+    ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype).replace(tag=x.tag)
     ret = ret.forced_reshape(shape)
     # TODO: is this right? what if it's offset
     if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
