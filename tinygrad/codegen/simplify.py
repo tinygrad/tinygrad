@@ -75,7 +75,6 @@ def split_reduce(red:UOp):
     if len(cuts)!=1: return None
     cut = cuts[0]
     if cut.src[0] is not r or cut.src[1].op is not Ops.CONST: continue
-    print(r)
     new_r1, new_r2 = UOp.range(cut.src[1], r.arg[0]+2000, r.arg[1]), UOp.range(r.src[0]-cut.src[1], r.arg[0]+2001, r.arg[1])
     new_red = (red.src[0].substitute({r:new_r1}).reduce(new_r1, arg=Ops.ADD)+red.src[0].substitute({r:new_r2+cut.src[1]}).reduce(new_r2, arg=Ops.ADD))
     remaining_reds = [x for x in red.src[1:] if x is not r]
@@ -150,12 +149,12 @@ def reduce_unparented(red:UOp):
 
 pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
-  (UPat(Ops.REDUCE, src=(UPat.var("v"), UPat.const(dtypes.index, 0))), lambda v: v),
+  (UPat(Ops.REDUCE, src=(UPat.var("v"),), allow_any_len=True, name="red"), lambda v,red: v.reduce(*[r for r in red.src[1:] if r is not UOp.const(dtypes.index, 0)], arg=red.arg)),
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
 ])
 
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
   # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
-  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), split_reduce),
+  (UPat(Ops.REDUCE, name="red"), split_reduce),
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),
 ])
