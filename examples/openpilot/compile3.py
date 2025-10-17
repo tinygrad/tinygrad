@@ -1,9 +1,8 @@
-import os, sys, pickle, time, re
+import os, sys, pickle, time
 import numpy as np
 
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device, dtypes
 from tinygrad.helpers import DEBUG, getenv
-from tinygrad.engine.realize import CompiledRunner
 
 import onnx
 from tinygrad.nn.onnx import OnnxRunner
