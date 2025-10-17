@@ -5,7 +5,6 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon
 from tinygrad.helpers import CI
 from tinygrad.device import is_dtype_supported
-from extra.torch_muon import SingleDeviceMuon as TorchMuon
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -58,8 +57,7 @@ class TestOptim(unittest.TestCase):
   def _test_sgd(self, steps, opts, atol, rtol): self._test_optim(SGD, torch.optim.SGD, steps, opts, atol, rtol)
   def _test_adam(self, steps, opts, atol, rtol): self._test_optim(Adam, torch.optim.Adam, steps, opts, atol, rtol)
   def _test_adamw(self, steps, opts, atol, rtol): self._test_optim(AdamW, torch.optim.AdamW, steps, opts, atol, rtol)
-  #TODO: use torch.muon when it comes out
-  def _test_muon(self, steps, opts, atol, rtol): self._test_optim(Muon, TorchMuon, steps, opts, atol, rtol)
+  def _test_muon(self, steps, opts, atol, rtol): self._test_optim(Muon, torch.optim.Muon, steps, opts, atol, rtol)
 
   def test_multistep_sgd_high_lr_teeny(self): self._test_sgd(2, {'lr': 1.1, 'teeny': True}, 1e-6, 1e-5)
   def test_multistep_adam_high_lr_teeny(self): self._test_adam(2, {'lr': 1.1, 'teeny': True}, 2e-4, 5e-4)
