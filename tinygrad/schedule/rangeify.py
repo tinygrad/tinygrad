@@ -109,6 +109,18 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 ])
 
 # *****************
+
+pm_where_is_multi = PatternMatcher([
+  # move *0 through where
+  (UPat.var("gate").where(UPat.var("a"), 0) * UPat.var("b"), lambda gate,a,b: gate.where(a*b, 0)),
+  # move *0 through unary op
+  (UPat(Ops.CONTIGUOUS, src=(UPat.var("gate").where(UPat.var("a"), 0),), name="u"), lambda gate,a,u: gate.where(u.replace(src=(a,)), 0)),
+  # move where 0 through reduce if the reduce ranges are not in the gate
+  (UPat(Ops.REDUCE, src=(UPat.var("gate").where(UPat.var("a"), 0),), name="red", allow_any_len=True),
+   lambda gate,a,red: gate.where(red.replace(src=(a,)+red.src[1:]), 0) if all(r not in gate.ranges for r in red.src[1:]) else None),
+])
+
+# *****************
 # 3.5 cleanups
 
 # Ops.NOOP happens when we have a COPY to the device the Tensor is already on. We treat it like COPY here for MSTACK.
@@ -340,6 +352,7 @@ def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag is not None: return None
+  if r.arg[-1] is AxisType.MULTI: return None
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=())
   ctx.range += 1
   return ret
@@ -414,7 +427,7 @@ class Kernel:
     return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
 def split_store(ctx:list[UOp], x:UOp):
-  if len(x.ranges): return None
+  if len([r for r in x.ranges if r.arg[-1] != AxisType.MULTI]): return None
   if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
 
   # local kernel rewrite
@@ -496,6 +509,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
+
+  tsink = graph_rewrite(tsink, pm_where_is_multi, name="where_is_multi")
+
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   # TODO: can you substitute and remove costly buffers at the same time?
   tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 class AxisType(Enum):
   def __repr__(self): return str(self)
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
-  THREAD = auto()
+  THREAD = auto(); MULTI = auto() # noqa: E702
 
 range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3}
 
@@ -114,7 +114,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
-  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=(%s))")
+  def __repr__(self):
+    if self.dtype == dtypes.index: return srender(self)  # makes shapes print nicely
+    return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
@@ -220,7 +222,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
-          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          #if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
         case Ops.EXPAND:
           if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
@@ -436,16 +438,30 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def _unshard(self, axis:int) -> UOp:
     bsz, dcount = self.shape[axis], len(self.device)
-    dnum = UOp.variable("_device_num", 0, dcount-1)
+    #dnum = UOp.variable("_device_num", 0, dcount-1)
+    dnum = UOp.range(dcount, -10, AxisType.MULTI)
     return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
 
   def _shard(self, axis:int) -> UOp:
     dcount = len(self.device)
-    dnum = UOp.variable("_device_num", 0, dcount-1)
+    dnum = UOp.range(dcount, -10, AxisType.MULTI)
     if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
     sz = self.shape[axis] // dcount
-    return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
-  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis).multi(axis)
+    #ret = self.reshape(tuple(s if i != axis else dnum*sz for i,s in enumerate(self.shape)))
+    #return ret
+
+    #flatten([[s] if i != axis else [dcount, sz] for i,s in enumerate(self.shape)])))
+
+    #ret = self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
+    #print(ret.shape)
+    #print(dnum)
+    #dnum = UOp.variable("_device_num", 0, dcount-1)
+    # TODO: 0 isn't correct here
+    ret = self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
+    ret = ret.pad(tuple((0,0) if a != axis else (sz*dnum, sz*(dcount-1) - sz*dnum) for a in range(len(self.shape))))
+    return ret
+
+  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis) #.multi(axis)
 
   # *** from LazyBuffer ***
 
