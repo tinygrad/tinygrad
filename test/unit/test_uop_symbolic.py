@@ -688,6 +688,26 @@ class TestSymbolic(unittest.TestCase):
     r0 = UOp.range(255-a, 0)
     self.helper_test_variable((a+r0)<255, True, True, "True")
 
+  def test_symbolic_range_lt_with_multiplier_3(self):
+    a = Variable("a", 0, 50)
+    r0 = UOp.range(51-a, 0)
+    self.helper_test_variable((a*3+r0*3)<153, True, True, "True")
+
+  def test_symbolic_range_lt_with_negative_multiplier(self):
+    a = Variable("a", 0, 100)
+    r0 = UOp.range(50-a, 0)
+    self.helper_test_variable((a-r0*2)<100, False, True, "((a+(r0*-2))<100)")
+
+  def test_symbolic_range_lt_nonlinear_div(self):
+    a = Variable("a", 0, 100)
+    r0 = UOp.range(10-a, 0)
+    self.helper_test_variable((a+(r0//2))<100, False, True, "((a+(r0//2))<100)")
+
+  def test_symbolic_range_lt_nonlinear_mod(self):
+    a = Variable("a", 0, 100)
+    r0 = UOp.range(10-a, 0)
+    self.helper_test_variable((a+(r0%3))<100, False, True, "((a+(r0%3))<100)")
+
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
     u1, u0 = cond.ufix(1), cond.ufix(0)
