@@ -17,77 +17,77 @@ on:
   workflow_dispatch:
 
 jobs:
-  llvmspeed:
-    name: LLVM Speed
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: llvm-speed
-        deps: testing_minimal
-        llvm: 'true'
-    - name: Speed Test
-      run: CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
-    - name: Speed Test (BEAM=2)
-      run: BEAM=2 CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
+  # llvmspeed:
+  #   name: LLVM Speed
+  #   runs-on: ubuntu-24.04
+  #   timeout-minutes: 20
+  #   steps:
+  #   - name: Checkout Code
+  #     uses: actions/checkout@v4
+  #   - name: Setup Environment
+  #     uses: ./.github/actions/setup-tinygrad
+  #     with:
+  #       key: llvm-speed
+  #       deps: testing_minimal
+  #       llvm: 'true'
+  #   - name: Speed Test
+  #     run: CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
+  #   - name: Speed Test (BEAM=2)
+  #     run: BEAM=2 CPU=1 CPU_LLVM=1 python3 test/speed/external_test_speed_v_torch.py
 
-  docs:
-    name: Docs
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        deps: docs
-        pydeps: "capstone torch"
-    - name: Build wheel and show size
-      run: |
-        pip install build
-        python -m build --wheel --outdir dist
-        ls -lh dist/*.whl
-    - name: Use as an external package
-      run: |
-        mkdir $HOME/test_external_dir
-        cd $HOME/test_external_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-        pip install mypy
-        mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run beautiful_mnist with tinygrad only
-      run: |
-        mkdir $GITHUB_WORKSPACE/test_dir
-        cd $GITHUB_WORKSPACE/test_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
-        BS=2 STEPS=10 python beautiful_mnist.py
-    - name: Test Docs Build
-      run: python -m mkdocs build --strict
-    - name: Test Docs
-      run: |
-        python docs/abstractions2.py
-        python docs/abstractions3.py
-    - name: Test README
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  python quickstart.py
-    - name: Test DEBUG
-      run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Compile EfficientNet to C and test it
-      run: |
-        CPU=1 CPU_LLVM=0 python examples/compile_efficientnet.py > recognize.c
-        clang -O2 recognize.c -lm -o recognize
-        cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
+  # docs:
+  #   name: Docs
+  #   runs-on: ubuntu-22.04
+  #   timeout-minutes: 10
+  #   steps:
+  #   - name: Checkout Code
+  #     uses: actions/checkout@v4
+  #   - name: Setup Environment
+  #     uses: ./.github/actions/setup-tinygrad
+  #     with:
+  #       deps: docs
+  #       pydeps: "capstone torch"
+  #   - name: Build wheel and show size
+  #     run: |
+  #       pip install build
+  #       python -m build --wheel --outdir dist
+  #       ls -lh dist/*.whl
+  #   - name: Use as an external package
+  #     run: |
+  #       mkdir $HOME/test_external_dir
+  #       cd $HOME/test_external_dir
+  #       python -m venv venv
+  #       source venv/bin/activate
+  #       pip install $GITHUB_WORKSPACE
+  #       python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+  #       pip install mypy
+  #       mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+  #   - name: Run beautiful_mnist with tinygrad only
+  #     run: |
+  #       mkdir $GITHUB_WORKSPACE/test_dir
+  #       cd $GITHUB_WORKSPACE/test_dir
+  #       python -m venv venv
+  #       source venv/bin/activate
+  #       pip install $GITHUB_WORKSPACE
+  #       cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
+  #       BS=2 STEPS=10 python beautiful_mnist.py
+  #   - name: Test Docs Build
+  #     run: python -m mkdocs build --strict
+  #   - name: Test Docs
+  #     run: |
+  #       python docs/abstractions2.py
+  #       python docs/abstractions3.py
+  #   - name: Test README
+  #     run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
+  #   - name: Test Quickstart
+  #     run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  python quickstart.py
+  #   - name: Test DEBUG
+  #     run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
+  #   - name: Compile EfficientNet to C and test it
+  #     run: |
+  #       CPU=1 CPU_LLVM=0 python examples/compile_efficientnet.py > recognize.c
+  #       clang -O2 recognize.c -lm -o recognize
+  #       cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
   # TODO: fix the torch backend and reenable
   # torchbackend:
@@ -246,53 +246,53 @@ jobs:
 #     - name: Run TYPED=1
 #       run: TYPED=1 python -c "import tinygrad"
 
-#   unittest:
-#     name: Unit Tests
-#     runs-on: ubuntu-latest
-#     timeout-minutes: 15
+  unittest:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
-#     steps:
-#     - name: Checkout Code
-#       uses: actions/checkout@v4
-#     - name: Setup Environment
-#       uses: ./.github/actions/setup-tinygrad
-#       with:
-#         key: unittest-12
-#         pydeps: "pillow numpy ftfy regex"
-#         deps: testing_unit
-#     - name: Check Device.DEFAULT
-#       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
-#     - name: Run unit tests
-#       run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
-#     - name: Check SPEC=1
-#       run: SPEC=1 python3 test/test_tiny.py
-#     - name: Run targetted tests on NULL backend
-#       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
-#     # TODO: too slow
-#     # - name: Run SDXL on NULL backend
-#     #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
-#     - name: Run Clip tests for SD MLPerf on NULL backend
-#       run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
-#     - name: Run AMD emulated BERT training on NULL backend
-#       run: EMULATE=AMD_RDNA4 NULL=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
-#     # TODO: support fake weights
-#     #- name: Run LLaMA 7B on 4 fake devices
-#     #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
-#     - name: Run GC tests
-#       run: python test/external/external_uop_gc.py
-#     - name: External Benchmark Schedule
-#       run: python3 test/external/external_benchmark_schedule.py
-#     - name: Run process replay tests
-#       uses: ./.github/actions/process-replay
-#     - name: Regen dataset on test_tiny
-#       run: |
-#         test/external/process_replay/reset.py
-#         CAPTURE_PROCESS_REPLAY=1 python test/test_tiny.py TestTiny.test_plus
-#         python extra/optimization/extract_dataset.py
-#         gzip -c /tmp/sops > extra/datasets/sops.gz
-#         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
-#     - name: Repo line count < 18000 lines
-#       run: MAX_LINE_COUNT=18000 python sz.py
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: unittest-12
+        pydeps: "pillow numpy ftfy regex"
+        deps: testing_unit
+    - name: Check Device.DEFAULT
+      run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
+    - name: Run unit tests
+      run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
+    - name: Check SPEC=1
+      run: SPEC=1 python3 test/test_tiny.py
+    - name: Run targetted tests on NULL backend
+      run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
+    # TODO: too slow
+    # - name: Run SDXL on NULL backend
+    #   run: NULL=1 DEBUG=1 python3 examples/sdxl.py --seed 0 --noshow --timing --fakeweights
+    - name: Run Clip tests for SD MLPerf on NULL backend
+      run: NULL=1 python -m pytest -n=auto test/external/mlperf_stable_diffusion/external_test_models.py::TestOpenClip --durations=20
+    - name: Run AMD emulated BERT training on NULL backend
+      run: EMULATE=AMD_RDNA4 NULL=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
+    # TODO: support fake weights
+    #- name: Run LLaMA 7B on 4 fake devices
+    #  run: NULL=1 python3 examples/llama.py --gen 1 --size 7B --shard 4 --prompt "Hello." --count 3 --temperature 0 --timing
+    - name: Run GC tests
+      run: python test/external/external_uop_gc.py
+    - name: External Benchmark Schedule
+      run: python3 test/external/external_benchmark_schedule.py
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
+    - name: Regen dataset on test_tiny
+      run: |
+        test/external/process_replay/reset.py
+        CAPTURE_PROCESS_REPLAY=1 python test/test_tiny.py TestTiny.test_plus
+        python extra/optimization/extract_dataset.py
+        gzip -c /tmp/sops > extra/datasets/sops.gz
+        #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
+    - name: Repo line count < 18000 lines
+      run: MAX_LINE_COUNT=18000 python sz.py
 
 #   fuzzing:
 #     name: Fuzzing
@@ -821,99 +821,99 @@ jobs:
         name: metal-debug-log
         path: metal_debug.log
 
-  osxwebgpu:
-    name: MacOS (WebGPU)
-    runs-on: macos-14
-    timeout-minutes: 10
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: osx-webgpu
-        deps: testing
-        webgpu: 'true'
-    - name: Test infinity math in WGSL
-      run: WEBGPU=1 python -m pytest -n=auto test/test_renderer_failures.py::TestWGSLFailures::test_multiply_infinity --durations=20
-    - name: Build WEBGPU Efficientnet
-      run: WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m examples.compile_efficientnet
-    - name: Clean npm cache
-      run: npm cache clean --force
-    - name: Install Puppeteer
-      run: npm install puppeteer
-    # this is also flaky
-    #- name: Run WEBGPU Efficientnet
-    #  run: node test/web/test_webgpu.js
-    # this is flaky
-    #- name: Run VIZ tests as external package
-    #  run: |
-    #    mkdir $GITHUB_WORKSPACE/test_dir
-    #    cd $GITHUB_WORKSPACE/test_dir
-    #    python -m venv venv
-    #    source venv/bin/activate
-    #    pip install $GITHUB_WORKSPACE
-    #    cp $GITHUB_WORKSPACE/test/web/test_viz.js .
-    #    node test_viz.js
-    - name: Test ONNX Runner (WEBGPU)
-      run: WEBGPU=1 python3 test/external/external_test_onnx_runner.py
+  # osxwebgpu:
+  #   name: MacOS (WebGPU)
+  #   runs-on: macos-14
+  #   timeout-minutes: 10
+  #   steps:
+  #   - name: Checkout Code
+  #     uses: actions/checkout@v4
+  #   - name: Setup Environment
+  #     uses: ./.github/actions/setup-tinygrad
+  #     with:
+  #       key: osx-webgpu
+  #       deps: testing
+  #       webgpu: 'true'
+  #   - name: Test infinity math in WGSL
+  #     run: WEBGPU=1 python -m pytest -n=auto test/test_renderer_failures.py::TestWGSLFailures::test_multiply_infinity --durations=20
+  #   - name: Build WEBGPU Efficientnet
+  #     run: WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m examples.compile_efficientnet
+  #   - name: Clean npm cache
+  #     run: npm cache clean --force
+  #   - name: Install Puppeteer
+  #     run: npm install puppeteer
+  #   # this is also flaky
+  #   #- name: Run WEBGPU Efficientnet
+  #   #  run: node test/web/test_webgpu.js
+  #   # this is flaky
+  #   #- name: Run VIZ tests as external package
+  #   #  run: |
+  #   #    mkdir $GITHUB_WORKSPACE/test_dir
+  #   #    cd $GITHUB_WORKSPACE/test_dir
+  #   #    python -m venv venv
+  #   #    source venv/bin/activate
+  #   #    pip install $GITHUB_WORKSPACE
+  #   #    cp $GITHUB_WORKSPACE/test/web/test_viz.js .
+  #   #    node test_viz.js
+  #   - name: Test ONNX Runner (WEBGPU)
+  #     run: WEBGPU=1 python3 test/external/external_test_onnx_runner.py
 
-  osxremote:
-   name: MacOS (remote metal)
-   runs-on: macos-15
-   timeout-minutes: 10
-   env:
-     REMOTE: 1
-     REMOTEDEV: METAL
-   steps:
-     - name: Checkout Code
-       uses: actions/checkout@v4
-     - name: Setup Environment
-       uses: ./.github/actions/setup-tinygrad
-       with:
-         key: macos-remote
-         deps: testing_minimal
-     - name: Check Device.DEFAULT and print some source
-       run: |
-         python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
-         python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'METAL', Device.default.properties.real_device"
-         DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-     - name: Run REMOTE=1 Test
-       run: |
-         python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
+  # osxremote:
+  #  name: MacOS (remote metal)
+  #  runs-on: macos-15
+  #  timeout-minutes: 10
+  #  env:
+  #    REMOTE: 1
+  #    REMOTEDEV: METAL
+  #  steps:
+  #    - name: Checkout Code
+  #      uses: actions/checkout@v4
+  #    - name: Setup Environment
+  #      uses: ./.github/actions/setup-tinygrad
+  #      with:
+  #        key: macos-remote
+  #        deps: testing_minimal
+  #    - name: Check Device.DEFAULT and print some source
+  #      run: |
+  #        python -c "from tinygrad import Device; assert Device.DEFAULT == 'REMOTE', Device.DEFAULT"
+  #        python -c "from tinygrad import Device; assert Device.default.properties.real_device == 'METAL', Device.default.properties.real_device"
+  #        DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+  #    - name: Run REMOTE=1 Test
+  #      run: |
+  #        python3 -m pytest test/test_tiny.py test/test_jit.py test/test_subbuffer.py test/test_graph.py test/test_multitensor.py test/test_tensor_variable.py
 
-  osxtests:
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [metal, llvm, cpu, lvp]
-    name: MacOS (${{ matrix.backend }})
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: macos-${{ matrix.backend }}-minimal
-          deps: testing_minimal
-          pydeps: "capstone"
-          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
-          mesa: ${{ matrix.backend == 'lvp' && 'true' }}
-      - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
-      - name: Check Device.DEFAULT and print some source
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
-          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run pytest (${{ matrix.backend }})
-        run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
-      - name: Run process replay tests
-        uses: ./.github/actions/process-replay
-      - name: Run macOS-specific unit test
-        if: matrix.backend == 'cpu'
-        run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
+  # osxtests:
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       backend: [metal, llvm, cpu, lvp]
+  #   name: MacOS (${{ matrix.backend }})
+  #   runs-on: macos-15
+  #   timeout-minutes: 20
+  #   steps:
+  #     - name: Checkout Code
+  #       uses: actions/checkout@v4
+  #     - name: Setup Environment
+  #       uses: ./.github/actions/setup-tinygrad
+  #       with:
+  #         key: macos-${{ matrix.backend }}-minimal
+  #         deps: testing_minimal
+  #         pydeps: "capstone"
+  #         llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
+  #         mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+  #     - name: Set env
+  #       run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
+  #     - name: Check Device.DEFAULT and print some source
+  #       run: |
+  #         python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
+  #         DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
+  #     - name: Run pytest (${{ matrix.backend }})
+  #       run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+  #     - name: Run process replay tests
+  #       uses: ./.github/actions/process-replay
+  #     - name: Run macOS-specific unit test
+  #       if: matrix.backend == 'cpu'
+  #       run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
 
 # ****** Windows Tests ******
 

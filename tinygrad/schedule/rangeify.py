@@ -158,6 +158,7 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
 def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
   if not (g := winoguard(lhs, rhs, redu)): return None
+  print("LOOK HERE WINOGRAD REWRITE HAS BEEN CALLED! *******************************************************")
   act_like, w_like, k_axes, o_axes, o_adds = g
   reduce_ranges = list(redu.src[1:]); device = redu.device
   other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
