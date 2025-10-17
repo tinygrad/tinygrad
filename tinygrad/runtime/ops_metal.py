@@ -195,6 +195,7 @@ class MetalCompiler(Compiler):
 class MetalProgram:
   def __init__(self, dev:MetalDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = dev, name, lib
+    self.shader_src: str | None = None
     if lib[:4] == b"MTLB":
       # binary metal library
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
@@ -202,7 +203,9 @@ class MetalProgram:
       error_check(error_lib)
     else:
       # metal source. rely on OS caching
-      try: self.library = metal_src_to_library(self.dev, lib.decode())
+      try:
+        self.shader_src = lib.decode()
+        self.library = metal_src_to_library(self.dev, self.shader_src)
       except CompileError as e: raise RuntimeError from e
     self.fxn = msg("newFunctionWithName:", objc_instance)(self.library, to_ns_str(name))
     descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"))
@@ -210,7 +213,7 @@ class MetalProgram:
     msg("setSupportIndirectCommandBuffers:")(descriptor, True)
     self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
-    error_check(error_pipeline_creation)
+    error_check(error_pipeline_creation, shader_src=self.shader_src)
     # cache these msg calls
     self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
 
