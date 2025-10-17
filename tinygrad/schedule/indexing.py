@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey, PCONTIG
+from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -61,6 +61,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
       closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[s][1]) if i in realized_ranges])
+      # None in the device assigns it a number later
       opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
       new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
       if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
@@ -188,15 +189,15 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       rngs_valids = []
       for valid_rngs in all_rngs:
         local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
-        rngs_valids.append((local_rngs, valids, all_same(local_rngs)))
+        rngs_valids.append((local_rngs, valids))
 
       # TODO: in RANGEIFY > 1 all_all_same isn't required
-      all_all_same = all(same_rngs for _,_,same_rngs in rngs_valids)
+      all_all_same = all(all_same(local_rngs) for local_rngs,_ in rngs_valids)
       _out_rngs = []
       _new_rngs = []
-      for i,(local_rngs,valids,same_rngs) in enumerate(rngs_valids):
+      for i,(local_rngs,valids) in enumerate(rngs_valids):
         # we compare the ranges without their valids
-        if all_all_same or (PCONTIG and same_rngs):
+        if all_all_same or (PCONTIG and all_same(local_rngs)):
           # the new valid is the OR of all the children valids
           minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
           _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
@@ -230,8 +231,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
 
     if debug:
-      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}",
-            UOp.sink().index(*rngs).render(), " -> ", UOp.sink().index(*out_rngs).render())
+      realized_ranges = rctx.realize_map.get(x, None)
+      disp = []
+      for i, (ri, ro) in enumerate(zip([r.render() for r in rngs], [r.render() for r in out_rngs])):
+        rng = f"{ri}" if ri == ro else f"{ri} -> {ro}"
+        if realized_ranges is not None and i in realized_ranges: rng = colored(rng, "yellow")
+        disp.append("["+rng+"]")
+      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}", ''.join(disp))
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)

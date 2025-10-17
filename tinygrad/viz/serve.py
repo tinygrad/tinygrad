@@ -154,12 +154,12 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
-  ei_encoding:list[tuple[int, int, int]] = [] # <[u32, u8, u8] [run id, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
+  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u8, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
   for e in execs:
     num = next(i for i,k in enumerate(e.arg["bufs"]) if k == key)
     mode = 2 if (num in e.arg["inputs"] and num in e.arg["outputs"]) else 1 if (num in e.arg["outputs"]) else 0
-    ei_encoding.append((e.key, num, mode))
-  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IBB", *t) for t in ei_encoding)
+    ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
+  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIBB", *t) for t in ei_encoding)
 
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
