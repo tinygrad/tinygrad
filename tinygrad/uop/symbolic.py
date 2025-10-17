@@ -193,12 +193,6 @@ def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
   if d.op is Ops.MOD: return rem - rem.vmin//c*c
   return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + (const-const%c+rem.vmin//c*c)//c
 
-def small_mod_optimization(x, d):
-  if x.vmin>=0 and x.vmax<2*d.arg: return (x<d).where(x, x - d)
-
-def small_div_optimization(x, d):
-  if x.vmin>=0 and x.vmax<2*d.arg: return (x<d).where(x.const_like(0), 1)
-
 def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
   gcd = UOp.gcd(*x.split_uop(Ops.ADD), y).simplify()
@@ -373,8 +367,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # mod folding
   (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
   (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
-  (UPat.var("x", dtypes.index) % UPat.cvar("d", vec=False), small_mod_optimization),
-  (UPat.var("x", dtypes.index) // UPat.cvar("d", vec=False), small_div_optimization),
   # cast/long folding
   # if the intermediate cast doesnt narrow we can do it in one cast
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x.cast(b.dtype) if can_safe_cast(x.dtype, a.dtype) else None),
