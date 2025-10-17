@@ -130,6 +130,7 @@ if __name__ == "__main__":
   with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
 
   test_vs_compile(pickle_loaded, inputs, outputs)
-  tol = 1e-1 if getenv("FLOAT16") else 1e-4
-  test_vs_onnx(inputs, outputs, onnx_file, tol)
+  if not getenv("NO_ORT_TEST"):
+    tol = 1e-1 if getenv("FLOAT16") else 1e-4
+    test_vs_onnx(inputs, outputs, onnx_file, tol)
 
