@@ -221,8 +221,7 @@ async function renderProfiler() {
       data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
-        if (e.key != null) shapeMap.set(e.key, e);
+        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null, id:`${k}-${j}`};
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -242,7 +241,8 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
+        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key:e.id, ...shapeRef };
+        if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -262,7 +262,7 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({...shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -287,11 +287,11 @@ async function renderProfiler() {
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
-          const { repr, num, mode, info, ref } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
-          const metadata = info?.split("\n")[1]
+          const { repr, num, mode, shape } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const metadata = shape?.tooltipText?.split("\n").at(-1);
           if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
           p.onclick = () => {
-            if (ref != null) setCtxWithHistory(ref);
+            if (shape != null) focusShape(shape);
           }
         }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
@@ -452,12 +452,14 @@ async function renderProfiler() {
     }
   }
 
+  function focusShape(shape) {
+    focusedShape = shape; render(zoomLevel);
+    return document.querySelector(".metadata").replaceChildren(shape?.html ?? "");
+  }
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
-    if (foundRect?.key != focusedShape?.key) { focusedShape = foundRect; render(zoomLevel); }
-    return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
+    if (foundRect?.key != focusedShape?.key) { focusShape(foundRect); }
   });
 
   canvas.addEventListener("mousemove", e => {
