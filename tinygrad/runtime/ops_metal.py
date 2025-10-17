@@ -1,4 +1,4 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, re
 from typing import Any, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
@@ -47,6 +47,40 @@ def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
 def to_ns_str(s: str): return msg("stringWithUTF8String:", objc_instance)(libobjc.objc_getClass(b"NSString"), s.encode())
 def from_ns_str(s): return bytes(msg("UTF8String", ctypes.c_char_p)(s)).decode()
 
+_METAL_ERROR_RE = re.compile(r"program_source:(\d+):(\d+):\s*(error|warning|note):\s*(.*)")
+
+def _format_metal_error(message: str, src: str | None) -> str:
+  if not src:
+    return message
+  matches = list(_METAL_ERROR_RE.finditer(message))
+  if not matches:
+    return message
+  src_lines = src.splitlines()
+  formatted: list[str] = []
+  seen: set[tuple[int, int, str, str]] = set()
+  for match in matches:
+    line_no = int(match.group(1))
+    col = int(match.group(2))
+    level = match.group(3)
+    detail = match.group(4)
+    key = (line_no, col, level, detail)
+    if key in seen:
+      continue
+    seen.add(key)
+    formatted.append(f"{level} at line {line_no}, column {col}: {detail}")
+    if 1 <= line_no <= len(src_lines):
+      snippet = src_lines[line_no-1]
+      line_prefix = f"{line_no:>4} | "
+      pointer_offset = min(max(col - 1, 0), len(snippet))
+      formatted.append(f"    {line_prefix}{snippet}")
+      formatted.append(f"    {' ' * len(line_prefix)}{' ' * pointer_offset}^")
+  if not formatted:
+    return message
+  formatted.append("")
+  formatted.append("Metal compiler output:")
+  formatted.extend(message.strip().splitlines())
+  return "\n".join(formatted)
+
 def to_struct(*t: int, _type: type[ctypes._SimpleCData] = ctypes.c_ulong):
   return init_c_struct_t(tuple([(f"field{i}", _type) for i in range(len(t))]))(*t)
 
@@ -58,9 +92,16 @@ def cmdbuf_label(cbuf: objc_id) -> str|None: return from_ns_str(label) if (label
 def cmdbuf_st_time(cbuf: objc_id) -> float: return cast(float, msg("GPUStartTime", ctypes.c_double)(cbuf))
 def cmdbuf_en_time(cbuf: objc_id) -> float: return cast(float, msg("GPUEndTime", ctypes.c_double)(cbuf))
 
-def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError):
+def error_check(error: objc_instance, error_constructor: type[Exception] = RuntimeError, shader_src: str | None = None):
   if error.value is None: return None
-  raise error_constructor(from_ns_str(msg("localizedDescription", objc_instance)(error)))
+  description_obj = msg("localizedDescription", objc_instance)(error)
+  description = from_ns_str(description_obj) if description_obj.value is not None else "Unknown Metal error"
+  failure = msg("localizedFailureReason", objc_instance)(error)
+  if failure.value is not None:
+    failure_str = from_ns_str(failure)
+    if failure_str and failure_str not in description:
+      description = f"{description}\n{failure_str}" if description else failure_str
+  raise error_constructor(_format_metal_error(description, shader_src))
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
@@ -93,7 +134,7 @@ def metal_src_to_library(device:MetalDevice, src:str) -> objc_instance:
   msg("setFastMathEnabled:")(options, getenv("METAL_FAST_MATH"))
   library = msg("newLibraryWithSource:options:error:", objc_instance)(device.sysdevice, to_ns_str(src),
                                                                       options, ctypes.byref(compileError:=objc_instance()))
-  error_check(compileError, CompileError)
+  error_check(compileError, CompileError, src)
   return library
 
 class MetalCompiler(Compiler):
@@ -120,7 +161,8 @@ class MetalCompiler(Compiler):
         # offset from beginning to data = header size + warning size
         ret = reply[sum(struct.unpack('<LL', reply[8:16])):]
       else:
-        ret = CompileError(errorMessage.decode())
+        message = errorMessage.decode() if errorMessage else "Unknown Metal compile error"
+        ret = CompileError(_format_metal_error(message, src))
 
     # no changes for compute in 2.0 - 2.4 specs, use 2.0 as default for old versions.
     macos_major = int(platform.mac_ver()[0].split('.')[0])
@@ -153,6 +195,7 @@ class MetalCompiler(Compiler):
 class MetalProgram:
   def __init__(self, dev:MetalDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = dev, name, lib
+    self.shader_src: str | None = None
     if lib[:4] == b"MTLB":
       # binary metal library
       data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
@@ -160,7 +203,9 @@ class MetalProgram:
       error_check(error_lib)
     else:
       # metal source. rely on OS caching
-      try: self.library = metal_src_to_library(self.dev, lib.decode())
+      try:
+        self.shader_src = lib.decode()
+        self.library = metal_src_to_library(self.dev, self.shader_src)
       except CompileError as e: raise RuntimeError from e
     self.fxn = msg("newFunctionWithName:", objc_instance)(self.library, to_ns_str(name))
     descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLComputePipelineDescriptor"))
@@ -168,7 +213,7 @@ class MetalProgram:
     msg("setSupportIndirectCommandBuffers:")(descriptor, True)
     self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
       descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
-    error_check(error_pipeline_creation)
+    error_check(error_pipeline_creation, shader_src=self.shader_src)
     # cache these msg calls
     self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
 
