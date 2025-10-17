@@ -130,7 +130,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
 def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
-    return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
+    return cast(UOp, UOp.sum(*np).divides(d))<(c//d)
   return None
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
@@ -144,7 +144,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
       u = u.src[0]
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
-  return functools.reduce(operator.add, ret) if changed else None
+  return UOp.sum(*ret) if changed else None
 
 def cancel_divmod(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # simple cancel div/mod case when the range of the numerator lies within a single denominator interval
@@ -167,7 +167,7 @@ def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
         something_changed = True
         u = u.src[0]
     new_xs.append(u)
-  new_x: UOp = functools.reduce(operator.add, new_xs)
+  new_x: UOp = UOp.sum(*new_xs)
   if something_changed and new_x.vmin>=0: return new_x % y
   return None
 
@@ -300,6 +300,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
+  (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.index) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # -(x+c) -> -x + -c
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)
     if f.arg is not Invalid else None),
@@ -452,9 +453,9 @@ def simplify_valid(valid:UOp) -> UOp|None:
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    ret.append(uop_given_valid(functools.reduce(operator.and_, ret), stmt) if ret else stmt)
+    ret.append(uop_given_valid(UOp.prod(*ret), stmt) if ret else stmt)
     if ret[-1] is not stmt: something_changed = True
-  return functools.reduce(operator.and_, ret) if something_changed else None
+  return UOp.prod(*ret) if something_changed else None
 
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
@@ -471,7 +472,7 @@ def reduce_mul_chain(r:UOp):
 
 def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if not (dropped_clauses:=[c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]): return None
-  return functools.reduce(operator.and_, [c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses], UOp.const(dtypes.bool, True)).where(x, i)
+  return UOp.const(dtypes.bool, True).prod(*[c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses]).where(x, i)
 pm_drop_and_clauses = PatternMatcher([(UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), drop_and_clauses)])
 
 def where_on_load(l, c1, buf, x):
@@ -483,7 +484,7 @@ def where_on_load(l, c1, buf, x):
     and not c.op_in_backward_slice_with_self(Ops.LOAD)]
   if not (removed:=moved_clauses+duplicate_clauses): return None
   # aditionally we can drop the clause on the where if it already exists in the load
-  remaining_clause = functools.reduce(operator.and_, [c for c in c1.split_uop(Ops.AND) if c not in removed], UOp.const(dtypes.bool, True))
+  remaining_clause = UOp.const(dtypes.bool, True).prod(*[c for c in c1.split_uop(Ops.AND) if c not in removed])
   return remaining_clause.where(UOp.load(buf.index(x.get_idx().valid(functools.reduce(operator.and_, moved_clauses, c2)), *l.src[1:])), 0)
 pm_move_where_on_load = PatternMatcher([
   (UPat.var("c1").where(UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l"), 0), where_on_load),
