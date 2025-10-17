@@ -2355,6 +2355,10 @@ class Tensor(MathTrait):
     s_, d_ = make_tuple(stride, len(k_)), make_tuple(dilation, len(k_))
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
+    # 1. Handle When "stride > input size"
+    s_ = tuple(min(s, i) for s,i in zip(s_, i_))  # cap stride to input size
+    # 2. Handle When "kernel size == 0"
+    d_ = tuple(d if k > 0 else 0 for d,k in zip(d_, k_))  # disable dilation when kernel size is 0
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
     # input size scaling factor to make sure shrink for stride is possible
