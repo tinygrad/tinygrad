@@ -576,7 +576,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, getenv("DEBUG_RANGEIFY", 0))
 
-  #if WINO: tsink = graph_rewrite(tsink, practice, ctx=rctx, name="practice")
   if WINO: tsink = graph_rewrite(tsink, winograd_rewrite, ctx=rctx, name="winograd")
 
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
