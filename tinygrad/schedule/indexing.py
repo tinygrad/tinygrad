@@ -61,7 +61,8 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
       closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[s][1]) if i in realized_ranges])
-      opts = BufferizeOpts(s.device, AddrSpace.GLOBAL if len(ctx.range_map[s][1]) == len(realized_ranges) else AddrSpace.LOCAL)
+      # None in the device assigns it a number later
+      opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
       new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
       if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
