@@ -135,12 +135,10 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
 
 def lt_folding_symbolic_range(lt, x, y):
   if not (sym_ranges:=[r for r in x.ranges if r.src[0].op is not Ops.CONST]): return None
+  # we try replacing all the _linear_ symbolic ranges with their min and max and see if the expression resolves
   lt1 = UOp.sum(*[UOp.prod(*[u.src[0]-1 if u in sym_ranges else u for u in t.split_uop(Ops.MUL)]) for t in x.split_uop(Ops.ADD)])<y
   lt2 = UOp.sum(*[UOp.prod(*[u.const_like(0) if u in sym_ranges else u for u in t.split_uop(Ops.MUL)]) for t in x.split_uop(Ops.ADD)])<y
   if lt1 is lt or lt2 is lt: return None
-  # if lt2 is x: return None
-  # lt1 = lt1.simplify(tracked=True)
-  # lt2 = lt2.simplify(tracked=True)
   if resolve(lt1&lt2, False): return UOp.const(dtypes.bool, True)
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
