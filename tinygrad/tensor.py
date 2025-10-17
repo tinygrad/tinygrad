@@ -2542,7 +2542,6 @@ class Tensor(MathTrait):
     # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
     ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW))\
       .sum([-1-i for i in range(1+len(oyx))], keepdim=True, dtype=dtype).reshape(bs, cout, *oyx)
-      
     return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
   def conv_transpose2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:

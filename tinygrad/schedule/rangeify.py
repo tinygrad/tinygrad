@@ -127,7 +127,7 @@ def kron(buf, B, outer_axes, device, ctx):
   inner_shape = buf.shape[len(outer_axes_shape):]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
   T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I]) for I in product(*(range(s) for s in inner_shape))]
   #convert to flat index
-  def idx(I, S): return sum(i * prod(S[j+1:]) for j, i in enumerate(I)) 
+  def idx(I, S): return sum(i * prod(S[j+1:]) for j, i in enumerate(I))
   def tensordot(T, S, k, M): #k-mode tensor product
     pre, post = S[:k], S[k+1:]
     contract = lambda pr, j, su: sum(T[idx((*pr, i, *su), S)] * M[j][i] for i in range(S[k]))
@@ -147,13 +147,13 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   #dfs to check if conv with 3^n kernel and stride = dilation = 1 exists.
   def collect(root: UOp):
     need, ks, ox, os = set(three), [], [], []
-    for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):      
+    for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):
       for loop, red in ((a, b), (b, a)):  #could be made nicer with UPat
         if red in need and loop.op is Ops.RANGE and loop not in need: ks.append(red); ox.append(loop); os.append(n); need.remove(red); break
     return ks, ox, os #we dont allow the case where output axes are shared between activations and weights
   kL, oxl, oL = collect(lhs); kR, oxr, oR = collect(rhs)
   #identify activation and weight if they exist
-  return (lhs, rhs, kL, oxl, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oxr, oR) if (len(kR) >= 2 and not oL) else None) 
+  return (lhs, rhs, kL, oxl, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oxr, oR) if (len(kR) >= 2 and not oL) else None)
 
 def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
@@ -169,10 +169,10 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
   #Create input tiles by adding tile and inner tile axes and applying n-mode tensor product
   X_vu = close_buffer(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, device, ctx)
-  XHAT = kron(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, device, ctx) 
+  XHAT = kron(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, device, ctx)
   #process kernel tiles
   w = close_buffer(w_like.substitute({k: r for k, r in zip(k_axes, kranges)}), other_reduces+other_loops_w, kranges, device, ctx)
-  GHAT = kron(w, winograd_G, other_reduces+other_loops_w, device, ctx)  
+  GHAT = kron(w, winograd_G, other_reduces+other_loops_w, device, ctx)
   #hadamard multiply and reduce over other ranges like cin
   mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1) * GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
   MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges1, *inner6_1, arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL)) # which loops come first?
