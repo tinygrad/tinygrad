@@ -156,7 +156,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], start=[])
 
     # if this element has weight and it's ending a range, we (force) realize it
-    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}) and not PCONTIG:
+    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}) and not (PCONTIG>1):
       rctx.realize_map[x] = None
 
     # *** the ranges on the output are
@@ -206,7 +206,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       out_rngs = tuple(_out_rngs)
 
       # we have to (partially) realize here if there's new ranges
-      if not all_all_same: rctx.realize_map[x] = _new_rngs
+      if len(_new_rngs): rctx.realize_map[x] = _new_rngs
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \

@@ -43,7 +43,7 @@ class TestPcontig(unittest.TestCase):
       with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
       return q.scaled_dot_product_attention(k, v).realize()
 
-    with Context(PCONTIG=1, DEBUG=2):
+    with Context(PCONTIG=2, DEBUG=2):
       GlobalCounters.reset()
       ret = fa()
     with Context(DEBUG=2):
