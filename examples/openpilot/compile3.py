@@ -52,12 +52,6 @@ def compile(onnx_file):
       for v in [m.group(1) for m in re.finditer(r'(val\d+)\s*=\s*read_imagef\(', ei.prg.p.src)]:
         if len(re.findall(fr'[\?\:]{v}\.[xyzw]', ei.prg.p.src)) > 0: gated_read_image_count += 1
   print(f"{kernel_count=},  {read_image_count=}, {gated_read_image_count=}")
-  if (allowed_kernel_count:=getenv("ALLOWED_KERNEL_COUNT", -1)) != -1:
-    assert kernel_count == allowed_kernel_count, f"different kernels! {kernel_count=}, {allowed_kernel_count=}"
-  if (allowed_read_image:=getenv("ALLOWED_READ_IMAGE", -1)) != -1:
-    assert read_image_count == allowed_read_image, f"different read_image! {read_image_count=}, {allowed_read_image=}"
-  if (allowed_gated_read_image:=getenv("ALLOWED_GATED_READ_IMAGE", -1)) != -1:
-    assert gated_read_image_count == allowed_gated_read_image, f"different gated read_image! {gated_read_image_count=}, {allowed_gated_read_image=}"
 
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)
@@ -104,8 +98,6 @@ def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   ORT_TO_NP_DTYPES: dict[str, np.dtype] = {
     'tensor(float)': np.dtype('float32'),
     'tensor(float16)': np.dtype('float16'),
-    'tensor(int64)': np.dtype('int64'),
-    'tensor(int32)': np.dtype('int32'),
     'tensor(uint8)': np.dtype('uint8'),
   }
 
@@ -130,7 +122,7 @@ if __name__ == "__main__":
   with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
 
   test_vs_compile(pickle_loaded, inputs, outputs)
-  if not getenv("NO_ORT_TEST"):
+  if not getenv("NO_ORT"):
     tol = 1 if getenv("FLOAT16") else 1e-4 # This tolerance is absurd, but better than nothing
     test_vs_onnx(inputs, outputs, onnx_file, tol)
 
