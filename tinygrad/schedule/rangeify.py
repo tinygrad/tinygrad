@@ -155,9 +155,9 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   #identify activation and weight if they exist
   return (lhs, rhs, kL, oxl, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oxr, oR) if (len(kR) >= 2 and not oL) else None) 
 
-def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
+def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
-  if not (g := winoguard(x, y, redu)): return None
+  if not (g := winoguard(lhs, rhs, redu)): return None
   act_like, w_like, k_axes, o_axes, o_adds = g
   reduce_ranges = list(redu.src[1:])
   other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
@@ -181,9 +181,8 @@ def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
     .index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes]) #bring back the original loops like cout (Do we need to use simplify?)
 
 winograd_rewrite = PatternMatcher([
- ((UPat.var("x")*UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, x, y, redu: winowrite(ctx, x, y, redu))
+ ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))
  ])
-
 # *****************
 # 3.5 cleanups
 
