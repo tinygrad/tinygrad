@@ -149,14 +149,14 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
 
   # explicit rangeify
-  ending_ranges: dict[UOp, list[UOp]] = {}
+  ending_ranges: dict[UOp, bool] = {}
   for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
-    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], start=[])
+    ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
 
     # if this element has weight and it's ending a range, we (force) realize it
-    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}) and not (PCONTIG>1):
+    if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}) and not (PCONTIG>1):
       rctx.realize_map[x] = None
 
     # *** the ranges on the output are
@@ -169,7 +169,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) if not isinstance(s, UOp) or s.op is not Ops.RANGE else s for s in x.shape)
       # all ranges are ended now
-      ending_ranges[x] = []
+      ending_ranges[x] = False
       # mark all ranges as ended
       assert rctx.realize_map[x] is None
       rctx.realize_map[x] = list(range(len(out_rngs)))
@@ -222,9 +222,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # apply movement ops
     if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
-    if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      in_range_list = UOp.sink(*rngs).ranges
-      ending_ranges.setdefault(x, []).extend([r for r in UOp.sink(*out_rngs).ranges if r not in in_range_list])
+    # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
+    if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape): ending_ranges[x] = True
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:

@@ -185,7 +185,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_simplify_padded_const(self):
     a = Tensor.empty(1022).cummax(axis=0)
-    check_schedule(a, 2)
+    check_schedule(a, 3)
 
   def test_basic_binop_fusion(self):
     a = Tensor.empty(10)

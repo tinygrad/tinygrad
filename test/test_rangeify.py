@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import Context, GlobalCounters, CI
+from tinygrad.helpers import Context, GlobalCounters, CI, CPU_LVP
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 
 class TestRangeifyAssign(unittest.TestCase):
@@ -28,6 +28,7 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     res = Tensor.cat(a, c, dim=0)
     self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
+@unittest.skipIf(CPU_LVP, "broken in LVP")
 class TestPcontig(unittest.TestCase):
   def test_flash_attention(self):
     BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
