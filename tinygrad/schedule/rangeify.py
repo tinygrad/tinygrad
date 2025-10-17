@@ -140,7 +140,7 @@ def kron(buf, B, outer_axes, ctx):
   def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0) #have to double check
   #sum all wheres together, and return buffer
   return sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))\
-    .bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL))
+    .bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
 
 def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
@@ -150,26 +150,24 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
     for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):      
       for loop, red in ((a, b), (b, a)):  #could be made nicer with UPat
         if red in need and loop.op is Ops.RANGE and loop not in need: ks.append(red); ox.append(loop); os.append(n); need.remove(red); break
-    return ks, ox, os
+    return ks, ox, os #we dont allow the case where output axes are shared between activations and weights
   kL, oxl, oL = collect(lhs); kR, oxr, oR = collect(rhs)
   #identify activation and weight if they exist
   return (lhs, rhs, kL, oxl, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oxr, oR) if (len(kR) >= 2 and not oL) else None) 
 
 def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
   # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
-  guard = winoguard(x, y, redu)
-  if guard is None: return None
-  act_like, w_like, k_axes, o_axes, o_adds = guard
-  o_bases = [o_adds[i].substitute({k: k.const_like(0)}) for i, k in enumerate(k_axes)]
+  if not (g := winoguard(x, y, redu)): return None
+  act_like, w_like, k_axes, o_axes, o_adds = g
   reduce_ranges = list(redu.src[1:])
   other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
   other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes] #all loop like axes not tied to our core conv
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
-  tile_ranges, tile_ranges1 = [[ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases] for _ in range(2)]
-  inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_bases] for _ in range(2)]
+  tile_ranges, tile_ranges1 = [[ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_axes] for _ in range(2)]
+  inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_axes] for _ in range(2)]
   other_loop_ranges_xhat, other_loop_ranges_ghat = [[ctx.new_range(r.vmax+1, AxisType.LOOP) for r in rs] for rs in (other_loops_x, other_loops_w)]
-  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_bases]
-
+  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
+  #Create input tiles by adding tile and inner tile axes and applying n-mode tensor product
   X_vu = close_buffer(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, ctx)
   XHAT = kron(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, ctx) 
   #process kernel tiles
@@ -177,10 +175,10 @@ def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
   GHAT = kron(w, winograd_G, other_reduces+other_loops_w, ctx)  
   #hadamard multiply and reduce over other ranges like cin
   mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1) * GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
-  MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges1, *inner6_1, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)) # which loops come first?
+  MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges1, *inner6_1, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL)) # which loops come first?
   #output transform (inferring tile shape from tile_ranges_1 is a hack cuz those ranges are "dead")
   return kron(MHAT, winograd_At, other_loops_x+other_loops_w+tile_ranges1, ctx)\
-    .index(*other_loops_x, *other_loops_w, *[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases]) #bring back the original loops
+    .index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes]) #bring back the original loops like cout (Do we need to use simplify?)
 
 winograd_rewrite = PatternMatcher([
  ((UPat.var("x")*UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, x, y, redu: winowrite(ctx, x, y, redu))
