@@ -284,7 +284,7 @@ async function renderProfiler() {
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
-          const { name, num, mode } = users[u]; p.appendChild(colored(`[${u}] ${name} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}`));
+          const { name, num, mode } = users[u]; p.appendChild(colored(`[${u}] ${name} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
           p.onclick = () => {
             const cid = ctxs.findIndex(c => c.name === name);
             if (cid != null) setCtxWithHistory(cid-1);
