@@ -52,20 +52,17 @@ class TestPcontig(unittest.TestCase):
         target = Tensor.rand(BS, SEQLEN, HEADS*EMB).contiguous().realize()
 
       GlobalCounters.reset()
-      #print("****\n\n\n\n\n")
       attn = q.scaled_dot_product_attention(k, v).contiguous().contiguous_backward()
       attn = attn.transpose(1, 2).reshape(BS, SEQLEN, -1)
       out = attn_output(attn)
       loss = (out - target).square().mean()
       loss.backward()
-      ret = [out, Tensor.stack(q.grad, k.grad, v.grad)]
+      #ret = [out, Tensor.stack(q.grad, k.grad, v.grad)]
+      ret = [out, q.grad, k.grad, v.grad]
       Tensor.realize(*ret)
       return ret
 
-      Tensor.realize(out, q.grad, k.grad, v.grad)
-      return out, q.grad, k.grad, v.grad
-
-    with Context(PCONTIG=2, DEBUG=2):
+    with Context(PCONTIG=2, REAL_SUBSTITUTE=1, DEBUG=2):
       grads= fa_bw()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
 

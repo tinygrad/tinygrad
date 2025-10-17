@@ -209,10 +209,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
     if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
       _realize_axis = rctx.realize_map.get(x, []) or []
-      local_ending_ranges = ending_ranges[x]
       for i,r in enumerate(out_rngs):
         if i in _realize_axis: continue
-        if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in local_ending_ranges) for rr in r.ranges):
+        if not (PCONTIG > 1) or any(any(rr.arg > e.arg for e in ending_ranges[x]) for rr in r.ranges):
           _realize_axis.append(i)
       ending_ranges[x] = []
       if len(_realize_axis):

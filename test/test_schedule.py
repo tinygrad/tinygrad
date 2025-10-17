@@ -333,7 +333,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out0 = r0 + y
     out1 = r1 + y
-    schedule = check_schedule([out0, out1], 4)
+    schedule = check_schedule([out0, out1], 3)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
     self.assertEqual(len(reduceops), 2) # why is RANGEIFY different?
 
