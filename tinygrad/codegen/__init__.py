@@ -42,7 +42,7 @@ def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool
 
 @functools.cache
 def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
-  # ** lowerer (rewrite_shapetracker_with_index) **
+  # ** lowerer **
   ret: list[RewriteStep] = []
 
   if optimize:
