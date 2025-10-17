@@ -7,11 +7,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
 from tinygrad.uop.symbolic import symbolic_simple
-<<<<<<< HEAD
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, unwrap, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, WINO
-=======
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
->>>>>>> upstream/master
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -168,31 +164,26 @@ def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
   o_bases = [o_adds[i].substitute({k: k.const_like(0)}) for i, k in enumerate(k_axes)]
   tile_shape = tuple((int(b.vmax+1)+3)//4 for b in o_bases)
   reduce_ranges = list(redu.src[1:])
-  #### Prep X tiles #### #NOTE: THIS WILL BREAK IN ARANGE?
   other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
   other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes] #all loop like axes not tied to our core conv
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
-
+  #process input tiles
   tile_ranges = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases];
   inner6 = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
   X_vu = close_buffer(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, ctx)
   XHAT = kron(X_vu, winograd_Bt, tuple((int(ax.vmax+1) for ax in other_reduces))+tuple((int(ax.vmax+1) for ax in other_loops_x))+tile_shape, ctx) 
-  ### Prep W tiles ####
-   #weights have no output spatial axes
+  #process kernel tiles
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in range(len(o_bases))]
   w = close_buffer(w_like.substitute({k: r for k, r in zip(k_axes, kranges)}), other_reduces+other_loops_w, kranges, ctx)
-  GHAT = kron(w, winograd_G, tuple((int(ax.vmax+1) for ax in other_reduces))+tuple((int(ax.vmax+1) for ax in other_loops_w)), ctx)  # outer_axes=()
-  #Rinse and repeat for Mhat - get rid of the reduce ranges and only carry through loop ranges
-
+  GHAT = kron(w, winograd_G, tuple((int(ax.vmax+1) for ax in other_reduces))+tuple((int(ax.vmax+1) for ax in other_loops_w)), ctx)  
+  #hadamard multiply and reduce over other ranges like cin
   tile_ranges_1 = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases]
   inner6_1      = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
   other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
   other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
-
   mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges_1, *inner6_1) * GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
-  
   MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges_1, *inner6_1, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)) # which loops come first?
-  
+  #output transform
   return kron(MHAT, winograd_At, tuple((int(ax.vmax+1) for ax in other_loops_x))+tuple((int(ax.vmax+1) for ax in other_loops_w))+tile_shape, ctx)\
     .index(*other_loops_x, *other_loops_w, *[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases]) #bring back the original loops
 
