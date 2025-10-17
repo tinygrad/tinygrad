@@ -296,12 +296,13 @@ async function renderProfiler() {
         if (users != null) rows.push(["Users", users.length]);
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
-          const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
+          const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px";
           const { repr, num, mode, shape } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
           const metadata = shape?.tooltipText?.split("\n").at(-1);
           if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
-          p.onclick = () => {
-            if (shape != null) focusShape(shape);
+          if (shape != null) {
+            p.style.cursor = "pointer";
+            p.onclick = () => focusShape(shape);
           }
         }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
