@@ -1,6 +1,62 @@
 import unittest
-from tinygrad import Tensor, UOp
+from tinygrad import Tensor, UOp, Variable, nn
 from tinygrad.uop.ops import AxisType, Ops
+
+class TestOuterworldTrain(unittest.TestCase):
+  @Tensor.train()
+  def test_train(self):
+    # same example over and over
+    X = Tensor.rand(1, 32).expand(16,32).contiguous()
+    Y = Tensor.rand(1, 1).expand(16,1).contiguous()
+
+    layer = nn.Linear(32, 1, bias=False)
+    opt = nn.optim.SGD(nn.state.get_parameters(layer))
+    Tensor.realize(X, Y, *nn.state.get_parameters(layer))
+
+    print("train")
+
+    # if everything is correct, this should be a 16 step training loop
+    steps = UOp.range(16, -1)
+    opt.zero_grad()
+    loss = (layer(X[steps]) - Y[steps]).square().mean().backward()
+    sched = opt.schedule_step() # TODO: does this need to know anything about steps?
+    # NOTE: this can't work. the inputs to layer are not the assign, need to run twice for the fixed point?
+    all_losses = Tensor.realize(loss.reshape(1).expand(steps).contiguous(), *sched)
+    print(all_losses.numpy())
+
+#@unittest.skip("TODO: understand assign")
+class TestOuterworldAssign(unittest.TestCase):
+  def test_triple_add_inner(self):
+    t = Tensor.zeros(5).contiguous().realize()
+    t2 = Tensor.ones(3).contiguous().realize()
+    a = UOp.range(3, -1)
+    t = t.reshape(1,5).expand(a+1,5)[a].assign(t+t2[a])
+    self.assertListEqual(t.tolist(), [3,3,3,3,3])
+
+  def test_triple_add_outer(self):
+    t = Tensor.zeros(5).contiguous().realize()
+    t2 = Tensor.ones(3).contiguous().realize()
+
+    # OUTER is a loop at the schedule level
+    a = UOp.range(3, -1, AxisType.OUTER)
+    va = Variable("loop", 0, 2).bind(a)
+    t = t.assign(t+t2[va])
+    t = Tensor(UOp(Ops.ENDRANGE, dtype=t.uop.dtype, src=(a, t.uop)))
+
+    self.assertListEqual(t.tolist(), [3,3,3,3,3])
+
+  def test_triple_gemm(self):
+    x = Tensor.rand(1, 16).realize()
+    W = Tensor.rand(3, 16, 16).realize()
+
+    #manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
+
+    a = UOp.range(3, -1)
+
+    out = (x @ W[a]).contiguous()
+    t = Tensor(UOp(Ops.ASSIGN, dtype=out.uop.dtype, src=(x.uop, out.uop, a)))
+    #t = Tensor(UOp(Ops.REDUCE, dtype=out.uop.dtype, src=(out.uop, x.uop, a), arg=Ops.NOOP))
+    t.realize()
 
 class TestOuterworldReduce(unittest.TestCase):
   def test_reduce(self):
@@ -40,6 +96,7 @@ class TestOuterworld(unittest.TestCase):
     # passthrough ranges
     a = UOp.range(10, -1)
     sel = t[9-a]
+    assert sel.shape == (10,)
     cpy = sel.reshape(1, 10).expand(a, 10).contiguous().realize()
 
     self.assertTrue((t.flip(0)==cpy).all().item())
