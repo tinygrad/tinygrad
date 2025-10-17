@@ -45,7 +45,8 @@ class IndexingContext:
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
-  def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
+  def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP) -> UOp:
+    if isinstance(s, UOp) and s.op is Ops.RANGE: return s
     # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
@@ -143,7 +144,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()
 
   # get ops to realize
-  graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="Input Graph")
+  graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")
 
   # get the traversal order
   with cpu_profile(TracingKey("reverse toposort"), "TINY"):
@@ -173,7 +174,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       ending_ranges[x] = False
       # mark all ranges as ended
       assert rctx.realize_map[x] is None
-      rctx.realize_map[x] = list(range(len(out_rngs)))
+      rctx.realize_map[x] = list(range(len(x.shape)))
     elif x.op in {Ops.MSTACK, Ops.MSELECT}:
       # treat MSTACK/MSELECT like SINK
       continue
