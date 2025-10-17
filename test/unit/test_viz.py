@@ -512,5 +512,13 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(users[1][2], 2) # read+write Tensor.assign
     self.assertEqual(users[2][2], 0) # readonly
 
+  def test_dedup_users(self):
+    a = Tensor.empty(1, device="NULL")
+    for _ in range(n:=4): a.add(1).realize()
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    programs = profile["layout"][a.device]["events"]
+    users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
+    self.assertEqual(len(programs), len(set(users)), n)
+
 if __name__ == "__main__":
   unittest.main()
