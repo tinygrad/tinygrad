@@ -215,7 +215,6 @@ class TestRangeify(unittest.TestCase):
     out = blk._feed_forward(x)
     out.realize()
 
-  @unittest.skip("RANGEIFY=0 does nothing")
   def test_flash_attention(self):
     BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
@@ -230,15 +229,14 @@ class TestRangeify(unittest.TestCase):
       with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
       return q.scaled_dot_product_attention(k, v).realize()
 
-    with Context(DEBUG=4):
+    with Context(PCONTIG=1, DEBUG=2):
       GlobalCounters.reset()
       ret = fa()
-    with Context(RANGEIFY=0):
-      with Context(DEBUG=2):
-        GlobalCounters.reset()
-        cmp = fa()
-      with Context(DEBUG=0):
-        mse = ((cmp-ret)**2).sum().item()
+    with Context(DEBUG=2):
+      GlobalCounters.reset()
+      cmp = fa()
+    with Context(DEBUG=0):
+      mse = ((cmp-ret)**2).sum().item()
     print(f"mse: {mse}")
     self.assertLessEqual(mse, 1e-6)
 

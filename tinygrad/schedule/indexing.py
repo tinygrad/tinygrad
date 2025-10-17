@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey
+from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey, PCONTIG
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -40,12 +40,13 @@ class BufferizeOpts:
 
 @dataclass
 class IndexingContext:
-  realize_map: dict[UOp, None] = field(default_factory=dict)
+  realize_map: dict[UOp, None|list[int]] = field(default_factory=dict)
   range_map: dict[UOp, tuple[tuple[UOp, ...], tuple[UOp, ...]]] = field(default_factory=dict)
 
   # create ranges
   range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP):
+    # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
@@ -57,8 +58,12 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
     if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
-      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+tuple(ctx.range_map[s][1]), arg=BufferizeOpts(device=s.device), tag=s.tag)
-      if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
+      realized_ranges = ctx.realize_map[s]
+      assert isinstance(realized_ranges, list), "realize map must contain range list"
+      closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[s][1]) if i in realized_ranges])
+      opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
+      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
+      if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
@@ -144,14 +149,15 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
 
   # explicit rangeify
-  ending_ranges: dict[UOp, bool] = {}
+  ending_ranges: dict[UOp, list[UOp]] = {}
   for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
-    ending_ranges[x] = any(ending_ranges[u] for u in consumer_map[x])
+    ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], start=[])
 
     # if this element has weight and it's ending a range, we (force) realize it
-    if ending_ranges[x] and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}): rctx.realize_map[x] = None
+    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}) and not PCONTIG:
+      rctx.realize_map[x] = None
 
     # *** the ranges on the output are
     #  1. new if this op is realized
@@ -163,7 +169,10 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       # if this is in the realize_map, we create new ranges (at the output)
       out_rngs = tuple(rctx.new_range(s) if not isinstance(s, UOp) or s.op is not Ops.RANGE else s for s in x.shape)
       # all ranges are ended now
-      ending_ranges[x] = False
+      ending_ranges[x] = []
+      # mark all ranges as ended
+      assert rctx.realize_map[x] is None
+      rctx.realize_map[x] = list(range(len(x.shape)))
     elif x.op in {Ops.MSTACK, Ops.MSELECT}:
       # treat MSTACK/MSELECT like SINK
       continue
@@ -175,29 +184,29 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       out_rngs = consumer_rngs[0]
     elif len(consumer_rngs) > 1:
       # if this has two consumers, we have to merge the ranges and might create new ones
-      all_rngs = list(zip(*consumer_rngs))
+      all_rngs: list[tuple[UOp, ...]] = list(zip(*consumer_rngs))
       rngs_valids = []
       for valid_rngs in all_rngs:
         local_rngs, valids = zip(*[(r.get_idx(), r.get_valid()) for r in valid_rngs])
-        # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
-        same_rngs = [x if x.op is not Ops.RANGE or resolve(x.src[0] != 1) else UOp.const(dtypes.index, 0) for x in local_rngs]
-        rngs_valids.append((local_rngs, valids, all_same(same_rngs)))
+        rngs_valids.append((local_rngs, valids, all_same(local_rngs)))
 
       # TODO: in RANGEIFY > 1 all_all_same isn't required
       all_all_same = all(same_rngs for _,_,same_rngs in rngs_valids)
       _out_rngs = []
+      _new_rngs = []
       for i,(local_rngs,valids,same_rngs) in enumerate(rngs_valids):
         # we compare the ranges without their valids
-        if all_all_same:
+        if all_all_same or (PCONTIG and same_rngs):
           # the new valid is the OR of all the children valids
           minimum_valid = functools.reduce(operator.or_, valids, UOp.const(dtypes.bool, False))
           _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
         else:
           _out_rngs.append(rctx.new_range(x.shape[i]))
+          _new_rngs.append(i)
       out_rngs = tuple(_out_rngs)
 
-      # we have to realize here if there's new ranges
-      if not all_all_same: rctx.realize_map[x] = None
+      # we have to (partially) realize here if there's new ranges
+      if not all_all_same: rctx.realize_map[x] = _new_rngs
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
@@ -213,7 +222,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # apply movement ops
     if x.op in GroupOp.Movement: rngs = apply_movement_op(x.op, x.src[0].shape, x.marg, rngs)
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
-    if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape): ending_ranges[x] = True
+    if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
+      in_range_list = UOp.sink(*rngs).ranges
+      ending_ranges.setdefault(x, []).extend([r for r in UOp.sink(*out_rngs).ranges if r not in in_range_list])
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
