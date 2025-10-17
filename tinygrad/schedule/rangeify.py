@@ -111,7 +111,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), find_permutes),
 ])
 
-
 # *****************
 # 3.2 Winograd
 winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
@@ -123,8 +122,8 @@ def close_buffer(branch, outer_axes, inner_axes, ctx:IndexingContext):
   return branch.substitute({R: r for R, r in zip(outer_axes, closing_outer_axes)})\
   .bufferize(*closing_outer_axes, *inner_axes, arg=BufferizeOpts(device=None, addrspace=AddrSpace.LOCAL))
 
-def kron(buf, B,outer_axes_shape, ctx):
-  #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
+def kron(buf, B, outer_axes, ctx):
+  outer_axes_shape = tuple((ax.vmax+1 for ax in outer_axes)) #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
   inner_shape = buf.shape[len(outer_axes_shape):]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
   T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I]) for I in product(*(range(s) for s in inner_shape))]
   #convert to flat index
@@ -148,8 +147,8 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   #dfs to check if conv with 3^n kernel and stride = dilation = 1 exists.
   def collect(root: UOp):
     need, ks, ox, os = set(three), [], [], []
-    for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):
-      for loop, red in ((a, b), (b, a)): 
+    for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):      
+      for loop, red in ((a, b), (b, a)):  #could be made nicer with UPat
         if red in need and loop.op is Ops.RANGE and loop not in need: ks.append(red); ox.append(loop); os.append(n); need.remove(red); break
     return ks, ox, os
   kL, oxl, oL = collect(lhs); kR, oxr, oR = collect(rhs)
@@ -162,29 +161,25 @@ def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
   if guard is None: return None
   act_like, w_like, k_axes, o_axes, o_adds = guard
   o_bases = [o_adds[i].substitute({k: k.const_like(0)}) for i, k in enumerate(k_axes)]
-  tile_shape = tuple((int(b.vmax+1)+3)//4 for b in o_bases)
   reduce_ranges = list(redu.src[1:])
   other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
   other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes] #all loop like axes not tied to our core conv
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
-  #process input tiles
-  tile_ranges = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases];
-  inner6 = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
+  tile_ranges, tile_ranges1 = [[ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases] for _ in range(2)]
+  inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_bases] for _ in range(2)]
+  other_loop_ranges_xhat, other_loop_ranges_ghat = [[ctx.new_range(r.vmax+1, AxisType.LOOP) for r in rs] for rs in (other_loops_x, other_loops_w)]
+  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_bases]
+
   X_vu = close_buffer(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, ctx)
-  XHAT = kron(X_vu, winograd_Bt, tuple((int(ax.vmax+1) for ax in other_reduces))+tuple((int(ax.vmax+1) for ax in other_loops_x))+tile_shape, ctx) 
+  XHAT = kron(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, ctx) 
   #process kernel tiles
-  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in range(len(o_bases))]
   w = close_buffer(w_like.substitute({k: r for k, r in zip(k_axes, kranges)}), other_reduces+other_loops_w, kranges, ctx)
-  GHAT = kron(w, winograd_G, tuple((int(ax.vmax+1) for ax in other_reduces))+tuple((int(ax.vmax+1) for ax in other_loops_w)), ctx)  
+  GHAT = kron(w, winograd_G, other_reduces+other_loops_w, ctx)  
   #hadamard multiply and reduce over other ranges like cin
-  tile_ranges_1 = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases]
-  inner6_1      = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
-  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
-  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
-  mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges_1, *inner6_1) * GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
-  MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges_1, *inner6_1, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)) # which loops come first?
-  #output transform
-  return kron(MHAT, winograd_At, tuple((int(ax.vmax+1) for ax in other_loops_x))+tuple((int(ax.vmax+1) for ax in other_loops_w))+tile_shape, ctx)\
+  mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1) * GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
+  MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges1, *inner6_1, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)) # which loops come first?
+  #output transform (inferring tile shape from tile_ranges_1 is a hack cuz those ranges are "dead")
+  return kron(MHAT, winograd_At, other_loops_x+other_loops_w+tile_ranges1, ctx)\
     .index(*other_loops_x, *other_loops_w, *[(o_base//4).simplify() for o_base in o_bases], *[(o_base%4).simplify() for o_base in o_bases]) #bring back the original loops
 
 winograd_rewrite = PatternMatcher([
@@ -577,7 +572,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink, rctx = run_rangeify(tsink, getenv("DEBUG_RANGEIFY", 0))
 
   if WINO: tsink = graph_rewrite(tsink, winograd_rewrite, ctx=rctx, name="winograd")
-
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
