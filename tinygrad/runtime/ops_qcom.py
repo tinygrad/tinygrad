@@ -54,10 +54,16 @@ class QCOMComputeQueue(HWQueue):
 
   def _cache_flush(self, write_back=True, invalidate=False, sync=True, memsync=False):
     # TODO: 7xx support.
-    if write_back: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS, *data64_le(QCOMDevice.dummy_addr), 0) # dirty cache write-back.
-    if invalidate: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
-    if memsync: self.cmd(adreno.CP_WAIT_MEM_WRITES)
-    if sync: self.cmd(adreno.CP_WAIT_FOR_IDLE)
+    if QCOMDevice.gpu_id < 700:
+      if write_back: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_FLUSH_TS, *data64_le(QCOMDevice.dummy_addr), 0) # dirty cache write-back.
+      if invalidate: self.cmd(adreno.CP_EVENT_WRITE, adreno.CACHE_INVALIDATE) # invalidate cache lines (following reads from RAM).
+      if memsync: self.cmd(adreno.CP_WAIT_MEM_WRITES)
+      if sync: self.cmd(adreno.CP_WAIT_FOR_IDLE)
+    else:
+      if write_back: self.cmd(adreno.CP_EVENT_WRITE7, qreg.cp_event_write7_0(event=adreno.CACHE_FLUSH_TS, write_src=adreno.EV_WRITE_USER_32B, write_dst=adreno.EV_DST_RAM), *data64_le(QCOMDevice.dummy_addr), 0) # dirty cache write-back.
+      if invalidate: self.cmd(adreno.CP_EVENT_WRITE7, qreg.cp_event_write7_0(event=adreno.CACHE_INVALIDATE, write_src=adreno.EV_WRITE_USER_32B, write_dst=adreno.EV_DST_RAM)) # invalidate cache lines (following reads from RAM).
+      if memsync: self.cmd(adreno.CP_WAIT_MEM_WRITES)
+      if sync: self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
   def memory_barrier(self):
     self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
@@ -71,7 +77,10 @@ class QCOMComputeQueue(HWQueue):
       self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
-      raise RuntimeError('CP_EVENT_WRITE7 is not supported')
+      self.cmd(adreno.CP_EVENT_WRITE7, qreg.cp_event_write7_0(event=adreno.CACHE_FLUSH_TS,
+        write_src=adreno.EV_WRITE_ALWAYSON if ts else adreno.EV_WRITE_USER_32B, write_dst=adreno.EV_DST_RAM) | adreno.CP_EVENT_WRITE7_0_WRITE_ENABLED,
+        *data64_le(signal.timestamp_addr if ts else signal.value_addr), 0 if ts else qreg.cp_event_write_3(value & 0xFFFFFFFF))
+      self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     return self
 
   def timestamp(self, signal:QCOMSignal): return self.signal(signal, 0, ts=True)
@@ -106,9 +115,14 @@ class QCOMComputeQueue(HWQueue):
     def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
     global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
 
+    self.cmd(adreno.CP_THREAD_CONTROL, 0x8000001)
     self.cmd(adreno.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=adreno.RM6_COMPUTE))
-    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd(cs_state=True, cs_ibo=True))
-    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
+    if QCOMDevice.gpu_id < 700:
+      self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd(cs_state=True, cs_ibo=True))
+      self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
+    else:
+      self.reg(adreno.REG_A7XX_HLSQ_INVALIDATE_CMD, 0x260)
+      # self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
     self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, qreg.a6xx_sp_cs_tex_count(0x80))
     self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, qreg.a6xx_sp_cs_ibo_count(0x40))
     self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, qreg.a6xx_sp_mode_control(isammode=adreno.ISAMMODE_CL))
@@ -117,16 +131,23 @@ class QCOMComputeQueue(HWQueue):
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0,
-             qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
-             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_hlsq_cs_cntl_1(threadsize=adreno.THREAD64),
-             cast_int(global_size[0], ceil=True), cast_int(global_size[1], ceil=True), cast_int(global_size[2], ceil=True))
+    # REG_A7XX_HLSQ_CS_NDRANGE_0
+    # 0xf01f,16,0,16,0,1,0,0xfc,2,1,1,0xf01c
+    self.reg(adreno.REG_A7XX_HLSQ_CS_NDRANGE_0,
+             qreg.a7xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
+             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xfc | qreg.a7xx_hlsq_cs_cntl_1(threadsize=adreno.THREAD64),
+             cast_int(global_size[0], ceil=True), cast_int(global_size[1], ceil=True), cast_int(global_size[2], ceil=True),
+             qreg.a7xx_hlsq_cs_local_size(localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1))
+
+    # self.reg(adreno.REG_A7XX_HLSQ_CS_NDRANGE_0, 11,3,0,1,0,1,0,0x2fc,1,1,1,8)
 
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
              qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
+
+    self.reg(adreno.REG_A6XX_SP_CS_CNTL_0, 0xccc0cf, 0xfc | qreg.a7xx_hlsq_cs_cntl_1(threadsize=adreno.THREAD64))
 
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
                                                                state_block=adreno.SB6_CS_SHADER, num_unit=1024 // 4),
@@ -135,41 +156,48 @@ class QCOMComputeQueue(HWQueue):
                                                                state_block=adreno.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
              *data64_le(prg.lib_gpu.va_addr))
 
-    self.reg(adreno.REG_A6XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, qreg.a6xx_hlsq_cs_cntl(constlen=1024 // 4, enabled=True))
+    self.reg(adreno.REG_A7XX_HLSQ_CONTROL_2_REG, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, qreg.a7xx_hlsq_cs_cntl(constlen=1024 // 4, enabled=True))
 
-    self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, qreg.a6xx_sp_cs_pvt_mem_hw_stack_offset(prg.hw_stack_offset))
+    self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, 0)
     self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, qreg.a6xx_sp_cs_instrlen(prg.image_size // 4))
 
+    mode = adreno.SS6_BINDLESS if args_state.prg.is_bindless else adreno.SS6_INDIRECT
+    if args_state.prg.is_bindless:
+      self.reg(0xa9e8, *data64_le((args_state.buf.va_addr + args_state.prg.bindless_off) | 0x3))
+
     if args_state.prg.samp_cnt > 0:
-      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=adreno.SS6_INDIRECT,
+      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=mode,
                                                                  state_block=adreno.SB6_CS_TEX, num_unit=args_state.prg.samp_cnt),
-               *data64_le(args_state.buf.va_addr + args_state.prg.samp_off))
-      self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.buf.va_addr + args_state.prg.samp_off))
+               *data64_le(0))
+      if mode == adreno.SS6_INDIRECT: self.reg(adreno.REG_A6XX_SP_CS_TEX_SAMP, *data64_le(args_state.buf.va_addr + args_state.prg.samp_off))
       self.reg(adreno.REG_A6XX_SP_PS_TP_BORDER_COLOR_BASE_ADDR, *data64_le(prg.dev.border_color_buf.va_addr))
 
     if args_state.prg.tex_cnt > 0:
-      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
-                                                                 state_block=adreno.SB6_CS_TEX, num_unit=min(16, args_state.prg.tex_cnt)),
-               *data64_le(args_state.buf.va_addr + args_state.prg.tex_off))
-      self.reg(adreno.REG_A6XX_SP_CS_TEX_CONST, *data64_le(args_state.buf.va_addr + args_state.prg.tex_off))
+      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=mode,
+                                                                 state_block=adreno.SB6_CS_TEX, num_unit=args_state.prg.tex_cnt),
+               *data64_le((args_state.prg.samp_cnt + args_state.prg.ibo_cnt) * 0x40 // 4))
+      if mode == adreno.SS6_INDIRECT: self.reg(adreno.REG_A6XX_SP_CS_TEX_CONST, *data64_le(args_state.buf.va_addr + args_state.prg.tex_off))
 
     if args_state.prg.ibo_cnt > 0:
-      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST6_IBO, state_src=adreno.SS6_INDIRECT,
+      self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST6_IBO, state_src=mode,
                                                                  state_block=adreno.SB6_CS_SHADER, num_unit=args_state.prg.ibo_cnt),
-               *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
-      self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
+               *data64_le(args_state.prg.samp_cnt * 0x40 // 4))
+      if mode == adreno.SS6_INDIRECT: self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
 
-    self.reg(adreno.REG_A6XX_SP_CS_CONFIG,
-             qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.prg.samp_cnt, ntex=args_state.prg.tex_cnt, nibo=args_state.prg.ibo_cnt))
+    self.reg(adreno.REG_A7XX_HLSQ_CS_CNTL, 0x140)
+    if args_state.prg.is_bindless:
+      cs_cfg = qreg.a6xx_sp_cs_config(enabled=True, bindless_tex=True, bindless_samp=True, bindless_ibo=True, bindless_ubo=True)
+    else: cs_cfg = qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.prg.samp_cnt, ntex=args_state.prg.tex_cnt, nibo=args_state.prg.ibo_cnt)
+    self.reg(adreno.REG_A6XX_SP_CS_CONFIG, cs_cfg)
     self.cmd(adreno.CP_RUN_OPENCL, 0)
-    self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
+    self._cache_flush(write_back=True, invalidate=False, sync=True, memsync=False)
     return self
 
 class QCOMArgsState(HCQArgsState):
   def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(buf, prg, bufs, vals=vals)
 
-    if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
+    # if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
 
     self.buf_info, self.args_info = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):]
 
@@ -201,7 +229,7 @@ class QCOMProgram(HCQProgram):
     self.max_threads = min(1024, ((384 * 32) // (max(1, (self.fregs + round_up(self.hregs, 2) // 2)) * 128)) * 128)
     dev._ensure_stack_size(self.hw_stack_offset * 4)
 
-    kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
+    kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x40, 0x100)
     super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
@@ -213,6 +241,9 @@ class QCOMProgram(HCQProgram):
 
   def _parse_lib(self):
     def _read_lib(off) -> int: return struct.unpack("I", self.lib[off:off+4])[0]
+
+    # from hexdump import hexdump
+    # hexdump(self.lib)
 
     # Extract image binary
     self.image_size = _read_lib(0x100)
@@ -237,18 +268,32 @@ class QCOMProgram(HCQProgram):
     # Collect kernel arguments (buffers) info.
     bdoff = round_up(image_desc_off + 0x158 + len(self.name), 4) + 8 * samp_cnt_in_file
     while bdoff + 32 <= len(self.lib):
-      length, _, _, offset_words, _, _, _, typ = struct.unpack("IIIIIIII", self.lib[bdoff:bdoff+32])
+      length, a, b, offset_words, c, d, e, typ = struct.unpack("IIIIIIII", self.lib[bdoff:bdoff+32])
       if length == 0: break
-      self.buf_info.append(SimpleNamespace(offset=offset_words * 4, type=typ))
+
+      is_bindless, bindless_id = struct.unpack("II", self.lib[bdoff+0x60:bdoff+0x68])
+      if is_bindless and typ == BUFTYPE_BUF: typ = BUFTYPE_TEX
+
+      self.buf_info.append(SimpleNamespace(offset=offset_words * 4, type=typ, bindless_id=bindless_id))
       bdoff += length
+
+    self.is_bindless = True # TODO: fixme
 
     # Setting correct offsets to textures/ibos.
     self.tex_cnt, self.ibo_cnt = sum(x.type is BUFTYPE_TEX for x in self.buf_info), sum(x.type is BUFTYPE_IBO for x in self.buf_info)
-    self.ibo_off, self.tex_off, self.samp_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt
-    cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off
+
+    if self.is_bindless: self.ibo_off, self.tex_off, self.samp_off, self.bindless_off = 2048, 2048, 2048, 2048
+    else:
+      self.ibo_off, self.tex_off, self.samp_off, self.bindless_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt, 0
+      cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off, self.bindless_off
+
     for x in self.buf_info:
-      if x.type is BUFTYPE_IBO: x.offset, cur_ibo_off = cur_ibo_off, cur_ibo_off + 0x40
-      elif x.type is BUFTYPE_TEX: x.offset, cur_tex_off = cur_tex_off, cur_tex_off + 0x40
+      if x.type is BUFTYPE_IBO:
+        if self.is_bindless: x.offset = self.bindless_off + x.bindless_id * 0x40
+        else: x.offset, cur_ibo_off = cur_ibo_off, cur_ibo_off + 0x40
+      elif x.type is BUFTYPE_TEX:
+        if self.is_bindless: x.offset = self.bindless_off + x.bindless_id * 0x40
+        else: x.offset, cur_tex_off = cur_tex_off, cur_tex_off + 0x40
 
     if _read_lib(0xb0) != 0: # check if we have constants.
       cdoff = _read_lib(0xac)
@@ -285,8 +330,26 @@ class QCOMAllocator(HCQAllocatorBase):
       desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
               qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_2D, pitch=pitch, pitchalign=pitchalign-6), 0,
               *data64_le(buf.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
+    else:  
+      # 00000000: 08 B2 80 12 03 00 00 00  10 00 00 80 00 00 00 00  ................
+      # 00000010: 00 E0 E7 00 40 00 00 00  00 00 00 08 0E 00 00 00  ....@...........
+      # 00000020: 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ................
+      # 00000030: 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ...............
+      # 08 B2 80 12
+      # ['0x12806888', '0x3', '0x80000000', '0x0', '0xf9ffb000', '0x3f', '0x40000000', '0x0']
+      desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=0, swiz_z=0, swiz_w=0, fmt=adreno.FMT6_32_FLOAT), qreg.a6xx_tex_const_1(width=size//4, height=0),
+              qreg.a6xx_tex_const_2(type=adreno.A6XX_TEX_BUFFER, pitch=0x10, pitchalign=0), 0,
+              *data64_le(buf.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x800000), qreg.a6xx_tex_const_7(0xe)]
+      desc[0] = 0x1280b208
+      desc[2] = 0x80000010
+      pitch, real_stride = size, size
+      # l = array.array('I', desc)
+      # print(l)
 
-      buf.texture_info = QCOMTextureInfo(pitch, real_stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]])
+      # from hexdump import hexdump
+      # hexdump(l)
+
+    buf.texture_info = QCOMTextureInfo(pitch, real_stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]])
     return buf
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
@@ -339,7 +402,7 @@ class QCOMDevice(HCQCompiled):
     info = kgsl.struct_kgsl_devinfo()
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
-    if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
+    # if QCOMDevice.gpu_id >= 800: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal, QCOMComputeQueue, None)
