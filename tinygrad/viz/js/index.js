@@ -218,7 +218,7 @@ async function renderProfiler() {
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, visible, offsetY });
+      data.tracks.set(k, { shapes, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null, id:`${k}-${j}`};
@@ -317,7 +317,7 @@ async function renderProfiler() {
         sum.x.push(allX[i], allX[i+1]);
         const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
       }
-      data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
+      data.tracks.set(k, { shapes:[sum], visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -346,7 +346,7 @@ async function renderProfiler() {
     xscale.domain(visibleX);
     // draw shapes
     const paths = [];
-    for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
+    for (const [_, { offsetY, shapes, visible, valueMap, pcolor }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
         const p = new Path2D();
@@ -385,7 +385,7 @@ async function renderProfiler() {
             lw += e.label[li].width;
           }
         }
-        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push(p); }
+        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push([p, pcolor]); }
       }
     }
     // draw axes
@@ -415,7 +415,7 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
-    for (const p of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(p); }
+    for (const [p, color] of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = color; ctx.stroke(p); }
   }
 
   function resize() {
