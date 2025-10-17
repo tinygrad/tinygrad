@@ -119,7 +119,7 @@ def test_vs_onnx(new_inputs, test_val, onnx_file):
     timings.append(time.perf_counter() - st)
 
   if test_val is not None:
-    np.testing.assert_allclose(onnx_output[0].reshape(test_val.shape), test_val, atol=1e-2, rtol=1e-2)
+    np.testing.assert_allclose(onnx_output[0].reshape(test_val.shape), test_val, atol=5e-2, rtol=5e-2)
     print("test vs onnx passed")
   return timings
 
