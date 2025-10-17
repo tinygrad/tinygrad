@@ -178,8 +178,11 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it
-  replaces = flatten([(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST])
-  return UOp(Ops.SUBSTITUTE, dtype=src.dtype, src=(src, UOp(Ops.NOOP, src=tuple(replaces[0::2])), UOp(Ops.NOOP, src=tuple(replaces[1::2]))))
+  if getenv("REAL_SUBSTITUTE"):
+    return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST})
+  else:
+    replaces = flatten([(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST])
+    return UOp(Ops.SUBSTITUTE, dtype=src.dtype, src=(src, UOp(Ops.NOOP, src=tuple(replaces[0::2])), UOp(Ops.NOOP, src=tuple(replaces[1::2]))))
 
 def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
