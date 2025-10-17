@@ -262,7 +262,7 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({...shapeMap.get(u32()), num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({...shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -287,12 +287,11 @@ async function renderProfiler() {
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
-          const { name, num, mode, info } = users[u]; p.appendChild(colored(`[${u}] ${name ?? 'ext'} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const { repr, num, mode, info, ref } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
           const metadata = info?.split("\n")[1]
           if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
           p.onclick = () => {
-            const cid = ctxs.findIndex(c => c.name === name);
-            if (cid != null) setCtxWithHistory(cid-1);
+            if (ref != null) setCtxWithHistory(ref);
           }
         }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
