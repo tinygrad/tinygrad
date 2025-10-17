@@ -424,7 +424,7 @@ class RemoteConnection:
     conns = RemoteConnection.all.keys()
     datas = {conn: conn.req.serialize() for conn in conns}
     reqs, hashes, hash_datas = sum(len(c.req._q) for c in conns), sum(len(c.req._h) for c in conns), sum(len(data) for data in datas.values())
-    resps = []
+    ret, resps = None, []
     with Timing(f"*** send {reqs:-3d} requests {hashes:-3d} hashes with len {hash_datas/1024:.2f} kB in ", enabled=DEBUG>=3):
       for conn,data in datas.items(): conn.conn.request("POST", "/batch", data)
       for conn in datas.keys():

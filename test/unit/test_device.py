@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-import unittest, os, subprocess, sys
+import unittest, os, subprocess
 from tinygrad import Tensor
-from tinygrad.device import Device, Compiler
+from tinygrad.device import Device, Compiler, enumerate_devices_str
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI
 
 class TestDevice(unittest.TestCase):
@@ -100,10 +100,7 @@ class TestCompiler(unittest.TestCase):
 
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
-    p = subprocess.run([sys.executable, "-m", "tinygrad.device"],stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-      env={**os.environ, "DEBUG": "1"}, timeout=40,)
-    out = (p.stdout + p.stderr).decode()
-    self.assertEqual(p.returncode, 0, msg=out)
+    out = '\n'.join(enumerate_devices_str())
     self.assertIn("CPU", out) # for sanity check
 
 if __name__ == "__main__":

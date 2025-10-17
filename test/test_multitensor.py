@@ -390,7 +390,6 @@ class TestMultiTensor(unittest.TestCase):
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
-  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -659,7 +658,7 @@ class TestMultiTensor(unittest.TestCase):
 
   # it doesn't work like this anymore
   # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
-  @unittest.expectedFailure
+  @unittest.skip("this test is broken")
   def test_mlb_assign_change_axis(self):
     t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
     t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)

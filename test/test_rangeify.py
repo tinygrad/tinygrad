@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import Context, GlobalCounters
-from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, UPat, Ops
+from tinygrad.helpers import Context, GlobalCounters, CI
+from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
@@ -17,8 +17,22 @@ class TestRangeifyAssign(unittest.TestCase):
     self.assertListEqual(lst, lst3)
     self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
+class TestRangeifyEdgeCase(unittest.TestCase):
+  def test_matmul_relu_cat(self):
+    a = Tensor.ones(100, 512).contiguous().realize()
+    c = Tensor.ones(1, 512).contiguous().realize()
+    cm = Tensor.ones(512, 512)
+    c = c @ cm
+    c = c.relu()
+
+    res = Tensor.cat(a, c, dim=0)
+    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
+
+# *** non CI rangeify tests below this line ***
+
 N = 256
 
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeifyOpt(unittest.TestCase):
   def test_randperm(self):
     Tensor.randperm(10000).realize()
@@ -54,6 +68,7 @@ class TestRangeifyOpt(unittest.TestCase):
     A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
     A.sum().realize()
 
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
     # ranges 1 and 3 are merging
@@ -229,76 +244,6 @@ class TestRangeify(unittest.TestCase):
 
 # contiguous + reduce can support ranges?
 
-@unittest.skip("okay to disable this for now")
-class TestOuterworld(unittest.TestCase):
-  def test_passthrough_range(self):
-    t = Tensor.rand(10, 10).realize()
-
-    # passthrough ranges
-    a = UOp.range(10, -1)
-    sel = t[a]
-    cpy = sel.contiguous(a).realize()
-
-    self.assertTrue((t==cpy).all().item())
-
-  def test_flip_range(self):
-    t = Tensor.rand(10, 10).realize()
-
-    # passthrough ranges
-    a = UOp.range(10, -1)
-    sel = t[9-a]
-    cpy = sel.contiguous(a).realize()
-
-    self.assertTrue((t.flip(0)==cpy).all().item())
-
-  def test_vmap(self):
-    def f(x): return x.sum(axis=0)*2
-
-    x = Tensor.ones(3, 10, 2).contiguous()
-
-    # vmap across axis 0
-    a = UOp.range(3, -1)
-    out = f(x[a])
-    out = out.contiguous(a)
-
-    # 3x2 grid of 20
-    out.realize()
-    print(out.numpy())
-
-  @unittest.skip("opts don't work")
-  def test_triple_gemm(self):
-    x = Tensor.rand(1, 16).realize()
-    W = Tensor.rand(3, 16, 16).realize()
-
-    manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
-
-    a = UOp.range(3, -1)
-    x = x.assign(x @ W[a])
-    out = x.contiguous(a)[-1].contiguous().realize()
-
-    self.assertTrue((manual==out).all().item())
-
-  def test_setitem_pyrange(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    for i in range(10):
-      o[i] = t[i]
-    o.realize()
-    self.assertTrue((t==o).all().item())
-
-  @unittest.skip("TODO: fix this")
-  def test_setitem(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    i = UOp.range(10, -1)
-    o[i] = t[i]
-    o.contiguous(i).realize()
-    self.assertTrue((t==o).all().item())
-
 @unittest.skip("pm_rangeify no longer exists. test this in a different way")
 class TestRangeifyPM(unittest.TestCase):
   def setUp(self): self.base = Tensor.empty(10*10).reshape(10, 10).contiguous()
@@ -349,17 +294,6 @@ class TestRangeifyPM(unittest.TestCase):
     a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))
     b = self.base.pad(((0,1),(0,0))).pad(((0,0),(0,1)))
     self.assert_same(a, b)
-
-class TestRangeifyEdgeCase(unittest.TestCase):
-  def test_matmul_relu_cat(self):
-    a = Tensor.ones(100, 512).contiguous().realize()
-    c = Tensor.ones(1, 512).contiguous().realize()
-    cm = Tensor.ones(512, 512)
-    c = c @ cm
-    c = c.relu()
-
-    res = Tensor.cat(a, c, dim=0)
-    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
 if __name__ == '__main__':
   unittest.main()

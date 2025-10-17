@@ -4,7 +4,7 @@ from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.uop.decompositions import xexp2, xlog2
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, sint_to_uop, range_str
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
 
@@ -226,7 +226,7 @@ class AMDLLVMRenderer(LLVMRenderer):
   def _render_footer(self, uops: list[UOp]) -> str:
     # TODO: this is copied from cstyle
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
-    requiredMaxThreadsPerBlock = sint_to_uop(prod(local_dims)).vmax
+    requiredMaxThreadsPerBlock = prod([d.vmax for d in local_dims])
     attributes = ["alwaysinline", "nounwind", '"no-builtins"',
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
@@ -248,7 +248,7 @@ class AMDLLVMRenderer(LLVMRenderer):
         (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
           x.src[2]), x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
       ])
-    if self.arch.split(":")[0] == "gfx1201":
+    if self.arch.split(":")[0] in {"gfx1200", "gfx1201"}:
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16.vec(8)), lambda x: UOp(Ops.WMMA, dtypes.uint16.vec(8),
           (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)), x.src[2].bitcast(dtypes.uint16.vec(8))), (*x.arg,))

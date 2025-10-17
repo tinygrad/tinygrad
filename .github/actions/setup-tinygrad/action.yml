@@ -41,6 +41,10 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
+  mesa:
+    description: "Install mesa"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -289,3 +293,13 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
+
+    # **** mesa ****
+    - name: Install mesa (linux)
+      if: inputs.mesa == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: sudo curl -L https://github.com/sirhcm/tinymesa/releases/download/tinymesa-32dc66c/libtinymesa_cpu-mesa-25.2.4-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
+    - name: Install mesa (macOS)
+      if: inputs.mesa == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: brew install sirhcm/tinymesa/tinymesa

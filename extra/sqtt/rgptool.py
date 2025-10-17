@@ -156,6 +156,9 @@ class RGP:
     sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
     device_props = sqtt_events[0].props
+    gfx_ver = device_props['gfx_target_version'] // 10000
+    gfx_iplvl = getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}_{(device_props['gfx_target_version']//100)%100}",
+                        getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}", None))
     sqtt_itrace_enabled = any([event.itrace for event in sqtt_events])
     sqtt_itrace_masked = not all_same([event.itrace for event in sqtt_events])
     sqtt_itrace_se_mask = functools.reduce(lambda a,b: a|b, [int(event.itrace) << event.se for event in sqtt_events], 0) if sqtt_itrace_masked else 0
@@ -193,7 +196,7 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id={110000: 0x744c, 110003: 0x7480}[device_props['gfx_target_version']],
+        device_id={110000: 0x744c, 110003: 0x7480, 120001: 0x7550}[device_props['gfx_target_version']],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
@@ -207,7 +210,7 @@ class RGP:
         sgpr_alloc_granularity=128,
         hardware_contexts=8,
         gpu_type=sqtt.SQTT_GPU_TYPE_DISCRETE,
-        gfxip_level=sqtt.SQTT_GFXIP_LEVEL_GFXIP_11_0,
+        gfxip_level=gfx_iplvl,
         gpu_index=0,
         gds_size=0,
         gds_per_shader_engine=0,
@@ -258,7 +261,7 @@ class RGP:
             major_version=0, minor_version=2,
           ),
           shader_engine_index=sqtt_event.se,
-          sqtt_version=sqtt.SQTT_VERSION_3_2,
+          sqtt_version={11: sqtt.SQTT_VERSION_3_2, 12: sqtt.SQTT_VERSION_3_3}.get(gfx_ver),
           _0=sqtt.union_sqtt_file_chunk_sqtt_desc_0(
             v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
               instrumentation_spec_version=1,

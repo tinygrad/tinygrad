@@ -2,8 +2,7 @@ import unittest, decimal, json, struct
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher
-from tinygrad.uop.ops import graph_rewrite, track_rewrites, TRACK_MATCH_STATS
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, TRACK_MATCH_STATS
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
@@ -15,21 +14,23 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
     sink = graph_rewrite(sink, TrackedPatternMatcher(pm.patterns), name=names[i] if names else None)
   return sink
 
-# real VIZ=1 pickles these tracked values
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt
-traces = [(tracked_keys, tracked_ctxs, uop_fields)]
-from tinygrad.viz.serve import get_metadata, uop_to_json, get_details
-def get_viz_list(): return get_metadata(traces)
+# real VIZ=1 loads the trace from a file, we just keep it in memory for tests
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, _name_cnt, RewriteTrace
+from tinygrad.viz import serve
+serve.trace = RewriteTrace(tracked_keys, tracked_ctxs, uop_fields)
+from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json
+def get_viz_list(): return get_rewrites(serve.trace)
 def get_viz_details(rewrite_idx:int, step:int) -> Generator[dict, None, None]:
   lst = get_viz_list()
   assert len(lst) > rewrite_idx, "only loaded {len(lst)} traces, expecting at least {idx}"
-  return get_details(tracked_ctxs[rewrite_idx][step])
+  return get_full_rewrite(tracked_ctxs[rewrite_idx][step])
 
 class BaseTestViz(unittest.TestCase):
   def setUp(self):
     # clear the global context
     for lst in [tracked_keys, tracked_ctxs, active_rewrites, _name_cnt]: lst.clear()
     Buffer.profile_events.clear()
+    cpu_events.clear()
     self.tms = TRACK_MATCH_STATS.value
     self.profile = PROFILE.value
     TRACK_MATCH_STATS.value = 2
@@ -332,7 +333,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg":{"users":[u("<I")[0] for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(unittest.TestCase):
@@ -441,7 +442,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(len(ret["events"]), 2)
+    self.assertEqual(len(ret["events"]), 4)
 
   def test_del_once(self):
     a = _alloc(1)
@@ -450,7 +451,7 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
-    self.assertEqual(len(ret["events"]), 3)
+    self.assertEqual(len(ret["events"]), 4)
 
   def test_alloc_free(self):
     a = _alloc(1)
@@ -460,7 +461,43 @@ class TestVizMemoryLayout(BaseTestViz):
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
-    self.assertEqual(len(ret["events"]), 4)
+    self.assertEqual(len(ret["events"]), 6)
+
+  def test_free_last(self):
+    bufs = []
+    for _ in range(3):
+      bufs.append(_alloc(1))
+      profile_marker("alloc")
+    device = bufs[0].device
+    while bufs:
+      b = bufs.pop()
+      del b
+      profile_marker("free")
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    ret = profile["layout"][f"{device} Memory"]
+    self.assertEqual(ret["peak"], 3)
+    self.assertEqual(len(ret["events"]), 6)
+    self.assertEqual(len(profile["markers"]), 6)
+
+  def test_producer_simple(self):
+    a = Tensor.ones(10, device="NULL")
+    Tensor.realize(a.add(1).contiguous())
+    b = Tensor.ones(10, device="NULL")
+    Tensor.realize(b.add(1).contiguous())
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    buffers = profile["layout"]["NULL Memory"]["events"]
+    programs = profile["layout"]["NULL"]["events"]
+    user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
+    self.assertEqual(len(user_cnt), len(programs))
+
+  def test_inflight_buf(self):
+    a = Tensor.empty(1, device="NULL")
+    n = 4
+    for i in range(n): (a+i).realize()
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    buffers = profile["layout"]["NULL Memory"]["events"]
+    user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
+    self.assertEqual(max(user_cnt), n)
 
 if __name__ == "__main__":
   unittest.main()
