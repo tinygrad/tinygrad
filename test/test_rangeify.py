@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import Context, GlobalCounters, CI, CPU_LVP
+from tinygrad.helpers import Context, GlobalCounters, CI, CPU_LVP, getenv
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 
 class TestRangeifyAssign(unittest.TestCase):
@@ -31,13 +31,14 @@ class TestRangeifyEdgeCase(unittest.TestCase):
 @unittest.skipIf(CPU_LVP, "broken in LVP")
 class TestPcontig(unittest.TestCase):
   def test_flash_attention(self):
-    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
-
-    # bigger
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
-
-    # llama 8B
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
+    if getenv("BIG") > 1:
+      # llama 8B
+      BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
+    elif getenv("BIG") > 0:
+      # bigger
+      BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
+    else:
+      BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
     def fa():
       Tensor.manual_seed(1337)
