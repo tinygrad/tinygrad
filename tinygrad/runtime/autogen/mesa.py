@@ -8,19 +8,17 @@
 #
 import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers
 def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
+  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa'], stderr=subprocess.DEVNULL).decode().strip()
   except Exception: return ''
-PATHS_TO_TRY = [
-  (BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'),
-  f'{BASE}/libtinymesa{EXT}',
-  f'{brew_prefix()}/lib/libtinymesa_cpu.dylib',
-]
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
   if library: return ctypes.CDLL(library)
-  for candidate in PATHS_TO_TRY:
-    try: return ctypes.CDLL(candidate)
-    except OSError: pass
+  try: return ctypes.CDLL((BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'))
+  except OSError: pass
+  try: return ctypes.CDLL(f'{BASE}/libtinymesa{EXT}')
+  except OSError: pass
+  try: return ctypes.CDLL(f'{brew_prefix()}/lib/libtinymesa_cpu.dylib')
+  except OSError: pass
   return None
 
 

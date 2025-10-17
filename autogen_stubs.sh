@@ -26,15 +26,10 @@ patch_dlopen() {
   path=$1; shift
   name=$1; shift
   cat <<EOF | sed -i "/import ctypes.*/r /dev/stdin" $path
-PATHS_TO_TRY = [
-$(for p in "$@"; do echo "  $p,"; done)
-]
 def _try_dlopen_$name():
   library = ctypes.util.find_library("$name")
   if library: return ctypes.CDLL(library)
-  for candidate in PATHS_TO_TRY:
-    try: return ctypes.CDLL(candidate)
-    except OSError: pass
+$(for p in "$@"; do echo "  try: return ctypes.CDLL($p)"; echo "  except OSError: pass"; done)
   return None
 EOF
 }
@@ -524,7 +519,7 @@ generate_mesa() {
   echo "lvp_nir_options = gzip.decompress(base64.b64decode('$LVP_NIR_OPTIONS'))" >> $BASE/mesa.py
   cat <<EOF | sed -i "/import ctypes.*/r /dev/stdin" $BASE/mesa.py
 def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
+  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa'], stderr=subprocess.DEVNULL).decode().strip()
   except Exception: return ''
 EOF
   sed -i "/in_dll/s/.*/try: &\nexcept AttributeError: pass/" $BASE/mesa.py
