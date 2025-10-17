@@ -169,6 +169,7 @@ VIZ = PROFILE = ContextVar("VIZ", 0)
 SPEC = ContextVar("SPEC", 0)
 # TODO: disable by default due to speed
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
+PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 
 @dataclass(frozen=True)
 class Metadata:
