@@ -499,7 +499,7 @@ class TestVizMemoryLayout(BaseTestViz):
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
     self.assertEqual(max(user_cnt), n)
     input_buf = buffers.pop()
-    assert all(u[2] == 0 for u in input_buf["users"])
+    assert all(u[2] == 0 for u in input_buf["arg"]["users"])
 
   def test_annotate_read_write(self):
     a = Tensor.ones(4, device="NULL").contiguous().realize()
