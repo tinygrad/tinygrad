@@ -201,11 +201,11 @@ def winowrite(ctx: IndexingContext, x: UOp, y: UOp, redu: UOp):
 
   tile_ranges_1 = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_bases]
   inner6_1      = [ctx.new_range(6, AxisType.LOOP) for _ in o_bases]
-  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
+  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.REDUCE) for r in other_loops_x]
   other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
   other_reduce_ranges_mhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_reduces_x]
 
-  mhat_redu = (XHAT.index(*other_reduce_ranges_x, *other_loop_ranges_xhat, *tile_ranges_1, *inner6_1) * GHAT.index(*other_reduce_ranges_x, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduce_ranges_x, arg=Ops.ADD)
+  mhat_redu = (XHAT.index(*other_reduces_x, *other_loop_ranges_xhat, *tile_ranges_1, *inner6_1) * GHAT.index(*other_reduces_x, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces_x, arg=Ops.ADD)
   
   MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges_1, *inner6_1, arg=BufferizeOpts(device='METAL', addrspace=AddrSpace.GLOBAL)) # which loops come first?
   print(f"MHAT: {MHAT.shape}")
