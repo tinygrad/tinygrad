@@ -345,11 +345,10 @@ async function renderProfiler() {
     for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
-        // generic polygon
-        if (e.width == null) {
+        const p = new Path2D();
+        if (e.width == null) { // generic polygon
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          const p = new Path2D();
           p.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
             p.lineTo(x[i], offsetY+e.y0[i]);
@@ -360,32 +359,29 @@ async function renderProfiler() {
           for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
           p.closePath();
           ctx.fillStyle = e.fillColor; ctx.fill(p);
-          if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push(p); }
-          continue;
-        }
-        // contiguous rect
-        if (e.x>et || e.x+e.width<st) continue;
-        const x = xscale(e.x);
-        const y = offsetY+e.y;
-        const width = xscale(e.x+e.width)-x;
-        ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
-        visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
-        // add label
-        if (e.label == null) continue;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        let labelX = x+2, labelWidth = 0;
-        const labelY = y+e.height/2;
-        for (const [i,l] of e.label.entries()) {
-          if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
-            if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
-            break;
+        } else { // contiguous rect
+          if (e.x>et || e.x+e.width<st) continue;
+          const x = xscale(e.x);
+          const y = offsetY+e.y;
+          const width = xscale(e.x+e.width)-x;
+          p.rect(x, y, width, e.height);
+          visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
+          ctx.fillStyle = e.fillColor; ctx.fill(p);
+          // add label
+          let lw = 0;
+          const lx = x+2, ly = y+e.height/2;
+          for (let li=0; li<e.label?.length; li++) {
+            if (lw+e.label[li].width+(li===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
+              if (lw>0) ctx.fillText("...", lx+lw, ly);
+              break;
+            }
+            ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            ctx.fillStyle = e.label[li].color;
+            ctx.fillText(e.label[li].st, lx+lw, ly);
+            lw += e.label[li].width;
           }
-          ctx.fillStyle = l.color;
-          ctx.fillText(l.st, labelX, labelY);
-          labelWidth += l.width;
-          labelX += l.width;
         }
+        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push(p); }
       }
     }
     // draw axes
