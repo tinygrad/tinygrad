@@ -17,7 +17,7 @@ class NullRenderer(CStyleLanguage):
 class NullProgram:
   def __init__(self, device:str, name:str, lib:bytes): self.device, self.name = device, name
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
-    with cpu_profile(self.name, self.device): return 1e-4
+    with cpu_profile(self.name, self.device): return 1e-3
 
 class NullAllocator(Allocator['NullDevice']):
   def _alloc(self, size, options): pass
@@ -28,7 +28,7 @@ class NullAllocator(Allocator['NullDevice']):
   def _offset(self, buf, offset:int, size:int): pass
 
 class NullGraph(MultiGraphRunner):
-  def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-3
+  def __call__(self, input_rawbuffers, var_vals, wait=False) -> float|None: return 1e-1
 
 class NullDevice(Compiled):
   def __init__(self, device:str):

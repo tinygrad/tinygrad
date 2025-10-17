@@ -136,25 +136,30 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
-  exec_points:dict[str, dict] = {}
+  exec_points:dict[str, ProfilePointEvent] = {}
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
+    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
     if dur == 0: continue
-    name, info = e.name, None
+    name, info, key = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
-        info = f"{sym_infer(p.estimates.ops, ei['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei['var_vals'])/t:4.1f}"+ \
-               f"|{sym_infer(p.estimates.lds,ei['var_vals'])/t:.1f} GB/s\n{ei['metadata']}"
+        info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
+               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{ei.arg['metadata']}"
+        key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    events.append(struct.pack("<IIIfI", enum_str(name, scache), option(ref), st-start_ts, dur, enum_str(info or "", scache)))
+    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), st-start_ts, dur, enum_str(info or "", scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
-  kernel_names = [enum_str(ei.key, scache) for ei in execs]
-  return struct.pack(f"<BIII{len(kernel_names)}I", 0, ts, key, len(kernel_names), *kernel_names)
+  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u8, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
+  for e in execs:
+    num = next(i for i,k in enumerate(e.arg["bufs"]) if k == key)
+    mode = 2 if (num in e.arg["inputs"] and num in e.arg["outputs"]) else 1 if (num in e.arg["outputs"]) else 0
+    ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
+  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIBB", *t) for t in ei_encoding)
 
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:

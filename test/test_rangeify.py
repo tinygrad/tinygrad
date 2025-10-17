@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, nn
-from tinygrad.helpers import Context, GlobalCounters, CI
+from tinygrad.helpers import Context, GlobalCounters, CI, CPU_LVP, getenv
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 
 class TestRangeifyAssign(unittest.TestCase):
@@ -27,6 +27,35 @@ class TestRangeifyEdgeCase(unittest.TestCase):
 
     res = Tensor.cat(a, c, dim=0)
     self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
+
+@unittest.skipIf(CPU_LVP, "broken in LVP")
+class TestPcontig(unittest.TestCase):
+  def test_flash_attention(self):
+    if getenv("BIG") > 1:
+      # llama 8B
+      BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
+    elif getenv("BIG") > 0:
+      # bigger
+      BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
+    else:
+      BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+
+    def fa():
+      Tensor.manual_seed(1337)
+      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
+      return q.scaled_dot_product_attention(k, v).realize()
+
+    with Context(PCONTIG=2, DEBUG=2):
+      GlobalCounters.reset()
+      ret = fa()
+    with Context(DEBUG=2):
+      GlobalCounters.reset()
+      cmp = fa()
+    with Context(DEBUG=0):
+      mse = ((cmp-ret)**2).sum().item()
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-6)
+
 
 # *** non CI rangeify tests below this line ***
 
@@ -214,33 +243,6 @@ class TestRangeify(unittest.TestCase):
     x = Tensor.empty(128, 1024)
     out = blk._feed_forward(x)
     out.realize()
-
-  @unittest.skip("RANGEIFY=0 does nothing")
-  def test_flash_attention(self):
-    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
-
-    # bigger
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
-
-    # llama 8B
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
-
-    def fa():
-      Tensor.manual_seed(1337)
-      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-      return q.scaled_dot_product_attention(k, v).realize()
-
-    with Context(DEBUG=4):
-      GlobalCounters.reset()
-      ret = fa()
-    with Context(RANGEIFY=0):
-      with Context(DEBUG=2):
-        GlobalCounters.reset()
-        cmp = fa()
-      with Context(DEBUG=0):
-        mse = ((cmp-ret)**2).sum().item()
-    print(f"mse: {mse}")
-    self.assertLessEqual(mse, 1e-6)
 
 # contiguous + reduce can support ranges?
 

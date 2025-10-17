@@ -326,14 +326,14 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
     event_type, event_count = u("<BI")
     if event_type == 0:
       for _ in range(event_count):
-        name, ref, st, dur, _ = u("<IIIfI")
-        v["events"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur})
+        name, ref, key, st, dur, _ = u("<IIIIfI")
+        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur})
     else:
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg":{"users":[u("<I")[0] for _ in range(u("<I")[0])]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIBB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(unittest.TestCase):
@@ -498,6 +498,27 @@ class TestVizMemoryLayout(BaseTestViz):
     buffers = profile["layout"]["NULL Memory"]["events"]
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
     self.assertEqual(max(user_cnt), n)
+    input_buf = buffers.pop()
+    assert all(u[3] == 0 for u in input_buf["arg"]["users"])
+
+  def test_annotate_read_write(self):
+    a = Tensor.ones(4, device="NULL").contiguous().realize()
+    b = a.assign(a+2)
+    c = a+1
+    Tensor.realize(b, c)
+    buf_events = load_profile(cpu_events+Buffer.profile_events)["layout"]["NULL Memory"]["events"]
+    users = next((b["arg"]["users"] for b in buf_events if len(b["arg"].get("users",[])) == 3))
+    self.assertEqual(users[0][3], 1) # write Tensor.ones
+    self.assertEqual(users[1][3], 2) # read+write Tensor.assign
+    self.assertEqual(users[2][3], 0) # readonly
+
+  def test_dedup_users(self):
+    a = Tensor.empty(1, device="NULL")
+    for _ in range(n:=4): a.add(1).realize()
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    programs = profile["layout"][a.device]["events"]
+    users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
+    self.assertEqual(len(programs), len(set(users)), n)
 
 if __name__ == "__main__":
   unittest.main()

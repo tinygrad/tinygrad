@@ -51,7 +51,7 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-let [workerUrl, worker] = [null, null];
+let workerUrl = null, worker = null;
 async function initWorker() {
   const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -202,6 +202,8 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/device)
   const colorMap = new Map();
+  // map shapes by event key
+  const shapeMap = new Map();
   data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
@@ -219,7 +221,8 @@ async function renderProfiler() {
       data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
+        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
+        if (e.key != null) shapeMap.set(e.key, e);
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -259,7 +262,7 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => strings[u32()]);
+          free.users = Array.from({ length: u32() }, () => ({...shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -284,10 +287,11 @@ async function renderProfiler() {
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
-          const name = users[u]; p.appendChild(colored(`[${u}] ${name}`));
+          const { repr, num, mode, info, ref } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const metadata = info?.split("\n")[1]
+          if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
           p.onclick = () => {
-            const cid = ctxs.findIndex(c => c.name === name);
-            if (cid != null) setCtxWithHistory(cid-1);
+            if (ref != null) setCtxWithHistory(ref);
           }
         }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
@@ -345,11 +349,10 @@ async function renderProfiler() {
     for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
-        // generic polygon
-        if (e.width == null) {
+        const p = new Path2D();
+        if (e.width == null) { // generic polygon
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
-          const p = new Path2D();
           p.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
             p.lineTo(x[i], offsetY+e.y0[i]);
@@ -360,32 +363,29 @@ async function renderProfiler() {
           for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
           p.closePath();
           ctx.fillStyle = e.fillColor; ctx.fill(p);
-          if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push(p); }
-          continue;
-        }
-        // contiguous rect
-        if (e.x>et || e.x+e.width<st) continue;
-        const x = xscale(e.x);
-        const y = offsetY+e.y;
-        const width = xscale(e.x+e.width)-x;
-        ctx.fillStyle = e.fillColor; ctx.fillRect(x, y, width, e.height);
-        visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
-        // add label
-        if (e.label == null) continue;
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        let labelX = x+2, labelWidth = 0;
-        const labelY = y+e.height/2;
-        for (const [i,l] of e.label.entries()) {
-          if (labelWidth+l.width+(i===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
-            if (labelWidth !== 0) ctx.fillText("...", labelX, labelY);
-            break;
+        } else { // contiguous rect
+          if (e.x>et || e.x+e.width<st) continue;
+          const x = xscale(e.x);
+          const y = offsetY+e.y;
+          const width = xscale(e.x+e.width)-x;
+          p.rect(x, y, width, e.height);
+          visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
+          ctx.fillStyle = e.fillColor; ctx.fill(p);
+          // add label
+          let lw = 0;
+          const lx = x+2, ly = y+e.height/2;
+          for (let li=0; li<e.label?.length; li++) {
+            if (lw+e.label[li].width+(li===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
+              if (lw>0) ctx.fillText("...", lx+lw, ly);
+              break;
+            }
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = e.label[li].color;
+            ctx.fillText(e.label[li].st, lx+lw, ly);
+            lw += e.label[li].width;
           }
-          ctx.fillStyle = l.color;
-          ctx.fillText(l.st, labelX, labelY);
-          labelWidth += l.width;
-          labelX += l.width;
         }
+        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push(p); }
       }
     }
     // draw axes
@@ -516,11 +516,6 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
-function appendTd(tr, value, unit=null) {
-  const fmt = (typeof value === "number" && !Number.isInteger(value)) ? value.toFixed(2) : value;
-  tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
-}
-
 function setActive(e) {
   if (e == null) return;
   e.classList.add("active");
@@ -645,7 +640,7 @@ async function main() {
         tr.className = "main-row code-row";
         for (const [i,value] of r.entries()) {
           // string format scalar values
-          if (!Array.isArray(value)) appendTd(tr, value);
+          if (!Array.isArray(value)) tr.appendChild(document.createElement("td")).innerText = value;
           // display arrays in a bar graph
           else {
             const segmentsTd = tr.appendChild(document.createElement("td"));
