@@ -51,7 +51,7 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-let [workerUrl, worker] = [null, null];
+let workerUrl = null, worker = null;
 async function initWorker() {
   const resp = await Promise.all(["/assets/dagrejs.github.io/project/dagre/latest/dagre.min.js","/js/worker.js"].map(u => fetch(u)));
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
@@ -375,7 +375,7 @@ async function renderProfiler() {
               if (lw>0) ctx.fillText("...", lx+lw, ly);
               break;
             }
-            ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            ctx.textBaseline = "middle";
             ctx.fillStyle = e.label[li].color;
             ctx.fillText(e.label[li].st, lx+lw, ly);
             lw += e.label[li].width;
@@ -512,11 +512,6 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
-function appendTd(tr, value, unit=null) {
-  const fmt = (typeof value === "number" && !Number.isInteger(value)) ? value.toFixed(2) : value;
-  tr.appendChild(document.createElement("td")).innerText = unit == "us" ? formatTime(value) : fmt+(unit ?? "");
-}
-
 function setActive(e) {
   if (e == null) return;
   e.classList.add("active");
@@ -641,7 +636,7 @@ async function main() {
         tr.className = "main-row code-row";
         for (const [i,value] of r.entries()) {
           // string format scalar values
-          if (!Array.isArray(value)) appendTd(tr, value);
+          if (!Array.isArray(value)) tr.appendChild(document.createElement("td")).innerText = value;
           // display arrays in a bar graph
           else {
             const segmentsTd = tr.appendChild(document.createElement("td"));
