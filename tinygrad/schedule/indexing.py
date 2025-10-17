@@ -172,7 +172,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       ending_ranges[x] = []
       # mark all ranges as ended
       assert rctx.realize_map[x] is None
-      rctx.realize_map[x] = list(range(len(x.shape)))
+      rctx.realize_map[x] = list(range(len(out_rngs)))
     elif x.op in {Ops.MSTACK, Ops.MSELECT}:
       # treat MSTACK/MSELECT like SINK
       continue
