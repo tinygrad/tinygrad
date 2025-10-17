@@ -11,7 +11,7 @@ class TestRangeifyAssign(unittest.TestCase):
     lst = ret.tolist()
     lst2 = A.tolist()
     lst3 = B.tolist()
-    Sprint(lst)
+    print(lst)
     print(lst2)
     print(lst3)
     self.assertListEqual(lst, lst3)
