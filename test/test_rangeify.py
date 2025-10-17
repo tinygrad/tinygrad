@@ -63,7 +63,7 @@ class TestPcontig(unittest.TestCase):
       return ret
 
     with Context(PCONTIG=2, REAL_SUBSTITUTE=1, DEBUG=2):
-      grads= fa_bw()
+      grads = fa_bw()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
 
     with Context(DEBUG=2):
