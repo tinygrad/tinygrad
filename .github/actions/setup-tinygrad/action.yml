@@ -302,4 +302,4 @@ runs:
     - name: Install mesa (macOS)
       if: inputs.mesa == 'true' && runner.os == 'macOS'
       shell: bash
-      run: brew install sirhcm/tinymesa/tinymesa
+      run: brew install sirhcm/tinymesa/tinymesa_cpu
