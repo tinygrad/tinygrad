@@ -202,6 +202,8 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/device)
   const colorMap = new Map();
+  // map shapes by event key
+  const shapeMap = new Map();
   data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
@@ -219,7 +221,8 @@ async function renderProfiler() {
       data.tracks.set(k, { shapes, visible, offsetY });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
+        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
+        if (e.key != null) shapeMap.set(e.key, e);
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -259,7 +262,7 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({name:strings[u32()], num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({...shapeMap.get(u32()), num:u8(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -284,7 +287,9 @@ async function renderProfiler() {
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
-          const { name, num, mode } = users[u]; p.appendChild(colored(`[${u}] ${name} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const { name, num, mode, info } = users[u]; p.appendChild(colored(`[${u}] ${name ?? 'ext'} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const metadata = info?.split("\n")[1]
+          if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
           p.onclick = () => {
             const cid = ctxs.findIndex(c => c.name === name);
             if (cid != null) setCtxWithHistory(cid-1);

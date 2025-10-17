@@ -326,8 +326,8 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
     event_type, event_count = u("<BI")
     if event_type == 0:
       for _ in range(event_count):
-        name, ref, st, dur, _ = u("<IIIfI")
-        v["events"].append({"name":strings[name], "ref":option(ref), "st":st, "dur":dur})
+        name, ref, key, st, dur, _ = u("<IIIIfI")
+        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur})
     else:
       v["peak"] = u("<Q")[0]
       for _ in range(event_count):
@@ -511,6 +511,14 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(users[0][2], 1) # write Tensor.ones
     self.assertEqual(users[1][2], 2) # read+write Tensor.assign
     self.assertEqual(users[2][2], 0) # readonly
+
+  def test_dedup_users(self):
+    a = Tensor.empty(1, device="NULL")
+    for _ in range(n:=4): a.add(1).realize()
+    profile = load_profile(cpu_events+Buffer.profile_events)
+    programs = profile["layout"][a.device]["events"]
+    users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
+    self.assertEqual(len(programs), len(set(users)), n)
 
 if __name__ == "__main__":
   unittest.main()
