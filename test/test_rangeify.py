@@ -11,7 +11,7 @@ class TestRangeifyAssign(unittest.TestCase):
     lst = ret.tolist()
     lst2 = A.tolist()
     lst3 = B.tolist()
-    print(lst)
+    Sprint(lst)
     print(lst2)
     print(lst3)
     self.assertListEqual(lst, lst3)
@@ -42,21 +42,29 @@ class TestPcontig(unittest.TestCase):
   def test_flash_attention_bw(self):
     def fa_bw():
       Tensor.manual_seed(1337)
-      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize().requires_grad_() for _ in range(3)]
-      q.scaled_dot_product_attention(k, v).sum().backward()
+      with Context(DEBUG=0):
+        q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize().requires_grad_() for _ in range(3)]
+        attn_output = nn.Linear(HEADS*EMB, HEADS*EMB, bias=False)
+        attn_output.weight.requires_grad_().realize()
+        target = Tensor.rand(BS, SEQLEN, HEADS*EMB).contiguous().realize()
+
+      attn = q.scaled_dot_product_attention(k, v)
+      attn = attn.transpose(1, 2).reshape(BS, SEQLEN, -1)
+      attn = attn_output(attn)
+      loss = (attn - target).square().mean()
+      loss.backward()
+      Tensor.realize(q.grad, k.grad, v.grad)
       return q,k,v
 
     with Context(PCONTIG=2, DEBUG=2):
       GlobalCounters.reset()
       q,k,v = fa_bw()
       grads = q.grad, k.grad, v.grad
-      Tensor.realize(*grads)
 
     with Context(DEBUG=2):
       GlobalCounters.reset()
       q,k,v = fa_bw()
       cmp_grads = q.grad, k.grad, v.grad
-      Tensor.realize(*cmp_grads)
 
     with Context(DEBUG=0):
       mses = [((x-y)**2).sum().item() for x,y in zip(grads, cmp_grads)]
