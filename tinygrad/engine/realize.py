@@ -167,6 +167,7 @@ class ExecItem:
     bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
     if PROFILE:
       payload = {"metadata":self.metadata, "var_vals":var_vals, "bufs":[b.trace_num for b in bufs]}
+      payload["outputs"], payload["inputs"] = (self.prg.p.outs, self.prg.p.ins) if isinstance(self.prg, CompiledRunner) else ([0], [1])
       cpu_events.append(ProfilePointEvent(self.prg.device, "exec", self.prg.display_name, payload))
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:

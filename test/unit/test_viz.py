@@ -333,7 +333,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg":{"users":[u("<I")[0] for _ in range(u("<I")[0])]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IBB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(unittest.TestCase):
@@ -498,6 +498,19 @@ class TestVizMemoryLayout(BaseTestViz):
     buffers = profile["layout"]["NULL Memory"]["events"]
     user_cnt = [len(b["arg"]["users"]) for b in buffers if b["arg"].get("users")]
     self.assertEqual(max(user_cnt), n)
+    input_buf = buffers.pop()
+    assert all(u[2] == 0 for u in input_buf["arg"]["users"])
+
+  def test_annotate_read_write(self):
+    a = Tensor.ones(4, device="NULL").contiguous().realize()
+    b = a.assign(a+2)
+    c = a+1
+    Tensor.realize(b, c)
+    buf_events = load_profile(cpu_events+Buffer.profile_events)["layout"]["NULL Memory"]["events"]
+    users = next((b["arg"]["users"] for b in buf_events if len(b["arg"].get("users",[])) == 3))
+    self.assertEqual(users[0][2], 1) # write Tensor.ones
+    self.assertEqual(users[1][2], 2) # read+write Tensor.assign
+    self.assertEqual(users[2][2], 0) # readonly
 
 if __name__ == "__main__":
   unittest.main()

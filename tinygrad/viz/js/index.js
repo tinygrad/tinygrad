@@ -259,7 +259,7 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => strings[u32()]);
+          free.users = Array.from({ length: u32() }, () => ({name:strings[u32()], num:u8(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -284,7 +284,7 @@ async function renderProfiler() {
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
-          const name = users[u]; p.appendChild(colored(`[${u}] ${name}`));
+          const { name, num, mode } = users[u]; p.appendChild(colored(`[${u}] ${name} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
           p.onclick = () => {
             const cid = ctxs.findIndex(c => c.name === name);
             if (cid != null) setCtxWithHistory(cid-1);
