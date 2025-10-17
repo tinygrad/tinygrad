@@ -19,6 +19,7 @@ def compile(onnx_file):
   input_types = {name: spec.dtype for name, spec in run_onnx.graph_inputs.items()}
 
   # Float inputs and outputs to tinyjits for openpilot are always float32
+  # TODO this seems dumb
   input_types = {k:(dtypes.float32 if v is dtypes.float16 else v) for k,v in input_types.items()}
   Tensor.manual_seed(100)
   inputs = {k:Tensor(Tensor.randn(*shp, dtype=input_types[k]).mul(8).realize().numpy(), device='NPY') for k,shp in sorted(input_shapes.items())}
@@ -94,7 +95,7 @@ def test_vs_compile(run, inputs, test_val=None):
   np.testing.assert_raises(AssertionError, np.testing.assert_array_equal, val, changed_val)
   return val
 
-def test_vs_onnx(new_inputs, test_val, onnx_file):
+def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   import onnxruntime as ort
   
   onnx_inputs = {k:v.numpy() for k,v in new_inputs.items()}
@@ -118,9 +119,8 @@ def test_vs_onnx(new_inputs, test_val, onnx_file):
     onnx_output = onnx_session.run([onnx_model.graph.output[0].name], onnx_inputs)
     timings.append(time.perf_counter() - st)
 
-  if test_val is not None:
-    np.testing.assert_allclose(onnx_output[0].reshape(test_val.shape), test_val, atol=5e-2, rtol=5e-2)
-    print("test vs onnx passed")
+  np.testing.assert_allclose(onnx_output[0].reshape(test_val.shape), test_val, atol=tol, rtol=tol)
+  print("test vs onnx passed")
   return timings
 
 if __name__ == "__main__":
@@ -130,5 +130,6 @@ if __name__ == "__main__":
   with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
 
   test_vs_compile(pickle_loaded, inputs, outputs)
-  if not getenv("FLOAT16"): test_vs_onnx(inputs, outputs, onnx_file)
+  tol = 1e-1 if getenv("FLOAT16") else 1e-4
+  test_vs_onnx(inputs, outputs, onnx_file, tol)
 
