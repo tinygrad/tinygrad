@@ -28,7 +28,10 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     res = Tensor.cat(a, c, dim=0)
     self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
-if getenv("BIG") > 1:
+if getenv("BIG") > 2:
+  # llama 8B (8192)
+  BS, HEADS, SEQLEN, EMB = 4, 32, 8192, 128
+elif getenv("BIG") > 1:
   # llama 8B
   BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
 elif getenv("BIG") > 0:
@@ -51,10 +54,10 @@ class TestPcontig(unittest.TestCase):
       GlobalCounters.reset()
       attn = q.scaled_dot_product_attention(k, v)
       attn = attn.transpose(1, 2).reshape(BS, SEQLEN, -1)
-      attn = attn_output(attn)
-      loss = (attn - target).square().mean()
+      out = attn_output(attn)
+      loss = (out - target).square().mean()
       loss.backward()
-      Tensor.realize(q.grad, k.grad, v.grad)
+      Tensor.realize(out, q.grad, k.grad, v.grad)
       return q,k,v
 
     with Context(PCONTIG=2, DEBUG=2):
