@@ -380,7 +380,7 @@ jobs:
       # - name: Test openpilot simple_plan vision model correctness (float32)
       #   run: DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/35ff4f4577002f2685e50c8346addae33fe8da27a41dd4d6a0f14d1f4b1af81b
       - name: Test openpilot LLVM compile
-        run: CPU=1 CPU_LLVM=1 LLVMOPT=1 JIT=2 BEAM=0 python examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+        run: CPU=1 CPU_LLVM=1 LLVMOPT=1 JIT=2 BEAM=0 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision.onnx
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
