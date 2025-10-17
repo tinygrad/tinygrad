@@ -218,7 +218,9 @@ def late_buffer_view(t:UOp, b:UOp):
 
     # walk up for the INDEX
     x = t
-    while not any(u.op is Ops.INDEX for u in x.src): x = x.src[0]
+    while not any(u.op is Ops.INDEX for u in x.src):
+      assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
+      x = x.src[0]
     x = next(u for u in x.src if u.op is Ops.INDEX)
 
     if len(shape) == 0: offset = x.src[1].arg
