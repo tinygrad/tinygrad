@@ -221,7 +221,7 @@ async function renderProfiler() {
       data.tracks.set(k, { shapes, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null, id:`${k}-${j}`};
+        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -241,7 +241,17 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key:e.id, ...shapeRef };
+        const html = document.createElement("div");
+        html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
+        if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
+        if (shapeRef != null) {
+          const a = html.appendChild(document.createElement("a"));
+          a.innerText = "\nView Codegen Rewrite"; a.style.cursor = "pointer";
+          a.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
+        }
+        // tiny device events go straight to the rewrite rule
+        const key = k.startsWith("TINY") ? null : `${k}-${j}`;
+        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), html, key, ...shapeRef };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -459,6 +469,7 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
+    if (foundRect?.step != null && foundRect?.key == null) { return setCtxWithHistory(foundRect.ctx, foundRect.step); }
     if (foundRect?.key != focusedShape?.key) { focusShape(foundRect); }
   });
 
