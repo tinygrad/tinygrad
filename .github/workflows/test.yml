@@ -769,12 +769,13 @@ jobs:
 # ****** OSX Tests ******
 
   testmetal:
-    name: MacOS (unit)
+    name: MacOS (unit, debug wino conv)
     runs-on: macos-14
     timeout-minutes: 20
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
@@ -785,46 +786,40 @@ jobs:
         cuda: 'true'
         ocelot: 'true'
         llvm: 'true'
-    - name: Run unit tests
-      run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
-    - name: Run ONNX
-      run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-    - name: Test tensor core ops (fake)
-      run: METAL=1 DEBUG=3 TC=2 python test/test_ops.py TestOps.test_gemm
-    - name: Test tensor core ops (real)
-      run: METAL=1 DEBUG=3 python test/test_ops.py TestOps.test_big_gemm
-    - name: Test Beam Search
-      run: METAL=1 IGNORE_BEAM_CACHE=1 python3 -m pytest extra/optimization/test_beam_search.py
-    #- name: Fuzz Test linearizer
-    #  run: METAL=1 DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
-    - name: Run TRANSCENDENTAL math
-      run: METAL=1 TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
-    - name: Run pytest (amd)
-      env:
-        MOCKGPU: 1
-        AMD: 1
-        AMD_LLVM: 0
-        FORWARD_ONLY: 1
+
+    - name: System info (macOS/Xcode/GPU/Python)
       run: |
-        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
-    - name: Run pytest (amd with llvm backend)
+        sw_vers
+        xcodebuild -version || true
+        system_profiler SPDisplaysDataType || true
+        python -V
+        python -c "import platform, sys; print('platform:', platform.platform()); print('sys.maxsize:', sys.maxsize)"
+        python -c "import numpy; import tinygrad; print('numpy', numpy.__version__); print('tinygrad import ok')"
+        pip freeze | sort || true
+
+    - name: Repro failing test with verbose Metal + tinygrad debug
       env:
-        MOCKGPU: 1
-        AMD: 1
-        AMD_LLVM: 1
-        FORWARD_ONLY: 1
+        METAL: "1"
+        DEBUG: "4"                 # tinygrad kernel + schedule logs
+        PYTHONUNBUFFERED: "1"      # flush logs
+        PYTHONFAULTHANDLER: "1"    # dump on hangs
+        MTL_DEBUG_LAYER: "1"       # Metal Validation
+        MTL_SHADER_VALIDATION: "1" # extra shader checks
+        # Optional: dial down parallelism to avoid log interleaving + reduce nondeterminism
+        # OMP_NUM_THREADS: "1"
+        # Accelerate framework can spawn threads; sometimes good to pin:
+        # VECLIB_MAXIMUM_THREADS: "1"
       run: |
-        python -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py test/device/test_amd_llvm.py --durations=20
-    - name: Run pytest (ptx)
-      env:
-        MOCKGPU: 1
-        NV_PTX: 1
-        NV: 1
-        FORWARD_ONLY: 1
-      run: |
-        python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
-    - name: Run process replay tests
-      uses: ./.github/actions/process-replay
+        set -o pipefail
+        echo "=== Running single failing test sequentially ==="
+        python -m pytest -s -vv -n=0 test/unit/test_conv.py::TestConv::test_two_overlapping_binops_no_rerun_wino 2>&1 | tee metal_debug.log
+
+    - name: Upload debug log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: metal-debug-log
+        path: metal_debug.log
 
   osxwebgpu:
     name: MacOS (WebGPU)
