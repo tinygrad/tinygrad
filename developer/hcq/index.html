@@ -1,0 +1,3127 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://docs.tinygrad.org/developer/hcq/">
+      
+      
+        <link rel="prev" href="../runtime/">
+      
+      
+        <link rel="next" href="../am/">
+      
+      
+      <link rel="icon" href="../../favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.22">
+    
+    
+      
+        <title>HCQ - tinygrad docs</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.84d31ad4.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_markdown_exec_pyodide.css">
+    
+      <link rel="stylesheet" href="../../assets/_markdown_exec_ansi.css">
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="lime">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#hcq-compatible-runtime" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="tinygrad docs" class="md-header__button md-logo" aria-label="tinygrad docs" data-md-component="logo">
+      
+  <img src="../../logo_tiny_dark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            tinygrad docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              HCQ
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="lime"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="lime"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="lime"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tinygrad/tinygrad/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="tinygrad docs" class="md-nav__button md-logo" aria-label="tinygrad docs" data-md-component="logo">
+      
+  <img src="../../logo_tiny_dark.svg" alt="logo">
+
+    </a>
+    tinygrad docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tinygrad/tinygrad/" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            Home
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Quickstart
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../showcase/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Showcase
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mnist/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    MNIST Tutorial
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_5" id="__nav_1_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    API Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_5">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1_5_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tensor/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    Tensor
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1_5_1" id="__nav_1_5_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_1_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            Tensor
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tensor/properties/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Properties
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tensor/creation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Creation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tensor/movement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Movement
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tensor/elementwise/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Elementwise
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tensor/ops/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Complex Ops
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dtypes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    dtypes
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../nn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    nn (Neural Networks)
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../env_vars/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Environment Variables
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Runtime
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_1_6" id="__nav_1_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Developer
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_1_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1_6">
+            <span class="md-nav__icon md-icon"></span>
+            Developer
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../developer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Intro
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../layout/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Layout
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../speed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Speed
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../uop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    UOp
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1_6_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_1_6_5" id="__nav_1_6_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Grouper
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_1_6_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1_6_5">
+            <span class="md-nav__icon md-icon"></span>
+            Grouper
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kernelize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Kernel Creation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1_6_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_1_6_6" id="__nav_1_6_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Runtime
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_1_6_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_1_6_6">
+            <span class="md-nav__icon md-icon"></span>
+            Runtime
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Runtime Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    HCQ
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    HCQ
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      Overview
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#command-queues" class="md-nav__link">
+    <span class="md-ellipsis">
+      Command Queues
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HWQueue
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" HWQueue">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.signal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;signal
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.wait" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;wait
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.timestamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;timestamp
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.bind" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;bind
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.submit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;submit
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.memory_barrier" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;memory_barrier
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.exec" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;exec
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HWQueue.copy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;copy
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hcq-compatible-device" class="md-nav__link">
+    <span class="md-ellipsis">
+      HCQ Compatible Device
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQCompiled" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HCQCompiled
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" HCQCompiled">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#signals" class="md-nav__link">
+    <span class="md-ellipsis">
+      Signals
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQSignal" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HCQSignal
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" HCQSignal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQSignal.value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;value
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQSignal.timestamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;timestamp
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQSignal.wait" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;wait
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" wait">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#synchronization-signals" class="md-nav__link">
+    <span class="md-ellipsis">
+      Synchronization signals
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hcq-compatible-allocator" class="md-nav__link">
+    <span class="md-ellipsis">
+      HCQ Compatible Allocator
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQAllocator" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HCQAllocator
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" HCQAllocator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#hcq-allocator-result-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      HCQ Allocator Result Protocol
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQBuffer" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HCQBuffer
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" HCQBuffer">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQBuffer._mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;_mappings
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQBuffer.mapped_devs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;mapped_devs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQBuffer.mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;mappings
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQBuffer.cpu_view" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;cpu_view
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQBuffer.offset" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;offset
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hcq-compatible-program" class="md-nav__link">
+    <span class="md-ellipsis">
+      HCQ Compatible Program
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQProgram" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HCQProgram
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" HCQProgram">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQProgram.__call__" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;__call__
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQProgram._fini" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;_fini
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQProgram.fill_kernargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;fill_kernargs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#arguments-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      Arguments State
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQArgsState" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-class"></code>&nbsp;HCQArgsState
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=" HCQArgsState">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQArgsState.bind_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-attribute"></code>&nbsp;bind_data
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tinygrad.runtime.support.hcq.HCQArgsState.bind_sints_to_buf" class="md-nav__link">
+    <span class="md-ellipsis">
+      <code class="doc-symbol doc-symbol-toc doc-symbol-method"></code>&nbsp;bind_sints_to_buf
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#synchronization" class="md-nav__link">
+    <span class="md-ellipsis">
+      Synchronization
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hcqgraph" class="md-nav__link">
+    <span class="md-ellipsis">
+      HCQGraph
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../am/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    AM Driver
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tinybox/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    tinybox
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/tinygrad/tinygrad/edit/master/docs/developer/hcq.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+    
+      
+    
+    <a href="https://github.com/tinygrad/tinygrad/raw/master/docs/developer/hcq.md" title="View source of this page" class="md-content__button md-icon">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M17 18c.56 0 1 .44 1 1s-.44 1-1 1-1-.44-1-1 .44-1 1-1m0-3c-2.73 0-5.06 1.66-6 4 .94 2.34 3.27 4 6 4s5.06-1.66 6-4c-.94-2.34-3.27-4-6-4m0 6.5a2.5 2.5 0 0 1-2.5-2.5 2.5 2.5 0 0 1 2.5-2.5 2.5 2.5 0 0 1 2.5 2.5 2.5 2.5 0 0 1-2.5 2.5M9.27 20H6V4h7v5h5v4.07c.7.08 1.36.25 2 .49V8l-6-6H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4.5a8.2 8.2 0 0 1-1.23-2"/></svg>
+    </a>
+  
+
+
+<h1 id="hcq-compatible-runtime">HCQ Compatible Runtime<a class="headerlink" href="#hcq-compatible-runtime" title="Permanent link">¤</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">¤</a></h2>
+<p>The main aspect of HCQ-compatible runtimes is how they interact with devices. In HCQ, all interactions with devices occur in a hardware-friendly manner using <a href="#command-queues">command queues</a>. This approach allows commands to be issued directly to devices, bypassing runtime overhead such as HIP or CUDA. Additionally, by using the HCQ API, these runtimes can benefit from various optimizations and features, including <a href="#hcqgraph">HCQGraph</a> and built-in profiling capabilities.</p>
+<h3 id="command-queues">Command Queues<a class="headerlink" href="#command-queues" title="Permanent link">¤</a></h3>
+<p>To interact with devices you create a <code class="language-python highlight"><span class="n">HWQueue</span></code>. Some methods are required, like timestamp and synchronization methods like <a href="#tinygrad.runtime.support.hcq.HWQueue.signal">signal</a> and <a href="#tinygrad.runtime.support.hcq.HWQueue.wait">wait</a>, while others are dependent on it being a compute or copy queue.</p>
+<p>For example, the following Python code enqueues a wait, execute, and signal command on the HCQ-compatible device:
+<div class="language-python highlight"><pre><span></span><code><span class="n">HWQueue</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">signal_to_wait</span><span class="p">,</span> <span class="n">value_to_wait</span><span class="p">)</span> \
+         <span class="o">.</span><span class="n">exec</span><span class="p">(</span><span class="n">program</span><span class="p">,</span> <span class="n">args_state</span><span class="p">,</span> <span class="n">global_dims</span><span class="p">,</span> <span class="n">local_dims</span><span class="p">)</span> \
+         <span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal_to_fire</span><span class="p">,</span> <span class="n">value_to_fire</span><span class="p">)</span> \
+         <span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">your_device</span><span class="p">)</span>
+</code></pre></div></p>
+<p>Each runtime should implement the required functions that are defined in the <code class="language-python highlight"><span class="n">HWQueue</span></code> classes.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tinygrad.runtime.support.hcq.HWQueue" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">HWQueue</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue" class="headerlink" title="Permanent link">¤</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">HWQueue</span><span class="p">()</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Generic&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Generic">Generic</a>[<span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span>, <span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span>, <span title="tinygrad.runtime.support.hcq.ProgramType">ProgramType</span>, <span title="tinygrad.runtime.support.hcq.ArgsStateType">ArgsStateType</span>]</code></p>
+
+
+        <p>A base class for hardware command queues in the HCQ (Hardware Command Queue) API.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+<p><span class="doc-section-title">Methods:</span></p>
+    <ul>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;signal&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.signal&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.signal">signal</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;wait&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.wait&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.wait">wait</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;timestamp&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.timestamp&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.timestamp">timestamp</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;bind&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.bind&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.bind">bind</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Associates the queue with a specific device for optimized execution.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;submit&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.submit&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.submit">submit</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Submits the command queue to a specific device for execution.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;memory_barrier&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.memory_barrier&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.memory_barrier">memory_barrier</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;exec&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.exec&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.exec">exec</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Enqueues an execution command for a kernel program. Only on compute queues.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;copy&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue.copy&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue.copy">copy</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Enqueues a copy command to transfer data. Only on copy queues.</p>
+            </div>
+          </li>
+    </ul>
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.signal" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">signal</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.signal" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">signal</span><span class="p">(</span><span class="n">signal</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span></span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueues a signal command which sets the signal to the given value, ensuring all previous operations are completed.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>signal</code></b>
+              (<code><span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The signal to set</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>value</code></b>
+              (<code><span title="tinygrad.uop.ops.sint">sint</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The value to set the signal to</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.wait" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">wait</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.wait" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">wait</span><span class="p">(</span><span class="n">signal</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span></span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueues a wait command which halts execution until the signal is greater than or equal to a specific value.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>signal</code></b>
+              (<code><span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The signal to wait on</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>value</code></b>
+              (<code><span title="tinygrad.uop.ops.sint">sint</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The value to wait for</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.timestamp" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">timestamp</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.timestamp" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">timestamp</span><span class="p">(</span><span class="n">signal</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span></span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueues a timestamp command which records the current time in a signal after all previously enqueued commands are completed.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>signal</code></b>
+              (<code><span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The signal to store the timestamp</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.bind" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">bind</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.bind" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">bind</span><span class="p">(</span><span class="n">dev</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span></span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Associates the queue with a specific device for optimized execution.</p>
+<p>This optional method allows backend implementations to tailor the queue for efficient use on the given device. When implemented, it can eliminate
+the need to copy queues into the device, thereby enhancing performance.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>dev</code></b>
+              (<code><span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The target device for queue optimization.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<details class="note" open>
+  <summary>Note</summary>
+  <p>Implementing this method is optional but recommended for performance gains.</p>
+</details>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.submit" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">submit</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.submit" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">submit</span><span class="p">(</span>
+    <span class="n">dev</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span></span><span class="p">,</span>
+    <span class="n">var_vals</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#dict">dict</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Submits the command queue to a specific device for execution.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>dev</code></b>
+              (<code><span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The device to submit the queue to</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.memory_barrier" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">memory_barrier</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.memory_barrier" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">memory_barrier</span><span class="p">()</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueues a memory barrier command to ensure memory coherence between agents. Only on compute queues.</p>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.exec" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">exec</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.exec" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">exec</span><span class="p">(</span>
+    <span class="n">prg</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.ProgramType">ProgramType</span></span><span class="p">,</span>
+    <span class="n">args_state</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.ArgsStateType">ArgsStateType</span></span><span class="p">,</span>
+    <span class="n">global_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+    <span class="n">local_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueues an execution command for a kernel program. Only on compute queues.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>prg</code></b>
+              (<code><span title="tinygrad.runtime.support.hcq.ProgramType">ProgramType</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The program to execute</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>args_state</code></b>
+              (<code><span title="tinygrad.runtime.support.hcq.ArgsStateType">ArgsStateType</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The args state to execute program with</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>global_size</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<span title="tinygrad.uop.ops.sint">sint</span>, ...]</code>)
+          –
+          <div class="doc-md-description">
+            <p>The global work size</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>local_size</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<span title="tinygrad.uop.ops.sint">sint</span>, ...]</code>)
+          –
+          <div class="doc-md-description">
+            <p>The local work size</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HWQueue.copy" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">copy</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HWQueue.copy" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">copy</span><span class="p">(</span><span class="n">dest</span><span class="p">:</span> <span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span> <span class="n">src</span><span class="p">:</span> <span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span> <span class="n">copy_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueues a copy command to transfer data. Only on copy queues.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>dest</code></b>
+              (<code><span title="tinygrad.uop.ops.sint">sint</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The destination of the copy</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>src</code></b>
+              (<code><span title="tinygrad.uop.ops.sint">sint</span></code>)
+          –
+          <div class="doc-md-description">
+            <p>The source of the copy</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>copy_size</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>The size of data to copy</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><h3 id="hcq-compatible-device">HCQ Compatible Device<a class="headerlink" href="#hcq-compatible-device" title="Permanent link">¤</a></h3>
+<p>The <code class="language-python highlight"><span class="n">HCQCompiled</span></code> class defines the API for HCQ-compatible devices. This class serves as an abstract base class that device-specific implementations should inherit from and implement.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tinygrad.runtime.support.hcq.HCQCompiled" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">HCQCompiled</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQCompiled" class="headerlink" title="Permanent link">¤</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">HCQCompiled</span><span class="p">(</span>
+    <span class="n">device</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></span><span class="p">,</span>
+    <span class="n">allocator</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.HCQAllocatorBase">HCQAllocatorBase</span></span><span class="p">,</span>
+    <span class="n">compilers</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Sequence&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Sequence">Sequence</a></span><span class="p">[</span><span class="n"><span title="tinygrad.device.CompilerPairT">CompilerPairT</span></span><span class="p">],</span>
+    <span class="n">runtime</span><span class="p">,</span>
+    <span class="n">signal_t</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Type&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Type">Type</a></span><span class="p">[</span><span class="n"><span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span></span><span class="p">],</span>
+    <span class="n">comp_queue_t</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Callable&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Callable">Callable</a></span><span class="p">[[],</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HWQueue&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue">HWQueue</a></span><span class="p">],</span>
+    <span class="n">copy_queue_t</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Callable&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Callable">Callable</a></span><span class="p">[[],</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HWQueue&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HWQueue&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HWQueue">HWQueue</a></span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">kernargs_size</span><span class="o">=</span><span class="mi">16</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span><span class="p">,</span>
+    <span class="n">sigalloc_size</span><span class="o">=</span><span class="mi">4096</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;Compiled&lt;/span&gt; (&lt;code&gt;tinygrad.device.Compiled&lt;/code&gt;)" href="../runtime/#tinygrad.device.Compiled">Compiled</a></code>, <code><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Generic&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Generic">Generic</a>[<span title="tinygrad.runtime.support.hcq.SignalType">SignalType</span>]</code></p>
+
+
+        <p>A base class for devices compatible with the HCQ (Hardware Command Queue) API.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div><h4 id="signals">Signals<a class="headerlink" href="#signals" title="Permanent link">¤</a></h4>
+<p>Signals are device-dependent structures used for synchronization and timing in HCQ-compatible devices. They should be designed to record both a <code class="language-python highlight"><span class="n">value</span></code> and a <code class="language-python highlight"><span class="n">timestamp</span></code> within the same signal. HCQ-compatible backend implementations should use <code class="language-python highlight"><span class="n">HCQSignal</span></code> as a base class.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tinygrad.runtime.support.hcq.HCQSignal" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">HCQSignal</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQSignal" class="headerlink" title="Permanent link">¤</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">HCQSignal</span><span class="p">(</span>
+    <span class="n">base_buf</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span><span class="p">,</span>
+    <span class="n">value</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>
+    <span class="n">owner</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">is_timeline</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#bool">bool</a></span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">timestamp_divider</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Generic&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Generic">Generic</a>[<span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span>]</code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<p><span class="doc-section-title">Methods:</span></p>
+    <ul>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;wait&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQSignal.wait&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQSignal.wait">wait</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Waits the signal is greater than or equal to a specific value.</p>
+            </div>
+          </li>
+    </ul>
+
+
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+          <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-attribute&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-attribute-name&quot;&gt;value&lt;/span&gt;
+
+
+  &lt;span class=&quot;doc doc-labels&quot;&gt;
+      &lt;small class=&quot;doc doc-label doc-label-property&quot;&gt;&lt;code&gt;property&lt;/code&gt;&lt;/small&gt;
+      &lt;small class=&quot;doc doc-label doc-label-writable&quot;&gt;&lt;code&gt;writable&lt;/code&gt;&lt;/small&gt;
+  &lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQSignal.value&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQSignal.value">value</a></code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+          –
+          <div class="doc-md-description">
+            
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+          <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-attribute&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-attribute-name&quot;&gt;timestamp&lt;/span&gt;
+
+
+  &lt;span class=&quot;doc doc-labels&quot;&gt;
+      &lt;small class=&quot;doc doc-label doc-label-property&quot;&gt;&lt;code&gt;property&lt;/code&gt;&lt;/small&gt;
+  &lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQSignal.timestamp&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQSignal.timestamp">timestamp</a></code></b>
+              (<code><a class="autorefs autorefs-external" title="&lt;code&gt;decimal.Decimal&lt;/code&gt;" href="https://docs.python.org/3/library/decimal.html#decimal.Decimal">Decimal</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>Get the timestamp field of the signal.</p>
+          </div>
+        </li>
+    </ul>
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQSignal.value" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">value</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+      <small class="doc doc-label doc-label-writable"><code>writable</code></small>
+  </span>
+
+<a href="#tinygrad.runtime.support.hcq.HCQSignal.value" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="n">value</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQSignal.timestamp" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">timestamp</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tinygrad.runtime.support.hcq.HCQSignal.timestamp" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="n">timestamp</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;decimal.Decimal&lt;/code&gt;" href="https://docs.python.org/3/library/decimal.html#decimal.Decimal">Decimal</a></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Get the timestamp field of the signal.</p>
+<p>This property provides read-only access to the signal's timestamp.</p>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-external" title="&lt;code&gt;decimal.Decimal&lt;/code&gt;" href="https://docs.python.org/3/library/decimal.html#decimal.Decimal">Decimal</a></code>
+          –
+          <div class="doc-md-description">
+            <p>The timestamp in microseconds.</p>
+          </div>
+        </li>
+    </ul>
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQSignal.wait" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">wait</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQSignal.wait" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">wait</span><span class="p">(</span>
+    <span class="n">value</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span>
+    <span class="n">timeout</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">=</span> <span class="n"><span title="tinygrad.helpers.getenv">getenv</span></span><span class="p">(</span><span class="s2">&quot;HCQDEV_WAIT_TIMEOUT_MS&quot;</span><span class="p">,</span> <span class="mi">30000</span><span class="p">),</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Waits the signal is greater than or equal to a specific value.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>value</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>)
+          –
+          <div class="doc-md-description">
+            <p>The value to wait for.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>timeout</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></code>, default:
+                  <code><span title="tinygrad.helpers.getenv">getenv</span>(&#39;HCQDEV_WAIT_TIMEOUT_MS&#39;, 30000)</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Maximum time to wait in milliseconds. Defaults to 30s.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><p>The following Python code demonstrates the usage of signals:</p>
+<div class="language-python highlight"><pre><span></span><code><span class="n">signal</span> <span class="o">=</span> <span class="n">your_device</span><span class="o">.</span><span class="n">new_signal</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+<span class="n">HWQueue</span><span class="p">()</span><span class="o">.</span><span class="n">timestamp</span><span class="p">(</span><span class="n">signal</span><span class="p">)</span> \
+         <span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">signal</span><span class="p">,</span> <span class="n">value_to_fire</span><span class="p">)</span> \
+         <span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">your_device</span><span class="p">)</span>
+
+<span class="n">signal</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">value_to_fire</span><span class="p">)</span>
+<span class="n">signaled_value</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">value</span> <span class="c1"># should be the same as `value_to_fire`</span>
+<span class="n">timestamp</span> <span class="o">=</span> <span class="n">signal</span><span class="o">.</span><span class="n">timestamp</span>
+</code></pre></div>
+<h5 id="synchronization-signals">Synchronization signals<a class="headerlink" href="#synchronization-signals" title="Permanent link">¤</a></h5>
+<p>Each HCQ-compatible device must allocate two signals for global synchronization purposes. These signals are passed to the <code class="language-python highlight"><span class="n">HCQCompiled</span></code> base class during initialization: an active timeline signal <code class="language-python highlight"><span class="bp">self</span><span class="o">.</span><span class="n">timeline_signal</span></code> and a shadow timeline signal <code class="language-python highlight"><span class="bp">self</span><span class="o">.</span><span class="n">_shadow_timeline_signal</span></code> which helps to handle signal value overflow issues. You can find more about synchronization in the <a href="#synchronization">synchronization section</a></p>
+<h3 id="hcq-compatible-allocator">HCQ Compatible Allocator<a class="headerlink" href="#hcq-compatible-allocator" title="Permanent link">¤</a></h3>
+<p>The <code class="language-python highlight"><span class="n">HCQAllocator</span></code> base class simplifies allocator logic by leveraging <a href="#command-queues">command queues</a> abstractions. This class efficiently handles copy and transfer operations, leaving only the alloc and free functions to be implemented by individual backends.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tinygrad.runtime.support.hcq.HCQAllocator" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">HCQAllocator</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQAllocator" class="headerlink" title="Permanent link">¤</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">HCQAllocator</span><span class="p">(</span>
+    <span class="n">dev</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span></span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">=</span> <span class="mi">2</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span><span class="p">,</span>
+    <span class="n">batch_cnt</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">=</span> <span class="mi">32</span><span class="p">,</span>
+    <span class="n">copy_bufs</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="n">max_copyout_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><span title="tinygrad.runtime.support.hcq.HCQAllocatorBase">HCQAllocatorBase</span></code>, <code><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Generic&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Generic">Generic</a>[<span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span>]</code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div><h4 id="hcq-allocator-result-protocol">HCQ Allocator Result Protocol<a class="headerlink" href="#hcq-allocator-result-protocol" title="Permanent link">¤</a></h4>
+<p>Backends must adhere to the <code class="language-python highlight"><span class="n">HCQBuffer</span></code> protocol when returning allocation results.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tinygrad.runtime.support.hcq.HCQBuffer" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">HCQBuffer</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQBuffer" class="headerlink" title="Permanent link">¤</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">HCQBuffer</span><span class="p">(</span>
+    <span class="n">va_addr</span><span class="p">:</span> <span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span>
+    <span class="n">size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span>
+    <span class="n">texture_info</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Any&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Any">Any</a></span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">meta</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Any&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Any">Any</a></span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">_base</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">view</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.MMIOInterface">MMIOInterface</span></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">owner</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQCompiled&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQCompiled&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQCompiled">HCQCompiled</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+
+
+
+
+
+
+
+
+
+
+
+
+<p><span class="doc-section-title">Methods:</span></p>
+    <ul>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;cpu_view&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer.cpu_view&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer.cpu_view">cpu_view</a></code></b>
+            –
+            <div class="doc-md-description">
+              
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;offset&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer.offset&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer.offset">offset</a></code></b>
+            –
+            <div class="doc-md-description">
+              
+            </div>
+          </li>
+    </ul>
+
+
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+          <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-attribute&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-attribute-name&quot;&gt;_mappings&lt;/span&gt;
+
+
+  &lt;span class=&quot;doc doc-labels&quot;&gt;
+      &lt;small class=&quot;doc doc-label doc-label-instance-attribute&quot;&gt;&lt;code&gt;instance-attribute&lt;/code&gt;&lt;/small&gt;
+  &lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer._mappings&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer._mappings">_mappings</a></code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#dict">dict</a>[<a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQCompiled&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQCompiled&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQCompiled">HCQCompiled</a>, <a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a>]</code>)
+          –
+          <div class="doc-md-description">
+            
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+          <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-attribute&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-attribute-name&quot;&gt;mapped_devs&lt;/span&gt;
+
+
+  &lt;span class=&quot;doc doc-labels&quot;&gt;
+      &lt;small class=&quot;doc doc-label doc-label-property&quot;&gt;&lt;code&gt;property&lt;/code&gt;&lt;/small&gt;
+  &lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer.mapped_devs&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer.mapped_devs">mapped_devs</a></code></b>
+          –
+          <div class="doc-md-description">
+            
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+          <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-attribute&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-attribute-name&quot;&gt;mappings&lt;/span&gt;
+
+
+  &lt;span class=&quot;doc doc-labels&quot;&gt;
+      &lt;small class=&quot;doc doc-label doc-label-property&quot;&gt;&lt;code&gt;property&lt;/code&gt;&lt;/small&gt;
+  &lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer.mappings&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer.mappings">mappings</a></code></b>
+          –
+          <div class="doc-md-description">
+            
+          </div>
+        </li>
+    </ul>
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQBuffer._mappings" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">_mappings</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#tinygrad.runtime.support.hcq.HCQBuffer._mappings" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="n">_mappings</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#dict">dict</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQCompiled&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQCompiled&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQCompiled">HCQCompiled</a></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQBuffer.mapped_devs" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">mapped_devs</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tinygrad.runtime.support.hcq.HCQBuffer.mapped_devs" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="n">mapped_devs</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQBuffer.mappings" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">mappings</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-property"><code>property</code></small>
+  </span>
+
+<a href="#tinygrad.runtime.support.hcq.HCQBuffer.mappings" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="n">mappings</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQBuffer.cpu_view" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">cpu_view</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQBuffer.cpu_view" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">cpu_view</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n"><span title="tinygrad.runtime.support.hcq.MMIOInterface">MMIOInterface</span></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQBuffer.offset" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">offset</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQBuffer.offset" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">offset</span><span class="p">(</span>
+    <span class="n">offset</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><h3 id="hcq-compatible-program">HCQ Compatible Program<a class="headerlink" href="#hcq-compatible-program" title="Permanent link">¤</a></h3>
+<p><code class="language-python highlight"><span class="n">HCQProgram</span></code> is a base class for defining programs compatible with HCQ-enabled devices. It provides a flexible framework for handling different argument layouts (see <code class="language-python highlight"><span class="n">HCQArgsState</span></code>).</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tinygrad.runtime.support.hcq.HCQProgram" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">HCQProgram</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQProgram" class="headerlink" title="Permanent link">¤</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">HCQProgram</span><span class="p">(</span>
+    <span class="n">args_state_t</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Type&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Type">Type</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQArgsState&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQArgsState&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQArgsState">HCQArgsState</a></span><span class="p">],</span>
+    <span class="n">dev</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span></span><span class="p">,</span>
+    <span class="n">name</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></span><span class="p">,</span>
+    <span class="n">kernargs_alloc_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span>
+    <span class="n">lib</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#bytes">bytes</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">base</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Generic&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Generic">Generic</a>[<span title="tinygrad.runtime.support.hcq.HCQDeviceType">HCQDeviceType</span>]</code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<p><span class="doc-section-title">Methods:</span></p>
+    <ul>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;__call__&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQProgram.__call__&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQProgram.__call__">__call__</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Enqueues the program for execution with the given arguments and dimensions.</p>
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;_fini&lt;/span&gt;
+
+
+  &lt;span class=&quot;doc doc-labels&quot;&gt;
+      &lt;small class=&quot;doc doc-label doc-label-staticmethod&quot;&gt;&lt;code&gt;staticmethod&lt;/code&gt;&lt;/small&gt;
+  &lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQProgram._fini&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQProgram._fini">_fini</a></code></b>
+            –
+            <div class="doc-md-description">
+              
+            </div>
+          </li>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;fill_kernargs&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQProgram.fill_kernargs&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQProgram.fill_kernargs">fill_kernargs</a></code></b>
+            –
+            <div class="doc-md-description">
+              <p>Fills arguments for the kernel, optionally allocating space from the device if <code class="language-python highlight"><span class="n">kernargs_ptr</span></code> is not provided.</p>
+            </div>
+          </li>
+    </ul>
+
+
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQProgram.__call__" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">__call__</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQProgram.__call__" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">__call__</span><span class="p">(</span>
+    <span class="o">*</span><span class="n">bufs</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span><span class="p">,</span>
+    <span class="n">global_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+    <span class="n">local_size</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+    <span class="n">vals</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+    <span class="n">wait</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#bool">bool</a></span> <span class="o">=</span> <span class="kc">False</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#float">float</a></span> <span class="o">|</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Enqueues the program for execution with the given arguments and dimensions.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+            <b><code>bufs</code></b>
+              (<code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Buffer arguments to execute the kernel with.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>global_size</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>]</code>, default:
+                  <code>(1, 1, 1)</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Specifies the global work size for kernel execution (equivalent to CUDA's grid size).</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>local_size</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>]</code>, default:
+                  <code>(1, 1, 1)</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Specifies the local work size for kernel execution (equivalent to CUDA's block size).</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>vals</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a>, ...]</code>, default:
+                  <code>()</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>Value arguments to execute the kernel with.</p>
+          </div>
+        </li>
+        <li class="doc-section-item field-body">
+            <b><code>wait</code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#bool">bool</a></code>, default:
+                  <code>False</code>
+)
+          –
+          <div class="doc-md-description">
+            <p>If True, waits for the kernel to complete execution.</p>
+          </div>
+        </li>
+    </ul>
+
+
+<p><span class="doc-section-title">Returns:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+              <code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#float">float</a> | None</code>
+          –
+          <div class="doc-md-description">
+            <p>Execution time of the kernel if 'wait' is True, otherwise None.</p>
+          </div>
+        </li>
+    </ul>
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQProgram._fini" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">_fini</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-staticmethod"><code>staticmethod</code></small>
+  </span>
+
+<a href="#tinygrad.runtime.support.hcq.HCQProgram._fini" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">_fini</span><span class="p">(</span><span class="n">dev</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="n">spec</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQProgram.fill_kernargs" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">fill_kernargs</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQProgram.fill_kernargs" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">fill_kernargs</span><span class="p">(</span>
+    <span class="n">bufs</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+    <span class="n">vals</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/functions.html#int">int</a></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+    <span class="n">kernargs</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQArgsState&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQArgsState&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQArgsState">HCQArgsState</a></span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Fills arguments for the kernel, optionally allocating space from the device if <code class="language-python highlight"><span class="n">kernargs_ptr</span></code> is not provided.
+Args:
+  bufs: Buffers to be written to kernel arguments.
+  vals: Values to be written to kernel arguments.
+  kernargs_ptr: Optional pointer to pre-allocated kernel arguments memory.
+Returns:
+  Arguments state with the given buffers and values set for the program.</p>
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><h4 id="arguments-state">Arguments State<a class="headerlink" href="#arguments-state" title="Permanent link">¤</a></h4>
+<p><code class="language-python highlight"><span class="n">HCQArgsState</span></code> is a base class for managing the argument state for HCQ programs. Backend implementations should create a subclass of <code class="language-python highlight"><span class="n">HCQArgsState</span></code> to manage arguments for the given program.</p>
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="tinygrad.runtime.support.hcq.HCQArgsState" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>            <span class="doc doc-object-name doc-class-name">HCQArgsState</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQArgsState" class="headerlink" title="Permanent link">¤</a></h3>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">HCQArgsState</span><span class="p">(</span>
+    <span class="n">buf</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span><span class="p">,</span>
+    <span class="n">prg</span><span class="p">:</span> <span class="n"><span title="tinygrad.runtime.support.hcq.ProgramType">ProgramType</span></span><span class="p">,</span>
+    <span class="n">bufs</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+    <span class="n">vals</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+            <p class="doc doc-class-bases">
+              Bases: <code><a class="autorefs autorefs-external" title="&lt;code&gt;typing.Generic&lt;/code&gt;" href="https://docs.python.org/3/library/typing.html#typing.Generic">Generic</a>[<span title="tinygrad.runtime.support.hcq.ProgramType">ProgramType</span>]</code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+<p><span class="doc-section-title">Methods:</span></p>
+    <ul>
+          <li class="doc-section-item field-body">
+            <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-method&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-function-name&quot;&gt;bind_sints_to_buf&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQArgsState.bind_sints_to_buf&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQArgsState.bind_sints_to_buf">bind_sints_to_buf</a></code></b>
+            –
+            <div class="doc-md-description">
+              
+            </div>
+          </li>
+    </ul>
+
+
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <ul>
+        <li class="doc-section-item field-body">
+          <b><code><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-attribute&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-attribute-name&quot;&gt;bind_data&lt;/span&gt;
+
+
+  &lt;span class=&quot;doc doc-labels&quot;&gt;
+      &lt;small class=&quot;doc doc-label doc-label-instance-attribute&quot;&gt;&lt;code&gt;instance-attribute&lt;/code&gt;&lt;/small&gt;
+  &lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQArgsState.bind_data&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQArgsState.bind_data">bind_data</a></code></b>
+              (<code><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a>[<span title="tinygrad.uop.ops.sint">sint</span>, ...], <span title="tinygrad.runtime.support.hcq.MMIOInterface">MMIOInterface</span>, <a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a>]]</code>)
+          –
+          <div class="doc-md-description">
+            
+          </div>
+        </li>
+    </ul>
+
+
+
+
+  <div class="doc doc-children">
+
+
+
+
+
+
+
+<div class="doc doc-object doc-attribute">
+
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQArgsState.bind_data" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-attribute"></code>            <span class="doc doc-object-name doc-attribute-name">bind_data</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-instance-attribute"><code>instance-attribute</code></small>
+  </span>
+
+<a href="#tinygrad.runtime.support.hcq.HCQArgsState.bind_data" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="n">bind_data</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#list">list</a></span><span class="p">[</span>
+    <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#tuple">tuple</a></span><span class="p">[</span><span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span> <span class="o">...</span><span class="p">],</span> <span class="n"><span title="tinygrad.runtime.support.hcq.MMIOInterface">MMIOInterface</span></span><span class="p">,</span> <span class="n"><a class="autorefs autorefs-external" href="https://docs.python.org/3/library/stdtypes.html#str">str</a></span><span class="p">]</span>
+<span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+    </div>
+
+</div>
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="tinygrad.runtime.support.hcq.HCQArgsState.bind_sints_to_buf" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <span class="doc doc-object-name doc-function-name">bind_sints_to_buf</span>
+
+
+<a href="#tinygrad.runtime.support.hcq.HCQArgsState.bind_sints_to_buf" class="headerlink" title="Permanent link">¤</a></h4>
+<div class="language-python doc-signature highlight"><pre><span></span><code><span class="nf">bind_sints_to_buf</span><span class="p">(</span>
+    <span class="o">*</span><span class="n">vals</span><span class="p">:</span> <span class="n"><span title="tinygrad.uop.ops.sint">sint</span></span><span class="p">,</span> <span class="n">buf</span><span class="p">:</span> <span class="n"><a class="autorefs autorefs-internal" title="&lt;code class=&quot;doc-symbol doc-symbol-heading doc-symbol-class&quot;&gt;&lt;/code&gt;            &lt;span class=&quot;doc doc-object-name doc-class-name&quot;&gt;HCQBuffer&lt;/span&gt; (&lt;code&gt;tinygrad.runtime.support.hcq.HCQBuffer&lt;/code&gt;)" href="#tinygrad.runtime.support.hcq.HCQBuffer">HCQBuffer</a></span><span class="p">,</span> <span class="n">fmt</span><span class="p">,</span> <span class="n">offset</span><span class="o">=</span><span class="mi">0</span>
+<span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div><p><strong>Lifetime</strong>: The <code class="language-python highlight"><span class="n">HCQArgsState</span></code> is passed to <code class="language-python highlight"><span class="n">HWQueue</span><span class="o">.</span><span class="n">exec</span></code> and is guaranteed not to be freed until <code class="language-python highlight"><span class="n">HWQueue</span><span class="o">.</span><span class="n">submit</span></code> for the same queue is called.</p>
+<h3 id="synchronization">Synchronization<a class="headerlink" href="#synchronization" title="Permanent link">¤</a></h3>
+<p>HCQ-compatible devices use a global timeline signal for synchronizing all operations. This mechanism ensures proper ordering and completion of tasks across the device. By convention, <code class="language-python highlight"><span class="bp">self</span><span class="o">.</span><span class="n">timeline_value</span></code> points to the next value to signal. So, to wait for all previous operations on the device to complete, wait for <code class="language-python highlight"><span class="bp">self</span><span class="o">.</span><span class="n">timeline_value</span> <span class="o">-</span> <span class="mi">1</span></code> value. The following Python code demonstrates the typical usage of signals to synchronize execution to other operations on the device:</p>
+<div class="language-python highlight"><pre><span></span><code><span class="n">HWQueue</span><span class="p">()</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">your_device</span><span class="o">.</span><span class="n">timeline_signal</span><span class="p">,</span> <span class="n">your_device</span><span class="o">.</span><span class="n">timeline_value</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> \
+         <span class="o">.</span><span class="n">exec</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+         <span class="o">.</span><span class="n">signal</span><span class="p">(</span><span class="n">your_device</span><span class="o">.</span><span class="n">timeline_signal</span><span class="p">,</span> <span class="n">your_device</span><span class="o">.</span><span class="n">next_timeline</span><span class="p">())</span> \
+         <span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">your_device</span><span class="p">)</span>
+
+<span class="c1"># Optionally wait for execution</span>
+<span class="n">your_device</span><span class="o">.</span><span class="n">timeline_signal</span><span class="o">.</span><span class="n">wait</span><span class="p">(</span><span class="n">your_device</span><span class="o">.</span><span class="n">timeline_value</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="hcqgraph">HCQGraph<a class="headerlink" href="#hcqgraph" title="Permanent link">¤</a></h2>
+<p><a href="https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/graph/hcq.py">HCQGraph</a> is a core feature that implements <code class="language-python highlight"><span class="n">GraphRunner</span></code> for HCQ-compatible devices. <code class="language-python highlight"><span class="n">HCQGraph</span></code> builds static <code class="language-python highlight"><span class="n">HWQueue</span></code> for all operations per device. To optimize enqueue time, only the necessary parts of the queues are updated for each run using the symbolic variables, avoiding a complete rebuild.
+Optionally, queues can implement a <code class="language-python highlight"><span class="n">bind</span></code> API, which allows further optimization by eliminating the need to copy the queues into the device ring.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../runtime/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Runtime Overview">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Runtime Overview
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../am/" class="md-footer__link md-footer__link--next" aria-label="Next: AM Driver">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                AM Driver
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["announce.dismiss", "content.action.edit", "content.action.view", "content.code.annotate", "content.code.copy", "content.tooltips", "navigation.footer", "navigation.indexes", "navigation.sections", "navigation.expand", "navigation.top", "navigation.path", "search.highlight", "search.suggest", "toc.follow", "toc.integrate"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+        <script src="../../assets/_markdown_exec_pyodide.js"></script>
+      
+    
+  </body>
+</html>
