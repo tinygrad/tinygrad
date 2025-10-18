@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LLVM
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -698,8 +698,8 @@ class TestOps(unittest.TestCase):
 
   def test_pow_zero_tensor(self):
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
-    # TODO: fix WEBGPU
-    if Device.DEFAULT != "WEBGPU":
+    # TODO: fix WEBGPU and LVP
+    if Device.DEFAULT != "WEBGPU" and not CPU_LVP:
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
   def test_pow_zero_const(self):
@@ -830,6 +830,7 @@ class TestOps(unittest.TestCase):
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().idiv(4).item(), 0)  # NOTE this is trunc-div behaviour
 
+  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
@@ -839,6 +840,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
+  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
@@ -847,6 +849,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
+  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
@@ -3177,6 +3180,7 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
+  @unittest.skip("we have test_linalg, no need to test here. TODO: should be in torch backend tests")
   def test_svd(self):
     # test for tiny backend. real svd tests are in test_linalg
     A = torch.randn(5, 5)

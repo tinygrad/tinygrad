@@ -32,7 +32,10 @@
     font-size: 14px;
     overflow: hidden;
     background-color: #08090e;
+    scrollbar-color: #686977 #151720;
   }
+  ::-webkit-scrollbar-track { background: #151720; }
+  ::-webkit-scrollbar-thumb { background: #686977; }
   a {
     color: #4a90e2;
   }
@@ -142,7 +145,7 @@
     inset: 0;
     z-index: 1;
   }
-  .profiler, .disasm {
+  .profiler, .render {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
@@ -332,7 +335,7 @@
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
     <div class="view profiler"></div>
-    <div class="view disasm"></div>
+    <div class="view render"></div>
     <div class="view graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">

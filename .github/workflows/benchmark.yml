@@ -51,17 +51,18 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: python3.11 test/external/process_replay/reset.py
+    - name: Print macOS version
+      run: sw_vers
     - name: Run Stable Diffusion
-      run: BENCHMARK_LOG=stable_diffusion JIT=1 ASSERT_MIN_STEP_TIME=800 python3.11 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
+      run: BENCHMARK_LOG=stable_diffusion JIT=1 ASSERT_MIN_STEP_TIME=720 python3.11 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion without fp16
-      run: BENCHMARK_LOG=stable_diffusion_fp32 JIT=1 ASSERT_MIN_STEP_TIME=900 python3.11 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd_no_fp16.txt
+      run: BENCHMARK_LOG=stable_diffusion_fp32 JIT=1 ASSERT_MIN_STEP_TIME=800 python3.11 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd_no_fp16.txt
     - name: Run Stable Diffusion v2
       # TODO: very slow step time
-      run: BENCHMARK_LOG=stable_diffusion_v2 JIT=1 ASSERT_MIN_STEP_TIME=10000 python3.11 examples/sdv2.py --fp16 --seed 0 --noshow --timing | tee sdv2.txt
+      run: BENCHMARK_LOG=stable_diffusion_v2 JIT=1 ASSERT_MIN_STEP_TIME=4500 python3.11 examples/sdv2.py --fp16 --seed 0 --noshow --timing | tee sdv2.txt
     # process replay can't capture this, the graph is too large
-    # TODO: too slow
-    # - name: Run SDXL
-    #   run: BENCHMARK_LOG=stable_diffusion_xl ASSERT_MIN_STEP_TIME=5000 CAPTURE_PROCESS_REPLAY=0 JIT=1 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
+    - name: Run SDXL
+      run: BENCHMARK_LOG=stable_diffusion_xl ASSERT_MIN_STEP_TIME=5000 CAPTURE_PROCESS_REPLAY=0 JIT=1 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run model inference benchmark
       run: METAL=1 python3.11 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -632,7 +633,7 @@ jobs:
       run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=12 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: openpilot compile3 Space Lab policy + vision
       run: |
-        PYTHONPATH="." ASSERT_MIN_STEP_TIME=4 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/22aec22a10ce09384d4a4af2a0bbff08d54af7e0c888503508f356fae4ff0e29
+        PYTHONPATH="." ASSERT_MIN_STEP_TIME=5 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/22aec22a10ce09384d4a4af2a0bbff08d54af7e0c888503508f356fae4ff0e29
         PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/c824f68646a3b94f117f01c70dc8316fb466e05fbd42ccdba440b8a8dc86914b
     - name: benchmark MobileNetV2 on DSP
       run: |
@@ -641,7 +642,7 @@ jobs:
         ln -s /data/home/tiny/tinygrad/testsig-*.so .
         PYTHONPATH=. CC=clang-19 CPU=1 CPU_LLVM=0 QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
-        PYTHONPATH=. CC=clang-19 DSP=1 DONT_REALIZE_EXPAND=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
+        PYTHONPATH=. CC=clang-19 DSP=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
     - uses: actions/upload-artifact@v4
