@@ -71,10 +71,10 @@ jobs:
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
     - name: Verify Linux autogen
       run: |
-        cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
+        mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
         cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
         cp tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
-        ./autogen_stubs.sh libc
+        python3 -c "from tinygrad.runtime.autogen import libc"
         ./autogen_stubs.sh io_uring
         ./autogen_stubs.sh ib
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
