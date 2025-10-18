@@ -142,12 +142,14 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
   def test_fp8e4m3_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
+    if op[1] == np.exp and Device.DEFAULT in {"CUDA", "NV"}: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3)<89.0) # cuda cast f32 inf to f8 MAX
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3), dtypes.fp8e4m3, op)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
   def test_fp8e5m2_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2) != 0.0)
+    if op[1] == np.exp and Device.DEFAULT in {"CUDA", "NV"}: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2)<89.0) # cuda cast f32 inf to f8 MAX
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e5m2), dtypes.fp8e5m2, op)
 
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
