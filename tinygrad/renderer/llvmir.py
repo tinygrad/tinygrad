@@ -17,11 +17,10 @@ def ldt(dt:DType):
 
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
+    if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
     if math.isinf(x) or math.isnan(x):
-      if dtype in dtypes.fp8s: return 0xff
       return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
-    if dtype in dtypes.fp8s:
-      return float_to_fp8(x, dtype)
+
     return truncate[dtype](x)
   return int(x)
 
@@ -101,10 +100,8 @@ base_rewrite = PatternMatcher([
   # rewrite cast to bool to CMPNE 0
   (UPat(Ops.CAST, name="x", dtype=dtypes.bool),
    lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][Ops.CMPNE]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, zeroinitializer"),
-  (UPat(Ops.CAST, dtypes.fp8e4m3, (UPat.var("y", dtypes.float),), name="x",), lambda ctx,x, y:
-    f" {ctx[x]} = call i8 @cast_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 false)"),
-  (UPat(Ops.CAST, dtypes.fp8e5m2, (UPat.var("y", dtypes.float),), name="x",), lambda ctx,x, y:
-    f" {ctx[x]} = call i8 @cast_to_bf8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 false)"),
+  (UPat(Ops.CAST, dtypes.fp8s, (UPat.var("y", dtypes.float),), name="x",), lambda ctx,x, y:
+    f" {ctx[x]} = call i8 @f32_to_fp8s({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'true' if x.dtype == dtypes.fp8e5m2 else 'false'})"),
   (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x, y:
     f"  {ctx[x.src[0]]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
     f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{fp8_map[y.dtype.scalar()]}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
@@ -136,6 +133,36 @@ base_rewrite = PatternMatcher([
 
 non_native = (dtypes.bfloat16, *dtypes.fp8s)
 
+ir_f32_to_fp8s = """
+define i8 @f32_to_fp8s(float %val, i1 %is_bf8) {
+entry:
+  %ival = bitcast float %val to i32
+  %exp = and i32 %ival, 2139095040        ; 0x7F800000
+  %is_special = icmp eq i32 %exp, 2139095040
+  br i1 %is_special, label %select_clip, label %clip
+clip:
+  br i1 %is_bf8, label %bf8_clip, label %fp8_clip
+bf8_clip:
+  %clamped_bf8 = call float @llvm.amdgcn.fmed3.f32(float %val, float 57344.0, float -57344.0)
+  br label %select_clip
+fp8_clip:
+  %clamped_fp8 = call float @llvm.amdgcn.fmed3.f32(float %val, float 448.0, float -448.0)
+  br label %select_clip
+select_clip:
+  %phi_val = phi float [ %val, %entry ], [ %clamped_bf8, %bf8_clip ], [ %clamped_fp8, %fp8_clip ]
+  br i1 %is_bf8, label %do_bf8, label %do_fp8
+do_bf8:
+  %packed_bf8 = call i32 @llvm.amdgcn.cvt.pk.bf8.f32(float %phi_val, float %phi_val, i32 0, i1 false)
+  br label %exit
+do_fp8:
+  %packed_fp8 = call i32 @llvm.amdgcn.cvt.pk.fp8.f32(float %phi_val, float %phi_val, i32 0, i1 false)
+  br label %exit
+exit:
+  %packed = phi i32 [ %packed_bf8, %do_bf8 ], [ %packed_fp8, %do_fp8 ]
+  %trunc = trunc i32 %packed to i8
+  ret i8 %trunc
+}
+"""
 class LLVMRenderer(Renderer):
   device = "CPU"
   abi = 'win64cc' if sys.platform == 'win32' else None
@@ -168,47 +195,10 @@ class LLVMRenderer(Renderer):
     r: dict[UOp, str] = {}
     args: list[tuple[str, DType]] = []
     kernel: list[str] = []
-    f32_to_bf8 = """
-define i8 @cast_to_bf8(float %val, i1 %saturate) {
-entry:
-  %ival = bitcast float %val to i32
-  %exp = and i32 %ival, 2139095040        ; 0x7F800000
-  %is_special = icmp eq i32 %exp, 2139095040
-  br i1 %is_special, label %cvt, label %clip
-clip:
-  %clamped = call float @llvm.amdgcn.fmed3.f32(float %val, float 5.734400e+04, float -5.734400e+04)
-  br label %cvt
-cvt:
-  %phi_val = phi float [ %val, %entry ], [ %clamped, %clip ]
-  %packed = call i32 @llvm.amdgcn.cvt.pk.bf8.f32(float %phi_val, float %phi_val, i32 0, i1 false)
-  %trunc = trunc i32 %packed to i8
-  ret i8 %trunc
-}
-"""
-    f32_to_fp8 = """
-define i8 @cast_to_fp8(float %val, i1 %saturate) {
-entry:
-  %ival = bitcast float %val to i32
-  %exp = and i32 %ival, 2139095040        ; 0x7F800000
-  %is_special = icmp eq i32 %exp, 2139095040
-  br i1 %is_special, label %cvt, label %clip
-clip:
-  %clamped = call float @llvm.amdgcn.fmed3.f32(float %val, float 448.0, float -448.0)
-  br label %cvt
-cvt:
-  %phi_val = phi float [ %val, %entry ], [ %clamped, %clip ]
-  %packed = call i32 @llvm.amdgcn.cvt.pk.fp8.f32(float %phi_val, float %phi_val, i32 0, i1 false)
-  %trunc = trunc i32 %packed to i8
-  ret i8 %trunc
-}
-"""
     vc = -1
     defines = []
-    if any(u.dtype in dtypes.fp8s for u in uops):
-      # TODO: merge two functions
-      defines.append(f32_to_bf8)
-      defines.append(f32_to_fp8)
-
+    if any(u.dtype in dtypes.fp8s for u in uops if u.op is Ops.CAST):
+      defines.append(ir_f32_to_fp8s)
     local_args: list[str] = []
     for u in uops:
       if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
