@@ -38,8 +38,21 @@ def compile(onnx_file):
     if i == 1: test_val = np.copy(ret)
   print(f"captured {len(run_onnx_jit.captured.jit_cache)} kernels")
   np.testing.assert_equal(test_val, ret, "JIT run failed")
-
   print("jit run validated")
+
+  # checks from compile2
+  kernel_count = 0
+  read_image_count = 0
+  gated_read_image_count = 0
+  for ei in run_onnx_jit.captured.jit_cache:
+    if isinstance(ei.prg, CompiledRunner):
+      kernel_count += 1
+      read_image_count += ei.prg.p.src.count("read_image")
+      gated_read_image_count += ei.prg.p.src.count("?read_image")
+      for v in [m.group(1) for m in re.finditer(r'(val\d+)\s*=\s*read_imagef\(', ei.prg.p.src)]:
+        if len(re.findall(fr'[\?\:]{v}\.[xyzw]', ei.prg.p.src)) > 0: gated_read_image_count += 1
+  print(f"{kernel_count=},  {read_image_count=}, {gated_read_image_count=}")
+
   with open(OUTPUT, "wb") as f:
     pickle.dump(run_onnx_jit, f)
   mdl_sz = os.path.getsize(onnx_file)
