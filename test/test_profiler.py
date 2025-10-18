@@ -92,7 +92,9 @@ class TestProfiler(unittest.TestCase):
     #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
 
   def test_profile_multidev(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    try: d1 = Device[f"{Device.DEFAULT}:1"]
+    except Exception as e: self.skipTest(f"second device not available {e}")
+
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
@@ -109,7 +111,8 @@ class TestProfiler(unittest.TestCase):
       assert evs[0].is_copy, "kernel should be copy"
 
   def test_profile_multidev_transfer(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    try: d1 = Device[f"{Device.DEFAULT}:1"]
+    except Exception as e: self.skipTest(f"second device not available {e}")
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
@@ -122,7 +125,8 @@ class TestProfiler(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    try: d1 = Device[f"{Device.DEFAULT}:1"]
+    except Exception as e: self.skipTest(f"second device not available {e}")
 
     def f(a):
       x = (a + 1).realize()
@@ -145,7 +149,9 @@ class TestProfiler(unittest.TestCase):
   @unittest.skipIf(CI or not issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "skip CI")
   def test_dev_jitter_matrix(self):
     dev_cnt = 6
-    devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]
+    try: devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]
+    except Exception as e: self.skipTest(f"multiple devices not available {e}")
+
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
