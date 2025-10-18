@@ -41,10 +41,14 @@ def cuda_disassemble(lib:bytes, arch:str):
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
 class CUDACompiler(Compiler):
-  def __init__(self, arch:str, cache_key:str="cuda"):
+  def __init__(self, arch:str, cache_key:str="cuda", extra_options:list[str]=[]):
     self.arch, self.compile_options = arch, [f'--gpu-architecture={arch}']
     self.compile_options += [f"-I{CUDA_PATH}/include"] if CUDA_PATH else ["-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include"]
+    if extra_options:
+      self.compile_options += extra_options
+      cache_key = f"{cache_key}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}"
     nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
+    print(f"Using NVRTC version {nvrtcMajor.value}.{nvrtcMinor.value} for architecture {arch} with options {self.compile_options}")
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_{cache_key}_{self.arch}")
   def _compile_program(self, src:str, nvrtc_get_content:Callable, nvrtc_get_size:Callable) -> bytes:
