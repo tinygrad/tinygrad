@@ -350,7 +350,7 @@ class Tensor(MathTrait):
     ```
     """
     # TODO: remove half once minimum python supports it
-    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
+    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.float().tolist()
     return self.data().tolist()
 
   def numpy(self) -> 'np.ndarray':  # type: ignore [name-defined] # noqa: F821
@@ -4018,7 +4018,9 @@ class Tensor(MathTrait):
     if FUSE_ATTENTION: q, key, value = self.contiguous(), key.contiguous(), value.contiguous()
     else: q = self
 
+    ic(q.squeeze().numpy(), key.transpose(-2,-1).squeeze().numpy())
     qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1])
+    ic(qk.squeeze().numpy(), 1/ math.sqrt(q.shape[-1]))
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
