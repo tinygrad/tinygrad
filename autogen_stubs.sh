@@ -41,15 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_opencl() {
-  clang2py /usr/include/CL/cl.h -o $BASE/opencl.py -l /usr/lib/x86_64-linux-gnu/libOpenCL.so.1 -k cdefstum
-  fixup $BASE/opencl.py
-  # hot patches
-  sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/opencl.py
-  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libOpenCL.so.1')\ctypes.CDLL(ctypes.util.find_library('OpenCL'))\g" $BASE/opencl.py
-  python3 -c "import tinygrad.runtime.autogen.opencl"
-}
-
 generate_hip() {
   clang2py /opt/rocm/include/hip/hip_ext.h /opt/rocm/include/hip/hiprtc.h \
   /opt/rocm/include/hip/hip_runtime_api.h /opt/rocm/include/hip/driver_types.h \
@@ -523,8 +514,7 @@ generate_mesa() {
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
-if [ "$1" == "opencl" ]; then generate_opencl
-elif [ "$1" == "hip" ]; then generate_hip
+if [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "nvrtc" ]; then generate_nvrtc
@@ -545,6 +535,6 @@ elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
+elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
 else echo "usage: $0 <type>"
 fi

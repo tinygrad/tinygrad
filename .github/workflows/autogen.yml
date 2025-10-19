@@ -31,7 +31,6 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        opencl: 'true'
         amd: 'true'
         cuda: 'true'
         webgpu: 'true'
@@ -39,11 +38,6 @@ jobs:
         pydeps: 'pyyaml mako'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
-    - name: Verify OpenCL autogen
-      run: |
-        cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
-        ./autogen_stubs.sh opencl
-        diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
     - name: Verify CUDA autogen
       run: |
         cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
@@ -71,13 +65,10 @@ jobs:
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
     - name: Verify Linux autogen
       run: |
-        mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
         cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
         cp tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
-        python3 -c "from tinygrad.runtime.autogen import libc"
         ./autogen_stubs.sh io_uring
         ./autogen_stubs.sh ib
-        diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
         diff /tmp/ib.py.bak tinygrad/runtime/autogen/ib.py
     - name: Verify WebGPU autogen
@@ -95,3 +86,27 @@ jobs:
         cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
         ./autogen_stubs.sh mesa
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
+  autogen-ng:
+    name: In-tree Autogen
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        opencl: 'true'
+        pydeps: 'clang>=20'
+    - name: Install autogen support packages
+      run: sudo apt-get install -y --no-install-recommends libclang-20-dev
+    - name: Verify OpenCL autogen
+      run: |
+        mv tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
+        ./autogen_stubs.sh opencl
+        diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
+    - name: Verify Linux autogen
+      run: |
+        mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
+        python3 -c "from tinygrad.runtime.autogen import libc"
+        diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
