@@ -477,7 +477,7 @@
                     // context_input = batch_double_helper(context_input);
 
                     // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
-                    decoder_output = await decoder_helper(context, context_input, audio_features, i_DEADBEEF-1, decoder_state);
+                    let decoder_output = await decoder_helper(context, context_input, audio_features, i_DEADBEEF-1, decoder_state);
                     decoder_output = decoder_output.slice(0, decoder_output.length / BS);
                     decoder_state.last_index_DEADBEEF = i_DEADBEEF;
                     // decoder_state.context = context;
