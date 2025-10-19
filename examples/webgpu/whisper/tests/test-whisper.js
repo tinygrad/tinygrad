@@ -66,7 +66,8 @@ import {
   batch_double_helper,
   decoder_helper,
   rebuild_cache_tail_index,
-  decodeOne
+  decodeOne,
+  inferLoop
 } from "../whisper.js";
 // #endregion imports
 
@@ -217,99 +218,6 @@ async function transcribeAudio(audioFetcher, cancelToken) {
   // requestAnimationFrame(updateLoop);
   // currentTranscription.style.display = 'block';
 
-  async function inferLoop(previous_context, temperature, audio_features, seek, cancelToken) {
-    let context = [];
-    if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
-      let prefix = [TOK_STARTOFPREV];
-      let suffix = [TOK_BEGIN_TRANSCRIPTION];
-      if (NO_TIMESTAMPS) suffix.push(TOK_NO_TIMESTAMPS);
-      let max_context_to_take = MAX_TOKENS_TO_DECODE - prefix.length - suffix.length;
-      context.push(...prefix);
-      context.push(...previous_context.filter((tok) => tok < TOK_EOS /*|| (tok >= TOK_TS_FIRST && tok <= TOK_TS_LAST)*/).slice(-max_context_to_take));
-      context.push(...suffix);
-    } else {
-      context = [TOK_BEGIN_TRANSCRIPTION];
-      if (NO_TIMESTAMPS) context.push(TOK_NO_TIMESTAMPS);
-    }
-    console.log(context);
-
-    const offset_DEADBEEF = context.length;
-    if (offset_DEADBEEF > MAX_TOKENS_TO_DECODE) {
-      console.error("Context length exceeds 224");
-      return;
-    }
-    // var v = new Int32Array(51864);
-    // v.fill(0);
-    // v[0] = TOK_NO_TIMESTAMPS;
-
-    let decoder_state = {
-      last_index_DEADBEEF: undefined,
-      context: []
-    };
-
-    const max_range_DEADBEEF = offset_DEADBEEF + MAX_TOKENS_TO_DECODE;
-
-    let sequences = [];
-    const default_sequence = {
-      index: 0,
-      max_range: 0,
-      segment_cumlogprob: 0,
-      avg_logprob: 0,
-      last_eos_logprob: -10,
-      context: undefined,
-      logprobs: undefined,
-      eos_logprobs: undefined
-    };
-
-    const BEST_OF = 5;
-    const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
-    for (let i = 0; i < SEQUENCE_COUNT; ++i) {
-      let sequence = Object.create(default_sequence);
-      sequence.index = offset_DEADBEEF;
-      sequence.max_range = max_range_DEADBEEF;
-      sequence.context = context.slice();
-      sequence.logprobs = [];
-      sequence.eos_logprobs = [-10];
-      sequences.push(sequence);
-    }
-
-    for (; sequences.some(c => c.context.at(-1) !== TOK_EOS);) {
-      let updated = false;
-      for (let idx = 0; idx < sequences.length; ++idx) {
-        if (sequences[idx].context.at(-1) === TOK_EOS) continue;
-        if (cancelToken.cancelled) return;
-
-        let decode_result = await decodeOne(nets, sequences[idx], decoder_state, temperature, audio_features, offset_DEADBEEF);
-        let keep = decode_result.keep;
-        sequences[idx].context = decode_result.context;
-        sequences[idx].avg_logprob = decode_result.avg_logprob;
-        sequences[idx].segment_cumlogprob = decode_result.segment_cumlogprob;
-        sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
-
-        if (!updated) {
-          pendingText = format_text(tokensToText(sequences[idx].context.slice(offset_DEADBEEF), mapping), sequences[idx].avg_logprob, seek, Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
-          console.log(pendingText);
-          updated = true;
-        }
-
-        if (!keep) break;
-        ++sequences[idx].index;
-      }
-    }
-
-    for (let seq of sequences) {
-      console.log(seq.logprobs);
-      console.log(seq.eos_logprobs);
-      let cumlogprob = seq.logprobs.reduce((a, b) => a + b);
-      console.log(cumlogprob);
-      console.log(cumlogprob / seq.logprobs.length);
-    }
-    let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
-    let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
-
-    return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, offset_DEADBEEF];
-  }
-
   console.log("begin new transcription");
 
   let previous_context = [];
@@ -330,8 +238,7 @@ async function transcribeAudio(audioFetcher, cancelToken) {
     const [audio_features] = await nets.encoder(log_spec);
     // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
 
-
-    let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(previous_context, temperature, audio_features, seek, cancelToken);
+    let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, pendingText => console.log(pendingText));
     if (cancelToken.cancelled) {
       console.log("Transcription cancelled");
       inferenceDone = true;
