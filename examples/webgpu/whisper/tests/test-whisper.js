@@ -42,6 +42,12 @@ import {
 
   getDevice,
 
+  argsort,
+  logSoftmax,
+  softmax,
+  sample,
+  normalize,
+
   fetchMonoFloat32Array,
   fetchMonoFloat32ArrayFile,
   getProgressDlForPart
@@ -86,7 +92,7 @@ const device = await getDevice(navigator.gpu);
 const WASM_ARGSORT = false;
 
 if (WASM_ARGSORT) {
- var argsort = await (async () => {
+  globalThis.argsort = await (async () => {
   // paste base64 string here (shortened in example)
   const wasmBase64 = "AGFzbQEAAAABBgFgAn9/AAIPAQNlbnYGbWVtb3J5AgACAwIBAAQFAXABAQEGCAF/AUGAiAQLBwsBB2FyZ3NvcnQAAArjBAHgBAIFfwF9QQAhAkEAIQMDQCABIAJqIgQgAzYCACAEQRxqIANBB2o2AgAgBEEYaiADQQZqNgIAIARBFGogA0EFajYCACAEQRBqIANBBGo2AgAgBEEMaiADQQNqNgIAIARBCGogA0ECajYCACAEQQRqIANBAWo2AgAgAkEgaiECIANBCGoiA0GYlQNHDQALQcvKASEDA0AgAyIFQQF0IgJBAXIhAyAAIAEgBUECdGooAgAiBkECdGoqAgAhByAFIQQDQCADIAQgByAAIAEgA0ECdGooAgBBAnRqKgIAXRshAwJAIAJBAmoiAkGXlQNKDQAgACABIANBAnRqKAIAQQJ0aioCACAAIAEgAkECdGooAgBBAnRqKgIAXUUNACACIQMLAkAgAyAERg0AIAEgBEECdGogASADQQJ0aiIEKAIANgIAIAQgBjYCACADIQQgA0EBdCICQQFyIgNBmJUDSA0BCwsgBUF/aiEDIAUNAAtBl5UDIQICQANAIAEgAkECdGoiAygCACEFIAMgASgCADYCACABIAU2AgAgAkECSQ0BIAAgBUECdGoqAgAhB0EAIQZBASEDQQAhBANAIAMgBCAHIAAgASADQQJ0aigCAEECdGoqAgBdGyEDAkAgBkECaiIGIAJODQAgACABIANBAnRqKAIAQQJ0aioCACAAIAEgBkECdGooAgBBAnRqKgIAXUUNACAGIQMLAkAgAyAERg0AIAEgBEECdGogASADQQJ0aiIEKAIANgIAIAQgBTYCACADIQQgA0EBdCIGQQFyIgMgAkgNAQsLIAJBf2ohAgwACwsLACUEbmFtZQEKAQAHYXJnc29ydAcSAQAPX19zdGFja19wb2ludGVyACYJcHJvZHVjZXJzAQxwcm9jZXNzZWQtYnkBBWNsYW5nBjE3LjAuMQAsD3RhcmdldF9mZWF0dXJlcwIrD211dGFibGUtZ2xvYmFscysIc2lnbi1leHQ="; // contents of wasm.b64
 
@@ -112,14 +118,6 @@ if (WASM_ARGSORT) {
     return i32.slice().reverse();
   }
 })();
-} else {
-  var argsort = function(array) {
-    // arange
-    const indices = new Uint32Array(array.length);
-    for (let i = 0; i < indices.length; i++) indices[i] = i;
-    indices.sort((a, b) => array[b] - array[a]);
-    return indices;
-  }
 }
 
 const db = await initDb();
@@ -203,53 +201,9 @@ async function transcribeAudio(audioFetcher, cancelToken) {
   // requestAnimationFrame(updateLoop);
   // currentTranscription.style.display = 'block';
 
-  function logSoftmax(logits) {
-    const max = Math.max.apply(null, logits);
-    const exps = logits.map(x => Math.exp(x - max));
-    const sumExp = exps.reduce((a, b) => a + b, 0);
-    const logSumExp = Math.log(sumExp);
-    return [logits.map(x => x - max - logSumExp), max];
-  }
-
-  function softmax(logits) {
-    const scaled = logits;
-    const max = Math.max.apply(null, scaled); // prevent overflow
-    const exps = scaled.map(x => Math.exp(x - max));
-    const sum = exps.reduce((a, b) => a + b, 0);
-    return exps.map(x => x / sum);
-  }
-
-
-  function sample(probs) {
-    const r = Math.random();
-    let cum = 0;
-    for (let i = 0; i < probs.length; i++) {
-      cum += probs[i];
-      if (r < cum) return i;
-    }
-    return probs.length - 1; // fallback for float imprecision
-  }
-
-  function normalize(probs) {
-    const sum = probs.reduce((a, b) => a + b, 0);
-    return probs.map(p => p / sum);
-  }
-
   const NO_TIMESTAMPS = true;
   const NO_CONTEXT = true;
   const SUPPRESS_NONSPEECH_TOKENS = true;
-
-  // const TOK_EOS = 50256;
-  // const TOK_BEGIN_TRANSCRIPTION = 50257;
-  // const TOK_NO_TIMESTAMPS = 50362;
-  // const TOK_STARTOFPREV = 50360;
-  // const TOK_TRANSCRIBE = 50358;
-  // const TOK_NOSPEECH = 50361;
-
-  // const TOK_TS_FIRST = 50363;
-  // const TOK_TS_LAST = 51863;
-
-  // const MAX_TOKENS_TO_DECODE = 224;
 
   async function inferLoop(previous_context, temperature, audio_features, seek, cancelToken) {
     let context = [];

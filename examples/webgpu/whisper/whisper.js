@@ -128,6 +128,48 @@ const getDevice = async (GPU) => {
     return device;
 };
 
+// #region math
+function argsort(array) {
+    // arange
+    const indices = new Uint32Array(array.length);
+    for (let i = 0; i < indices.length; i++) indices[i] = i;
+    indices.sort((a, b) => array[b] - array[a]);
+    return indices;
+}
+
+function logSoftmax(logits) {
+    const max = Math.max.apply(null, logits);
+    const exps = logits.map(x => Math.exp(x - max));
+    const sumExp = exps.reduce((a, b) => a + b, 0);
+    const logSumExp = Math.log(sumExp);
+    return [logits.map(x => x - max - logSumExp), max];
+}
+
+function softmax(logits) {
+    const scaled = logits;
+    const max = Math.max.apply(null, scaled); // prevent overflow
+    const exps = scaled.map(x => Math.exp(x - max));
+    const sum = exps.reduce((a, b) => a + b, 0);
+    return exps.map(x => x / sum);
+}
+
+
+function sample(probs) {
+    const r = Math.random();
+    let cum = 0;
+    for (let i = 0; i < probs.length; i++) {
+        cum += probs[i];
+        if (r < cum) return i;
+    }
+    return probs.length - 1; // fallback for float imprecision
+}
+
+function normalize(probs) {
+    const sum = probs.reduce((a, b) => a + b, 0);
+    return probs.map(p => p / sum);
+}
+// #endregion math
+
 export {
     SAMPLES_PER_SEGMENT,
     MEL_SPEC_CHUNK_LENGTH,
@@ -148,6 +190,12 @@ export {
     initDb,
 
     getDevice,
+
+    argsort,
+    logSoftmax,
+    softmax,
+    sample,
+    normalize,
 
     fetchMonoFloat32Array,
     fetchMonoFloat32ArrayFile,
