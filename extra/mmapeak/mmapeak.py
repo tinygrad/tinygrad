@@ -9,7 +9,7 @@ WAVE_SIZE = 32
 NUM_WAVES = 2
 FLOPS_PER_MATMUL = 16*16*16*2
 INTERNAL_LOOP = 1_000_00
-INSTRUCTIONS_PER_LOOP = 1000
+INSTRUCTIONS_PER_LOOP = 200
 DIRECTIVE = ".amdhsa_wavefront_size32 1"
 
 assemblyTemplate = (pathlib.Path(__file__).parent / "template.s").read_text()
@@ -33,7 +33,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, extra="")
   lib = COMPILER.compile(src)
   fxn = AMDProgram(DEV, "matmul", lib)
   start = time.perf_counter()
-  # TODO: why?
+  # TODO: why is this elapsed wrong?
   elapsed = fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) #For some reason the returned time is very small after the first kernel execution
   end = time.perf_counter()
   elapsed = end-start
@@ -48,7 +48,9 @@ if __name__=="__main__":
     raise RuntimeError("Error while initiating AMD device")
 
   COMPILER = HIPCompiler(DEV.arch)
-  if DEV.arch == 'gfx1100':
+  if DEV.arch in {'gfx1100', 'gfx1103'}:
+    if DEV.arch == 'gfx1103':
+      NUM_WORKGROUPS = 8
     launchBenchmark("v_wmma_bf16_16x16x16_bf16", (7,8,15))
     launchBenchmark("v_wmma_f16_16x16x16_f16", (7,8,15))
     launchBenchmark("v_wmma_f32_16x16x16_bf16", (7,8,15))
