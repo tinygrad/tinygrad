@@ -40,6 +40,8 @@ import {
   tensorStore,
   initDb,
 
+  getDevice,
+
   fetchMonoFloat32Array,
   fetchMonoFloat32ArrayFile,
   getProgressDlForPart
@@ -79,27 +81,7 @@ const LIMITS_KEYS = ["maxTextureDimension1D",
 "maxComputeWorkgroupsPerDimension"];
 // #endregion limits_keys
 
-const getDevice = async () => {
-  if (!navigator.gpu) return false;
-  const adapter = await navigator.gpu.requestAdapter();
-  let limits = Object.fromEntries(LIMITS_KEYS.map(x => [x, adapter.limits[x]]));
-  // let limits = adapter.limits;
-  // console.log(limits);
-  console.log(Object.entries(adapter.limits));
-  console.log(Object.entries(adapter.features));
-  let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
-  let maxBufferSize = Math.min(adapter.limits.maxBufferSize, 2147483648);
-  let maxComputeWorkgroupStorageSize = adapter.limits.maxComputeWorkgroupStorageSize;
-  const params = {
-    // requiredFeatures: ["shader-f16"],
-    requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize, "maxComputeWorkgroupStorageSize": maxComputeWorkgroupStorageSize },
-    powerPreference: "high-performance"
-  };
-  const device = await adapter.requestDevice(params);
-  return device;
-};
-
-const device = await getDevice();
+const device = await getDevice(navigator.gpu);
 
 const WASM_ARGSORT = false;
 

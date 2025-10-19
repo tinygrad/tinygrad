@@ -129,6 +129,7 @@
 
                 tensorStore,
                 initDb,
+                getDevice,
 
                 fetchMonoFloat32Array,
                 fetchMonoFloat32ArrayFile,
@@ -194,7 +195,7 @@
         async function loadAndInitializeModels() {
             await window.moduleReady;
             if (!nets.encoder) {
-                const device = await getDevice();
+                const device = await getDevice(navigator.gpu);
                 if (!device) {
                     wgpuError.style.display = "block";
                     loadingContainer.style.display = "none";
@@ -581,21 +582,6 @@
 
             console.log("end transcription");
         }
-
-        const getDevice = async () => {
-            if (!navigator.gpu) return false;
-            const adapter = await navigator.gpu.requestAdapter();
-            // console.log(adapter.limits);
-            let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
-            let maxBufferSize = adapter.limits.maxBufferSize;
-            let maxComputeWorkgroupStorageSize = adapter.limits.maxComputeWorkgroupStorageSize;
-            const params = {
-                // requiredFeatures: ["shader-f16"],
-                requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize, "maxComputeWorkgroupStorageSize": maxComputeWorkgroupStorageSize },
-                powerPreference: "high-performance"
-            };
-            return adapter?.requestDevice(params);
-        };
 
         const overlay = document.getElementById('overlay');
 

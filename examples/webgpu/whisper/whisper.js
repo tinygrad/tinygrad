@@ -104,6 +104,30 @@ function initDb() {
     });
 }
 
+const getDevice = async (GPU) => {
+    if (!GPU) return false;
+    const adapter = await GPU.requestAdapter();
+    // let limits = Object.fromEntries(LIMITS_KEYS.map(x => [x, adapter.limits[x]]));
+    // let limits = adapter.limits;
+    // console.log(limits);
+    // console.log(Object.entries(adapter.limits));
+    // console.log(Object.entries(adapter.features));
+    let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
+
+    const _2GB = 2**31; // 2GB
+    // safeguard against webgpu reporting nonsense value. some anti-fingerprinting measures?
+    let maxBufferSize = Math.min(adapter.limits.maxBufferSize, _2GB);
+    let maxComputeWorkgroupStorageSize = adapter.limits.maxComputeWorkgroupStorageSize;
+    const params = {
+        // requiredFeatures: ["shader-f16"],
+        requiredLimits: { "maxStorageBufferBindingSize": maxStorageBufferBindingSize, "maxBufferSize": maxBufferSize, "maxComputeWorkgroupStorageSize": maxComputeWorkgroupStorageSize },
+        powerPreference: "high-performance"
+    };
+    /** @type {GPUDevice} */
+    const device = await adapter.requestDevice(params);
+    return device;
+};
+
 export {
     SAMPLES_PER_SEGMENT,
     MEL_SPEC_CHUNK_LENGTH,
@@ -122,6 +146,8 @@ export {
 
     tensorStore,
     initDb,
+
+    getDevice,
 
     fetchMonoFloat32Array,
     fetchMonoFloat32ArrayFile,
