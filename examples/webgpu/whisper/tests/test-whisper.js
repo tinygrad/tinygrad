@@ -37,6 +37,8 @@ import {
   TOK_TS_LAST,
   MAX_TOKENS_TO_DECODE,
 
+  MODEL_BATCH_SIZE_HARDCODED,
+
   tensorStore,
   initDb,
 
@@ -47,6 +49,10 @@ import {
   softmax,
   sample,
   normalize,
+
+  format_seek,
+  format_text,
+  tokensToText,
 
   fetchMonoFloat32Array,
   fetchMonoFloat32ArrayFile,
@@ -247,14 +253,6 @@ async function transcribeAudio(audioFetcher, cancelToken) {
       return nextTokens;
     }
 
-    function format_seek(seek) {
-      return (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2);
-    }
-
-    function format_text(text, segment_cumlogprob, seek, seek_end) {
-      return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
-    }
-
     let decoder_state = {
       last_index_DEADBEEF: undefined,
       context: []
@@ -281,12 +279,11 @@ async function transcribeAudio(audioFetcher, cancelToken) {
         return array;
       }
 
-      const BS = 1;
       async function decoder_helper(context, context_input, audio_features, context_index_DEADBEEF, decoder_state) {
         context_input = batch_double_helper(context_input);
         let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index_DEADBEEF]);
         decoder_state.last_index_DEADBEEF = context_index_DEADBEEF;
-        decoder_state.context = [...decoder_state.context.slice(0, context_index_DEADBEEF * BS), ...context_input];
+        decoder_state.context = [...decoder_state.context.slice(0, context_index_DEADBEEF * MODEL_BATCH_SIZE_HARDCODED), ...context_input];
         return decoder_output;
       }
 
@@ -313,7 +310,7 @@ async function transcribeAudio(audioFetcher, cancelToken) {
 
       // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
       let decoder_output = await decoder_helper(context, context_input, audio_features, i_DEADBEEF - 1, decoder_state);
-      decoder_output = decoder_output.slice(0, decoder_output.length / BS);
+      decoder_output = decoder_output.slice(0, decoder_output.length / MODEL_BATCH_SIZE_HARDCODED);
       decoder_state.last_index_DEADBEEF = i_DEADBEEF;
       // decoder_state.context = context;
       let nextLogprobs;
@@ -388,10 +385,6 @@ async function transcribeAudio(audioFetcher, cancelToken) {
       sequences.push(sequence);
     }
 
-    function tokensToText(tokens) {
-      return tokens.filter((t) => ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
-    }
-
     for (; sequences.some(c => c.context.at(-1) !== TOK_EOS);) {
       let updated = false;
       for (let idx = 0; idx < sequences.length; ++idx) {
@@ -406,7 +399,7 @@ async function transcribeAudio(audioFetcher, cancelToken) {
         sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
 
         if (!updated) {
-          pendingText = format_text(tokensToText(sequences[idx].context.slice(offset_DEADBEEF)), sequences[idx].avg_logprob, seek, Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+          pendingText = format_text(tokensToText(sequences[idx].context.slice(offset_DEADBEEF), mapping), sequences[idx].avg_logprob, seek, Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
           console.log(pendingText);
           updated = true;
         }

@@ -16,6 +16,8 @@ const TOK_NOSPEECH = 50361;
 const TOK_TS_FIRST = 50363;
 const TOK_TS_LAST = 51863;
 
+const MODEL_BATCH_SIZE_HARDCODED = 1;
+
 const MAX_TOKENS_TO_DECODE = 224;
 // #endregion constants
 
@@ -170,6 +172,18 @@ function normalize(probs) {
 }
 // #endregion math
 
+function format_seek(seek) {
+    return (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2);
+}
+
+function format_text(text, segment_cumlogprob, seek, seek_end) {
+    return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
+}
+
+function tokensToText(tokens, mapping) {
+    return tokens.filter((t) => ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
+}
+
 export {
     SAMPLES_PER_SEGMENT,
     MEL_SPEC_CHUNK_LENGTH,
@@ -186,6 +200,8 @@ export {
     TOK_TS_LAST,
     MAX_TOKENS_TO_DECODE,
 
+    MODEL_BATCH_SIZE_HARDCODED,
+
     tensorStore,
     initDb,
 
@@ -196,6 +212,10 @@ export {
     softmax,
     sample,
     normalize,
+
+    format_seek,
+    format_text,
+    tokensToText,
 
     fetchMonoFloat32Array,
     fetchMonoFloat32ArrayFile,
