@@ -2,10 +2,6 @@
 const SAMPLES_PER_SEGMENT = 480000;
 const MEL_SPEC_CHUNK_LENGTH = 80 * 3000;
 
-// const NO_TIMESTAMPS = true;
-// const NO_CONTEXT = true;
-// const SUPPRESS_NONSPEECH_TOKENS = true;
-
 const TOK_EOS = 50256;
 const TOK_BEGIN_TRANSCRIPTION = 50257;
 const TOK_NO_TIMESTAMPS = 50362;
@@ -410,9 +406,6 @@ async function inferLoop(nets, mapping, log_specs_full, previous_context, temper
 export {
     SAMPLES_PER_SEGMENT,
     MEL_SPEC_CHUNK_LENGTH,
-    // NO_TIMESTAMPS,
-    // NO_CONTEXT,
-    // SUPPRESS_NONSPEECH_TOKENS,
     TOK_EOS,
     TOK_BEGIN_TRANSCRIPTION,
     TOK_NO_TIMESTAMPS,

@@ -6,67 +6,22 @@ const {default: mel} = await import("../mel.js");
 const {default: encoder} = await import("../encoder.js");
 const {default: decoder} = await import("../decoder.js");
 
-// (async () => {
-//const { create, globals } = require('webgpu');
-//import { create, globals } from 'webgpu';
-//const { create, globals } = await import('webgpu');
-
-//Object.assign(globalThis, globals);
-//const navigator = { gpu: create([]) };
-
-//const fs = require('node:fs');
-//const { PNG } = require('pngjs');
-//const { create, globals } = require('webgpu');
-
 Object.assign(globalThis, globals);
 
 const navigator = { gpu: create([]) };
 
-// const SAMPLES_PER_SEGMENT = 480000;
-// const MEL_SPEC_CHUNK_LENGTH = 80 * 3000;
-
 // #region imports
 import {
   SAMPLES_PER_SEGMENT, MEL_SPEC_CHUNK_LENGTH, TOK_EOS,
-  TOK_BEGIN_TRANSCRIPTION,
-  TOK_NO_TIMESTAMPS,
-  TOK_STARTOFPREV,
-  TOK_TRANSCRIBE,
-  TOK_NOSPEECH,
-  TOK_TS_FIRST,
-  TOK_TS_LAST,
-  MAX_TOKENS_TO_DECODE,
-
-  MODEL_BATCH_SIZE_HARDCODED,
-
-  NO_TIMESTAMPS,
-  NO_CONTEXT,
-  SUPPRESS_NONSPEECH_TOKENS,
 
   tensorStore,
   initDb,
 
   getDevice,
 
-  argsort,
-  logSoftmax,
-  softmax,
-  sample,
-  normalize,
-
-  format_seek,
-  format_text,
-  tokensToText,
-
   fetchMonoFloat32Array,
-  fetchMonoFloat32ArrayFile,
   getProgressDlForPart,
 
-  handle_timestamp_tokens,
-  batch_double_helper,
-  decoder_helper,
-  rebuild_cache_tail_index,
-  decodeOne,
   inferLoop
 } from "../whisper.js";
 // #endregion imports
@@ -197,26 +152,9 @@ async function transcribeAudio(audioFetcher, cancelToken) {
     log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
   }
 
-  // console.log(log_specs_full.slice(0, 100));
-
-  // let res = await fetch(`${BASE_URL}/RED_16k.mel_f32`);
-  // log_specs_full = new Float32Array(await res.arrayBuffer());
-  // const audio_features_full = new Float32Array(await fetch(`${BASE_URL}/RED_16k.features`).then((res) => res.arrayBuffer()));
-
   const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
 
   let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
-  // const updateLoop = (now) => {
-  //   if (pendingText !== null && pendingText !== lastDisplayed && now - lastUpdateTime >= 1000.0 / 30) {
-  //     currentTranscription.innerText = pendingText;
-  //     lastDisplayed = pendingText;
-  //     lastUpdateTime = now;
-  //     transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
-  //   }
-  //   if (!inferenceDone) requestAnimationFrame(updateLoop);
-  // };
-  // requestAnimationFrame(updateLoop);
-  // currentTranscription.style.display = 'block';
 
   console.log("begin new transcription");
 
@@ -302,6 +240,3 @@ delete globalThis.navigator;
 globalThis.navigator = null;
 // console.log(process._getActiveRequests());
 // console.log(process._getActiveHandles());
-
-// delete globalThis.navigator;
-// }) ();
