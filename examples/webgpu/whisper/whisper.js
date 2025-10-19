@@ -114,7 +114,7 @@ const getDevice = async (GPU) => {
     // console.log(Object.entries(adapter.features));
     let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
 
-    const _2GB = 2**31; // 2GB
+    const _2GB = 2 ** 31; // 2GB
     // safeguard against webgpu reporting nonsense value. some anti-fingerprinting measures?
     let maxBufferSize = Math.min(adapter.limits.maxBufferSize, _2GB);
     let maxComputeWorkgroupStorageSize = adapter.limits.maxComputeWorkgroupStorageSize;
