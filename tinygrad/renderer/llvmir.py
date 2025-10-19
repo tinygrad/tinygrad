@@ -18,9 +18,7 @@ def ldt(dt:DType):
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
     if dtype in dtypes.fp8s: return float_to_fp8(x, dtype)
-    if math.isinf(x) or math.isnan(x):
-      return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
-
+    if math.isinf(x) or math.isnan(x): return "0x%02X%02X%02X%02X%02X%02X%02X%02X" % tuple(struct.pack("d",x)[::-1])
     return truncate[dtype](x)
   return int(x)
 
@@ -71,7 +69,7 @@ flags = " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
-fp8_map = {dtypes.fp8e4m3: "fp8", dtypes.fp8e5m2: "bf8"}
+
 base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
@@ -100,11 +98,6 @@ base_rewrite = PatternMatcher([
   # rewrite cast to bool to CMPNE 0
   (UPat(Ops.CAST, name="x", dtype=dtypes.bool),
    lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][Ops.CMPNE]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, zeroinitializer"),
-  (UPat(Ops.CAST, dtypes.fp8s, (UPat.var("y", dtypes.float),), name="x",), lambda ctx,x, y:
-    f" {ctx[x]} = call i8 @f32_to_fp8s({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'true' if x.dtype == dtypes.fp8e5m2 else 'false'})"),
-  (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x, y:
-    f"  {ctx[x.src[0]]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
-    f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{fp8_map[y.dtype.scalar()]}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
@@ -131,10 +124,10 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 
-non_native = (dtypes.bfloat16, *dtypes.fp8s)
+non_native_dtypes = (dtypes.bfloat16, *dtypes.fp8s)
 
-ir_f32_to_fp8s = """
-define i8 @f32_to_fp8s(float %val, i1 %is_bf8) {
+ir_f32_to_fp8 = """
+define i8 @f32_to_fp8(float %val, i1 %is_bf8) {
 entry:
   %ival = bitcast float %val to i32
   %exp = and i32 %ival, 2139095040        ; 0x7F800000
@@ -163,6 +156,7 @@ exit:
   ret i8 %trunc
 }
 """
+
 class LLVMRenderer(Renderer):
   device = "CPU"
   abi = 'win64cc' if sys.platform == 'win32' else None
@@ -177,28 +171,29 @@ class LLVMRenderer(Renderer):
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
     # copied from cstyle.py, upcast to float32 all the ops that don't support bfloat16/fp8s
-    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=non_native, name="x"),
+    (UPat((Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN), dtype=non_native_dtypes, name="x"),
       lambda x: (UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(x.dtype))),
     # copied from cstyle.py, add float intermediate casting
-    (UPat(Ops.CAST, name="x", src=UPat.var("y", non_native)),lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
-    (UPat(Ops.CAST, non_native, UPat.var("x"), name="y"),lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(Ops.CAST, name="x", src=UPat.var("y", non_native_dtypes)),
+      lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None),
+    (UPat(Ops.CAST, non_native_dtypes, UPat.var("x"), name="y"),lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=dtypes.float else None),
   ])
 
-  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
+  def render(self, uops: list[UOp]) -> str:
+    return "\n".join((self._render_header(uops), *(k:=self._render_kernel(uops))[0], k[1], self._render_footer(uops)))
+  def _render_header(self, uops: list[UOp]) -> str: return ir_f32_to_fp8 if any(u.dtype in dtypes.fp8s for u in uops if u.op is Ops.CAST) else ""
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
-  def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None, defines:list[str]|None=None) -> str:
+  def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
     sprefix = "".join([f" {x}" for x in (prefix or []) + [self.abi] if x is not None])
-    return "\n".join(defines or []) + "\n".join([f"define{sprefix} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+    return "\n".join([f"define{sprefix} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
     args: list[tuple[str, DType]] = []
     kernel: list[str] = []
     vc = -1
-    defines = []
-    if any(u.dtype in dtypes.fp8s for u in uops if u.op is Ops.CAST):
-      defines.append(ir_f32_to_fp8s)
+
     local_args: list[str] = []
     for u in uops:
       if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
@@ -238,7 +233,7 @@ class LLVMRenderer(Renderer):
         if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
-    return tuple(local_args), self._render_fn(name, args, kernel, prefix, defines)
+    return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
@@ -257,6 +252,11 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(tuple(llvm_intrinsics), name="x"),
     lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
+    (UPat(Ops.CAST, dtypes.fp8s, (UPat.var("y", dtypes.float),), name="x",), lambda ctx,x, y:
+      f" {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'true' if x.dtype == dtypes.fp8e5m2 else 'false'})"),
+    (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x, y:
+      f"  {ctx[x.src[0]]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
+      f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + PatternMatcher([
     (UPat(Ops.CAST, name="x", dtype=dtypes.half.vec(16), src=UPat.var("y", dtypes.half.vec(8))),

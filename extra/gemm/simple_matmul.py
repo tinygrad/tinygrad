@@ -16,19 +16,9 @@ N = getenv("N", 4096)
 M = getenv("M", N)
 K = getenv("K", N)
 CNT = getenv("CNT", 10)
-ATOL = getenv("ATOL", 1e-4)
-RTOL = getenv("RTOL", 3e-2)
-if dtype_in is dtypes.fp8e5m2:
-  ATOL = 1.0
-  RTOL = 5e-1
 
-if dtype_in is dtypes.fp8e4m3:
-  ATOL = getenv("ATOL", 1e-1)
-  RTOL = getenv("RTOL", 1e-1)
-
-if dtype_in is dtypes.bfloat16:
-  ATOL = getenv("ATOL", 1e-2)
-  RTOL = getenv("RTOL", 1e-2)
+atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1)}.get(dtype_in, (1e-4, 3e-2))
+ATOL, RTOL = getenv("ATOL", atol), getenv("RTOL", rtol)
 
 INT_LOW = getenv("INT_LOW", 0)
 INT_HIGH = getenv("INT_HIGH", 10)
@@ -51,17 +41,8 @@ if __name__ == "__main__":
   if getenv("SHOULD_USE_TC"):
     sched = a.matmul(b, dtype=acc_dtype).schedule()
     lowered = list(lower_schedule(sched))
-    if dtype_in in dtypes.fp8s:
-      ok = False
-      for i,ei in enumerate(lowered):
-        ei = ei[1]
-        if any(opt.op is OptOps.TC for opt in ei.prg.p.applied_opts):
-          ok = True
-          break
-      assert ok == True
-    else:
-      ei = get_single_element(lowered)[1]
-      assert any(opt.op is OptOps.TC for opt in ei.prg.p.applied_opts), f"TC not triggered, {ei.prg.p.applied_opts}"
+    ei = get_single_element(lowered)[1]
+    assert any(opt.op is OptOps.TC for opt in ei.prg.p.applied_opts), f"TC not triggered, {ei.prg.p.applied_opts}"
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
   res = c.numpy()
