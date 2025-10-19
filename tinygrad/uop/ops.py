@@ -977,7 +977,8 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
 active_rewrites:list[TrackedGraphRewrite] = []
 def profile_matches(fxn:Callable):
   def wrap(*args, **kwargs):
-    name = kwargs.get("name", None) or fxn.__name__
+    name = str(kwargs.get("name", None) or fxn.__name__)
+    assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {name} with {args}"
     if tracking:=(TRACK_MATCH_STATS >= 2):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
