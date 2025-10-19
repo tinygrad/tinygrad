@@ -1,5 +1,4 @@
 import unittest
-from tinygrad.shape.shapetracker import ShapeTracker, View
 from tinygrad import Variable
 from tinygrad.tensor import Tensor
 
@@ -7,115 +6,33 @@ class TestSymbolic(unittest.TestCase):
   def assert_tuple_equal(self, x, y):
     for a,b in zip(x,y): self.assertFalse(a != b)
 
-  def test_symbolic_st(self):
-    x = Variable("x", 1, 100)
-    st = ShapeTracker.from_shape((x, 3))
-    self.assert_tuple_equal(st.shape, (x, 3))
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
-
-  def test_is_expanded_0(self):
-    st = ShapeTracker(views=(View(shape=(2, (Variable('start_pos', 1, 8)+1), 1, 1), strides=(8, 1, 0, 0), offset=0, mask=((0, 2), (0, Variable('start_pos', 1, 8)), (0, 1), (0, 1)), contiguous=False), View(shape=(2, (Variable('start_pos', 1, 8)+1)), strides=((Variable('start_pos', 1, 8)+1), 1), offset=0, mask=None, contiguous=True)))   # noqa: E501
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
-
-  def test_is_expanded_1(self):
-    st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+2)), strides=(Variable('i', 1, 10), 1), offset=0, mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
-
-  def test_is_expanded_2(self):
-    st = ShapeTracker(views=(View(shape=(3, (Variable('i', 1, 10)+Variable('j', 1, 10))), strides=(Variable('i', 1, 10), 1), offset=0, mask=((0, 3), (0, Variable('i', 1, 10))), contiguous=False),))   # noqa: E501
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
-
-  def test_merge_view_recursion_err(self):
-    vm2 = View(shape=(Variable('j', 1, 10),), strides=(0,), offset=0, mask=None, contiguous=False)
-    vm1 = View(shape=(1,), strides=(0,), offset=0, mask=None, contiguous=True)
-    self.assertEqual(vm2+vm1, None)
-
-  def test_merge_view_recursion_err2(self):
-    vm2 = View(shape=(Variable('a', 1, 10).bind(4),), strides=(0,), offset=0, mask=None, contiguous=False)
-    # NOTE: vm1 is different from what create function would give, and this test vm2+vm1 halts
-    vm1 = View(shape=(Variable('a', 1, 10).bind(4),), strides=(1,), offset=0, mask=((0, Variable('a', 1, 10).bind(4)),), contiguous=False)
-    self.assertEqual(vm2+vm1, None)
-
-    vm3 = View.create(shape=(Variable('a', 1, 10).bind(4),))
-    self.assertEqual(vm3.shape, vm1.shape)
-    self.assertEqual(vm3.strides, vm1.strides)
-    self.assertEqual(vm2+vm3, vm2)
-
   def test_cat_dim0_is_expanded(self):
     i = Variable("i", 1, 5).bind(3)
     j = Variable("j", 1, 5).bind(3)
     k = Variable("k", 1, 5).bind(3)
     t = Tensor.rand(5, 4)[:i].cat(Tensor.rand(5, 4)[:j], dim=0).cat(Tensor.rand(5, 4)[:k], dim=0)
-    st = t.uop.st
-    self.assert_tuple_equal(st.shape, (i+j+k, 4))
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
+    self.assert_tuple_equal(t.shape, (i+j+k, 4))
     t = Tensor.rand(5, 3)[:i].cat(Tensor.rand(5, 3)[:i], dim=0).cat(Tensor.rand(3, 3), dim=0)
-    st = t.uop.st
-    self.assert_tuple_equal(st.shape, (2*i+3, 3))
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
+    self.assert_tuple_equal(t.shape, (2*i+3, 3))
 
   def test_cat_dim1_strides(self):
     i = Variable("i", 1, 5).bind(4)
     j = Variable("j", 1, 5).bind(4)
     k = Variable("k", 1, 5).bind(4)
     t = Tensor.rand(3, 5)[:, :i].cat(Tensor.rand(3, 5)[:, :j], dim=1).cat(Tensor.rand(3, 5)[:, :k], dim=1)
-    st = t.uop.st
-    self.assert_tuple_equal(st.shape, (3, i+j+k))
-    self.assert_tuple_equal(st.is_expanded(), (False, False))
+    self.assert_tuple_equal(t.shape, (3, i+j+k))
 
 class TestSymbolicVarVals(unittest.TestCase):
   def assert_equal(self, x, y): self.assertFalse(x != y)
-  def test_var_vals_empty(self):
-    assert ShapeTracker.from_shape((3, 4, 5)).var_vals == {}
-
-  def test_var_vals_shape(self):
-    x = Variable("x", 1, 100).bind(3)
-    assert ShapeTracker.from_shape((x, 3)).var_vals == {"x": 3}
-
-  def test_var_vals_offset(self):
-    x = Variable("x", 1, 100).bind(3)
-    st = ShapeTracker.from_shape((4, 3)).shrink(((x, x+1), (0, 3)))
-    self.assert_equal(st.views[-1].offset, x * 3)
-    assert st.var_vals == {"x": 3}
-
-  def test_var_vals_mask(self):
-    x = Variable("x", 1, 100).bind(3)
-    view = View.create(shape=(3,4), strides=(4,1), offset=0, mask=((0, x), (0, 4)))
-    st = ShapeTracker(views=(view,))
-    assert st.var_vals == {"x": 3}
-
-  def test_var_vals_complex(self):
-    x = Variable("x", 1, 100).bind(3)
-    y = Variable("y", 1, 100).bind(4)
-    z = Variable("z", 1, 100).bind(5)
-    st = ShapeTracker.from_shape((x, 5, y)).shrink(((0, x), (z, z+1), (0, 3)))
-    self.assert_equal(st.views[-1].offset, y * z)
-    assert st.var_vals == {"x": 3, "y": 4, "z": 5}
-
-  def test_shrink_reshape(self):
-    x = Variable("x", 1, 100).bind(3)
-    st = ShapeTracker.from_shape((10, 10, 10)).shrink(((x, x+3), (3, 7), (2, 5)))
-    st = st.reshape((3*4*3,))
-    assert st.var_vals == {"x": 3}
-
-class TestShapeTrackerUnbind(unittest.TestCase):
-  def test_view_unbind(self):
-    v = Variable("v", 1, 100)
-    bv = Variable("v", 1, 100).bind(3)
-    unbound_view, var_val = View.create(shape=(bv, 4)).unbind()
-    assert unbound_view == View.create(shape=(v, 4))
-    assert var_val == {v: 3}
 
   def test_shrink_unbind(self):
     v = Variable("v", 1, 100)
     bv = Variable("v", 1, 100).bind(2)
     t = Tensor.rand(3, 4).shrink(((0,bv),(0,4)))
-    unbound_st, var_val = t.uop.st.unbind()
-    assert unbound_st == ShapeTracker((View.create(shape=(v, 4)),))
+    unbound_st, var_val = t.uop.unbind_all()
     assert var_val == {v: 2}
     t = Tensor.rand(3, 4).shrink(((bv, bv+1), (0, 4)))
-    unbound_st, var_val = t.uop.st.unbind()
-    assert unbound_st == ShapeTracker((View.create(shape=(1, 4), offset=4*v),))
+    unbound_st, var_val = t.uop.unbind_all()
     assert var_val == {v: 2}
 
 class TestSymbolicReshape(unittest.TestCase):
@@ -144,17 +61,6 @@ class TestSymbolicReshape(unittest.TestCase):
         assert ret.shape == (vi, vj)
         ret = ret.reshape(1, vi*vj)
         assert ret.shape == (1, vi*vj)
-
-  def test_symbolic_mask(self):
-    # taken from gpt2 single kvcache
-    # these two caused problems in gpt2 if reshape merged views
-    view = View(shape=(1, (Variable('start_pos', 1, 128).bind(2)+1), 16, 64), strides=(0, 0, 64, 1), offset=1024, mask=((0, 1), (Variable('start_pos', 1, 128).bind(2), (Variable('start_pos', 1, 128).bind(2)+1)), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
-    new_shape = (1, 1, (Variable('start_pos', 1, 128).bind(2)+1), 16, 64)
-    assert view.reshape(new_shape) is None
-
-    view = View(shape=(2, 1, (Variable('start_pos', 1, 128)+1), 16, 64), strides=(0, 0, 1024, 64, 1), offset=131072, mask=((1, 2), (0, 1), (0, (Variable('start_pos', 1, 128)+1)), (0, 16), (0, 64)), contiguous=False)   # noqa: E501
-    new_shape = (2, (Variable('start_pos', 1, 128)+1), 16, 64)
-    assert view.reshape(new_shape) is None
 
 class TestSymbolicExpand(unittest.TestCase):
   def test_expand_into_symbols(self):
@@ -197,7 +103,6 @@ class TestSymbolicPad(unittest.TestCase):
     t = Tensor.ones(100)[:v].pad(((4, 0),))
     t = t[:9]
     assert t.tolist() == [0,0,0,0,1,1,1,1,1]
-
 
 if __name__ == '__main__':
   unittest.main()

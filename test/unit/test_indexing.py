@@ -5,8 +5,6 @@ import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, TinyJit
 from tinygrad.device import is_dtype_supported
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
 from tinygrad.helpers import CI, all_same, prod
 
 random.seed(42)
@@ -22,11 +20,13 @@ def consec(shape, start=1):
 # creates strided tensor with base set to reference tensor's base, equivalent to torch.set_()
 def set_(reference: Tensor, shape, strides, offset):
   raise NotImplementedError("need to implement without calling uop.view")
+  """
   if reference.uop.base.realized is None: reference.realize()
   assert reference.uop.base.realized, "base has to be realized before setting it to strided's base"
   strided = Tensor(reference.uop.view(ShapeTracker((View.create(shape=shape, strides=strides, offset=offset),))))
   assert strided.uop.st.real_strides() == strides, "real_strides should equal strides for strided"
   return strided
+  """
 
 def clone(original:Tensor): return original.clone()
 def copy_(src:Tensor, other:Tensor) -> Tensor: return src.clone()
@@ -501,10 +501,6 @@ class TestIndexing(unittest.TestCase):
     y = x[:, :, :, 1]
     z = y[:, 1:1, :]
     numpy_testing_assert_equal_helper((2, 0, 4), z.shape)
-    # this isn't technically necessary, but matches NumPy stride calculations.
-    # NOTE: this is empty and shouldn't have strides
-    numpy_testing_assert_equal_helper((True, True, True), z.uop.st.is_expanded())
-    self.assertTrue(z.uop.st.contiguous)
 
   @unittest.skip("bool indexing not supported")
   def test_index_getitem_copy_bools_slices(self):

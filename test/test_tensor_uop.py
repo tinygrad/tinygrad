@@ -11,8 +11,7 @@ class TestTensorUOp(unittest.TestCase):
     def helper(a: np.ndarray):
       print(a.shape, a.strides, a.flags.c_contiguous)
       b = Tensor(a).uop
-      #assert b.st.contiguous == a.flags.c_contiguous
-      assert b.st.shape == a.shape
+      assert b.shape == a.shape
       np.testing.assert_equal(a, Tensor(b).numpy())
 
     for ndims in range(1, 4):
