@@ -48,7 +48,6 @@ class CUDACompiler(Compiler):
       self.compile_options += extra_options
       cache_key = f"{cache_key}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}"
     nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
-    print(f"Using NVRTC version {nvrtcMajor.value}.{nvrtcMinor.value} for architecture {arch} with options {self.compile_options}")
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
     super().__init__(f"compile_{cache_key}_{self.arch}")
   def _compile_program(self, src:str, nvrtc_get_content:Callable, nvrtc_get_size:Callable) -> bytes:
