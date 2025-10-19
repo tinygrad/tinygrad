@@ -128,6 +128,10 @@
                 MAX_TOKENS_TO_DECODE,
                 MODEL_BATCH_SIZE_HARDCODED,
 
+                NO_TIMESTAMPS,
+                NO_CONTEXT,
+                SUPPRESS_NONSPEECH_TOKENS,
+
                 tensorStore,
                 initDb,
                 getDevice,
@@ -274,22 +278,6 @@
             };
             requestAnimationFrame(updateLoop);
             currentTranscription.style.display = 'block';
-
-            const NO_TIMESTAMPS = true;
-            const NO_CONTEXT = true;
-            const SUPPRESS_NONSPEECH_TOKENS = true;
-
-            // const TOK_EOS = 50256;
-            // const TOK_BEGIN_TRANSCRIPTION = 50257;
-            // const TOK_NO_TIMESTAMPS = 50362;
-            // const TOK_STARTOFPREV = 50360;
-            // const TOK_TRANSCRIBE = 50358;
-            // const TOK_NOSPEECH = 50361;
-
-            // const TOK_TS_FIRST = 50363;
-            // const TOK_TS_LAST = 51863;
-
-            // const MAX_TOKENS_TO_DECODE = 224;
 
             async function inferLoop(previous_context, temperature, audio_features, seek, cancelToken) {
                 let context = [];

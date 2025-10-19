@@ -17,6 +17,9 @@ const TOK_TS_FIRST = 50363;
 const TOK_TS_LAST = 51863;
 
 const MODEL_BATCH_SIZE_HARDCODED = 1;
+const NO_TIMESTAMPS = true;
+const NO_CONTEXT = true;
+const SUPPRESS_NONSPEECH_TOKENS = true;
 
 const MAX_TOKENS_TO_DECODE = 224;
 // #endregion constants
@@ -201,6 +204,9 @@ export {
     MAX_TOKENS_TO_DECODE,
 
     MODEL_BATCH_SIZE_HARDCODED,
+    NO_TIMESTAMPS,
+    NO_CONTEXT,
+    SUPPRESS_NONSPEECH_TOKENS,
 
     tensorStore,
     initDb,

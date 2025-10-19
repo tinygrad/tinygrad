@@ -39,6 +39,10 @@ import {
 
   MODEL_BATCH_SIZE_HARDCODED,
 
+  NO_TIMESTAMPS,
+  NO_CONTEXT,
+  SUPPRESS_NONSPEECH_TOKENS,
+
   tensorStore,
   initDb,
 
@@ -206,10 +210,6 @@ async function transcribeAudio(audioFetcher, cancelToken) {
   // };
   // requestAnimationFrame(updateLoop);
   // currentTranscription.style.display = 'block';
-
-  const NO_TIMESTAMPS = true;
-  const NO_CONTEXT = true;
-  const SUPPRESS_NONSPEECH_TOKENS = true;
 
   async function inferLoop(previous_context, temperature, audio_features, seek, cancelToken) {
     let context = [];
