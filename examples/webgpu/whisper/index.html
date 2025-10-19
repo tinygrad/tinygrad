@@ -125,7 +125,10 @@
                 TOK_NOSPEECH,
                 TOK_TS_FIRST,
                 TOK_TS_LAST,
-                MAX_TOKENS_TO_DECODE
+                MAX_TOKENS_TO_DECODE,
+
+                fetchMonoFloat32Array,
+                fetchMonoFloat32ArrayFile
             } from "./whisper.js";
 
         document.getElementById("fetchForm").addEventListener("submit", async (e) => {
@@ -154,24 +157,6 @@
         // const AUDIO_PATH = 'test2.wav';
         // const AUDIO_PATH = 'TINYCORP_MEETING_2025-07-07-DSWQCT9mypQ.mp3';
         // const AUDIO_PATH = `${BASE_URL}/TINYCORP_MEETING_2025-08-25-KA0h9zmJtcs.mp3`;
-
-        async function fetchMonoFloat32Array(url) {
-            const response = await fetch(url);
-            return await fetchMonoFloat32ArrayFile(response);
-        }
-
-        async function fetchMonoFloat32ArrayFile(response) {
-            const arrayBuffer = await response.arrayBuffer();
-            const audioCtx = new AudioContext({ sampleRate: 16000 });
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            const mono = new Float32Array(audioBuffer.length);
-            for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
-                const data = audioBuffer.getChannelData(c);
-                for (let i = 0; i < data.length; i++) mono[i] += data[i] / audioBuffer.numberOfChannels;
-            }
-            return { sampleRate: audioBuffer.sampleRate, samples: mono };
-        }
-
 
         const getProgressDlForPart = async (part, progressCallback, lastModified) => {
             const response = await fetch(part, {

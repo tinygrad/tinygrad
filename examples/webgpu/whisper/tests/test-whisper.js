@@ -34,7 +34,10 @@ import {
   TOK_NOSPEECH,
   TOK_TS_FIRST,
   TOK_TS_LAST,
-  MAX_TOKENS_TO_DECODE
+  MAX_TOKENS_TO_DECODE,
+
+  fetchMonoFloat32Array,
+  fetchMonoFloat32ArrayFile
 } from "../whisper.js";
 
 const LIMITS_KEYS = ["maxTextureDimension1D",
@@ -199,27 +202,6 @@ const getProgressDlForPart = async (part, progressCallback, lastModified) => {
   }));
   return { buffer: await res.arrayBuffer(), lastModified: newLastModified };
 };
-
-
-async function fetchMonoFloat32Array(url) {
-  const response = await fetch(url);
-  return await fetchMonoFloat32ArrayFile(response);
-}
-
-async function fetchMonoFloat32ArrayFile(response) {
-  const arrayBuffer = await response.arrayBuffer();
-  const audioCtx = new AudioContext({ sampleRate: 16000, sinkId: 'none' });
-  const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-  await audioCtx.close();
-  const mono = new Float32Array(audioBuffer.length);
-  for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
-    // const data = audioBuffer.getChannelData(c);
-    const data = new Float32Array(audioBuffer.length);
-    audioBuffer.copyFromChannel(data, c);
-    for (let i = 0; i < data.length; i++) mono[i] += data[i] / audioBuffer.numberOfChannels;
-  }
-  return { sampleRate: audioBuffer.sampleRate, samples: mono };
-}
 
 
 const BASE_URL = 'http://localhost:8000';
@@ -623,7 +605,7 @@ async function transcribeAudio(audioFetcher, cancelToken) {
 }
 
 currentCancel = { cancelled: false };
-await transcribeAudio(async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`), currentCancel);
+await transcribeAudio(async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel);
 console.log("we're supposed to be done here");
 
 delete globalThis.mel;

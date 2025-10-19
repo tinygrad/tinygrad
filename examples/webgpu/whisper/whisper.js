@@ -17,6 +17,26 @@ const TOK_TS_LAST = 51863;
 
 const MAX_TOKENS_TO_DECODE = 224;
 
+async function fetchMonoFloat32Array(url, AudioContextImplementation = globalThis.AudioContext) {
+    const response = await fetch(url);
+    return await fetchMonoFloat32ArrayFile(response, AudioContextImplementation);
+}
+
+async function fetchMonoFloat32ArrayFile(response, AudioContextImplementation = globalThis.AudioContext) {
+    const arrayBuffer = await response.arrayBuffer();
+    const audioCtx = new AudioContextImplementation({ sampleRate: 16000, sinkId: 'none' });
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    await audioCtx.close();
+    const mono = new Float32Array(audioBuffer.length);
+    for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+        // const data = audioBuffer.getChannelData(c);
+        const data = new Float32Array(audioBuffer.length);
+        audioBuffer.copyFromChannel(data, c);
+        for (let i = 0; i < data.length; i++) mono[i] += data[i] / audioBuffer.numberOfChannels;
+    }
+    return { sampleRate: audioBuffer.sampleRate, samples: mono };
+}
+
 export {
     SAMPLES_PER_SEGMENT,
     MEL_SPEC_CHUNK_LENGTH,
@@ -31,5 +51,8 @@ export {
     TOK_NOSPEECH,
     TOK_TS_FIRST,
     TOK_TS_LAST,
-    MAX_TOKENS_TO_DECODE
+    MAX_TOKENS_TO_DECODE,
+
+    fetchMonoFloat32Array,
+    fetchMonoFloat32ArrayFile
 };
