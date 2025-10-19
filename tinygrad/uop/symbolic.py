@@ -28,6 +28,7 @@ invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 propagate_invalid = PatternMatcher([
   # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
   # propagate invalid, push it past children
+  (invalid_gate.cast(name="cast"), lambda i,x,cond,cast: x.cast(cast.dtype) if cast.dtype is not dtypes.index else None),
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i))
     for op in GroupOp.Binary-GroupOp.Comparison),
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: x.alu(alu.op,y)) for op in GroupOp.Comparison),
