@@ -40,18 +40,18 @@ MODELS = {
 
 def precompute_freqs_cis(dim:int, end:int, theta:float = 10000.0, scale:float=1.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
   half = dim // 2
-  freqs = (theta ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+  freqs = (theta ** (-(Tensor.arange(half, dtype=dtypes.float32) / half)))[None, :]
 
   def _angles(freqs, mscale=1): return (Tensor.arange(end, dtype=dtypes.float32)[:, None] * Tensor.stack(freqs.cos()*mscale, freqs.sin()*mscale, dim=-1)).reshape(1, end, 1, half, 2)
   def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(theta)
 
-  # rope
+  # rope https://arxiv.org/pdf/2104.09864
   if scale <= 1: return _angles(freqs)
 
   # yarn https://arxiv.org/pdf/2309.00071
   low, high = _ratio(ntk_alpha), _ratio(ntk_beta)
   interpolation, extrapolation = freqs, freqs / scale
-  ramp = (Tensor.arange(half, dtype=dtypes.float32, device=freqs.device) - low) / (high - low)
+  ramp = (Tensor.arange(half, dtype=dtypes.float32) - low) / (high - low)
   mask = 1 - ramp.clamp(0, 1)
   freqs = interpolation * (1 - mask) + extrapolation * mask
   return _angles(freqs, 0.1 * math.log(scale) + 1.0)
