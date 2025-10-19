@@ -65,7 +65,8 @@ import {
   handle_timestamp_tokens,
   batch_double_helper,
   decoder_helper,
-  rebuild_cache_tail_index
+  rebuild_cache_tail_index,
+  decodeOne
 } from "../whisper.js";
 // #endregion imports
 
@@ -237,7 +238,6 @@ async function transcribeAudio(audioFetcher, cancelToken) {
       console.error("Context length exceeds 224");
       return;
     }
-    const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61, 62, 63, 90, 91, 92, 93, 357, 366, 438, 532, 685, 705, 796, 930, 1058, 1220, 1267, 1279, 1303, 1343, 1377, 1391, 1635, 1782, 1875, 2162, 2361, 2488, 3467, 4008, 4211, 4600, 4808, 5299, 5855, 6329, 7203, 9609, 9959, 10563, 10786, 11420, 11709, 11907, 13163, 13697, 13700, 14808, 15306, 16410, 16791, 17992, 19203, 19510, 20724, 22305, 22935, 27007, 30109, 30420, 33409, 34949, 40283, 40493, 40549, 47282, 49146, 50257, 50357, 50358, 50359, 50360, 50361];
     // var v = new Int32Array(51864);
     // v.fill(0);
     // v[0] = TOK_NO_TIMESTAMPS;
@@ -246,86 +246,6 @@ async function transcribeAudio(audioFetcher, cancelToken) {
       last_index_DEADBEEF: undefined,
       context: []
     };
-    async function decodeOne(decode_sequence, decoder_state, temperature) {
-      const { index: i_DEADBEEF, max_range: max_range_DEADBEEF, last_eos_logprob } = decode_sequence;
-      const last_index_DEADBEEF = decoder_state.last_index_DEADBEEF;
-      let { context } = decode_sequence;
-      let result = {
-        keep: false,
-        context,
-        avg_logprob: undefined,
-        segment_cumlogprob: decode_sequence.segment_cumlogprob,
-        last_eos_logprob: undefined
-      }
-      if (i_DEADBEEF >= max_range_DEADBEEF) return result;
-
-      let token_count = context.length - offset_DEADBEEF;
-      let last_token_index_DEADBEEF = i_DEADBEEF;
-      let one_before_last_token_index_DEADBEEF = i_DEADBEEF - 1;
-
-      let tail_index_DEADBEEF = rebuild_cache_tail_index(context, decoder_state.context);
-      if (tail_index_DEADBEEF < i_DEADBEEF - 1) {
-        // NOTE(irwin): rebuild self attention kv cache
-        // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
-        for (let build_cache_index_DEADBEEF = 0; build_cache_index_DEADBEEF < offset_DEADBEEF - 1; ++build_cache_index_DEADBEEF) {
-          let context_input = context.slice(build_cache_index_DEADBEEF, build_cache_index_DEADBEEF + 1);
-          await decoder_helper(nets, context, context_input, audio_features, build_cache_index_DEADBEEF, decoder_state);
-        }
-      }
-
-      let context_input = context.slice(i_DEADBEEF - 1, i_DEADBEEF);
-      // context_input = batch_double_helper(context_input);
-
-      // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
-      let decoder_output = await decoder_helper(nets, context, context_input, audio_features, i_DEADBEEF - 1, decoder_state);
-      decoder_output = decoder_output.slice(0, decoder_output.length / MODEL_BATCH_SIZE_HARDCODED);
-      decoder_state.last_index_DEADBEEF = i_DEADBEEF;
-      // decoder_state.context = context;
-      let nextLogprobs;
-      let nextTokens;
-      let max;
-
-      if (SUPPRESS_NONSPEECH_TOKENS) {
-        for (let token_index of suppress) {
-          decoder_output[token_index] = -Infinity;
-        }
-      }
-      if (temperature > 0) decoder_output = decoder_output.map(x => x / temperature);
-      [nextLogprobs, max] = logSoftmax(decoder_output);
-      nextTokens = argsort(nextLogprobs);
-
-      // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
-      nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index_DEADBEEF, one_before_last_token_index_DEADBEEF);
-      let nextTokenIndex = 0;
-      if (temperature > 0) {
-        // let sortedSampledIndex = sample(normalize(nextLogprobs));
-        let dist = normalize(softmax(decoder_output));
-        nextTokenIndex = nextTokens.indexOf(sample(dist));
-      }
-
-      if (nextTokens[nextTokenIndex] == TOK_EOS && Math.abs(last_eos_logprob) - Math.abs(nextLogprobs[TOK_EOS]) > 8) {
-        ++nextTokenIndex;
-      }
-
-      context.push(nextTokens[nextTokenIndex]);
-
-      result.avg_logprob = result.segment_cumlogprob / (i_DEADBEEF - offset_DEADBEEF + 1);
-      let nextLogprob = nextLogprobs[nextTokens[nextTokenIndex]];
-      decode_sequence.logprobs.push(nextLogprob);
-      decode_sequence.eos_logprobs.push(nextLogprobs[TOK_EOS]);
-      result.segment_cumlogprob += nextLogprob;
-      // pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
-      result.last_eos_logprob = nextLogprobs[TOK_EOS];
-
-      if (nextTokens[nextTokenIndex] == TOK_EOS) {
-        return result;
-      } else if (i_DEADBEEF + 1 >= max_range_DEADBEEF) {
-        context[context.length - 1] = TOK_EOS;
-      }
-
-      result.keep = true;
-      return result;
-    }
 
     const max_range_DEADBEEF = offset_DEADBEEF + MAX_TOKENS_TO_DECODE;
 
@@ -359,7 +279,7 @@ async function transcribeAudio(audioFetcher, cancelToken) {
         if (sequences[idx].context.at(-1) === TOK_EOS) continue;
         if (cancelToken.cancelled) return;
 
-        let decode_result = await decodeOne(sequences[idx], decoder_state, temperature);
+        let decode_result = await decodeOne(nets, sequences[idx], decoder_state, temperature, audio_features, offset_DEADBEEF);
         let keep = decode_result.keep;
         sequences[idx].context = decode_result.context;
         sequences[idx].avg_logprob = decode_result.avg_logprob;
