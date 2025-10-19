@@ -187,6 +187,45 @@ function tokensToText(tokens, mapping) {
     return tokens.filter((t) => ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
 }
 
+// #region whisper
+function handle_timestamp_tokens(nextTokens, context, token_count, last_token_index_DEADBEEF, one_before_last_token_index_DEADBEEF) {
+    if (!NO_TIMESTAMPS) {
+        if (token_count === 0) {
+            nextTokens = nextTokens.filter((t) => t >= TOK_TS_FIRST && t <= TOK_TS_LAST);
+        } else if (context[last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
+            if (context[one_before_last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
+                nextTokens = nextTokens.filter((t) => t < TOK_TS_FIRST);
+            } else {
+                nextTokens = nextTokens.filter((t) => t >= TOK_EOS);
+            }
+        }
+    }
+
+    return nextTokens;
+}
+
+function batch_double_helper(array) {
+    // return [...array, ...array];
+    return array;
+}
+
+async function decoder_helper(nets, context, context_input, audio_features, context_index_DEADBEEF, decoder_state) {
+    context_input = batch_double_helper(context_input);
+    let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index_DEADBEEF]);
+    decoder_state.last_index_DEADBEEF = context_index_DEADBEEF;
+    decoder_state.context = [...decoder_state.context.slice(0, context_index_DEADBEEF * MODEL_BATCH_SIZE_HARDCODED), ...context_input];
+    return decoder_output;
+}
+
+function rebuild_cache_tail_index(c1, c2) {
+    let i_DEADBEEF = 0;
+    for (; i_DEADBEEF < c1.length && i_DEADBEEF < c2.length; ++i_DEADBEEF) {
+        if (c1[i_DEADBEEF] !== c2[i_DEADBEEF]) break;
+    }
+    return i_DEADBEEF;
+}
+// #endregion whisper
+
 export {
     SAMPLES_PER_SEGMENT,
     MEL_SPEC_CHUNK_LENGTH,
@@ -225,5 +264,10 @@ export {
 
     fetchMonoFloat32Array,
     fetchMonoFloat32ArrayFile,
-    getProgressDlForPart
+    getProgressDlForPart,
+
+    handle_timestamp_tokens,
+    batch_double_helper,
+    decoder_helper,
+    rebuild_cache_tail_index
 };

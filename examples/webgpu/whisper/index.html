@@ -148,7 +148,12 @@
 
                 fetchMonoFloat32Array,
                 fetchMonoFloat32ArrayFile,
-                getProgressDlForPart
+                getProgressDlForPart,
+
+                handle_timestamp_tokens,
+                batch_double_helper,
+                decoder_helper,
+                rebuild_cache_tail_index
             } from "./whisper.js";
 
         async function setModelName() {
@@ -305,22 +310,6 @@
                 // v.fill(0);
                 // v[0] = TOK_NO_TIMESTAMPS;
 
-                function handle_timestamp_tokens(nextTokens, context, token_count, last_token_index_DEADBEEF, one_before_last_token_index_DEADBEEF) {
-                    if (!NO_TIMESTAMPS) {
-                        if (token_count === 0) {
-                            nextTokens = nextTokens.filter((t)=> t >= TOK_TS_FIRST && t <= TOK_TS_LAST);
-                        } else if (context[last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
-                            if (context[one_before_last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
-                                nextTokens = nextTokens.filter((t)=> t < TOK_TS_FIRST);
-                            } else {
-                                nextTokens = nextTokens.filter((t)=> t >= TOK_EOS);
-                            }
-                        }
-                    }
-
-                    return nextTokens;
-                }
-
                 let decoder_state = {
                     last_index_DEADBEEF: undefined,
                     context: []
@@ -342,34 +331,13 @@
                     let last_token_index_DEADBEEF = i_DEADBEEF;
                     let one_before_last_token_index_DEADBEEF = i_DEADBEEF - 1;
 
-                    function batch_double_helper(array) {
-                        // return [...array, ...array];
-                        return array;
-                    }
-
-                    async function decoder_helper(context, context_input, audio_features, context_index_DEADBEEF, decoder_state) {
-                        context_input = batch_double_helper(context_input);
-                        let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index_DEADBEEF]);
-                        decoder_state.last_index_DEADBEEF = context_index_DEADBEEF;
-                        decoder_state.context = [...decoder_state.context.slice(0, context_index_DEADBEEF*MODEL_BATCH_SIZE_HARDCODED), ...context_input];
-                        return decoder_output;
-                    }
-
-                    function rebuild_cache_tail_index(c1, c2) {
-                        let i_DEADBEEF = 0;
-                        for (; i_DEADBEEF < c1.length && i_DEADBEEF < c2.length; ++i_DEADBEEF) {
-                            if (c1[i_DEADBEEF] !== c2[i_DEADBEEF]) break;
-                        }
-                        return i_DEADBEEF;
-                    }
-
                     let tail_index_DEADBEEF = rebuild_cache_tail_index(context, decoder_state.context);
                     if (tail_index_DEADBEEF < i_DEADBEEF - 1) {
                         // NOTE(irwin): rebuild self attention kv cache
                         // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
                         for (let build_cache_index_DEADBEEF = 0; build_cache_index_DEADBEEF < offset_DEADBEEF-1; ++build_cache_index_DEADBEEF) {
                             let context_input = context.slice(build_cache_index_DEADBEEF, build_cache_index_DEADBEEF+1);
-                            await decoder_helper(context, context_input, audio_features, build_cache_index_DEADBEEF, decoder_state);
+                            await decoder_helper(nets, context, context_input, audio_features, build_cache_index_DEADBEEF, decoder_state);
                         }
                     }
 
@@ -377,7 +345,7 @@
                     // context_input = batch_double_helper(context_input);
 
                     // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
-                    let decoder_output = await decoder_helper(context, context_input, audio_features, i_DEADBEEF-1, decoder_state);
+                    let decoder_output = await decoder_helper(nets, context, context_input, audio_features, i_DEADBEEF-1, decoder_state);
                     decoder_output = decoder_output.slice(0, decoder_output.length / MODEL_BATCH_SIZE_HARDCODED);
                     decoder_state.last_index_DEADBEEF = i_DEADBEEF;
                     // decoder_state.context = context;
