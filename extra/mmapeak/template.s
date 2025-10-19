@@ -36,6 +36,5 @@ amdhsa.kernels:
     .sgpr_count: 8
     .vgpr_count: 32
     .max_flat_workgroup_size: 1024
-    .args:
 ...
 .end_amdgpu_metadata
