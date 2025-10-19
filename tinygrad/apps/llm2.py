@@ -123,7 +123,7 @@ class TransformerBlock:
     self.attn_q         = nn.Linear(dim, n_heads * head_dim,    bias=True)
     self.attn_k         = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
     self.attn_v         = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
-    self.attn_output    = nn.Linear(n_heads * head_dim, dim,    bias=True)
+    self.attn_o    = nn.Linear(n_heads * head_dim, dim,    bias=True)
     self.attn_sinks     = Tensor.empty(n_heads)
 
     # --- RMSNorms --------------------------------------------------------
@@ -132,12 +132,12 @@ class TransformerBlock:
 
     # --- feed-forward ----------------------------------------------------
     # todo: add ffn to all the names
-    self.n_active_experts  = n_active_experts
-    self.gate               = nn.Linear(dim, n_experts, bias=True)
-    self.up_proj            = Tensor.empty(n_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16)
-    self.up_proj_bias       = Tensor.empty(n_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
-    self.down_proj          = Tensor.empty(n_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
-    self.down_proj_bias     = Tensor.empty(n_experts, dim, dtype=dtypes.bfloat16)
+    self.n_active_experts   = n_active_experts
+    self.router             = nn.Linear(dim, n_experts, bias=True)
+    self.ffn_up_proj        = Tensor.empty(n_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16) # todo: remove dtype?
+    self.ffn_up_proj_bias   = Tensor.empty(n_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
+    self.ffn_down_proj      = Tensor.empty(n_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
+    self.ffn_down_proj_bias = Tensor.empty(n_experts, dim, dtype=dtypes.bfloat16)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
@@ -165,7 +165,7 @@ class TransformerBlock:
 
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    attn = self.attn_output(attn)
+    attn = self.attn_o(attn)
     return x + attn
 
   # todo: make this MoE
@@ -177,7 +177,7 @@ class TransformerBlock:
     assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
 
     # Select top-k experts
-    g = self.gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
+    g = self.router(x).softmax(-1) # (B,T,D) -> (B,T,E)
     g = g.squeeze() # (B,T,E) -> (E,)
     probs, sel = g.topk(self.n_active_experts) # (E,) -> (E,) (E,)
 
@@ -245,24 +245,20 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
   def permute(v: Tensor, n_heads: int):
     return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1] if len(v.shape) > 1 else 1).transpose(1, 2).reshape(*v.shape[:2])
 
+  # map hf name to tinygrad name
   keymap = {
-    "model.embed_tokens.weight": "tok_embeddings.weight",
-    **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attention_norm.weight" for l in range(n_layers)},
-    **{f"model.layers.{l}.self_attn.{x}_norm.weight": f"layers.{l}.attention.{x}_norm.weight" for x in ["q", "k"] for l in range(n_layers)},
-    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"layers.{l}.attention.w{x}.weight" for x in ["q", "k", "v", "o"] for l in range(n_layers)},
-    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"layers.{l}.attention.w{x}.bias" for x in ["q", "k", "v", "o"] for l in range(n_layers)},
-    **{f"model.layers.{l}.self_attn.sinks": f"layers.{l}.attention.sinks" for l in range(n_layers)},
+    "model.embed_tokens.weight": "token_embd.weight",
+    **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attn_norm.weight" for l in range(n_layers)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"layers.{l}.attn_{x}.weight" for x in ["q", "k", "v", "o"] for l in range(n_layers)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"layers.{l}.attn_{x}.bias" for x in ["q", "k", "v", "o"] for l in range(n_layers)},
+    **{f"model.layers.{l}.self_attn.sinks": f"layers.{l}.attn_sinks" for l in range(n_layers)},
     **{f"model.layers.{l}.post_attention_layernorm.weight": f"layers.{l}.ffn_norm.weight" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.{x}_proj.weight": f"layers.{l}.feed_forward.w{y}.weight" for x, y in {"gate": "1", "down": "2", "up": "3"}.items() for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.router.weight": f"layers.{l}.feed_forward.gate.weight" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.router.bias": f"layers.{l}.feed_forward.gate.bias" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.gate_up_proj_bias": f"layers.{l}.feed_forward.up_proj_bias" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.down_proj_bias": f"layers.{l}.feed_forward.down_proj_bias" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.gate_up_proj_blocks": f"layers.{l}.feed_forward.gate_up_proj_blocks" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.gate_up_proj_scales": f"layers.{l}.feed_forward.gate_up_proj_scales" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.down_proj_blocks": f"layers.{l}.feed_forward.gate_down_proj_blocks" for l in range(n_layers)},
-    **{f"model.layers.{l}.mlp.experts.down_proj_scales": f"layers.{l}.feed_forward.gate_down_proj_scales" for l in range(n_layers)},
-    "model.norm.weight": "norm.weight",
+    **{f"model.layers.{l}.mlp.router.weight": f"layers.{l}.router.weight" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.router.bias": f"layers.{l}.router.bias" for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.{d1}_proj_bias": f"layers.{l}.ffn_{d2}_proj_bias" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.{d1}_proj_blocks": f"layers.{l}.ffn_{d2}_proj_blocks" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(n_layers)},
+    **{f"model.layers.{l}.mlp.experts.{d1}_proj_scales": f"layers.{l}.ffn_{d2}_proj_scales" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(n_layers)},
+    "model.norm.weight": "output_norm.weight",
     "lm_head.weight": "output.weight",
   }
 
@@ -284,14 +280,14 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
     # ic(blocks, scales, mxfp4_data)
     return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, 39).reshape(*scales.shape[:2], -1)
 
-  # dequantize only the gate_up_proj and gate_down_proj
+  # dequantize only the ffn_up_proj and ffn_down_proj
   for l in range(n_layers):
-    for proj in ['gate_up_proj', 'gate_down_proj']:
-      blocks = f'layers.{l}.feed_forward.{proj}_blocks'
-      scales = f'layers.{l}.feed_forward.{proj}_scales'
+    for d in ['up', 'down']:
+      blocks = f'layers.{l}.ffn_{d}_proj_blocks'
+      scales = f'layers.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
       # ic(proj)
-      weights[f'layers.{l}.feed_forward.{proj}.weights'] = proj
+      weights[f'layers.{l}.ffn_{d}_proj'] = proj
     return weights
 
 def load_weights(model_path:Path, params:dict[str, int|float]):
@@ -324,6 +320,7 @@ def main(args):
 
   # build model
   model = Transformer.build_model(model_path, model_info["params"])
+  1 / 0
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
@@ -331,7 +328,7 @@ def main(args):
 
   tok_tensor = None
   for i in range(args.count):
-
+    # forward pass
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
     tok_tensor = model(next_tok, start_pos) # todo: add temperature
     tok = tok_tensor.item()
