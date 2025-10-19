@@ -631,7 +631,6 @@ jobs:
       run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=5 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/refs/heads/master/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.10.1 dmonitoring
       run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=10 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/refs/heads/master/selfdrive/modeld/models/dmonitoring_model.onnx
->>>>>>> Stashed changes
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
