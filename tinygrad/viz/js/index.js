@@ -608,7 +608,7 @@ async function main() {
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
         inner.id = `step-${i}-${j}`;
-        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]}`+(u.match_count ? ` - ${u.match_count}` : '');
+        inner.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
           e.stopPropagation();

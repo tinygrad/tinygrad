@@ -930,7 +930,7 @@ class TrackedGraphRewrite:
   loc:tuple[str, int]                           # location that called graph_rewrite
   sink:int                                      # the sink input to graph_rewrite
   matches:list[tuple[int, int, tuple, float]]   # before/after UOp, UPat location and time
-  name:str|None                                 # optional name of the rewrite
+  name:str                                      # name of the rewrite
   depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
 
@@ -977,13 +977,14 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
 active_rewrites:list[TrackedGraphRewrite] = []
 def track_matches(func):
   def _track_func(*args, **kwargs):
+    name = kwargs.get("name", func.__name__)
     if tracking:=(TRACK_MATCH_STATS >= 2):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
       if not tracked_ctxs: add_trace_group(TracingKey(f"default {func.__name__}"))
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
-    with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
+    with cpu_profile(name, "TINY", display=tracking):
       ret = func(*args, **kwargs)
     if tracking: active_rewrites.pop()
     return ret
