@@ -90,7 +90,7 @@
 
 <body>
     <div class="container">
-        <h2>Whisper Tinygrad WebGPU (small.en)</h2>
+        <h2 id="whisper-title">Whisper Tinygrad WebGPU (tiny.en)</h2>
         <h2 id="wgpu-error" style="display: none;">Error: WebGPU is not supported in this browser. See <a href="https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips">more</a>.</h2>
 
         <form id="fetchForm">
@@ -135,6 +135,19 @@
                 fetchMonoFloat32ArrayFile,
                 getProgressDlForPart
             } from "./whisper.js";
+
+        async function setModelName() {
+            const h = id => document.getElementById(id);
+            try {
+                const r = await fetch('./model_metadata.json', {cache: 'no-cache'});
+                if (r.ok) {
+                    const json = await r.json();
+                    h('whisper-title').textContent = `Whisper Tinygrad WebGPU (${json.model_name})`;
+                }
+
+            } catch (_) { }
+        }
+        let _ = setModelName();
 
         document.getElementById("fetchForm").addEventListener("submit", async (e) => {
             // prevent page refresh

@@ -163,6 +163,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 # NOTE(irwin): change to True to export weights in float16.
 # IMPORTANT(irwin): unfortunately this doesn't switch all computations to half precision yet
 FLOAT16 = False
+MODEL_NAME = "tiny.en"
 
 if __name__ == '__main__':
   def tofull(sd):
@@ -184,7 +185,7 @@ if __name__ == '__main__':
       safe_save(change_sd(get_state_dict(model)), f.name)
       load_state_dict(model, safe_load(f.name))
 
-  model, enc = init_whisper("tiny.en")
+  model, enc = init_whisper(MODEL_NAME)
 
   dirname = Path(__file__).parent
   # NOTE(irwin): force export as f32 as it's a little easier to validate
@@ -269,3 +270,5 @@ if __name__ == '__main__':
   export_encoder()
   export_decoder_2()
   export_vocab()
+
+  (dirname / "model_metadata.json").write_text(json.dumps({"model_name": MODEL_NAME}), encoding="utf8")
