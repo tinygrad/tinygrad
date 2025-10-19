@@ -38,25 +38,23 @@ MODELS = {
 
 # ****** model architecture *****
 
-# yarn https://arxiv.org/pdf/2309.00071
 def precompute_freqs_cis(dim:int, end:int, theta:float = 10000.0, scale:float=1.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
   half = dim // 2
   freqs = (theta ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
 
-  # rope
-  if scale <= 1:
-    freqs = Tensor.arange(end, dtype="float32")[:, None] * freqs
-    return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, half, 2)
-
+  def _angles(freqs, mscale=1): return (Tensor.arange(end, dtype=dtypes.float32)[:, None] * Tensor.stack(freqs.cos()*mscale, freqs.sin()*mscale, dim=-1)).reshape(1, end, 1, half, 2)
   def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(theta)
+
+  # rope
+  if scale <= 1: return _angles(freqs)
+
+  # yarn https://arxiv.org/pdf/2309.00071
   low, high = _ratio(ntk_alpha), _ratio(ntk_beta)
   interpolation, extrapolation = freqs, freqs / scale
   ramp = (Tensor.arange(half, dtype=dtypes.float32, device=freqs.device) - low) / (high - low)
   mask = 1 - ramp.clamp(0, 1)
   freqs = interpolation * (1 - mask) + extrapolation * mask
-  freqs = Tensor.arange(end, dtype=dtypes.float32)[:, None] * freqs
-  mscale = 0.1 * math.log(scale) + 1.0
-  return Tensor.stack(freqs.cos() * mscale, freqs.sin() * mscale, dim=-1).reshape(1, end, 1, half, 2)
+  return _angles(freqs, 0.1 * math.log(scale) + 1.0)
 
 # matches meta, non hugging face weights
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
@@ -80,37 +78,6 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:float=10000.0) -> Tensor:
 def swiglu(x:Tensor, alpha:float=1.702, limit:float=7.0) -> Tensor:
   gate, up = x[..., ::2], x[..., 1::2]
   return (up.clip(-limit, limit) + 1) * gate.clip(None, limit) * (gate.clip(None, limit) * alpha).sigmoid()
-
-class MixtureFeedForward:
-  def __init__(self, n_experts:int, n_active_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
-    self.n_active_experts  = n_active_experts
-    self.gate               = nn.Linear(dim, n_experts, bias=True)
-    self.up_proj            = Tensor.empty(n_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16)
-    self.up_proj_bias       = Tensor.empty(n_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
-    self.down_proj          = Tensor.empty(n_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
-    self.down_proj_bias     = Tensor.empty(n_experts, dim, dtype=dtypes.bfloat16)
-
-  def __call__(self, x: Tensor) -> Tensor:
-    assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
-
-    # Select top-k experts
-    g = self.gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
-    g = g.squeeze() # (B,T,E) -> (E,)
-    probs, sel = g.topk(self.n_active_experts) # (E,) -> (E,) (E,)
-
-    # reshape
-    w1 = self.up_proj[sel].unsqueeze(0) # (1,E,D2,D)
-    w2 = self.down_proj[sel].unsqueeze(0) # (1,E,D,D)
-    b1 = self.up_proj_bias[sel].unsqueeze(0) # (1,E,D2)
-    b2 = self.down_proj_bias[sel].unsqueeze(0) # (1,E,D)
-
-    # MLP forward
-    t = x.squeeze(1)  # (B,T,D) -> (B,1,T,D)
-    t = swiglu(Tensor.einsum("bk,beck->bec", t, w1) + b1)  # (B,1,T,D) (1,E,D2,D) -> ?
-    t = Tensor.einsum("bek,beck->bec", t, w2) + b2  # (1, 4, 2880)
-
-    # Weighted sum over experts
-    return (t * probs.reshape(1, -1, 1)).sum(1, keepdim=True)  # (1, 1, 2880)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0,):
