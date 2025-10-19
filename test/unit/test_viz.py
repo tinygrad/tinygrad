@@ -131,6 +131,7 @@ class TestViz(BaseTestViz):
     steps = get_viz_list()[0]["steps"]
     self.assertEqual(steps[0]["name"], "init")
     self.assertEqual(steps[1]["name"], "nested_function")
+    self.assertEqual(len(steps), 4)
 
   def test_profile_matches_invalid_arg(self):
     @profile_matches
