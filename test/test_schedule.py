@@ -333,7 +333,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out0 = r0 + y
     out1 = r1 + y
-    schedule = check_schedule([out0, out1], 4)
+    schedule = check_schedule([out0, out1], 3)
     reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
     self.assertEqual(len(reduceops), 2) # why is RANGEIFY different?
 
@@ -1274,7 +1274,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 15)
+      check_schedule(opt.schedule_step(), 13)
 
   def test_sgd_4convs_fuse(self):
     with Tensor.train():

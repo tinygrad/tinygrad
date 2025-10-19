@@ -202,6 +202,8 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/device)
   const colorMap = new Map();
+  // map shapes by event key
+  const shapeMap = new Map();
   data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
@@ -216,10 +218,10 @@ async function renderProfiler() {
     if (eventType === EventTypes.TIMELINE) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, visible, offsetY });
+      data.tracks.set(k, { shapes, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
-        const e = {name:strings[u32()], ref:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
+        const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = levels.findIndex(levelEt => e.st >= levelEt);
         const et = e.st+Math.trunc(e.dur);
@@ -239,7 +241,18 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef };
+        const html = document.createElement("div");
+        html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
+        if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
+        if (shapeRef != null) {
+          const p = html.appendChild(document.createElement("p"));
+          p.innerText = "\nView Codegen Rewrite"; p.style.cursor = "pointer";
+          p.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
+        }
+        // tiny device events go straight to the rewrite rule
+        const key = k.startsWith("TINY") ? null : `${k}-${j}`;
+        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), html, key, ...shapeRef };
+        if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -259,7 +272,7 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({name:strings[u32()], num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -283,11 +296,13 @@ async function renderProfiler() {
         if (users != null) rows.push(["Users", users.length]);
         const info = html.appendChild(tabulate(rows).node());
         for (let u=0; u<users?.length; u++) {
-          const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px"; p.style.cursor = "pointer";
-          const { name, num, mode } = users[u]; p.appendChild(colored(`[${u}] ${name} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
-          p.onclick = () => {
-            const cid = ctxs.findIndex(c => c.name === name);
-            if (cid != null) setCtxWithHistory(cid-1);
+          const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px";
+          const { repr, num, mode, shape } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const metadata = shape?.tooltipText?.split("\n").at(-1);
+          if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
+          if (shape != null) {
+            p.style.cursor = "pointer";
+            p.onclick = () => focusShape(shape);
           }
         }
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
@@ -313,7 +328,7 @@ async function renderProfiler() {
         sum.x.push(allX[i], allX[i+1]);
         const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
       }
-      data.tracks.set(k, { shapes:[sum], visible, offsetY, height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
+      data.tracks.set(k, { shapes:[sum], visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -342,7 +357,7 @@ async function renderProfiler() {
     xscale.domain(visibleX);
     // draw shapes
     const paths = [];
-    for (const [_, { offsetY, shapes, visible, valueMap }] of data.tracks) {
+    for (const [_, { offsetY, shapes, visible, valueMap, pcolor }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
         const p = new Path2D();
@@ -381,7 +396,7 @@ async function renderProfiler() {
             lw += e.label[li].width;
           }
         }
-        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push(p); }
+        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push([p, pcolor]); }
       }
     }
     // draw axes
@@ -411,7 +426,7 @@ async function renderProfiler() {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
-    for (const p of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = "#c9a8ff"; ctx.stroke(p); }
+    for (const [p, color] of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = color; ctx.stroke(p); }
   }
 
   function resize() {
@@ -448,12 +463,15 @@ async function renderProfiler() {
     }
   }
 
+  function focusShape(shape) {
+    focusedShape = shape; render(zoomLevel);
+    return document.querySelector(".metadata").replaceChildren(shape?.html ?? "");
+  }
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.step != null) return setCtxWithHistory(foundRect.ctx, foundRect.step);
-    if (foundRect?.key != focusedShape?.key) { focusedShape = foundRect; render(zoomLevel); }
-    return document.querySelector(".metadata").replaceChildren(foundRect?.html ?? "");
+    if (foundRect?.step != null && foundRect?.key == null) { return setCtxWithHistory(foundRect.ctx, foundRect.step); }
+    if (foundRect?.key != focusedShape?.key) { focusShape(foundRect); }
   });
 
   canvas.addEventListener("mousemove", e => {
@@ -590,7 +608,7 @@ async function main() {
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
         inner.id = `step-${i}-${j}`;
-        inner.innerText = `${u.name ?? u.loc[0].replaceAll("\\", "/").split("/").pop()+':'+u.loc[1]}`+(u.match_count ? ` - ${u.match_count}` : '');
+        inner.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
           e.stopPropagation();
