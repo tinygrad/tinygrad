@@ -11,6 +11,7 @@
 # https://magazine.sebastianraschka.com/p/from-gpt-2-to-gpt-oss-analyzing-the
 # https://cameronrwolfe.substack.com/p/gpt-oss
 
+from __future__ import annotations
 import argparse, functools, math, os
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
@@ -168,7 +169,7 @@ class TransformerBlock:
     attn = self.attn_o(attn)
     return x + attn
 
-  # todo: make this MoE
+  # todo: clean up
   def _feed_forward(self, x: Tensor) -> Tensor:
     # h_norm = self.ffn_norm(h)
     # gated  = self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)
@@ -182,10 +183,10 @@ class TransformerBlock:
     probs, sel = g.topk(self.n_active_experts) # (E,) -> (E,) (E,)
 
     # reshape
-    w1 = self.up_proj[sel].unsqueeze(0) # (1,E,D2,D)
-    w2 = self.down_proj[sel].unsqueeze(0) # (1,E,D,D)
-    b1 = self.up_proj_bias[sel].unsqueeze(0) # (1,E,D2)
-    b2 = self.down_proj_bias[sel].unsqueeze(0) # (1,E,D)
+    w1 = self.ffn_up_proj[sel].unsqueeze(0) # (1,E,D2,D)
+    w2 = self.ffn_down_proj[sel].unsqueeze(0) # (1,E,D,D)
+    b1 = self.ffn_up_proj_bias[sel].unsqueeze(0) # (1,E,D2)
+    b2 = self.ffn_down_proj_bias[sel].unsqueeze(0) # (1,E,D)
 
     # MLP forward
     t = x.squeeze(1)  # (B,T,D) -> (B,1,T,D)
@@ -218,7 +219,7 @@ class Transformer:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
   @staticmethod
-  def build_model(model_path, params): # -> Transformer:
+  def build_model(model_path, params) -> Transformer:
     # load model
     moe_params = params.pop("moe")
     model = Transformer(**params, **moe_params)
@@ -226,7 +227,10 @@ class Transformer:
     for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
 
     # load weights
-    weights = load_weights(model_path, params)
+    weights = load(str(model_path / "model.safetensors.index.json"))
+    weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
+    weights = fix_mxfp4(weights, params["n_layers"])
+    # weights = fix_bf16(weights) # todo: do we need ??
 
     load_state_dict(model, weights, strict=False, consume=True)
     return model
@@ -245,7 +249,7 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
   def permute(v: Tensor, n_heads: int):
     return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1] if len(v.shape) > 1 else 1).transpose(1, 2).reshape(*v.shape[:2])
 
-  # map hf name to tinygrad name
+  # map hf to tinygrad
   keymap = {
     "model.embed_tokens.weight": "token_embd.weight",
     **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attn_norm.weight" for l in range(n_layers)},
@@ -290,13 +294,6 @@ def fix_mxfp4(weights, n_layers) -> Tensor:
       weights[f'layers.{l}.ffn_{d}_proj'] = proj
     return weights
 
-def load_weights(model_path:Path, params:dict[str, int|float]):
-  weights = load(str(model_path / "model.safetensors.index.json"))
-  weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
-  weights = fix_mxfp4(weights, params["n_layers"])
-  # weights = fix_bf16(weights) # todo: do we need ?? turns bf16 into fp32->fp16
-  return weights
-
 def main(args):
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
@@ -320,7 +317,6 @@ def main(args):
 
   # build model
   model = Transformer.build_model(model_path, model_info["params"])
-  1 / 0
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
