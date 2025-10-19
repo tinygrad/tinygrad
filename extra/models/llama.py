@@ -63,16 +63,15 @@ class Attention:
       xq = self.q_norm(xq)
       xk = self.k_norm(xk)
 
-    ic(x.numpy())
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
-    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1], xk.transpose(1, 2).shape, xk.transpose(1, 2).numpy()[:, :8, :, -1], xv.transpose(1, 2).shape, xv.transpose(1, 2).numpy()[:, :8, :, -1])
+    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1])
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
 
-    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1], xk.transpose(1, 2).shape, xk.transpose(1, 2).numpy()[:, :8, :, -1], xv.transpose(1, 2).shape, xv.transpose(1, 2).numpy()[:, :8, :, -1])
+    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1])
 
     # create kv cache
     if self.max_context:

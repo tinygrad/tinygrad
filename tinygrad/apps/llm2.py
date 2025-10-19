@@ -13,11 +13,11 @@
 
 import argparse, functools, math, os
 from pathlib import Path
-from tinygrad import Tensor, nn, dtypes, Device
+from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
 from tinygrad.helpers import fetch, getenv
 from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters, get_state_dict
 from examples.llama3 import load
-from extra.models.llama import Transformer, fix_bf16
+from extra.models.llama import fix_bf16
 from transformers import AutoTokenizer
 
 from icecream import install
@@ -26,7 +26,7 @@ install()
 MODELS = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "n_heads": 64, "n_layers": 24, "norm_eps": 1e-5, "vocab_size": 201088, "n_kv_heads": 8, "head_dim": 64, "max_context": 4096,
-               "moe": {"num_experts": 32, "activated_experts": 4},
+               "moe": {"n_experts": 32, "n_active_experts": 4},
                "rope": {"theta": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
                },
     "total_num_weights": 3,
@@ -35,20 +35,59 @@ MODELS = {
   }
 }
 
-# ****** model archeticture *****
+# ****** model architecture *****
+
+# yarn https://arxiv.org/pdf/2309.00071
+def precompute_freqs_cis(dim:int, end:int, theta:float = 10000.0, scale:float=1.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
+  half = dim // 2
+  freqs = (theta ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+
+  # rope
+  if scale <= 1:
+    freqs = Tensor.arange(end, dtype="float32")[:, None] * freqs
+    return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, half, 2)
+
+  def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(theta)
+  low, high = _ratio(ntk_alpha), _ratio(ntk_beta)
+  interpolation, extrapolation = freqs, freqs / scale
+  ramp = (Tensor.arange(half, dtype=dtypes.float32, device=freqs.device) - low) / (high - low)
+  mask = 1 - ramp.clamp(0, 1)
+  freqs = interpolation * (1 - mask) + extrapolation * mask
+  freqs = Tensor.arange(end, dtype=dtypes.float32)[:, None] * freqs
+  mscale = 0.1 * math.log(scale) + 1.0
+  return Tensor.stack(freqs.cos() * mscale, freqs.sin() * mscale, dim=-1).reshape(1, end, 1, half, 2)
+
+# matches meta, non hugging face weights
+# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
+def complex_mult(A, c, d):
+  a,b = A[..., 0:1], A[..., 1:2]
+  ro = a*c - b*d
+  co = a*d + b*c
+  return ro.cat(co, dim=-1)
+
+def apply_rope(x:Tensor, start_pos:int|UOp, base:float=10000.0) -> Tensor:
+  B, H, T, Hd = x.shape
+  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  half = Hd // 2
+  angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+  # contiguous here allows RoPE to be pruned in the JIT
+  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype).contiguous(), angles.sin().reshape(1, 1, T, half).cast(x.dtype).contiguous()
+  x_pairs = x.reshape(B, H, T, half, 2)
+  return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
+                      x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
 
 def swiglu(x:Tensor, alpha:float=1.702, limit:float=7.0) -> Tensor:
   gate, up = x[..., ::2], x[..., 1::2]
   return (up.clip(-limit, limit) + 1) * gate.clip(None, limit) * (gate.clip(None, limit) * alpha).sigmoid()
 
 class MixtureFeedForward:
-  def __init__(self, num_experts:int, activated_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
-    self.activated_experts = activated_experts
-    self.gate = nn.Linear(dim, num_experts, bias=True)
-    self.up_proj = Tensor.zeros(num_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16)
-    self.up_proj_bias = Tensor.zeros(num_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
-    self.down_proj = Tensor.zeros(num_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
-    self.down_proj_bias = Tensor.zeros(num_experts, dim, dtype=dtypes.bfloat16)
+  def __init__(self, n_experts:int, n_active_experts:int, dim:int, hidden_dim:int, linear=nn.Linear):
+    self.n_active_experts  = n_active_experts
+    self.gate               = nn.Linear(dim, n_experts, bias=True)
+    self.up_proj            = Tensor.empty(n_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16)
+    self.up_proj_bias       = Tensor.empty(n_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
+    self.down_proj          = Tensor.empty(n_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
+    self.down_proj_bias     = Tensor.empty(n_experts, dim, dtype=dtypes.bfloat16)
 
   def __call__(self, x: Tensor) -> Tensor:
     assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
@@ -56,7 +95,7 @@ class MixtureFeedForward:
     # Select top-k experts
     g = self.gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
     g = g.squeeze() # (B,T,E) -> (E,)
-    probs, sel = g.topk(self.activated_experts) # (E,) -> (E,) (E,)
+    probs, sel = g.topk(self.n_active_experts) # (E,) -> (E,) (E,)
 
     # reshape
     w1 = self.up_proj[sel].unsqueeze(0) # (1,E,D2,D)
@@ -72,44 +111,125 @@ class MixtureFeedForward:
     # Weighted sum over experts
     return (t * probs.reshape(1, -1, 1)).sum(1, keepdim=True)  # (1, 1, 2880)
 
+class TransformerBlock:
+  def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0,):
+    self.n_heads        = n_heads
+    self.n_kv_heads     = n_kv_heads
+    self.head_dim       = head_dim if head_dim else dim // n_heads
+    self.sliding_window = sliding_window
+    self.max_context    = max_context
 
-def precompute_freqs_cis(dim:int, end:int, theta:float = 10000.0, scale:float=1.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
-  half = dim // 2
-  freqs = (theta ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+    # --- attention projections (linear with bias) ------------------------
+    self.attn_q         = nn.Linear(dim, n_heads * head_dim,    bias=True)
+    self.attn_k         = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
+    self.attn_v         = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
+    self.attn_output    = nn.Linear(n_heads * head_dim, dim,    bias=True)
+    self.attn_sinks     = Tensor.empty(n_heads)
 
-  # rope
-  if scale <= 1:
-    freqs = Tensor.arange(end, dtype="float32")[:, None] * freqs
-    return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, half, 2)
+    # --- RMSNorms --------------------------------------------------------
+    self.attn_norm      = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm       = nn.RMSNorm(dim, norm_eps)
 
-  # yarn https://arxiv.org/pdf/2309.00071
-  def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(theta)
-  low, high = _ratio(ntk_alpha), _ratio(ntk_beta)
-  interpolation, extrapolation = freqs, freqs / scale
-  ramp = (Tensor.arange(half, dtype=dtypes.float32, device=freqs.device) - low) / (high - low)
-  mask = 1 - ramp.clamp(0, 1)
-  freqs = interpolation * (1 - mask) + extrapolation * mask
-  freqs = Tensor.arange(end, dtype=dtypes.float32)[:, None] * freq_final[None, :]
-  mscale = 0.1 * math.log(scale) + 1.0
-  return Tensor.stack(freqs.cos() * mscale, freqs.sin() * mscale, dim=-1).reshape(1, end, 1, half, 2)
+    # --- feed-forward ----------------------------------------------------
+    # todo: add ffn to all the names
+    self.n_active_experts  = n_active_experts
+    self.gate               = nn.Linear(dim, n_experts, bias=True)
+    self.up_proj            = Tensor.empty(n_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16)
+    self.up_proj_bias       = Tensor.empty(n_experts, hidden_dim * 2, dtype=dtypes.bfloat16)
+    self.down_proj          = Tensor.empty(n_experts, dim, hidden_dim, dtype=dtypes.bfloat16)
+    self.down_proj_bias     = Tensor.empty(n_experts, dim, dtype=dtypes.bfloat16)
 
-# matches meta, non hugging face weights
-# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
-def complex_mult(A, c, d):
-  a,b = A[..., 0:1], A[..., 1:2]
-  ro = a*c - b*d
-  co = a*d + b*c
-  return ro.cat(co, dim=-1)
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+    x_norm = self.attn_norm(x)                       # (B,T,D)
+    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
 
-def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Tensor]:
-  assert freqs_cis.shape[1] == xq.shape[1] == xk.shape[1], f"freqs_cis shape mismatch freqs_cis:{freqs_cis.shape} xq:{xq.shape} xk:{xk.shape}"
-  xq = xq.reshape(*xq.shape[0:-1], -1, 2)
-  xk = xk.reshape(*xk.shape[0:-1], -1, 2)
-  assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
-  c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
-  xq_out = complex_mult(xq, c, d)
-  xk_out = complex_mult(xk, c, d)
-  return xq_out.flatten(3), xk_out.flatten(3)
+    B, T, _ = x.shape
+    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
+    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+
+    q = apply_rope(q, start_pos)
+    k = apply_rope(k, start_pos)
+
+    # TODO: remove these kv cache realizes
+    if not hasattr(self, "cache_kv"):
+      self.cache_kv = Tensor.zeros(2, B, self.n_kv_heads, self.max_context, self.head_dim, dtype=k.dtype, device=k.device).contiguous().realize()
+    self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v)).realize()  # type: ignore
+    k = self.cache_kv[0, :, :, 0:start_pos+T, :]
+    v = self.cache_kv[1, :, :, 0:start_pos+T, :]
+
+    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if T > 1 else None
+    if self.sliding_window:
+     sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
+     mask = sliding_mask if mask is None else mask+sliding_mask
+
+    attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
+    attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
+    attn = self.attn_output(attn)
+    return x + attn
+
+  # todo: make this MoE
+  def _feed_forward(self, x: Tensor) -> Tensor:
+    # h_norm = self.ffn_norm(h)
+    # gated  = self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)
+    # return h + self.ffn_down(gated)
+
+    assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
+
+    # Select top-k experts
+    g = self.gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
+    g = g.squeeze() # (B,T,E) -> (E,)
+    probs, sel = g.topk(self.n_active_experts) # (E,) -> (E,) (E,)
+
+    # reshape
+    w1 = self.up_proj[sel].unsqueeze(0) # (1,E,D2,D)
+    w2 = self.down_proj[sel].unsqueeze(0) # (1,E,D,D)
+    b1 = self.up_proj_bias[sel].unsqueeze(0) # (1,E,D2)
+    b2 = self.down_proj_bias[sel].unsqueeze(0) # (1,E,D)
+
+    # MLP forward
+    t = x.squeeze(1)  # (B,T,D) -> (B,1,T,D)
+    t = swiglu(Tensor.einsum("bk,beck->bec", t, w1) + b1)  # (B,1,T,D) (1,E,D2,D) -> ?
+    t = Tensor.einsum("bek,beck->bec", t, w2) + b2  # (1, 4, 2880)
+
+    # Weighted sum over experts
+    return (t * probs.reshape(1, -1, 1)).sum(1, keepdim=True)  # (1, 1, 2880)
+
+  def __call__(self, x: Tensor, start_pos: int|UOp):
+    return self._feed_forward(self._attention(x, start_pos)).contiguous()
+
+class Transformer:
+  def __init__(self, n_layers, dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, rope, vocab_size, max_context):
+    self.layers       = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context) for _ in range(n_layers)]
+    self.token_embd   = nn.Embedding(vocab_size, dim)
+    self.output_norm  = nn.RMSNorm(dim, norm_eps)
+    self.output       = nn.Linear(dim, vocab_size, bias=False)
+    self.max_context  = max_context
+    # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
+    self.forward_jit  = TinyJit(self.forward)
+
+  def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
+    x = self.token_embd(tokens)                           # (B, T, D)
+    for block in self.layers: x = block(x, start_pos)
+    # TODO: add temperature
+    return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
+
+  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
+    return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
+
+  @staticmethod
+  def build_model(model_path, params): # -> Transformer:
+    # load model
+    moe_params = params.pop("moe")
+    model = Transformer(**params, **moe_params)
+    # add sliding attention to all even layers
+    for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
+
+    # load weights
+    weights = load_weights(model_path, params)
+
+    load_state_dict(model, weights, strict=False, consume=True)
+    return model
 
 # ***** model loading *****
 
@@ -158,7 +278,7 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
 
 def fix_mxfp4(weights, n_layers) -> Tensor:
   def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
-    """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
+    """Dequantize MXFP4 to float32. blocks: (*batch, n_layers, 16), scales: (*batch, n_layers) -> (*batch, n_layers*32)"""
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
     mxfp4_data = Tensor.cat(scales.unsqueeze(-1), blocks, dim=-1).flatten()  # interleave and flatten to 1D
     # ic(blocks, scales, mxfp4_data)
@@ -181,31 +301,6 @@ def load_weights(model_path:Path, params:dict[str, int|float]):
   # weights = fix_bf16(weights) # todo: do we need ?? turns bf16 into fp32->fp16
   return weights
 
-def load_model(params:dict[str, int|float]) -> Transformer:
-  # build model
-  moe_params = params.pop("moe")
-  rope_params = params.pop("rope")
-  feed_forward = functools.partial(MixtureFeedForward, moe_params["num_experts"], moe_params["activated_experts"])
-  model = Transformer(**params, jit=False, feed_forward=feed_forward) # todo: fix jit=True
-
-  # add bias to each attention projection
-  for i in range(len(model.layers)):
-    model.layers[i].attention.wq = nn.Linear(params["dim"], params["n_heads"] * params["head_dim"], bias=True)
-    model.layers[i].attention.wk = nn.Linear(params["dim"], params["n_kv_heads"] * params["head_dim"], bias=True)
-    model.layers[i].attention.wv = nn.Linear(params["dim"], params["n_kv_heads"] * params["head_dim"], bias=True)
-    model.layers[i].attention.wo = nn.Linear(params["n_heads"] * params["head_dim"], params["dim"], bias=True)
-
-  # add sliding attention to all even layers
-  for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
-
-  # add attention sinks to all layers
-  for i in range(len(model.layers)): model.layers[i].sinks = Tensor.empty(params['n_heads'], dtype=dtypes.bfloat16)
-
-  # add yarn positional encodings
-  model.freqs_cis = precompute_freqs_cis(params["head_dim"], model.max_context * 2, **rope_params)
-
-  return model
-
 def main(args):
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
@@ -213,14 +308,12 @@ def main(args):
   model_info = MODELS[args.size]
   model_path = Path(args.weights) if args.weights else download_weights(model_info["model"], model_info["total_num_weights"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
-  ic(model_path)
 
   if getenv("TORCH"):
     print("Using torch, not tinygrad.")
     import torch
     from transformers import GptOssForCausalLM
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    ic(device)
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=(subdir:=model_info["model"].split('/')[-1]))
     model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
@@ -230,10 +323,7 @@ def main(args):
     return
 
   # build model
-  model = load_model(model_info["params"])
-  weights = load_weights(model_path, model_info["params"])
-  load_state_dict(model, weights, strict=False, consume=True)
-  param_bytes = sum(x.uop.size * x.dtype.itemsize for x in get_parameters(model))
+  model = Transformer.build_model(model_path, model_info["params"])
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
@@ -243,7 +333,7 @@ def main(args):
   for i in range(args.count):
 
     next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
-    tok_tensor = model(next_tok, start_pos, args.temperature)
+    tok_tensor = model(next_tok, start_pos) # todo: add temperature
     tok = tok_tensor.item()
 
     # use the kv cache
