@@ -1,3 +1,4 @@
+// #region constants
 const SAMPLES_PER_SEGMENT = 480000;
 const MEL_SPEC_CHUNK_LENGTH = 80 * 3000;
 
@@ -16,7 +17,9 @@ const TOK_TS_FIRST = 50363;
 const TOK_TS_LAST = 51863;
 
 const MAX_TOKENS_TO_DECODE = 224;
+// #endregion constants
 
+// #region audio
 async function fetchMonoFloat32Array(url, AudioContextImplementation = globalThis.AudioContext) {
     const response = await fetch(url);
     return await fetchMonoFloat32ArrayFile(response, AudioContextImplementation);
@@ -36,6 +39,70 @@ async function fetchMonoFloat32ArrayFile(response, AudioContextImplementation = 
     }
     return { sampleRate: audioBuffer.sampleRate, samples: mono };
 }
+// #endregion audio
+
+const getProgressDlForPart = async (part, progressCallback, lastModified) => {
+    const response = await fetch(part, {
+        headers: lastModified ? { "If-Modified-Since": lastModified } : {}
+    });
+    if (response.status === 304) return null; // not modified
+
+    const total = parseInt(response.headers.get('content-length'), 10);
+    const newLastModified = response.headers.get('Last-Modified');
+
+    const res = new Response(new ReadableStream({
+        async start(controller) {
+            const reader = response.body.getReader();
+            for (; ;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                progressCallback(part, value.byteLength, total);
+                controller.enqueue(value);
+            }
+            controller.close();
+        },
+    }));
+    return { buffer: await res.arrayBuffer(), lastModified: newLastModified };
+};
+
+const tensorStore = (db) => ({
+    get: (id) => new Promise(r => {
+        const req = db.transaction('tensors').objectStore('tensors').get(id);
+        req.onsuccess = () => r(req.result || null);
+        req.onerror = () => r(null);
+    }),
+    put: (id, content, lastModified) => new Promise(r => {
+        const req = db.transaction('tensors', 'readwrite')
+            .objectStore('tensors').put({ id, content, lastModified });
+        req.onsuccess = () => r();
+        req.onerror = () => r(null);
+    })
+});
+
+function initDb() {
+    return new Promise((resolve, reject) => {
+        let db;
+        const request = indexedDB.open('tinywhisperdb', 2);
+        request.onerror = (event) => {
+            console.error('Database error:', event.target.error);
+            resolve(null);
+        };
+
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            console.log("Db initialized.");
+            resolve(db);
+        };
+
+        request.onupgradeneeded = (event) => {
+            db = event.target.result;
+            if (event.oldVersion < 2 && db.objectStoreNames.contains("tensors")) db.deleteObjectStore?.('tensors');
+            if (!db.objectStoreNames.contains('tensors')) {
+                db.createObjectStore('tensors', { keyPath: 'id' });
+            }
+        };
+    });
+}
 
 export {
     SAMPLES_PER_SEGMENT,
@@ -53,6 +120,10 @@ export {
     TOK_TS_LAST,
     MAX_TOKENS_TO_DECODE,
 
+    tensorStore,
+    initDb,
+
     fetchMonoFloat32Array,
-    fetchMonoFloat32ArrayFile
+    fetchMonoFloat32ArrayFile,
+    getProgressDlForPart
 };

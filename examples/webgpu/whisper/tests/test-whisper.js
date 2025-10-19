@@ -25,6 +25,7 @@ const navigator = { gpu: create([]) };
 // const SAMPLES_PER_SEGMENT = 480000;
 // const MEL_SPEC_CHUNK_LENGTH = 80 * 3000;
 
+// #region imports
 import {
   SAMPLES_PER_SEGMENT, MEL_SPEC_CHUNK_LENGTH, TOK_EOS,
   TOK_BEGIN_TRANSCRIPTION,
@@ -36,10 +37,16 @@ import {
   TOK_TS_LAST,
   MAX_TOKENS_TO_DECODE,
 
-  fetchMonoFloat32Array,
-  fetchMonoFloat32ArrayFile
-} from "../whisper.js";
+  tensorStore,
+  initDb,
 
+  fetchMonoFloat32Array,
+  fetchMonoFloat32ArrayFile,
+  getProgressDlForPart
+} from "../whisper.js";
+// #endregion imports
+
+// #region limits_keys
 const LIMITS_KEYS = ["maxTextureDimension1D",
 "maxTextureDimension2D",
 "maxTextureDimension3D",
@@ -70,6 +77,7 @@ const LIMITS_KEYS = ["maxTextureDimension1D",
 "maxComputeWorkgroupSizeY",
 "maxComputeWorkgroupSizeZ",
 "maxComputeWorkgroupsPerDimension"];
+// #endregion limits_keys
 
 const getDevice = async () => {
   if (!navigator.gpu) return false;
@@ -132,77 +140,13 @@ if (WASM_ARGSORT) {
   }
 }
 
-function initDb() {
-  return new Promise((resolve, reject) => {
-    let db;
-    const request = indexedDB.open('tinywhisperdb', 2);
-    request.onerror = (event) => {
-      console.error('Database error:', event.target.error);
-      resolve(null);
-    };
-
-    request.onsuccess = (event) => {
-      db = event.target.result;
-      console.log("Db initialized.");
-      resolve(db);
-    };
-
-    request.onupgradeneeded = (event) => {
-      db = event.target.result;
-      if (event.oldVersion < 2 && db.objectStoreNames.contains("tensors")) db.deleteObjectStore?.('tensors');
-      if (!db.objectStoreNames.contains('tensors')) {
-        db.createObjectStore('tensors', { keyPath: 'id' });
-      }
-    };
-  });
-}
-
 const db = await initDb();
-
-const tensorStore = (db) => ({
-  get: (id) => new Promise(r => {
-    const req = db.transaction('tensors').objectStore('tensors').get(id);
-    req.onsuccess = () => r(req.result || null);
-    req.onerror = () => r(null);
-  }),
-  put: (id, content, lastModified) => new Promise(r => {
-    const req = db.transaction('tensors', 'readwrite')
-      .objectStore('tensors').put({ id, content, lastModified });
-    req.onsuccess = () => r();
-    req.onerror = () => r(null);
-  })
-});
 
 const modules = [
   ["mel", "./mel.js"],
   ["encoder", "./encoder.js"],
   ["decoder", "./decoder.js"],
 ];
-
-const getProgressDlForPart = async (part, progressCallback, lastModified) => {
-  const response = await fetch(part, {
-    headers: lastModified ? { "If-Modified-Since": lastModified } : {}
-  });
-  if (response.status === 304) return null; // not modified
-
-  const total = parseInt(response.headers.get('content-length'), 10);
-  const newLastModified = response.headers.get('Last-Modified');
-
-  const res = new Response(new ReadableStream({
-    async start(controller) {
-      const reader = response.body.getReader();
-      for (; ;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        progressCallback(part, value.byteLength, total);
-        controller.enqueue(value);
-      }
-      controller.close();
-    },
-  }));
-  return { buffer: await res.arrayBuffer(), lastModified: newLastModified };
-};
-
 
 const BASE_URL = 'http://localhost:8000';
 // const AUDIO_PATH = 'RED_16k.wav';
