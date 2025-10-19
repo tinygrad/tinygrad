@@ -386,8 +386,8 @@
                 }
                 //console.log(context);
 
-                const offset = context.length;
-                if (offset > MAX_TOKENS_TO_DECODE) {
+                const offset_DEADBEEF = context.length;
+                if (offset_DEADBEEF > MAX_TOKENS_TO_DECODE) {
                     console.error("Context length exceeds 224");
                     return;
                 }
@@ -396,12 +396,12 @@
                 // v.fill(0);
                 // v[0] = TOK_NO_TIMESTAMPS;
 
-                function handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index) {
+                function handle_timestamp_tokens(nextTokens, context, token_count, last_token_index_DEADBEEF, one_before_last_token_index_DEADBEEF) {
                     if (!NO_TIMESTAMPS) {
                         if (token_count === 0) {
                             nextTokens = nextTokens.filter((t)=> t >= TOK_TS_FIRST && t <= TOK_TS_LAST);
-                        } else if (context[last_token_index] >= TOK_TS_FIRST) {
-                            if (context[one_before_last_token_index] >= TOK_TS_FIRST) {
+                        } else if (context[last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
+                            if (context[one_before_last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
                                 nextTokens = nextTokens.filter((t)=> t < TOK_TS_FIRST);
                             } else {
                                 nextTokens = nextTokens.filter((t)=> t >= TOK_EOS);
@@ -421,12 +421,12 @@
                 }
 
                 let decoder_state = {
-                    last_index: undefined,
+                    last_index_DEADBEEF: undefined,
                     context: []
                 };
                 async function decodeOne(decode_sequence, decoder_state, temperature) {
-                    const {index: i, max_range, last_eos_logprob} = decode_sequence;
-                    const last_index = decoder_state.last_index;
+                    const {index: i_DEADBEEF, max_range: max_range_DEADBEEF, last_eos_logprob} = decode_sequence;
+                    const last_index_DEADBEEF = decoder_state.last_index_DEADBEEF;
                     let {context} = decode_sequence;
                     let result = {
                         keep: false,
@@ -435,11 +435,11 @@
                         segment_cumlogprob: decode_sequence.segment_cumlogprob,
                         last_eos_logprob: undefined
                     }
-                    if (i >= max_range) return result;
+                    if (i_DEADBEEF >= max_range_DEADBEEF) return result;
 
-                    let token_count = context.length - offset;
-                    let last_token_index = i;
-                    let one_before_last_token_index = i - 1;
+                    let token_count = context.length - offset_DEADBEEF;
+                    let last_token_index_DEADBEEF = i_DEADBEEF;
+                    let one_before_last_token_index_DEADBEEF = i_DEADBEEF - 1;
 
                     function batch_double_helper(array) {
                         // return [...array, ...array];
@@ -447,39 +447,39 @@
                     }
 
                     const BS = 1;
-                    async function decoder_helper(context, context_input, audio_features, context_index, decoder_state) {
+                    async function decoder_helper(context, context_input, audio_features, context_index_DEADBEEF, decoder_state) {
                         context_input = batch_double_helper(context_input);
-                        let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index]);
-                        decoder_state.last_index = context_index;
-                        decoder_state.context = [...decoder_state.context.slice(0, context_index*BS), ...context_input];
+                        let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index_DEADBEEF]);
+                        decoder_state.last_index_DEADBEEF = context_index_DEADBEEF;
+                        decoder_state.context = [...decoder_state.context.slice(0, context_index_DEADBEEF*BS), ...context_input];
                         return decoder_output;
                     }
 
                     function rebuild_cache_tail_index(c1, c2) {
-                        let i = 0;
-                        for (; i < c1.length && i < c2.length; ++i) {
-                            if (c1[i] !== c2[i]) break;
+                        let i_DEADBEEF = 0;
+                        for (; i_DEADBEEF < c1.length && i_DEADBEEF < c2.length; ++i_DEADBEEF) {
+                            if (c1[i_DEADBEEF] !== c2[i_DEADBEEF]) break;
                         }
-                        return i;
+                        return i_DEADBEEF;
                     }
 
-                    let tail_index = rebuild_cache_tail_index(context, decoder_state.context);
-                    if (tail_index < i - 1) {
+                    let tail_index_DEADBEEF = rebuild_cache_tail_index(context, decoder_state.context);
+                    if (tail_index_DEADBEEF < i_DEADBEEF - 1) {
                         // NOTE(irwin): rebuild self attention kv cache
                         // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
-                        for (let build_cache_index = 0; build_cache_index < offset-1; ++build_cache_index) {
-                            let context_input = context.slice(build_cache_index, build_cache_index+1);
-                            await decoder_helper(context, context_input, audio_features, build_cache_index, decoder_state);
+                        for (let build_cache_index_DEADBEEF = 0; build_cache_index_DEADBEEF < offset_DEADBEEF-1; ++build_cache_index_DEADBEEF) {
+                            let context_input = context.slice(build_cache_index_DEADBEEF, build_cache_index_DEADBEEF+1);
+                            await decoder_helper(context, context_input, audio_features, build_cache_index_DEADBEEF, decoder_state);
                         }
                     }
 
-                    let context_input = context.slice(i-1, i);
+                    let context_input = context.slice(i_DEADBEEF-1, i_DEADBEEF);
                     // context_input = batch_double_helper(context_input);
 
                     // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
-                    decoder_output = await decoder_helper(context, context_input, audio_features, i-1, decoder_state);
+                    decoder_output = await decoder_helper(context, context_input, audio_features, i_DEADBEEF-1, decoder_state);
                     decoder_output = decoder_output.slice(0, decoder_output.length / BS);
-                    decoder_state.last_index = i;
+                    decoder_state.last_index_DEADBEEF = i_DEADBEEF;
                     // decoder_state.context = context;
                     let nextLogprobs;
                     let nextTokens;
@@ -495,7 +495,7 @@
                     nextTokens = argsort(nextLogprobs);
 
                     // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
-                    nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index);
+                    nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index_DEADBEEF, one_before_last_token_index_DEADBEEF);
                     let nextTokenIndex = 0;
                     if (temperature > 0) {
                         // let sortedSampledIndex = sample(normalize(nextLogprobs));
@@ -509,7 +509,7 @@
 
                     context.push(nextTokens[nextTokenIndex]);
 
-                    result.avg_logprob = result.segment_cumlogprob / (i-offset+1);
+                    result.avg_logprob = result.segment_cumlogprob / (i_DEADBEEF-offset_DEADBEEF+1);
                     let nextLogprob = nextLogprobs[nextTokens[nextTokenIndex]];
                     decode_sequence.logprobs.push(nextLogprob);
                     decode_sequence.eos_logprobs.push(nextLogprobs[TOK_EOS]);
@@ -519,7 +519,7 @@
 
                     if (nextTokens[nextTokenIndex] == TOK_EOS) {
                         return result;
-                    } else if (i + 1 >= max_range) {
+                    } else if (i_DEADBEEF + 1 >= max_range_DEADBEEF) {
                         context[context.length-1] = TOK_EOS;
                     }
 
@@ -527,7 +527,7 @@
                     return result;
                 }
 
-                const max_range = offset + MAX_TOKENS_TO_DECODE;
+                const max_range_DEADBEEF = offset_DEADBEEF + MAX_TOKENS_TO_DECODE;
 
                 let sequences = [];
                 const default_sequence = {
@@ -545,8 +545,8 @@
                 const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
                 for(let i = 0; i < SEQUENCE_COUNT; ++i) {
                     let sequence = Object.create(default_sequence);
-                    sequence.index = offset;
-                    sequence.max_range = max_range;
+                    sequence.index = offset_DEADBEEF;
+                    sequence.max_range = max_range_DEADBEEF;
                     sequence.context = context.slice();
                     sequence.logprobs = [];
                     sequence.eos_logprobs = [-10];
@@ -571,7 +571,7 @@
                         sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
 
                         if (!updated) {
-                            pendingText = format_text(tokensToText(sequences[idx].context.slice(offset)), sequences[idx].avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                            pendingText = format_text(tokensToText(sequences[idx].context.slice(offset_DEADBEEF)), sequences[idx].avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
                             updated = true;
                         }
 
@@ -590,7 +590,7 @@
                 let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
                 let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
 
-                return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, offset];
+                return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, offset_DEADBEEF];
             }
 
             console.log("begin new transcription");
