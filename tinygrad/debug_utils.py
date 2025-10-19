@@ -26,11 +26,11 @@ def debug_realize(tensors, reference_outputs=None):
 
     # Realize each tensor
     for i, t in enumerate(order):
-        # Force computation
-        arr = t.numpy()
-
-        # Print node info
-        print(f"[{i}] Realized node: shape={arr.shape}, dtype={arr.dtype}, device={getattr(t, 'device', 'unknown')}")
+        arr = t.numpy()  # force computation
+        print(
+            f"[{i}] Realized node: "
+            f"shape={arr.shape}, dtype={arr.dtype}, device={getattr(t, 'device', 'unknown')}"
+        )
 
         # Compare to reference if provided
         if reference_outputs is not None:
