@@ -20,7 +20,7 @@ def linearize(sink:UOp) -> list[UOp]:
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
-    #if u.op is Ops.RANGE: priority = [2000]
+    if u.op in {Ops.RANGE, Ops.IF}: priority = [2000]
     # move defines and consts to the top
     if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
     priorities[u] = min(priority)
