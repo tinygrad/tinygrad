@@ -172,8 +172,8 @@ class Linear:
   """
   def __init__(self, in_features:int, out_features:int, bias=True):
     bound = 1 / math.sqrt(in_features)
-    self.weight = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
-    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
+    self.weight = Tensor.uniform(out_features, in_features, low=-bound, high=bound,requires_grad=True)
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound, requires_grad=True) if bias else None
 
   def __call__(self, x:Tensor) -> Tensor: return x.linear(self.weight.transpose(), self.bias)
 
@@ -304,25 +304,41 @@ class RMSNorm:
     x = self._norm(x.float()).cast(x.dtype)
     return x if self.weight is None else x * self.weight
 
+
 class Embedding:
   """
   A simple lookup table that stores embeddings of a fixed dictionary and size.
 
   See: https://pytorch.org/docs/stable/generated/torch.nn.Embedding
 
-  ```python exec="true" source="above" session="tensor" result="python"
-  emb = nn.Embedding(10, 3)
-  print(emb(Tensor([1, 2, 3, 1])).numpy())
-  ```
+  Example:
+      emb = nn.Embedding(10, 3)
+      print(emb(Tensor([1, 2, 3, 1])).numpy())
   """
-  def __init__(self, vocab_size:int, embed_size:int):
-    self.vocab_sz, self.embed_sz, self.weight = vocab_size, embed_size, Tensor.glorot_uniform(vocab_size, embed_size)
+  def __init__(self, vocab_size: int, embed_size: int):
+    # Store sizes and initialize embedding weights with gradient tracking enabled
+    self.vocab_sz = vocab_size
+    self.embed_sz = embed_size
+    self.weight = Tensor.glorot_uniform(vocab_size, embed_size, requires_grad=True)
 
-  def __call__(self, idx:Tensor) -> Tensor:
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).unsqueeze(-1)
-    if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
-    big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
-    arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
+  def __call__(self, idx: Tensor) -> Tensor:
+    # Create a cached arange tensor for one-hot comparison (no gradients needed)
+    if not hasattr(self, 'arange'):
+      self.arange = Tensor.arange(
+        self.vocab_sz, requires_grad=False, device=self.weight.device
+      ).unsqueeze(-1)
+
+    # Validate index dtype
+    if not dtypes.is_int(idx.dtype):
+      raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
+
+    # Broadcast tensors to compute the embedding lookup
+    big_shp = idx.shape + (self.vocab_sz, self.embed_sz)
+    arange = self.arange.expand(big_shp)
+    idx = idx.reshape(idx.shape + (1, 1)).expand(big_shp)
+    vals = self.weight.expand(big_shp)
+
+    # Perform elementwise comparison + masking and sum along the vocab dimension
     return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
 
 class LSTMCell:
