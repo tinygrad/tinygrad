@@ -88,7 +88,7 @@ class CFGContext:
     for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
       # range/if that have dependencies on other siblings need to run after them
-      order = sorted(v, key=lambda x: len([y for y in v if y in deps[x]]))
+      order = sorted(v, key=lambda x: len(deps[x].intersection(v)))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
       for x,y in zipped: self.edges[y.src[0]] = x
 
