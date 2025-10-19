@@ -930,7 +930,7 @@ class TrackedGraphRewrite:
   loc:tuple[str, int]                           # location that called graph_rewrite
   sink:int                                      # the sink input to graph_rewrite
   matches:list[tuple[int, int, tuple, float]]   # before/after UOp, UPat location and time
-  name:str|None                                 # optional name of the rewrite
+  name:str                                      # name of the rewrite
   depth:int                                     # depth if it's a subrewrite
   bottom_up:bool
 
@@ -975,19 +975,21 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
   return _decorator
 
 active_rewrites:list[TrackedGraphRewrite] = []
-def track_matches(func):
-  def _track_func(*args, **kwargs):
+def profile_matches(fxn:Callable):
+  def wrap(*args, **kwargs):
+    name = str(kwargs.get("name", None) or fxn.__name__)
+    assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {name} with {args}"
     if tracking:=(TRACK_MATCH_STATS >= 2):
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
-      if not tracked_ctxs: add_trace_group(TracingKey(f"default {func.__name__}"))
-      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], kwargs.get("name", None), depth, kwargs.get("bottom_up", False)))
+      if not tracked_ctxs: add_trace_group(TracingKey(f"default {fxn.__name__}"))
+      tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
-    with cpu_profile(kwargs.get("name", "<unnamed>"), "TINY", display=tracking):
-      ret = func(*args, **kwargs)
+    with cpu_profile(name, "TINY", display=tracking):
+      ret = fxn(*args, **kwargs)
     if tracking: active_rewrites.pop()
     return ret
-  return _track_func
+  return wrap
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
@@ -1127,12 +1129,12 @@ class RewriteContext:
           self.replace[n] = replaced_new_n
     return self.replace[root]
 
-@track_matches
+@profile_matches
 def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None) -> UOp:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
   return rewrite_ctx.unified_rewrite(sink)
 
-@track_matches
+@profile_matches
 def graph_rewrite_map(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=None, bpm=None,
                       input_map:dict[UOp, UOp]|None=None, ) -> dict[UOp, UOp]:
   rewrite_ctx = RewriteContext(pm if not bottom_up else None, pm if bottom_up else bpm, ctx)
