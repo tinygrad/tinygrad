@@ -171,6 +171,7 @@ SPEC = ContextVar("SPEC", 0)
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 REAL_SUBSTITUTE = ContextVar("REAL_SUBSTITUTE", 0)
+NEW_LINEARIZE = ContextVar("NEW_LINEARIZE", 1)
 
 @dataclass(frozen=True)
 class Metadata:
