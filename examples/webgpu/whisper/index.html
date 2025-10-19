@@ -116,7 +116,17 @@
     </div>
 
     <script type="module">
-        import {SAMPLES_PER_SEGMENT, MEL_SPEC_CHUNK_LENGTH} from "./whisper.js";
+        import {
+                SAMPLES_PER_SEGMENT, MEL_SPEC_CHUNK_LENGTH, TOK_EOS,
+                TOK_BEGIN_TRANSCRIPTION,
+                TOK_NO_TIMESTAMPS,
+                TOK_STARTOFPREV,
+                TOK_TRANSCRIBE,
+                TOK_NOSPEECH,
+                TOK_TS_FIRST,
+                TOK_TS_LAST,
+                MAX_TOKENS_TO_DECODE
+            } from "./whisper.js";
 
         document.getElementById("fetchForm").addEventListener("submit", async (e) => {
             // prevent page refresh
@@ -358,17 +368,17 @@
             const NO_CONTEXT = true;
             const SUPPRESS_NONSPEECH_TOKENS = true;
 
-            const TOK_EOS = 50256;
-            const TOK_BEGIN_TRANSCRIPTION = 50257;
-            const TOK_NO_TIMESTAMPS = 50362;
-            const TOK_STARTOFPREV = 50360;
-            const TOK_TRANSCRIBE = 50358;
-            const TOK_NOSPEECH = 50361;
+            // const TOK_EOS = 50256;
+            // const TOK_BEGIN_TRANSCRIPTION = 50257;
+            // const TOK_NO_TIMESTAMPS = 50362;
+            // const TOK_STARTOFPREV = 50360;
+            // const TOK_TRANSCRIBE = 50358;
+            // const TOK_NOSPEECH = 50361;
 
-            const TOK_TS_FIRST = 50363;
-            const TOK_TS_LAST = 51863;
+            // const TOK_TS_FIRST = 50363;
+            // const TOK_TS_LAST = 51863;
 
-            const MAX_TOKENS_TO_DECODE = 224;
+            // const MAX_TOKENS_TO_DECODE = 224;
 
             async function inferLoop(previous_context, temperature, audio_features, seek, cancelToken) {
                 let context = [];
