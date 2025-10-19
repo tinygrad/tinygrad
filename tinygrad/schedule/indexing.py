@@ -2,9 +2,9 @@ from typing import Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey, PCONTIG, colored
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -139,7 +139,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
-@cpu_profile(TracingKey("run_rangeify"), "TINY")
+@profile_matches
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   rctx = IndexingContext()
 
@@ -147,7 +147,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")
 
   # get the traversal order
-  with cpu_profile(TracingKey("reverse toposort"), "TINY"):
+  with cpu_profile("reverse toposort", "TINY"):
     tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
 
   # explicit rangeify

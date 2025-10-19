@@ -131,7 +131,7 @@ jobs:
     - name: UsbGPU copy speeds
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB NOLOCALS=0 IMAGE=0 GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    #  run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -625,16 +625,12 @@ jobs:
       run: BENCHMARK_LOG=openpilot_0_9_9_policy PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
     - name: benchmark openpilot 0.9.9 dmonitoring
       run: BENCHMARK_LOG=openpilot_0_9_9_dmonitoring PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
-    - name: openpilot compile3 0.9.9 driving_vision
-      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=18 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_vision.onnx
-    - name: openpilot compile3 0.9.9 driving_policy
-      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=7 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
-    - name: openpilot compile3 0.9.9 dmonitoring
-      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=12 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
-    - name: openpilot compile3 Space Lab policy + vision
-      run: |
-        PYTHONPATH="." ASSERT_MIN_STEP_TIME=5 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/22aec22a10ce09384d4a4af2a0bbff08d54af7e0c888503508f356fae4ff0e29
-        PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/c824f68646a3b94f117f01c70dc8316fb466e05fbd42ccdba440b8a8dc86914b
+    - name: openpilot compile3 0.10.1 driving_vision
+      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=25 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+    - name: openpilot compile3 0.10.1 driving_policy
+      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=7 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/refs/heads/master/selfdrive/modeld/models/driving_policy.onnx
+    - name: openpilot compile3 0.10.1 dmonitoring
+      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=12 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/refs/heads/master/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
