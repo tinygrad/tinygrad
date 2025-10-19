@@ -115,7 +115,9 @@
         <span class="loader"></span>
     </div>
 
-    <script>
+    <script type="module">
+        import {SAMPLES_PER_SEGMENT, MEL_SPEC_CHUNK_LENGTH} from "./whisper.js";
+
         document.getElementById("fetchForm").addEventListener("submit", async (e) => {
             // prevent page refresh
             e.preventDefault();
@@ -134,8 +136,6 @@
         const currentTranscription = document.getElementById('current-transcription');
         const transcriptionContainer = document.getElementById('transcription-container');
 
-        const SAMPLES_PER_SEGMENT = 480000;
-        const MEL_SPEC_CHUNK_LENGTH = 80 * 3000;
 
         const BASE_URL = '.';
         // const AUDIO_PATH = 'RED_16k.wav';
