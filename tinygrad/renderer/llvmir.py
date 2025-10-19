@@ -181,7 +181,7 @@ class LLVMRenderer(Renderer):
 
   def render(self, uops: list[UOp]) -> str:
     return "\n".join((self._render_header(uops), *(k:=self._render_kernel(uops))[0], k[1], self._render_footer(uops)))
-  def _render_header(self, uops: list[UOp]) -> str: return ir_f32_to_fp8 if any(u.dtype in dtypes.fp8s for u in uops if u.op is Ops.CAST) else ""
+  def _render_header(self, uops: list[UOp]) -> str: return ir_f32_to_fp8 if any(u.dtype in dtypes.fp8s for u in uops) else ""
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
@@ -253,7 +253,7 @@ class AMDLLVMRenderer(LLVMRenderer):
     lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, dtypes.fp8s, (UPat.var("y", dtypes.float),), name="x",), lambda ctx,x, y:
-      f" {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'true' if x.dtype == dtypes.fp8e5m2 else 'false'})"),
+      f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'true' if x.dtype == dtypes.fp8e5m2 else 'false'})"),
     (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x, y:
       f"  {ctx[x.src[0]]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
