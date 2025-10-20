@@ -204,8 +204,8 @@ jobs:
       run: NV=1 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Test tensor cores
       run: |
-        NV=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
-        NV=1 NV_PTX=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+        DEBUG=2 NV=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+        DEBUG=2 NV=1 NV_PTX=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
