@@ -24,7 +24,7 @@ from transformers import AutoTokenizer
 from icecream import install
 install()
 
-MODELS:dict[str, str|dict[str, int|float]] = {
+MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "n_layers": 24, "n_experts": 32, "n_active_experts": 4,
                "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
