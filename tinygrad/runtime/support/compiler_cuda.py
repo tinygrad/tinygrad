@@ -1,8 +1,11 @@
 import subprocess, hashlib, tempfile, ctypes, re, pathlib
 from typing import Callable
-from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
-import tinygrad.runtime.autogen.nvrtc as nvrtc
+from tinygrad.helpers import colored, init_c_var, getenv
+import tinygrad.runtime.autogen.nvrtc as nvrtc, tinygrad.runtime.autogen.nvjitlink as jitlink
 from tinygrad.device import Compiler, CompileError
+
+def to_char_p_p(options: list[bytes]):
+  return ctypes.cast((ctypes.c_char_p * len(options))(*options), ctypes.POINTER(ctypes.c_char_p))
 
 CUDA_PATH = getenv("CUDA_PATH", "")
 
@@ -17,8 +20,8 @@ def nvrtc_check(status, ctx=None):
 
 def jitlink_check(status, ctx=None):
   if status != 0:
-    err_log = _get_bytes(ctx, nvrtc.nvJitLinkGetErrorLog, nvrtc.nvJitLinkGetErrorLogSize, lambda _: None).decode() if ctx else ""
-    raise CompileError(f"NvJitLink Error {status}, {nvrtc.nvJitLinkResult__enumvalues.get(status, 'Unknown')}\n{err_log}")
+    err_log = _get_bytes(ctx, jitlink.nvJitLinkGetErrorLog, jitlink.nvJitLinkGetErrorLogSize, lambda _: None).decode() if ctx else ""
+    raise CompileError(f"jitlink Error {status}, {jitlink.nvJitLinkResult__enumvalues.get(status, 'Unknown')}\n{err_log}")
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
@@ -86,9 +89,9 @@ class NVPTXCompiler(PTXCompiler):
     nvrtc_check(nvrtc.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
     super().__init__(arch, cache_key="nv_ptx")
   def compile(self, src:str) -> bytes:
-    jitlink_check(nvrtc.nvJitLinkCreate(handle := nvrtc.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
-    jitlink_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
-    jitlink_check(nvrtc.nvJitLinkComplete(handle), handle)
-    data = _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
-    jitlink_check(nvrtc.nvJitLinkDestroy(handle))
+    jitlink_check(jitlink.nvJitLinkCreate(handle := jitlink.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
+    jitlink_check(jitlink.nvJitLinkAddData(handle, jitlink.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
+    jitlink_check(jitlink.nvJitLinkComplete(handle), handle)
+    data = _get_bytes(handle, jitlink.nvJitLinkGetLinkedCubin, jitlink.nvJitLinkGetLinkedCubinSize, jitlink_check)
+    jitlink_check(jitlink.nvJitLinkDestroy(handle))
     return data

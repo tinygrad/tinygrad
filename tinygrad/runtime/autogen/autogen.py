@@ -45,7 +45,7 @@ class Autogen:
 
   def gen(self):
     if not os.path.exists(path:=(pathlib.Path(__file__).parent / f"{self.name}.py")):
-      from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, TokenKind as ToK, PrintingPolicy as PP, PrintingPolicyProperty as PPP
+      from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, TokenKind as ToK, PrintingPolicy as PP, PrintingPolicyProperty
       assert importlib.metadata.version('clang')[:2] == "20"
       if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
 
@@ -54,7 +54,7 @@ class Autogen:
       for f in self.files() if callable(self.files) else self.files:
         macros:list[tuple[str,tuple[str,...]]] = []
         tu = idx.parse(f, self.args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
-        (pp:=PP.create(tu.cursor)).set_property(PPP.TerseOutput, 1)
+        (pp:=PP.create(tu.cursor)).set_property(PrintingPolicyProperty.TerseOutput, 1)
         for c in tu.cursor.walk_preorder():
           if str(c.location.file) != f: continue
           match c.kind:
