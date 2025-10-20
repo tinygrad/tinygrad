@@ -8,3 +8,7 @@ libc = Autogen("libc", "None if (libc_path:=ctypes.util.find_library('c')) is No
 opencl = Autogen("opencl", "ctypes.CDLL(ctypes.util.find_library('OpenCL'))", ["/usr/include/CL/cl.h"])
 
 cuda = Autogen("cuda", "ctypes.CDLL(ctypes.util.find_library('cuda'))", ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"])
+
+nvrtc = Autogen("nvrtc", "ctypes.CDLL(ctypes.util.find_library('nvrtc'))", ["/usr/local/cuda/include/nvrtc.h"])
+nvjitlink = Autogen("nvjitlink", "ctypes.CDLL(ctypes.util.find_library('nvJitLink'))", ["/usr/local/cuda/include/nvJitLink.h"])
+
