@@ -527,7 +527,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.BUFFERIZE: return self.arg.device
-    if self.op is Ops.AFTER: return self.src[0].device
+    if self.op is Ops.AFTER: return self.src[0]._device
     if self.op is Ops.MSELECT:
       assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
       return self.src[0].device[self.arg]
