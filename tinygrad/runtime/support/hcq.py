@@ -261,20 +261,20 @@ class HCQSignal(Generic[HCQDeviceType]):
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]|None=None, queue:HWQueue|None=None):
   st, en = (dev.new_signal(), dev.new_signal()) if enabled else (None, None)
+  assert queue is not None or queue_type is not None, "Either queue or queue_type must be provided"
 
   if enabled and queue is not None: queue.timestamp(st)
-  elif enabled:
-    assert queue_type is not None
+  elif enabled and queue_type is not None:
     queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(st).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
   try: yield (st, en)
   finally:
     if enabled and queue is not None: queue.timestamp(en)
-    elif enabled:
-      assert queue_type is not None
+    elif enabled and queue_type is not None:
       queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
-    if enabled and PROFILE: dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, queue_type is dev.hw_copy_queue_t))
+    if enabled and PROFILE:
+      dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, (queue_type or type(queue)) is dev.hw_copy_queue_t))
 
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=()):

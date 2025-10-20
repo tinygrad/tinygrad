@@ -1,6 +1,6 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno, itertools
 from typing import cast, ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
 from tinygrad.runtime.autogen import libc, vfio
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
@@ -77,15 +77,14 @@ class _System:
       sysmem_view = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE))
       paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem_view.view(fmt='Q')[0::2], sysmem_view.view(fmt='Q')[1::2])))
       assert not contiguous or len(paddrs) == 1, "not contiguous, but required"
-      paged_paddrs = [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:round_up(size, 0x1000)//0x1000]
     else:
       assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-      flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
+      flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
-      sysmem_view, paged_paddrs = MMIOInterface(va, size), self.system_paddrs(va, size)
+      sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in self.system_paddrs(va, size)]
 
     if data is not None: sysmem_view[:len(data)] = data
-    return sysmem_view, paged_paddrs
+    return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
 
   def pci_reset(self, gpu):
     if OSX: System.iokit_pci_rpc(__TinyGPURPCReset:=2)
@@ -202,7 +201,7 @@ class LNXPCIIfaceBase:
       mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
 
-    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
     barview = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
     return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 

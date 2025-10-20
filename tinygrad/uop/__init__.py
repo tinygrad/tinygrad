@@ -12,6 +12,9 @@ class Ops(FastEnum):
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto(); REWRITE_ERROR = auto()  # noqa: E702
   SENTINEL = auto()
 
+  # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
+  AFTER = auto()
+
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
 

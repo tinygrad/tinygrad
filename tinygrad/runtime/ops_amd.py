@@ -278,6 +278,7 @@ class AMDComputeQueue(HWQueue):
   def timestamp(self, signal:AMDSignal):
     with self.pred_exec(xcc_mask=0b1):
       self.release_mem(signal.timestamp_addr, 0, self.pm4.data_sel__mec_release_mem__send_gpu_clock_counter, self.pm4.int_sel__mec_release_mem__none)
+      self.acquire_mem() # ensure timestamp is written
     return self
 
   def signal(self, signal:AMDSignal, value:sint=0):
@@ -334,7 +335,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
     def flush_pm4_batch():
       nonlocal pm4_batch
       if not pm4_batch: return bytes()
-      dev.pm4_ibs.cpu_view().view(off:=dev.pm4_ib_alloc.alloc(len(pm4_batch) * 4), fmt='I')[:len(pm4_batch)] = array.array('I', pm4_batch)
+      dev.pm4_ibs.cpu_view().view(off:=dev.pm4_ib_alloc.alloc(len(pm4_batch) * 4, 16), fmt='I')[:len(pm4_batch)] = array.array('I', pm4_batch)
       pkt = [AQL_HDR | (hsa.HSA_PACKET_TYPE_VENDOR_SPECIFIC << hsa.HSA_PACKET_HEADER_TYPE) | (1 << 16),
         self.pm4.PACKET3(self.pm4.PACKET3_INDIRECT_BUFFER, 2), *data64_le(dev.pm4_ibs.va_addr+off), len(pm4_batch)|self.pm4.INDIRECT_BUFFER_VALID, 10]
       pm4_batch.clear()
@@ -701,7 +702,7 @@ class PCIIface(PCIIfaceBase):
       read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')])
 
   def sleep(self, timeout):
-    if self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
+    if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
       self.dev_impl.ih.interrupt_handler()
 
@@ -833,7 +834,7 @@ class AMDDevice(HCQCompiled):
         read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
         max_cu_id=self.max_cu_id, max_wave_id=self.max_wave_id)
       gart.cpu_view().view(fmt='B')[:ctypes.sizeof(aql_desc)] = bytes(aql_desc)
-      self.aql_desc = hsa.amd_queue_t.from_address(gart.va_addr)
+      self.aql_desc = hsa.amd_queue_t.from_address(gart.cpu_view().addr)
 
     cwsr_buffer_size = round_up((ctx_save_restore_size + debug_memory_size) * self.iface.props.get('num_xcc', 1), mmap.PAGESIZE)
     cwsr_buffer = self.iface.alloc(cwsr_buffer_size) if ctx_save_restore_size else None

@@ -433,17 +433,15 @@ class TestDiskTensorMovement(unittest.TestCase):
     t = Tensor(self.fn)
     self.assertListEqual(t[16:18].tolist(), [16,17])
 
-  # TODO: fix this! at least assert on it
-  @unittest.expectedFailure
   def test_slice_read_cat(self):
     t = Tensor(self.fn)
-    self.assertListEqual(Tensor.cat(t[16:18], t[20:22]).tolist(), [16,17,20,21])
+    with self.assertRaises(AssertionError):
+      self.assertListEqual(Tensor.cat(t[16:18], t[20:22]).tolist(), [16,17,20,21])
 
-  # TODO: fix this! at least assert on it
-  @unittest.expectedFailure
   def test_slice_sum(self):
     t = Tensor(self.fn)
-    self.assertListEqual((t[16:18]+t[20:22]).tolist(), [16+20,17+21])
+    with self.assertRaises(AssertionError):
+      self.assertListEqual((t[16:18]+t[20:22]).tolist(), [16+20,17+21])
 
 if __name__ == "__main__":
   unittest.main()
