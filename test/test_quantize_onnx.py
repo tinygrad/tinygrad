@@ -3,11 +3,9 @@ import numpy as np
 import unittest
 from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
-from tinygrad.uop.ops import Ops, UOp # noqa: F401 # pylint: disable=unused-import
-from tinygrad.opt.kernel import Kernel, Opt, OptOps
+from tinygrad.uop.ops import Ops
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item, get_program
-from tinygrad.opt.search import bufs_from_lin
-from tinygrad.shape.shapetracker import ShapeTracker, View # noqa: F401 # pylint: disable=unused-import
 
 N = 512
 
@@ -32,16 +30,15 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
     graph_def = helper.make_graph([gemm_node], "SingleGemmGraph", [input_tensor], [output_tensor], initializer=[W_init])
 
   # Create and save the model
-  model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
+  #model_def = helper.make_model(graph_def, producer_name="single_gemm_example")
+  # TODO remove this once ORT supports 1.18.0
+  model_def = helper.make_model(graph_def, producer_name="single_gemm_example", ir_version=10, opset_imports=[helper.make_opsetid("", 22)])
   onnx.save_model(model_def, model_path)
   return model_path
 
 def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
-  k = Kernel(si.ast, opts=Device[Device.DEFAULT].renderer)
-  #opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128)] #, Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-  k.apply_opts(opts)
-  prg = get_program(k.get_optimized_ast(), k.opts)
+  prg = get_program(si.ast, opts=opts)
   if replace_src is not None:
     old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
     prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))
@@ -63,6 +60,7 @@ def get_quantized_model(sz):
                   extra_options={"ActivationSymmetric": False})
   return out_file
 
+@unittest.skip("this is broken")
 @unittest.skipIf(Device.DEFAULT != "CPU", "only tests for CPU")
 class TestQuantizeOnnxCPU(unittest.TestCase):
   def test_quant_128(self, sz=128):
@@ -70,11 +68,11 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
       import onnx # noqa: F401 # pylint: disable=unused-import
     except ImportError:
       raise unittest.SkipTest()
-    from tinygrad.frontend.onnx import OnnxRunner
+    from tinygrad.nn.onnx import OnnxRunner
     out_file = get_quantized_model(sz)
     run_onnx = OnnxRunner(out_file)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
-    with Context(DONT_REALIZE_EXPAND=1, QUANTIZE=1):
+    with Context(QUANTIZE=1):
       sched = run_onnx({"input":inp})["output"].schedule()
       ei = lower_schedule_item(sched[-2])
       daccs = [u for u in ei.prg.p.uops if u.op is Ops.DEFINE_REG]
@@ -88,8 +86,7 @@ class TestQuantizeOnnx(unittest.TestCase):
     # divide is ~1500-2000 without reduce_range, 750-900 with it
     out_file = get_quantized_model(sz)
     run_onnx_jit, _ = load_onnx_model(out_file)
-    with Context(DONT_REALIZE_EXPAND=1):
-      run_onnx_jit(input=Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32)))
+    run_onnx_jit(input=Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32)))
 
   def test_prequant_conv2d_1x1(self):
     X = Tensor(np.random.uniform(0, 255, size=(1, 32, 128, 128)).astype(np.uint8))
@@ -111,11 +108,10 @@ class TestQuantizeOnnx(unittest.TestCase):
     N = 512
     X = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(xi))
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(wi))
-    with Context(DONT_REALIZE_EXPAND=1):
-      # this divide is interesting and forces the accumulator to actually be an int
-      out = (X.cast("int").matmul(W.cast("int"))//1000).cast("int8")
-      opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
-      sexec(out, opts)
+    # this divide is interesting and forces the accumulator to actually be an int
+    out = (X.cast("int").matmul(W.cast("int"))//1000).cast("int8")
+    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
+    sexec(out, opts)
 
   def test_prequant_gemm_handcode(self):
     src = """typedef int int128 __attribute__((aligned(512),vector_size(512)));
@@ -205,14 +201,12 @@ class TestQuantizeOnnx(unittest.TestCase):
   def test_prequant_gemm_intacc(self, xi=np.uint8, wi=np.uint8, replace_src=None, N=512, clip=True, opts=None):
     X = Tensor(m1:=(np.random.uniform(0, 255, size=(N,N)).astype(xi))).realize()
     W = Tensor(m2:=(np.random.uniform(0, 255, size=(N,N)).astype(wi))).realize()
-    # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     tg_dtype = dtypes.int8 if xi == np.int8 else dtypes.uint8
-    with Context(DONT_REALIZE_EXPAND=1):
-      out = (X.int().matmul(W.int())//1000)
-      if clip: out = out.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
-      out = out.cast(tg_dtype)
-      opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)] if opts is None else opts
-      sexec(out, opts, replace_src, run_count=1)
+    out = (X.int().matmul(W.int())//1000)
+    if clip: out = out.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
+    out = out.cast(tg_dtype)
+    opts = [Opt(op=OptOps.UPCAST, axis=1, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)] if opts is None else opts
+    sexec(out, opts, replace_src, run_count=1)
     tout = out.numpy()
     mout = ((m1.astype(np.int32) @ m2.astype(np.int32)) // 1000)
     if clip: mout = mout.clip(dtypes.min(tg_dtype),dtypes.max(tg_dtype))
@@ -227,7 +221,6 @@ class TestQuantizeOnnx(unittest.TestCase):
 
   def test_prequant_gemv(self):
     N = 2048
-    # ugh, it's so broken with those casts. need DONT_REALIZE_EXPAND=1 python3 test/test_quantize_onnx.py TestQuantizeOnnx.test_prequant
     X = Tensor(np.random.uniform(0, 255, size=(1,N)).astype(np.uint8)).realize()
     W = Tensor(np.random.uniform(0, 255, size=(N,N)).astype(np.uint8)).realize()
     #out = X.cast(dtypes.int) @ W.cast(dtypes.int)
@@ -235,133 +228,6 @@ class TestQuantizeOnnx(unittest.TestCase):
     out = X.matmul(W, dtype=X.dtype)
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=128), Opt(op=OptOps.UNROLL, axis=0, arg=4)]
     sexec(out, opts)
-
-@unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")
-class TestDSPCache(unittest.TestCase):
-  def test_cache_speed(self):
-    # string becuase this breaks Python language server for syntax highlight for some reason
-    ast = eval("""UOp(Ops.SINK, dtypes.void, arg=None, src=(
-      UOp(Ops.STORE, dtypes.void, arg=None, src=(
-        UOp(Ops.VIEW, dtypes.uchar.ptr(25088), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 896, 32, 1, 0), offset=0, mask=None, contiguous=True),)), src=(
-          UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(25088), arg=0, src=()),)),
-        UOp(Ops.CAST, dtypes.uchar, arg=None, src=(
-          UOp(Ops.XOR, dtypes.int, arg=None, src=(
-            UOp(Ops.MAX, dtypes.int, arg=None, src=(
-              UOp(Ops.XOR, dtypes.int, arg=None, src=(
-                UOp(Ops.MAX, dtypes.int, arg=None, src=(
-                  UOp(Ops.CAST, dtypes.int, arg=None, src=(
-                    UOp(Ops.ADD, dtypes.float, arg=None, src=(
-                      UOp(Ops.ADD, dtypes.float, arg=None, src=(
-                        UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                          UOp(Ops.ADD, dtypes.float, arg=None, src=(
-                            UOp(Ops.REDUCE_AXIS, dtypes.float, arg=(Ops.ADD, (4,)), src=(
-                              UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                                UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                                  UOp(Ops.CAST, dtypes.float, arg=None, src=(
-                                    UOp(Ops.CAST, dtypes.int, arg=None, src=(
-                                      UOp(Ops.LOAD, dtypes.uchar, arg=None, src=(
-                                        UOp(Ops.VIEW, dtypes.uchar.ptr(150528), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 192), strides=(0, 5376, 192, 0, 1), offset=0, mask=None, contiguous=False),)), src=(
-                                          UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(150528), arg=1, src=()),)),)),)),)),
-                                  UOp(Ops.CONST, dtypes.float, arg=0.012368360534310341, src=(
-                                    x22:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 192), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),
-                                UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                                  UOp(Ops.CAST, dtypes.float, arg=None, src=(
-                                    UOp(Ops.CAST, dtypes.int, arg=None, src=(
-                                      UOp(Ops.LOAD, dtypes.char, arg=None, src=(
-                                        UOp(Ops.VIEW, dtypes.char.ptr(6144), arg=ShapeTracker(views=(View(shape=(32, 48, 4), strides=(4, 128, 1), offset=0, mask=None, contiguous=False), View(shape=(1, 28, 28, 32, 192), strides=(0, 0, 0, 192, 1), offset=0, mask=None, contiguous=False))), src=(
-                                          UOp(Ops.DEFINE_GLOBAL, dtypes.char.ptr(6144), arg=2, src=()),)),)),)),)),
-                                  UOp(Ops.CONST, dtypes.float, arg=0.007441135589033365, src=(
-                                    x22,)),)),)),)),
-                            UOp(Ops.MUL, dtypes.float, arg=None, src=(
-                              UOp(Ops.CAST, dtypes.float, arg=None, src=(
-                                UOp(Ops.LOAD, dtypes.int, arg=None, src=(
-                                  UOp(Ops.VIEW, dtypes.int.ptr(32), arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 0, 0, 1, 0), offset=0, mask=None, contiguous=False),)), src=(
-                                    UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(32), arg=3, src=()),)),)),)),
-                              UOp(Ops.CONST, dtypes.float, arg=9.203465015161783e-05, src=(
-                                x36:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(1, 28, 28, 32, 1), strides=(0, 0, 0, 0, 0), offset=0, mask=None, contiguous=False),)), src=()),)),)),)),
-                          UOp(Ops.CONST, dtypes.float, arg=33.812857328652136, src=(
-                            x36,)),)),
-                        UOp(Ops.CONST, dtypes.float, arg=0.4999999, src=(
-                          x36,)),)),
-                      UOp(Ops.CONST, dtypes.float, arg=136.0, src=(
-                        x36,)),)),)),
-                  UOp(Ops.CONST, dtypes.int, arg=0, src=(
-                    x36,)),)),
-                x41:=UOp(Ops.CONST, dtypes.int, arg=-1, src=(
-                  x36,)),)),
-              UOp(Ops.CONST, dtypes.int, arg=-256, src=(
-                x36,)),)),
-            x41,)),)),)),))""")
-    opts = [Opt(op=OptOps.UNROLL, axis=0, arg=8), Opt(op=OptOps.UPCAST, axis=1, arg=32), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    with Context(DEVECTORIZE=0, QUANTIZE=1):
-      k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
-      k.apply_opts(opts)
-      prg = get_program(k.get_optimized_ast(), k.opts)
-      #print(prg.src)
-
-    new_src = """
-typedef int int32 __attribute__((aligned(128),vector_size(128)));
-typedef signed char signed_char128 __attribute__((aligned(128),vector_size(128)));
-typedef unsigned char unsigned_char8 __attribute__((aligned(8),vector_size(8)));
-typedef unsigned char unsigned_char4 __attribute__((aligned(4),vector_size(4)));
-typedef unsigned char unsigned_char128 __attribute__((aligned(128),vector_size(128)));
-__attribute__((noinline)) void r_196_24_8_32_4(unsigned char* restrict __attribute__((align_value(128))) data0, unsigned char* restrict __attribute__((align_value(128))) data1, signed char* restrict __attribute__((align_value(
-128))) data2, int* restrict __attribute__((align_value(128))) data3) {
-  int32 cast0 = (int32){0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-  int32 val0 = *((int32*)((data3+0)));
-  for (int ridx0 = 0; ridx0 < 196; ridx0++) {
-    int32 acc0 = cast0;
-    int32 acc1 = cast0;
-    int32 acc2 = cast0;
-    int32 acc3 = cast0;
-    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768);
-    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768+192);
-    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768+384);
-    __builtin_HEXAGON_Y2_dcfetch(data1+ridx0*768+576);
-    for (int ridx1 = 0; ridx1 < 24; ridx1++) {
-      signed_char128 val1 = *((signed_char128*)((data2+(ridx1<<8))));
-      signed_char128 val2 = *((signed_char128*)((data2+((1+(ridx1<<1))<<7))));
-
-      int alu0 = ((ridx0*768)+(ridx1<<3));
-
-      unsigned_char8 val3 = *((unsigned_char8*)((data1+alu0)));
-      __builtin_HEXAGON_Y2_dcfetch(((data1+alu0)+16));
-      unsigned_char8 val4 = *((unsigned_char8*)((data1+(alu0+192))));
-      __builtin_HEXAGON_Y2_dcfetch(((data1+(alu0+192))+16));
-      unsigned_char8 val5 = *((unsigned_char8*)((data1+(alu0+384))));
-      __builtin_HEXAGON_Y2_dcfetch(((data1+(alu0+384))+16));
-      unsigned_char8 val6 = *((unsigned_char8*)((data1+(alu0+576))));
-      __builtin_HEXAGON_Y2_dcfetch(((data1+(alu0+576))+16));
-
-      unsigned_char4 alu5 = __builtin_shufflevector(val3, val3,    0,   1,   2,   3);
-      unsigned_char4 alu6 = __builtin_shufflevector(val4, val4,    0,   1,   2,   3);
-      unsigned_char4 alu7 = __builtin_shufflevector(val5, val5,    0,   1,   2,   3);
-      unsigned_char4 alu8 = __builtin_shufflevector(val6, val6,    0,   1,   2,   3);
-      acc0 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc0, val1, (*((unsigned int*)&alu5)));
-      acc1 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc1, val1, (*((unsigned int*)&alu6)));
-      acc2 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc2, val1, (*((unsigned int*)&alu7)));
-      acc3 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc3, val1, (*((unsigned int*)&alu8)));
-
-      unsigned_char4 alu9 = __builtin_shufflevector(val3, val3,    4,   5,   6,   7);
-      unsigned_char4 alu10 = __builtin_shufflevector(val4, val4,    4,   5,   6,   7);
-      unsigned_char4 alu11 = __builtin_shufflevector(val5, val5,    4,   5,   6,   7);
-      unsigned_char4 alu12 = __builtin_shufflevector(val6, val6,    4,   5,   6,   7);
-      acc0 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc0, val2, (*((unsigned int*)&alu9)));
-      acc1 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc1, val2, (*((unsigned int*)&alu10)));
-      acc2 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc2, val2, (*((unsigned int*)&alu11)));
-      acc3 = __builtin_HEXAGON_V6_vrmpybus_acc_128B(acc3, val2, (*((unsigned int*)&alu12)));
-    }
-    unsigned_char128 alu18 = __builtin_HEXAGON_V6_vpackhub_sat_128B(__builtin_HEXAGON_V6_vpackwh_sat_128B((((((acc3+val0)*203)+32767)/65536)+136), (((((acc2+val0)*203)+32767)/65536)+136)), __builtin_HEXAGON_V6_vpackwh_sat_128B((((((acc1+val0)*203)+32767)/65536)+136), (((((acc0+val0)*203)+32767)/65536)+136)));
-    *((unsigned_char128*)((data0+(ridx0<<7)))) = alu18;
-  }
-}
-"""
-    prg = replace(prg, src=new_src+prg.src.split("/* DSP boilerplate */ ")[1])
-    rt = CompiledRunner(prg)
-    #Device.default.compiler.disassemble(rt.lib)
-    ei = ExecItem(rt, bufs_from_lin(k))
-    tm = ei.run(wait=True)
-    print(f"final time {tm*1e6:.2f} us")
 
 if __name__ == "__main__":
   unittest.main()

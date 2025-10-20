@@ -43,7 +43,7 @@ def matmul_kernel(c_ptr, a_ptr, b_ptr, BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N:
   c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
   tl.store(c_ptrs, c)
 
-# CUDA=1 PTX=1 python3 extra/gemm/triton_nv_matmul.py
+# CUDA=1 CUDA_PTX=1 python3 extra/gemm/triton_nv_matmul.py
 if __name__ == "__main__":
   BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 64, 128, 64
   M, N, K = 4096, 4096, 4096

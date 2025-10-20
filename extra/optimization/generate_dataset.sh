@@ -7,7 +7,7 @@ rm $LOGOPS
 test/external/process_replay/reset.py
 
 CI=1 python3 -m pytest -n=auto test/test_ops.py test/test_nn.py test/test_winograd.py test/models/test_real_world.py --durations=20
-GPU=1 python3 -m pytest test/test_tiny.py
+CL=1 python3 -m pytest test/test_tiny.py
 
 # extract, sort and uniq
 extra/optimization/extract_dataset.py

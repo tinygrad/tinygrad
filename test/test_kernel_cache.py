@@ -16,14 +16,14 @@ class TestKernelCache(unittest.TestCase):
 
     a1 = Tensor.rand(4,4).realize()
     b1 = Tensor.rand(4,4).realize()
-    orig_compile_func = Device['CPU'].compiler
-    Device['CPU'].compiler = None # making it not callable
+    orig_compile_func = Device['CPU'].compiler.compile_cached
+    Device['CPU'].compiler.compile_cached = None # making it not callable
 
     try:
       x1 = a1 + b1 + unique_const
       x1.realize() # Same kernel should be from cache.
     finally:
-      Device['CPU'].compiler = orig_compile_func
+      Device['CPU'].compiler.compile_cached = orig_compile_func
 
 if __name__ == "__main__":
   unittest.main()

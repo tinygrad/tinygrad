@@ -57,8 +57,8 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   return out_buf.cast(uop.dtype.fmt).tolist()[0]
 
 def not_support_multi_device():
-  # GPU and CUDA don't support multi device if in CI
-  return CI and REAL_DEV in ("GPU", "CUDA")
+  # CL and CUDA don't support multi device if in CI
+  return CI and REAL_DEV in ("CL", "CUDA")
 
 # NOTE: This will open REMOTE if it's the default device
 REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties.real_device)

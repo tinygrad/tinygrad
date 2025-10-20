@@ -1,20 +1,21 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal
-from dataclasses import dataclass
-from typing import Union, ClassVar, Optional, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+from dataclasses import dataclass, field
+from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast
 
 T = TypeVar("T")
 U = TypeVar("U")
 # NOTE: it returns int 1 if x is empty regardless of the type of x
-def prod(x:Iterable[T]) -> Union[T,int]: return functools.reduce(operator.mul, x, 1)
+def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
-OSX = platform.system() == "Darwin"
+OSX, WIN = platform.system() == "Darwin", sys.platform == "win32"
 CI = os.getenv("CI", "") != ""
+ARCH_X86 = any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
-if sys.platform == "win32": os.system("")
+if WIN: os.system("")
 
 def dedup(x:Iterable[T]): return list(dict.fromkeys(x))   # retains list order
 def argfix(*x):
@@ -22,15 +23,18 @@ def argfix(*x):
     if len(x) != 1: raise ValueError(f"bad arg {x}")
     return tuple(x[0])
   return x
-def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def all_same(items:Union[tuple[T, ...], list[T]]): return all(x == items[0] for x in items)
+# https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
+def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
+def all_same(items:tuple[T, ...]|list[T]): return all(x == items[0] for x in items)
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
-def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
+def colored(st, color:str|None, background=False): # replace the termcolor library
+  colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
+  return f"\u001b[{10*background+60*(color.upper() == color)+30+colors.index(color.lower())}m{st}\u001b[0m" if color is not None else st
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
 def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,pr in [(1, "s "),(1e3, "ms")] if t > 10/d), f"{t * 1e6:{w}.2f}us")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
-def make_tuple(x:Union[int, Sequence[int]], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
+def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
 def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in sublist]
 def fully_flatten(l):
   if hasattr(l, "__len__") and hasattr(l, "__getitem__") and not isinstance(l, str):
@@ -56,13 +60,13 @@ def i2u(bits: int, value: int): return value if value >= 0 else (1<<bits)+value
 def is_numpy_ndarray(x) -> bool: return str(type(x)) == "<class 'numpy.ndarray'>"
 def merge_dicts(ds:Iterable[dict[T,U]]) -> dict[T,U]:
   kvs = set([(k,v) for d in ds for k,v in d.items()])
-  assert len(kvs) == len(set(kv[0] for kv in kvs)), f"cannot merge, {kvs} contains different values for the same key"
+  if len(kvs) != len(set(kv[0] for kv in kvs)): raise RuntimeError(f"{kvs} contains different values for the same key")
   return {k:v for d in ds for k,v in d.items()}
 def partition(itr:Iterable[T], fxn:Callable[[T],bool]) -> tuple[list[T], list[T]]:
   ret:tuple[list[T], list[T]] = ([], [])
   for s in itr: (ret[0] if fxn(s) else ret[1]).append(s)
   return ret
-def unwrap(x:Optional[T]) -> T:
+def unwrap(x:T|None) -> T:
   assert x is not None
   return x
 def get_single_element(x:Sequence[T]) -> T:
@@ -76,9 +80,38 @@ def get_child(obj, key):
   return obj
 def word_wrap(x, wrap=80):
   if len(ansistrip(x)) <= wrap: return x
+  if len(lines:=x.splitlines()) > 1: return "\n".join(word_wrap(line, wrap) for line in lines)
   i = 0
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
+def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
+
+@functools.cache
+def canonicalize_strides(shape:tuple[T, ...], strides:tuple[T, ...]) -> tuple[T, ...]:
+  return tuple(cast(T, 0) if s == 1 else st for s, st in zip(shape, strides))
+
+@functools.cache
+def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
+  if not shape: return ()
+  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
+  return canonicalize_strides(shape, strides)
+
+# returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
+def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
+  acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
+  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
+  except ValueError: return None
+  return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
+
+def suppress_finalizing(func):
+  def wrapper(*args, **kwargs):
+    try: return func(*args, **kwargs)
+    except (RuntimeError, AttributeError, TypeError, ImportError):
+      if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
+  return wrapper
+
+def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
+
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
 class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
@@ -117,20 +150,27 @@ class ContextVar:
   def __lt__(self, x): return self.value < x
 
 DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
-JIT = ContextVar("JIT", 2 if platform.system() == 'Darwin' and ('Intel' in platform.processor() or 'i386' in platform.processor()) else 1)
-JIT_BATCH_SIZE = ContextVar("JIT_BATCH_SIZE", 32)
+JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
 WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
-TRANSCENDENTAL, TC_SEARCH_OVER_SHAPE, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("TC_SEARCH_OVER_SHAPE", 1), ContextVar("NOLOCALS", 0)
-FUSE_ARANGE, FUSE_CONV_BW = ContextVar("FUSE_ARANGE", 0), ContextVar("FUSE_CONV_BW", 0)
+TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
-PICKLE_BUFFERS, PROFILE, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("PROFILE", getenv("VIZ")), ContextVar("LRU", 1)
+PICKLE_BUFFERS, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("LRU", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
-DISABLE_COMPILER_CACHE = ContextVar("DISABLE_COMPILER_CACHE", 0)
-DONT_REALIZE_EXPAND, DONT_GROUP_REDUCES = ContextVar("DONT_REALIZE_EXPAND", 0), ContextVar("DONT_GROUP_REDUCES", 0)
-QUANTIZE, VALIDATE_WITH_CPU = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0)
+DISABLE_COMPILER_CACHE, BLOCK_REORDER = ContextVar("DISABLE_COMPILER_CACHE", 0), ContextVar("BLOCK_REORDER", 1)
+QUANTIZE, VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
-ALLOW_DEVICE_USAGE, AMD_LLVM = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("AMD_LLVM", 1)
+ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
+FUSE_ATTENTION = ContextVar("FUSE_ATTENTION", 0)
+EMULATE = ContextVar("EMULATE", "")
+CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
+CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 1)
+VIZ = PROFILE = ContextVar("VIZ", 0)
+SPEC = ContextVar("SPEC", 0)
+# TODO: disable by default due to speed
+IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
+PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
+REAL_SUBSTITUTE = ContextVar("REAL_SUBSTITUTE", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -182,34 +222,42 @@ class Profiling(contextlib.ContextDecorator):
               colored(_format_fcn(fcn).ljust(50), "yellow"),
               colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if scallers else '')
 
+def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_counter_ns())/1000
 
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
-  keys:tuple[str, ...]=()                # optional keys to search for related traces
-  fmt:str|None=None                      # optional detailed formatting
-  cat:str|None=None                      # optional category to color this by
+  keys:tuple[Any, ...]=()                # optional keys to search for related traces
+  ret:Any=None
 
 class ProfileEvent: pass
 
 @dataclass
-class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+class ProfileRangeEvent(ProfileEvent):
+  device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+
+@dataclass(frozen=True)
+class ProfilePointEvent(ProfileEvent):
+  device:str; name:str; key:Any; arg:dict=field(default_factory=dict); ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
 def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
-  res = ProfileRangeEvent(device, name, decimal.Decimal(time.perf_counter_ns()) / 1000, is_copy=is_copy)
+  res = ProfileRangeEvent(device, name, perf_counter_us(), is_copy=is_copy)
   try: yield res
   finally:
-    res.en = decimal.Decimal(time.perf_counter_ns()) / 1000
+    res.en = perf_counter_us()
     if PROFILE and display: cpu_events.append(res)
+
+def profile_marker(name:str, color="gray") -> None:
+  cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
 
 # *** universal database cache ***
 
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")
 CACHEDB: str = getenv("CACHEDB", os.path.abspath(os.path.join(cache_dir, "cache.db")))
 
-VERSION = 21
+VERSION = 22
 _db_connection = None
 def db_connection():
   global _db_connection
@@ -227,7 +275,7 @@ def diskcache_clear():
   drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
   cur.executescript("\n".join([s[0] for s in drop_tables] + ["VACUUM;"]))
 
-def diskcache_get(table:str, key:Union[dict, str, int]) -> Any:
+def diskcache_get(table:str, key:dict|str|int) -> Any:
   if CACHELEVEL < 1: return None
   if isinstance(key, (str,int)): key = {"key": key}
   cur = db_connection().cursor()
@@ -239,7 +287,7 @@ def diskcache_get(table:str, key:Union[dict, str, int]) -> Any:
   return None
 
 _db_tables = set()
-def diskcache_put(table:str, key:Union[dict, str, int], val:Any, prepickled=False):
+def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
   if CACHELEVEL < 1: return val
   if isinstance(key, (str,int)): key = {"key": key}
   conn = db_connection()
@@ -249,7 +297,8 @@ def diskcache_put(table:str, key:Union[dict, str, int], val:Any, prepickled=Fals
     ltypes = ', '.join(f"{k} {TYPES[type(key[k])]}" for k in key.keys())
     cur.execute(f"CREATE TABLE IF NOT EXISTS '{table}_{VERSION}' ({ltypes}, val blob, PRIMARY KEY ({', '.join(key.keys())}))")
     _db_tables.add(table)
-  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)", tuple(key.values()) + (val if prepickled else pickle.dumps(val), ))  # noqa: E501
+  cur.execute(f"REPLACE INTO '{table}_{VERSION}' ({', '.join(key.keys())}, val) VALUES ({', '.join(['?']*len(key))}, ?)",
+              tuple(key.values()) + (val if prepickled else pickle.dumps(val),))
   conn.commit()
   cur.close()
   return val
@@ -274,14 +323,14 @@ def _ensure_downloads_dir() -> pathlib.Path:
     return downloads_dir
   return pathlib.Path(cache_dir) / "downloads"
 
-def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional[str]=None, gunzip:bool=False,
+def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
   else: fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.10.3"}), timeout=10) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.11.0"}), timeout=10) as r:
       assert r.status == 200, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r
@@ -296,18 +345,16 @@ def fetch(url:str, name:Optional[Union[pathlib.Path, str]]=None, subdir:Optional
 
 # *** Exec helpers
 
-def cpu_time_execution(cb, enable):
-  if enable: st = time.perf_counter()
-  cb()
-  if enable: return time.perf_counter()-st
-
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
     print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
 
 def capstone_flatdump(lib: bytes):
-  import capstone
+  try: import capstone
+  except ImportError:
+    print("Disassembler Error: Capstone not installed.")
+    return
   match platform.machine():
     case 'x86_64' | 'AMD64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
     case 'aarch64' | 'arm64': cs = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
@@ -317,10 +364,10 @@ def capstone_flatdump(lib: bytes):
     print(f"{instr.address:#08x}: {instr.mnemonic}\t{instr.op_str}")
   sys.stdout.flush()
 
-def wait_cond(cb, value=True, timeout_ms=10000, msg="") -> bool:
+def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
   start_time = int(time.perf_counter() * 1000)
   while int(time.perf_counter() * 1000) - start_time < timeout_ms:
-    if (val:=cb()) == value: return val
+    if (val:=cb(*args)) == value: return val
   raise TimeoutError(f"{msg}. Timed out after {timeout_ms} ms, condition not met: {val} != {value}")
 
 # *** ctypes helpers
@@ -344,7 +391,7 @@ def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(m
 
 class tqdm(Generic[T]):
   def __init__(self, iterable:Iterable[T]|None=None, desc:str='', disable:bool=False,
-               unit:str='it', unit_scale=False, total:Optional[int]=None, rate:int=100):
+               unit:str='it', unit_scale=False, total:int|None=None, rate:int=100):
     self.iterable, self.disable, self.unit, self.unit_scale, self.rate = iterable, disable, unit, unit_scale, rate
     self.st, self.i, self.n, self.skip, self.t = time.perf_counter(), -1, 0, 1, getattr(iterable, "__len__", lambda:0)() if total is None else total
     self.set_description(desc)

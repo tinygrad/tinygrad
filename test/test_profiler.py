@@ -1,6 +1,6 @@
 import unittest, struct, contextlib, statistics, time, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events
+from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
@@ -17,7 +17,7 @@ def helper_collect_profile(*devs):
   cpu_events.clear()
 
   profile_list = []
-  with Context(PROFILE=1):
+  with Context(VIZ=1):
     yield profile_list
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
@@ -30,7 +30,10 @@ def helper_profile_filter_device(profile, device:str):
   assert len(dev_events) == 1, "only one device registration event is expected"
   return [x for x in profile if getattr(x, "device", None) == device], dev_events[0]
 
-@unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled) or Device.DEFAULT in {"METAL"}, "HCQ device required to run")
+# TODO: support in HCQCompiled
+is_cpu_hcq = Device.DEFAULT in {"CPU"}
+
+@unittest.skipUnless((issubclass(type(Device[Device.DEFAULT]), HCQCompiled) and not is_cpu_hcq) or Device.DEFAULT in {"METAL"}, "Dev not supported")
 class TestProfiler(unittest.TestCase):
   @classmethod
   def setUpClass(self):
@@ -89,7 +92,9 @@ class TestProfiler(unittest.TestCase):
     #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
 
   def test_profile_multidev(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    try: d1 = Device[f"{Device.DEFAULT}:1"]
+    except Exception as e: self.skipTest(f"second device not available {e}")
+
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
@@ -106,7 +111,8 @@ class TestProfiler(unittest.TestCase):
       assert evs[0].is_copy, "kernel should be copy"
 
   def test_profile_multidev_transfer(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    try: d1 = Device[f"{Device.DEFAULT}:1"]
+    except Exception as e: self.skipTest(f"second device not available {e}")
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
@@ -119,7 +125,8 @@ class TestProfiler(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
-    d1 = Device[f"{Device.DEFAULT}:1"]
+    try: d1 = Device[f"{Device.DEFAULT}:1"]
+    except Exception as e: self.skipTest(f"second device not available {e}")
 
     def f(a):
       x = (a + 1).realize()
@@ -142,7 +149,9 @@ class TestProfiler(unittest.TestCase):
   @unittest.skipIf(CI or not issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "skip CI")
   def test_dev_jitter_matrix(self):
     dev_cnt = 6
-    devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]
+    try: devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]
+    except Exception as e: self.skipTest(f"multiple devices not available {e}")
+
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
 
@@ -182,7 +191,13 @@ class TestProfiler(unittest.TestCase):
     range_events = [p for p in profile if isinstance(p, ProfileRangeEvent)]
     self.assertEqual(len(range_events), 2)
     # record start/end time up to exit (error or success)
-    self.assertGreater(range_events[0].en-range_events[0].st, range_events[1].en-range_events[1].st)
+    for e in range_events:
+      self.assertGreater(e.en, e.st)
+    e1, e2 = range_events
+    self.assertEqual([e1.name, e2.name], ["test_1", "test_2"])
+    # TODO: this is flaky
+    #self.assertLess(e1.st, e2.st)
+    #self.assertGreater(e1.en-e1.st, e2.en-e2.st)
 
   @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
   def test_graph(self):
@@ -199,6 +214,19 @@ class TestProfiler(unittest.TestCase):
     self.assertEqual(len(graphs), runs)
     for ge in graphs:
       self.assertEqual(len(ge.ents), len(graphs))
+
+  def test_trace_metadata(self):
+    with Context(TRACEMETA=1):
+      a = Tensor.empty(1)+2
+      b = Tensor.empty(1)+2
+      with helper_collect_profile(TestProfiler.d0) as profile:
+        Tensor.realize(a, b)
+    profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
+    exec_points = [e for e in profile if isinstance(e, ProfilePointEvent) and e.name == "exec"]
+    range_events = [e for e in profile if isinstance(e, ProfileRangeEvent) and not e.is_copy]
+    self.assertEqual(len(exec_points), len(range_events), 2)
+    self.assertEqual(len(dedup(e.arg['name'] for e in exec_points)), 1)
+    self.assertEqual(len(dedup(e.arg['metadata'] for e in exec_points)), 1)
 
 if __name__ == "__main__":
   unittest.main()

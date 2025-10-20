@@ -23,12 +23,13 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
   # Sort buffer operations in timeline order. Two events: buffer is allocated or buffer is freed.
   buffer_requests = sorted([((first_appearance[buf], True), buf) for buf in first_appearance.keys()] + \
                            [((last_appearance[buf] + 1, False), buf) for buf in first_appearance.keys()], key=lambda x: x[0])
+  total_memory = sum(round_up(buf.nbytes, min_block_size:=0x1000) for buf in first_appearance.keys()) * 2 # *2 for fragmentation (which is about 15%)
 
   # Try to suballocate from a shared buffer managed by global_planner using TLSFAllocator.
   # Also track buffer replacements for buffers that do not support suballocation.
   buffer_replace:dict[Buffer, tuple[Buffer|None, int|None]] = {}
   reuse_buffers:dict[tuple, list[Buffer]] = defaultdict(list)
-  global_planner:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(1 << 44, block_size=0x1000, lv2_cnt=32)))
+  global_planner:dict[str, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=min_block_size, lv2_cnt=32)))
   for (_, is_open_ev), buf in buffer_requests:
     # Check if suballocation is possible for the given buffer and device.
     if hasattr(Device[buf.device].allocator, "_offset") and not isinstance(buf.dtype, ImageDType):

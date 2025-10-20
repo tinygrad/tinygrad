@@ -270,8 +270,10 @@ class FidInceptionV3:
     self.Mixed_7b = inception.Mixed_7b
     self.Mixed_7c = inception.Mixed_7c
 
-  def load_from_pretrained(self):
-    state_dict = torch_load(str(fetch("https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth", "pt_inception-2015-12-05-6726825d.pth")))
+  def load_from_pretrained(self, path=None):
+    if path is None:
+      path = fetch("https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth", "pt_inception-2015-12-05-6726825d.pth")
+    state_dict = torch_load(str(path))
     for k,v in state_dict.items():
       if k.endswith(".num_batches_tracked"):
         state_dict[k] = v.reshape(1)

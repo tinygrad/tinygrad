@@ -2,14 +2,14 @@ from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref
 assert sys.platform != 'win32'
 from types import SimpleNamespace
-from typing import Any, cast, ClassVar
+from typing import Any, cast
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
-from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
+from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -37,14 +37,12 @@ class QCOMCompiler(CLCompiler):
   def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
 
 class QCOMSignal(HCQSignal):
-  def __init__(self, base_buf:HCQBuffer|None=None, **kwargs):
-    super().__init__(base_buf, **kwargs, timestamp_divider=19.2, dev_t=QCOMDevice)
+  def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 19.2})
 
   def _sleep(self, time_spent_waiting_ms:int):
-    # Sleep only for only timeline signals. Do it immediately to free cpu.
-    if self.timeline_for_device is not None:
-      kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.timeline_for_device.fd, context_id=self.timeline_for_device.ctx,
-                                                  timestamp=self.timeline_for_device.last_cmd, timeout=0xffffffff)
+    # Sleep only for timeline signals. Do it immediately to free cpu.
+    if self.is_timeline and self.owner is not None:
+      kgsl.IOCTL_KGSL_DEVICE_WAITTIMESTAMP_CTXTID(self.owner.fd, context_id=self.owner.ctx, timestamp=self.owner.last_cmd, timeout=0xffffffff)
 
 class QCOMComputeQueue(HWQueue):
   def __del__(self):
@@ -280,7 +278,7 @@ class QCOMAllocator(HCQAllocatorBase):
       pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
       size = pitch * imgh
 
-    buf = HCQBuffer(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
+    buf = HCQBuffer(options.external_ptr, size, owner=self.dev) if options.external_ptr else self.dev._gpu_alloc(size)
 
     if options.image is not None:
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
@@ -291,20 +289,21 @@ class QCOMAllocator(HCQAllocatorBase):
       buf.texture_info = QCOMTextureInfo(pitch, real_stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]])
     return buf
 
-  def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
-    while src_off < src_size:
-      ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
-      src_off, dest_off = src_off+src_stride, dest_off+dest_stride
+  def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
+    with cpu_profile(prof_text, self.dev.device, is_copy=True):
+      while src_off < src_size:
+        ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
+        src_off, dest_off = src_off+src_stride, dest_off+dest_stride
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     stride, pitch = (src.nbytes, src.nbytes) if (ti:=cast(QCOMTextureInfo, dest.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(mv_address(src), dest.va_addr, src.nbytes, stride, stride, pitch)
+    self._do_copy(mv_address(src), dest.va_addr, src.nbytes, stride, stride, pitch, f"TINY -> {self.dev.device}")
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
 
     stride, pitch = (src.size, src.size) if (ti:=cast(QCOMTextureInfo, src.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(src.va_addr, mv_address(dest), src.size, stride, pitch, stride)
+    self._do_copy(src.va_addr, mv_address(dest), src.size, stride, pitch, stride, f"{self.dev.device} -> TINY")
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
@@ -315,10 +314,6 @@ class QCOMAllocator(HCQAllocatorBase):
     self.dev._gpu_free(opaque)
 
 class QCOMDevice(HCQCompiled):
-  devices: ClassVar[list[HCQCompiled]] = []
-  signal_pages: ClassVar[list[HCQBuffer]] = []
-  signal_pool: ClassVar[list[HCQBuffer]] = []
-
   gpu_id: int = 0
   dummy_addr: int = 0
 
@@ -347,8 +342,8 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
-    super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
-                     QCOMSignal, QCOMComputeQueue, None)
+    compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
+    super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal, QCOMComputeQueue, None)
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     flags |= kgsl.KGSL_MEMALIGN(alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP
@@ -358,7 +353,7 @@ class QCOMDevice(HCQCompiled):
     va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc, view=MMIOInterface(va_addr, size, fmt='B'))
+    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc, view=MMIOInterface(va_addr, size, fmt='B'), owner=self)
 
   def _gpu_free(self, mem:HCQBuffer):
     kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)

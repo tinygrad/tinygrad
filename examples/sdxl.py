@@ -6,7 +6,7 @@
 from tinygrad import Tensor, TinyJit, dtypes, GlobalCounters
 from tinygrad.nn import Conv2d, GroupNorm
 from tinygrad.nn.state import safe_load, load_state_dict
-from tinygrad.helpers import fetch, trange, colored, Timing
+from tinygrad.helpers import fetch, trange, colored, Timing, getenv
 from extra.models.clip import Embedder, FrozenClosedClipEmbedder, FrozenOpenClipEmbedder
 from extra.models.unet import UNetModel, Upsample, Downsample, timestep_embedding
 from extra.bench_log import BenchEvent, WallTimeEvent
@@ -14,7 +14,7 @@ from examples.stable_diffusion import ResnetBlock, Mid
 import numpy as np
 
 from typing import Dict, List, Callable, Optional, Any, Set, Tuple, Union, Type
-import argparse, tempfile
+import argparse, tempfile, time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from PIL import Image
@@ -342,11 +342,13 @@ class DPMPP2MSampler:
     sigmas = self.discretization(num_steps).to(x.device)
     x *= Tensor.sqrt(1.0 + sigmas[0] ** 2.0)
     num_sigmas = len(sigmas)
+    step_times = []
 
     old_denoised = None
     for i in trange(num_sigmas - 1):
       with Timing("step in ", enabled=timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
         GlobalCounters.reset()
+        st = time.perf_counter_ns()
         with WallTimeEvent(BenchEvent.STEP):
           x, old_denoised = self.sampler_step(
             old_denoised=old_denoised,
@@ -358,7 +360,12 @@ class DPMPP2MSampler:
             c=c,
             uc=uc,
           )
+          step_times.append(t:=(time.perf_counter_ns() - st)*1e-6)
           x.realize(old_denoised)
+
+    if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+      min_time = min(step_times)
+      assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
 
     return x
 
@@ -430,8 +437,8 @@ if __name__ == "__main__":
     im.show()
 
   # validation!
-  if args.prompt == default_prompt and args.steps == 10 and args.seed == 0 and args.guidance == 6.0 and args.width == args.height == 1024 \
-    and not args.weights:
+  is_default = args.prompt == default_prompt and args.steps == 10 and args.seed == 0 and args.guidance == 6.0 and args.width == args.height == 1024
+  if is_default and not args.weights and not args.fakeweights:
     ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "sdxl_seed0.png")))
     distance = (((x.cast(dtypes.float) - ref_image.cast(dtypes.float)) / ref_image.max())**2).mean().item()
     assert distance < 4e-3, colored(f"validation failed with {distance=}", "red")

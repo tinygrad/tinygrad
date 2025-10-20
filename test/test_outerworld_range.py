@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, nn, Variable, UOp, dtypes
+from tinygrad import Tensor, nn, Variable, UOp
 
 # outerworld range should support three things
 # 1. full optimizer steps (test_model_bound_range)
@@ -136,7 +136,7 @@ class TestOuterworldRange(unittest.TestCase):
   def test_model_bound_range(self):
     m, opt = get_model_and_opt()
     # TODO: should ranges be unique so you don't have to pass in the -1?
-    rng = UOp.range(dtypes.int, self.STEPS, -1)
+    rng = UOp.range(self.STEPS, -1)
     vib = Variable('i', 0, self.STEPS-1).bind(rng)
     loss = (m(self.X[vib]) - self.Y[vib]).square().mean()
     loss.backward()

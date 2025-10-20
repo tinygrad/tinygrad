@@ -24,6 +24,15 @@ class TestElfLoader(unittest.TestCase):
     '''
     with self.assertRaisesRegex(RuntimeError, 'evil_external_function'):
       ClangJITCompiler().compile(src)
+  def test_link(self):
+    src = '''
+      float powf(float, float); // from libm
+      float test(float x, float y) { return powf(x, y); }
+    '''
+    args = ('-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
+    obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
+    with self.assertRaisesRegex(RuntimeError, 'powf'): elf_loader(obj)
+    elf_loader(obj, link_libs=['m'])
 
 if __name__ == '__main__':
   unittest.main()

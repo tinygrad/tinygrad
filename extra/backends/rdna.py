@@ -15,8 +15,8 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
         u.vin = tuple(n if x == o else x for x in u.vin)
     # pointer indexing
     if u.uop in {UOps.LOAD, UOps.STORE} and u.vin[0].dtype.itemsize > 1:
-      val = UOp(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_before=uops.uops.index(u))
-      ptr = UOp(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_before=uops.uops.index(u))
+      val = UOp(UOps.CONST, dtypes.int, tuple(), arg=u.vin[0].dtype.itemsize, insert_at=uops.uops.index(u))
+      ptr = UOp(UOps.ALU, dtypes.int, (u.vin[1], val), arg=BinaryOps.MUL, insert_at=uops.uops.index(u))
       u.vin = (u.vin[0], ptr) + u.vin[2:]
   #uops.print()
 
@@ -29,10 +29,10 @@ def uops_to_rdna(function_name:str, uops:UOpGraph) -> str:
   r: Dict[UOp, str] = {}
   for u in uops:
     if u.uop == UOps.SPECIAL:
-      if u.arg[1].startswith("lidx"):
-        r[u] = f'v{u.arg[0]}'
-      elif u.arg[1].startswith("gidx"):
-        r[u] = f's{2+u.arg[0]}'
+      if u.arg.startswith("lidx"):
+        r[u] = f'v{u.src[0].arg}'
+      elif u.arg.startswith("gidx"):
+        r[u] = f's{2+u.src[0].arg}'
       else:
         raise NotImplementedError
     elif u.uop == UOps.CONST:

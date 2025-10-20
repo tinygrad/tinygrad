@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
-from tinygrad.helpers import getenv, DEBUG, fetch, getbits, to_mv
+from tinygrad.helpers import getenv, DEBUG, fetch, getbits
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
@@ -51,14 +51,14 @@ class NVPageTableEntry:
     return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self._is_dual_pde() else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
-    if self.is_huge_page(entry_id): return self.nvdev.pte_t.decode(self.entry(entry_id))
+    if self.is_page(entry_id): return self.nvdev.pte_t.decode(self.entry(entry_id))
     return (self.nvdev.dual_pde_t if self._is_dual_pde() else self.nvdev.pde_t).decode(self.entry(entry_id))
 
-  def is_huge_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv < self.nvdev.mm.level_cnt - 1 else True
+  def is_page(self, entry_id) -> bool: return (self.entry(entry_id) & 1 == 1) if self.lv < self.nvdev.mm.level_cnt - 1 else True
   def supports_huge_page(self, paddr:int): return self.lv >= self.nvdev.mm.level_cnt - 3 and paddr % self.nvdev.mm.pte_covers[self.lv] == 0
 
   def valid(self, entry_id):
-    if self.is_huge_page(entry_id): return self.read_fields(entry_id)['valid']
+    if self.is_page(entry_id): return self.read_fields(entry_id)['valid']
     return self.read_fields(entry_id)['aperture_small' if self._is_dual_pde() else 'aperture'] != 0
 
   def address(self, entry_id:int) -> int:
@@ -66,12 +66,12 @@ class NVPageTableEntry:
     return self.read_fields(entry_id)[f'address{small}{sys}'] << 12
 
 class NVMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator((1 << 44), base=1 << 30) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 44), base=0x1000000000) # global for all devices.
 
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev(PCIDevImplBase):
-  def __init__(self, devfmt, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
+  def __init__(self, devfmt:str, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
     self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
     self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
 
@@ -87,7 +87,7 @@ class NVDev(PCIDevImplBase):
     # 5           PTE_64K / PTE_4K                    20:16 / 20:12
     bits, shifts = (56, [12, 21, 29, 38, 47, 56]) if self.mmu_ver == 3 else (48, [12, 21, 29, 38, 47])
     self.mm = NVMemoryManager(self, self.vram_size, boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts, va_base=0,
-      palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]])
+      palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=not self.large_bar)
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
 
@@ -97,13 +97,14 @@ class NVDev(PCIDevImplBase):
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
 
-  def fini(self): System.pci_reset(self.devfmt) # Reset the device to clean up resources. TODO: Consider a warm start process.
+  def fini(self):
+    for ip in [self.gsp, self.flcn]: ip.fini_hw()
 
   def reg(self, reg:str) -> NVReg: return self.__dict__[reg]
-  def wreg(self, addr, value):
+  def wreg(self, addr:int, value:int):
     self.mmio[addr // 4] = value
     if NV_DEBUG >= 4: print(f"wreg: {hex(addr)} = {hex(value)}")
-  def rreg(self, addr): return self.mmio[addr // 4]
+  def rreg(self, addr:int) -> int: return self.mmio[addr // 4]
 
   def _early_init(self):
     self.reg_names:set[str] = set()
@@ -113,11 +114,12 @@ class NVDev(PCIDevImplBase):
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
     self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
+    self.fw_name = {"GB2": "GB202", "AD1": "AD102", "GA1": "GA102"}[self.chip_name[:3]]
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
-      if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.")
+      if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
       System.pci_reset(self.devfmt)
       time.sleep(0.5)
 
@@ -132,25 +134,28 @@ class NVDev(PCIDevImplBase):
     self.pte_t, self.pde_t, self.dual_pde_t = tuple([self.__dict__[name] for name in mmu_pd_names])
 
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
+    self.large_bar = self.vram.nbytes >= self.vram_size
 
-  def _alloc_boot_struct(self, struct):
-    va, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
-    to_mv(va, sz)[:] = bytes(struct)
-    return type(struct).from_address(va), paddrs[0]
+  def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:
+    view, paddrs = System.alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
+    view[:sz] = bytes(struct)
+    return type(struct).from_address(view.addr), paddrs[0]
 
-  def _download(self, file) -> str:
+  def _download(self, file:str) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
     return fetch(url, subdir="defines").read_text()
 
   def extract_fw(self, file:str, dname:str) -> bytes:
     # Extracts the firmware binary from the given header
     tname = file.replace("kgsp", "kgspGet")
-    text = self._download(f"src/nvidia/generated/g_bindata_{tname}_{self.chip_name}.c")
-    info, sl = text[text[:text.index(dnm:=f'{file}_{self.chip_name}_{dname}')].rindex("COMPRESSION:"):][:16], text[text.index(dnm) + len(dnm) + 7:]
+    text = self._download(f"src/nvidia/generated/g_bindata_{tname}_{self.fw_name}.c")
+    info, sl = text[text[:text.index(dnm:=f'{file}_{self.fw_name}_{dname}')].rindex("COMPRESSION:"):][:16], text[text.index(dnm) + len(dnm) + 7:]
     image = bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
     return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
   def include(self, file:str):
+    def _do_eval(s:str): return eval(s) # pylint: disable=eval-used
+
     regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0, 'NV_PFSP': 0x0,
       'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
       'NV_VIRTUAL_FUNCTION':0xb80000}
@@ -162,13 +167,13 @@ class NVDev(PCIDevImplBase):
         name, hi, lo = m.groups()
 
         reg = next((r for r in self.reg_names if name.startswith(r+"_")), None)
-        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), eval(lo), eval(hi))
-        else: self.reg_offsets[name] = (eval(lo), eval(hi))
+        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), _do_eval(lo), _do_eval(hi))
+        else: self.reg_offsets[name] = (_do_eval(lo), _do_eval(hi))
         continue
 
       if m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
         fn = m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()
-        name, value = m.groups()[0], eval(f"lambda {m.groups()[1]}: {fn}")
+        name, value = m.groups()[0], _do_eval(f"lambda {m.groups()[1]}: {fn}")
       elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)(?![^\n]*:)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
       else: continue
 

@@ -8,7 +8,7 @@ if __name__ == "__main__":
   GlobalCounters.reset()
   t.softmax(-1, dtype="half", _single_kernel=True).realize()
 
-  from tinygrad.opt.kernel import Kernel, Opt, OptOps
+  from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
   from tinygrad.helpers import get_single_element
   GlobalCounters.reset()
   si = get_single_element(t.softmax(-1, dtype="half", _single_kernel=True).schedule())
@@ -24,5 +24,5 @@ if __name__ == "__main__":
   #k.apply_opt(Opt(OptOps.GROUP, 1, 32))
   #k.apply_opt(Opt(OptOps.GROUP, 0, 32))
   from tinygrad.engine.realize import CompiledRunner, ExecItem
-  run = CompiledRunner(prg:=get_program(k.get_optimized_ast(), k.opts))
+  run = CompiledRunner(prg:=get_program(k.ast, k.opts, k.applied_opts))
   ExecItem(run, si.bufs).run()

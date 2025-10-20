@@ -4,7 +4,7 @@ import torch
 torch.set_num_threads(1)
 import onnxruntime as ort
 from onnx2torch import convert
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 from tinygrad.helpers import OSX, DEBUG, fetch, getenv
 from tinygrad.dtype import _to_np_dtype
 from tinygrad import Tensor, Device, dtypes
