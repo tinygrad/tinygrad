@@ -579,6 +579,8 @@ function setState(ns) {
   main();
 }
 
+const getSubrewrites = (ul) => ul.querySelectorAll(":scope > ul");
+
 // set a new context and keep the old one in browser history
 function setCtxWithHistory(newCtx, step=0) {
   // NOTE: browser does a structured clone, passing a mutable object is safe.
@@ -618,6 +620,10 @@ async function main() {
           setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
         }
         stack.push(u);
+      }
+      for (const l of ul.querySelectorAll("ul > ul > p")) {
+        const subrewrites = getSubrewrites(l.parentElement);
+        if (subrewrites.length > 0) l.innerText += ` (${subrewrites.length})`;
       }
     }
     return setState({ currentCtx:-1 });
