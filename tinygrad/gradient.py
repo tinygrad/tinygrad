@@ -4,13 +4,13 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):
-  def to_inp_shape(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
-  if ret.arg[0] == Ops.ADD: return (to_inp_shape(ctx),)
+  def broadcast_to_input(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
+  if ret.arg[0] == Ops.ADD: return (broadcast_to_input(ctx),)
   if ret.arg[0] == Ops.MAX:
-    max_is_1s = ret.src[0].eq(to_inp_shape(ret)).cast(ctx.dtype)
-    div = to_inp_shape(max_is_1s.r(Ops.ADD, ret.arg[1]))
-    return ((max_is_1s/div) * to_inp_shape(ctx),)
-  if ret.arg[0] == Ops.MUL: return (to_inp_shape(ctx * ret) / ret.src[0],)
+    mask = ret.src[0].eq(broadcast_to_input(ret)).cast(ctx.dtype)
+    count = mask.r(Ops.ADD, ret.arg[1])
+    return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
+  if ret.arg[0] == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -31,12 +31,12 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="ret"), reduce_gradient),
   (UPat((Ops.CONTIGUOUS, Ops.FUSE)), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
-  (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape),)),
-  (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.arg)),)),
-  (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.arg)])),)),
-  (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(ret.src[0].shape, ret.arg)])),)),
-  (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip(ret.arg),)),
-  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret: (ctx.r(Ops.ADD, tuple(i for i,(si,so) in enumerate(zip(ret.src[0].shape, ret.arg)) if si!=so)),)),
+  (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
+  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret: (ctx.r(Ops.ADD,tuple(i for i,(s,n) in enumerate(zip(ret.src[0].shape, ret.shape)) if s!=n)), None)),
+  (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
+  (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
+  (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
+  (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip(ret.marg),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
@@ -60,5 +60,9 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
       if v is None: continue
       if k in grads: grads[k] = grads[k] + v
       else: grads[k] = v
-      if len(forward_metadata:=all_metadata.get(t0, ())): all_metadata[v] = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
+      if len(forward_metadata:=all_metadata.get(t0, ())):
+        backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
+        # we add the backward metadata to everything new in the graph
+        for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
+          all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
   return grads

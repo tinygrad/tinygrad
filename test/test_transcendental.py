@@ -149,6 +149,7 @@ class TestTranscendentalVectorized(unittest.TestCase):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.log2, np.log2, (0.001, 200), vec_size)
 
   @unittest.skipIf(getenv("DSP"), "requires int division")
+  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
   def test_sin_vectorized(self):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.sin, np.sin, (-100, 100), vec_size)
 

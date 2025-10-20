@@ -72,7 +72,8 @@ class PythonProgram:
               if g: _store(m, o+j, v, dtp[1].scalar())
           i += 1
           continue
-        if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
+        if uop is Ops.AFTER: ul[i] = inp[0]
+        elif uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
           assert isinstance(dtype, PtrDType), dtype
           storage_fmt = storage_fmt_for_dtype(dtype.base.scalar())
           if storage_fmt is None: raise RuntimeError(f"{dtype=} is not supported")
