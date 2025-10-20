@@ -208,6 +208,16 @@ class TestStatsOptimized(unittest.TestCase):
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
+  def test_gemm_group(self):
+    try:
+      p = get_program(self.ast_gemm, opts=[Opt(OptOps.GROUP, 0, 4)])
+    except KernelOptError:
+      raise unittest.SkipTest("no locals")
+    SZ = N*N*4
+    # NOTE: these are sort of wrong. they aren't honoring the IF statement
+    self.check_gemm(p, extra_flops=SZ*4)
+    self.assertEqual(p.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
+
   def test_reduce(self):
     p = get_program(self.ast_reduce, opts=[])
     print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
