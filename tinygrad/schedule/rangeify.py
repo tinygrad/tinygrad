@@ -278,7 +278,6 @@ def bufferize_to_store(x:UOp):
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
     do_store = assign_target.replace(dtype=sdtype).store(assign_src, *rngs).replace(tag=x.tag)
-    assert assign_target.src[0].op is Ops.BUFFER
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
