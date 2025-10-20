@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>tinygrad viz</title>
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
   <script src="assets/d3js.org/d3.v7.min.js" charset="utf-8"></script>
@@ -50,11 +51,15 @@
   ul.active > p {
     opacity: 1;
   }
-  .ctx-list > ul > ul {
-    display: none;
-  }
   ul > ul {
+    display: none;
     margin-left: 6px;
+  }
+  ul.has-children > p::before {
+    content:"▸ ";
+  }
+  ul.has-children.expanded > p::before {
+    content:"▾ ";
   }
   ul.expanded > ul {
     display: block;

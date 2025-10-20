@@ -617,13 +617,15 @@ async function main() {
         p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
         u.li.onclick = (e) => {
           e.stopPropagation();
+          const subrewrites = getSubrewrites(e.currentTarget);
+          if (subrewrites.length) { e.currentTarget.classList.toggle("expanded"); }
           setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
         }
         stack.push(u);
       }
       for (const l of ul.querySelectorAll("ul > ul > p")) {
         const subrewrites = getSubrewrites(l.parentElement);
-        if (subrewrites.length > 0) l.innerText += ` (${subrewrites.length})`;
+        if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
       }
     }
     return setState({ currentCtx:-1 });
