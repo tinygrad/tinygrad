@@ -99,8 +99,9 @@ def _reconstruct(a:int):
 
 def get_full_rewrite(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
-  ignore_indexing = not (isinstance(trace.keys[i].ret, ProgramSpec) or ctx.name in {"kernel split"} or
-                         any(s.dtype is dtypes.index for s in next_sink.src+(next_sink,)))
+  # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
+  ignore_indexing = trace.keys[i].display_name.startswith("Schedule") and not (ctx.name in {"kernel split"} or \
+      any(s.dtype is dtypes.index for s in next_sink.src+(next_sink,)))
   yield {"graph":uop_to_json(next_sink, ignore_indexing), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
