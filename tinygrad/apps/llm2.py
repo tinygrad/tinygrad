@@ -24,7 +24,7 @@ from transformers import AutoTokenizer
 from icecream import install
 install()
 
-MODELS = {
+MODELS:dict[str, str|dict[str, int|float]] = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "n_layers": 24, "n_experts": 32, "n_active_experts": 4,
                "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
@@ -319,7 +319,7 @@ def main(args):
     import torch
     from transformers import GptOssForCausalLM
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # "mps" if torch.mps.is_available() else "cpu")
-    fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=(subdir:=model_info["model"].split('/')[-1]))
+    fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1])
     model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
     generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   357,   939,   261]], device='cuda:0')
