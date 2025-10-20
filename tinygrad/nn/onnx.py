@@ -1122,16 +1122,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # ***** Indexing Ops *****
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
 
-  def Gather(x:Tensor, indices:Tensor, axis:int=0):
-    if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
-      ret_shape = x.shape[:axis] + indices.shape + x.shape[axis+1:]
-      if indices.ndim > 1: indices = indices.flatten()
-      index_consts = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
-      index_consts = [x.shape[axis]+i if i<0 else i for i in index_consts]
-      args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x.shape)] for i in index_consts]
-      return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
-    # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
-    return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
+  def Gather(x:Tensor, indices:Tensor, axis:int=0): return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
   def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 
   def GatherND(x:Tensor, indices:Tensor, batch_dims:int=0):
