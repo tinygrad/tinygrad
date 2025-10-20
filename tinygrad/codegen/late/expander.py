@@ -145,7 +145,8 @@ def fix_group_for_reduce(x:UOp):
   reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
   buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(reduce_gfr[0].arg[0], AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
 
-  # do the final reduce (if/barrier are added in gpudims step)
+  # gate with an if on the store + do the final reduce
+  buf = UOp(Ops.IF, dtype=buf.dtype, src=(functools.reduce(operator.and_, [x.eq(0) for x in reduce_gfr]), buf))
   return buf.reduce(*reduce_loop, arg=x.arg)
 
 pm_pre_expander = PatternMatcher([
