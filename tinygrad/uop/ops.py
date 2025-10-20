@@ -169,7 +169,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def ptrdtype(self) -> PtrDType:
-    if not isinstance(self.dtype, PtrDType): raise RuntimeError("ptrdtype called on UOp without PtrDType")
+    if not isinstance(self.dtype, PtrDType): raise RuntimeError(f"ptrdtype called on UOp with type {self.dtype}")
     return self.dtype
 
   # *** uop shape stuff ***
@@ -1178,8 +1178,6 @@ pm_lower_index_dtype = PatternMatcher([
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
   # TODO: this is only triggering if they are all casts, correct?
   (UPat((Ops.SINK, Ops.NOOP), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
-  # TODO: this should be more general
-  (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=tuple(y.src[0] if y.op is Ops.CAST and y.dtype.scalar()==dtypes.index else y for y in x.src))),
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
