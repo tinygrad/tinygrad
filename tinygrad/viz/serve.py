@@ -64,13 +64,15 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     # always exclude DEVICE/CONST/UNIQUE
     if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
     if u.op is Ops.VCONST and u.dtype.scalar() == dtypes.index and u is not x: excluded.add(u)
+    if u.dtype.scalar() is dtypes.index:
+      for x in u.backward_slice_with_self: excluded.add(x)
   for u in toposort:
     if u in excluded: continue
     argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
-    for idx,x in enumerate(u.src):
+    for idx,x in enumerate(u.src[:1] if u.op in {Ops.BUFFERIZE, Ops.INDEX} else u.src):
       if x in excluded:
         arg = f"{x.arg:g}" if x.op is Ops.CONST and dtypes.is_float(x.dtype) else f"{x.arg}"
         label += f"\n{x.op.name}{idx} {arg}" + (f" {x.src[0].op}" if len(x.src) else "")
