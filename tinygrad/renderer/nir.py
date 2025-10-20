@@ -1,4 +1,4 @@
-from typing import Callable, cast
+from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
 from tinygrad.helpers import DEBUG, OSX, unwrap
 from tinygrad.renderer import Renderer
@@ -169,10 +169,13 @@ class NIRRenderer(Renderer):
   def render(self, uops:list[UOp]):
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
-    self.r, self.param_idx, ranges = {}, 0, []
+    self.r: dict[UOp, Any] = {}
+    self.param_idx, ranges = 0, []
 
     for u in uops:
       if u.op == Ops.NOOP or u.op == Ops.INDEX: pass
+      elif u.op is Ops.AFTER:
+        self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
         if u.arg is not None: self.b.shader.contents.info.name = mesa.char_pointer_cast(u.arg.function_name)
       elif u.op == Ops.DEFINE_LOCAL:

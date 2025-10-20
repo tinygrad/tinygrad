@@ -165,6 +165,9 @@ spec = PatternMatcher([
 
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
+  # allow AFTER on buffers
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
+
   # **** new style load/store ****
 
   # make sure all index dtypes have been lowered
@@ -174,8 +177,8 @@ spec = PatternMatcher([
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat())), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
 
   # LOAD on STORE
   (UPat(Ops.LOAD, src=(UPat(Ops.STORE),), allow_any_len=True), lambda: True),
@@ -286,6 +289,8 @@ full_spec = PatternMatcher([
   (UPat(Ops.DEFINE_VAR), lambda: True),
   # reshape on STORE
   (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
+  # allow any AFTER
+  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 ])+tensor_uop_spec+spec
 
 # ***** uop helpers *****
