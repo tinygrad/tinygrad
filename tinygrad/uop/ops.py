@@ -21,6 +21,7 @@ def canonicalize_dim(d:sint)->int:
     case Ops.MAX: return max(canonicalize_dim(d.src[0]), canonicalize_dim(d.src[1]))
     case Ops.MUL: return canonicalize_dim(d.src[0]) * canonicalize_dim(d.src[1])
     case Ops.ADD: return canonicalize_dim(d.src[0]) + canonicalize_dim(d.src[1])
+    case Ops.IDIV: return cdiv(canonicalize_dim(d.src[0]), canonicalize_dim(d.src[1]))
     case _: raise ValueError(f"Unsupported dimension type: {d}")
 def canonicalize_shape(s:tuple[sint,...])->tuple[int,...]: return tuple(canonicalize_dim(d) for d in s)
 
