@@ -26,8 +26,8 @@ install()
 
 MODELS = {
   "20B": {
-    "params": {"dim": 2880, "hidden_dim": 2880, "n_heads": 64, "n_layers": 24, "norm_eps": 1e-5, "vocab_size": 201088, "n_kv_heads": 8, "head_dim": 64, "max_context": 4096,
-               "moe": {"n_experts": 32, "n_active_experts": 4},
+    "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "n_layers": 24, "n_experts": 32, "n_active_experts": 4,
+               "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
                "rope": {"theta": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
                },
     "total_num_weights": 3,
@@ -64,6 +64,52 @@ def complex_mult(A, c, d):
   co = a*d + b*c
   return ro.cat(co, dim=-1)
 
+def apply_rope3(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
+  B, H, T, Hd = x.shape
+  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  half = Hd // 2
+  freqs = (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+
+  def _angles(freqs, mscale=1.0):
+    angles =((Tensor.arange(T, dtype=dtypes.float32) + start_pos)[:, None] * freqs).reshape(1, 1, T, half)
+    return angles.cos().cast(x.dtype).contiguous(), angles.sin().cast(x.dtype).contiguous()
+  angles = _angles(freqs)
+  complex_mult(angles.cos())
+
+  # contiguous here allows RoPE to be pruned in the JIT
+  cos, sin = angles.cos().cast(x.dtype).contiguous(), angles.sin().cast(x.dtype).contiguous()
+  x_pairs = x.reshape(B, H, T, half, 2)
+  return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
+                      x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
+
+def apply_rope2(x:Tensor, start_pos:int|UOp, base:float=10000.0) -> Tensor:
+  B, H, T, Hd = x.shape
+  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  half = Hd // 2
+
+  def _angles(freqs, mscale=1):
+    angles = ((Tensor.arange(T, dtype=dtypes.float32) + start_pos)[:, None] * freqs * mscale).reshape(1, 1, T, half)
+    # contiguous here allows RoPE to be pruned in the JIT
+    cos, sin = angles.cos().cast(x.dtype).contiguous(), angles.sin().cast(x.dtype).contiguous()
+
+    x_pairs = x.reshape(B, H, T, half, 2)
+    return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
+                        x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
+  def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(theta)
+
+  # rope https://arxiv.org/pdf/2104.09864
+  freqs = (theta ** (-(Tensor.arange(half, dtype=dtypes.float32) / half)))[None, :]
+  if scale <= 1: return _angles(freqs)
+
+  # yarn https://arxiv.org/pdf/2309.00071
+  low, high = _ratio(ntk_alpha), _ratio(ntk_beta)
+  interpolation, extrapolation = freqs, freqs / scale
+  ramp = (Tensor.arange(half, dtype=dtypes.float32) - low) / (high - low)
+  mask = 1 - ramp.clamp(0, 1)
+  freqs = interpolation * (1 - mask) + extrapolation * mask
+  return _angles(freqs, 0.1 * math.log(scale) + 1.0)
+
+
 def apply_rope(x:Tensor, start_pos:int|UOp, base:float=10000.0) -> Tensor:
   B, H, T, Hd = x.shape
   assert (Hd & 1) == 0, "RoPE requires an even head dimension"
@@ -81,25 +127,24 @@ def swiglu(x:Tensor, alpha:float=1.702, limit:float=7.0) -> Tensor:
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0,):
-    self.n_heads        = n_heads
-    self.n_kv_heads     = n_kv_heads
-    self.head_dim       = head_dim if head_dim else dim // n_heads
-    self.sliding_window = sliding_window
-    self.max_context    = max_context
+    self.n_heads            = n_heads
+    self.n_kv_heads         = n_kv_heads
+    self.head_dim           = head_dim if head_dim else dim // n_heads
+    self.sliding_window     = sliding_window
+    self.max_context        = max_context
 
     # --- attention projections (linear with bias) ------------------------
-    self.attn_q         = nn.Linear(dim, n_heads * head_dim,    bias=True)
-    self.attn_k         = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
-    self.attn_v         = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
-    self.attn_o    = nn.Linear(n_heads * head_dim, dim,    bias=True)
-    self.attn_sinks     = Tensor.empty(n_heads)
+    self.attn_q             = nn.Linear(dim, n_heads * head_dim,    bias=True)
+    self.attn_k             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
+    self.attn_v             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
+    self.attn_o             = nn.Linear(n_heads * head_dim, dim,    bias=True)
+    self.attn_sinks         = Tensor.empty(n_heads)
 
     # --- RMSNorms --------------------------------------------------------
-    self.attn_norm      = nn.RMSNorm(dim, norm_eps)
-    self.ffn_norm       = nn.RMSNorm(dim, norm_eps)
+    self.attn_norm          = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm           = nn.RMSNorm(dim, norm_eps)
 
     # --- feed-forward ----------------------------------------------------
-    # todo: add ffn to all the names
     self.n_active_experts   = n_active_experts
     self.router             = nn.Linear(dim, n_experts, bias=True)
     self.ffn_up_proj        = Tensor.empty(n_experts, hidden_dim * 2, dim, dtype=dtypes.bfloat16) # todo: remove dtype?
@@ -167,7 +212,7 @@ class TransformerBlock:
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
-  def __init__(self, n_layers, dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, rope, vocab_size, max_context):
+  def __init__(self, n_layers, dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, rope, vocab_size, sliding_window, max_context):
     self.layers       = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context) for _ in range(n_layers)]
     self.token_embd   = nn.Embedding(vocab_size, dim)
     self.output_norm  = nn.RMSNorm(dim, norm_eps)
@@ -175,6 +220,9 @@ class Transformer:
     self.max_context  = max_context
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
     self.forward_jit  = TinyJit(self.forward)
+
+    # add sliding attention to all even layers
+    for i in range(0, n_layers, 2): self.layers[i].sliding_window = sliding_window
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
@@ -186,20 +234,17 @@ class Transformer:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
   @staticmethod
-  def build_model(model_path, params) -> Transformer:
+  def from_pretrained(model_path:Path, params:dict[str, int|float], fakeweights:bool) -> Transformer:
     # load model
-    moe_params = params.pop("moe")
-    model = Transformer(**params, **moe_params)
-    # add sliding attention to all even layers
-    for i in range(0, len(model.layers), 2): model.layers[i].sliding_window = 128
+    model = Transformer(**params)
 
     # load weights
-    weights = load(str(model_path / "model.safetensors.index.json"))
-    weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
-    weights = fix_mxfp4(weights, params["n_layers"])
-    # weights = fix_bf16(weights) # todo: do we need ??
-
-    load_state_dict(model, weights, strict=False, consume=True)
+    if not fakeweights:
+      weights = load(str(model_path / "model.safetensors.index.json"))
+      weights = convert_from_huggingface(weights, params["n_layers"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
+      weights = fix_mxfp4(weights, params["n_layers"])
+      # weights = fix_bf16(weights) # todo: do we need ??
+      load_state_dict(model, weights, strict=False, consume=True)
     return model
 
 # ***** model loading *****
@@ -238,8 +283,8 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
     if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
     if "model.layers" in k:
-      if ("q_proj" in k or "q_norm" in k) and permute_layers: v = permute(v, n_heads)
-      elif ("k_proj" in k or "k_norm" in k) and permute_layers: v = permute(v, n_kv_heads)
+      if "q_proj" in k and permute_layers: v = permute(v, n_heads)
+      elif "k_proj" in k and permute_layers: v = permute(v, n_kv_heads)
     sd[keymap[k]] = v
   return sd
 
@@ -266,14 +311,14 @@ def main(args):
   if args.seed is not None: Tensor.manual_seed(args.seed)
 
   model_info = MODELS[args.size]
-  model_path = Path(args.weights) if args.weights else download_weights(model_info["model"], model_info["total_num_weights"])
+  model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
 
   if getenv("TORCH"):
     print("Using torch, not tinygrad.")
     import torch
     from transformers import GptOssForCausalLM
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # "mps" if torch.mps.is_available() else "cpu")
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=(subdir:=model_info["model"].split('/')[-1]))
     model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
@@ -283,7 +328,7 @@ def main(args):
     return
 
   # build model
-  model = Transformer.build_model(model_path, model_info["params"])
+  model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights)
 
   outputted = args.prompt
   start_pos, toks = 0, tokenizer(outputted)["input_ids"]
@@ -317,6 +362,7 @@ if __name__ == "__main__":
   parser.add_argument("--prompt", type=str, default="Hi", help="Phrase to start with")
   parser.add_argument("--weights", type=str, default=None, help="Path to the downloaded weights")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
+  parser.add_argument('--fakeweights',  action='store_true', help="Load fake weights")
   args = parser.parse_args()
 
   main(args)
