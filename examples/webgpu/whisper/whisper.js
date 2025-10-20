@@ -120,6 +120,7 @@ const getDevice = async (GPU) => {
 
     const _2GB = 2 ** 31; // 2GB
     // safeguard against webgpu reporting nonsense value. some anti-fingerprinting measures?
+    // TODO(irwin): use max_size_per_tensor_in_bytes to get actual required limit
     let maxBufferSize = Math.min(adapter.limits.maxBufferSize, _2GB);
     let maxComputeWorkgroupStorageSize = adapter.limits.maxComputeWorkgroupStorageSize;
     const params = {
