@@ -15,11 +15,13 @@ if TYPE_CHECKING:
 def canonicalize_dim(d:sint)->int:
   if isinstance(d,int): return d
   match d.op:
-    case Ops.CONST: return d.arg
-    case Ops.RANGE: return d.src[0].arg
+    case Ops.CONST: return cast(int, d.arg)
+    case Ops.RANGE: return cast(int, d.src[0].arg)
     case Ops.BIND: return canonicalize_dim(d.src[1])
     case Ops.MAX: return max(canonicalize_dim(d.src[0]), canonicalize_dim(d.src[1]))
-  raise ValueError(f"Unsupported dimension type: {d}")
+    case Ops.MUL: return canonicalize_dim(d.src[0]) * canonicalize_dim(d.src[1])
+    case Ops.ADD: return canonicalize_dim(d.src[0]) + canonicalize_dim(d.src[1])
+    case _: raise ValueError(f"Unsupported dimension type: {d}")
 def canonicalize_shape(s:tuple[sint,...])->tuple[int,...]: return tuple(canonicalize_dim(d) for d in s)
 
 class AxisType(Enum):
