@@ -50,8 +50,11 @@
   ul.active > p {
     opacity: 1;
   }
-  ul > ul {
+  .ctx-list > ul > ul {
     display: none;
+  }
+  ul > ul {
+    margin-left: 6px;
   }
   ul.expanded > ul {
     display: block;
@@ -141,7 +144,7 @@
   .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
-  .ctx-list > ul > * + * {
+  ul > * + * {
     margin-top: 4px;
   }
   .graph {

@@ -605,16 +605,19 @@ async function main() {
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
+      const stack = []; let list = ul;
       for (const [j,u] of steps.entries()) {
-        const inner = ul.appendChild(document.createElement("ul"));
-        inner.id = `step-${i}-${j}`;
-        const p = inner.appendChild(document.createElement("p"));
+        while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
+        const list = stack.length > 0 ? stack.at(-1).li : ul;
+        u.li = list.appendChild(document.createElement("ul"));
+        u.li.id = `step-${i}-${j}`;
+        const p = u.li.appendChild(document.createElement("p"));
         p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
-        inner.style.marginLeft = `${8*u.depth}px`;
-        inner.onclick = (e) => {
+        u.li.onclick = (e) => {
           e.stopPropagation();
           setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
         }
+        stack.push(u);
       }
     }
     return setState({ currentCtx:-1 });
