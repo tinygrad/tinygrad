@@ -40,11 +40,8 @@ jobs:
       run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
     - name: Verify CUDA autogen
       run: |
-        cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
         cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
-        ./autogen_stubs.sh cuda
         ./autogen_stubs.sh nv
-        diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
         diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
     - name: Verify AMD autogen
       run: |
@@ -97,14 +94,20 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         opencl: 'true'
+        cuda: 'true'
         pydeps: 'clang>=20'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev
     - name: Verify OpenCL autogen
       run: |
         mv tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
-        ./autogen_stubs.sh opencl
+        python3 -c "from tinygrad.runtime.autogen import opencl"
         diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
+    - name: Verify CUDA autogen
+      run: |
+        mv tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
+        python3 -c "from tinygrad.runtime.autogen import cuda"
+        diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
     - name: Verify Linux autogen
       run: |
         mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak

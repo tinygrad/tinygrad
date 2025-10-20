@@ -80,14 +80,6 @@ generate_kfd() {
   python3 -c "import tinygrad.runtime.autogen.kfd"
 }
 
-generate_cuda() {
-  clang2py /usr/include/cuda.h --clang-args="-D__CUDA_API_VERSION_INTERNAL" -o $BASE/cuda.py -l /usr/lib/x86_64-linux-gnu/libcuda.so
-  sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/cuda.py
-  sed -i "s\ctypes.CDLL('/usr/lib/x86_64-linux-gnu/libcuda.so')\ctypes.CDLL(ctypes.util.find_library('cuda'))\g" $BASE/cuda.py
-  fixup $BASE/cuda.py
-  python3 -c "import tinygrad.runtime.autogen.cuda"
-}
-
 generate_nvrtc() {
   clang2py /usr/local/cuda/include/nvrtc.h /usr/local/cuda/include/nvJitLink.h -o $BASE/nvrtc.py -l /usr/local/cuda/lib64/libnvrtc.so -l /usr/local/cuda/lib64/libnvJitLink.so
   sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/nvrtc.py
@@ -516,7 +508,6 @@ generate_mesa() {
 
 if [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
-elif [ "$1" == "cuda" ]; then generate_cuda
 elif [ "$1" == "nvrtc" ]; then generate_nvrtc
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "kfd" ]; then generate_kfd
@@ -535,6 +526,6 @@ elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
+elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
 else echo "usage: $0 <type>"
 fi

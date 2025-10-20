@@ -6,3 +6,5 @@ libc = Autogen("libc", "None if (libc_path:=ctypes.util.find_library('c')) is No
            ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]))
 
 opencl = Autogen("opencl", "ctypes.CDLL(ctypes.util.find_library('OpenCL'))", ["/usr/include/CL/cl.h"])
+
+cuda = Autogen("cuda", "ctypes.CDLL(ctypes.util.find_library('cuda'))", ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"])
