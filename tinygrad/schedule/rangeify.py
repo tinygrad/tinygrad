@@ -97,6 +97,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
+  # insert a contiguous before copy
+  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="s"), UPat.var("dev")), name="c"),
+    lambda c,s,dev: c.replace(src=(s.contiguous(), dev)) if s.op is not Ops.CONTIGUOUS else None),
   # ** assign rules **
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
@@ -183,10 +186,6 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   # NOTE: if buf src is a const, we don't replace it
   return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST}, extra_pm=pm_gate_substitute)
 
-def pre_bufferize(b:UOp, x:UOp, copy:UOp):
-  nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
-  return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
-
 pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
@@ -203,8 +202,6 @@ pm_cleanups = pm_mops+PatternMatcher([
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
-                       .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
