@@ -165,8 +165,8 @@ spec = PatternMatcher([
 
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
-  # allow AFTER
-  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
+  # allow AFTER on buffers
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
 
   # **** new style load/store ****
 
@@ -289,6 +289,8 @@ full_spec = PatternMatcher([
   (UPat(Ops.DEFINE_VAR), lambda: True),
   # reshape on STORE
   (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
+  # allow any AFTER
+  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 ])+tensor_uop_spec+spec
 
 # ***** uop helpers *****
