@@ -242,11 +242,13 @@ def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))))
 
 devectorize = PatternMatcher([
+  # CAST after AFTER
+  (UPat(Ops.CAST, name="c").f(Ops.AFTER, allow_any_len=True, name="a"), lambda c,a: c.src[0].after(*a.src[1:]).cast(c.dtype)),
   # no ALU on vectorized dtypes
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
 ])
 
 pm_render = PatternMatcher([
@@ -297,12 +299,13 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in stored_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))
-    acc_indexed = acc.index(UOp.const(dtypes.int, 0))
-    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else acc_indexed.store(identity)
+    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
+               acc.index(UOp.const(dtypes.int, 0)).store(identity)
     lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0)).load()] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc_indexed.load(acc_indexed.store(ret, *reduce_range)) if len(reduce_range) != 0 else ret
+  if len(reduce_range) == 0: return ret
+  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret, *reduce_range)).index(UOp.const(dtypes.int, 0)).load()
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN
