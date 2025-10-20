@@ -2414,5 +2414,13 @@ class TestUOpBecome(unittest.TestCase):
     b.shrink(((0,4),)).assign(a_view).realize()
     self.assertListEqual(b.tolist(), [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
 
+class TestScheduleMultioutput(unittest.TestCase):
+  def test_simplest_multioutput(self):
+    a = Tensor.ones(256, 256).contiguous().realize()
+    r = a.sum(axis=1)
+    b = r+1
+    c = r+2
+    check_schedule([b, c], 1)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)

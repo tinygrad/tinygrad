@@ -141,6 +141,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
 
 @profile_matches
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
+  if debug: print("**************************")
   rctx = IndexingContext()
 
   # get ops to realize
@@ -251,6 +252,28 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
+
+  # second forward pass to fuse children
+  replaced_ranges = {}
+  for x in tsink.toposort():
+    if x not in rctx.realize_map: continue
+    out_rngs = rctx.range_map[x][1]
+    _realize_axis = rctx.realize_map[x]
+    consumers = [rctx.range_map[u][0] for u in consumer_map[x] if u in rctx.range_map]
+    if len(consumers) < 2: continue
+    assert all(len(out_rngs) == len(rr) for rr in consumers)
+    for i,c in enumerate(zip(*consumers)):
+      out_rng = out_rngs[i]
+      # check if they are all simple ranges
+      if not all(y.op is Ops.RANGE and y.vmax == out_rng.vmax for y in c): continue
+      for r in c: replaced_ranges[r] = out_rngs[i]
+      _realize_axis.remove(i)
+    if len(_realize_axis) == 0: del rctx.realize_map[x]
+    else: rctx.realize_map[x] = _realize_axis
+
+  # do all the replaces
+  for k,(v0,v1) in rctx.range_map.items():
+    rctx.range_map[k] = (tuple(x.substitute(replaced_ranges) for x in v0), tuple(x.substitute(replaced_ranges) for x in v1))
 
   tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   return tsink, rctx
