@@ -55,7 +55,6 @@ class TestOuterworld(unittest.TestCase):
     out = out.reshape(1, 2).expand(a, 2).contiguous()
 
     # 3x2 grid of 20
-    out.realize()
     self.assertTrue((out==20).all().item())
 
   def test_fancy_vmap(self):
@@ -69,6 +68,16 @@ class TestOuterworld(unittest.TestCase):
     # TODO: this should support flatten
     out = out.reshape(1, 3).expand(a, 3).contiguous().realize()
     self.assertListEqual([[0,4,8],[4,8,12],[8,12,16]], out.tolist())
+
+  def test_indexing_after_vmap(self):
+    def fn(x: Tensor) -> Tensor:
+      return Tensor.arange(x.shape[0]) * x
+
+    n, m = 20, 10
+    x = Tensor.ones(n, m)
+    r = UOp.range(n, -1)
+    o = fn(x[r]).reshape(1, m).expand(r, m).contiguous()[[0, 1, 2, 3], [0, 2, 4, 6]]
+    self.assertListEqual(o.tolist(), [0.0, 2.0, 4.0, 6.0])
 
 if __name__ == '__main__':
   unittest.main()

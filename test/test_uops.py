@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, DEBUG, getenv, Timing
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
+from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu, canonicalize_dim, canonicalize_shape # noqa F401
 from tinygrad.uop.spec import spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner, get_program
@@ -545,6 +545,49 @@ class TestUOpRender(unittest.TestCase):
   def test_render_vectorize_different(self):
     u = UOp(Ops.VECTORIZE, src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(), "{0,1,2}")
+
+class TestCanonicalizeDim(unittest.TestCase):
+  def test_canonicalize_dim_int(self):
+    # Test basic int
+    self.assertEqual(canonicalize_dim(5), 5)
+
+  def test_canonicalize_dim_const(self):
+    # Test Ops.CONST
+    c = UOp.const(dtypes.int, 10)
+    self.assertEqual(canonicalize_dim(c), 10)
+
+  def test_canonicalize_dim_range(self):
+    # Test Ops.RANGE
+    r = UOp.range(20, -1)
+    self.assertEqual(canonicalize_dim(r), 20)
+
+  def test_canonicalize_dim_bind(self):
+    # Test Ops.BIND (new functionality)
+    v = UOp.variable("x", 1, 10)
+    b = v.bind(7)
+    self.assertEqual(canonicalize_dim(b), 7)
+
+  def test_canonicalize_dim_max(self):
+    # Test Ops.MAX (new functionality)
+    c1 = UOp.const(dtypes.int, 5)
+    c2 = UOp.const(dtypes.int, 8)
+    m = UOp(Ops.MAX, dtypes.int, (c1, c2))
+    self.assertEqual(canonicalize_dim(m), 8)
+
+  def test_canonicalize_shape_mixed(self):
+    # Test canonicalize_shape with mixed symbolic/concrete dims
+    r = UOp.range(10, -1)
+    c = UOp.const(dtypes.int, 5)
+    shape = (r, 20, c)
+    result = canonicalize_shape(shape)
+    self.assertEqual(result, (10, 20, 5))
+
+  def test_canonicalize_dim_bind_nested(self):
+    # Test nested BIND (bind of a const)
+    c = UOp.const(dtypes.int, 15)
+    v = UOp.variable("y", 1, 20)
+    b = UOp(Ops.BIND, dtypes.int, (v, c))
+    self.assertEqual(canonicalize_dim(b), 15)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

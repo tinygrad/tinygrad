@@ -920,5 +920,53 @@ class TestIdxUpcast(unittest.TestCase):
     a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
     a.realize()
 
+class TestSymbolicShapeOperations(unittest.TestCase):
+  def test_expand_symbolic_shape(self):
+    # Test that .expand() with symbolic dimensions validates correctly
+    n = 10
+    x = Tensor.ones(1, 5)
+    r = UOp.range(n, -1)
+    # Should not raise - expand with symbolic range
+    y = x.expand(r, 5).contiguous().realize()
+    # After realize, shape should be concrete
+    self.assertEqual(y.shape, (n, 5))
+    np.testing.assert_allclose(y.numpy(), np.ones((n, 5)))
+
+  def test_reshape_symbolic_shape(self):
+    # Test that .reshape() with symbolic dimensions validates correctly
+    n, m = 6, 8
+    x = Tensor.arange(n * m)
+    r = UOp.range(n, -1)
+    # Index with range to get symbolic shape
+    y = x.reshape(n, m)
+    indexed = y[r]
+    self.assertEqual(indexed.shape, (m,))
+    # Should not raise - reshape after symbolic indexing
+    z = indexed.reshape(1, m)
+    self.assertEqual(z.shape, (1, m))
+
+  def test_expand_with_mixed_symbolic_concrete(self):
+    # Test expand with both symbolic and concrete dimensions
+    x = Tensor.ones(1, 1, 5)
+    r1 = UOp.range(3, -1)
+    r2 = UOp.range(4, -1)
+    # Expand with mix of symbolic ranges and concrete dimensions
+    y = x.expand(r1, r2, 5).contiguous().realize()
+    # After realize, shape should be concrete
+    self.assertEqual(y.shape, (3, 4, 5))
+    np.testing.assert_allclose(y.numpy(), np.ones((3, 4, 5)))
+
+  def test_reshape_preserves_prod_with_symbolic(self):
+    # Test that reshape validates product equality even with symbolic shapes
+    n, m = 12, 4
+    x = Tensor.arange(n * m).reshape(n, m).contiguous()
+    r = UOp.range(n, -1)
+    # Index to get symbolic shape, then reshape
+    y = x[r].reshape(1, m)
+    # Should be able to expand back
+    z = y.expand(r, m).contiguous().realize()
+    # After realize, check values
+    np.testing.assert_allclose(z.numpy(), x.numpy())
+
 if __name__ == '__main__':
   unittest.main()

@@ -1052,5 +1052,40 @@ class TestFuzzFailure(unittest.TestCase):
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     assert num==rn, f"{num} != {rn}"
 
+class TestSymbolicZeroDivMod(unittest.TestCase):
+  def test_zero_div_any(self):
+    # Test that 0 // x = 0 simplifies correctly (added for symbolic shape support)
+    a = Variable("a", 1, 10)
+    zero = uconst(0)
+    expr = zero // a
+    simplified = graph_rewrite(expr, sym)
+    self.assertEqual(simplified, zero)
+
+  def test_zero_mod_any(self):
+    # Test that 0 % x = 0 simplifies correctly (added for symbolic shape support)
+    a = Variable("a", 1, 10)
+    zero = uconst(0)
+    expr = zero % a
+    simplified = graph_rewrite(expr, sym)
+    self.assertEqual(simplified, zero)
+
+  def test_zero_div_symbolic(self):
+    # Test with more complex symbolic expressions
+    a = Variable("a", 5, 20)
+    b = Variable("b", 2, 8)
+    zero = uconst(0)
+    expr = zero // (a * b + 3)
+    simplified = graph_rewrite(expr, sym)
+    self.assertEqual(simplified, zero)
+
+  def test_zero_mod_symbolic(self):
+    # Test with more complex symbolic expressions
+    a = Variable("a", 5, 20)
+    b = Variable("b", 2, 8)
+    zero = uconst(0)
+    expr = zero % (a * b + 3)
+    simplified = graph_rewrite(expr, sym)
+    self.assertEqual(simplified, zero)
+
 if __name__ == '__main__':
   unittest.main()
