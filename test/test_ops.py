@@ -2556,7 +2556,7 @@ class TestOps(unittest.TestCase):
       with self.subTest(padding=p):
         helper_test_op([shape],
           lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(5,5), padding=1),
-          lambda x: Tensor.avg_pool2d(x, kernel_size=(5,5), padding=1), rtol=1e-5)
+          lambda x: Tensor.avg_pool2d(x, kernel_size=(5,5), padding=1), rtol=1e-5, forward_only=True)
     self.helper_test_exception([shape], lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
                                lambda x: Tensor.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
 
@@ -2600,7 +2600,7 @@ class TestOps(unittest.TestCase):
   def test_global_avg_pool2d(self):
     helper_test_op([(32,2,111,28)],
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5, forward_only=True)
 
   def test_avg_pool3d_failure(self):
     with Context(NOOPT=0):
