@@ -1242,7 +1242,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     G, V, H = G.detach(), V.detach(), H.detach()
     X.grad = norm_coefficient * X.detach() + G
     opt = TinyAdam([X], b1=alpha, b2=beta, eps=epsilon)
-    opt.m, opt.v, opt.lr = [V], [H], R
+    # NOTE: FUSE_OPTIM can change shapes of m and v
+    opt.m, opt.v, opt.lr = [V.reshape(opt.m[0].shape)], [H.reshape(opt.v[0].shape)], R
     # need no-op for m_hat and v_hat if T == 0
     if T == 0: opt.b1_t, opt.b2_t = opt.b1_t.zeros_like(), opt.b2_t.zeros_like()
     else:

@@ -24,7 +24,6 @@ class TestUnaryOpsConstFolding(unittest.TestCase):
     _check_ast_count(0, Tensor.ones(4).cast(dtypes.int16))
     _check_ast_count(0, Tensor.full(4, fill_value=-1).cast(dtypes.uint16))
 
-  @unittest.expectedFailure  # no two level fold
   def test_neg_folding(self):
     _check_ast_count(0, Tensor([1, 2, 3]).mul(-1).neg())
     _check_ast_count(0, Tensor([1, 2, 3]).neg().mul(-1))
@@ -83,10 +82,8 @@ class TestBinaryOpsConstFolding(unittest.TestCase):
   def test_div_tensor_one(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) / Tensor.ones(4))
 
-  @unittest.expectedFailure  # TODO: fix
   def test_idiv_literal_one(self):
     _check_ast_count(0, Tensor([1, 2, 3, 4]) // 1)
-  @unittest.expectedFailure  # TODO: fix
   def test_idiv_tensor_one(self):
     _check_ast_count(0, Tensor([1, 2, 3, 4]) // Tensor.ones(4, dtype=dtypes.int32))
 

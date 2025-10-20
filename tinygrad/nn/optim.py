@@ -50,7 +50,7 @@ class Optimizer:
     if self.fused:
       # optimizer fusion just concatenates all the buffers, runs the _step, then splits them back up
       out, extra = self._step([Tensor.cat(*[t.flatten() for t in self.params], dim=0)],
-                              [Tensor.cat(*[unwrap(t.grad).flatten() for t in self.params], dim=0)])
+                              [Tensor.cat(*[unwrap(t.grad).contiguous().flatten() for t in self.params], dim=0)])
       updated_params = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
     else:
       updated_params, extra = self._step(self.params, [unwrap(t.grad) for t in self.params])
@@ -116,9 +116,7 @@ class LARS(Optimizer):
       # classic momentum does post learning rate update
       if self.classic: g = g * r * self.lr
       if self.momentum:
-        # TODO: this contiguous is required for correctness because self.b[i] becomes a non contiguous view
-        # the scheduler should detect this and just insert contiguous
-        self.b[i].assign(self.momentum * self.b[i].contiguous() + g)  # NOTE: self.b[i] is zero on the first run, no if required
+        self.b[i].assign(self.momentum * self.b[i] + g)  # NOTE: self.b[i] is zero on the first run, no if required
         g = (g + self.momentum * self.b[i]) if self.nesterov else self.b[i]
       if self.ns_params: g = g.reshape(g.shape[0], -1).newton_schulz(self.ns_steps, self.ns_params).reshape(g.shape)
       # muon does post momentum weight decay
