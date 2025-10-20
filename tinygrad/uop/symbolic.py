@@ -350,6 +350,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # a range mod its own upper bound is just the range
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")%UPat.var("end"), lambda r,end: r),
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")//UPat.var("end"), lambda r,end: r.const_like(0)),
+  # 0 divided by anything is 0 (avoid triggering divide_by_gcd with CONST(0))
+  (UPat.cvar("zero", arg=0, vec=False) // UPat.var("y"), lambda zero,y: zero),
+  (UPat.cvar("zero", arg=0, vec=False) % UPat.var("y"), lambda zero,y: zero),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
   (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),

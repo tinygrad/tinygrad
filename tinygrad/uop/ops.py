@@ -12,6 +12,16 @@ from tinygrad.helpers import strip_parens
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
+def canonicalize_dim(d:sint)->int:
+  if isinstance(d,int): return d
+  match d.op:
+    case Ops.CONST: return d.arg
+    case Ops.RANGE: return d.src[0].arg
+    case Ops.BIND: return canonicalize_dim(d.src[1])
+    case Ops.MAX: return max(canonicalize_dim(d.src[0]), canonicalize_dim(d.src[1]))
+  raise ValueError(f"Unsupported dimension type: {d}")
+def canonicalize_shape(s:tuple[sint,...])->tuple[int,...]: return tuple(canonicalize_dim(d) for d in s)
+
 class AxisType(Enum):
   def __repr__(self): return str(self)
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
@@ -221,10 +231,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
-          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          if prod(canonicalize_shape(ps)) != prod(canonicalize_shape(self.marg)): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
         case Ops.EXPAND:
-          if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
+          cps, cns = canonicalize_shape(ps), canonicalize_shape(cast(tuple[sint,...], self.marg))
+          if len(cps) != len(cns) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(cps, cns)):
             raise ValueError(f"bad expand: {ps} -> {self.marg}")
           return self.marg
         case Ops.PERMUTE:
