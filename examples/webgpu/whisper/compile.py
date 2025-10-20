@@ -164,6 +164,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 # IMPORTANT(irwin): unfortunately this doesn't switch all computations to half precision yet
 FLOAT16 = False
 MODEL_NAME = "tiny.en"
+DECODER_BATCH_SIZE = 1
 
 if __name__ == '__main__':
   def tofull(sd):
@@ -245,10 +246,9 @@ if __name__ == '__main__':
 
   def export_decoder_2():
     reload(model.decoder, change_sd=change_sd)
-    BS = 1
     embedding_dims = model.decoder.positional_embedding.shape[1]
     # x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
-    x = Tensor.randint(BS, low=0, high=50256).to("WEBGPU").reshape(BS, -1)
+    x = Tensor.randint(DECODER_BATCH_SIZE, low=0, high=50256).to("WEBGPU").reshape(DECODER_BATCH_SIZE, -1)
     prg, inp_sizes, out_sizes, state = export_model(
       model.decoder,
       Device.DEFAULT.lower(),
@@ -271,4 +271,5 @@ if __name__ == '__main__':
   export_decoder_2()
   export_vocab()
 
-  (dirname / "model_metadata.json").write_text(json.dumps({"model_name": MODEL_NAME}), encoding="utf8")
+  metadata_dict = {"model_name": MODEL_NAME, "decoder_batch_size": DECODER_BATCH_SIZE}
+  (dirname / "model_metadata.json").write_text(json.dumps(metadata_dict), encoding="utf8")
