@@ -149,7 +149,7 @@ class TestViz(BaseTestViz):
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable('a', 0, 10, dtype=dtypes.int)
     b = a.replace(op=Ops.CONST)
     pm = PatternMatcher([
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
@@ -164,8 +164,8 @@ class TestViz(BaseTestViz):
     self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
 
   def test_const_node_visibility(self):
-    a = UOp.variable("a", 0, 10)
-    z = UOp.const(dtypes.index, 0)
+    a = UOp.variable("a", 0, 10, dtype=dtypes.int)
+    z = UOp.const(a.dtype, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
     lst = get_viz_list()
