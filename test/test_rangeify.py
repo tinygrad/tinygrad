@@ -62,7 +62,7 @@ class TestPcontig(unittest.TestCase):
       Tensor.realize(*ret)
       return ret
 
-    with Context(PCONTIG=2, REAL_SUBSTITUTE=1, DEBUG=2):
+    with Context(PCONTIG=2, DEBUG=2):
       grads = fa_bw()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
 
