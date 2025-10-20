@@ -19,7 +19,6 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
-
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|None) -> str: return Device.canonicalize(device)
 
@@ -3627,8 +3626,6 @@ class Tensor(MathTrait):
     # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     shape, _ = _align_left(self.shape, new_shape)
     # for each dimension, check either dim is 1, or it does not change
-    # shape, new_shape = canonicalize_shape(shape), canonicalize_shape(new_shape)
-    # shape= canonicalize_shape(shape)
     if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(canonicalize_shape(shape), canonicalize_shape(new_shape))):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
