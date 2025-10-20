@@ -20,6 +20,7 @@ class Ops(FastEnum):
 
   # create buffer
   BUFFERIZE = auto()
+  REMOVE = auto()
   SUBSTITUTE = auto()
 
   # ops that adjust the behavior of the scheduler
