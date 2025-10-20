@@ -41,11 +41,13 @@
   }
   ul {
     padding: 0;
-    opacity: 0.6;
     white-space: nowrap;
     cursor: pointer;
   }
-  ul.active {
+  ul > p {
+    opacity: 0.6;
+  }
+  ul.active > p {
     opacity: 1;
   }
   ul > ul {
@@ -54,8 +56,10 @@
   ul.expanded > ul {
     display: block;
   }
-  ul.disabled {
+  ul.disabled > p {
     opacity: 0.4;
+  }
+  ul.disabled {
     pointer-events: none;
   }
   label {
