@@ -179,6 +179,9 @@ class PTXRenderer(Renderer):
     name = "test"
     for u in uops:
       if u.op is Ops.NOOP: continue
+      if u.op is Ops.AFTER:
+        self.r[u] = self.r[u.src[0]]
+        continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
