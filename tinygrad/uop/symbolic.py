@@ -554,4 +554,7 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   ((UPat.var("x")*UPat.cvar("c", vec=False)).reduce(arg=Ops.ADD, name="r", allow_any_len=True), lambda x,c,r: r.replace(src=(x,)+r.src[1:])*c.arg),
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
+  # only RANGE/STORE/AFTER have side effects
+  (UPat(Ops.AFTER, name="x"), lambda x:
+   x.replace(src=(x.src[0],)+tuple(flatten([(y,) if y.op in {Ops.RANGE, Ops.STORE, Ops.AFTER} else y.src for y in x.src[1:]])))),
 ])
