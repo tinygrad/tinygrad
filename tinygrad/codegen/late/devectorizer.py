@@ -296,12 +296,13 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     stored_ranges = flatten([x.src[2:] for x in topo if x.op is Ops.STORE])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in stored_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,)).index(UOp.const(dtypes.int, 0))
-    do_store = acc.store(identity, UOp(Ops.NOOP, src=input_ranges)) if len(input_ranges) else acc.store(identity)
-    lst = [acc.load(do_store, *reduce_range)] + lst  # put acc as the first element
+    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))
+    acc_indexed = acc.index(UOp.const(dtypes.int, 0))
+    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else acc_indexed.store(identity)
+    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0)).load()] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
-  return acc.load(acc.store(ret, *reduce_range)) if len(reduce_range) != 0 else ret
+  return acc_indexed.load(acc_indexed.store(ret, *reduce_range)) if len(reduce_range) != 0 else ret
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN
