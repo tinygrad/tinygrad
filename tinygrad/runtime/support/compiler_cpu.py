@@ -17,7 +17,7 @@ class ClangJITCompiler(Compiler):
     args = [arch, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
     arch_args = ['-ffixed-x18'] if target == 'arm64' else []
     obj = subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
-    return jit_loader(obj)
+    return jit_loader(obj, link_libs=["m"])
 
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
 
@@ -75,7 +75,7 @@ class LLVMCompiler(Compiler):
     obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)
     if self.diag_msgs: raise RuntimeError("llvm diagnostic: " + "\n".join(self.diag_msgs))
-    return jit_loader(obj) if self.jit else obj
+    return jit_loader(obj, link_libs=["m"]) if self.jit else obj
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib)
 
