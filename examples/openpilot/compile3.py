@@ -122,7 +122,7 @@ def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   print("test vs onnx passed")
   return timings
 
-def time(run, inputs):
+def bench(run, inputs):
   from extra.bench_log import WallTimeEvent, KernelTimeEvent, BenchEvent
   for _ in range(10):
     with WallTimeEvent(BenchEvent.STEP):
@@ -140,4 +140,4 @@ if __name__ == "__main__":
     test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
 
   if getenv("BENCHMARK_LOG"):
-    time(pickle_loaded, inputs)
+    bench(pickle_loaded, inputs)
