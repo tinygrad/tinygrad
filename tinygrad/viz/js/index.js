@@ -298,18 +298,24 @@ async function renderProfiler() {
         const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px";
-          const { repr, num, mode, shape } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const { repr, num, mode, shape } = users[u];
+          const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
+          p.appendChild(colored(`[${u}] ${repr} ${bufInfo}`));
           const metadata = shape?.tooltipText?.split("\n").at(-1);
           if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
           if (shape != null) {
             p.style.cursor = "pointer";
             p.onclick = () => focusShape(shape);
-            const args = d3.select(shape.html.querySelector("#args"));
-            args.append("p").text(`@data${num} ${rows[2][1]}`).style("cursor", "pointer").style("margin-top", "4px").on("click", () => {
+            const args = shape.html.querySelector("#args");
+            const bufArg = d3.create("p").text(`${bufInfo} ${rows[2][1]}`).style("cursor", "pointer").style("margin-top", "4px").on("click", () => {
               const device = document.getElementById(k);
               if (!isExpanded(device)) device.click();
               focusShape(arg);
-            });
+            }).node();
+            bufArg.dataset.num = num;
+            let before = null;
+            for (const c of args.children) { if (+c.dataset.num > num) { before = c; break; } }
+            args.insertBefore(bufArg, before);
           }
         }
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
