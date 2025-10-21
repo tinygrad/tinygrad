@@ -52,7 +52,7 @@ class AMDComputeQueue(HWQueue):
     if bool(args) == bool(kwargs): raise RuntimeError('One (and only one) of *args or **kwargs must be specified')
     if self.pm4.PACKET3_SET_SH_REG_START <= reg.addr[0] < self.pm4.PACKET3_SET_SH_REG_END:
       set_packet, set_packet_start = self.pm4.PACKET3_SET_SH_REG, self.pm4.PACKET3_SET_SH_REG_START
-    elif self.pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr[0] < self.pm4.PACKET3_SET_UCONFIG_REG_START + 2**16-1:
+    elif self.pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr[0]:
       set_packet, set_packet_start = self.pm4.PACKET3_SET_UCONFIG_REG, self.pm4.PACKET3_SET_UCONFIG_REG_START
     else: raise RuntimeError(f'Cannot set {reg.name} ({reg.addr[0]}) via pm4 packet')
     self.pkt3(set_packet, reg.addr[0] - set_packet_start, *(args or (reg.encode(**kwargs),)))
@@ -131,10 +131,67 @@ class AMDComputeQueue(HWQueue):
 
   def sqtt_config(self, tracing:bool):
     trace_ctrl = {'rt_freq': self.soc.SQ_TT_RT_FREQ_4096_CLK} if self.dev.target < (12,0,0) else {}
-    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1, util_timer=1,
+    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1, lowater=5, util_timer=1,
       mode=int(tracing), **trace_ctrl)
 
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
+  def sqtt_start_9(self, buf0s:HCQBuffer, se_mask:int):
+    self.memory_barrier()
+    # print(self.gc.regGRBM_GFX_INDEX.addr)
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
+    return self
+
+    self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, simd_en=0, cu_sel=0, sq_stall_en=1, spi_stall_en=1, reg_stall_en=1, vm_id_mask=0xf)
+    SQTT_TOKEN_MISC = 1 << 0
+    SQTT_TOKEN_TIME = 1 << 1
+    SQTT_TOKEN_REG = 1 << 2
+    SQTT_TOKEN_WAVE_START = 1 << 3
+    SQTT_TOKEN_REG_CS = 1 << 5
+    SQTT_TOKEN_WAVE_END = 1 << 6
+    SQTT_TOKEN_INST = 1 << 10
+    SQTT_TOKEN_INST_PC = 1 << 11
+    SQTT_TOKEN_USERDATA = 1 << 12
+    SQTT_TOKEN_ISSUE = 1 << 13
+    SQTT_TOKEN_REG_CS_PRIV = 1 << 15
+    mask = SQTT_TOKEN_MISC | SQTT_TOKEN_TIME | SQTT_TOKEN_REG | SQTT_TOKEN_WAVE_START | SQTT_TOKEN_WAVE_END | SQTT_TOKEN_REG_CS_PRIV | SQTT_TOKEN_REG_CS | SQTT_TOKEN_USERDATA
+    self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
+    self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=0) # off
+    self.wreg(self.gc.regSQ_THREAD_TRACE_HIWATER, 0x6)
+
+    for se in range(len(buf0s)):
+      xcc_index = se // self.dev.xccs
+      se_index_xcc = se % self.dev.xccs
+      with self.pred_exec(xcc_mask=1<<xcc_index):
+        self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se_index_xcc, sh_index=0, instance_broadcast_writes=1)
+        buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK2, inst_mask=0xFFFFFFFF)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BASE, addr=buf0_lo)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_BASE2, addr_hi=buf0_hi)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_SIZE, size=buf0s[se].size >> 12)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, reset_buffer=1)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=1) # on
+
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
+    self.memory_barrier()
+    return self
+
+  def sqtt_end_9(self, ses:int, wptrs:HCQBuffer):
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
+    self.memory_barrier()
+
+    self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=0)
+    for se in range(len(buf0s)):
+      xcc_index = se // self.dev.xccs
+      se_index_xcc = se % self.dev.xccs
+      with self.pred_exec(xcc_mask=1<<xcc_index):
+        self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
+                  self.gc.regSQ_THREAD_TRACE_STATUS.addr[0], 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('busy'), 4)
+        self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regSQ_THREAD_TRACE_WPTR.addr[0], 0, *data64_le(wptrs.va_addr+(se*4)))
+
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
+    self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, reset_buffer=1)
+    return self
+
   def sqtt_start(self, buf0s:list[HCQBuffer], se_mask:int):
     self.memory_barrier()
     self.spi_config(tracing=True)
@@ -238,7 +295,7 @@ class AMDComputeQueue(HWQueue):
 
     user_regs += [*data64_le(args_state.buf.va_addr)]
 
-    if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
+    # if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
 
     self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)
@@ -267,7 +324,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size,
               self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**gfx10p, force_start_at_000=1, compute_shader_en=1))
 
-    if prg.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
+    # if prg.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
     return self
 
@@ -781,6 +838,8 @@ class AMDDevice(HCQCompiled):
     self.soc = import_soc(self.target)
     self.pm4 = importlib.import_module(f"tinygrad.runtime.autogen.am.pm4_{'nv' if self.target[0] >= 10 else 'soc15'}")
     self.sdma = import_module('sdma', min(self.iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
+    # print(self.iface.ip_versions[am.GC_HWIP], self.iface.ip_offsets[am.GC_HWIP])
+    # exit(0)
     self.gc = AMDIP('gc', self.iface.ip_versions[am.GC_HWIP], self.iface.ip_offsets[am.GC_HWIP])
 
     nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
@@ -814,7 +873,7 @@ class AMDDevice(HCQCompiled):
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and bool(getenv("SQTT", 0))
     if self.sqtt_enabled:
-      if self.target[0] < 11: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
+      if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
       if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
         raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
@@ -823,7 +882,8 @@ class AMDDevice(HCQCompiled):
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True)) for _ in range(self.se_cnt)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
       self.sqtt_next_cmd_id = itertools.count(0)
-      cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
+      cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start_9(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
+      self.synchronize()
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
     ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
@@ -876,7 +936,7 @@ class AMDDevice(HCQCompiled):
   def _at_profile_finalize(self):
     if self.sqtt_enabled:
       wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))
-      cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_stop(len(self.sqtt_buffers), wptrs_buf) \
+      cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_stop_9(len(self.sqtt_buffers), wptrs_buf) \
                                                       .signal(self.timeline_signal, self.next_timeline()).submit(self)
       self.synchronize()
       if DEBUG >= 2: print(f'{self.device}: Saving SQTT in profile...')
