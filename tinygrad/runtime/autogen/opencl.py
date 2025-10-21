@@ -1,5 +1,5 @@
 import ctypes, ctypes.util
-from tinygrad.runtime.autogen.helpers import *
+from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 dll = ctypes.CDLL(ctypes.util.find_library('OpenCL'))
 
 class struct__cl_platform_id(ctypes.Structure):
