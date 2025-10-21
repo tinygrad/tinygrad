@@ -78,7 +78,7 @@ function renderDag(graph, additions, recenter) {
         if (parents == null && children == null) return;
         const src = [...parents, ...children, d.id];
         nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
-        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child "  : (parents.includes(v) && w===d.id) ? "highlight " : "";
+        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
         d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
         d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
         e.stopPropagation();
@@ -92,10 +92,9 @@ function renderDag(graph, additions, recenter) {
     }).selectAll("text").data(d => {
       const ret = [[]];
       for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
-        for (const [i, l] of st.split("\n").entries()) {
-          if (i > 0) ret.push([]);
-          ret.at(-1).push({ st:l, color });
-        }
+        const lines = st.split("\n");
+        ret.at(-1).push({ st:lines[0], color });
+        for (let i=1; i<lines.length; i++) ret.push([{ st:lines[i], color }]);
       }
       return [ret];
     }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
