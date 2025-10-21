@@ -29,8 +29,8 @@ class Estimates:
     dont_count: set[UOp] = set()
     if ignore_indexing:
       for u in uops:
-        if u.op is Ops.INDEX and (not isinstance(u.dtype, PtrDType) or u.ptrdtype.addrspace != AddrSpace.REG):
-          dont_count = dont_count.union(UOp.sink(*u.src[1:]).toposort())
+        if u.op in {Ops.LOAD, Ops.STORE} and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
+          dont_count = dont_count.union((UOp.sink(*u.src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort())
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
