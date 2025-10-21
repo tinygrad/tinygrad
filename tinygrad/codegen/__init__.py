@@ -52,7 +52,6 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
 
     # optimize (schedule) the AST
     ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
-    ret.append(RewriteStep(pm_reduce_simplify, name="simplify reduces"))
     ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **

@@ -6,7 +6,7 @@ from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, si
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG
-from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
+from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
 
@@ -204,6 +204,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
     and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
+  # dont bufferize an arange
+  (UPat(dtype=dtypes.index).cast(name="src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"),
+    remove_bufferize),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # indexing a const is a const
@@ -497,7 +500,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
-  tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_unparented+pm_const_buffer_folding, name="symbolic")  # this supports const folding
+  tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_simplify+pm_const_buffer_folding, name="symbolic+reduce_collapse")  # this does const folding
   tsink = graph_rewrite(tsink, pm_remove_bufferize, bottom_up=True, name="remove bufferize with cost function")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
