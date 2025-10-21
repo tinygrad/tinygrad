@@ -59,14 +59,14 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, 
     return rotate(x.reshape(B, H, T, 2, half).transpose(-1, -2), freqs).transpose(-1, -2).reshape(B, H, T, Hd)
 
   # yarn https://arxiv.org/pdf/2309.00071
+  attn_scale = 0.1 * math.log(scale) + 1.0
   def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(base)
-  x = x * (0.1 * math.log(scale) + 1.0)
   low, high = _ratio(ntk_beta), _ratio(ntk_alpha)
   interpolation, extrapolation = freqs / scale, freqs
   ramp = (Tensor.arange(half, dtype=dtypes.float32) - low) / (high - low)
   mask = 1 - ramp.clamp(0, 1)
   freqs = interpolation * (1 - mask) + extrapolation * mask
-  return rotate(x.reshape(B, H, T, 2, half).transpose(-1, -2), freqs).transpose(-1, -2).reshape(B, H, T, Hd)
+  return rotate(x.reshape(B, H, T, 2, half).transpose(-1, -2) * attn_scale, freqs).transpose(-1, -2).reshape(B, H, T, Hd)
 
 
 # arxiv.org/pdf/2002.05202v1
