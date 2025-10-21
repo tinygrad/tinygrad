@@ -4,7 +4,8 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic_flat
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
+from tinygrad.helpers import PCONTIG
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -157,16 +158,19 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     accessed_buffers: list[UOp] = []
     reduces: list[UOp] = []
     def red_gate(x:UOp):
-      if x.op is Ops.INDEX:
+      if x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL:
         accessed_buffers.append(x)
         return False
+      if x.op is Ops.BUFFER:
+        accessed_buffers.append(x)
       if x.op is Ops.REDUCE: reduces.append(x)
       return True
     src.toposort(gate=red_gate)
     del red_gate
+    accessed_buffers = dedup(accessed_buffers)
 
     # if this is generated from multiple buffers, don't remove this buffer
-    if len(dedup([x.src[0] for x in accessed_buffers])) > 2: return None
+    if len(accessed_buffers) > 2 and not (PCONTIG > 2): return None
 
     # if any reduces access a buffer, don't remove this buffer
     buffer_in_reduce = False
@@ -176,7 +180,12 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       return not buffer_in_reduce
     UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
     del buf_gate
-    if buffer_in_reduce: return None
+    if buffer_in_reduce:
+      if PCONTIG > 2:
+        out_in_ratio = (prod(buf.shape)+1) / (sum([x.size for x in accessed_buffers])+1)
+        if out_in_ratio < 10: return None
+      else:
+        return None
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
@@ -486,7 +495,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
   # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, getenv("DEBUG_RANGEIFY", 0))
+  tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
   tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_unparented+pm_const_buffer_folding, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_remove_bufferize, bottom_up=True, name="fix copy")

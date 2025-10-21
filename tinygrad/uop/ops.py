@@ -362,7 +362,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
   def end(self, *src:UOp, ends:Sequence[UOp]):
-    if len(ends) == 0: return self
+    if len(ends) == 0:
+      if len(src): return UOp(Ops.NOOP, src=(self, *src))
+      return self
     return UOp(Ops.END, src=(*ends, self, *src), arg=len(ends))
   def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
@@ -555,8 +557,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.buf_uop for x in self.src))
-    assert self.op is Ops.AFTER, f"must be AFTER {self.op}"
-    return self.src[0].buf_uop.base
+    assert self.base.op is Ops.AFTER, f"must be AFTER {self.base.op}"
+    return self.base.src[0].buf_uop.base
 
   def as_buf(self) -> UOp:
     if self.op is Ops.MSELECT: return self.src[0].as_buf().mselect(self.arg)

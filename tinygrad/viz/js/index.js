@@ -72,7 +72,7 @@ function renderDag(graph, additions, recenter) {
     d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
-        if (d.ref != null) return setCtxWithHistory(d.ref);
+        if (d.ref != null) return switchCtx(d.ref);
         const parents = g.predecessors(d.id);
         const children = g.successors(d.id);
         if (parents == null && children == null) return;
@@ -253,7 +253,7 @@ async function renderProfiler() {
         if (shapeRef != null) {
           const a = html.appendChild(document.createElement("a"));
           a.innerText = "\nView codegen rewrite";
-          a.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
+          a.onclick = () => switchCtx(shapeRef.ctx, shapeRef.step);
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
@@ -487,7 +487,7 @@ async function renderProfiler() {
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.step != null && foundRect?.key == null) { return setCtxWithHistory(foundRect.ctx, foundRect.step); }
+    if (foundRect?.step != null && foundRect?.key == null) { return switchCtx(foundRect.ctx, foundRect.step); }
     if (foundRect?.key != focusedShape) { focusShape(foundRect); }
   });
 
@@ -585,7 +585,10 @@ function setState(ns) {
   // update element styles if needed
   const { ctx, step } = select(state.currentCtx, state.currentStep);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
-  if (ctx?.id !== prevCtx?.id) toggleCls(prevCtx, ctx, "active");
+  if (ctx?.id !== prevCtx?.id) {
+    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentRewrite:0, currentStep:0, expandSteps:false });
+    toggleCls(prevCtx, ctx, "active");
+  }
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
     toggleCls(prevStep, step, "active");
     // walk the tree back until all parents expanded so that the child is visible
@@ -607,11 +610,8 @@ function saveToHistory(ns) {
   history.pushState(ns, "");
 }
 
-// set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx, step=0) {
-  saveToHistory(state);
-  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step, currentRewrite:0 });
-}
+// switch to the start of a new graph and expand all the steps
+const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0 });
 
 window.addEventListener("popstate", (e) => {
   if (e.state?.shape != null) return focusShape({ key:e.state?.shape });
