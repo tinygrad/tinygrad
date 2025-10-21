@@ -1,13 +1,14 @@
 import ctypes, ctypes.util
-dll = None if (libc_path:=ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path, use_errno=True)
+from tinygrad.runtime.autogen.helpers import CEnum
 
-from tinygrad.runtime.autogen.autogen import CEnum
+dll = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+
 off_t = ctypes.c_long
 mode_t = ctypes.c_uint
 size_t = ctypes.c_ulong
 __off_t = ctypes.c_long
 # extern void *mmap(void *__addr, size_t __len, int __prot, int __flags, int __fd, __off_t __offset) __attribute__((nothrow))
-try: (mmap:=dll.mmap).restype,mmap.argtypes = ctypes.c_void_p,[ctypes.c_void_p, size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, __off_t]
+try: (mmap:=dll.mmap).restype,mmap.argtypes = ctypes.c_void_p,[ctypes.c_void_p, size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 except AttributeError: pass
 
 # extern int munmap(void *__addr, size_t __len) __attribute__((nothrow))
@@ -58,9 +59,6 @@ except AttributeError: pass
 try: (shm_unlink:=dll.shm_unlink).restype,shm_unlink.argtypes = ctypes.c_int,[ctypes.c_char_p]
 except AttributeError: pass
 
-_SYS_MMAN_H = 1
-MAP_FAILED = (ctypes.c_void_p(-1))
-_SYSCALL_H = 1
 # extern void *memcpy(void *restrict __dest, const void *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (memcpy:=dll.memcpy).restype,memcpy.argtypes = ctypes.c_void_p,[ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
@@ -261,7 +259,6 @@ except AttributeError: pass
 try: (strlcat:=dll.strlcat).restype,strlcat.argtypes = size_t,[ctypes.c_char_p, ctypes.c_char_p, size_t]
 except AttributeError: pass
 
-_STRING_H = 1
 Elf32_Half = ctypes.c_ushort
 Elf64_Half = ctypes.c_ushort
 Elf32_Word = ctypes.c_uint
@@ -632,6 +629,448 @@ Val_GNU_MIPS_ABI_FP_64 = _anonenum6.define('Val_GNU_MIPS_ABI_FP_64', 6)
 Val_GNU_MIPS_ABI_FP_64A = _anonenum6.define('Val_GNU_MIPS_ABI_FP_64A', 7)
 Val_GNU_MIPS_ABI_FP_MAX = _anonenum6.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
 
+ssize_t = ctypes.c_long
+gid_t = ctypes.c_uint
+uid_t = ctypes.c_uint
+useconds_t = ctypes.c_uint
+pid_t = ctypes.c_int
+intptr_t = ctypes.c_long
+socklen_t = ctypes.c_uint
+# extern int access(const char *__name, int __type) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (access:=dll.access).restype,access.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_int]
+except AttributeError: pass
+
+# extern int faccessat(int __fd, const char *__file, int __type, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
+try: (faccessat:=dll.faccessat).restype,faccessat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
+except AttributeError: pass
+
+# extern __off_t lseek(int __fd, __off_t __offset, int __whence) __attribute__((nothrow))
+try: (lseek:=dll.lseek).restype,lseek.argtypes = ctypes.c_long,[ctypes.c_int, ctypes.c_long, ctypes.c_int]
+except AttributeError: pass
+
+# extern int close(int __fd)
+try: (close:=dll.close).restype,close.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern void closefrom(int __lowfd) __attribute__((nothrow))
+try: (closefrom:=dll.closefrom).restype,closefrom.argtypes = None,[ctypes.c_int]
+except AttributeError: pass
+
+# extern ssize_t read(int __fd, void *__buf, size_t __nbytes)
+try: (read:=dll.read).restype,read.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t]
+except AttributeError: pass
+
+# extern ssize_t write(int __fd, const void *__buf, size_t __n)
+try: (write:=dll.write).restype,write.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t]
+except AttributeError: pass
+
+# extern ssize_t pread(int __fd, void *__buf, size_t __nbytes, __off_t __offset)
+try: (pread:=dll.pread).restype,pread.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t, ctypes.c_long]
+except AttributeError: pass
+
+# extern ssize_t pwrite(int __fd, const void *__buf, size_t __n, __off_t __offset)
+try: (pwrite:=dll.pwrite).restype,pwrite.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t, ctypes.c_long]
+except AttributeError: pass
+
+# extern int pipe(int __pipedes[2]) __attribute__((nothrow))
+try: (pipe:=dll.pipe).restype,pipe.argtypes = ctypes.c_int,[(ctypes.c_int * 2)]
+except AttributeError: pass
+
+# extern unsigned int alarm(unsigned int __seconds) __attribute__((nothrow))
+try: (alarm:=dll.alarm).restype,alarm.argtypes = ctypes.c_uint,[ctypes.c_uint]
+except AttributeError: pass
+
+# extern unsigned int sleep(unsigned int __seconds)
+try: (sleep:=dll.sleep).restype,sleep.argtypes = ctypes.c_uint,[ctypes.c_uint]
+except AttributeError: pass
+
+__useconds_t = ctypes.c_uint
+# extern __useconds_t ualarm(__useconds_t __value, __useconds_t __interval) __attribute__((nothrow))
+try: (ualarm:=dll.ualarm).restype,ualarm.argtypes = ctypes.c_uint,[ctypes.c_uint, ctypes.c_uint]
+except AttributeError: pass
+
+# extern int usleep(__useconds_t __useconds)
+try: (usleep:=dll.usleep).restype,usleep.argtypes = ctypes.c_int,[ctypes.c_uint]
+except AttributeError: pass
+
+# extern int pause(void)
+try: (pause:=dll.pause).restype,pause.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+__uid_t = ctypes.c_uint
+__gid_t = ctypes.c_uint
+# extern int chown(const char *__file, __uid_t __owner, __gid_t __group) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (chown:=dll.chown).restype,chown.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint]
+except AttributeError: pass
+
+# extern int fchown(int __fd, __uid_t __owner, __gid_t __group) __attribute__((nothrow))
+try: (fchown:=dll.fchown).restype,fchown.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_uint, ctypes.c_uint]
+except AttributeError: pass
+
+# extern int lchown(const char *__file, __uid_t __owner, __gid_t __group) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (lchown:=dll.lchown).restype,lchown.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint]
+except AttributeError: pass
+
+# extern int fchownat(int __fd, const char *__file, __uid_t __owner, __gid_t __group, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
+try: (fchownat:=dll.fchownat).restype,fchownat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_int]
+except AttributeError: pass
+
+# extern int chdir(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (chdir:=dll.chdir).restype,chdir.argtypes = ctypes.c_int,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int fchdir(int __fd) __attribute__((nothrow))
+try: (fchdir:=dll.fchdir).restype,fchdir.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern char *getcwd(char *__buf, size_t __size) __attribute__((nothrow))
+try: (getcwd:=dll.getcwd).restype,getcwd.argtypes = ctypes.c_char_p,[ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern char *getwd(char *__buf) __attribute__((nothrow)) __attribute__((nonnull(1))) __attribute__((deprecated("")))
+try: (getwd:=dll.getwd).restype,getwd.argtypes = ctypes.c_char_p,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int dup(int __fd) __attribute__((nothrow))
+try: (dup:=dll.dup).restype,dup.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern int dup2(int __fd, int __fd2) __attribute__((nothrow))
+try: (dup2:=dll.dup2).restype,dup2.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int]
+except AttributeError: pass
+
+# extern int execve(const char *__path, char *const __argv[], char *const __envp[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (execve:=dll.execve).restype,execve.argtypes = ctypes.c_int,[ctypes.c_char_p, (ctypes.c_char_p * 0), (ctypes.c_char_p * 0)]
+except AttributeError: pass
+
+# extern int fexecve(int __fd, char *const __argv[], char *const __envp[]) __attribute__((nothrow)) __attribute__((nonnull(2)))
+try: (fexecve:=dll.fexecve).restype,fexecve.argtypes = ctypes.c_int,[ctypes.c_int, (ctypes.c_char_p * 0), (ctypes.c_char_p * 0)]
+except AttributeError: pass
+
+# extern int execv(const char *__path, char *const __argv[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (execv:=dll.execv).restype,execv.argtypes = ctypes.c_int,[ctypes.c_char_p, (ctypes.c_char_p * 0)]
+except AttributeError: pass
+
+# extern int execle(const char *__path, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (execle:=dll.execle).restype,execle.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int execl(const char *__path, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (execl:=dll.execl).restype,execl.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int execvp(const char *__file, char *const __argv[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (execvp:=dll.execvp).restype,execvp.argtypes = ctypes.c_int,[ctypes.c_char_p, (ctypes.c_char_p * 0)]
+except AttributeError: pass
+
+# extern int execlp(const char *__file, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (execlp:=dll.execlp).restype,execlp.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int nice(int __inc) __attribute__((nothrow))
+try: (nice:=dll.nice).restype,nice.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern void _exit(int __status)
+try: (_exit:=dll._exit).restype,_exit.argtypes = None,[ctypes.c_int]
+except AttributeError: pass
+
+# extern long pathconf(const char *__path, int __name) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (pathconf:=dll.pathconf).restype,pathconf.argtypes = ctypes.c_long,[ctypes.c_char_p, ctypes.c_int]
+except AttributeError: pass
+
+# extern long fpathconf(int __fd, int __name) __attribute__((nothrow))
+try: (fpathconf:=dll.fpathconf).restype,fpathconf.argtypes = ctypes.c_long,[ctypes.c_int, ctypes.c_int]
+except AttributeError: pass
+
+# extern long sysconf(int __name) __attribute__((nothrow))
+try: (sysconf:=dll.sysconf).restype,sysconf.argtypes = ctypes.c_long,[ctypes.c_int]
+except AttributeError: pass
+
+# extern size_t confstr(int __name, char *__buf, size_t __len) __attribute__((nothrow))
+try: (confstr:=dll.confstr).restype,confstr.argtypes = size_t,[ctypes.c_int, ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+__pid_t = ctypes.c_int
+# extern __pid_t getpid(void) __attribute__((nothrow))
+try: (getpid:=dll.getpid).restype,getpid.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern __pid_t getppid(void) __attribute__((nothrow))
+try: (getppid:=dll.getppid).restype,getppid.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern __pid_t getpgrp(void) __attribute__((nothrow))
+try: (getpgrp:=dll.getpgrp).restype,getpgrp.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern __pid_t __getpgid(__pid_t __pid) __attribute__((nothrow))
+try: (__getpgid:=dll.__getpgid).restype,__getpgid.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern __pid_t getpgid(__pid_t __pid) __attribute__((nothrow))
+try: (getpgid:=dll.getpgid).restype,getpgid.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern int setpgid(__pid_t __pid, __pid_t __pgid) __attribute__((nothrow))
+try: (setpgid:=dll.setpgid).restype,setpgid.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int]
+except AttributeError: pass
+
+# extern int setpgrp(void) __attribute__((nothrow))
+try: (setpgrp:=dll.setpgrp).restype,setpgrp.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern __pid_t setsid(void) __attribute__((nothrow))
+try: (setsid:=dll.setsid).restype,setsid.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern __pid_t getsid(__pid_t __pid) __attribute__((nothrow))
+try: (getsid:=dll.getsid).restype,getsid.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern __uid_t getuid(void) __attribute__((nothrow))
+try: (getuid:=dll.getuid).restype,getuid.argtypes = ctypes.c_uint,[]
+except AttributeError: pass
+
+# extern __uid_t geteuid(void) __attribute__((nothrow))
+try: (geteuid:=dll.geteuid).restype,geteuid.argtypes = ctypes.c_uint,[]
+except AttributeError: pass
+
+# extern __gid_t getgid(void) __attribute__((nothrow))
+try: (getgid:=dll.getgid).restype,getgid.argtypes = ctypes.c_uint,[]
+except AttributeError: pass
+
+# extern __gid_t getegid(void) __attribute__((nothrow))
+try: (getegid:=dll.getegid).restype,getegid.argtypes = ctypes.c_uint,[]
+except AttributeError: pass
+
+# extern int getgroups(int __size, __gid_t __list[]) __attribute__((nothrow))
+try: (getgroups:=dll.getgroups).restype,getgroups.argtypes = ctypes.c_int,[ctypes.c_int, (ctypes.c_uint * 0)]
+except AttributeError: pass
+
+# extern int setuid(__uid_t __uid) __attribute__((nothrow))
+try: (setuid:=dll.setuid).restype,setuid.argtypes = ctypes.c_int,[ctypes.c_uint]
+except AttributeError: pass
+
+# extern int setreuid(__uid_t __ruid, __uid_t __euid) __attribute__((nothrow))
+try: (setreuid:=dll.setreuid).restype,setreuid.argtypes = ctypes.c_int,[ctypes.c_uint, ctypes.c_uint]
+except AttributeError: pass
+
+# extern int seteuid(__uid_t __uid) __attribute__((nothrow))
+try: (seteuid:=dll.seteuid).restype,seteuid.argtypes = ctypes.c_int,[ctypes.c_uint]
+except AttributeError: pass
+
+# extern int setgid(__gid_t __gid) __attribute__((nothrow))
+try: (setgid:=dll.setgid).restype,setgid.argtypes = ctypes.c_int,[ctypes.c_uint]
+except AttributeError: pass
+
+# extern int setregid(__gid_t __rgid, __gid_t __egid) __attribute__((nothrow))
+try: (setregid:=dll.setregid).restype,setregid.argtypes = ctypes.c_int,[ctypes.c_uint, ctypes.c_uint]
+except AttributeError: pass
+
+# extern int setegid(__gid_t __gid) __attribute__((nothrow))
+try: (setegid:=dll.setegid).restype,setegid.argtypes = ctypes.c_int,[ctypes.c_uint]
+except AttributeError: pass
+
+# extern __pid_t fork(void) __attribute__((nothrow))
+try: (fork:=dll.fork).restype,fork.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern int vfork(void) __attribute__((nothrow))
+try: (vfork:=dll.vfork).restype,vfork.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern char *ttyname(int __fd) __attribute__((nothrow))
+try: (ttyname:=dll.ttyname).restype,ttyname.argtypes = ctypes.c_char_p,[ctypes.c_int]
+except AttributeError: pass
+
+# extern int ttyname_r(int __fd, char *__buf, size_t __buflen) __attribute__((nothrow)) __attribute__((nonnull(2)))
+try: (ttyname_r:=dll.ttyname_r).restype,ttyname_r.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int isatty(int __fd) __attribute__((nothrow))
+try: (isatty:=dll.isatty).restype,isatty.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern int ttyslot(void) __attribute__((nothrow))
+try: (ttyslot:=dll.ttyslot).restype,ttyslot.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern int link(const char *__from, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (link:=dll.link).restype,link.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int linkat(int __fromfd, const char *__from, int __tofd, const char *__to, int __flags) __attribute__((nothrow)) __attribute__((nonnull(2, 4)))
+try: (linkat:=dll.linkat).restype,linkat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+except AttributeError: pass
+
+# extern int symlink(const char *__from, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (symlink:=dll.symlink).restype,symlink.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
+except AttributeError: pass
+
+# extern ssize_t readlink(const char *restrict __path, char *restrict __buf, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (readlink:=dll.readlink).restype,readlink.argtypes = ssize_t,[ctypes.c_char_p, ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int symlinkat(const char *__from, int __tofd, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 3)))
+try: (symlinkat:=dll.symlinkat).restype,symlinkat.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p]
+except AttributeError: pass
+
+# extern ssize_t readlinkat(int __fd, const char *restrict __path, char *restrict __buf, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(2, 3)))
+try: (readlinkat:=dll.readlinkat).restype,readlinkat.argtypes = ssize_t,[ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int unlink(const char *__name) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (unlink:=dll.unlink).restype,unlink.argtypes = ctypes.c_int,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int unlinkat(int __fd, const char *__name, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
+try: (unlinkat:=dll.unlinkat).restype,unlinkat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+except AttributeError: pass
+
+# extern int rmdir(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (rmdir:=dll.rmdir).restype,rmdir.argtypes = ctypes.c_int,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern __pid_t tcgetpgrp(int __fd) __attribute__((nothrow))
+try: (tcgetpgrp:=dll.tcgetpgrp).restype,tcgetpgrp.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern int tcsetpgrp(int __fd, __pid_t __pgrp_id) __attribute__((nothrow))
+try: (tcsetpgrp:=dll.tcsetpgrp).restype,tcsetpgrp.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int]
+except AttributeError: pass
+
+# extern char *getlogin(void)
+try: (getlogin:=dll.getlogin).restype,getlogin.argtypes = ctypes.c_char_p,[]
+except AttributeError: pass
+
+# extern int getlogin_r(char *__name, size_t __name_len) __attribute__((nonnull(1)))
+try: (getlogin_r:=dll.getlogin_r).restype,getlogin_r.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int setlogin(const char *__name) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (setlogin:=dll.setlogin).restype,setlogin.argtypes = ctypes.c_int,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int gethostname(char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (gethostname:=dll.gethostname).restype,gethostname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int sethostname(const char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (sethostname:=dll.sethostname).restype,sethostname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int sethostid(long __id) __attribute__((nothrow))
+try: (sethostid:=dll.sethostid).restype,sethostid.argtypes = ctypes.c_int,[ctypes.c_long]
+except AttributeError: pass
+
+# extern int getdomainname(char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (getdomainname:=dll.getdomainname).restype,getdomainname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int setdomainname(const char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (setdomainname:=dll.setdomainname).restype,setdomainname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
+except AttributeError: pass
+
+# extern int vhangup(void) __attribute__((nothrow))
+try: (vhangup:=dll.vhangup).restype,vhangup.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern int revoke(const char *__file) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (revoke:=dll.revoke).restype,revoke.argtypes = ctypes.c_int,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int profil(unsigned short *__sample_buffer, size_t __size, size_t __offset, unsigned int __scale) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (profil:=dll.profil).restype,profil.argtypes = ctypes.c_int,[ctypes.POINTER(ctypes.c_ushort), size_t, size_t, ctypes.c_uint]
+except AttributeError: pass
+
+# extern int acct(const char *__name) __attribute__((nothrow))
+try: (acct:=dll.acct).restype,acct.argtypes = ctypes.c_int,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern char *getusershell(void) __attribute__((nothrow))
+try: (getusershell:=dll.getusershell).restype,getusershell.argtypes = ctypes.c_char_p,[]
+except AttributeError: pass
+
+# extern void endusershell(void) __attribute__((nothrow))
+try: (endusershell:=dll.endusershell).restype,endusershell.argtypes = None,[]
+except AttributeError: pass
+
+# extern void setusershell(void) __attribute__((nothrow))
+try: (setusershell:=dll.setusershell).restype,setusershell.argtypes = None,[]
+except AttributeError: pass
+
+# extern int daemon(int __nochdir, int __noclose) __attribute__((nothrow))
+try: (daemon:=dll.daemon).restype,daemon.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int]
+except AttributeError: pass
+
+# extern int chroot(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (chroot:=dll.chroot).restype,chroot.argtypes = ctypes.c_int,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern char *getpass(const char *__prompt) __attribute__((nonnull(1)))
+try: (getpass:=dll.getpass).restype,getpass.argtypes = ctypes.c_char_p,[ctypes.c_char_p]
+except AttributeError: pass
+
+# extern int fsync(int __fd)
+try: (fsync:=dll.fsync).restype,fsync.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern long gethostid(void)
+try: (gethostid:=dll.gethostid).restype,gethostid.argtypes = ctypes.c_long,[]
+except AttributeError: pass
+
+# extern void sync(void) __attribute__((nothrow))
+try: (sync:=dll.sync).restype,sync.argtypes = None,[]
+except AttributeError: pass
+
+# extern int getpagesize(void) __attribute__((nothrow)) __attribute__((const))
+try: (getpagesize:=dll.getpagesize).restype,getpagesize.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern int getdtablesize(void) __attribute__((nothrow))
+try: (getdtablesize:=dll.getdtablesize).restype,getdtablesize.argtypes = ctypes.c_int,[]
+except AttributeError: pass
+
+# extern int truncate(const char *__file, __off_t __length) __attribute__((nothrow)) __attribute__((nonnull(1)))
+try: (truncate:=dll.truncate).restype,truncate.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_long]
+except AttributeError: pass
+
+# extern int ftruncate(int __fd, __off_t __length) __attribute__((nothrow))
+try: (ftruncate:=dll.ftruncate).restype,ftruncate.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_long]
+except AttributeError: pass
+
+# extern int brk(void *__addr) __attribute__((nothrow))
+try: (brk:=dll.brk).restype,brk.argtypes = ctypes.c_int,[ctypes.c_void_p]
+except AttributeError: pass
+
+# extern void *sbrk(intptr_t __delta) __attribute__((nothrow))
+try: (sbrk:=dll.sbrk).restype,sbrk.argtypes = ctypes.c_void_p,[intptr_t]
+except AttributeError: pass
+
+# extern long syscall(long __sysno, ...) __attribute__((nothrow))
+try: (syscall:=dll.syscall).restype,syscall.argtypes = ctypes.c_long,[ctypes.c_long]
+except AttributeError: pass
+
+# extern int lockf(int __fd, int __cmd, __off_t __len)
+try: (lockf:=dll.lockf).restype,lockf.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int, ctypes.c_long]
+except AttributeError: pass
+
+# extern int fdatasync(int __fildes)
+try: (fdatasync:=dll.fdatasync).restype,fdatasync.argtypes = ctypes.c_int,[ctypes.c_int]
+except AttributeError: pass
+
+# extern char *crypt(const char *__key, const char *__salt) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
+try: (crypt:=dll.crypt).restype,crypt.argtypes = ctypes.c_char_p,[ctypes.c_char_p, ctypes.c_char_p]
+except AttributeError: pass
+
+# int getentropy(void *__buffer, size_t __length)
+try: (getentropy:=dll.getentropy).restype,getentropy.argtypes = ctypes.c_int,[ctypes.c_void_p, size_t]
+except AttributeError: pass
+
+_SYS_MMAN_H = 1
+_SYSCALL_H = 1
+_STRING_H = 1
 _ELF_H = 1
 EI_NIDENT = (16)
 EI_MAG0 = 0
@@ -661,6 +1100,7 @@ ELFOSABI_SYSV = 0
 ELFOSABI_HPUX = 1
 ELFOSABI_NETBSD = 2
 ELFOSABI_GNU = 3
+ELFOSABI_LINUX = ELFOSABI_GNU
 ELFOSABI_SOLARIS = 6
 ELFOSABI_AIX = 7
 ELFOSABI_IRIX = 8
@@ -865,6 +1305,7 @@ EM_BPF = 247
 EM_CSKY = 252
 EM_LOONGARCH = 258
 EM_NUM = 259
+EM_ARC_A5 = EM_ARC_COMPACT
 EM_ALPHA = 0x9026
 EV_NONE = 0
 EV_CURRENT = 1
@@ -918,22 +1359,22 @@ SHT_LOPROC = 0x70000000
 SHT_HIPROC = 0x7fffffff
 SHT_LOUSER = 0x80000000
 SHT_HIUSER = 0x8fffffff
-SHF_WRITE = (1<<0)
-SHF_ALLOC = (1<<1)
-SHF_EXECINSTR = (1<<2)
-SHF_MERGE = (1<<4)
-SHF_STRINGS = (1<<5)
-SHF_INFO_LINK = (1<<6)
-SHF_LINK_ORDER = (1<<7)
-SHF_OS_NONCONFORMING = (1<<8)
-SHF_GROUP = (1<<9)
-SHF_TLS = (1<<10)
-SHF_COMPRESSED = (1<<11)
+SHF_WRITE = (1 << 0)
+SHF_ALLOC = (1 << 1)
+SHF_EXECINSTR = (1 << 2)
+SHF_MERGE = (1 << 4)
+SHF_STRINGS = (1 << 5)
+SHF_INFO_LINK = (1 << 6)
+SHF_LINK_ORDER = (1 << 7)
+SHF_OS_NONCONFORMING = (1 << 8)
+SHF_GROUP = (1 << 9)
+SHF_TLS = (1 << 10)
+SHF_COMPRESSED = (1 << 11)
 SHF_MASKOS = 0x0ff00000
 SHF_MASKPROC = 0xf0000000
-SHF_GNU_RETAIN = (1<<21)
-SHF_ORDERED = (1<<30)
-SHF_EXCLUDE = (1<<31)
+SHF_GNU_RETAIN = (1 << 21)
+SHF_ORDERED = (1 << 30)
+SHF_EXCLUDE = (1 << 31)
 ELFCOMPRESS_ZLIB = 1
 ELFCOMPRESS_ZSTD = 2
 ELFCOMPRESS_LOOS = 0x60000000
@@ -951,12 +1392,12 @@ SYMINFO_FLG_LAZYLOAD = 0x0008
 SYMINFO_NONE = 0
 SYMINFO_CURRENT = 1
 SYMINFO_NUM = 2
-def ELF32_ST_BIND(val): return ((ctypes.c_ubyte((val)))>>4)
-def ELF32_ST_TYPE(val): return ((val)&0xf)
-def ELF32_ST_INFO(bind, type): return (((bind)<<4)+((type)&0xf))
-def ELF64_ST_BIND(val): return ELF32_ST_BIND(val)
-def ELF64_ST_TYPE(val): return ELF32_ST_TYPE(val)
-def ELF64_ST_INFO(bind, type): return ELF32_ST_INFO((bind), (type))
+ELF32_ST_BIND = lambda val: (( (val)) >> 4)
+ELF32_ST_TYPE = lambda val: ((val) & 0xf)
+ELF32_ST_INFO = lambda bind,type: (((bind) << 4) + ((type) & 0xf))
+ELF64_ST_BIND = lambda val: ELF32_ST_BIND (val)
+ELF64_ST_TYPE = lambda val: ELF32_ST_TYPE (val)
+ELF64_ST_INFO = lambda bind,type: ELF32_ST_INFO ((bind), (type))
 STB_LOCAL = 0
 STB_GLOBAL = 1
 STB_WEAK = 2
@@ -980,17 +1421,18 @@ STT_HIOS = 12
 STT_LOPROC = 13
 STT_HIPROC = 15
 STN_UNDEF = 0
-def ELF32_ST_VISIBILITY(o): return ((o)&0x03)
-def ELF64_ST_VISIBILITY(o): return ELF32_ST_VISIBILITY(o)
+ELF32_ST_VISIBILITY = lambda o: ((o) & 0x03)
+ELF64_ST_VISIBILITY = lambda o: ELF32_ST_VISIBILITY (o)
 STV_DEFAULT = 0
 STV_INTERNAL = 1
 STV_HIDDEN = 2
 STV_PROTECTED = 3
-def ELF32_R_SYM(val): return ((val)>>8)
-def ELF32_R_TYPE(val): return ((val)&0xff)
-def ELF32_R_INFO(sym, type): return (((sym)<<8)+((type)&0xff))
-def ELF64_R_SYM(i): return ((i)>>32)
-def ELF64_R_TYPE(i): return ((i)&0xffffffff)
+ELF32_R_SYM = lambda val: ((val) >> 8)
+ELF32_R_TYPE = lambda val: ((val) & 0xff)
+ELF32_R_INFO = lambda sym,type: (((sym) << 8) + ((type) & 0xff))
+ELF64_R_SYM = lambda i: ((i) >> 32)
+ELF64_R_TYPE = lambda i: ((i) & 0xffffffff)
+ELF64_R_INFO = lambda sym,type: ((((Elf64_Xword) (sym)) << 32) + (type))
 PN_XNUM = 0xffff
 PT_NULL = 0
 PT_LOAD = 1
@@ -1014,9 +1456,9 @@ PT_HISUNW = 0x6fffffff
 PT_HIOS = 0x6fffffff
 PT_LOPROC = 0x70000000
 PT_HIPROC = 0x7fffffff
-PF_X = (1<<0)
-PF_W = (1<<1)
-PF_R = (1<<2)
+PF_X = (1 << 0)
+PF_W = (1 << 1)
+PF_R = (1 << 2)
 PF_MASKOS = 0x0ff00000
 PF_MASKPROC = 0xf0000000
 NT_PRSTATUS = 1
@@ -1158,6 +1600,7 @@ DT_POSFLAG_1 = 0x6ffffdfd
 DT_SYMINSZ = 0x6ffffdfe
 DT_SYMINENT = 0x6ffffdff
 DT_VALRNGHI = 0x6ffffdff
+DT_VALTAGIDX = lambda tag: (DT_VALRNGHI - (tag))
 DT_VALNUM = 12
 DT_ADDRRNGLO = 0x6ffffe00
 DT_GNU_HASH = 0x6ffffef5
@@ -1172,6 +1615,7 @@ DT_PLTPAD = 0x6ffffefd
 DT_MOVETAB = 0x6ffffefe
 DT_SYMINFO = 0x6ffffeff
 DT_ADDRRNGHI = 0x6ffffeff
+DT_ADDRTAGIDX = lambda tag: (DT_ADDRRNGHI - (tag))
 DT_ADDRNUM = 11
 DT_VERSYM = 0x6ffffff0
 DT_RELACOUNT = 0x6ffffff9
@@ -1181,9 +1625,11 @@ DT_VERDEF = 0x6ffffffc
 DT_VERDEFNUM = 0x6ffffffd
 DT_VERNEED = 0x6ffffffe
 DT_VERNEEDNUM = 0x6fffffff
+DT_VERSIONTAGIDX = lambda tag: (DT_VERNEEDNUM - (tag))
 DT_VERSIONTAGNUM = 16
 DT_AUXILIARY = 0x7ffffffd
 DT_FILTER = 0x7fffffff
+DT_EXTRATAGIDX = lambda tag: ((Elf32_Word)-((Elf32_Sword) (tag) <<1>>1)-1)
 DT_EXTRANUM = 3
 DF_ORIGIN = 0x00000001
 DF_SYMBOLIC = 0x00000002
@@ -1289,6 +1735,7 @@ ELF_NOTE_GNU = "GNU"
 ELF_NOTE_FDO = "FDO"
 ELF_NOTE_PAGESIZE_HINT = 1
 NT_GNU_ABI_TAG = 1
+ELF_NOTE_ABI = NT_GNU_ABI_TAG
 ELF_NOTE_OS_LINUX = 0
 ELF_NOTE_OS_GNU = 1
 ELF_NOTE_OS_SOLARIS2 = 2
@@ -1305,29 +1752,30 @@ GNU_PROPERTY_UINT32_AND_LO = 0xb0000000
 GNU_PROPERTY_UINT32_AND_HI = 0xb0007fff
 GNU_PROPERTY_UINT32_OR_LO = 0xb0008000
 GNU_PROPERTY_UINT32_OR_HI = 0xb000ffff
-GNU_PROPERTY_1_NEEDED_INDIRECT_EXTERN_ACCESS = (1<<0)
+GNU_PROPERTY_1_NEEDED = GNU_PROPERTY_UINT32_OR_LO
+GNU_PROPERTY_1_NEEDED_INDIRECT_EXTERN_ACCESS = (1 << 0)
 GNU_PROPERTY_LOPROC = 0xc0000000
 GNU_PROPERTY_HIPROC = 0xdfffffff
 GNU_PROPERTY_LOUSER = 0xe0000000
 GNU_PROPERTY_HIUSER = 0xffffffff
 GNU_PROPERTY_AARCH64_FEATURE_1_AND = 0xc0000000
-GNU_PROPERTY_AARCH64_FEATURE_1_BTI = (1<<0)
-GNU_PROPERTY_AARCH64_FEATURE_1_PAC = (1<<1)
+GNU_PROPERTY_AARCH64_FEATURE_1_BTI = (1 << 0)
+GNU_PROPERTY_AARCH64_FEATURE_1_PAC = (1 << 1)
 GNU_PROPERTY_X86_ISA_1_USED = 0xc0010002
 GNU_PROPERTY_X86_ISA_1_NEEDED = 0xc0008002
 GNU_PROPERTY_X86_FEATURE_1_AND = 0xc0000002
-GNU_PROPERTY_X86_ISA_1_BASELINE = (1<<0)
-GNU_PROPERTY_X86_ISA_1_V2 = (1<<1)
-GNU_PROPERTY_X86_ISA_1_V3 = (1<<2)
-GNU_PROPERTY_X86_ISA_1_V4 = (1<<3)
-GNU_PROPERTY_X86_FEATURE_1_IBT = (1<<0)
-GNU_PROPERTY_X86_FEATURE_1_SHSTK = (1<<1)
-def ELF32_M_SYM(info): return ((info)>>8)
-def ELF32_M_SIZE(info): return (ctypes.c_ubyte((info)))
-def ELF32_M_INFO(sym, size): return (((sym)<<8)+ctypes.c_ubyte((size)))
-def ELF64_M_SYM(info): return ELF32_M_SYM(info)
-def ELF64_M_SIZE(info): return ELF32_M_SIZE(info)
-def ELF64_M_INFO(sym, size): return ELF32_M_INFO(sym, size)
+GNU_PROPERTY_X86_ISA_1_BASELINE = (1 << 0)
+GNU_PROPERTY_X86_ISA_1_V2 = (1 << 1)
+GNU_PROPERTY_X86_ISA_1_V3 = (1 << 2)
+GNU_PROPERTY_X86_ISA_1_V4 = (1 << 3)
+GNU_PROPERTY_X86_FEATURE_1_IBT = (1 << 0)
+GNU_PROPERTY_X86_FEATURE_1_SHSTK = (1 << 1)
+ELF32_M_SYM = lambda info: ((info) >> 8)
+ELF32_M_SIZE = lambda info: ( (info))
+ELF32_M_INFO = lambda sym,size: (((sym) << 8) +  (size))
+ELF64_M_SYM = lambda info: ELF32_M_SYM (info)
+ELF64_M_SIZE = lambda info: ELF32_M_SIZE (info)
+ELF64_M_INFO = lambda sym,size: ELF32_M_INFO (sym, size)
 EF_CPU32 = 0x00810000
 R_68K_NONE = 0
 R_68K_32 = 1
@@ -1577,6 +2025,13 @@ EF_MIPS_MACH_LS2F = 0x00A10000
 EF_MIPS_MACH_GS464 = 0x00A20000
 EF_MIPS_MACH_GS464E = 0x00A30000
 EF_MIPS_MACH_GS264E = 0x00A40000
+E_MIPS_ARCH_1 = EF_MIPS_ARCH_1
+E_MIPS_ARCH_2 = EF_MIPS_ARCH_2
+E_MIPS_ARCH_3 = EF_MIPS_ARCH_3
+E_MIPS_ARCH_4 = EF_MIPS_ARCH_4
+E_MIPS_ARCH_5 = EF_MIPS_ARCH_5
+E_MIPS_ARCH_32 = EF_MIPS_ARCH_32
+E_MIPS_ARCH_64 = EF_MIPS_ARCH_64
 SHN_MIPS_ACOMMON = 0xff00
 SHN_MIPS_TEXT = 0xff01
 SHN_MIPS_DATA = 0xff02
@@ -1652,6 +2107,7 @@ OEX_FPU_MAX = 0x1f00
 OEX_PAGE0 = 0x10000
 OEX_SMM = 0x20000
 OEX_FPDBUG = 0x40000
+OEX_PRECISEFP = OEX_FPDBUG
 OEX_DISMISS = 0x80000
 OEX_FPU_INVAL = 0x10
 OEX_FPU_DIV0 = 0x08
@@ -1831,28 +2287,28 @@ DT_MIPS_RLD_MAP_REL = 0x70000035
 DT_MIPS_XHASH = 0x70000036
 DT_MIPS_NUM = 0x37
 RHF_NONE = 0
-RHF_QUICKSTART = (1<<0)
-RHF_NOTPOT = (1<<1)
-RHF_NO_LIBRARY_REPLACEMENT = (1<<2)
-RHF_NO_MOVE = (1<<3)
-RHF_SGI_ONLY = (1<<4)
-RHF_GUARANTEE_INIT = (1<<5)
-RHF_DELTA_C_PLUS_PLUS = (1<<6)
-RHF_GUARANTEE_START_INIT = (1<<7)
-RHF_PIXIE = (1<<8)
-RHF_DEFAULT_DELAY_LOAD = (1<<9)
-RHF_REQUICKSTART = (1<<10)
-RHF_REQUICKSTARTED = (1<<11)
-RHF_CORD = (1<<12)
-RHF_NO_UNRES_UNDEF = (1<<13)
-RHF_RLD_ORDER_SAFE = (1<<14)
+RHF_QUICKSTART = (1 << 0)
+RHF_NOTPOT = (1 << 1)
+RHF_NO_LIBRARY_REPLACEMENT = (1 << 2)
+RHF_NO_MOVE = (1 << 3)
+RHF_SGI_ONLY = (1 << 4)
+RHF_GUARANTEE_INIT = (1 << 5)
+RHF_DELTA_C_PLUS_PLUS = (1 << 6)
+RHF_GUARANTEE_START_INIT = (1 << 7)
+RHF_PIXIE = (1 << 8)
+RHF_DEFAULT_DELAY_LOAD = (1 << 9)
+RHF_REQUICKSTART = (1 << 10)
+RHF_REQUICKSTARTED = (1 << 11)
+RHF_CORD = (1 << 12)
+RHF_NO_UNRES_UNDEF = (1 << 13)
+RHF_RLD_ORDER_SAFE = (1 << 14)
 LL_NONE = 0
-LL_EXACT_MATCH = (1<<0)
-LL_IGNORE_INT_VER = (1<<1)
-LL_REQUIRE_MINOR = (1<<2)
-LL_EXPORTS = (1<<3)
-LL_DELAY_LOAD = (1<<4)
-LL_DELTA = (1<<5)
+LL_EXACT_MATCH = (1 << 0)
+LL_IGNORE_INT_VER = (1 << 1)
+LL_REQUIRE_MINOR = (1 << 2)
+LL_EXPORTS = (1 << 3)
+LL_DELAY_LOAD = (1 << 4)
+LL_DELTA = (1 << 5)
 MIPS_AFL_REG_NONE = 0x00
 MIPS_AFL_REG_32 = 0x01
 MIPS_AFL_REG_64 = 0x02
@@ -1909,6 +2365,8 @@ SHF_PARISC_SHORT = 0x20000000
 SHF_PARISC_HUGE = 0x40000000
 SHF_PARISC_SBP = 0x80000000
 STT_PARISC_MILLICODE = 13
+STT_HP_OPAQUE = (STT_LOOS + 0x1)
+STT_HP_STUB = (STT_LOOS + 0x2)
 R_PARISC_NONE = 0
 R_PARISC_DIR32 = 1
 R_PARISC_DIR21L = 2
@@ -2012,7 +2470,28 @@ R_PARISC_TLS_DTPMOD32 = 242
 R_PARISC_TLS_DTPMOD64 = 243
 R_PARISC_TLS_DTPOFF32 = 244
 R_PARISC_TLS_DTPOFF64 = 245
+R_PARISC_TLS_LE21L = R_PARISC_TPREL21L
+R_PARISC_TLS_LE14R = R_PARISC_TPREL14R
+R_PARISC_TLS_IE21L = R_PARISC_LTOFF_TP21L
+R_PARISC_TLS_IE14R = R_PARISC_LTOFF_TP14R
+R_PARISC_TLS_TPREL32 = R_PARISC_TPREL32
+R_PARISC_TLS_TPREL64 = R_PARISC_TPREL64
 R_PARISC_HIRESERVE = 255
+PT_HP_TLS = (PT_LOOS + 0x0)
+PT_HP_CORE_NONE = (PT_LOOS + 0x1)
+PT_HP_CORE_VERSION = (PT_LOOS + 0x2)
+PT_HP_CORE_KERNEL = (PT_LOOS + 0x3)
+PT_HP_CORE_COMM = (PT_LOOS + 0x4)
+PT_HP_CORE_PROC = (PT_LOOS + 0x5)
+PT_HP_CORE_LOADABLE = (PT_LOOS + 0x6)
+PT_HP_CORE_STACK = (PT_LOOS + 0x7)
+PT_HP_CORE_SHM = (PT_LOOS + 0x8)
+PT_HP_CORE_MMF = (PT_LOOS + 0x9)
+PT_HP_PARALLEL = (PT_LOOS + 0x10)
+PT_HP_FASTBIND = (PT_LOOS + 0x11)
+PT_HP_OPT_ANNOT = (PT_LOOS + 0x12)
+PT_HP_HSL_ANNOT = (PT_LOOS + 0x13)
+PT_HP_STACK = (PT_LOOS + 0x14)
 PT_PARISC_ARCHEXT = 0x70000000
 PT_PARISC_UNWIND = 0x70000001
 PF_PARISC_SBP = 0x08000000
@@ -2070,6 +2549,7 @@ LITUSE_ALPHA_BYTOFF = 2
 LITUSE_ALPHA_JSR = 3
 LITUSE_ALPHA_TLS_GD = 4
 LITUSE_ALPHA_TLS_LDM = 5
+DT_ALPHA_PLTRO = (DT_LOPROC + 0)
 DT_ALPHA_NUM = 1
 EF_PPC_EMB = 0x80000000
 EF_PPC_RELOCATABLE = 0x00010000
@@ -2169,8 +2649,44 @@ R_PPC_REL16_LO = 250
 R_PPC_REL16_HI = 251
 R_PPC_REL16_HA = 252
 R_PPC_TOC16 = 255
+DT_PPC_GOT = (DT_LOPROC + 0)
+DT_PPC_OPT = (DT_LOPROC + 1)
 DT_PPC_NUM = 2
 PPC_OPT_TLS = 1
+R_PPC64_NONE = R_PPC_NONE
+R_PPC64_ADDR32 = R_PPC_ADDR32
+R_PPC64_ADDR24 = R_PPC_ADDR24
+R_PPC64_ADDR16 = R_PPC_ADDR16
+R_PPC64_ADDR16_LO = R_PPC_ADDR16_LO
+R_PPC64_ADDR16_HI = R_PPC_ADDR16_HI
+R_PPC64_ADDR16_HA = R_PPC_ADDR16_HA
+R_PPC64_ADDR14 = R_PPC_ADDR14
+R_PPC64_ADDR14_BRTAKEN = R_PPC_ADDR14_BRTAKEN
+R_PPC64_ADDR14_BRNTAKEN = R_PPC_ADDR14_BRNTAKEN
+R_PPC64_REL24 = R_PPC_REL24
+R_PPC64_REL14 = R_PPC_REL14
+R_PPC64_REL14_BRTAKEN = R_PPC_REL14_BRTAKEN
+R_PPC64_REL14_BRNTAKEN = R_PPC_REL14_BRNTAKEN
+R_PPC64_GOT16 = R_PPC_GOT16
+R_PPC64_GOT16_LO = R_PPC_GOT16_LO
+R_PPC64_GOT16_HI = R_PPC_GOT16_HI
+R_PPC64_GOT16_HA = R_PPC_GOT16_HA
+R_PPC64_COPY = R_PPC_COPY
+R_PPC64_GLOB_DAT = R_PPC_GLOB_DAT
+R_PPC64_JMP_SLOT = R_PPC_JMP_SLOT
+R_PPC64_RELATIVE = R_PPC_RELATIVE
+R_PPC64_UADDR32 = R_PPC_UADDR32
+R_PPC64_UADDR16 = R_PPC_UADDR16
+R_PPC64_REL32 = R_PPC_REL32
+R_PPC64_PLT32 = R_PPC_PLT32
+R_PPC64_PLTREL32 = R_PPC_PLTREL32
+R_PPC64_PLT16_LO = R_PPC_PLT16_LO
+R_PPC64_PLT16_HI = R_PPC_PLT16_HI
+R_PPC64_PLT16_HA = R_PPC_PLT16_HA
+R_PPC64_SECTOFF = R_PPC_SECTOFF
+R_PPC64_SECTOFF_LO = R_PPC_SECTOFF_LO
+R_PPC64_SECTOFF_HI = R_PPC_SECTOFF_HI
+R_PPC64_SECTOFF_HA = R_PPC_SECTOFF_HA
 R_PPC64_ADDR30 = 37
 R_PPC64_ADDR64 = 38
 R_PPC64_ADDR16_HIGHER = 39
@@ -2257,11 +2773,17 @@ R_PPC64_REL16_LO = 250
 R_PPC64_REL16_HI = 251
 R_PPC64_REL16_HA = 252
 EF_PPC64_ABI = 3
+DT_PPC64_GLINK = (DT_LOPROC + 0)
+DT_PPC64_OPD = (DT_LOPROC + 1)
+DT_PPC64_OPDSZ = (DT_LOPROC + 2)
+DT_PPC64_OPT = (DT_LOPROC + 3)
 DT_PPC64_NUM = 4
 PPC64_OPT_TLS = 1
 PPC64_OPT_MULTI_TOC = 2
 PPC64_OPT_LOCALENTRY = 4
 STO_PPC64_LOCAL_BIT = 5
+STO_PPC64_LOCAL_MASK = (7 << STO_PPC64_LOCAL_BIT)
+PPC64_LOCAL_ENTRY_OFFSET = lambda other: (((1 << (((other) & STO_PPC64_LOCAL_MASK) >> STO_PPC64_LOCAL_BIT)) >> 2) << 2)
 EF_ARM_RELEXEC = 0x01
 EF_ARM_HASENTRY = 0x02
 EF_ARM_INTERWORK = 0x04
@@ -2282,17 +2804,24 @@ EF_ARM_MAPSYMSFIRST = 0x10
 EF_ARM_EABIMASK = 0XFF000000
 EF_ARM_BE8 = 0x00800000
 EF_ARM_LE8 = 0x00400000
+EF_ARM_EABI_VERSION = lambda flags: ((flags) & EF_ARM_EABIMASK)
 EF_ARM_EABI_UNKNOWN = 0x00000000
 EF_ARM_EABI_VER1 = 0x01000000
 EF_ARM_EABI_VER2 = 0x02000000
 EF_ARM_EABI_VER3 = 0x03000000
 EF_ARM_EABI_VER4 = 0x04000000
 EF_ARM_EABI_VER5 = 0x05000000
+STT_ARM_TFUNC = STT_LOPROC
+STT_ARM_16BIT = STT_HIPROC
 SHF_ARM_ENTRYSECT = 0x10000000
 SHF_ARM_COMDEF = 0x80000000
 PF_ARM_SB = 0x10000000
 PF_ARM_PI = 0x20000000
 PF_ARM_ABS = 0x40000000
+PT_ARM_EXIDX = (PT_LOPROC + 1)
+SHT_ARM_EXIDX = (SHT_LOPROC + 1)
+SHT_ARM_PREEMPTMAP = (SHT_LOPROC + 2)
+SHT_ARM_ATTRIBUTES = (SHT_LOPROC + 3)
 R_AARCH64_NONE = 0
 R_AARCH64_P32_ABS32 = 1
 R_AARCH64_P32_COPY = 180
@@ -2426,6 +2955,10 @@ R_AARCH64_TLS_DTPREL = 1029
 R_AARCH64_TLS_TPREL = 1030
 R_AARCH64_TLSDESC = 1031
 R_AARCH64_IRELATIVE = 1032
+PT_AARCH64_MEMTAG_MTE = (PT_LOPROC + 2)
+DT_AARCH64_BTI_PLT = (DT_LOPROC + 1)
+DT_AARCH64_PAC_PLT = (DT_LOPROC + 3)
+DT_AARCH64_VARIANT_PCS = (DT_LOPROC + 5)
 DT_AARCH64_NUM = 6
 STO_AARCH64_VARIANT_PCS = 0x80
 R_ARM_NONE = 0
@@ -2615,12 +3148,21 @@ EF_CSKY_OTHER = 0X0FFF0000
 EF_CSKY_PROCESSOR = 0X0000FFFF
 EF_CSKY_ABIV1 = 0X10000000
 EF_CSKY_ABIV2 = 0X20000000
+SHT_CSKY_ATTRIBUTES = (SHT_LOPROC + 1)
 EF_IA_64_MASKOS = 0x0000000f
 EF_IA_64_ABI64 = 0x00000010
 EF_IA_64_ARCH = 0xff000000
+PT_IA_64_ARCHEXT = (PT_LOPROC + 0)
+PT_IA_64_UNWIND = (PT_LOPROC + 1)
+PT_IA_64_HP_OPT_ANOT = (PT_LOOS + 0x12)
+PT_IA_64_HP_HSL_ANOT = (PT_LOOS + 0x13)
+PT_IA_64_HP_STACK = (PT_LOOS + 0x14)
 PF_IA_64_NORECOV = 0x80000000
+SHT_IA_64_EXT = (SHT_LOPROC + 0)
+SHT_IA_64_UNWIND = (SHT_LOPROC + 1)
 SHF_IA_64_SHORT = 0x10000000
 SHF_IA_64_NORECOV = 0x20000000
+DT_IA_64_PLT_RESERVE = (DT_LOPROC + 0)
 DT_IA_64_NUM = 1
 R_IA64_NONE = 0x00
 R_IA64_IMM14 = 0x21
@@ -2891,6 +3433,9 @@ R_X86_64_GOTPCRELX = 41
 R_X86_64_REX_GOTPCRELX = 42
 R_X86_64_NUM = 43
 SHT_X86_64_UNWIND = 0x70000001
+DT_X86_64_PLT = (DT_LOPROC + 0)
+DT_X86_64_PLTSZ = (DT_LOPROC + 1)
+DT_X86_64_PLTENT = (DT_LOPROC + 3)
 DT_X86_64_NUM = 4
 R_MN10300_NONE = 0
 R_MN10300_32 = 1
@@ -3330,6 +3875,9 @@ R_RISCV_SET_ULEB128 = 60
 R_RISCV_SUB_ULEB128 = 61
 R_RISCV_NUM = 62
 STO_RISCV_VARIANT_CC = 0x80
+SHT_RISCV_ATTRIBUTES = (SHT_LOPROC + 3)
+PT_RISCV_ATTRIBUTES = (PT_LOPROC + 3)
+DT_RISCV_VARIANT_CC = (DT_LOPROC + 1)
 R_BPF_NONE = 0
 R_BPF_64_64 = 1
 R_BPF_64_32 = 10
@@ -3495,6 +4043,8 @@ R_LARCH_SUB_ULEB128 = 108
 R_LARCH_64_PCREL = 109
 EF_ARC_MACH_MSK = 0x000000ff
 EF_ARC_OSABI_MSK = 0x00000f00
+EF_ARC_ALL_MSK = (EF_ARC_MACH_MSK | EF_ARC_OSABI_MSK)
+SHT_ARC_ATTRIBUTES = (SHT_LOPROC + 1)
 R_ARC_NONE = 0x0
 R_ARC_8 = 0x1
 R_ARC_16 = 0x2
@@ -3603,448 +4153,15 @@ R_OR1K_TLS_LE_LO16 = 31
 R_OR1K_TLS_TPOFF = 32
 R_OR1K_TLS_DTPOFF = 33
 R_OR1K_TLS_DTPMOD = 34
-ssize_t = ctypes.c_long
-gid_t = ctypes.c_uint
-uid_t = ctypes.c_uint
-useconds_t = ctypes.c_uint
-pid_t = ctypes.c_int
-intptr_t = ctypes.c_long
-socklen_t = ctypes.c_uint
-# extern int access(const char *__name, int __type) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (access:=dll.access).restype,access.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_int]
-except AttributeError: pass
-
-# extern int faccessat(int __fd, const char *__file, int __type, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
-try: (faccessat:=dll.faccessat).restype,faccessat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_int]
-except AttributeError: pass
-
-# extern __off_t lseek(int __fd, __off_t __offset, int __whence) __attribute__((nothrow))
-try: (lseek:=dll.lseek).restype,lseek.argtypes = __off_t,[ctypes.c_int, __off_t, ctypes.c_int]
-except AttributeError: pass
-
-# extern int close(int __fd)
-try: (close:=dll.close).restype,close.argtypes = ctypes.c_int,[ctypes.c_int]
-except AttributeError: pass
-
-# extern void closefrom(int __lowfd) __attribute__((nothrow))
-try: (closefrom:=dll.closefrom).restype,closefrom.argtypes = None,[ctypes.c_int]
-except AttributeError: pass
-
-# extern ssize_t read(int __fd, void *__buf, size_t __nbytes)
-try: (read:=dll.read).restype,read.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-# extern ssize_t write(int __fd, const void *__buf, size_t __n)
-try: (write:=dll.write).restype,write.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-# extern ssize_t pread(int __fd, void *__buf, size_t __nbytes, __off_t __offset)
-try: (pread:=dll.pread).restype,pread.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t, __off_t]
-except AttributeError: pass
-
-# extern ssize_t pwrite(int __fd, const void *__buf, size_t __n, __off_t __offset)
-try: (pwrite:=dll.pwrite).restype,pwrite.argtypes = ssize_t,[ctypes.c_int, ctypes.c_void_p, size_t, __off_t]
-except AttributeError: pass
-
-# extern int pipe(int __pipedes[2]) __attribute__((nothrow))
-try: (pipe:=dll.pipe).restype,pipe.argtypes = ctypes.c_int,[(ctypes.c_int * 2)]
-except AttributeError: pass
-
-# extern unsigned int alarm(unsigned int __seconds) __attribute__((nothrow))
-try: (alarm:=dll.alarm).restype,alarm.argtypes = ctypes.c_uint,[ctypes.c_uint]
-except AttributeError: pass
-
-# extern unsigned int sleep(unsigned int __seconds)
-try: (sleep:=dll.sleep).restype,sleep.argtypes = ctypes.c_uint,[ctypes.c_uint]
-except AttributeError: pass
-
-__useconds_t = ctypes.c_uint
-# extern __useconds_t ualarm(__useconds_t __value, __useconds_t __interval) __attribute__((nothrow))
-try: (ualarm:=dll.ualarm).restype,ualarm.argtypes = __useconds_t,[__useconds_t, __useconds_t]
-except AttributeError: pass
-
-# extern int usleep(__useconds_t __useconds)
-try: (usleep:=dll.usleep).restype,usleep.argtypes = ctypes.c_int,[__useconds_t]
-except AttributeError: pass
-
-# extern int pause(void)
-try: (pause:=dll.pause).restype,pause.argtypes = ctypes.c_int,[]
-except AttributeError: pass
-
-__uid_t = ctypes.c_uint
-__gid_t = ctypes.c_uint
-# extern int chown(const char *__file, __uid_t __owner, __gid_t __group) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (chown:=dll.chown).restype,chown.argtypes = ctypes.c_int,[ctypes.c_char_p, __uid_t, __gid_t]
-except AttributeError: pass
-
-# extern int fchown(int __fd, __uid_t __owner, __gid_t __group) __attribute__((nothrow))
-try: (fchown:=dll.fchown).restype,fchown.argtypes = ctypes.c_int,[ctypes.c_int, __uid_t, __gid_t]
-except AttributeError: pass
-
-# extern int lchown(const char *__file, __uid_t __owner, __gid_t __group) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (lchown:=dll.lchown).restype,lchown.argtypes = ctypes.c_int,[ctypes.c_char_p, __uid_t, __gid_t]
-except AttributeError: pass
-
-# extern int fchownat(int __fd, const char *__file, __uid_t __owner, __gid_t __group, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
-try: (fchownat:=dll.fchownat).restype,fchownat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, __uid_t, __gid_t, ctypes.c_int]
-except AttributeError: pass
-
-# extern int chdir(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (chdir:=dll.chdir).restype,chdir.argtypes = ctypes.c_int,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int fchdir(int __fd) __attribute__((nothrow))
-try: (fchdir:=dll.fchdir).restype,fchdir.argtypes = ctypes.c_int,[ctypes.c_int]
-except AttributeError: pass
-
-# extern char *getcwd(char *__buf, size_t __size) __attribute__((nothrow))
-try: (getcwd:=dll.getcwd).restype,getcwd.argtypes = ctypes.c_char_p,[ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern char *getwd(char *__buf) __attribute__((nothrow)) __attribute__((nonnull(1))) __attribute__((deprecated("")))
-try: (getwd:=dll.getwd).restype,getwd.argtypes = ctypes.c_char_p,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int dup(int __fd) __attribute__((nothrow))
-try: (dup:=dll.dup).restype,dup.argtypes = ctypes.c_int,[ctypes.c_int]
-except AttributeError: pass
-
-# extern int dup2(int __fd, int __fd2) __attribute__((nothrow))
-try: (dup2:=dll.dup2).restype,dup2.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int]
-except AttributeError: pass
-
-# extern int execve(const char *__path, char *const __argv[], char *const __envp[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (execve:=dll.execve).restype,execve.argtypes = ctypes.c_int,[ctypes.c_char_p, (ctypes.c_char_p * 0), (ctypes.c_char_p * 0)]
-except AttributeError: pass
-
-# extern int fexecve(int __fd, char *const __argv[], char *const __envp[]) __attribute__((nothrow)) __attribute__((nonnull(2)))
-try: (fexecve:=dll.fexecve).restype,fexecve.argtypes = ctypes.c_int,[ctypes.c_int, (ctypes.c_char_p * 0), (ctypes.c_char_p * 0)]
-except AttributeError: pass
-
-# extern int execv(const char *__path, char *const __argv[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (execv:=dll.execv).restype,execv.argtypes = ctypes.c_int,[ctypes.c_char_p, (ctypes.c_char_p * 0)]
-except AttributeError: pass
-
-# extern int execle(const char *__path, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (execle:=dll.execle).restype,execle.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int execl(const char *__path, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (execl:=dll.execl).restype,execl.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int execvp(const char *__file, char *const __argv[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (execvp:=dll.execvp).restype,execvp.argtypes = ctypes.c_int,[ctypes.c_char_p, (ctypes.c_char_p * 0)]
-except AttributeError: pass
-
-# extern int execlp(const char *__file, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (execlp:=dll.execlp).restype,execlp.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int nice(int __inc) __attribute__((nothrow))
-try: (nice:=dll.nice).restype,nice.argtypes = ctypes.c_int,[ctypes.c_int]
-except AttributeError: pass
-
-# extern void _exit(int __status)
-try: (_exit:=dll._exit).restype,_exit.argtypes = None,[ctypes.c_int]
-except AttributeError: pass
-
-# extern long pathconf(const char *__path, int __name) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (pathconf:=dll.pathconf).restype,pathconf.argtypes = ctypes.c_long,[ctypes.c_char_p, ctypes.c_int]
-except AttributeError: pass
-
-# extern long fpathconf(int __fd, int __name) __attribute__((nothrow))
-try: (fpathconf:=dll.fpathconf).restype,fpathconf.argtypes = ctypes.c_long,[ctypes.c_int, ctypes.c_int]
-except AttributeError: pass
-
-# extern long sysconf(int __name) __attribute__((nothrow))
-try: (sysconf:=dll.sysconf).restype,sysconf.argtypes = ctypes.c_long,[ctypes.c_int]
-except AttributeError: pass
-
-# extern size_t confstr(int __name, char *__buf, size_t __len) __attribute__((nothrow))
-try: (confstr:=dll.confstr).restype,confstr.argtypes = size_t,[ctypes.c_int, ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-__pid_t = ctypes.c_int
-# extern __pid_t getpid(void) __attribute__((nothrow))
-try: (getpid:=dll.getpid).restype,getpid.argtypes = __pid_t,[]
-except AttributeError: pass
-
-# extern __pid_t getppid(void) __attribute__((nothrow))
-try: (getppid:=dll.getppid).restype,getppid.argtypes = __pid_t,[]
-except AttributeError: pass
-
-# extern __pid_t getpgrp(void) __attribute__((nothrow))
-try: (getpgrp:=dll.getpgrp).restype,getpgrp.argtypes = __pid_t,[]
-except AttributeError: pass
-
-# extern __pid_t __getpgid(__pid_t __pid) __attribute__((nothrow))
-try: (__getpgid:=dll.__getpgid).restype,__getpgid.argtypes = __pid_t,[__pid_t]
-except AttributeError: pass
-
-# extern __pid_t getpgid(__pid_t __pid) __attribute__((nothrow))
-try: (getpgid:=dll.getpgid).restype,getpgid.argtypes = __pid_t,[__pid_t]
-except AttributeError: pass
-
-# extern int setpgid(__pid_t __pid, __pid_t __pgid) __attribute__((nothrow))
-try: (setpgid:=dll.setpgid).restype,setpgid.argtypes = ctypes.c_int,[__pid_t, __pid_t]
-except AttributeError: pass
-
-# extern int setpgrp(void) __attribute__((nothrow))
-try: (setpgrp:=dll.setpgrp).restype,setpgrp.argtypes = ctypes.c_int,[]
-except AttributeError: pass
-
-# extern __pid_t setsid(void) __attribute__((nothrow))
-try: (setsid:=dll.setsid).restype,setsid.argtypes = __pid_t,[]
-except AttributeError: pass
-
-# extern __pid_t getsid(__pid_t __pid) __attribute__((nothrow))
-try: (getsid:=dll.getsid).restype,getsid.argtypes = __pid_t,[__pid_t]
-except AttributeError: pass
-
-# extern __uid_t getuid(void) __attribute__((nothrow))
-try: (getuid:=dll.getuid).restype,getuid.argtypes = __uid_t,[]
-except AttributeError: pass
-
-# extern __uid_t geteuid(void) __attribute__((nothrow))
-try: (geteuid:=dll.geteuid).restype,geteuid.argtypes = __uid_t,[]
-except AttributeError: pass
-
-# extern __gid_t getgid(void) __attribute__((nothrow))
-try: (getgid:=dll.getgid).restype,getgid.argtypes = __gid_t,[]
-except AttributeError: pass
-
-# extern __gid_t getegid(void) __attribute__((nothrow))
-try: (getegid:=dll.getegid).restype,getegid.argtypes = __gid_t,[]
-except AttributeError: pass
-
-# extern int getgroups(int __size, __gid_t __list[]) __attribute__((nothrow))
-try: (getgroups:=dll.getgroups).restype,getgroups.argtypes = ctypes.c_int,[ctypes.c_int, (__gid_t * 0)]
-except AttributeError: pass
-
-# extern int setuid(__uid_t __uid) __attribute__((nothrow))
-try: (setuid:=dll.setuid).restype,setuid.argtypes = ctypes.c_int,[__uid_t]
-except AttributeError: pass
-
-# extern int setreuid(__uid_t __ruid, __uid_t __euid) __attribute__((nothrow))
-try: (setreuid:=dll.setreuid).restype,setreuid.argtypes = ctypes.c_int,[__uid_t, __uid_t]
-except AttributeError: pass
-
-# extern int seteuid(__uid_t __uid) __attribute__((nothrow))
-try: (seteuid:=dll.seteuid).restype,seteuid.argtypes = ctypes.c_int,[__uid_t]
-except AttributeError: pass
-
-# extern int setgid(__gid_t __gid) __attribute__((nothrow))
-try: (setgid:=dll.setgid).restype,setgid.argtypes = ctypes.c_int,[__gid_t]
-except AttributeError: pass
-
-# extern int setregid(__gid_t __rgid, __gid_t __egid) __attribute__((nothrow))
-try: (setregid:=dll.setregid).restype,setregid.argtypes = ctypes.c_int,[__gid_t, __gid_t]
-except AttributeError: pass
-
-# extern int setegid(__gid_t __gid) __attribute__((nothrow))
-try: (setegid:=dll.setegid).restype,setegid.argtypes = ctypes.c_int,[__gid_t]
-except AttributeError: pass
-
-# extern __pid_t fork(void) __attribute__((nothrow))
-try: (fork:=dll.fork).restype,fork.argtypes = __pid_t,[]
-except AttributeError: pass
-
-# extern int vfork(void) __attribute__((nothrow))
-try: (vfork:=dll.vfork).restype,vfork.argtypes = ctypes.c_int,[]
-except AttributeError: pass
-
-# extern char *ttyname(int __fd) __attribute__((nothrow))
-try: (ttyname:=dll.ttyname).restype,ttyname.argtypes = ctypes.c_char_p,[ctypes.c_int]
-except AttributeError: pass
-
-# extern int ttyname_r(int __fd, char *__buf, size_t __buflen) __attribute__((nothrow)) __attribute__((nonnull(2)))
-try: (ttyname_r:=dll.ttyname_r).restype,ttyname_r.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int isatty(int __fd) __attribute__((nothrow))
-try: (isatty:=dll.isatty).restype,isatty.argtypes = ctypes.c_int,[ctypes.c_int]
-except AttributeError: pass
-
-# extern int ttyslot(void) __attribute__((nothrow))
-try: (ttyslot:=dll.ttyslot).restype,ttyslot.argtypes = ctypes.c_int,[]
-except AttributeError: pass
-
-# extern int link(const char *__from, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (link:=dll.link).restype,link.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int linkat(int __fromfd, const char *__from, int __tofd, const char *__to, int __flags) __attribute__((nothrow)) __attribute__((nonnull(2, 4)))
-try: (linkat:=dll.linkat).restype,linkat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
-except AttributeError: pass
-
-# extern int symlink(const char *__from, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (symlink:=dll.symlink).restype,symlink.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_char_p]
-except AttributeError: pass
-
-# extern ssize_t readlink(const char *restrict __path, char *restrict __buf, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (readlink:=dll.readlink).restype,readlink.argtypes = ssize_t,[ctypes.c_char_p, ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int symlinkat(const char *__from, int __tofd, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 3)))
-try: (symlinkat:=dll.symlinkat).restype,symlinkat.argtypes = ctypes.c_int,[ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p]
-except AttributeError: pass
-
-# extern ssize_t readlinkat(int __fd, const char *restrict __path, char *restrict __buf, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(2, 3)))
-try: (readlinkat:=dll.readlinkat).restype,readlinkat.argtypes = ssize_t,[ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int unlink(const char *__name) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (unlink:=dll.unlink).restype,unlink.argtypes = ctypes.c_int,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int unlinkat(int __fd, const char *__name, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
-try: (unlinkat:=dll.unlinkat).restype,unlinkat.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
-except AttributeError: pass
-
-# extern int rmdir(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (rmdir:=dll.rmdir).restype,rmdir.argtypes = ctypes.c_int,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern __pid_t tcgetpgrp(int __fd) __attribute__((nothrow))
-try: (tcgetpgrp:=dll.tcgetpgrp).restype,tcgetpgrp.argtypes = __pid_t,[ctypes.c_int]
-except AttributeError: pass
-
-# extern int tcsetpgrp(int __fd, __pid_t __pgrp_id) __attribute__((nothrow))
-try: (tcsetpgrp:=dll.tcsetpgrp).restype,tcsetpgrp.argtypes = ctypes.c_int,[ctypes.c_int, __pid_t]
-except AttributeError: pass
-
-# extern char *getlogin(void)
-try: (getlogin:=dll.getlogin).restype,getlogin.argtypes = ctypes.c_char_p,[]
-except AttributeError: pass
-
-# extern int getlogin_r(char *__name, size_t __name_len) __attribute__((nonnull(1)))
-try: (getlogin_r:=dll.getlogin_r).restype,getlogin_r.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int setlogin(const char *__name) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (setlogin:=dll.setlogin).restype,setlogin.argtypes = ctypes.c_int,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int gethostname(char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (gethostname:=dll.gethostname).restype,gethostname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int sethostname(const char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (sethostname:=dll.sethostname).restype,sethostname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int sethostid(long __id) __attribute__((nothrow))
-try: (sethostid:=dll.sethostid).restype,sethostid.argtypes = ctypes.c_int,[ctypes.c_long]
-except AttributeError: pass
-
-# extern int getdomainname(char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (getdomainname:=dll.getdomainname).restype,getdomainname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int setdomainname(const char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (setdomainname:=dll.setdomainname).restype,setdomainname.argtypes = ctypes.c_int,[ctypes.c_char_p, size_t]
-except AttributeError: pass
-
-# extern int vhangup(void) __attribute__((nothrow))
-try: (vhangup:=dll.vhangup).restype,vhangup.argtypes = ctypes.c_int,[]
-except AttributeError: pass
-
-# extern int revoke(const char *__file) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (revoke:=dll.revoke).restype,revoke.argtypes = ctypes.c_int,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int profil(unsigned short *__sample_buffer, size_t __size, size_t __offset, unsigned int __scale) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (profil:=dll.profil).restype,profil.argtypes = ctypes.c_int,[ctypes.POINTER(ctypes.c_ushort), size_t, size_t, ctypes.c_uint]
-except AttributeError: pass
-
-# extern int acct(const char *__name) __attribute__((nothrow))
-try: (acct:=dll.acct).restype,acct.argtypes = ctypes.c_int,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern char *getusershell(void) __attribute__((nothrow))
-try: (getusershell:=dll.getusershell).restype,getusershell.argtypes = ctypes.c_char_p,[]
-except AttributeError: pass
-
-# extern void endusershell(void) __attribute__((nothrow))
-try: (endusershell:=dll.endusershell).restype,endusershell.argtypes = None,[]
-except AttributeError: pass
-
-# extern void setusershell(void) __attribute__((nothrow))
-try: (setusershell:=dll.setusershell).restype,setusershell.argtypes = None,[]
-except AttributeError: pass
-
-# extern int daemon(int __nochdir, int __noclose) __attribute__((nothrow))
-try: (daemon:=dll.daemon).restype,daemon.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int]
-except AttributeError: pass
-
-# extern int chroot(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (chroot:=dll.chroot).restype,chroot.argtypes = ctypes.c_int,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern char *getpass(const char *__prompt) __attribute__((nonnull(1)))
-try: (getpass:=dll.getpass).restype,getpass.argtypes = ctypes.c_char_p,[ctypes.c_char_p]
-except AttributeError: pass
-
-# extern int fsync(int __fd)
-try: (fsync:=dll.fsync).restype,fsync.argtypes = ctypes.c_int,[ctypes.c_int]
-except AttributeError: pass
-
-# extern long gethostid(void)
-try: (gethostid:=dll.gethostid).restype,gethostid.argtypes = ctypes.c_long,[]
-except AttributeError: pass
-
-# extern void sync(void) __attribute__((nothrow))
-try: (sync:=dll.sync).restype,sync.argtypes = None,[]
-except AttributeError: pass
-
-# extern int getpagesize(void) __attribute__((nothrow)) __attribute__((const))
-try: (getpagesize:=dll.getpagesize).restype,getpagesize.argtypes = ctypes.c_int,[]
-except AttributeError: pass
-
-# extern int getdtablesize(void) __attribute__((nothrow))
-try: (getdtablesize:=dll.getdtablesize).restype,getdtablesize.argtypes = ctypes.c_int,[]
-except AttributeError: pass
-
-# extern int truncate(const char *__file, __off_t __length) __attribute__((nothrow)) __attribute__((nonnull(1)))
-try: (truncate:=dll.truncate).restype,truncate.argtypes = ctypes.c_int,[ctypes.c_char_p, __off_t]
-except AttributeError: pass
-
-# extern int ftruncate(int __fd, __off_t __length) __attribute__((nothrow))
-try: (ftruncate:=dll.ftruncate).restype,ftruncate.argtypes = ctypes.c_int,[ctypes.c_int, __off_t]
-except AttributeError: pass
-
-# extern int brk(void *__addr) __attribute__((nothrow))
-try: (brk:=dll.brk).restype,brk.argtypes = ctypes.c_int,[ctypes.c_void_p]
-except AttributeError: pass
-
-# extern void *sbrk(intptr_t __delta) __attribute__((nothrow))
-try: (sbrk:=dll.sbrk).restype,sbrk.argtypes = ctypes.c_void_p,[intptr_t]
-except AttributeError: pass
-
-# extern long syscall(long __sysno, ...) __attribute__((nothrow))
-try: (syscall:=dll.syscall).restype,syscall.argtypes = ctypes.c_long,[ctypes.c_long]
-except AttributeError: pass
-
-# extern int lockf(int __fd, int __cmd, __off_t __len)
-try: (lockf:=dll.lockf).restype,lockf.argtypes = ctypes.c_int,[ctypes.c_int, ctypes.c_int, __off_t]
-except AttributeError: pass
-
-# extern int fdatasync(int __fildes)
-try: (fdatasync:=dll.fdatasync).restype,fdatasync.argtypes = ctypes.c_int,[ctypes.c_int]
-except AttributeError: pass
-
-# extern char *crypt(const char *__key, const char *__salt) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
-try: (crypt:=dll.crypt).restype,crypt.argtypes = ctypes.c_char_p,[ctypes.c_char_p, ctypes.c_char_p]
-except AttributeError: pass
-
-# int getentropy(void *__buffer, size_t __length)
-try: (getentropy:=dll.getentropy).restype,getentropy.argtypes = ctypes.c_int,[ctypes.c_void_p, size_t]
-except AttributeError: pass
-
 _UNISTD_H = 1
 _POSIX_VERSION = 200809
 __POSIX2_THIS_VERSION = 200809
+_POSIX2_VERSION = __POSIX2_THIS_VERSION
+_POSIX2_C_VERSION = __POSIX2_THIS_VERSION
+_POSIX2_C_BIND = __POSIX2_THIS_VERSION
+_POSIX2_C_DEV = __POSIX2_THIS_VERSION
+_POSIX2_SW_DEV = __POSIX2_THIS_VERSION
+_POSIX2_LOCALEDEF = __POSIX2_THIS_VERSION
 _XOPEN_VERSION = 700
 _XOPEN_XCU_VERSION = 4
 _XOPEN_XPG2 = 1
@@ -4063,6 +4180,9 @@ F_OK = 0
 SEEK_SET = 0
 SEEK_CUR = 1
 SEEK_END = 2
+L_SET = SEEK_SET
+L_INCR = SEEK_CUR
+L_XTND = SEEK_END
 F_ULOCK = 0
 F_LOCK = 1
 F_TLOCK = 2
@@ -4116,3 +4236,4 @@ MADV_COLLAPSE = 25
 MAP_FILE = 0
 PKEY_DISABLE_ACCESS = 0x1
 PKEY_DISABLE_WRITE = 0x2
+PKEY_ACCESS_MASK = (PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE)
