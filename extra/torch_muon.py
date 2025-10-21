@@ -2,7 +2,7 @@ import torch
 
 #credit to KellerJordan at https://github.com/KellerJordan/Muon/tree/master
 #some changes: classic momentum instead of weighting gradient
-#added ns_steps, ns_params, nesterov as hyperparams
+#added ns_steps, ns_coefficients, nesterov as hyperparams
 def zeropower_via_newtonschulz5(G:torch.tensor, steps:int, params:tuple[int, ...]):
   """
   Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -33,22 +33,22 @@ def zeropower_via_newtonschulz5(G:torch.tensor, steps:int, params:tuple[int, ...
 
   return X
 
-def muon_update(grad, momentum, beta=0.95, ns_steps=5, ns_params=(3.4445, -4.7750,  2.0315), nesterov=True):
+def muon_update(grad, momentum, beta=0.95, ns_steps=5, ns_coefficients=(3.4445, -4.7750,  2.0315), nesterov=True):
   if beta:
     momentum.mul_(beta).add_(grad)
     update = grad.add(momentum,alpha=beta) if nesterov else momentum
   else: update = grad
   if update.ndim == 4: # for the case of conv filters
     update = update.view(len(update), -1)
-  update = zeropower_via_newtonschulz5(update, steps=ns_steps, params=ns_params)
+  update = zeropower_via_newtonschulz5(update, steps=ns_steps, params=ns_coefficients)
   return update
 
 class SingleDeviceMuon(torch.optim.Optimizer):
   """
   Muon variant for usage in non-distributed settings.
   """
-  def __init__(self, params, lr=0.02, weight_decay=0.0, momentum=0.95, ns_steps=5, ns_params=(3.4445, -4.7750,  2.0315), nesterov=True):
-    defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, ns_steps=ns_steps, ns_params=ns_params, nesterov=nesterov)
+  def __init__(self, params, lr=0.02, weight_decay=0.0, momentum=0.95, ns_steps=5, ns_coefficients=(3.4445, -4.7750,  2.0315), nesterov=True):
+    defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, ns_steps=ns_steps, ns_coefficients=ns_coefficients, nesterov=nesterov)
     super().__init__(params, defaults)
 
   @torch.no_grad()
@@ -67,7 +67,7 @@ class SingleDeviceMuon(torch.optim.Optimizer):
         if len(state) == 0:
           state["momentum_buffer"] = torch.zeros_like(p)
         update = muon_update(p.grad, state["momentum_buffer"], beta=group["momentum"], ns_steps=group["ns_steps"],
-                             ns_params=group["ns_params"], nesterov=group["nesterov"])
+                             ns_coefficients=group["ns_coefficients"], nesterov=group["nesterov"])
         p.mul_(1.0 - group["lr"] * group["weight_decay"])
 
         p.add_(update.reshape(p.shape), alpha=-group["lr"])
