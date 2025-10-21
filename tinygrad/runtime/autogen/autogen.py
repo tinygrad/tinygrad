@@ -23,9 +23,9 @@ class Autogen:
     self.name, self.dll, self.loaded, self.files, self.args, self.prelude = name, dll, False, files, args, prelude
     if not os.path.exists(pathlib.Path(__file__).parent / f"{self.name}.py"): self.gen()
 
-  def __getattr__(self, nm):
-    if not self.loaded: self._mod, self.loaded = importlib.import_module(f"tinygrad.runtime.autogen.{self.name}"), True
-    return getattr(self._mod, nm)
+  @functools.cached_property
+  def _mod(self): return importlib.import_module(f"tinygrad.runtime.autogen.{self.name}")
+  def __getattr__(self, nm): return getattr(self._mod, nm)
 
   def gen(self):
     from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, TokenKind as ToK, PrintingPolicy as PP, PrintingPolicyProperty
@@ -33,7 +33,7 @@ class Autogen:
     if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
 
     idx, self.lines = Index.create(), [f"import {', '.join(['ctypes'] + [i for i in ['ctypes.util'] if i in (self.dll or '')])}",
-      "from tinygrad.runtime.autogen.helpers import *", *([f"dll = {self.dll}\n"] if self.dll else []), *self.prelude]
+      "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *([f"dll = {self.dll}\n"] if self.dll else []), *self.prelude]
     self.types, self.macros, self.anoncnt = {}, set(), 0
     macros:list[str] = []
     for f in self.files() if callable(self.files) else self.files:
