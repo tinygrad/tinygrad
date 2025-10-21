@@ -1,6 +1,5 @@
 import ctypes, ctypes.util
-from tinygrad.runtime.autogen.helpers import CEnum
-
+from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 dll = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
 
 nvrtcResult = CEnum(ctypes.c_uint)
