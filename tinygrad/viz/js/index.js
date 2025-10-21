@@ -779,18 +779,20 @@ document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
+  const step = document.getElementById(`step-${currentCtx}-${currentStep}`);
   if (event.key == "ArrowUp") {
     event.preventDefault();
     if (changeStep) {
-      return setState({ currentRewrite:0, currentStep:Math.max(0, currentStep-1) });
+      const prevId = step.previousElementSibling?.id;
+      return prevId != null && setState({ currentRewrite:0, currentStep:+prevId.split("-").at(-1) });
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
     if (changeStep) {
-      const totalUOps = ctxs[currentCtx].steps.length-1;
-      return setState({ currentRewrite:0, currentStep:Math.min(totalUOps, currentStep+1) });
+      const nextId = step.nextElementSibling?.id;
+      return nextId != null && setState({ currentRewrite:0, currentStep:+nextId.split("-").at(-1) });;
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
   }
