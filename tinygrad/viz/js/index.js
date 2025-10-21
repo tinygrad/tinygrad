@@ -243,6 +243,7 @@ async function renderProfiler() {
         }
         const html = document.createElement("div");
         html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
+        const argsDiv = document.createElement("div"); argsDiv.id = "args"; html.appendChild(document.createElement("br")); html.appendChild(argsDiv);
         if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
         if (shapeRef != null) {
           const a = html.appendChild(document.createElement("a"));
@@ -295,6 +296,7 @@ async function renderProfiler() {
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         if (users != null) rows.push(["Users", users.length]);
         const info = html.appendChild(tabulate(rows).node());
+        const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px";
           const { repr, num, mode, shape } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
@@ -303,9 +305,14 @@ async function renderProfiler() {
           if (shape != null) {
             p.style.cursor = "pointer";
             p.onclick = () => focusShape(shape);
+            const args = d3.select(shape.html.querySelector("#args"));
+            args.append("p").text(`@data${num} ${rows[2][1]}`).style("cursor", "pointer").style("margin-top", "4px").on("click", () => {
+              const device = document.getElementById(k);
+              if (!isExpanded(device)) device.click();
+              focusShape(arg);
+            });
           }
         }
-        const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -338,6 +345,7 @@ async function renderProfiler() {
           else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
         data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
+        toggleCls(document.getElementById(focusedDevice), document.getElementById(newFocus), "expanded");
         focusedDevice = newFocus;
         return resize();
       });
