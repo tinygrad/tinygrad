@@ -86,7 +86,7 @@ def do_merge_ends(s:UOp):
   replaces = {}
   for k,v in stacked.items():
     if len(v) == 1: continue
-    rep = UOp(v[0].op, src=tuple([k] + [y for x in v for y in x.src[1:]]), arg=x[0].arg)
+    rep = UOp(v[0].op, src=tuple([k] + [y for x in v for y in x.src[1:]]), arg=v[0].arg)
     for x in v: replaces[x] = rep
   if not len(replaces) and not len(dangling_ifs): return None
   ret = s.substitute(replaces)
