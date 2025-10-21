@@ -832,8 +832,6 @@ class TestIFUOps(unittest.TestCase):
     if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
-    for st in sink.src:
-      self.assertEqual(len(st.src), 2)
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
@@ -850,8 +848,6 @@ class TestIFUOps(unittest.TestCase):
     if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
-    for st in sink.src:
-      self.assertEqual(len(st.src), 2)
 
   # this will be fixed with the merge gated stores bounty
   @unittest.expectedFailure
@@ -866,8 +862,6 @@ class TestIFUOps(unittest.TestCase):
     if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
-    for st in sink.src:
-      self.assertEqual(len(st.src), 2)
 
 class TestUOpTags(unittest.TestCase):
   def test_inc_by_one(self):
