@@ -487,7 +487,6 @@ generate_mesa() {
 if [ "$1" == "hip" ]; then generate_hip
 elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "hsa" ]; then generate_hsa
-elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
@@ -503,6 +502,6 @@ elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
+elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_nv; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
 else echo "usage: $0 <type>"
 fi
