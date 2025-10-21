@@ -810,7 +810,7 @@ document.addEventListener("keydown", (event) => {
     if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
-    if (getSubrewrites(step).length) return step.children[0].click();
+    if (expandSteps && getSubrewrites(step).length) return step.children[0].click();
     return setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
