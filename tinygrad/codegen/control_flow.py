@@ -66,16 +66,33 @@ class CFGContext:
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
       for x,y in zipped: self.edges[y.src[0]] = x
 
-# put all endifs on the sink
-def add_endifs(sink:UOp):
-  if sink.src[0].op is Ops.ENDIF: return None
-  ifs = [x for x in sink.toposort() if x.op is Ops.IF]
-  if len(ifs) == 0: return None
-  assert len(ifs) == 1, "we only support one if"
-  return sink.replace(src=(UOp(Ops.ENDIF, src=(ifs[0],*sink.src))))
-
 pm_add_control_flow = PatternMatcher([
   (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
   (UPat(Ops.IF, src=(UPat(), UPat(Ops.BARRIER)), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
-  (UPat(Ops.SINK, name="sink"), add_endifs),
+])
+
+def do_merge_ends(s:UOp):
+  # NOTE: this can fail
+  stacked: dict[UOp, list[UOp]] = {}
+  dangling_ifs = []
+  for x in s.toposort():
+    if x.op in {Ops.END, Ops.ENDIF}:
+      assert x.op is not Ops.END or x.arg == 1, "ends must be single ends for linearizer"
+      stacked.setdefault(x.src[0], []).append(x)
+    if x.op is Ops.IF: dangling_ifs.append(x)
+  dangling_ifs = [x for x in dangling_ifs if x not in stacked]
+  replaces = {}
+  for k,v in stacked.items():
+    if len(v) == 1: continue
+    rep = UOp(v[0].op, src=tuple([k] + [y for x in v for y in x.src[1:]]), arg=x[0].arg)
+    for x in v: replaces[x] = rep
+  if not len(replaces) and not len(dangling_ifs): return None
+  ret = s.substitute(replaces)
+  if len(dangling_ifs):
+    assert len(dangling_ifs) == 1, "we only support 1 dangling if"
+    ret = ret.replace(src=(UOp(Ops.ENDIF, src=(dangling_ifs[0], *ret.src)),))
+  return ret
+
+pm_merge_ends = PatternMatcher([
+  (UPat(Ops.SINK, name="s"), do_merge_ends),
 ])

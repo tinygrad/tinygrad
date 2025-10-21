@@ -18,7 +18,7 @@ from tinygrad.codegen.opt.postrange import pm_postrange_opt
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
 #from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
-from tinygrad.codegen.control_flow import CFGContext, pm_add_control_flow, linearize
+from tinygrad.codegen.control_flow import CFGContext, pm_merge_ends, pm_add_control_flow, linearize
 
 @dataclass
 class RewriteStep:
@@ -40,7 +40,8 @@ rewrites_for_linearizer = [
 """
 
 rewrites_for_linearizer = [
-  RewriteStep(pm_add_control_flow, CFGContext, name="add control flow starts", bottom_up=True)
+  RewriteStep(pm_merge_ends, CFGContext, name="merge ends", bottom_up=True),
+  RewriteStep(pm_add_control_flow, CFGContext, name="add control flow starts", bottom_up=True),
 ]
 
 def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool=True) -> list[RewriteStep]:

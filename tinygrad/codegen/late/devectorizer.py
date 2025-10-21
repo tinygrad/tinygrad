@@ -268,9 +268,9 @@ pm_render = PatternMatcher([
     UPat.var("a")), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
   (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c").logical_not()).or_casted(),),
     allow_any_len=True, name="l").or_casted()), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
-  # gate any stores that aren't gated with ifs
+  # gate any stores that aren't gated with if/endif pairs
   (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
-    lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src[:2]+(UOp(Ops.IF, src=(idx.src[2],)),)+store.src[2:]) if \
+    lambda store,idx: UOp(Ops.ENDIF, src=(uif:=UOp(Ops.IF, src=(idx.src[2],)), UOp(Ops.STORE, src=store.src[:2]+(uif,)+store.src[2:]))) if \
       len(store.src) <= 2 or store.src[2].op != Ops.IF else None),
   # for renderering and linearizing, all ends must end one loop
   (UPat(Ops.END, name="e"), lambda e: e.replace(src=e.src[e.arg-1:], arg=1).end(ends=e.src[:e.arg-1]) if e.arg > 1 else None),
