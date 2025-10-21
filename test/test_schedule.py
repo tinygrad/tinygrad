@@ -2076,6 +2076,11 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
 
+  def test_one_hot_with_copy(self):
+    y = Tensor([1, 2, 3]).to("CPU")
+    x = y.one_hot(10)
+    check_schedule(x, 3, filter_sink=False)
+
   def test_const_copy_multi(self):
     x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"])
     check_schedule(x, 0, filter_sink=False)
@@ -2085,7 +2090,7 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
     b = (a*zeros).to("CPU")
-    run_schedule(check_schedule(b, 2, filter_sink=False)) # TODO: 0?
+    run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
     self.assertEqual(b.device, "CPU")
 

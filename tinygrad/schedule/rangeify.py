@@ -17,6 +17,7 @@ sys.setrecursionlimit(10000)
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
    lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
+  (UPat(Ops.INDEX, src=(UPat.cvar("c"),), allow_any_len=True), lambda c:c),
 ])
 
 # *****************
@@ -97,9 +98,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP, tag=copy.tag) if x.device == copy.device else None),
 
-  # insert a contiguous before copy
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS}, name="s"), UPat.var("dev")), name="c"),
-    lambda c,s,dev: c.replace(src=(s.contiguous(), dev)) if s.op is not Ops.CONTIGUOUS else None),
   # ** assign rules **
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
@@ -200,8 +198,9 @@ pm_cleanups = pm_mops+PatternMatcher([
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
-  # copy on CONST is CONST
-  (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  # copy on CONST is CONST, copy is always between two buffers
+  (UPat(Ops.COPY, src=(UPat.cvar("x").f(Ops.RESHAPE, allow_any_len=True).f(Ops.EXPAND, allow_any_len=True), UPat())).f(Ops.BUFFERIZE,
+    allow_any_len=True, name="b"), lambda b,x: b.const_like(x.arg)),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
