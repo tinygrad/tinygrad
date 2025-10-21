@@ -402,6 +402,90 @@ async function inferLoop(nets, mapping, log_specs_full, previous_context, temper
     return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, offset_DEADBEEF];
 }
 
+async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, mapping, loadAndInitializeModels) {
+    let before = performance.now();
+    await loadAndInitializeModels();
+    const { sampleRate, samples } = await audioFetcher();
+
+    let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
+    for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
+        let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
+        if (chunk.length < SAMPLES_PER_SEGMENT) {
+            const padded = new Float32Array(SAMPLES_PER_SEGMENT);
+            const pad_length = SAMPLES_PER_SEGMENT - chunk.length;
+            console.log(`padding last chunk by ${pad_length} samples (${Math.round(pad_length / SAMPLES_PER_SEGMENT * 100)}%)`);
+            padded.set(chunk);
+            chunk = padded;
+        }
+        let [mel_spec] = await nets.mel(chunk);
+        log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
+    }
+
+
+    let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
+
+    onEvent("inferenceBegin");
+    console.log("begin new transcription");
+
+    let previous_context = [];
+    let temperature = 0;
+    // for (let seek = 50 * MEL_SPEC_CHUNK_LENGTH; seek < 51*MEL_SPEC_CHUNK_LENGTH;) {
+    for (let seek = 0; seek < log_specs_full.length;) {
+        console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
+        let log_spec = log_specs_full.slice(seek, seek + MEL_SPEC_CHUNK_LENGTH);
+        if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
+            let pad_length = seek + MEL_SPEC_CHUNK_LENGTH - log_specs_full.length;
+            // TODO(irwin): possible double-pad, log_specs were already padded to multiple of MEL_SPEC_CHUNK_LENGTH
+            // so this only triggers on custom seeks
+            console.log(`must pad to ${pad_length}`);
+            let padded = new Float32Array(MEL_SPEC_CHUNK_LENGTH);
+            padded.set(log_specs_full.slice(seek));
+            log_spec = padded;
+        }
+        const [audio_features] = await nets.encoder(log_spec);
+        // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
+        function updateCallback(pd) {
+            pendingText = pd;
+            // console.log(pendingText);
+            onEvent("chunkUpdate", { pendingText });
+        }
+        let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
+        if (cancelToken.cancelled) {
+            console.log("Transcription cancelled");
+            inferenceDone = true;
+            onEvent("cancel");
+            // currentTranscription.style.display = 'none';
+            return;
+        } else {
+            if ((avg_logprob < -1) && temperature < 1) {
+                temperature += 0.2;
+                console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length - offset}`);
+                continue;
+            } else {
+                temperature = 0;
+            }
+            previous_context = context.slice();
+
+            onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText });
+            // const newChunk = document.createElement('div');
+            // newChunk.className = 'transcription-chunk';
+            // newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
+            // console.log(segment_cumlogprob.toFixed(2) + ' ' + pendingText);
+            // transcriptionLog.appendChild(newChunk);
+            pendingText = '';
+            // currentTranscription.innerText = '';
+
+            seek += MEL_SPEC_CHUNK_LENGTH;
+        }
+    }
+    inferenceDone = true;
+    onEvent("inferenceDone");
+    // currentTranscription.style.display = 'none';
+
+    let took = performance.now() - before;
+    console.log("end transcription: " + took);
+}
+
 // #endregion whisper
 
 export {
@@ -446,5 +530,6 @@ export {
     decoder_helper,
     rebuild_cache_tail_index,
     decodeOne,
-    inferLoop
+    inferLoop,
+    transcribeAudio
 };
