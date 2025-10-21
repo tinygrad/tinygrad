@@ -268,7 +268,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
 
   # linearizer: outputs + intermediate KERNELs
-  (UPat((Ops.BLOCKSTART, Ops.BLOCK, Ops.BLOCKFINAL, Ops.BLOCKEND, Ops.KERNEL), dtype=dtypes.void), lambda: True),
+  (UPat(Ops.KERNEL, dtype=dtypes.void), lambda: True),
 
   # allow index dtype on a restricted set of UOps
   (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX, Ops.WHERE,
