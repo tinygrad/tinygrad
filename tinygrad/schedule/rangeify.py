@@ -208,7 +208,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
 def pre_bufferize(b:UOp, x:UOp, copy:UOp):
   nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
   return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
-pm_remove_buffers = PatternMatcher([
+pm_remove_bufferize = PatternMatcher([
   # hack so remove_bufferize doesnt remove the buffer before a copy
   (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
                       .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
@@ -488,7 +488,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink, rctx = run_rangeify(tsink, getenv("DEBUG_RANGEIFY", 0))
 
   tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_unparented+pm_const_buffer_folding, name="symbolic")  # this supports const folding
-  tsink = graph_rewrite(tsink, pm_remove_buffers, bottom_up=True, name="fix copy")
+  tsink = graph_rewrite(tsink, pm_remove_bufferize, bottom_up=True, name="fix copy")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
