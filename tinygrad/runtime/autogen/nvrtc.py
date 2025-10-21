@@ -1,7 +1,8 @@
 import ctypes, ctypes.util
+from tinygrad.runtime.autogen.helpers import CEnum
+
 dll = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
 
-from tinygrad.runtime.autogen.autogen import CEnum
 nvrtcResult = CEnum(ctypes.c_uint)
 NVRTC_SUCCESS = nvrtcResult.define('NVRTC_SUCCESS', 0)
 NVRTC_ERROR_OUT_OF_MEMORY = nvrtcResult.define('NVRTC_ERROR_OUT_OF_MEMORY', 1)
@@ -104,3 +105,5 @@ except AttributeError: pass
 # nvrtcResult nvrtcGetLoweredName(nvrtcProgram prog, const char *const name_expression, const char **lowered_name)
 try: (nvrtcGetLoweredName:=dll.nvrtcGetLoweredName).restype,nvrtcGetLoweredName.argtypes = nvrtcResult,[nvrtcProgram, ctypes.c_char_p, ctypes.POINTER(ctypes.c_char_p)]
 except AttributeError: pass
+
+__DEPRECATED__ = lambda msg: __attribute__((deprecated(msg)))

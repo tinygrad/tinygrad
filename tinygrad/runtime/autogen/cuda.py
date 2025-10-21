@@ -1,7 +1,8 @@
 import ctypes, ctypes.util
+from tinygrad.runtime.autogen.helpers import CEnum
+
 dll = ctypes.CDLL(ctypes.util.find_library('cuda'))
 
-from tinygrad.runtime.autogen.autogen import CEnum
 cuuint32_t = ctypes.c_uint
 cuuint64_t = ctypes.c_ulong
 CUdeviceptr_v2 = ctypes.c_ulonglong
@@ -3966,8 +3967,8 @@ except AttributeError: pass
 try: (cuGetProcAddress:=dll.cuGetProcAddress).restype,cuGetProcAddress.argtypes = CUresult,[ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, cuuint64_t]
 except AttributeError: pass
 
-def __CUDA_API_PTDS(api): return api
-def __CUDA_API_PTSZ(api): return api
+__CUDA_API_PTDS = lambda api: api ## _ptds
+__CUDA_API_PTSZ = lambda api: api ## _ptsz
 cuDeviceTotalMem = cuDeviceTotalMem_v2
 cuCtxCreate = cuCtxCreate_v2
 cuCtxCreate_v3 = cuCtxCreate_v3
@@ -3979,6 +3980,30 @@ cuMemFree = cuMemFree_v2
 cuMemGetAddressRange = cuMemGetAddressRange_v2
 cuMemAllocHost = cuMemAllocHost_v2
 cuMemHostGetDevicePointer = cuMemHostGetDevicePointer_v2
+cuMemcpyHtoD = __CUDA_API_PTDS(cuMemcpyHtoD_v2)
+cuMemcpyDtoH = __CUDA_API_PTDS(cuMemcpyDtoH_v2)
+cuMemcpyDtoD = __CUDA_API_PTDS(cuMemcpyDtoD_v2)
+cuMemcpyDtoA = __CUDA_API_PTDS(cuMemcpyDtoA_v2)
+cuMemcpyAtoD = __CUDA_API_PTDS(cuMemcpyAtoD_v2)
+cuMemcpyHtoA = __CUDA_API_PTDS(cuMemcpyHtoA_v2)
+cuMemcpyAtoH = __CUDA_API_PTDS(cuMemcpyAtoH_v2)
+cuMemcpyAtoA = __CUDA_API_PTDS(cuMemcpyAtoA_v2)
+cuMemcpyHtoAAsync = __CUDA_API_PTSZ(cuMemcpyHtoAAsync_v2)
+cuMemcpyAtoHAsync = __CUDA_API_PTSZ(cuMemcpyAtoHAsync_v2)
+cuMemcpy2D = __CUDA_API_PTDS(cuMemcpy2D_v2)
+cuMemcpy2DUnaligned = __CUDA_API_PTDS(cuMemcpy2DUnaligned_v2)
+cuMemcpy3D = __CUDA_API_PTDS(cuMemcpy3D_v2)
+cuMemcpyHtoDAsync = __CUDA_API_PTSZ(cuMemcpyHtoDAsync_v2)
+cuMemcpyDtoHAsync = __CUDA_API_PTSZ(cuMemcpyDtoHAsync_v2)
+cuMemcpyDtoDAsync = __CUDA_API_PTSZ(cuMemcpyDtoDAsync_v2)
+cuMemcpy2DAsync = __CUDA_API_PTSZ(cuMemcpy2DAsync_v2)
+cuMemcpy3DAsync = __CUDA_API_PTSZ(cuMemcpy3DAsync_v2)
+cuMemsetD8 = __CUDA_API_PTDS(cuMemsetD8_v2)
+cuMemsetD16 = __CUDA_API_PTDS(cuMemsetD16_v2)
+cuMemsetD32 = __CUDA_API_PTDS(cuMemsetD32_v2)
+cuMemsetD2D8 = __CUDA_API_PTDS(cuMemsetD2D8_v2)
+cuMemsetD2D16 = __CUDA_API_PTDS(cuMemsetD2D16_v2)
+cuMemsetD2D32 = __CUDA_API_PTDS(cuMemsetD2D32_v2)
 cuArrayCreate = cuArrayCreate_v2
 cuArrayGetDescriptor = cuArrayGetDescriptor_v2
 cuArray3DCreate = cuArray3DCreate_v2
@@ -3997,6 +4022,7 @@ cuLinkAddData = cuLinkAddData_v2
 cuLinkAddFile = cuLinkAddFile_v2
 cuMemHostRegister = cuMemHostRegister_v2
 cuGraphicsResourceSetMapFlags = cuGraphicsResourceSetMapFlags_v2
+cuStreamBeginCapture = __CUDA_API_PTSZ(cuStreamBeginCapture_v2)
 cuDevicePrimaryCtxRelease = cuDevicePrimaryCtxRelease_v2
 cuDevicePrimaryCtxReset = cuDevicePrimaryCtxReset_v2
 cuDevicePrimaryCtxSetFlags = cuDevicePrimaryCtxSetFlags_v2
@@ -4009,6 +4035,58 @@ cuGraphAddKernelNode = cuGraphAddKernelNode_v2
 cuGraphKernelNodeGetParams = cuGraphKernelNodeGetParams_v2
 cuGraphKernelNodeSetParams = cuGraphKernelNodeSetParams_v2
 cuGraphExecKernelNodeSetParams = cuGraphExecKernelNodeSetParams_v2
+cuStreamWriteValue32 = __CUDA_API_PTSZ(cuStreamWriteValue32_v2)
+cuStreamWaitValue32 = __CUDA_API_PTSZ(cuStreamWaitValue32_v2)
+cuStreamWriteValue64 = __CUDA_API_PTSZ(cuStreamWriteValue64_v2)
+cuStreamWaitValue64 = __CUDA_API_PTSZ(cuStreamWaitValue64_v2)
+cuStreamBatchMemOp = __CUDA_API_PTSZ(cuStreamBatchMemOp_v2)
+cuStreamGetCaptureInfo = __CUDA_API_PTSZ(cuStreamGetCaptureInfo_v2)
+cuStreamGetCaptureInfo_v2 = __CUDA_API_PTSZ(cuStreamGetCaptureInfo_v2)
+cuMemcpy = __CUDA_API_PTDS(cuMemcpy)
+cuMemcpyAsync = __CUDA_API_PTSZ(cuMemcpyAsync)
+cuMemcpyPeer = __CUDA_API_PTDS(cuMemcpyPeer)
+cuMemcpyPeerAsync = __CUDA_API_PTSZ(cuMemcpyPeerAsync)
+cuMemcpy3DPeer = __CUDA_API_PTDS(cuMemcpy3DPeer)
+cuMemcpy3DPeerAsync = __CUDA_API_PTSZ(cuMemcpy3DPeerAsync)
+cuMemPrefetchAsync = __CUDA_API_PTSZ(cuMemPrefetchAsync)
+cuMemsetD8Async = __CUDA_API_PTSZ(cuMemsetD8Async)
+cuMemsetD16Async = __CUDA_API_PTSZ(cuMemsetD16Async)
+cuMemsetD32Async = __CUDA_API_PTSZ(cuMemsetD32Async)
+cuMemsetD2D8Async = __CUDA_API_PTSZ(cuMemsetD2D8Async)
+cuMemsetD2D16Async = __CUDA_API_PTSZ(cuMemsetD2D16Async)
+cuMemsetD2D32Async = __CUDA_API_PTSZ(cuMemsetD2D32Async)
+cuStreamGetPriority = __CUDA_API_PTSZ(cuStreamGetPriority)
+cuStreamGetId = __CUDA_API_PTSZ(cuStreamGetId)
+cuStreamGetFlags = __CUDA_API_PTSZ(cuStreamGetFlags)
+cuStreamGetCtx = __CUDA_API_PTSZ(cuStreamGetCtx)
+cuStreamWaitEvent = __CUDA_API_PTSZ(cuStreamWaitEvent)
+cuStreamEndCapture = __CUDA_API_PTSZ(cuStreamEndCapture)
+cuStreamIsCapturing = __CUDA_API_PTSZ(cuStreamIsCapturing)
+cuStreamUpdateCaptureDependencies = __CUDA_API_PTSZ(cuStreamUpdateCaptureDependencies)
+cuStreamAddCallback = __CUDA_API_PTSZ(cuStreamAddCallback)
+cuStreamAttachMemAsync = __CUDA_API_PTSZ(cuStreamAttachMemAsync)
+cuStreamQuery = __CUDA_API_PTSZ(cuStreamQuery)
+cuStreamSynchronize = __CUDA_API_PTSZ(cuStreamSynchronize)
+cuEventRecord = __CUDA_API_PTSZ(cuEventRecord)
+cuEventRecordWithFlags = __CUDA_API_PTSZ(cuEventRecordWithFlags)
+cuLaunchKernel = __CUDA_API_PTSZ(cuLaunchKernel)
+cuLaunchKernelEx = __CUDA_API_PTSZ(cuLaunchKernelEx)
+cuLaunchHostFunc = __CUDA_API_PTSZ(cuLaunchHostFunc)
+cuGraphicsMapResources = __CUDA_API_PTSZ(cuGraphicsMapResources)
+cuGraphicsUnmapResources = __CUDA_API_PTSZ(cuGraphicsUnmapResources)
+cuLaunchCooperativeKernel = __CUDA_API_PTSZ(cuLaunchCooperativeKernel)
+cuSignalExternalSemaphoresAsync = __CUDA_API_PTSZ(cuSignalExternalSemaphoresAsync)
+cuWaitExternalSemaphoresAsync = __CUDA_API_PTSZ(cuWaitExternalSemaphoresAsync)
+cuGraphInstantiateWithParams = __CUDA_API_PTSZ(cuGraphInstantiateWithParams)
+cuGraphUpload = __CUDA_API_PTSZ(cuGraphUpload)
+cuGraphLaunch = __CUDA_API_PTSZ(cuGraphLaunch)
+cuStreamCopyAttributes = __CUDA_API_PTSZ(cuStreamCopyAttributes)
+cuStreamGetAttribute = __CUDA_API_PTSZ(cuStreamGetAttribute)
+cuStreamSetAttribute = __CUDA_API_PTSZ(cuStreamSetAttribute)
+cuMemMapArrayAsync = __CUDA_API_PTSZ(cuMemMapArrayAsync)
+cuMemFreeAsync = __CUDA_API_PTSZ(cuMemFreeAsync)
+cuMemAllocAsync = __CUDA_API_PTSZ(cuMemAllocAsync)
+cuMemAllocFromPoolAsync = __CUDA_API_PTSZ(cuMemAllocFromPoolAsync)
 CUDA_VERSION = 12000
 CU_IPC_HANDLE_SIZE = 64
 CU_COMPUTE_ACCELERATED_TARGET_BASE = 0x10000

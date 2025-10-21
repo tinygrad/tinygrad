@@ -1,39 +1,49 @@
-import ctypes.util, importlib, importlib.metadata, os, pathlib, re
+import ctypes.util, importlib, importlib.metadata, os, pathlib, re, fcntl, functools
+from tinygrad.helpers import unwrap
 from itertools import takewhile
 
-def CEnum(typ):
-  class _CEnum(typ):
-    _val_to_name_ = {}
-
-    @classmethod
-    def from_param(cls, val): return val if isinstance(val, cls) else cls(val)
-    @classmethod
-    def name(cls, val): return cls._val_to_name_.get(val.value if isinstance(val, cls) else val)
-    @classmethod
-    def define(cls, name, val):
-      cls._val_to_name_[val] = name
-      return cls(val)
-
-    def __eq__(self, other): return self.value == other
-    def __repr__(self): return self.name(self) if self.value in self.__class__._val_to_name_ else str(self.value)
-
-  return _CEnum
-
 def fst(c): return next(c.get_children())
+def last(c): return list(c.get_children())[-1]
+def pread(f, count, offset):
+  with open(f, "r") as f:
+    f.seek(offset)
+    return f.read(count)
+
+def until(pred, f, x):
+  while not pred(x): x = f(x)
+  return x
+
+rules = [(r'\s*\\\n\s*', ' '), (r'//.*', ''), (r'\b(\d+)[UuLl]+\b', r'\1'),
+         (r'\s*&&\s*', r' and '), (r'\s*\|\|\s*', r' or '), (r'\s*!\s*', ' not '),
+         (r'(struct|union|enum)\s*([a-zA-Z_][a-zA-Z0-9_]*\b)', r'\1_\2'),
+         (r'\((unsigned )?(char)\)', '')]
 
 class Autogen:
-  def __init__(self, name, dll, files, args=[]):
-    self.name, self.dll, self.files, self.args, self.types, self.macros, self.anoncnt = name, dll, files, args, {}, set(), 0
-    self._mod = self.gen()
+  def __init__(self, name, dll, files, args=[], prelude=[]):
+    self.name, self.dll, self.loaded, self.files, self.args, self.prelude = name, dll, False, files, args, prelude
+    if not os.path.exists(pathlib.Path(__file__).parent / f"{self.name}.py"): self.gen()
 
-  def __getattr__(self, nm): return getattr(self._mod, nm)
+  def __getattr__(self, nm):
+    if not self.loaded: self._mod, self.loaded = importlib.import_module(f"tinygrad.runtime.autogen.{self.name}"), True
+    return getattr(self._mod, nm)
 
   def render(self, c):
     from clang.cindex import CursorKind as CK
     match c.kind:
-      case CK.RETURN_STMT: return f"return {self.render(next(c.get_children()))}"
-      case CK.PAREN_EXPR: return "(" + self.render(next(c.get_children())) + ")"
-      case CK.UNARY_OPERATOR: return ''.join(t.spelling for t in c.get_tokens())
+      case CK.TRANSLATION_UNIT: self.lines += [line for c in c.get_children() if (line:=self.render(c))]
+      case CK.VAR_DECL:
+        if len(list(c.get_children())) == 0:
+          print(f"WARNING: libclang did not parse {c.spelling}")
+          return None
+        return f"{c.spelling} = {self.render(fst(c))}"
+      case CK.FUNCTION_DECL:
+        if len(list(c.get_children())) == 0 or len(list(last(c).get_children())) == 0:
+          print(f"WARNING: libclang did not parse {c.spelling}")
+          return None
+        return f"{c.spelling} = lambda {','.join(a.spelling for a in c.get_arguments())}: {self.render(fst(last(c)))}"
+      case CK.RETURN_STMT: return self.render(fst(c)) # FIXME: this wont work for static functions
+      case CK.PAREN_EXPR: return "(" + self.render(fst(c)) + ")"
+      case CK.UNARY_OPERATOR: return ''.join({'!':'not '}.get(t.spelling,t.spelling) for t in c.get_tokens())
       case CK.BINARY_OPERATOR: return self.render(next(children:=c.get_children())) + c.spelling + self.render(next(children))
       case CK.UNEXPOSED_EXPR: return self.render(next(c.get_children()))
       case CK.CSTYLE_CAST_EXPR: return f"{self.tname(c.type)}({self.render(next(c.get_children()))})"
@@ -44,44 +54,41 @@ class Autogen:
       case _: raise NotImplementedError(f"unsupported expression {c.kind} in render")
 
   def gen(self):
-    if not os.path.exists(path:=(pathlib.Path(__file__).parent / f"{self.name}.py")):
-      from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, TokenKind as ToK, PrintingPolicy as PP, PrintingPolicyProperty
-      assert importlib.metadata.version('clang')[:2] == "20"
-      if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
+    from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, TokenKind as ToK, PrintingPolicy as PP, PrintingPolicyProperty
+    assert importlib.metadata.version('clang')[:2] == "20"
+    if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
 
-      idx, self.lines = Index.create(), [f"import {', '.join(['ctypes'] + [i for i in ['ctypes.util'] if i in self.dll])}\ndll = {self.dll}\n",
-                                         "from tinygrad.runtime.autogen.autogen import CEnum"]
-      for f in self.files() if callable(self.files) else self.files:
-        macros:list[tuple[str,tuple[str,...]]] = []
-        tu = idx.parse(f, self.args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
-        (pp:=PP.create(tu.cursor)).set_property(PrintingPolicyProperty.TerseOutput, 1)
-        for c in tu.cursor.walk_preorder():
-          if str(c.location.file) != f: continue
-          match c.kind:
-            case CK.FUNCTION_DECL:
-              self.lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype,{c.spelling}.argtypes = "
-                f"{self.tname(c.result_type)},[{', '.join(self.tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
-            case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: self.tname(c.type)
-            case CK.MACRO_DEFINITION if len(toks:=list(c.get_tokens())) > 1:
-              if toks[1].spelling == '(' and toks[0].extent.end.column == toks[1].extent.start.column:
-                it = iter(toks[1:])
-                args = [t.spelling for t in takewhile(lambda t:t.spelling!=')', it) if t.kind == ToK.IDENTIFIER]
-                body = ' '.join(t.spelling for t in it)
-                mtu = idx.parse("tmp.c", unsaved_files=[("tmp.c", f"{';'.join(args)};_x = {body};")])
-                if len(list((decl:=list(mtu.cursor.get_children())[-1]).get_children())) == 0: continue
-                try: macros += [(f"def {c.spelling}({', '.join(a for a in args)}): return " + self.render(fst(decl)), ())]
-                except Exception as e: raise Exception(f"{c.location}") from e
-              elif len(toks) == 2:
-                macros += [(c.spelling+" = "+re.sub(r'\b(\d+)(L|U)',r'\1',(t:=toks[1]).spelling), (t.spelling,) if t.kind == ToK.IDENTIFIER else ())]
-              else:
-                mtu = idx.parse("tmp.c", unsaved_files=[("tmp.c", f"_x = {' '.join(t.spelling for t in toks[1:])};")])
-                if len(list((decl:=fst(mtu.cursor)).get_children())) == 0: continue
-                try: macros += [(f"{c.spelling} = {self.render(fst(decl))}", ())]
-                except Exception as e: raise Exception(f"{c.location}") from e
-        self.lines += [m[0] for m in macros if all([dep in '\n'.join(self.lines) for dep in m[1]])]
-      with open(path, "w") as f: f.write('\n'.join(self.lines))
-      importlib.invalidate_caches()
-    return importlib.import_module(f"tinygrad.runtime.autogen.{self.name}")
+    idx, self.lines = Index.create(), [f"import {', '.join(['ctypes'] + [i for i in ['ctypes.util'] if i in (self.dll or '')])}",
+      "from tinygrad.runtime.autogen.helpers import *", *([f"dll = {self.dll}\n"] if self.dll else []), *self.prelude]
+    self.types, self.macros, self.anoncnt = {}, set(), 0
+    macros:list[str] = []
+    for f in self.files() if callable(self.files) else self.files:
+      tu = idx.parse(f, self.args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
+      (pp:=PP.create(tu.cursor)).set_property(PrintingPolicyProperty.TerseOutput, 1)
+      for c in tu.cursor.walk_preorder():
+        if str(c.location.file) != f: continue
+        match c.kind:
+          case CK.FUNCTION_DECL:
+            self.lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype,{c.spelling}.argtypes = "
+              f"{self.tname(c.result_type)},[{', '.join(self.tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
+          case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: self.tname(c.type)
+          case CK.MACRO_DEFINITION if len(toks:=list(c.get_tokens())) > 1:
+            if toks[1].spelling == '(' and toks[0].extent.end.column == toks[1].extent.start.column:
+              it = iter(toks[1:])
+              args = [t.spelling for t in takewhile(lambda t:t.spelling!=')', it) if t.kind == ToK.IDENTIFIER]
+              macros += [f"{c.spelling} = lambda {','.join(args)}: {pread(f, toks[-1].extent.end.offset - (begin:=next(it).location.offset), begin)}"]
+            else: macros += [f"{c.spelling} = {pread(f, toks[-1].extent.end.offset - (begin:=toks[1].location.offset), begin)}"]
+    main, macros = '\n'.join(self.lines) + '\n', [functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules, m) for m in macros]
+    while True:
+      try:
+        exec(main + '\n'.join(macros), {})
+        break
+      except Exception as e:
+        macrono = unwrap(e.lineno if isinstance(e, SyntaxError) else unwrap(unwrap(e.__traceback__).tb_next).tb_lineno) - main.count('\n') - 1
+        print(f"Skipping {macros[macrono].split()[0]}: {e}")
+        del macros[macrono]
+    with open(pathlib.Path(__file__).parent / f"{self.name}.py", "w") as f: f.write(main + '\n'.join(macros))
+    importlib.invalidate_caches()
 
   def tname(self, t) -> str:
     from clang.cindex import CursorKind as CK, TypeKind as TK
@@ -97,9 +104,9 @@ class Autogen:
       case TK.POINTER: return pmap[t.get_pointee().kind] if t.get_pointee().kind in pmap else f"ctypes.POINTER({self.tname(t.get_pointee())})"
       case TK.ELABORATED: return self.tname(t.get_named_type())
       case TK.TYPEDEF:
-        self.types[t.spelling] = t.spelling
+        self.types[t.spelling] = self.tname(t.get_canonical()) if t.spelling.startswith("__") else t.spelling
         self.lines.append(f"{t.spelling} = {self.tname(t.get_canonical())}")
-        return t.spelling
+        return self.types[t.spelling]
       case TK.RECORD:
         if (decl:=t.get_declaration()).is_anonymous():
           self.types[t.spelling] = f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{self.anoncnt}"

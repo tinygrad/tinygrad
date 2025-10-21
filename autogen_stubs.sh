@@ -67,19 +67,6 @@ generate_comgr() {
   python3 -c "import tinygrad.runtime.autogen.comgr"
 }
 
-generate_kfd() {
-  clang2py /usr/include/linux/kfd_ioctl.h -o $BASE/kfd.py -k cdefstum
-
-  fixup $BASE/kfd.py
-  sed -i "s/import ctypes/import ctypes, os/g" $BASE/kfd.py
-  sed -i "s/import fcntl, functools/import functools/g" $BASE/kfd.py
-  sed -i "/import functools/a from tinygrad.runtime.support.hcq import FileIOInterface" $BASE/kfd.py
-  sed -i "s/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd, \*\*kwargs):/def _do_ioctl(__idir, __base, __nr, __user_struct, __fd:FileIOInterface, \*\*kwargs):/g" $BASE/kfd.py
-  sed -i "s/fcntl.ioctl(__fd, (__idir<<30)/__fd.ioctl((__idir<<30)/g" $BASE/kfd.py
-  sed -i "s/!!/not not /g" $BASE/kfd.py
-  python3 -c "import tinygrad.runtime.autogen.kfd"
-}
-
 generate_nv() {
   NVKERN_COMMIT_HASH=81fe4fb417c8ac3b9bdcc1d56827d116743892a5
   NVKERN_SRC=/tmp/open-gpu-kernel-modules-$NVKERN_COMMIT_HASH
