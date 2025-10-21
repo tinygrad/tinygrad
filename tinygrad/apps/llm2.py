@@ -23,14 +23,16 @@ from examples.llama3 import load
 from extra.models.llama import fix_bf16
 from transformers import AutoTokenizer
 
-from icecream import install
+from icecream import install, ic
 install()
+
+def fix(x): return x.cast('float').numpy()
 
 MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24, "n_experts": 32, "n_active_experts": 4,
                "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
-               "rope_params": {"theta": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
+               "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
                },
     "total_num_weights": 3,
     "model": "openai/gpt-oss-20b",
@@ -57,14 +59,6 @@ def precompute_freqs_cis(dim:int, end:int, theta:float = 10000.0, scale:float=1.
   mask = 1 - ramp.clamp(0, 1)
   freqs = interpolation * (1 - mask) + extrapolation * mask
   return _angles(freqs, 0.1 * math.log(scale) + 1.0)
-
-# matches meta, non hugging face weights
-# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
-def complex_mult(A, c, d):
-  a,b = A[..., 0:1], A[..., 1:2]
-  ro = a*c - b*d
-  co = a*d + b*c
-  return ro.cat(co, dim=-1)
 
 def apply_rope3(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
   B, H, T, Hd = x.shape
@@ -111,22 +105,103 @@ def apply_rope2(x:Tensor, start_pos:int|UOp, base:float=10000.0) -> Tensor:
   freqs = interpolation * (1 - mask) + extrapolation * mask
   return _angles(freqs, 0.1 * math.log(scale) + 1.0)
 
+# matches meta, non hugging face weights
+# (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
+def complex_mult(A, c, d):
+  a,b = A[..., 0:1], A[..., 1:2]
+  ro = a*c - b*d
+  co = a*d + b*c
+  return ro.cat(co, dim=-1)
 
-def apply_rope(x:Tensor, start_pos:int|UOp, base:float=10000.0) -> Tensor:
+  c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
+  ic(c.numpy(), d.numpy())
+  xq_out = complex_mult(xq, c, d)
+  xk_out = complex_mult(xk, c, d)
+
+def apply_rope_f1(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
   B, H, T, Hd = x.shape
   assert (Hd & 1) == 0, "RoPE requires an even head dimension"
   half = Hd // 2
-  angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
-  # contiguous here allows RoPE to be pruned in the JIT
-  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype).contiguous(), angles.sin().reshape(1, 1, T, half).cast(x.dtype).contiguous()
-  x_pairs = x.reshape(B, H, T, half, 2)
-  return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
-                      x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
+  freqs = base ** -(Tensor.arange(half, dtype="float32") / half)
 
+  def _complex_mult(x_pairs, cos, sin):
+    return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin, x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1)
+
+  def yarn(freqs):
+    def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(base)
+    low, high = _ratio(ntk_beta), _ratio(ntk_alpha)
+    interpolation, extrapolation = freqs / scale, freqs
+    ramp = (Tensor.arange(half, dtype=dtypes.float32) - low) / (high - low)
+    mask = 1 - ramp.clamp(0, 1)
+    return interpolation * (1 - mask) + extrapolation * mask
+
+  if scale > 1:
+    freqs = yarn(freqs)
+    x = x * (0.1 * math.log(scale) + 1.0)
+
+  pos_ids = Tensor.arange(T, dtype=dtypes.float32) + start_pos
+  angles = (pos_ids[:, None] * freqs[None, :]).reshape(1, 1, T, half)
+  x = x.cast(dtypes.float32) # cast to float32!
+  # contiguous here allows RoPE to be pruned in the JIT
+  cos, sin = angles.cos().cast(x.dtype).contiguous(), angles.sin().cast(x.dtype).contiguous()
+  return _complex_mult(x.reshape(B,H,T,2,half).transpose(-1, -2), cos, sin).transpose(-1, -2).reshape(B, H, T, Hd)
+
+def apply_rope_f2(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
+  B, H, T, Hd = x.shape
+  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  half = Hd // 2
+  freqs = (base ** (-(Tensor.arange(half, dtype="float32") / half)))
+
+  # yarn
+  if scale > 1:
+    x = x * (0.1 * math.log(scale) + 1.0)
+
+    def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(base)
+    low, high = _ratio(ntk_beta), _ratio(ntk_alpha)
+    interpolation, extrapolation = freqs / scale, freqs
+    ramp = (Tensor.arange(half, dtype=dtypes.float32) - low) / (high - low)
+    mask = 1 - ramp.clamp(0, 1)
+    freqs = interpolation * (1 - mask) + extrapolation * mask
+
+  angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * freqs[None, :]
+  # contiguous here allows RoPE to be pruned in the JIT
+  cos, sin = angles.cos().reshape(1, 1, T, half).cast('float').contiguous(), angles.sin().reshape(1, 1, T, half).cast('float').contiguous()
+  x_pairs = x.reshape(B, H, T, 2, half).transpose(-1, -2)
+  return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
+                      x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).transpose(-1, -2).reshape(B, H, T, Hd)
+
+
+def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
+  B, H, T, Hd = x.shape
+  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  half = Hd // 2
+  freqs = (base ** (-(Tensor.arange(half, dtype="float32") / half)))
+
+  def rotate(x_pairs, freqs):
+    angles = ((Tensor.arange(T, dtype="float32") + start_pos)[:, None] * freqs[None, :]).reshape(1, 1, T, half)
+    # contiguous here allows RoPE to be pruned in the JIT
+    cos, sin = angles.cos().cast('float').contiguous(), angles.sin().cast('float').contiguous()
+    return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin, x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1)
+
+  # rope
+  if scale <= 1:
+    return rotate(x.reshape(B, H, T, 2, half).transpose(-1, -2), freqs).transpose(-1, -2).reshape(B, H, T, Hd)
+
+  # yarn
+  def _ratio(ntk): return half * math.log(initial_context_length / (ntk * 2 * math.pi)) / math.log(base)
+  x = x * (0.1 * math.log(scale) + 1.0)
+  low, high = _ratio(ntk_beta), _ratio(ntk_alpha)
+  interpolation, extrapolation = freqs / scale, freqs
+  ramp = (Tensor.arange(half, dtype=dtypes.float32) - low) / (high - low)
+  mask = 1 - ramp.clamp(0, 1)
+  freqs = interpolation * (1 - mask) + extrapolation * mask
+  return rotate(x.reshape(B, H, T, 2, half).transpose(-1, -2), freqs).transpose(-1, -2).reshape(B, H, T, Hd)
+
+
+# arxiv.org/pdf/2002.05202v1
 def swiglu(x, alpha: float = 1.702, limit: float = 7.0):
     x_glu = x[..., ::2].clamp(max_=limit)
     x_linear = x[..., 1::2].clamp(-limit, limit)
-    out_glu = x_glu * (alpha * x_glu).sigmoid()
     return x_glu * (alpha * x_glu).sigmoid() * (x_linear + 1)
 
 class TransformerBlock:
@@ -187,9 +262,15 @@ class TransformerBlock:
     q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    # ic(x.shape, self.attn_q.weight.shape, q.shape)
 
+    # ic(fix(x), fix(q), fix(self.attn_q.weight), x.shape)
     q = apply_rope(q, start_pos)
+    ic(fix(q))
+    1 / 0
     k = apply_rope(k, start_pos)
+    ic(fix(q), fix(k))
+    1/0
 
     # TODO: remove these kv cache realizes
     if not hasattr(self, "cache_kv"):
@@ -264,16 +345,16 @@ def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads
   # map hf to tinygrad
   keymap = {
     "model.embed_tokens.weight": "token_embd.weight",
-    **{f"model.layers.{l}.input_layernorm.weight": f"layers.{l}.attn_norm.weight" for l in range(num_blocks)},
-    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"layers.{l}.attn_{x}.weight" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
-    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"layers.{l}.attn_{x}.bias" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
-    **{f"model.layers.{l}.self_attn.sinks": f"layers.{l}.attn_sinks" for l in range(num_blocks)},
-    **{f"model.layers.{l}.post_attention_layernorm.weight": f"layers.{l}.ffn_norm.weight" for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.router.weight": f"layers.{l}.ffn_gate.weight" for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.router.bias": f"layers.{l}.ffn_gate.bias" for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d1}_proj_bias": f"layers.{l}.ffn_{d2}_proj_bias" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d1}_proj_blocks": f"layers.{l}.ffn_{d2}_proj_blocks" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d1}_proj_scales": f"layers.{l}.ffn_{d2}_proj_scales" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
+    **{f"model.layers.{l}.input_layernorm.weight": f"blk.{l}.attn_norm.weight" for l in range(num_blocks)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"blk.{l}.attn_{x}.weight" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"blk.{l}.attn_{x}.bias" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.self_attn.sinks": f"blk.{l}.attn_sinks" for l in range(num_blocks)},
+    **{f"model.layers.{l}.post_attention_layernorm.weight": f"blk.{l}.ffn_norm.weight" for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.router.weight": f"blk.{l}.ffn_gate.weight" for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.router.bias": f"blk.{l}.ffn_gate.bias" for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d1}_proj_bias": f"blk.{l}.ffn_{d2}_proj_bias" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d1}_proj_blocks": f"blk.{l}.ffn_{d2}_proj_blocks" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d1}_proj_scales": f"blk.{l}.ffn_{d2}_proj_scales" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
     "model.norm.weight": "output_norm.weight",
     "lm_head.weight": "output.weight",
   }
@@ -293,24 +374,25 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
     """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
     mxfp4_data = Tensor.cat(scales.unsqueeze(-1), blocks, dim=-1).flatten()  # interleave and flatten to 1D
-    # ic(blocks, scales, mxfp4_data)
     return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, 39).reshape(*scales.shape[:2], -1)
 
   # dequantize only the ffn_up_proj and ffn_down_proj
   for l in range(num_blocks):
     for d in ['up', 'down']:
-      blocks = f'layers.{l}.ffn_{d}_proj_blocks'
-      scales = f'layers.{l}.ffn_{d}_proj_scales'
+      blocks = f'blk.{l}.ffn_{d}_proj_blocks'
+      scales = f'blk.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
-      # ic(proj)
       weights[f'layers.{l}.ffn_{d}_proj'] = proj
     return weights
 
 def main(args):
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
+  args.prompt *= 8
+  ic(args.prompt)
 
   model_info = MODELS[args.size]
+
   model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
 
@@ -321,13 +403,12 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     print(f"Using {device=}")
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1])
-    model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=device)
+    model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
     generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   357,   939,   261]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
     return
-
 
   # build model
   model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights)
