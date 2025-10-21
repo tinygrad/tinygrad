@@ -27,32 +27,6 @@ class Autogen:
     if not self.loaded: self._mod, self.loaded = importlib.import_module(f"tinygrad.runtime.autogen.{self.name}"), True
     return getattr(self._mod, nm)
 
-  def render(self, c):
-    from clang.cindex import CursorKind as CK
-    match c.kind:
-      case CK.TRANSLATION_UNIT: self.lines += [line for c in c.get_children() if (line:=self.render(c))]
-      case CK.VAR_DECL:
-        if len(list(c.get_children())) == 0:
-          print(f"WARNING: libclang did not parse {c.spelling}")
-          return None
-        return f"{c.spelling} = {self.render(fst(c))}"
-      case CK.FUNCTION_DECL:
-        if len(list(c.get_children())) == 0 or len(list(last(c).get_children())) == 0:
-          print(f"WARNING: libclang did not parse {c.spelling}")
-          return None
-        return f"{c.spelling} = lambda {','.join(a.spelling for a in c.get_arguments())}: {self.render(fst(last(c)))}"
-      case CK.RETURN_STMT: return self.render(fst(c)) # FIXME: this wont work for static functions
-      case CK.PAREN_EXPR: return "(" + self.render(fst(c)) + ")"
-      case CK.UNARY_OPERATOR: return ''.join({'!':'not '}.get(t.spelling,t.spelling) for t in c.get_tokens())
-      case CK.BINARY_OPERATOR: return self.render(next(children:=c.get_children())) + c.spelling + self.render(next(children))
-      case CK.UNEXPOSED_EXPR: return self.render(next(c.get_children()))
-      case CK.CSTYLE_CAST_EXPR: return f"{self.tname(c.type)}({self.render(next(c.get_children()))})"
-      case CK.DECL_REF_EXPR: return c.spelling
-      case CK.INTEGER_LITERAL: return next(c.get_tokens()).spelling.replace('U', '').replace('L', '')
-      case CK.CHARACTER_LITERAL | CK.STRING_LITERAL: return next(c.get_tokens()).spelling
-      case CK.CALL_EXPR: return f"{c.spelling}({', '.join(self.render(a) for a in c.get_arguments())})"
-      case _: raise NotImplementedError(f"unsupported expression {c.kind} in render")
-
   def gen(self):
     from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, TokenKind as ToK, PrintingPolicy as PP, PrintingPolicyProperty
     assert importlib.metadata.version('clang')[:2] == "20"
