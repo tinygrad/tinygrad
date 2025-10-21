@@ -170,6 +170,7 @@ SPEC = ContextVar("SPEC", 0)
 # TODO: disable by default due to speed
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
+NEW_LINEARIZE = ContextVar("NEW_LINEARIZE", 1)
 
 @dataclass(frozen=True)
 class Metadata:

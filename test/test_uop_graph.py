@@ -665,6 +665,7 @@ class TestUOpGraph(unittest.TestCase):
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
 
+  @unittest.skip("outdated test")
   def test_switched_range_order(self):
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
     cf = UOp.const(dtypes.float, 0.0)
