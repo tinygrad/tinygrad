@@ -530,9 +530,9 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
-function toggleActive(prev, next) {
-  prev?.classList.remove("active");
-  next?.classList.add("active");
+function toggleCls(prev, next, cls, value) {
+  prev?.classList.remove(cls);
+  next?.classList.toggle(cls, value ?? true);
   requestAnimationFrame(() => next?.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
 
@@ -567,10 +567,10 @@ function setState(ns) {
   Object.assign(state, ns);
   // update element styles if needed
   const { ctx, step } = select(state.currentCtx, state.currentStep);
-  ctx?.classList.toggle("expanded", state.expandSteps);
-  if (ctx?.id !== prevCtx?.id) toggleActive(prevCtx, ctx);
+  toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
+  if (ctx?.id !== prevCtx?.id) toggleCls(prevCtx, ctx, "active");
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
-    toggleActive(prevStep, step);
+    toggleCls(prevStep, step, "active");
     // walk the tree back until all parents expanded so that the child is visible
     let e = step;
     while (e?.parentElement?.id.startsWith("step")) {
