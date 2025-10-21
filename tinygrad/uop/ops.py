@@ -190,7 +190,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.FUSE | Ops.AFTER:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.FUSE | Ops.AFTER | Ops.END:
         return self.src[0]._shape
 
       # ops with custom handling
@@ -276,6 +276,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
       for s in UOp.sink(*self.src[range_start[self.op]:]).ranges:
         if s in ret: del ret[s]
+    elif self.op is Ops.END:
+      for s in self.src[self.arg:]: ret.update(s.ranges)
+      for s in UOp.sink(*self.src[:self.arg]).ranges:
+        if s in ret: del ret[s]
     else:
       for s in self.src: ret.update(s.ranges)
     return ret
@@ -284,6 +288,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
     return self._ranges
+
+  @functools.cached_property
+  def ended_ranges(self):
+    match self.op:
+      case Ops.REDUCE: return self.src[1:]
+      case Ops.END: return self.src[:self.arg]
+      case _: raise RuntimeError(f"{self.op} doesn't end ranges")
 
   # *** uop evaluation ***
 
@@ -350,6 +361,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
+  def end(self, *src:UOp, ends:Sequence[UOp]):
+    if len(ends) == 0:
+      if len(src): return UOp(Ops.NOOP, src=(self, *src))
+      return self
+    return UOp(Ops.END, src=(*ends, self, *src), arg=len(ends))
   def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
@@ -541,8 +557,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.buf_uop for x in self.src))
-    assert self.op is Ops.AFTER, f"must be AFTER {self.op}"
-    return self.src[0].buf_uop.base
+    assert self.base.op is Ops.AFTER, f"must be AFTER {self.base.op}"
+    return self.base.src[0].buf_uop.base
 
   def as_buf(self) -> UOp:
     if self.op is Ops.MSELECT: return self.src[0].as_buf().mselect(self.arg)

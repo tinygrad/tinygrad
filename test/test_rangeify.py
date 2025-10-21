@@ -1,7 +1,9 @@
 import unittest
-from tinygrad import Tensor, nn
-from tinygrad.helpers import Context, GlobalCounters, CI, CPU_LVP, getenv
+from tinygrad import Tensor, nn, Device
+from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
+from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
@@ -40,7 +42,7 @@ elif getenv("BIG") > 0:
 else:
   BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
-@unittest.skipIf(CPU_LVP, "broken in LVP")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
 class TestPcontig(unittest.TestCase):
   def test_flash_attention_bw(self):
     def fa_bw():
@@ -62,11 +64,11 @@ class TestPcontig(unittest.TestCase):
       Tensor.realize(*ret)
       return ret
 
-    with Context(PCONTIG=2, DEBUG=2):
+    with Context(PCONTIG=max(2, PCONTIG.value), DEBUG=2):
       grads = fa_bw()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
 
-    with Context(DEBUG=2):
+    with Context(PCONTIG=0, DEBUG=2):
       cmp_grads = fa_bw()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
 
