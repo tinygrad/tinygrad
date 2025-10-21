@@ -2359,6 +2359,8 @@ class Tensor(MathTrait):
 
   # ***** processing ops *****
 
+  # POOL_IMPL toggle (default MAIN; ALT only for temporary parity soak).
+  # See PR #0000 ([pr] refactor: unify Tensor._pool (gated) + kernel parity tests); delete after soak once kernels stay identical.
   def _pool(self, k_:tuple[sint, ...], stride:int|tuple[int, ...]=1, dilation:int|tuple[int, ...]=1) -> Tensor:
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
     s_, d_ = make_tuple(stride, len(k_)), make_tuple(dilation, len(k_))
