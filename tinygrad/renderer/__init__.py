@@ -32,6 +32,8 @@ class Estimates:
         if u.op in {Ops.LOAD, Ops.STORE} and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
           # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
           dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort())
+          # TODO: is this correct? this all needs to be cleaned up
+          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
