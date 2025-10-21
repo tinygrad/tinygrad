@@ -272,8 +272,6 @@ pm_render = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
     lambda store,idx: UOp(Ops.ENDIF, src=(uif:=UOp(Ops.IF, src=(idx.src[2],)), UOp(Ops.STORE, src=store.src[:2]+(uif,)+store.src[2:]))) if \
       len(store.src) <= 2 or store.src[2].op != Ops.IF else None),
-  # for renderering and linearizing, all ends must end one loop
-  (UPat(Ops.END, name="e"), lambda e: e.replace(src=e.src[e.arg-1:], arg=1).end(ends=e.src[:e.arg-1]) if e.arg > 1 else None),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
