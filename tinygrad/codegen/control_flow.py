@@ -96,5 +96,7 @@ def do_merge_ends(s:UOp):
   return ret
 
 pm_merge_ends = PatternMatcher([
+  # for renderering and linearizing, all ends must end one loop
+  (UPat(Ops.END, name="e"), lambda e: e.replace(src=e.src[e.arg-1:], arg=1).end(ends=e.src[:e.arg-1]) if e.arg > 1 else None),
   (UPat(Ops.SINK, name="s"), do_merge_ends),
 ])

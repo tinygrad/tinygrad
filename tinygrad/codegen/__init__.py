@@ -96,7 +96,7 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
   # this was the linearizer
-  ret.append(RewriteStep(pm_merge_ends, name="merge ends", bottom_up=True))
+  ret.append(RewriteStep(pm_merge_ends, name="merge ends"))
   ret.append(RewriteStep(pm_add_control_flow, CFGContext, name="add control flow starts", bottom_up=True))
 
   # return the list
