@@ -17,7 +17,6 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
 from tinygrad.codegen.opt.postrange import pm_postrange_opt
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
-#from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
 from tinygrad.codegen.control_flow import CFGContext, pm_merge_ends, pm_add_control_flow, linearize
 
 @dataclass
@@ -30,19 +29,6 @@ class RewriteStep:
     return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
 def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
-
-"""
-rewrites_for_linearizer = [
-  RewriteStep(block_create, ctx=BlockContext.from_sink, name="Linearizer: Create Blocks", bottom_up=True),
-  RewriteStep(pm_blockend_merge, name="Linearizer: Merge Blockends"),
-  RewriteStep(block_merge, name="Linearizer: Merge Blocks"),
-  RewriteStep(pm_finalize, name="Linearizer: Finalize")]
-"""
-
-rewrites_for_linearizer = [
-  RewriteStep(pm_merge_ends, CFGContext, name="merge ends", bottom_up=True),
-  RewriteStep(pm_add_control_flow, CFGContext, name="add control flow starts", bottom_up=True),
-]
 
 def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool=True) -> list[RewriteStep]:
   # cache with the values of the context vars
@@ -109,11 +95,15 @@ def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _Q
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher
   ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
-  # return the list (with optional linearizer)
-  return ret + (rewrites_for_linearizer if linearizer else [])
+  # this was the linearizer
+  ret.append(RewriteStep(pm_merge_ends, name="merge ends", bottom_up=True))
+  ret.append(RewriteStep(pm_add_control_flow, CFGContext, name="add control flow starts", bottom_up=True))
 
-def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True, linearizer:bool=False) -> UOp:
-  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize, linearizer))
+  # return the list
+  return ret
+
+def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True) -> UOp:
+  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize))
 
 def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
@@ -127,6 +117,6 @@ def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
     Linear program in UOps.
   """
 
-  lst = linearize(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None, linearizer=True))
+  lst = linearize(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None))
   if __debug__: type_verify(lst)
   return lst
