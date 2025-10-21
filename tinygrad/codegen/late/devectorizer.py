@@ -295,8 +295,8 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   # if we have a range
   if len(reduce_range) != 0:
     topo = inp.toposort()
-    stored_ranges = flatten([x.src[2:] for x in topo if x.op is Ops.STORE])
-    input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in stored_ranges])
+    ended_ranges = [x.src[0] for x in topo if x.op is Ops.END]
+    input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))
     acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
