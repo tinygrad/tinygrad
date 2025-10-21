@@ -34,8 +34,8 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc),
               "query":f"/ctxs?ctx={i}&idx={j}", "depth":s.depth} for j,s in enumerate(v)]
     if isinstance(k.ret, ProgramSpec):
-      steps.append({"name":"View Program", "query":f"/render?ctx={i}&fmt=src"})
-      steps.append({"name":"View Disassembly", "query":f"/render?ctx={i}&fmt=asm"})
+      steps.append({"name":"View Program", "query":f"/render?ctx={i}&fmt=src", "depth":0})
+      steps.append({"name":"View Disassembly", "query":f"/render?ctx={i}&fmt=asm", "depth":0})
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
