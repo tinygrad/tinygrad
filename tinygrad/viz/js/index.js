@@ -775,24 +775,30 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 // **** keyboard shortcuts
 
+const select = (ctx, step) => ({ ctx:document.getElementById(`ctx-${ctx}`), step:document.getElementById(`step-${ctx}-${step}`) });
+const deselect = (element) => {
+  const parts = element.id.split("-").map(Number);
+  return element.id.startsWith("ctx") ? { ctx:parts[1], step:null } : element.id.startsWith("step") ? {ctx:parts[1], step:parts[2]} : {};
+}
+
 document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
-  const step = document.getElementById(`step-${currentCtx}-${currentStep}`);
+  const { step, ctx } = select(currentCtx, currentStep);
   if (event.key == "ArrowUp") {
     event.preventDefault();
     if (changeStep) {
-      const prevId = step.previousElementSibling?.id;
-      return prevId != null && setState({ currentRewrite:0, currentStep:+prevId.split("-").at(-1) });
+      const prev = deselect(step.previousElementSibling);
+      return prev.step != null && setState({ currentRewrite:0, currentStep:prev.step });
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
     if (changeStep) {
-      const nextId = step.nextElementSibling?.id;
-      return nextId != null && setState({ currentRewrite:0, currentStep:+nextId.split("-").at(-1) });;
+      const next = deselect(step.nextElementSibling);
+      return next.step != null && setState({ currentRewrite:0, currentStep:next.step });
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
   }
