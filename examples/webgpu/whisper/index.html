@@ -250,8 +250,9 @@
 
         let currentCancel = null;
         async function transcribeAudio(audioFetcher, cancelToken) {
+            let before = performance.now();
             await loadAndInitializeModels();
-            const { samples } = await audioFetcher();
+            const { sampleRate, samples } = await audioFetcher();
 
             let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
             for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
@@ -267,11 +268,7 @@
                 log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
             }
 
-            // let res = await fetch(`${BASE_URL}/RED_16k.mel_f32`);
-            // log_specs_full = new Float32Array(await res.arrayBuffer());
-            // const audio_features_full = new Float32Array(await fetch(`${BASE_URL}/RED_16k.features`).then((res) => res.arrayBuffer()));
-
-            const mapping = await fetch('./vocab.json').then(res => res.json());
+            const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
 
             let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
             const updateLoop = (now) => {
@@ -328,6 +325,7 @@
                     const newChunk = document.createElement('div');
                     newChunk.className = 'transcription-chunk';
                     newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
+                    // console.log(segment_cumlogprob.toFixed(2) + ' ' + pendingText);
                     transcriptionLog.appendChild(newChunk);
                     pendingText = '';
                     currentTranscription.innerText = '';
@@ -338,7 +336,8 @@
             inferenceDone = true;
             currentTranscription.style.display = 'none';
 
-            console.log("end transcription");
+            let took = performance.now() - before;
+            console.log("end transcription: " + took);
         }
 
         const overlay = document.getElementById('overlay');
