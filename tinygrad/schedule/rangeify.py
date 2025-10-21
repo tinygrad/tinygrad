@@ -204,6 +204,8 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
     lambda c,idx: c.rtag(nt if len(nt:=(idx.src[0].tag or ()) + (c.tag or ())) else None)),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
+  (UPat(Ops.BUFFERIZE, src=(UPat(Ops.NOOP, src=(UPat(),), name="n"),), allow_any_len=True, name="buf"), lambda n,buf:
+    buf.replace(src=(n.src[0],)+buf.src[1:])),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
