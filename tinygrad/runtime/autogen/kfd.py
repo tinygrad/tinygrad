@@ -1,6 +1,5 @@
 import ctypes
-from tinygrad.runtime.autogen.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-
+from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 __u32 = ctypes.c_uint
 class struct_kfd_ioctl_get_version_args(ctypes.Structure):
   _pack_ = 4
