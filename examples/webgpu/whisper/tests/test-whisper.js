@@ -133,7 +133,7 @@ nets.decoder = await decoder.setupNet(device, new Uint8Array(await getPart("deco
 
 
 let currentCancel = null;
-async function transcribeAudio(audioFetcher, cancelToken) {
+async function transcribeAudio(audioFetcher, cancelToken, onEvent) {
   let before = performance.now();
   // await loadAndInitializeModels();
   const { sampleRate, samples } = await audioFetcher();
@@ -175,11 +175,15 @@ async function transcribeAudio(audioFetcher, cancelToken) {
     }
     const [audio_features] = await nets.encoder(log_spec);
     // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
-
-    let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, pendingText => console.log(pendingText));
+    function updateCallback(pd) {
+      pendingText = pd;
+      console.log(pendingText);
+    }
+    let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
     if (cancelToken.cancelled) {
       console.log("Transcription cancelled");
       inferenceDone = true;
+      onEvent("cancel");
       // currentTranscription.style.display = 'none';
       return;
     } else {
@@ -192,10 +196,11 @@ async function transcribeAudio(audioFetcher, cancelToken) {
       }
       previous_context = context.slice();
 
+      onEvent("chunkDone", {avg_logprob, segment_cumlogprob, context, offset, pendingText});
       // const newChunk = document.createElement('div');
       // newChunk.className = 'transcription-chunk';
       // newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
-      console.log(segment_cumlogprob.toFixed(2) + ' ' + pendingText);
+      // console.log(segment_cumlogprob.toFixed(2) + ' ' + pendingText);
       // transcriptionLog.appendChild(newChunk);
       pendingText = '';
       // currentTranscription.innerText = '';
@@ -210,8 +215,16 @@ async function transcribeAudio(audioFetcher, cancelToken) {
   console.log("end transcription: " + took);
 }
 
+function onTranscriptionEvent(event, data) {
+  if (event === "cancel") {
+
+  } else if (event === "chunkDone") {
+    console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
+  }
+}
+
 currentCancel = { cancelled: false };
-await transcribeAudio(async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel);
+await transcribeAudio(async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent);
 console.log("we're supposed to be done here");
 
 delete globalThis.mel;

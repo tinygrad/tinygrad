@@ -171,13 +171,26 @@
         }
         let _ = setModelName();
 
+        function onTranscriptionEvent(event, data) {
+            if (event === "cancel") {
+                currentTranscription.style.display = 'none';
+            } else if (event === "chunkDone") {
+                const newChunk = document.createElement('div');
+                newChunk.className = 'transcription-chunk';
+                newChunk.innerText = data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText;
+                console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
+                transcriptionLog.appendChild(newChunk);
+                currentTranscription.innerText = '';
+            }
+        }
+
         document.getElementById("fetchForm").addEventListener("submit", async (e) => {
             // prevent page refresh
             e.preventDefault();
             const url = document.getElementById("urlInput").value;
             try {
                 currentCancel = { cancelled: false };
-                await transcribeAudio(async () => await fetchMonoFloat32Array(url), currentCancel);
+                await transcribeAudio(async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent);
             } catch (err) {
                 console.error("Fetch failed:", err);
             }
@@ -249,7 +262,7 @@
         }
 
         let currentCancel = null;
-        async function transcribeAudio(audioFetcher, cancelToken) {
+        async function transcribeAudio(audioFetcher, cancelToken, onEvent) {
             let before = performance.now();
             await loadAndInitializeModels();
             const { sampleRate, samples } = await audioFetcher();
@@ -310,7 +323,8 @@
                 if (cancelToken.cancelled) {
                     console.log("Transcription cancelled");
                     inferenceDone = true;
-                    currentTranscription.style.display = 'none';
+                    onEvent("cancel");
+                    // currentTranscription.style.display = 'none';
                     return;
                 } else {
                     if ((avg_logprob < -1) && temperature < 1) {
@@ -322,13 +336,14 @@
                     }
                     previous_context = context.slice();
 
-                    const newChunk = document.createElement('div');
-                    newChunk.className = 'transcription-chunk';
-                    newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
+                    onEvent("chunkDone", {avg_logprob, segment_cumlogprob, context, offset, pendingText});
+                    // const newChunk = document.createElement('div');
+                    // newChunk.className = 'transcription-chunk';
+                    // newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
                     // console.log(segment_cumlogprob.toFixed(2) + ' ' + pendingText);
-                    transcriptionLog.appendChild(newChunk);
+                    // transcriptionLog.appendChild(newChunk);
                     pendingText = '';
-                    currentTranscription.innerText = '';
+                    // currentTranscription.innerText = '';
 
                     seek += MEL_SPEC_CHUNK_LENGTH;
                 }
@@ -382,7 +397,7 @@
                         const file = item.getAsFile();
                         console.log(`... file[${i}].name = ${file.name}`);
                         currentCancel = { cancelled: false };
-                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file), currentCancel);
+                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent);
                     }
                 });
             } else {
@@ -394,7 +409,7 @@
         });
 
         // currentCancel = { cancelled: false };
-        // transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel);
+        // transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel, onTranscriptionEvent);
         loadAndInitializeModels();
     </script>
 </body>
