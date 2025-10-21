@@ -186,8 +186,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
   new_tag = (idx.src[0].tag or ()) + (b2.tag or ()) or None
-  if b2.shape: return idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape))
-  return idx.src[0].rtag(new_tag)
+  return idx.src[0].rtag(new_tag) if b2.shape else idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape))
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
@@ -195,17 +194,15 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
     and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
-  # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # indexing a const is a const
-  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),), name="idx"),
-    lambda c,idx: c.rtag(nt if len(nt:=(idx.src[0].tag or ()) + (c.tag or ())) else None)),
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
-  (UPat(Ops.BUFFERIZE, src=(UPat(Ops.NOOP, src=(UPat.cvar("c"),), name="n"),), allow_any_len=True, name="buf"), lambda n,buf,c:
-    buf.replace(src=(c,)+buf.src[1:])),
+  # hack if a noop turned to a const
+  (UPat.cvar("c").f(Ops.NOOP).f(Ops.BUFFERIZE, allow_any_len=True, name="buf"), lambda c,buf: buf.replace(src=(c,)+buf.src[1:])),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
