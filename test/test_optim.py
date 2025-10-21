@@ -101,13 +101,13 @@ class TestOptim(unittest.TestCase):
 
   def test_muon_ns_steps(self): self._test_muon(1, {'lr': 0.001, 'ns_steps': 3}, 1e-6, 0)
   def test_muon_high_lr_ns_steps(self): self._test_muon(1, {'lr': 10, 'ns_steps': 3}, 1e-5, 3e-4)
-  def test_muon_ns_params(self): self._test_muon(1, {'lr': 0.001,'ns_params': (2.0,-1.5,0.5)}, 1e-6, 0)
-  def test_muon_high_lr_ns_params(self): self._test_muon(1, {'lr': 10,'ns_params': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
+  def test_muon_ns_coefficients(self): self._test_muon(1, {'lr': 0.001,'ns_coefficients': (2.0,-1.5,0.5)}, 1e-6, 0)
+  def test_muon_high_lr_ns_coefficients(self): self._test_muon(1, {'lr': 10,'ns_coefficients': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
 
-  def test_muon_momentum_wd_ns_steps_ns_params(self):
-    self._test_muon(10, {'lr': 0.001, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_params': (2.0,-1.5,0.5)}, 1e-5, 0)
-  def test_multistep_muon_high_lr_momentum_wd_ns_steps_ns_params(self):
-    self._test_muon(10, {'lr': 10, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_params': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
+  def test_muon_momentum_wd_ns_steps_ns_coefficients(self):
+    self._test_muon(10, {'lr': 0.001, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_coefficients': (2.0,-1.5,0.5)}, 1e-5, 0)
+  def test_multistep_muon_high_lr_momentum_wd_ns_steps_ns_coefficients(self):
+    self._test_muon(10, {'lr': 10, 'momentum': 0.90, 'weight_decay': 0.01, 'ns_steps': 3, 'ns_coefficients': (2.0,-1.5,0.5)}, 1e-5, 3e-4)
 
   def test_adam(self): self._test_adam(1, {'lr': 0.001}, 1e-5, 0)
   def test_adam_high_lr(self): self._test_adam(1, {'lr': 10}, 1e-4, 1e-4)
