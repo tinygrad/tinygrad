@@ -78,7 +78,7 @@ function renderDag(graph, additions, recenter) {
         if (parents == null && children == null) return;
         const src = [...parents, ...children, d.id];
         nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
-        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child "  : (parents.includes(v) && w===d.id) ? "highlight " : "";
+        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
         d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
         d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
         e.stopPropagation();
@@ -92,10 +92,9 @@ function renderDag(graph, additions, recenter) {
     }).selectAll("text").data(d => {
       const ret = [[]];
       for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
-        for (const [i, l] of st.split("\n").entries()) {
-          if (i > 0) ret.push([]);
-          ret.at(-1).push({ st:l, color });
-        }
+        const lines = st.split("\n");
+        ret.at(-1).push({ st:lines[0], color });
+        for (let i=1; i<lines.length; i++) ret.push([{ st:lines[i], color }]);
       }
       return [ret];
     }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
@@ -245,9 +244,9 @@ async function renderProfiler() {
         html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
         if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
         if (shapeRef != null) {
-          const p = html.appendChild(document.createElement("p"));
-          p.innerText = "\nView Codegen Rewrite"; p.style.cursor = "pointer";
-          p.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
+          const a = html.appendChild(document.createElement("a"));
+          a.innerText = "\nView codegen rewrite";
+          a.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
@@ -530,10 +529,10 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
-function setActive(e) {
-  if (e == null) return;
-  e.classList.add("active");
-  requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
+function toggleCls(prev, next, cls, value) {
+  prev?.classList.remove(cls);
+  next?.classList.toggle(cls, value ?? true);
+  requestAnimationFrame(() => next?.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
 
 // ** hljs extra definitions for UOps and float4
@@ -563,23 +562,20 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
-  const { currentCtx:prevCtx, currentStep:prevStep } = state;
+  const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   Object.assign(state, ns);
   // update element styles if needed
-  document.getElementById(`ctx-${state.currentCtx}`)?.classList.toggle("expanded", state.expandSteps);
-  if (state.currentCtx !== prevCtx) {
-    document.getElementById(`ctx-${prevCtx}`)?.classList.remove("active", "expanded");
-    setActive(document.getElementById(`ctx-${state.currentCtx}`));
-  }
-  if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
-    document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
+  const { ctx, step } = select(state.currentCtx, state.currentStep);
+  toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
+  if (ctx?.id !== prevCtx?.id) toggleCls(prevCtx, ctx, "active");
+  if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
+    toggleCls(prevStep, step, "active");
     // walk the tree back until all parents expanded so that the child is visible
-    let e = document.getElementById(`step-${state.currentCtx}-${state.currentStep}`);
+    let e = step;
     while (e?.parentElement?.id.startsWith("step")) {
       e.parentElement.classList.add("expanded");
       e = e.parentElement;
     }
-    setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
   }
   // re-render
   main();
