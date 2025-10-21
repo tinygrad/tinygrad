@@ -288,7 +288,7 @@ def bufferize_to_store(x:UOp):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, *rngs).replace(tag=x.tag)
+    do_store = assign_target.replace(dtype=sdtype).store(assign_src).replace(tag=x.tag).end(ends=[x for x in rngs if x.op is Ops.RANGE])
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
@@ -301,7 +301,7 @@ def bufferize_to_store(x:UOp):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs).replace(tag=x.tag)
+    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0]).replace(tag=x.tag).end(ends=[x for x in rngs if x.op is Ops.RANGE])
     ret = buf.after(do_store).forced_reshape(shape)
     # TODO: is this right? what if it's offset
     if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
@@ -313,9 +313,8 @@ def bufferize_to_store(x:UOp):
   tag = x.arg.device
   if tag is None: tag = UOp.unique().arg # TODO: hack
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-  # store has the other dtype here
-  # TODO: use after here?
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).reshape(shape)
+  do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0]).end(ends=[x for x in rngs if x.op is Ops.RANGE])
+  return buf.after(do_store).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
@@ -348,6 +347,7 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   return b.src[0]
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
+  if isinstance(after.dtype, PtrDType) and after.ptrdtype.addrspace == AddrSpace.LOCAL: return None
   buf = after.as_buf()
   # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
   if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
@@ -400,16 +400,9 @@ rangeify_codegen = PatternMatcher([
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
-  (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-   lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
-
-  # TODO: this can be moved into codegen
-  (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
-    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store if idx.dtype.addrspace != AddrSpace.LOCAL else store.barrier())),
-
-  # TODO: hack for group for reduce
-  (UPat(Ops.IF, src=(UPat.var("gate"), UPat(Ops.LOAD, src=(UPat.var("src"), UPat.var("barrier"))),)),
-   lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
+  (UPat.any(UPat(Ops.DEFINE_GLOBAL, name="dg"), UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg"))
+   .f(Ops.INDEX, name="idx", allow_any_len=True),
+    lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
 ])
 
 def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
@@ -432,7 +425,6 @@ class Kernel:
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   if len(x.ranges): return None
-  if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
@@ -442,8 +434,14 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # NOTE: the hack for COPY is here
-  ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None) \
-    if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
+  for u in ret.toposort():
+    # TODO: this can be wrong if there's multiple of these
+    if u.op in {Ops.COPY, Ops.BUFFER_VIEW}:
+      ret = u
+      break
+  else:
+    ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
+
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src if x.op is not Ops.BIND]):
@@ -451,7 +449,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   return kernel
 
 split_kernels = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), split_store),
+  (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
 def tag_uop(ctx:list[UOp], x:UOp):

@@ -148,6 +148,14 @@ class TestViz(BaseTestViz):
     a2 = uop_to_json(a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
+  def test_colored_label_multiline(self):
+    arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
+    src = [Tensor.empty(1).uop for _ in range(10)]
+    a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
+    exec_rewrite(a, [PatternMatcher([])])
+    a2 = next(get_viz_details(0, 0))["graph"][id(a)]
+    self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
+
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10, dtype=dtypes.int)
     b = a.replace(op=Ops.CONST)

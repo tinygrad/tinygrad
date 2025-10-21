@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>tinygrad viz</title>
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
   <script src="assets/d3js.org/d3.v7.min.js" charset="utf-8"></script>
@@ -38,6 +39,8 @@
   ::-webkit-scrollbar-thumb { background: #686977; }
   a {
     color: #4a90e2;
+    text-decoration: underline;
+    cursor: pointer;
   }
   ul {
     padding: 0;
@@ -52,6 +55,13 @@
   }
   ul > ul {
     display: none;
+    margin-left: 6px;
+  }
+  ul.has-children > p::before {
+    content:"▸ ";
+  }
+  ul.has-children.expanded > p::before {
+    content:"▾ ";
   }
   ul.expanded > ul {
     display: block;
@@ -141,7 +151,7 @@
   .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
-  .ctx-list > ul > * + * {
+  ul > * + * {
     margin-top: 4px;
   }
   .graph {

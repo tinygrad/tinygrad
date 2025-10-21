@@ -1,4 +1,4 @@
-import math
+import math, functools, operator
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
 from tinygrad.helpers import all_int, dedup, get_contraction
 from tinygrad.dtype import dtypes
@@ -87,7 +87,15 @@ def add_gpudims(ctx:Renderer, s:UOp):
     except ValueError: continue
   return s.substitute(subs)
 
+def add_barrier_and_if(buf:UOp, e:UOp):
+  # TODO: this is not generic
+  local_ranges = [x for x in e.ended_ranges if x.op is Ops.RANGE and x.arg[-1] == AxisType.GROUP_REDUCE]
+  if len(local_ranges) == 0: return None
+  return buf.after(UOp(Ops.IF, dtype=dtypes.void, src=(functools.reduce(operator.and_, [x.eq(0) for x in local_ranges]), e.barrier())))
+
 pm_add_gpudims = PatternMatcher([
   # add gpudims must be last
   (UPat(Ops.SINK, name="s"), add_gpudims),
+  # add barrier and if
+  (UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL, name="buf"), UPat(Ops.END, name="e"))), add_barrier_and_if),
 ])
