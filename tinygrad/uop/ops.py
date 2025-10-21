@@ -277,9 +277,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s in UOp.sink(*self.src[range_start[self.op]:]).ranges:
         if s in ret: del ret[s]
     elif self.op is Ops.END:
-      ret.update(UOp.sink(*self.src[self.arg:]).ranges)
-      for i in range(self.arg):
-        if self.src[i] in ret: del ret[self.src[i]]
+      for s in self.src[self.arg:]: ret.update(s.ranges)
+      for s in UOp.sink(*self.src[:self.arg]).ranges:
+        if s in ret: del ret[s]
     else:
       for s in self.src: ret.update(s.ranges)
     return ret

@@ -13,6 +13,8 @@ def flatten_range(r:UOp):
 pm_flatten_range = PatternMatcher([
   # real ranges only
   (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
+  # END is only on RANGES. TODO: this is copied from symbolic
+  (UPat(Ops.END, name="e"), lambda e: UOp.end(*e.src[e.arg:], ends=sorted(UOp.sink(*e.src[:e.arg]).ranges, key=lambda x: x.arg))),
 ])
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
