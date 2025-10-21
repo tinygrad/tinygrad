@@ -530,10 +530,10 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
-function setActive(e) {
-  if (e == null) return;
-  e.classList.add("active");
-  requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
+function toggleCls(prev, next, cls, value) {
+  prev?.classList.remove(cls);
+  next?.classList.toggle(cls, value ?? true);
+  requestAnimationFrame(() => next?.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
 
 // ** hljs extra definitions for UOps and float4
@@ -563,23 +563,20 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
-  const { currentCtx:prevCtx, currentStep:prevStep } = state;
+  const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   Object.assign(state, ns);
   // update element styles if needed
-  document.getElementById(`ctx-${state.currentCtx}`)?.classList.toggle("expanded", state.expandSteps);
-  if (state.currentCtx !== prevCtx) {
-    document.getElementById(`ctx-${prevCtx}`)?.classList.remove("active", "expanded");
-    setActive(document.getElementById(`ctx-${state.currentCtx}`));
-  }
-  if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
-    document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
+  const { ctx, step } = select(state.currentCtx, state.currentStep);
+  toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
+  if (ctx?.id !== prevCtx?.id) toggleCls(prevCtx, ctx, "active");
+  if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
+    toggleCls(prevStep, step, "active");
     // walk the tree back until all parents expanded so that the child is visible
-    let e = document.getElementById(`step-${state.currentCtx}-${state.currentStep}`);
+    let e = step;
     while (e?.parentElement?.id.startsWith("step")) {
       e.parentElement.classList.add("expanded");
       e = e.parentElement;
     }
-    setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
   }
   // re-render
   main();
