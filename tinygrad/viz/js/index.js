@@ -173,10 +173,16 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
+var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map();
+function focusShape(shape) {
+  saveToHistory({ shape:focusedShape });
+  focusedShape = shape.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+  return document.querySelector(".metadata").replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+}
+
 async function renderProfiler() {
   displayGraph("profiler");
-  d3.select(".metadata").node().replaceChildren(focusedShape?.html ?? "");
+  d3.select(".metadata").node().replaceChildren(shapeMetadata.get(focusedShape) ?? "");
   // layout once!
   if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
@@ -251,7 +257,8 @@ async function renderProfiler() {
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), html, key, ...shapeRef };
+        if (key != null) shapeMetadata.set(key, html);
+        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -295,7 +302,7 @@ async function renderProfiler() {
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         if (users != null) rows.push(["Users", users.length]);
         const info = html.appendChild(tabulate(rows).node());
-        const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
+        const arg = {tooltipText:info.outerHTML, key:`${k}-${num}`};
         for (let u=0; u<users?.length; u++) {
           const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px";
           const { repr, num, mode, shape } = users[u];
@@ -306,7 +313,7 @@ async function renderProfiler() {
           if (shape != null) {
             p.style.cursor = "pointer";
             p.onclick = () => focusShape(shape);
-            const args = shape.html.querySelector("#args");
+            const args = shapeMetadata.get(shape.key).querySelector("#args");
             const bufArg = d3.create("p").text(`${bufInfo} ${rows[2][1]}`).style("cursor", "pointer").style("margin-top", "4px").on("click", () => {
               const device = document.getElementById(k);
               if (!isExpanded(device)) device.click();
@@ -318,6 +325,7 @@ async function renderProfiler() {
             args.insertBefore(bufArg, before);
           }
         }
+        shapeMetadata.set(arg.key, html)
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -409,7 +417,7 @@ async function renderProfiler() {
             lw += e.label[li].width;
           }
         }
-        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push([p, pcolor]); }
+        if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
     }
     // draw axes
@@ -476,15 +484,11 @@ async function renderProfiler() {
     }
   }
 
-  function focusShape(shape) {
-    focusedShape = shape; render(zoomLevel);
-    return document.querySelector(".metadata").replaceChildren(shape?.html ?? "");
-  }
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null && foundRect?.key == null) { return setCtxWithHistory(foundRect.ctx, foundRect.step); }
-    if (foundRect?.key != focusedShape?.key) { focusShape(foundRect); }
+    if (foundRect?.key != focusedShape) { focusShape(foundRect); }
   });
 
   canvas.addEventListener("mousemove", e => {
@@ -597,15 +601,20 @@ function setState(ns) {
 
 const getSubrewrites = (ul) => ul.querySelectorAll(":scope > ul");
 
+function saveToHistory(ns) {
+  // NOTE: browser does a structured clone, passing a mutable object is safe.
+  history.replaceState(ns, "");
+  history.pushState(ns, "");
+}
+
 // set a new context and keep the old one in browser history
 function setCtxWithHistory(newCtx, step=0) {
-  // NOTE: browser does a structured clone, passing a mutable object is safe.
-  history.replaceState(state, "");
-  history.pushState(state, "");
+  saveToHistory(state);
   setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step, currentRewrite:0 });
 }
 
 window.addEventListener("popstate", (e) => {
+  if (e.state?.shape != null) return focusShape({ key:e.state?.shape });
   if (e.state != null) setState(e.state);
 });
 
