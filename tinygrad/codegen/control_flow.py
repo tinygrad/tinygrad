@@ -64,11 +64,13 @@ class CFGContext:
       # range/if that have dependencies on other siblings need to run after them
       order = sorted(v, key=lambda x: len(deps[x].intersection(v)))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
-      for x,y in zipped: self.edges[y.src[0]] = x
+      for x,y in zipped:
+        # TODO: is this check correct?
+        if y.src[0] not in x.backward_slice_with_self:
+          self.edges[y.src[0]] = x
 
 pm_add_control_flow = PatternMatcher([
-  (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
-  (UPat(Ops.IF, src=(UPat(), UPat(Ops.BARRIER)), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  (UPat((Ops.RANGE, Ops.IF), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 
 def do_merge_ends(s:UOp):
