@@ -121,6 +121,12 @@ def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   print("test vs onnx passed")
   return timings
 
+def bench(run, inputs):
+  from extra.bench_log import WallTimeEvent, BenchEvent
+  for _ in range(10):
+    with WallTimeEvent(BenchEvent.STEP):
+      run(**inputs).numpy()
+
 if __name__ == "__main__":
   onnx_file = fetch(OPENPILOT_MODEL)
   inputs, outputs = compile(onnx_file)
@@ -131,3 +137,5 @@ if __name__ == "__main__":
   if not getenv("FLOAT16"):
     test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
 
+  if getenv("BENCHMARK_LOG", ""):
+    bench(pickle_loaded, inputs)

@@ -52,11 +52,11 @@ class IndexingContext:
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.KERNEL}: return None
-  if x.op is Ops.ASSIGN and x.src[1].op is Ops.KERNEL: return None
+  if x.op is Ops.AFTER and x.src[1].op is Ops.KERNEL: return None
   new_srcs = []
   for s in x.src:
     new_src = s
-    if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
+    if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.AFTER and s.src[1].op is Ops.KERNEL):
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
