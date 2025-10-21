@@ -421,8 +421,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, mapping
         log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
     }
 
-
-    let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
+    let pendingText = null;
 
     onEvent("inferenceBegin");
     console.log("begin new transcription");
@@ -446,15 +445,12 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, mapping
         // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
         function updateCallback(pd) {
             pendingText = pd;
-            // console.log(pendingText);
             onEvent("chunkUpdate", { pendingText });
         }
         let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
         if (cancelToken.cancelled) {
             console.log("Transcription cancelled");
-            inferenceDone = true;
             onEvent("cancel");
-            // currentTranscription.style.display = 'none';
             return;
         } else {
             if ((avg_logprob < -1) && temperature < 1) {
@@ -467,20 +463,12 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, mapping
             previous_context = context.slice();
 
             onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText });
-            // const newChunk = document.createElement('div');
-            // newChunk.className = 'transcription-chunk';
-            // newChunk.innerText = segment_cumlogprob.toFixed(2) + ' ' + pendingText;
-            // console.log(segment_cumlogprob.toFixed(2) + ' ' + pendingText);
-            // transcriptionLog.appendChild(newChunk);
             pendingText = '';
-            // currentTranscription.innerText = '';
 
             seek += MEL_SPEC_CHUNK_LENGTH;
         }
     }
-    inferenceDone = true;
     onEvent("inferenceDone");
-    // currentTranscription.style.display = 'none';
 
     let took = performance.now() - before;
     console.log("end transcription: " + took);
