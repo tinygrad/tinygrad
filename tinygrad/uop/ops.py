@@ -353,9 +353,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
-  def end(self, *src:UOp):
-    ret = self
-    for s in src: ret = UOp(Ops.END, src=(s, ret))
+  def end(self, *src:UOp, ends:Sequence[UOp]):
+    if len(ends) == 0:
+      assert len(src) == 0
+      return self
+    ret = UOp(Ops.END, src=(ends[-1], self, *src))
+    for s in ends[:-1][::-1]: ret = UOp(Ops.END, src=(s, ret))
     return ret
   def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
@@ -1184,8 +1187,6 @@ pm_lower_index_dtype = PatternMatcher([
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
   # TODO: this is only triggering if they are all casts, correct?
   (UPat((Ops.SINK, Ops.NOOP), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
-  # END range doesn't cast
-  (UPat(Ops.END, src=(UPat(Ops.CAST),), allow_any_len=True, name="e"), lambda e: e.replace(src=(e.src[0].src[0],)+e.src[1:])),
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 

@@ -382,6 +382,9 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     tuple(flatten([(y,) if y.op in {Ops.RANGE, Ops.IF, Ops.STORE, Ops.KERNEL, Ops.BARRIER, Ops.END} else y.src for y in x.src[1:]])))),
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
+  # END is only on RANGES
+  (UPat(Ops.END, name="e"), lambda e:
+    e.src[1].end(*e.src[2:], ends=sorted(list(e.src[0].ranges), key=lambda x: x.arg)) if e.src[0].op is not Ops.RANGE else None)
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
