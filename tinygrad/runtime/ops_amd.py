@@ -125,6 +125,19 @@ class AMDComputeQueue(HWQueue):
 
   ### SQTT ###
 
+  def sqtt_setup_exec(self, prg, global_size):
+    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(
+      _0=sqtt.union_rgp_sqtt_marker_pipeline_bind_0(_0=sqtt.struct_rgp_sqtt_marker_pipeline_bind_0_0(
+        identifier=sqtt.RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE, bind_point=(__BIND_POINT_COMPUTE:=1))),
+      _1=sqtt.union_rgp_sqtt_marker_pipeline_bind_1(api_pso_hash=data64_le(prg.libhash[0]))))
+
+    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event(
+      _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
+      _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=next(prg.dev.sqtt_next_cmd_id))), *global_size)
+
+    for i in range(8 if prg.dev.target >= (11,0,0) else 4):
+      self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), ((prg.dev.sqtt_itrace_se_mask >> i) & 0b1) if SQTT >= 2 else 0xffffffff)
+
   def sqtt_userdata(self, data, *extra_dwords):
     data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
     for i in range(0, len(data_ints), 2):
@@ -204,18 +217,6 @@ class AMDComputeQueue(HWQueue):
     self.memory_barrier()
     return self
 
-  def sqtt_prg_marker(self, prg:AMDProgram, global_size:tuple[sint, ...]):
-    BIND_POINT_COMPUTE = 1
-
-    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(
-      _0=sqtt.union_rgp_sqtt_marker_pipeline_bind_0(_0=sqtt.struct_rgp_sqtt_marker_pipeline_bind_0_0(
-        identifier=sqtt.RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE, bind_point=BIND_POINT_COMPUTE)),
-      _1=sqtt.union_rgp_sqtt_marker_pipeline_bind_1(api_pso_hash=data64_le(prg.libhash[0]))))
-
-    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event(
-      _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
-      _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=next(prg.dev.sqtt_next_cmd_id))), *global_size)
-
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
 
@@ -239,7 +240,7 @@ class AMDComputeQueue(HWQueue):
 
     user_regs += [*data64_le(args_state.buf.va_addr)]
 
-    if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
+    if prg.dev.sqtt_enabled: self.sqtt_setup_exec(prg, global_size)
 
     self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)
@@ -255,13 +256,8 @@ class AMDComputeQueue(HWQueue):
     if (10,0,0) <= prg.dev.target < (11,0,0): self.wreg(self.gc.mmCP_COHER_START_DELAY, 0x20)
 
     self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
-    for i in range(8 if prg.dev.target >= (11,0,0) else 4):
-      semask = (prg.dev.sqtt_itrace_se_mask >> i) & 0b1 if prg.dev.sqtt_enabled and SQTT >= 2 else 0xffffffff
-      self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), semask)
-
     self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
     self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, 0)
-
     self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
 
     gfx10p = {'cs_w32_en': int(prg.wave32)} if prg.dev.target >= (10,0,0) else {}
@@ -322,6 +318,7 @@ class AMDComputeQueue(HWQueue):
 class AMDComputeAQLQueue(AMDComputeQueue):
   def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
     self.bind_args_state(args_state)
+    if prg.dev.sqtt_enabled: self.sqtt_setup_exec(prg, global_size)
     self._q.append(pkt:=hsa.hsa_kernel_dispatch_packet_t(header=AQL_HDR | (hsa.HSA_PACKET_TYPE_KERNEL_DISPATCH << hsa.HSA_PACKET_HEADER_TYPE),
       setup=3<<hsa.HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS, private_segment_size=prg.private_segment_size,
       group_segment_size=prg.group_segment_size, kernel_object=prg.aql_prog_addr, kernarg_address=args_state.buf.va_addr))
