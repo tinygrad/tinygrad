@@ -245,9 +245,9 @@ async function renderProfiler() {
         html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
         if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
         if (shapeRef != null) {
-          const p = html.appendChild(document.createElement("p"));
-          p.innerText = "\nView Codegen Rewrite"; p.style.cursor = "pointer";
-          p.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
+          const a = html.appendChild(document.createElement("a"));
+          a.innerText = "\nView codegen rewrite";
+          a.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
