@@ -1,7 +1,8 @@
 import ctypes, ctypes.util
+from tinygrad.runtime.autogen.helpers import CEnum
+
 dll = ctypes.CDLL(ctypes.util.find_library('nvJitLink'))
 
-from tinygrad.runtime.autogen.autogen import CEnum
 nvJitLinkResult = CEnum(ctypes.c_uint)
 NVJITLINK_SUCCESS = nvJitLinkResult.define('NVJITLINK_SUCCESS', 0)
 NVJITLINK_ERROR_UNRECOGNIZED_OPTION = nvJitLinkResult.define('NVJITLINK_ERROR_UNRECOGNIZED_OPTION', 1)
