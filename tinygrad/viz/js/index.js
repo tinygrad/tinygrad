@@ -619,7 +619,7 @@ async function main() {
           e.stopPropagation();
           const subrewrites = getSubrewrites(e.currentTarget.parentElement);
           if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
-          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
+          setState({ currentStep:j, currentCtx:i });
         }
         stack.push(u);
       }
