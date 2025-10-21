@@ -1,10 +1,10 @@
-from typing import Iterator
+from typing import Iterator, cast
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, MULTIOUTPUT
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -253,27 +253,28 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
 
-  # second forward pass to fuse children
-  replaced_ranges = {}
-  for x in tsink.toposort():
-    if x not in rctx.realize_map: continue
-    out_rngs = rctx.range_map[x][1]
-    _realize_axis = rctx.realize_map[x]
-    consumers = [rctx.range_map[u][0] for u in consumer_map[x] if u in rctx.range_map]
-    if len(consumers) < 2: continue
-    assert all(len(out_rngs) == len(rr) for rr in consumers)
-    for i,c in enumerate(zip(*consumers)):
-      out_rng = out_rngs[i]
-      # check if they are all simple ranges
-      if not all(y.op is Ops.RANGE and y.vmax == out_rng.vmax for y in c): continue
-      for r in c: replaced_ranges[r] = out_rngs[i]
-      _realize_axis.remove(i)
-    if len(_realize_axis) == 0: del rctx.realize_map[x]
-    else: rctx.realize_map[x] = _realize_axis
+  if MULTIOUTPUT:
+    # second forward pass to fuse children
+    replaced_ranges = {}
+    for x in tsink.toposort():
+      if x not in rctx.realize_map: continue
+      out_rngs = rctx.range_map[x][1]
+      _realize_axis = cast(list[int], rctx.realize_map[x])
+      consumers = [rctx.range_map[u][0] for u in consumer_map[x] if u in rctx.range_map]
+      if len(consumers) < 2: continue
+      assert all(len(out_rngs) == len(rr) for rr in consumers)
+      for i,c in enumerate(zip(*consumers)):
+        out_rng = out_rngs[i]
+        # check if they are all simple ranges
+        if not all(y.op is Ops.RANGE and y.vmax == out_rng.vmax for y in c): continue
+        for r in c: replaced_ranges[r] = out_rngs[i]
+        _realize_axis.remove(i)
+      if len(_realize_axis) == 0: del rctx.realize_map[x]
+      else: rctx.realize_map[x] = _realize_axis
 
-  # do all the replaces
-  for k,(v0,v1) in rctx.range_map.items():
-    rctx.range_map[k] = (tuple(x.substitute(replaced_ranges) for x in v0), tuple(x.substitute(replaced_ranges) for x in v1))
+    # do all the replaces
+    for k,(v0,v1) in rctx.range_map.items():
+      rctx.range_map[k] = (tuple(x.substitute(replaced_ranges) for x in v0), tuple(x.substitute(replaced_ranges) for x in v1))
 
   tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   return tsink, rctx

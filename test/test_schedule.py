@@ -2416,11 +2416,14 @@ class TestUOpBecome(unittest.TestCase):
 
 class TestScheduleMultioutput(unittest.TestCase):
   def test_simplest_multioutput(self):
-    a = Tensor.ones(256, 256).contiguous().realize()
-    r = a.sum(axis=1)
-    b = r+1
-    c = r+2
-    check_schedule([b, c], 1)
+    with Context(MULTIOUTPUT=1):
+      a = Tensor.ones(256, 256).contiguous().realize()
+      r = a.sum(axis=1)
+      b = r+1
+      c = r+2
+      run_schedule(check_schedule([b, c], 1))
+      np.testing.assert_allclose(b.numpy(), 257)
+      np.testing.assert_allclose(c.numpy(), 258)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
