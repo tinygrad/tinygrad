@@ -66,7 +66,16 @@ class CFGContext:
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
       for x,y in zipped: self.edges[y.src[0]] = x
 
+# put all endifs on the sink
+def add_endifs(sink:UOp):
+  if sink.src[0].op is Ops.ENDIF: return None
+  ifs = [x for x in sink.toposort() if x.op is Ops.IF]
+  if len(ifs) == 0: return None
+  assert len(ifs) == 1, "we only support one if"
+  return sink.replace(src=(UOp(Ops.ENDIF, src=(ifs[0],*sink.src))))
+
 pm_add_control_flow = PatternMatcher([
   (UPat((Ops.RANGE, Ops.IF), src=(UPat(),), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
   (UPat(Ops.IF, src=(UPat(), UPat(Ops.BARRIER)), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  (UPat(Ops.SINK, name="sink"), add_endifs),
 ])

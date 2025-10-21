@@ -65,7 +65,7 @@ class Scheduler:
 
   def _globalizable_rngs(self) -> list[UOp]:
     # all ranges that end before any STOREs
-    return [x for x in self.ast.toposort(lambda x: x.op is not Ops.STORE) if x.op is Ops.RANGE]
+    return [x for x in self.ast.toposort(lambda x: x.op is not Ops.STORE) if x.op is Ops.RANGE and x not in self.ast.ranges]
 
   def convert_loop_to_global(self):
     if not self.opts.has_local: return None
