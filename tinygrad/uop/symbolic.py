@@ -383,8 +383,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
   # END is only on RANGES
-  (UPat(Ops.END, name="e"), lambda e:
-    e.src[1].end(*e.src[2:], ends=sorted(list(e.src[0].ranges), key=lambda x: x.arg)) if e.src[0].op is not Ops.RANGE else None)
+  (UPat(Ops.END, name="e"), lambda e: UOp.end(*e.src[e.arg:], ends=sorted(UOp.sink(*e.src[:e.arg]).ranges, key=lambda x: x.arg))),
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([

@@ -277,8 +277,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       for s in UOp.sink(*self.src[range_start[self.op]:]).ranges:
         if s in ret: del ret[s]
     elif self.op is Ops.END:
-      ret.update(UOp.sink(*self.src[1:]).ranges)
-      if self.src[0] in ret: del ret[self.src[0]]
+      ret.update(UOp.sink(*self.src[self.arg:]).ranges)
+      for i in range(self.arg):
+        if self.src[i] in ret: del ret[self.src[i]]
     else:
       for s in self.src: ret.update(s.ranges)
     return ret
@@ -354,12 +355,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
   def end(self, *src:UOp, ends:Sequence[UOp]):
-    if len(ends) == 0:
-      assert len(src) == 0
-      return self
-    ret = UOp(Ops.END, src=(ends[-1], self, *src))
-    for s in ends[:-1][::-1]: ret = UOp(Ops.END, src=(s, ret))
-    return ret
+    if len(ends) == 0: return self
+    return UOp(Ops.END, src=(*ends, self, *src), arg=len(ends))
   def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
