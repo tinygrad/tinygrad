@@ -573,6 +573,12 @@ function setState(ns) {
   }
   if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
     document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
+    // walk the tree back until all parents expanded so that the child is visible
+    let e = document.getElementById(`step-${state.currentCtx}-${state.currentStep}`);
+    while (e?.parentElement?.id.startsWith("step")) {
+      e.parentElement.classList.add("expanded");
+      e = e.parentElement;
+    }
     setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
   }
   // re-render
