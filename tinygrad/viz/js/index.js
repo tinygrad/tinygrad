@@ -176,7 +176,7 @@ function tabulate(rows) {
 var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map();
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
-  focusedShape = shape.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+  focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   return document.querySelector(".metadata").replaceChildren(shapeMetadata.get(focusedShape) ?? "");
 }
 
