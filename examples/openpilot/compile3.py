@@ -139,5 +139,5 @@ if __name__ == "__main__":
   if not getenv("FLOAT16"):
     test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
 
-  if getenv("BENCHMARK_LOG"):
+  if getenv("BENCHMARK_LOG", ""):
     bench(pickle_loaded, inputs)
