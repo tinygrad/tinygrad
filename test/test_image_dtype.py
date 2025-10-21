@@ -52,7 +52,6 @@ class TestImageDType(unittest.TestCase):
     assert isinstance(it.uop.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
-  @unittest.expectedFailure # this isn't supported anymore, CAST to ImageDType stays ImageDType
   def test_image_cast_and_back_collapses(self):
     data = Tensor.randn(9*27*4).realize()
     tst = data.numpy()
