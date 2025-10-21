@@ -190,7 +190,7 @@
             const url = document.getElementById("urlInput").value;
             try {
                 currentCancel = { cancelled: false };
-                await transcribeAudio(async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent);
+                await transcribeAudio(async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent, mapping);
             } catch (err) {
                 console.error("Fetch failed:", err);
             }
@@ -261,8 +261,10 @@
             }
         }
 
+        const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
+
         let currentCancel = null;
-        async function transcribeAudio(audioFetcher, cancelToken, onEvent) {
+        async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping) {
             let before = performance.now();
             await loadAndInitializeModels();
             const { sampleRate, samples } = await audioFetcher();
@@ -280,8 +282,6 @@
                 let [mel_spec] = await nets.mel(chunk);
                 log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
             }
-
-            const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
 
             let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
             const updateLoop = (now) => {
@@ -397,7 +397,7 @@
                         const file = item.getAsFile();
                         console.log(`... file[${i}].name = ${file.name}`);
                         currentCancel = { cancelled: false };
-                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent);
+                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent, mapping);
                     }
                 });
             } else {
@@ -409,7 +409,7 @@
         });
 
         // currentCancel = { cancelled: false };
-        // transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel, onTranscriptionEvent);
+        // transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel, onTranscriptionEvent, mapping);
         loadAndInitializeModels();
     </script>
 </body>
