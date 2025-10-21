@@ -105,7 +105,7 @@ def add_blockends(base_block:UOp, new_ctx:tuple[UOp, ...], current_ctx:tuple[UOp
   while len(ends_to_add):
     r:UOp = ends_to_add.pop(-1)
     new_ctx = tuple([z for z in new_ctx if z is not r])
-    end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.ENDRANGE, src=(r,))
+    end_uop = UOp(Ops.ENDIF if r.op is Ops.IF else Ops.END, src=(r,))
     base_block = UOp(Ops.BLOCKEND, src=(base_block,)*cnt, arg=BasicBlock((end_uop,), tuple(new_ctx), end=r, cnt=cnt))
   return base_block
 
@@ -215,7 +215,7 @@ def remove_blockend(x:UOp):
     # NOTE: DEFINE_ACC doesn't have to be handled in any special way
     late_ops = list(x.arg.lst)
     # NOTE: we have to add a barrier at the start if barrier is used in the range
-    if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.ENDRANGE:
+    if x.op is Ops.BLOCKEND and any(y.op is Ops.BARRIER for y in late_ops) and late_ops[-1].op is Ops.END:
       late_ops = [UOp(Ops.BARRIER)] + late_ops
     # peephole opt, remove any BARRIERs next to each other
     for i in range(len(late_ops)-1):
