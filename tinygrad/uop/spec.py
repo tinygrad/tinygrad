@@ -236,9 +236,6 @@ full_spec = PatternMatcher([
   # SENTINEL should never be in the graph
   (UPat(Ops.SENTINEL), lambda: False),
 
-  # allow any SUBSTITUTE
-  (UPat(Ops.SUBSTITUTE), lambda: True),
-
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine
