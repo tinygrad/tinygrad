@@ -186,7 +186,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 def remove_noop_bufferize(idx,b2):
   if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
   new_tag = (idx.src[0].tag or ()) + (b2.tag or ()) or None
-  return idx.src[0].rtag(new_tag) if b2.shape else idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape))
+  return idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0].rtag(new_tag)
 
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
