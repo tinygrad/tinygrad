@@ -145,8 +145,7 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
               lambda et_ns: f", {(B:=(GlobalCounters.mem_used-start_mem_used))/1e9:.2f} GB loaded at {B/et_ns:.2f} GB/s", enabled=verbose):
     model_state_dict = get_state_dict(model)
     if DEBUG >= 1 and len(state_dict) > len(model_state_dict):
-      diff = state_dict.keys() - model_state_dict.keys()
-      print(f"WARNING: {len(diff)} unused weights in state_dict", sorted(list(diff)))
+      print(f"WARNING: {len(unused := state_dict.keys() - model_state_dict.keys())} unused weights in state_dict", sorted(list(unused)))
     for k,v in (t := tqdm(model_state_dict.items(), disable=CI or not verbose)):
       t.desc = f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}: "
       if k not in state_dict and not strict:

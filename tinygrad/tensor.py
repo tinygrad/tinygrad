@@ -3925,7 +3925,7 @@ class Tensor(MathTrait):
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
-  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, sinks:Tensor|None=None, attn_mask:Tensor|None=None, dropout_p:float=0.0,
+  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, sink:Tensor|None=None, attn_mask:Tensor|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
     """
     Computes scaled dot-product attention.
@@ -3958,9 +3958,9 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    if sinks is not None:
+    if sink is not None:
       ic(qk.shape)
-      qk = qk.cat(sinks, dim=-1)
+      qk = qk.cat(sink, dim=-1)
       ic(qk.shape, qk.float().numpy())
     attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
     return attn.fuse() if FUSE_ATTENTION else attn

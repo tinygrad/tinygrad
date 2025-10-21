@@ -88,7 +88,7 @@ class TransformerBlock:
     self.attn_k             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
     self.attn_v             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
     self.attn_o             = nn.Linear(n_heads * head_dim, dim,    bias=True)
-    self.attn_sinks         = Tensor.empty(n_heads)
+    self.attn_sink         = Tensor.empty(n_heads)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm          = nn.RMSNorm(dim, norm_eps)
@@ -133,7 +133,7 @@ class TransformerBlock:
     q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)     # (B,H,T,Hd)
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
-    s = self.attn_sinks.reshape(1, -1, 1, 1).expand(B, self.head_dim, T, 1)  # (B,H,T,1)
+    s = self.attn_sink.reshape(1, -1, 1, 1).expand(B, self.head_dim, T, 1)  # (B,H,T,1)
 
     q = apply_rope(q, start_pos)
     k = apply_rope(k, start_pos)
@@ -150,7 +150,7 @@ class TransformerBlock:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
 
-    attn = q.scaled_dot_product_attention(k, v, sinks=s, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
+    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
     attn = self.attn_o(attn)
     1/0
@@ -215,7 +215,7 @@ def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads
     **{f"model.layers.{l}.input_layernorm.weight": f"blk.{l}.attn_norm.weight" for l in range(num_blocks)},
     **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"blk.{l}.attn_{x}.weight" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
     **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"blk.{l}.attn_{x}.bias" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
-    **{f"model.layers.{l}.self_attn.sinks": f"blk.{l}.attn_sinks" for l in range(num_blocks)},
+    **{f"model.layers.{l}.self_attn.sinks": f"blk.{l}.attn_sink" for l in range(num_blocks)},
     **{f"model.layers.{l}.post_attention_layernorm.weight": f"blk.{l}.ffn_norm.weight" for l in range(num_blocks)},
     **{f"model.layers.{l}.mlp.router.weight": f"blk.{l}.ffn_gate.weight" for l in range(num_blocks)},
     **{f"model.layers.{l}.mlp.router.bias": f"blk.{l}.ffn_gate.bias" for l in range(num_blocks)},
