@@ -38,6 +38,9 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str|None=None) -> Non
     if s is ns: continue
     t.uop = ns
 
+# TODO: temporary helper for pooling refactor toggle, remove after soak
+def _pool_impl_mode() -> str: return getenv("POOL_IMPL", "MAIN")
+
 # **** Tensor helper functions ****
 
 def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
