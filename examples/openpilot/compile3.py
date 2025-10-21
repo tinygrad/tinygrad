@@ -122,11 +122,10 @@ def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   return timings
 
 def bench(run, inputs):
-  from extra.bench_log import WallTimeEvent, KernelTimeEvent, BenchEvent
+  from extra.bench_log import WallTimeEvent, BenchEvent
   for _ in range(10):
     with WallTimeEvent(BenchEvent.STEP):
-      with KernelTimeEvent(BenchEvent.STEP):
-        run(**inputs).numpy()
+      run(**inputs).numpy()
 
 if __name__ == "__main__":
   onnx_file = fetch(OPENPILOT_MODEL)
