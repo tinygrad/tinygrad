@@ -137,10 +137,7 @@ class AMDComputeQueue(HWQueue):
   # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
   def sqtt_start_9(self, buf0s:HCQBuffer, se_mask:int):
     self.memory_barrier()
-    # print(self.gc.regGRBM_GFX_INDEX.addr)
     self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
-    return self
-
     self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, simd_en=0, cu_sel=0, sq_stall_en=1, spi_stall_en=1, reg_stall_en=1, vm_id_mask=0xf)
     SQTT_TOKEN_MISC = 1 << 0
     SQTT_TOKEN_TIME = 1 << 1
@@ -153,16 +150,19 @@ class AMDComputeQueue(HWQueue):
     SQTT_TOKEN_USERDATA = 1 << 12
     SQTT_TOKEN_ISSUE = 1 << 13
     SQTT_TOKEN_REG_CS_PRIV = 1 << 15
-    mask = SQTT_TOKEN_MISC | SQTT_TOKEN_TIME | SQTT_TOKEN_REG | SQTT_TOKEN_WAVE_START | SQTT_TOKEN_WAVE_END | SQTT_TOKEN_REG_CS_PRIV | SQTT_TOKEN_REG_CS | SQTT_TOKEN_USERDATA
+    mask = SQTT_TOKEN_MISC | SQTT_TOKEN_TIME | SQTT_TOKEN_REG | SQTT_TOKEN_WAVE_START | \
+        SQTT_TOKEN_WAVE_END | SQTT_TOKEN_INST | SQTT_TOKEN_INST_PC | SQTT_TOKEN_USERDATA | \
+        SQTT_TOKEN_ISSUE | SQTT_TOKEN_REG_CS | SQTT_TOKEN_REG_CS_PRIV
     self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
     self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=0) # off
-    self.wreg(self.gc.regSQ_THREAD_TRACE_HIWATER, 0x6)
+    # self.wreg(self.gc.regSQ_THREAD_TRACE_HIWATER, 0x6)
 
     for se in range(len(buf0s)):
-      xcc_index = se // self.dev.xccs
-      se_index_xcc = se % self.dev.xccs
+      xcc_index = se // 4
+      se_index_xcc = se % 4
       with self.pred_exec(xcc_mask=1<<xcc_index):
         self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se_index_xcc, sh_index=0, instance_broadcast_writes=1)
+        print(hex(buf0s[se].va_addr))
         buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
         self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK2, inst_mask=0xFFFFFFFF)
         self.wreg(self.gc.regSQ_THREAD_TRACE_BASE, addr=buf0_lo)
@@ -171,21 +171,24 @@ class AMDComputeQueue(HWQueue):
         self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, reset_buffer=1)
         self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=1) # on
 
+    # self.memory_barrier()
+    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
     self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
-    self.memory_barrier()
     return self
 
-  def sqtt_end_9(self, ses:int, wptrs:HCQBuffer):
-    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
+  def sqtt_stop_9(self, ses:int, wptrs:HCQBuffer):
     self.memory_barrier()
-
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
     self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=0)
-    for se in range(len(buf0s)):
-      xcc_index = se // self.dev.xccs
-      se_index_xcc = se % self.dev.xccs
+
+    for se in range(ses):
+      xcc_index = se // 4
+      se_index_xcc = se % 4
       with self.pred_exec(xcc_mask=1<<xcc_index):
-        self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_EQ),
-                  self.gc.regSQ_THREAD_TRACE_STATUS.addr[0], 0, 0, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('busy'), 4)
+        self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se_index_xcc, sh_index=0, instance_broadcast_writes=1)
+        self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, self.pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_NEQ),
+                  self.gc.regSQ_THREAD_TRACE_STATUS.addr[0] - self.pm4.PACKET3_SET_UCONFIG_REG_START, 0, 1, self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('busy'), 4)
+        self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
         self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regSQ_THREAD_TRACE_WPTR.addr[0], 0, *data64_le(wptrs.va_addr+(se*4)))
 
     self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
@@ -295,7 +298,7 @@ class AMDComputeQueue(HWQueue):
 
     user_regs += [*data64_le(args_state.buf.va_addr)]
 
-    # if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
+    if prg.dev.sqtt_enabled: self.sqtt_prg_marker(prg, global_size)
 
     self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)
@@ -324,7 +327,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size,
               self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**gfx10p, force_start_at_000=1, compute_shader_en=1))
 
-    # if prg.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
+    if prg.dev.sqtt_enabled: self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_MARKER) | self.pm4.EVENT_INDEX(0))
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
     return self
 
@@ -840,6 +843,7 @@ class AMDDevice(HCQCompiled):
     self.sdma = import_module('sdma', min(self.iface.ip_versions[am.SDMA0_HWIP], (6, 0, 0)))
     # print(self.iface.ip_versions[am.GC_HWIP], self.iface.ip_offsets[am.GC_HWIP])
     # exit(0)
+    self.iface.ip_offsets[am.GC_HWIP][0] = (0x2000, 0xA000, 0)
     self.gc = AMDIP('gc', self.iface.ip_versions[am.GC_HWIP], self.iface.ip_offsets[am.GC_HWIP])
 
     nbio_name = 'nbio' if self.target[0] < 12 else 'nbif'
@@ -880,9 +884,9 @@ class AMDDevice(HCQCompiled):
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True)) for _ in range(self.se_cnt)]
-      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 2) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
+      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 0) # -1 enable all, 0 disable all, >0 bitmask for where to enable instruction tracing
       self.sqtt_next_cmd_id = itertools.count(0)
-      cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start_9(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
+      cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start_9(self.sqtt_buffers, self.sqtt_itrace_se_mask).signal(self.timeline_signal, self.next_timeline()).submit(self)
       self.synchronize()
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
@@ -941,12 +945,13 @@ class AMDDevice(HCQCompiled):
       self.synchronize()
       if DEBUG >= 2: print(f'{self.device}: Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):
-        wptr = ((wptrs_buf.cpu_view().view(fmt='I')[i] & 0x1FFFFFFF) - (((buf0.va_addr//32) & 0x1FFFFFFF) if self.target < (12,0,0) else 0)) * 32
+        wptr = ((wptrs_buf.cpu_view().view(fmt='I')[i] & 0x1FFFFFFF) - ((0) if self.target < (12,0,0) else 0)) * 32
         if DEBUG >= 2: print(f'\t{self.device}: SE {i} blob size {wptr:#x}')
         assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
         # When sqtt buffer overflows, wptr stops at the last dword
         if wptr >= buf0.size - 32:
           print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {i})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
+        print(sqtt_buf[:129].hex())
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, self.iface.props, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
