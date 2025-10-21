@@ -263,14 +263,16 @@ if __name__ == "__main__":
   parser.add_argument('--timing', action='store_true', help="Print timing per step")
   parser.add_argument('--seed', type=int, help="Set the random latent seed")
   parser.add_argument('--guidance', type=float, default=7.5, help="Prompt strength")
+  parser.add_argument('--fakeweights', action='store_true', help="Skip loading checkpoints and use fake weights")
   args = parser.parse_args()
 
   model = StableDiffusion()
 
   # load in weights
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
-    model_bin = fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt')
-    load_state_dict(model, torch_load(model_bin)['state_dict'], verbose=False, strict=False, realize=False)
+    if not args.fakeweights:
+      model_bin = fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt')
+      load_state_dict(model, torch_load(model_bin)['state_dict'], verbose=False, strict=False, realize=False)
 
     if args.fp16:
       for k,v in get_state_dict(model).items():

@@ -20,7 +20,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
                Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
-               Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.SUBSTITUTE: "#ffff00"}
+               Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.SUBSTITUTE: "#ffff00", Ops.AFTER: "#8A7866"}
 
 # VIZ API
 
@@ -98,9 +98,11 @@ def _reconstruct(a:int):
   return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
 
 def get_full_rewrite(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
-  ignore_indexing = not (isinstance(trace.keys[i].ret, ProgramSpec) or ctx.name in {"kernel split"})
-  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink), ignore_indexing), "uop":pystr(next_sink,i), "changed_nodes":None,
-         "diff":None, "upat":None}
+  next_sink = _reconstruct(ctx.sink)
+  # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
+  ignore_indexing = trace.keys[i].display_name.startswith("Schedule") and not (ctx.name in {"kernel split"} or \
+      any(s.dtype is dtypes.index for s in next_sink.src+(next_sink,)))
+  yield {"graph":uop_to_json(next_sink, ignore_indexing), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)

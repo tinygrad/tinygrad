@@ -1,7 +1,7 @@
 from typing import Literal, Callable, cast
 import os, math, sys
 from collections import defaultdict, Counter
-from tinygrad.codegen.opt import tc
+from tinygrad.codegen.opt import tc, axis_letters
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
@@ -144,6 +144,9 @@ class CStyleLanguage(Renderer):
     name = "test"
     for u in uops:
       if u.op is Ops.NOOP: continue
+      if u.op is Ops.AFTER:
+        r[u] = r[u.src[0]]
+        continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
@@ -160,7 +163,7 @@ class CStyleLanguage(Renderer):
       # naming
       prefix = None
       if u.op is Ops.SPECIAL: r[u] = u.arg
-      elif u.op is Ops.RANGE: r[u] = "ridx"+range_str(u)
+      elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.arg[-1]]}idx"+range_str(u)
       else:
         prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.PRECAST: "precast",

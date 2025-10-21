@@ -12,6 +12,9 @@ class Ops(FastEnum):
   NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto(); REWRITE_ERROR = auto()  # noqa: E702
   SENTINEL = auto()
 
+  # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
+  AFTER = auto()
+
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
 
@@ -91,7 +94,6 @@ class GroupOp:
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   Buffer = {Ops.LOAD, Ops.STORE, Ops.CONST, Ops.DEFINE_VAR}
-  Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}

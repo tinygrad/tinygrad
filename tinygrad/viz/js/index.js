@@ -608,7 +608,8 @@ async function main() {
       for (const [j,u] of steps.entries()) {
         const inner = ul.appendChild(document.createElement("ul"));
         inner.id = `step-${i}-${j}`;
-        inner.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
+        const p = inner.appendChild(document.createElement("p"));
+        p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
         inner.style.marginLeft = `${8*u.depth}px`;
         inner.onclick = (e) => {
           e.stopPropagation();
@@ -706,8 +707,9 @@ async function main() {
     rewriteList.className = "rewrite-list";
     for (let s=0; s<=step.match_count; s++) {
       const ul = rewriteList.appendChild(document.createElement("ul"));
-      ul.innerText = s;
       ul.id = `rewrite-${s}`;
+      const p = ul.appendChild(document.createElement("p"));
+      p.innerText = s;
       ul.onclick = () => setState({ currentRewrite:s });
       ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
       if (s > 0 && s === currentRewrite) {
