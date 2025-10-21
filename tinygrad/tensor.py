@@ -1,4 +1,10 @@
-# inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
+"""Core Tensor ops inspired by https://github.com/karpathy/micrograd.
+
+POOL_IMPL={MAIN,ALT} toggles the temporary alternate Tensor._pool path (default MAIN).
+"""
+from __future__ import annotations
+import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
+from contextlib import ContextDecorator
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
@@ -2360,7 +2366,10 @@ class Tensor(MathTrait):
     noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
-    if any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
+    any_k_gt_stride = any(resolve(k > s) for k,s in zip(k_, s_))
+    any_d_ne_one = any(d != 1 for d in d_)
+    use_alt = _pool_impl_mode() == "ALT"
+    if not use_alt or any_k_gt_stride or any_d_ne_one:
       # input size scaling factor to make sure shrink for stride is possible
       f_ = [1 + int(resolve(o*s > (i - d*(k-1)))) for o,s,i,d,k in zip(o_,s_,i_,d_,k_)]
       # # repeats such that we don't need padding
@@ -2373,6 +2382,7 @@ class Tensor(MathTrait):
       # permute to move reduce to the end
       return x.permute(*range(len(noop)), *[len(noop)+i*2+1 for i in range(len(i_))], *[len(noop)+i*2 for i in range(len(i_))])
     # TODO: once the shapetracker can optimize well, remove this alternative implementation
+    # TEMP: ALT impl behind POOL_IMPL=ALT (remove after soak)
     x = self.pad(tuple(noop + [(0, max(0,o*s-i)) for i,o,s in zip(i_,o_,s_)])).shrink(tuple(noop + [(0,o*s) for o,s in zip(o_,s_)]))
     x = x.reshape(noop + flatten(((o,s) for o,s in zip(o_,s_))))
     x = x.shrink(tuple(noop + flatten(((0,o), (0,k)) for o,k in zip(o_,k_))))
