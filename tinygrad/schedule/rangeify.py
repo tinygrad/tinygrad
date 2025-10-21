@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic_flat
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -477,7 +477,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
   # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, getenv("DEBUG_RANGEIFY", 0))
+  tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_unparented, name="symbolic")  # this supports const folding
