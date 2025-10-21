@@ -214,8 +214,8 @@ class TestLinearizer(unittest.TestCase):
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
-      # children of STORE are placed after ENDRANGE
-      if any(x.op is Ops.STORE and x.src[1].op in GroupOp.ALU for x in u.src):
+      # children of END are placed after ENDRANGE
+      if any(x.op is Ops.END and x.src[1].op in GroupOp.ALU for x in u.src):
         assert end_range < uops.index(u)
 
   def test_grouped_dims(self):
@@ -400,7 +400,7 @@ class TestLinearizer(unittest.TestCase):
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
-    assert len([u for u in uops if u.op is Ops.IF and u.src[-1] == barrier]) == 1
+    assert len([u for u in uops if u.op is Ops.IF and u.src[1] == barrier]) == 1
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
