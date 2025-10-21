@@ -1,4 +1,3 @@
-from ast import Global
 import os, sys, pickle, time, re
 import numpy as np
 
