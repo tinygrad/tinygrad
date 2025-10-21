@@ -154,7 +154,7 @@ class TestViz(BaseTestViz):
     a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
     exec_rewrite(a, [PatternMatcher([])])
     a2 = next(get_viz_details(0, 0))["graph"][id(a)]
-    self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\nx\nyzww\nw")
+    self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
 
   def test_inf_loop(self):
     a = UOp.variable('a', 0, 10, dtype=dtypes.int)
