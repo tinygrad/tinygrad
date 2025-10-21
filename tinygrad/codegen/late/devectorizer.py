@@ -272,6 +272,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(src=(UPat(), UPat(), UPat(dtype=dtypes.bool)), name="idx").or_casted(), UPat()), name="store", allow_any_len=True),
     lambda store,idx: UOp(Ops.STORE, dtype=store.dtype, src=store.src[:2]+(UOp(Ops.IF, src=(idx.src[2],)),)+store.src[2:]) if \
       len(store.src) <= 2 or store.src[2].op != Ops.IF else None),
+  # for renderering and linearizing, all ends must end one loop
+  (UPat(Ops.END, name="e"), lambda e: e.replace(src=e.src[e.arg-1:], arg=1).end(ends=e.src[:e.arg-1]) if e.arg > 1 else None),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
@@ -295,7 +297,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   # if we have a range
   if len(reduce_range) != 0:
     topo = inp.toposort()
-    ended_ranges = [x.src[0] for x in topo if x.op is Ops.END]
+    ended_ranges = flatten([x.src[:x.arg] for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))

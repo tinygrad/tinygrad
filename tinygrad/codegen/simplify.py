@@ -18,9 +18,9 @@ pm_flatten_range = PatternMatcher([
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
-  i = range_start[u.op]
-  while i < len(u.src)-1:
-    r0, r1 = u.src[i], u.src[i+1]
+  i = 0
+  while i < len(u.ended_ranges)-1:
+    r0, r1 = u.ended_ranges[i], u.ended_ranges[i+1]
     # check same type
     if r0.arg[-1] == r1.arg[-1]:
       # check if the ranges to merge are in the same reduces
@@ -39,7 +39,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   return u
 
 pm_simplify_ranges = PatternMatcher([
-  (UPat((Ops.STORE, Ops.REDUCE), name="u"), simplify_merge_adjacent),
+  (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
 ])
 
 def mark_range_mod(ctx, r:UOp, c:UOp):

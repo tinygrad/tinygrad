@@ -84,7 +84,7 @@ def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
       if u.op is Ops.END:
-        label += " -- "+' '.join([f"{colored(u.src[i].arg[0], axis_colors[u.src[i].arg[-1]])}({u.src[i].vmax+1})" for i in range(u.arg)])
+        label += "\n"+' '.join([f"{colored(u.src[i].arg[0], axis_colors[u.src[i].arg[-1]])}({u.src[i].vmax+1})" for i in range(u.arg)])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"

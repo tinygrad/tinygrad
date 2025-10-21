@@ -289,6 +289,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.RANGE: return {self:None}
     return self._ranges
 
+  @functools.cached_property
+  def ended_ranges(self):
+    match self.op:
+      case Ops.REDUCE: return self.src[1:]
+      case Ops.END: return self.src[:self.arg]
+      case _: raise RuntimeError(f"{self.op} doesn't end ranges")
+
   # *** uop evaluation ***
 
   def simplify(self, tracked=False, full_symbolic=True):
