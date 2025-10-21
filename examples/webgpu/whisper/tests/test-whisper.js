@@ -156,6 +156,7 @@ async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping, load
 
   let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
 
+  onEvent("inferenceBegin");
   console.log("begin new transcription");
 
   let previous_context = [];
@@ -177,7 +178,8 @@ async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping, load
     // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
     function updateCallback(pd) {
       pendingText = pd;
-      console.log(pendingText);
+      // console.log(pendingText);
+      onEvent("chunkUpdate", {pendingText});
     }
     let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
     if (cancelToken.cancelled) {
@@ -209,6 +211,7 @@ async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping, load
     }
   }
   inferenceDone = true;
+  onEvent("inferenceDone");
   // currentTranscription.style.display = 'none';
 
   let took = performance.now() - before;
@@ -218,6 +221,8 @@ async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping, load
 function onTranscriptionEvent(event, data) {
   if (event === "cancel") {
 
+  } else if (event === "chunkUpdate") {
+    console.log(data.pendingText);
   } else if (event === "chunkDone") {
     console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
   }

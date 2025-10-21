@@ -171,9 +171,31 @@
         }
         let _ = setModelName();
 
+        let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
+        const updateLoop = (now) => {
+            if (pendingText !== null && pendingText !== lastDisplayed && now - lastUpdateTime >= 1000.0 / 30) {
+                currentTranscription.innerText = pendingText;
+                lastDisplayed = pendingText;
+                lastUpdateTime = now;
+                transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
+            }
+            if (!inferenceDone) requestAnimationFrame(updateLoop);
+        };
+
         function onTranscriptionEvent(event, data) {
             if (event === "cancel") {
                 currentTranscription.style.display = 'none';
+                inferenceDone = true;
+            } else if (event === "inferenceDone") {
+                inferenceDone = true;
+                currentTranscription.style.display = 'none';
+            } else if (event === "inferenceBegin") {
+                inferenceDone = false;
+                pendingText = '';
+                currentTranscription.style.display = 'block';
+                requestAnimationFrame(updateLoop);
+            } else if (event === "chunkUpdate") {
+                pendingText = data.pendingText;
             } else if (event === "chunkDone") {
                 const newChunk = document.createElement('div');
                 newChunk.className = 'transcription-chunk';
@@ -181,6 +203,7 @@
                 console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
                 transcriptionLog.appendChild(newChunk);
                 currentTranscription.innerText = '';
+                pendingText = '';
             }
         }
 
@@ -284,17 +307,18 @@
             }
 
             let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
-            const updateLoop = (now) => {
-                if (pendingText !== null && pendingText !== lastDisplayed && now - lastUpdateTime >= 1000.0 / 30) {
-                    currentTranscription.innerText = pendingText;
-                    lastDisplayed = pendingText;
-                    lastUpdateTime = now;
-                    transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
-                }
-                if (!inferenceDone) requestAnimationFrame(updateLoop);
-            };
-            requestAnimationFrame(updateLoop);
-            currentTranscription.style.display = 'block';
+            // const updateLoop = (now) => {
+            //     if (pendingText !== null && pendingText !== lastDisplayed && now - lastUpdateTime >= 1000.0 / 30) {
+            //         currentTranscription.innerText = pendingText;
+            //         lastDisplayed = pendingText;
+            //         lastUpdateTime = now;
+            //         transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
+            //     }
+            //     if (!inferenceDone) requestAnimationFrame(updateLoop);
+            // };
+            // requestAnimationFrame(updateLoop);
+            // currentTranscription.style.display = 'block';
+            onEvent("inferenceBegin");
 
             console.log("begin new transcription");
 
@@ -318,6 +342,7 @@
 
                 function updateCallback(pd) {
                     pendingText = pd;
+                    onEvent("chunkUpdate", {pendingText});
                 }
                 let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
                 if (cancelToken.cancelled) {
@@ -349,7 +374,8 @@
                 }
             }
             inferenceDone = true;
-            currentTranscription.style.display = 'none';
+            onEvent("inferenceDone");
+            // currentTranscription.style.display = 'none';
 
             let took = performance.now() - before;
             console.log("end transcription: " + took);
