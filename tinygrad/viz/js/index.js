@@ -615,10 +615,10 @@ async function main() {
         u.li.id = `step-${i}-${j}`;
         const p = u.li.appendChild(document.createElement("p"));
         p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
-        u.li.onclick = (e) => {
+        p.onclick = (e) => {
           e.stopPropagation();
-          const subrewrites = getSubrewrites(e.currentTarget);
-          if (subrewrites.length) { e.currentTarget.classList.toggle("expanded"); }
+          const subrewrites = getSubrewrites(e.currentTarget.parentElement);
+          if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
           setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
         }
         stack.push(u);
@@ -810,7 +810,7 @@ document.addEventListener("keydown", (event) => {
     if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
-    if (getSubrewrites(step).length) return step.click();
+    if (getSubrewrites(step).length) return step.children[0].click();
     return setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
