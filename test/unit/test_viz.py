@@ -148,8 +148,16 @@ class TestViz(BaseTestViz):
     a2 = uop_to_json(a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
+  def test_colored_label_multiline(self):
+    arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
+    src = [Tensor.empty(1).uop for _ in range(10)]
+    a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
+    exec_rewrite(a, [PatternMatcher([])])
+    a2 = next(get_viz_details(0, 0))["graph"][id(a)]
+    self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
+
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.variable('a', 0, 10, dtype=dtypes.int)
     b = a.replace(op=Ops.CONST)
     pm = PatternMatcher([
       (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
@@ -164,8 +172,8 @@ class TestViz(BaseTestViz):
     self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
 
   def test_const_node_visibility(self):
-    a = UOp.variable("a", 0, 10)
-    z = UOp.const(dtypes.index, 0)
+    a = UOp.variable("a", 0, 10, dtype=dtypes.int)
+    z = UOp.const(a.dtype, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
     lst = get_viz_list()

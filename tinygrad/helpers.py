@@ -170,7 +170,6 @@ SPEC = ContextVar("SPEC", 0)
 # TODO: disable by default due to speed
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
-REAL_SUBSTITUTE = ContextVar("REAL_SUBSTITUTE", 0)
 
 @dataclass(frozen=True)
 class Metadata:

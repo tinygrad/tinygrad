@@ -66,8 +66,8 @@ buffer_spec = PatternMatcher([
 ])
 
 assign_spec = PatternMatcher([
-  # KERNEL can attach to an ASSIGN to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.ASSIGN, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
+  # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
@@ -111,6 +111,9 @@ tensor_uop_spec = buffer_spec+assign_spec+PatternMatcher([
 
   # REDUCE with an outerworld range
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+
+  # AFTER if things were kernelized
+  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True)
 ])
 
 # ***** uop type spec *****
@@ -162,6 +165,9 @@ spec = PatternMatcher([
 
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
+  # allow AFTER on buffers
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
+
   # **** new style load/store ****
 
   # make sure all index dtypes have been lowered
@@ -171,18 +177,14 @@ spec = PatternMatcher([
 
   # INDEX is used in new style load/store
   # INDEX takes a <buf, alu, gate?>
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat())), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
-
-  # LOAD on STORE
-  (UPat(Ops.LOAD, src=(UPat(Ops.STORE),), allow_any_len=True), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
 
   # LOAD takes a <bufidx, alt?, barrier?>
   (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond")), allow_any_len=True), lambda idx,cond: validate_index(idx,cond.src[0])),
   (UPat(Ops.LOAD, src=(index_pat,), allow_any_len=True), validate_index),
 
-  # STORE takes a <bufidx, val, gate?>
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(Ops.IF, name="gate")), allow_any_len=True), validate_store),
+  # STORE takes a <bufidx, val, ranges...>
   (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
@@ -193,7 +195,7 @@ spec = PatternMatcher([
   (UPat((Ops.IDIV, Ops.MOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
 
-  (UPat(Ops.ENDRANGE, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
+  (UPat(Ops.END, dtype=dtypes.void, src=(UPat(Ops.RANGE),)), lambda: True),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
@@ -233,9 +235,6 @@ ast_spec = PatternMatcher([
 full_spec = PatternMatcher([
   # SENTINEL should never be in the graph
   (UPat(Ops.SENTINEL), lambda: False),
-
-  # allow any SUBSTITUTE
-  (UPat(Ops.SUBSTITUTE), lambda: True),
 
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
@@ -283,6 +282,8 @@ full_spec = PatternMatcher([
   (UPat(Ops.DEFINE_VAR), lambda: True),
   # reshape on STORE
   (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
+  # allow any AFTER
+  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 ])+tensor_uop_spec+spec
 
 # ***** uop helpers *****

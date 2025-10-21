@@ -169,7 +169,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @property
   def ptrdtype(self) -> PtrDType:
-    if not isinstance(self.dtype, PtrDType): raise RuntimeError("ptrdtype called on UOp without PtrDType")
+    if not isinstance(self.dtype, PtrDType): raise RuntimeError(f"ptrdtype called on UOp with type {self.dtype}")
     return self.dtype
 
   # *** uop shape stuff ***
@@ -179,7 +179,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.INDEX | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.SUBSTITUTE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.PRECAST:
+           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.PRECAST:
         return None
 
       # some ops init the shape
@@ -190,7 +190,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.FUSE: return self.src[0]._shape
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.FUSE | Ops.AFTER:
+        return self.src[0]._shape
 
       # ops with custom handling
       case Ops.KERNEL: return self.arg.ast._shape
@@ -324,7 +325,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, *srcs:UOp|None, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
-  def __getitem__(self, idx): return self.index(idx)
+  def __getitem__(self, *idx): return self.index(*idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
@@ -349,6 +350,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
+  def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def alu(self, op, *src:UOp, **kwargs):
@@ -525,6 +527,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def _device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.BUFFERIZE: return self.arg.device
+    if self.op is Ops.AFTER: return self.src[0]._device
     if self.op is Ops.MSELECT:
       assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
       return self.src[0].device[self.arg]
@@ -538,8 +541,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
     if self.op is Ops.MSTACK: return UOp(Ops.MSTACK, self.dtype, src=tuple(x.buf_uop for x in self.src))
-    assert self.op is Ops.ASSIGN, f"must be ASSIGN {self.op}"
-    return self.src[0].base
+    assert self.op is Ops.AFTER, f"must be AFTER {self.op}"
+    return self.src[0].buf_uop.base
 
   def as_buf(self) -> UOp:
     if self.op is Ops.MSELECT: return self.src[0].as_buf().mselect(self.arg)
@@ -810,6 +813,8 @@ class UPat(MathTrait):
   @staticmethod
   def any(*src): return UPatAny(src=src)
   def or_casted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.CAST, name=name, src=(self,)))
+  def or_after(self, name:str|None=None):
+    return UPat.any(self if name is None else self.named(name), UPat(Ops.AFTER, name=name, src=(self,), allow_any_len=True))
 
   @staticmethod
   @functools.cache
@@ -836,7 +841,6 @@ class UPat(MathTrait):
   def reduce(self, *src:UPat, **kwargs): return UPat(Ops.REDUCE, self.dtype, src=(self,)+src, **kwargs)
   def fuse(self): return self.alu(Ops.FUSE)
   def broadcast(self, **kwargs): return UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs)
-  def or_broadcasted(self, **kwargs): return UPat.any(self, self.broadcast(**kwargs))
   def contiguous(self, *args, **kwargs): return UPat(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
@@ -1091,7 +1095,7 @@ class RewriteContext:
               new_n, test_n = test_n, self.cached_bpm_rewrite(test_n)
           except BottomUpGate:
             # if the bpm matching raised a gate, we are done with this node and dont continue down the srcs
-            self.replace[n] = new_n
+            self.replace[n] = unwrap(test_n)
             continue
         stack.append((n, 1, new_n))
         for x in reversed(new_n.src):
@@ -1171,6 +1175,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("valid"))), lambda buf,idx,valid: buf.index(idx, valid)),
   (UPat((Ops.STORE, Ops.LOAD), src=(UPat(), UPat(), UPat().cast(dtypes.index)), allow_any_len=True, name="s"),
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
+  # TODO: this is only triggering if they are all casts, correct?
   (UPat((Ops.SINK, Ops.NOOP), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]

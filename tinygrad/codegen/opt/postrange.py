@@ -348,7 +348,7 @@ def apply_opts(ctx:Renderer, ast:UOp):
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if all(len(u.src) == 1 for u in ast.backward_slice if u.op is Ops.LOAD):
+    if not any(u.op is Ops.AFTER and u.src[0].op is Ops.DEFINE_LOCAL for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
