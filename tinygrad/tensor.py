@@ -3925,7 +3925,7 @@ class Tensor(MathTrait):
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
-  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
+  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, sinks:Tensor|None=None, attn_mask:Tensor|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
     """
     Computes scaled dot-product attention.
@@ -3950,9 +3950,7 @@ class Tensor(MathTrait):
     if FUSE_ATTENTION: q, key, value = self.contiguous(), key.contiguous(), value.contiguous()
     else: q = self
 
-    ic(q.squeeze().numpy(), key.transpose(-2,-1).squeeze().numpy())
-    qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1])
-    ic(qk.squeeze().numpy(), 1/ math.sqrt(q.shape[-1]))
+    qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1]) # (B,H,T,Hd) (B,H,Hd,T) -> (B,H,T,T)
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
@@ -3960,6 +3958,10 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
+    if sinks is not None:
+      ic(qk.shape)
+      qk = qk.cat(sinks, dim=-1)
+      ic(qk.shape, qk.float().numpy())
     attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
     return attn.fuse() if FUSE_ATTENTION else attn
 

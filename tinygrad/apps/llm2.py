@@ -127,21 +127,16 @@ class TransformerBlock:
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
-    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
+    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm) # (B,T,D)
 
     B, T, _ = x.shape
-    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
-    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    # ic(x.shape, self.attn_q.weight.shape, q.shape)
+    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)     # (B,H,T,Hd)
+    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
+    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
+    s = self.attn_sinks.reshape(1, -1, 1, 1).expand(B, self.head_dim, T, 1)  # (B,H,T,1)
 
-    # ic(fix(x), fix(q), fix(self.attn_q.weight), x.shape)
     q = apply_rope(q, start_pos)
-    ic(fix(q))
-    1 / 0
     k = apply_rope(k, start_pos)
-    ic(fix(q), fix(k))
-    1/0
 
     # TODO: remove these kv cache realizes
     if not hasattr(self, "cache_kv"):
@@ -155,9 +150,10 @@ class TransformerBlock:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
 
-    attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
+    attn = q.scaled_dot_product_attention(k, v, sinks=s, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
     attn = self.attn_o(attn)
+    1/0
     return x + attn
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
