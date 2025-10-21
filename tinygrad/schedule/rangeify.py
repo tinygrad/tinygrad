@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic_flat
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, PCONTIG
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -468,39 +468,6 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-def second_stage_removal(src:UOp, buf:UOp):
-  if buf.arg.addrspace != AddrSpace.GLOBAL: return None
-  # if it's user contiguous, we never remove it
-  if src.op in ALWAYS_RUN_OPS: return None
-  accessed_buffers: list[UOp] = []
-  def red_gate(x:UOp):
-    if x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL:
-      accessed_buffers.append(x)
-      return False
-    if x.op is Ops.BUFFER:
-      accessed_buffers.append(x)
-    return True
-  src.toposort(gate=red_gate)
-  del red_gate
-  accessed_buffers = dedup(accessed_buffers)
-  out_in_ratio = prod(buf.shape) / sum([x.size for x in accessed_buffers])
-  print(f"ratio {out_in_ratio:.2f} {buf.shape} from {[x.size for x in accessed_buffers]}")
-  if out_in_ratio > 10:
-    return buf.replace(op=Ops.REMOVE, arg=None)
-
-pm_cleanups_2 = PatternMatcher([
-  (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf"), second_stage_removal),
-])
-
-def do_remove(rem:UOp, idx:UOp):
-  assert len(rem.src) == len(idx.src), f"remove on wrong bufferize, {len(rem.src)} != {len(idx.src)}"
-  return rem.src[0].substitute({k:v for k,v in zip(rem.src[1:], idx.src[1:]) if k.op is not Ops.CONST})
-
-pm_cleanup_remove = PatternMatcher([
-  # TODO: benchmark and move the first pass to this
-  (UPat(Ops.REMOVE, name="rem").f(Ops.INDEX, allow_any_len=True, name="idx"), do_remove),
-])
-
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
@@ -515,11 +482,6 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_unparented, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
-
-  if PCONTIG >= 2:
-    tsink = graph_rewrite(tsink, pm_cleanups_2, name="remove (more) costly buffers")
-    tsink = graph_rewrite(tsink, pm_cleanup_remove, name="actually remove")
-
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph

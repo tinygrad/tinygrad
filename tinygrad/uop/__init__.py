@@ -40,7 +40,6 @@ class Ops(FastEnum):
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
-  REMOVE = auto()
 
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
