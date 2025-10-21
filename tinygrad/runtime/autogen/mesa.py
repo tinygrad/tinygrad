@@ -7,13 +7,11 @@
 # LONGDOUBLE_SIZE is: 16
 #
 import ctypes, ctypes.util, os, gzip, base64, subprocess, tinygrad.helpers as helpers
-def brew_prefix():
-  try: return subprocess.check_output(['brew', '--prefix', 'tinymesa']).decode().strip()
-  except Exception: return ''
 PATHS_TO_TRY = [
   (BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if helpers.OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if helpers.OSX else '.so'),
   f'{BASE}/libtinymesa{EXT}',
-  f'{brew_prefix()}/lib/libtinymesa_cpu.dylib',
+  '/opt/homebrew/lib/libtinymesa_cpu.dylib',
+  '/opt/homebrew/lib/libtinymesa.dylib',
 ]
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
@@ -6087,7 +6085,7 @@ struct_nir_op_info._fields_ = [
 
 nir_op_info = struct_nir_op_info
 try: nir_op_infos = (struct_nir_op_info * 489).in_dll(_libraries['libtinymesa_cpu.so'], 'nir_op_infos')
-except AttributeError: pass
+except (AttributeError, ValueError): pass
 try:
     nir_op_is_selection = _libraries['FIXME_STUB'].nir_op_is_selection
     nir_op_is_selection.restype = ctypes.c_bool
@@ -8118,7 +8116,7 @@ c__EA_nir_intrinsic_index_flag = ctypes.c_uint32 # enum
 nir_intrinsic_index_flag = c__EA_nir_intrinsic_index_flag
 nir_intrinsic_index_flag__enumvalues = c__EA_nir_intrinsic_index_flag__enumvalues
 try: nir_intrinsic_index_names = (ctypes.POINTER(ctypes.c_char) * 75).in_dll(_libraries['libtinymesa_cpu.so'], 'nir_intrinsic_index_names')
-except AttributeError: pass
+except (AttributeError, ValueError): pass
 class struct_nir_intrinsic_instr(Structure):
     pass
 
@@ -8242,7 +8240,7 @@ struct_nir_intrinsic_info._fields_ = [
 
 nir_intrinsic_info = struct_nir_intrinsic_info
 try: nir_intrinsic_infos = (struct_nir_intrinsic_info * 732).in_dll(_libraries['libtinymesa_cpu.so'], 'nir_intrinsic_infos')
-except AttributeError: pass
+except (AttributeError, ValueError): pass
 try:
     nir_intrinsic_src_components = _libraries['libtinymesa_cpu.so'].nir_intrinsic_src_components
     nir_intrinsic_src_components.restype = ctypes.c_uint32
@@ -19877,4 +19875,4 @@ __all__ = \
     'union_util_format_description_0', 'util_format_colorspace',
     'util_format_layout', 'va_list']
 lvp_nir_options = gzip.decompress(base64.b64decode('H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA'))
-def __getattr__(nm): raise AttributeError() if dll else FileNotFoundError(f'libtinymesa not found (MESA_PATH={BASE}). See https://github.com/sirhcm/tinymesa (tinymesa-32dc66c, mesa-25.2.4)')
+def __getattr__(nm): raise AttributeError('LLVMpipe requires tinymesa_cpu' if 'tinymesa_cpu' not in dll._name else f'attribute {nm} not found') if dll else FileNotFoundError(f'libtinymesa not found (MESA_PATH={BASE}). See https://github.com/sirhcm/tinymesa (tinymesa-32dc66c, mesa-25.2.4)')
