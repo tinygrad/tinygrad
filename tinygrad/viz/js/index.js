@@ -245,9 +245,9 @@ async function renderProfiler() {
         html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
         if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
         if (shapeRef != null) {
-          const p = html.appendChild(document.createElement("p"));
-          p.innerText = "\nView Codegen Rewrite"; p.style.cursor = "pointer";
-          p.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
+          const a = html.appendChild(document.createElement("a"));
+          a.innerText = "\nView codegen rewrite";
+          a.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
@@ -530,10 +530,10 @@ function codeBlock(st, language, { loc, wrap }={}) {
   return ret;
 }
 
-function setActive(e) {
-  if (e == null) return;
-  e.classList.add("active");
-  requestAnimationFrame(() => e.scrollIntoView({ behavior: "auto", block: "nearest" }));
+function toggleCls(prev, next, cls, value) {
+  prev?.classList.remove(cls);
+  next?.classList.toggle(cls, value ?? true);
+  requestAnimationFrame(() => next?.scrollIntoView({ behavior: "auto", block: "nearest" }));
 }
 
 // ** hljs extra definitions for UOps and float4
@@ -563,21 +563,26 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
-  const { currentCtx:prevCtx, currentStep:prevStep } = state;
+  const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   Object.assign(state, ns);
   // update element styles if needed
-  document.getElementById(`ctx-${state.currentCtx}`)?.classList.toggle("expanded", state.expandSteps);
-  if (state.currentCtx !== prevCtx) {
-    document.getElementById(`ctx-${prevCtx}`)?.classList.remove("active", "expanded");
-    setActive(document.getElementById(`ctx-${state.currentCtx}`));
-  }
-  if (state.currentCtx !== prevCtx || state.currentStep !== prevStep) {
-    document.getElementById(`step-${prevCtx}-${prevStep}`)?.classList.remove("active");
-    setActive(document.getElementById(`step-${state.currentCtx}-${state.currentStep}`));
+  const { ctx, step } = select(state.currentCtx, state.currentStep);
+  toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
+  if (ctx?.id !== prevCtx?.id) toggleCls(prevCtx, ctx, "active");
+  if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
+    toggleCls(prevStep, step, "active");
+    // walk the tree back until all parents expanded so that the child is visible
+    let e = step;
+    while (e?.parentElement?.id.startsWith("step")) {
+      e.parentElement.classList.add("expanded");
+      e = e.parentElement;
+    }
   }
   // re-render
   main();
 }
+
+const getSubrewrites = (ul) => ul.querySelectorAll(":scope > ul");
 
 // set a new context and keep the old one in browser history
 function setCtxWithHistory(newCtx, step=0) {
@@ -605,16 +610,25 @@ async function main() {
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
+      const stack = []; let list = ul;
       for (const [j,u] of steps.entries()) {
-        const inner = ul.appendChild(document.createElement("ul"));
-        inner.id = `step-${i}-${j}`;
-        const p = inner.appendChild(document.createElement("p"));
+        while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
+        const list = stack.length > 0 ? stack.at(-1).li : ul;
+        u.li = list.appendChild(document.createElement("ul"));
+        u.li.id = `step-${i}-${j}`;
+        const p = u.li.appendChild(document.createElement("p"));
         p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
-        inner.style.marginLeft = `${8*u.depth}px`;
-        inner.onclick = (e) => {
+        p.onclick = (e) => {
           e.stopPropagation();
-          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
+          const subrewrites = getSubrewrites(e.currentTarget.parentElement);
+          if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
+          setState({ currentStep:j, currentCtx:i });
         }
+        stack.push(u);
+      }
+      for (const l of ul.querySelectorAll("ul > ul > p")) {
+        const subrewrites = getSubrewrites(l.parentElement);
+        if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
       }
     }
     return setState({ currentCtx:-1 });
@@ -764,22 +778,32 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 // **** keyboard shortcuts
 
+const select = (ctx, step) => ({ ctx:document.getElementById(`ctx-${ctx}`), step:document.getElementById(`step-${ctx}-${step}`) });
+const deselect = (element) => {
+  const parts = element?.id.split("-").map(Number);
+  return element?.id.startsWith("ctx") ? { ctx:parts[1], step:null } : element?.id.startsWith("step") ? {ctx:parts[1], step:parts[2]} : {};
+}
+const isExpanded = (el) => el?.classList.contains("expanded");
+
 document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
+  const { step, ctx } = select(currentCtx, currentStep);
   if (event.key == "ArrowUp") {
     event.preventDefault();
     if (changeStep) {
-      return setState({ currentRewrite:0, currentStep:Math.max(0, currentStep-1) });
+      let prev = deselect(step.previousElementSibling);
+      if (prev.step == null && isExpanded(step.parentElement)) prev = deselect(step.parentElement);
+      return prev.step != null && !isExpanded(step) && setState({ currentRewrite:0, currentStep:prev.step });
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
     if (changeStep) {
-      const totalUOps = ctxs[currentCtx].steps.length-1;
-      return setState({ currentRewrite:0, currentStep:Math.min(totalUOps, currentStep+1) });
+      const next = deselect(isExpanded(step) ? step.children[1] : step.nextElementSibling);
+      return next.step != null && setState({ currentRewrite:0, currentStep:next.step });
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
   }
@@ -789,6 +813,7 @@ document.addEventListener("keydown", (event) => {
     if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
+    if (expandSteps && getSubrewrites(step).length) return step.children[0].click();
     return setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp

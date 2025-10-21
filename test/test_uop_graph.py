@@ -674,7 +674,7 @@ class TestUOpGraph(unittest.TestCase):
     store = UOp(Ops.STORE, dtypes.void, (glbl.index(alu), cf))
     uops = to_uops_list([store])
     ranges = [x for x in uops if x.op is Ops.RANGE]
-    endranges = [x for x in uops if x.op is Ops.ENDRANGE]
+    endranges = [x for x in uops if x.op is Ops.END]
     # ranges are closed in the right order
     self.assertEqual(endranges[-1].src[0], ranges[0])
 
