@@ -777,9 +777,10 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 const select = (ctx, step) => ({ ctx:document.getElementById(`ctx-${ctx}`), step:document.getElementById(`step-${ctx}-${step}`) });
 const deselect = (element) => {
-  const parts = element.id.split("-").map(Number);
-  return element.id.startsWith("ctx") ? { ctx:parts[1], step:null } : element.id.startsWith("step") ? {ctx:parts[1], step:parts[2]} : {};
+  const parts = element?.id.split("-").map(Number);
+  return element?.id.startsWith("ctx") ? { ctx:parts[1], step:null } : element?.id.startsWith("step") ? {ctx:parts[1], step:parts[2]} : {};
 }
+const isExpanded = (el) => el?.classList.contains("expanded");
 
 document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -789,15 +790,16 @@ document.addEventListener("keydown", (event) => {
   if (event.key == "ArrowUp") {
     event.preventDefault();
     if (changeStep) {
-      const prev = deselect(step.previousElementSibling);
-      return prev.step != null && setState({ currentRewrite:0, currentStep:prev.step });
+      let prev = deselect(step.previousElementSibling);
+      if (prev.step == null && isExpanded(step.parentElement)) prev = deselect(step.parentElement);
+      return prev.step != null && !isExpanded(step) && setState({ currentRewrite:0, currentStep:prev.step });
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
     if (changeStep) {
-      const next = deselect(step.nextElementSibling);
+      const next = deselect(isExpanded(step) ? step.children[1] : step.nextElementSibling);
       return next.step != null && setState({ currentRewrite:0, currentStep:next.step });
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
@@ -808,7 +810,8 @@ document.addEventListener("keydown", (event) => {
     if (currentCtx === -1) {
       return setState({ currentCtx:0, expandSteps:true });
     }
-    return setState({ expandSteps:!expandSteps });
+    if (getSubrewrites(step).length) return step.click();
+    return  setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
   if (event.key == "ArrowLeft") {
