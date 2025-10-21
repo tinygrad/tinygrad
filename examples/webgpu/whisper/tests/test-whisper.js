@@ -134,9 +134,9 @@ nets.decoder = await decoder.setupNet(device, new Uint8Array(await getPart("deco
 const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
 
 let currentCancel = null;
-async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping) {
+async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping, loadAndInitializeModels) {
   let before = performance.now();
-  // await loadAndInitializeModels();
+  await loadAndInitializeModels();
   const { sampleRate, samples } = await audioFetcher();
 
   let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
@@ -224,7 +224,7 @@ function onTranscriptionEvent(event, data) {
 }
 
 currentCancel = { cancelled: false };
-await transcribeAudio(async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, mapping);
+await transcribeAudio(async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, mapping, async () => {});
 console.log("we're supposed to be done here");
 
 delete globalThis.mel;

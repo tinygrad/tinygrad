@@ -190,7 +190,7 @@
             const url = document.getElementById("urlInput").value;
             try {
                 currentCancel = { cancelled: false };
-                await transcribeAudio(async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent, mapping);
+                await transcribeAudio(async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent, mapping, loadAndInitializeModels);
             } catch (err) {
                 console.error("Fetch failed:", err);
             }
@@ -264,7 +264,7 @@
         const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
 
         let currentCancel = null;
-        async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping) {
+        async function transcribeAudio(audioFetcher, cancelToken, onEvent, mapping, loadAndInitializeModels) {
             let before = performance.now();
             await loadAndInitializeModels();
             const { sampleRate, samples } = await audioFetcher();
@@ -397,7 +397,7 @@
                         const file = item.getAsFile();
                         console.log(`... file[${i}].name = ${file.name}`);
                         currentCancel = { cancelled: false };
-                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent, mapping);
+                            await transcribeAudio(async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent, mapping, loadAndInitializeModels);
                     }
                 });
             } else {
@@ -409,7 +409,7 @@
         });
 
         // currentCancel = { cancelled: false };
-        // transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel, onTranscriptionEvent, mapping);
+        // transcribeAudio(async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel, onTranscriptionEvent, mapping, loadAndInitializeModels);
         loadAndInitializeModels();
     </script>
 </body>
