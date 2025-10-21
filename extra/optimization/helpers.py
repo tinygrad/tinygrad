@@ -3,7 +3,6 @@ from tinygrad import Variable
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.shape.view import View
 from tinygrad.helpers import getenv
 from tinygrad.engine.realize import get_program
