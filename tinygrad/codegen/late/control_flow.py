@@ -1,6 +1,29 @@
 import heapq
+from typing import cast
 from collections import defaultdict
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
+from tinygrad.helpers import lambda_raise
+
+# only needed if device doesn't support gated stores
+pm_linearize_cleanups = PatternMatcher([
+  # if statements are not allowed in the graph
+  (UPat((Ops.IF, Ops.ENDIF)), lambda: lambda_raise(RuntimeError("if not allowed in graph"))),
+  # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
+  (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))).or_casted(), UPat()),
+        allow_any_len=True), lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate, u)), u, UOp(Ops.ENDIF, src=(mif,))]))
+])
+
+# requires lst be toposorted. like graph rewrite, but for lines
+def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
+  newlst = []
+  replaced: dict[UOp, UOp] = {}
+  for u in lst:
+    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
+    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
+    replaced[u] = ret[0]
+    newlst.extend(ret[1])
+  return newlst
 
 def linearize(u:UOp) -> list[UOp]:
   lst = list(u.toposort())
@@ -40,7 +63,7 @@ def linearize(u:UOp) -> list[UOp]:
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
 
   assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
-  return newlst
+  return line_rewrite(newlst, pm_linearize_cleanups)
 
 class CFGContext:
   def __init__(self, sink:UOp):
@@ -53,9 +76,9 @@ class CFGContext:
     nesting: dict[UOp, UOp] = {}
     for u in sink.toposort():
       deps[u] = set().union(*(deps[s] for s in u.src))
-      if u.op in (Ops.END, Ops.ENDIF, Ops.SINK):
-        nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.ENDIF) and (u.op is Ops.SINK or u.src[0] in deps[x]) and x not in nesting}
-      if u.op in (Ops.RANGE, Ops.END, Ops.IF, Ops.ENDIF): deps[u] |= {u}
+      if u.op in (Ops.END, Ops.SINK):
+        nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[0] in deps[x]) and x not in nesting}
+      if u.op in (Ops.RANGE, Ops.END): deps[u] |= {u}
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}
@@ -76,24 +99,17 @@ pm_add_control_flow = PatternMatcher([
 def do_merge_ends(s:UOp):
   # NOTE: this can fail
   stacked: dict[UOp, list[UOp]] = {}
-  dangling_ifs = []
   for x in s.toposort():
-    if x.op in {Ops.END, Ops.ENDIF}:
-      assert x.op is not Ops.END or x.arg == 1, "ends must be single ends for linearizer"
+    if x.op is Ops.END:
+      assert x.arg == 1, "ends must be single ends for linearizer"
       stacked.setdefault(x.src[0], []).append(x)
-    if x.op is Ops.IF: dangling_ifs.append(x)
-  dangling_ifs = [x for x in dangling_ifs if x not in stacked]
   replaces = {}
   for k,v in stacked.items():
     if len(v) == 1: continue
     rep = UOp(v[0].op, src=tuple([k] + [y for x in v for y in x.src[1:]]), arg=v[0].arg)
     for x in v: replaces[x] = rep
-  if not len(replaces) and not len(dangling_ifs): return None
-  ret = s.substitute(replaces)
-  if len(dangling_ifs):
-    assert len(dangling_ifs) == 1, "we only support 1 dangling if"
-    ret = ret.replace(src=(UOp(Ops.ENDIF, src=(dangling_ifs[0], *ret.src)),))
-  return ret
+    if not len(replaces): return None
+  return s.substitute(replaces)
 
 pm_add_ends = PatternMatcher([
   # put the end on the store
