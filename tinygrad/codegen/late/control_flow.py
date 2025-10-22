@@ -12,15 +12,16 @@ pm_linearize_cleanups = PatternMatcher([
   (UPat(Ops.AFTER, name="u"), lambda u: (u.src[0], [])),
   # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
   (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))).or_casted(), UPat()),
-        allow_any_len=True), lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate,)), u, UOp(Ops.ENDIF, src=(mif,))]))
+        allow_any_len=True), lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate,u)), u, UOp(Ops.ENDIF, src=(mif,))]))
 ])
 
 # requires lst be toposorted. like graph rewrite, but for lines
 def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
   newlst = []
   replaced: dict[UOp, UOp] = {}
-  for u in lst:
-    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
+  for i,u in enumerate(lst):
+    # we set the tags to the position so that the uops don't have to be deduped
+    nu = u.replace(src=tuple([replaced[x] for x in u.src]), tag=i)
     ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
     replaced[u] = ret[0]
     newlst.extend(ret[1])
