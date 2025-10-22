@@ -68,9 +68,9 @@ class TestGPTOSS(unittest.TestCase):
     for seed in seeds:
       np.random.seed(seed)
       input_ids = np.random.randint(params['vocab_size'], size=(bsz, seq_len))
-      if getenv("TORCH"): return torch_model.forward(torch.from_numpy(input_ids).long())
       out = model(Tensor(input_ids))
-      torch_out = torch_model.forward(torch.from_numpy(input_ids).long()).logits
+      torch_logits = torch_model.forward(torch.from_numpy(input_ids).long()).logits
+      torch_out = torch_logits[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
       np.testing.assert_allclose(out.numpy(), torch_out.detach().numpy(), atol=5e-4, rtol=5e-4)
 
 
