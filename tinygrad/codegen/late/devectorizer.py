@@ -253,9 +253,9 @@ devectorize = PatternMatcher([
 
 def gate_store_with_if(buf:UOp, idx:UOp, gate:UOp, cast:UOp, store:UOp):
   uif = UOp(Ops.IF, src=(gate,))
-  idxx = buf.after(uif).index(idx)
+  idxx = buf.index(idx)
   if cast.op is Ops.CAST: idxx = idxx.cast(cast.dtype)
-  st = UOp(Ops.STORE, src=(idxx,)+store.src[1:])
+  st = UOp(Ops.STORE, src=(idxx, store.src[1], uif))
   return UOp(Ops.ENDIF, src=(uif, st))
 
 pm_render = PatternMatcher([
