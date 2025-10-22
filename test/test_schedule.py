@@ -15,7 +15,6 @@ from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context,
 from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
 from tinygrad.engine.schedule import create_schedule_with_vars
 from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
-from tinygrad.renderer.ptx import PTXRenderer
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -935,7 +934,6 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out2.numpy(), np_out2:=np.exp2(np_b.sum()), atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out3.numpy(), np_b.sum()+np_out2, atol=1e-4, rtol=1e-4)
 
-  @unittest.skipIf(CI and isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "bug in GPUOcelet?")
   def test_reduce_ext_reduce_child(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(4, 4).realize()
@@ -1353,7 +1351,6 @@ class TestSchedule(unittest.TestCase):
     d = r[:4] * b
     check_schedule(d, 1)
 
-  @unittest.skipIf(CI and isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "bug in GPUOcelet?")
   def test_multireduce_push_shrink_chase(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(16, 16).realize()
@@ -1371,7 +1368,6 @@ class TestSchedule(unittest.TestCase):
     b = (a.sum(0) + a.max(1)) + 2
     check_schedule(b, 1)
 
-  @unittest.skipIf(CI and isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "bug in GPUOcelet?")
   def test_multireduce_midreduce_nochase(self):
     Tensor.manual_seed(0)
     a = Tensor.randn(16, 16).realize()
