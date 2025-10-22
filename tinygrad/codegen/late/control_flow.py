@@ -3,8 +3,11 @@ from typing import cast
 from collections import defaultdict
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
+from tinygrad.helpers import lambda_raise
 
 pm_linearize_cleanups = PatternMatcher([
+  # if statements are not allowed here
+  (UPat((Ops.IF, Ops.ENDIF)), lambda: lambda_raise(RuntimeError("if not allowed in graph"))),
   # remove AFTER and replace it with its first source
   (UPat(Ops.AFTER, name="u"), lambda u: (u.src[0], [])),
   # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
@@ -18,7 +21,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
   replaced: dict[UOp, UOp] = {}
   for u in lst:
     nu = u.replace(src=tuple([replaced[x] for x in u.src]))
-    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm_linearize_cleanups.rewrite(nu)) or (nu, [nu])
+    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
     replaced[u] = ret[0]
     newlst.extend(ret[1])
   return newlst
