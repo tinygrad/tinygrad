@@ -174,8 +174,6 @@ class NIRRenderer(Renderer):
 
     for u in uops:
       if u.op == Ops.NOOP or u.op == Ops.INDEX: pass
-      elif u.op is Ops.AFTER:
-        self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
         if u.arg is not None: self.b.shader.contents.info.name = mesa.char_pointer_cast(u.arg.function_name)
       elif u.op == Ops.DEFINE_LOCAL:
