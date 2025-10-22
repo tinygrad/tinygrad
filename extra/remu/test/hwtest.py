@@ -103,22 +103,26 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad import Tensor, dtypes, UOp
 
-def get_output2(asm:str):
+def get_output2(asm:str, n_threads:int=1):
   input_asm = "\n".join([f'asm volatile("{ln.strip().lstrip()}" : "+v"(a), "+v"(b));' for ln in asm.strip().splitlines() if ln.strip()])
   src = f"""
-  extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, 1))) test(unsigned int* data0_1) {{
-    unsigned a, b;
+  typedef long unsigned int size_t;
+  extern "C" __attribute__((device, const)) size_t __ockl_get_local_id(unsigned int);
+  extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, {n_threads}))) test(unsigned int* data0_1) {{
+    int l = __ockl_get_local_id(0);
+    unsigned a = 0;
+    unsigned b = 0;
     {input_asm}
     unsigned res;
     asm volatile("v_mov_b32 %0, v1" : "=v"(res));
-    *(data0_1+0) = res;
+    *(data0_1+l) = res;
   }}"""
-  t = Tensor.zeros(1, dtype=dtypes.uint32).contiguous().realize()
-  prg = ProgramSpec("test", src, Device.DEFAULT, UOp.sink(t), global_size=[1, 1, 1], local_size=[1, 1, 1])
+  t = Tensor.zeros(n_threads, dtype=dtypes.uint32).contiguous().realize()
+  prg = ProgramSpec("test", src, Device.DEFAULT, UOp.sink(t), global_size=[1, 1, 1], local_size=[n_threads, 1, 1])
   car = CompiledRunner(prg)
   if getenv("PRINT_ASM"): amdgpu_disassemble(car.lib)
   car([t.uop.buffer], {}, wait=True)
-  return t.item()
+  return t.numpy()
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "tests RDNA3")
 class TestHW(unittest.TestCase):
@@ -129,16 +133,16 @@ class TestHW(unittest.TestCase):
     out = get_output2("""
     v_mov_b32_e32 %1 42
     v_mov_b32_e32 %2 %1
-    """)
+    """)[0]
     np.testing.assert_equal(out, 42)
 
   def test_exec_mov(self):
-    out = get_output("""
-    v_mov_b32_e32 v10 42
+    out = get_output2("""
+    v_mov_b32_e32 %1 42
     s_mov_b32_e32 exec_lo 0b10
-    v_mov_b32_e32 v10 10
+    v_mov_b32_e32 %1 10
     s_mov_b32_e32 exec_lo 0b11
-    v_mov_b32_e32 v1 v10
+    v_mov_b32_e32 %2 %1
     """, n_threads=2)
     np.testing.assert_equal(out, [42, 10])
 
