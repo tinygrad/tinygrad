@@ -70,10 +70,9 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, 
 
 
 # arxiv.org/pdf/2002.05202v1
-def swiglu(x, alpha: float = 1.702, limit: float = 7.0):
-    x_glu = x[..., ::2].clamp(max_=limit)
-    x_linear = x[..., 1::2].clamp(-limit, limit)
-    return x_glu * (alpha * x_glu).sigmoid() * (x_linear + 1)
+def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0):
+  x_glu, x_up = x[..., ::2].clamp(None, limit), x[..., 1::2].clamp(-limit, limit)
+  return x_glu * (alpha * x_glu).sigmoid() * (x_up + 1)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0,):
@@ -84,86 +83,38 @@ class TransformerBlock:
     self.max_context        = max_context
 
     # --- attention projections (linear with bias) ------------------------
-    self.attn_q             = nn.Linear(dim, n_heads * head_dim,    bias=True)
-    self.attn_k             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
-    self.attn_v             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)
-    self.attn_o             = nn.Linear(n_heads * head_dim, dim,    bias=True)
-    self.attn_sink         = Tensor.empty(n_heads)
+    self.attn_q             = nn.Linear(dim, n_heads * head_dim,    bias=True)  # (D,H*Hd)
+    self.attn_k             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
+    self.attn_v             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
+    self.attn_o             = nn.Linear(n_heads * head_dim, dim,    bias=True)  # (H*Dh,D)
+    self.attn_sink         = Tensor.empty(n_heads)                              # (H,)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm          = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm           = nn.RMSNorm(dim, norm_eps)
 
     # --- MoE feed-forward ------------------------------------------------
+    self.n_experts          = n_experts
     self.n_active_experts   = n_active_experts
-    self.ffn_gate           = nn.Linear(dim, n_experts, bias=True)
-    self.ffn_up_proj        = Tensor.empty(n_experts, dim, hidden_dim * 2)
-    self.ffn_up_proj_bias   = Tensor.empty(n_experts, hidden_dim * 2)
-    self.ffn_down_proj      = Tensor.empty(n_experts, hidden_dim, dim)
-    self.ffn_down_proj_bias = Tensor.empty(n_experts, dim)
+    self.ffn_gate           = nn.Linear(dim, n_experts, bias=True)              # (D,E)
+    self.ffn_up_proj        = Tensor.empty(n_experts, dim, hidden_dim * 2)      # (E,D,D2*2)
+    self.ffn_up_proj_bias   = Tensor.empty(n_experts, hidden_dim * 2)           # (E,D2*2)
+    self.ffn_down_proj      = Tensor.empty(n_experts, hidden_dim, dim)          # (E,D2,D)
+    self.ffn_down_proj_bias = Tensor.empty(n_experts, dim)                      # (E,D)
 
-
-  # def _feed_forward(self, x: Tensor) -> Tensor:
-  #   assert x.shape[0] == 1 and x.shape[1] == 1, "expected BS=1 and seqlen=1 but got BS={x.shape[0]} and seqlen={x.shape[1]}"
-
-  #   # Select top-k experts
-  #   g = self.ffn_gate(x).softmax(-1) # (B,T,D) -> (B,T,E)
-  #   g = g.squeeze() # (B,T,E) -> (E,)
-  #   probs, sel = g.topk(self.n_active_experts) # (E,) -> (E,) (E,)
-  #   ic(probs.shape, probs.numpy(), sel.shape, sel.numpy())
-
-  #   ic()
-
-  #   # reshape
-  #   w1 = self.ffn_up_proj[sel].unsqueeze(0) # (1,E,D2,D)
-  #   w2 = self.ffn_down_proj[sel].unsqueeze(0) # (1,E,D,D)
-  #   b1 = self.ffn_up_proj_bias[sel].unsqueeze(0) # (1,E,D2)
-  #   b2 = self.ffn_down_proj_bias[sel].unsqueeze(0) # (1,E,D)
-
-  #   # MLP forward
-  #   t = x.squeeze(1)  # (B,T,D) -> (B,1,T,D)
-  #   t = swiglu(Tensor.einsum("bk,beck->bec", t, w1) + b1)  # (B,1,T,D) (1,E,D2,D) -> ?
-  #   t = Tensor.einsum("bek,beck->bec", t, w2) + b2  # (1, 4, 2880)
-
-  #   # Weighted sum over experts
-  #   return (t * probs.reshape(1, -1, 1)).sum(1, keepdim=True)  # (1, 1, 2880)
   def _feed_forward(self, x: Tensor) -> Tensor:
+    (B, T, D), E = x.shape, self.n_experts
 
     # Select top-k experts
-    routing_weights, sel = self.ffn_gate(x).softmax(-1).topk(self.n_active_experts, dim=-1)  # (B,T,D) -> (B,T,E), (B,T,E)
-    ic(x.shape, routing_weights.shape, sel.shape)
+    probs, sel = self.ffn_gate(x).softmax(-1).topk(self.n_active_experts, dim=-1)  # (B,T,D) -> (B,T,Ea), (B,T,Ea)
+    probs = Tensor.zeros(B,T,E).scatter(1, sel, probs) # (B,T,Ea) -> (B,T,E)
 
-    # Gather expert weights
-    ic(sel.shape, self.ffn_up_proj.shape, self.ffn_up_proj[sel].shape, self.ffn_up_proj[sel.squeeze()])
-    up_proj = self.ffn_up_proj[sel]  # (E,D,D2) (E,D,D2) -> (E, D2, D)
-    up_bias = self.ffn_up_proj_bias[sel.squeeze()]  # (K, D2)
-    down_proj = self.ffn_down_proj[sel.squeeze()]  # (K, D, D2//2)
-    down_bias = self.ffn_down_proj_bias[sel.squeeze()]  # (K, D)
-    ic(self.ffn_up_proj.shape, up_proj.shape, down_proj.shape, up_bias.shape, down_bias.shape)
-
-    # Prepare input for all experts
-    hidden_states = x.squeeze(1).unsqueeze(0)  # (1, D) -> (1, 1, D)
-    ic(hidden_states.shape)
-
-    # Gate-up projection: (1, 1, D) x (K, D, D2) -> (1, K, D2)
-    gate_up = Tensor.einsum("bsd,kdi->bki", hidden_states, up_proj) + up_bias.unsqueeze(0)  # (1, K, D2)
-    ic(gate_up.shape)
-
-    # SwiGLU activation: (1, K, D2) -> (1, K, D2//2)
-    activated = swiglu(gate_up)  # (1, K, D2//2)
-    ic(activated.shape)
-
-    # Down projection: (1, K, D2//2) x (K, D2//2, D) -> (1, K, D)
-    next_states = Tensor.einsum("bki,kid->bkd", activated, down_proj)  # (1, K, D)
-    next_states = next_states + down_bias.unsqueeze(0)  # (1, K, D)
-    ic(next_states.shape)
-
-    # Weight by routing scores and sum: (1, K, D) * (1, 1, K) -> (1, 1, D)
-    next_states = next_states * routing_weights.transpose(-1, -2).unsqueeze(-1)  # (1, K, D) * (1, K, 1)
-    ic(next_states.shape)
-    ret = next_states.sum(1, keepdim=True)  # (1, 1, D)
-    ic(ret.shape)
-    return ret
+    # run MoE
+    #todo: change ffn_up_proj to ffn_gate_up_proj
+    x = x.reshape(-1, D).repeat(E, 1).reshape(E, -1, D) # (B,T,D) -> (E,B*T,D)
+    x_up_gate = swiglu(x @ self.ffn_up_proj + self.ffn_up_proj_bias.unsqueeze(1)) # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
+    x_down = x_up_gate @ self.ffn_down_proj + self.ffn_down_proj_bias.unsqueeze(1) # (E,B*T,D2) (E,D2,D) (E,1,D) -> (E,B*T,D)
+    return (x_down.reshape(E, B, T, D) * probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)).sum(0) # (E,B,T,D) (E,B,T,1) -> (B,T,D)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
