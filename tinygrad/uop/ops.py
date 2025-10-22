@@ -291,8 +291,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def ended_ranges(self):
+    # copy of range_start
     match self.op:
       case Ops.REDUCE: return self.src[1:]
+      case Ops.STORE: return self.src[2:]
       case Ops.END: return self.src[:self.arg]
       case _: raise RuntimeError(f"{self.op} doesn't end ranges")
 

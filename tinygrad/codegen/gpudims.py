@@ -97,5 +97,5 @@ pm_add_gpudims = PatternMatcher([
   # add gpudims must be last
   (UPat(Ops.SINK, name="s"), add_gpudims),
   # add barrier and if
-  (UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL, name="buf"), UPat(Ops.END, name="e"))), add_barrier_and_if),
+  (UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL, name="buf"), UPat(Ops.STORE, name="e"))), add_barrier_and_if),
 ])

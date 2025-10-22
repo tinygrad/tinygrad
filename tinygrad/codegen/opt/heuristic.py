@@ -62,8 +62,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
-  if k.opts.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
-    k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.opts.has_shared and \
+  if k.ren.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
+    k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.ren.has_shared and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
     idx0, idx1 = mulop.src[0].src[0].src[1].get_idx(), mulop.src[1].src[0].src[1].get_idx()
     if k.ranges_of(AxisType.REDUCE):
@@ -103,7 +103,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
 
   # potentially do more upcasts of non reduce axes based on a heuristic
-  is_dsp = k.opts is not None and k.opts.device == "DSP"
+  is_dsp = k.ren is not None and k.ren.device == "DSP"
   upcasted_axis: set[int] = set()
   while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024):
     xb_choices = []
@@ -155,7 +155,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # **** local groups ****
 
-  if k.opts.has_local:
+  if k.ren.has_local:
     if NOLOCALS:
       k.apply_opt(Opt(OptOps.NOLOCALS))
     else:
@@ -176,10 +176,10 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # **** threading ****
 
-  if k.opts.has_threads and k.opts.global_max is not None:
+  if k.ren.has_threads and k.ren.global_max is not None:
     for threads in [32,16,12,8,6,5,4,3,2]:
       # Skip if too many threads. Heuristic: use about 128K ops per thread
-      if threads > k.opts.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
+      if threads > k.ren.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
       for axis in k.axes_of(AxisType.LOOP):
         if k.full_shape[axis] % threads == 0:
           k.apply_opt(Opt(OptOps.THREAD, axis, threads))
