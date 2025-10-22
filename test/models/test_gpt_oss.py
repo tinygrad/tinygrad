@@ -39,12 +39,12 @@ class TestGPTOSS(unittest.TestCase):
     from transformers import GptOssConfig
 
     # small params
-    params = {"dim": 2, "hidden_dim": 32, "head_dim": 2, "n_heads": 2, "n_kv_heads": 1, "num_blocks": 2, "n_experts": 3, "n_active_experts": 1,
+    params = {"dim": 4, "hidden_dim": 32, "head_dim": 2, "n_heads": 2, "n_kv_heads": 1, "num_blocks": 2, "n_experts": 3, "n_active_experts": 2,
                "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 3, "max_context": 128,
                "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
                }
 
-    torch_params = {"hidden_size": 2, "intermediate_size": 32, "head_dim": 2, "num_attention_heads": 2, "num_key_value_heads": 1, "num_hidden_layers": 2, "num_local_experts": 3, "num_experts_per_tok": 1,
+    torch_params = {"hidden_size": 4, "intermediate_size": 32, "head_dim": 2, "num_attention_heads": 2, "num_key_value_heads": 1, "num_hidden_layers": 2, "num_local_experts": 3, "num_experts_per_tok": 2,
                "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 3, "max_context": 128,
                "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
                }
@@ -62,7 +62,7 @@ class TestGPTOSS(unittest.TestCase):
 
     # forward pass
     seeds = (1337, 3141)
-    bsz, seq_len = 1, 1
+    bsz, seq_len = 2, 3
     for seed in seeds:
       np.random.seed(seed)
       input_ids = np.random.randint(params['vocab_size'], size=(bsz, seq_len))
@@ -73,5 +73,3 @@ class TestGPTOSS(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
-
-
