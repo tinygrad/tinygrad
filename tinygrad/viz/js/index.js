@@ -249,7 +249,7 @@ async function renderProfiler() {
         const html = d3.create("div").classed("info", true);
         html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
         html.append("div").attr("id", "args");
-        if (e.info != null) html.append("p").text(e.info);
+        if (e.info != null) html.append("p").html(e.info);
         if (shapeRef != null) html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
@@ -304,7 +304,7 @@ async function renderProfiler() {
           const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
           const p = html.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
           const metadata = shape?.tooltipText?.split("\n").at(-1);
-          if (metadata != null) p.append("span").text("\n"+metadata);
+          if (metadata != null) p.append("span").text(metadata);
           if (shape != null) {
             p.style("cursor", "pointer").on("click", () => focusShape(shape))
             const args = shapeMetadata.get(shape.key).querySelector("#args");
