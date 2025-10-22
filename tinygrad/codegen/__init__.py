@@ -1,6 +1,6 @@
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
-from tinygrad.uop.spec import type_verify
+from tinygrad.uop.spec import type_verify, program_spec
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
@@ -98,5 +98,5 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """
 
   lst = linearize(full_rewrite_to_sink(sink, ren, optimize=sink.tag is None))
-  if __debug__: type_verify(lst)
+  if __debug__: type_verify(lst, program_spec)
   return lst
