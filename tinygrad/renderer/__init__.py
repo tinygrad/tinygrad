@@ -34,7 +34,7 @@ class Estimates:
           # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
           dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
           # TODO: is this correct? this all needs to be cleaned up
-          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
+          if u.op is Ops.LOAD and len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort(range_gate))
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
