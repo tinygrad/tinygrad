@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
-from tinygrad.uop.symbolic import symbolic_flat
+from tinygrad.uop.symbolic import symbolic_flat, symbolic
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
@@ -502,7 +502,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_simplify+pm_const_buffer_folding, name="symbolic+reduce_collapse")  # this does const folding
   tsink = graph_rewrite(tsink, pm_remove_bufferize, bottom_up=True, name="remove bufferize with cost function")
-  tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
+  tsink = graph_rewrite(tsink, pm_limit_bufs+symbolic, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
