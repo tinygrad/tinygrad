@@ -204,16 +204,15 @@ class AMDComputeQueue(HWQueue):
         if not (se_mask >> se) & 0b1:
           # gfx12 doesn't have enums with all fields, so it's hardcoded, but it's the same as gfx11.
           token_exclude |= (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
-                          1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
-                          1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) if self.dev.target < (12,0,0) else 0x927
+                            1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
+                            1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) if self.dev.target < (12,0,0) else 0x927
 
-        token_mask = {} if self.dev.target < (12,0,0) else {'exclude_barrier_wait': 1}
-        self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1, **token_mask)
+        self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1,
+                  **({} if self.dev.target < (12,0,0) else {'exclude_barrier_wait': 1}))
         self.sqtt_config(tracing=True)
 
-      # Restore global broadcasting
-      self.set_grbm_broadcast()
-      self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 1)
+    self.set_grbm_broadcast()
+    if self.dev.target[0] > 9: self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 1)
     self.memory_barrier()
     return self
 
@@ -846,9 +845,9 @@ class AMDDevice(HCQCompiled):
         raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
-      SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 768) # in mb, per shader engine
+      SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True)) for _ in range(self.se_cnt)]
-      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", (1 << 1) if SQTT >= 2 else (1 << 1)) # se bitmask: -1 enable all, 0 disable all
+      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", -1 if SQTT >= 2 else (1 << 1)) # se bitmask: -1 enable all, 0 disable all
       self.sqtt_next_cmd_id = itertools.count(0)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
@@ -916,7 +915,5 @@ class AMDDevice(HCQCompiled):
           print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {i})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
         if self.target[0] == 9: sqtt_buf = bytearray(b'\x11\x80\x1f\x00\x00\x00\x00\x00') + sqtt_buf
-        print(sqtt_buf[:64].hex())
-        print(sqtt_buf[-64:].hex())
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, self.iface.props, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
