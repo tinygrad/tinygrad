@@ -49,20 +49,23 @@ class CFGContext:
     # dependent, meaning endrange y is a dependency of endrange x and range x is not a dependency of endrange y
     # independent, endrange y is not a dependency of endrange x
     # everything is nested inside the sink
-    deps: dict[UOp, set[UOp]] = {}
+    deps: dict[UOp, dict[UOp, None]] = {}
     nesting: dict[UOp, UOp] = {}
     for u in sink.toposort():
-      deps[u] = set().union(*(deps[s] for s in u.src))
+      # get the deps from the src
+      deps[u] = {}
+      for s in u.src: deps[u] |= deps[s]
+
       if u.op in (Ops.END, Ops.ENDIF, Ops.SINK):
         nesting |= {x:u for x in deps[u] if x.op in (Ops.END, Ops.ENDIF) and (u.op is Ops.SINK or u.src[0] in deps[x]) and x not in nesting}
-      if u.op in (Ops.RANGE, Ops.END, Ops.IF, Ops.ENDIF): deps[u] |= {u}
+      if u.op in (Ops.RANGE, Ops.END, Ops.IF, Ops.ENDIF): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
     siblings: dict[UOp, list[UOp]] = {}
     for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
       # range/if that have dependencies on other siblings need to run after them
-      order = sorted(v, key=lambda x: len(deps[x].intersection(v)))
+      order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
       for x,y in zipped:
         # TODO: is this check correct?
