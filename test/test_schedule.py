@@ -446,7 +446,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 30), (nn.optim.SGD, 13)]:
+    for optim, cnt in [(nn.optim.Adam, 21), (nn.optim.SGD, 8)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
@@ -1863,7 +1863,7 @@ class TestSchedule(unittest.TestCase):
     yt = Tensor.randn(BS, 10).realize()
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      run_schedule(check_schedule(loss, 5))
+      run_schedule(check_schedule(loss, 4))
       loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
@@ -2076,6 +2076,11 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
 
+  def test_one_hot_with_copy(self):
+    y = Tensor([1, 2, 3]).to("CPU")
+    x = y.one_hot(10)
+    check_schedule(x, 3, filter_sink=False)
+
   def test_const_copy_multi(self):
     x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"])
     check_schedule(x, 0, filter_sink=False)
@@ -2085,7 +2090,7 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
     b = (a*zeros).to("CPU")
-    run_schedule(check_schedule(b, 2, filter_sink=False)) # TODO: 0?
+    run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
     self.assertEqual(b.device, "CPU")
 
