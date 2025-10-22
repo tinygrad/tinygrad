@@ -76,24 +76,17 @@ pm_add_control_flow = PatternMatcher([
 def do_merge_ends(s:UOp):
   # NOTE: this can fail
   stacked: dict[UOp, list[UOp]] = {}
-  dangling_ifs = []
   for x in s.toposort():
     if x.op in {Ops.END, Ops.ENDIF}:
       assert x.op is not Ops.END or x.arg == 1, "ends must be single ends for linearizer"
       stacked.setdefault(x.src[0], []).append(x)
-    if x.op is Ops.IF: dangling_ifs.append(x)
-  dangling_ifs = [x for x in dangling_ifs if x not in stacked]
   replaces = {}
   for k,v in stacked.items():
     if len(v) == 1: continue
     rep = UOp(v[0].op, src=tuple([k] + [y for x in v for y in x.src[1:]]), arg=v[0].arg)
     for x in v: replaces[x] = rep
-  if not len(replaces) and not len(dangling_ifs): return None
-  ret = s.substitute(replaces)
-  if len(dangling_ifs):
-    assert len(dangling_ifs) == 1, "we only support 1 dangling if"
-    ret = ret.replace(src=(UOp(Ops.ENDIF, src=(dangling_ifs[0], *ret.src)),))
-  return ret
+  if not len(replaces): return None
+  return s.substitute(replaces)
 
 pm_add_ends = PatternMatcher([
   # put the end on the store
