@@ -972,8 +972,7 @@ class TestInvalidIndex(unittest.TestCase):
     ridx = Variable("ridx", 0, 10)
     idx = (ridx<5).where(ridx, UOp.invalid())<3
     self.assertIs(idx.simplify(), (ridx<3), "comparison of index should drop the invalid")
-    self.assertIs(idx.where(UOp.const(dtypes.int, 1), 0).simplify(), (ridx<3).where(UOp.const(dtypes.int, 1), 0),
-      "comparison of index should drop the invalid")
+    self.assertIs(idx.cast(dtypes.int).simplify(), (ridx<3).cast(dtypes.int), "comparison of index should drop the invalid")
 
   def test_alu_moves_inside_invalid(self):
     ridx = Variable("ridx", 0, 10)
