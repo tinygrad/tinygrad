@@ -4,7 +4,7 @@ fa = """
 using namespace kittens;
 
 constexpr int NUM_WORKERS = 4;
-constexpr int PIPE_STAGES = 3; 
+constexpr int PIPE_STAGES = 3;
 
 template<int D> constexpr size_t ROWS = 16*(128/D); // height of each worker tile (rows)
 template<int D, typename T=bf16, typename L=row_l> using qkvo_tile = rt<T, ROWS<D>, D, L>;
@@ -13,15 +13,14 @@ template<int D> using shared_tile = st_bf<ROWS<D>, D>;
 template<int D> using global_layout = gl<bf16, -1, -1, -1, D>; // B, N, H, specified at runtime, D known at compile time for this kernel
 template<int D> struct globals { global_layout<D> Qg, Kg, Vg, Og; };
 
-template<int D> __launch_bounds__(NUM_WORKERS*WARP_THREADS, 1)
-__global__ void attend_ker(const __grid_constant__ globals<D> g) {
-
+template<int D>
+__forceinline__ __device__ void attend_ker(const globals<D> g) {
     using load_group = kittens::group<2>; // pairs of workers collaboratively load k, v tiles
     int loadid = load_group::groupid(), workerid = kittens::warpid(); // which worker am I?
     constexpr int LOAD_BLOCKS = NUM_WORKERS / load_group::GROUP_WARPS;
     const int batch = blockIdx.z, head = blockIdx.y, q_seq = blockIdx.x * NUM_WORKERS + workerid;
 
-    extern __shared__ alignment_dummy __shm[]; 
+    extern __shared__ alignment_dummy __shm[];
     shared_allocator al((int*)&__shm[0]);
 
     shared_tile<D> (&k_smem)[LOAD_BLOCKS][PIPE_STAGES] = al.allocate<shared_tile<D>, LOAD_BLOCKS, PIPE_STAGES>();
@@ -94,14 +93,22 @@ __global__ void attend_ker(const __grid_constant__ globals<D> g) {
         store<1, false>(g.Og, qo_smem[workerid], {batch, q_seq, head, 0});
     }
 }
+
+//extern "C"
+__launch_bounds__(NUM_WORKERS*WARP_THREADS, 1)
+__global__ void attend_ker_64(const __grid_constant__ globals<64> g) {
+    attend_ker<64>(g);
+}
 """
 
 from tinygrad import Device, Tensor, Context, dtypes
+from tinygrad.runtime.support.compiler_cuda import NVCCCompiler
 
 if __name__ == "__main__":
   device = Device["CUDA"]
-  lib = device.compiler.compile(fa)
-  prg = device.runtime("attend_ker", lib)
+  lib = NVCCCompiler(device.compiler.arch, ["-Iinclude", "-std=c++20", "--extended-lambda", "-DKITTENS_4090",
+                                            "--expt-relaxed-constexpr", "-forward-unknown-to-host-compiler"]).compile(fa)
+  prg = device.runtime("attend_ker_64", lib)
 
   B, H, N, D = 16, 16, 1024, 64
   Qg = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16)
