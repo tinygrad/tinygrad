@@ -28,7 +28,8 @@ class Autogen:
   def __getattr__(self, nm): return getattr(self._mod, nm)
 
   def gen(self):
-    from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, TokenKind as ToK, PrintingPolicy as PP, PrintingPolicyProperty
+    from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, PrintingPolicy as PP
+    from clang.cindex import PrintingPolicyProperty as PPP
     assert importlib.metadata.version('clang')[:2] == "20"
     if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
 
@@ -38,11 +39,11 @@ class Autogen:
     macros:list[str] = []
     for f in self.files() if callable(self.files) else self.files:
       tu = idx.parse(f, self.args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
-      (pp:=PP.create(tu.cursor)).set_property(PrintingPolicyProperty.TerseOutput, 1)
+      (pp:=PP.create(tu.cursor)).set_property(PPP.TerseOutput, 1)
       for c in tu.cursor.walk_preorder():
         if str(c.location.file) != f: continue
         match c.kind:
-          case CK.FUNCTION_DECL:
+          case CK.FUNCTION_DECL if c.linkage == LK.EXTERNAL:
             self.lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype,{c.spelling}.argtypes = "
               f"{self.tname(c.result_type)},[{', '.join(self.tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
           case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: self.tname(c.type)
