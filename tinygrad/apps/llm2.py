@@ -97,10 +97,10 @@ class TransformerBlock:
     # --- MoE feed-forward ------------------------------------------------
     self.n_active_experts   = n_active_experts
     self.ffn_gate           = nn.Linear(dim, n_experts, bias=True)
-    self.ffn_up_proj        = Tensor.zeros(n_experts, hidden_dim * 2, dim, dtype='bfloat16') # todo: Tensor.empty? remove dtype?
-    self.ffn_down_proj      = Tensor.zeros(n_experts, dim, hidden_dim, dtype='bfloat16')
-    self.ffn_up_proj_bias   = Tensor.zeros(n_experts, hidden_dim * 2, dtype='bfloat16') # todo: Tensor.empty? remove dtype?
-    self.ffn_down_proj_bias = Tensor.zeros(n_experts, dim, dtype='bfloat16')
+    self.ffn_up_proj        = Tensor.empty(n_experts, dim, hidden_dim * 2)
+    self.ffn_down_proj      = Tensor.empty(n_experts, hidden_dim, dim)
+    self.ffn_up_proj_bias   = Tensor.empty(n_experts, hidden_dim * 2)
+    self.ffn_down_proj_bias = Tensor.empty(n_experts, dim)
 
 
   def _feed_forward(self, x: Tensor) -> Tensor:
@@ -153,7 +153,6 @@ class TransformerBlock:
     attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
     attn = self.attn_o(attn)
-    1/0
     return x + attn
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
@@ -204,13 +203,8 @@ def download_weights(model:str, total_num_weights:int) -> Path:
     fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
   return Path(os.path.dirname(model_path))
 
-def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads: int, n_kv_heads: int, permute_layers: bool = True):
-  # huggingface stores Q and K permuted! it is mostly correct without this, but without it makes RoPE different, so it will diverge after 10+ toks.
-  def permute(v: Tensor, n_heads: int):
-    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1] if len(v.shape) > 1 else 1).transpose(1, 2).reshape(*v.shape[:2])
-
-  # map hf to tinygrad
-  keymap = {
+def get_keymap(num_blocks):
+  return {
     "model.embed_tokens.weight": "token_embd.weight",
     **{f"model.layers.{l}.input_layernorm.weight": f"blk.{l}.attn_norm.weight" for l in range(num_blocks)},
     **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"blk.{l}.attn_{x}.weight" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
@@ -226,6 +220,12 @@ def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads
     "lm_head.weight": "output.weight",
   }
 
+def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads: int, n_kv_heads: int, permute_layers: bool = True):
+  # huggingface stores Q and K permuted! it is mostly correct without this, but without it makes RoPE different, so it will diverge after 10+ toks.
+  def permute(v: Tensor, n_heads: int):
+    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1] if len(v.shape) > 1 else 1).transpose(1, 2).reshape(*v.shape[:2])
+
+  keymap = get_keymap(num_blocks) # map hf to tinygrad keys
   sd = {}
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
@@ -255,8 +255,6 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
 def main(args):
 
   if args.seed is not None: Tensor.manual_seed(args.seed)
-  args.prompt *= 8
-  ic(args.prompt)
 
   model_info = MODELS[args.size]
 
@@ -268,9 +266,9 @@ def main(args):
     import torch
     from transformers import GptOssForCausalLM
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    print(f"Using {device=}")
+    print(f"Using {device}")
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1])
-    model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map="auto")
+    model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=device)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
     generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   357,   939,   261]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
@@ -287,7 +285,7 @@ def main(args):
   tok_tensor = None
   for i in range(args.count):
     # forward pass
-    next_tok = Tensor([toks[start_pos:]]) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
+    next_tok = Tensor([toks[start_pos:]], dtypes=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
     tok_tensor = model(next_tok, start_pos) # todo: add temperature
     tok = tok_tensor.item()
 
@@ -306,10 +304,10 @@ def main(args):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--size", choices=list(MODELS.keys()), default=list(MODELS.keys())[0], help="Model size")
-  parser.add_argument("--count", type=int, default=1, help="Max number of tokens to generate")
+  parser.add_argument("--count", type=int, default=4, help="Max number of tokens to generate")
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
-  parser.add_argument("--prompt", type=str, default="Hi", help="Phrase to start with")
+  parser.add_argument("--prompt", type=str, default="Hi, how are you?", help="Phrase to start with")
   parser.add_argument("--weights", type=str, default=None, help="Path to the downloaded weights")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument('--fakeweights',  action='store_true', help="Load fake weights")

@@ -1335,7 +1335,9 @@ class Tensor(MathTrait):
     ```
     """
     dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
+    for arg in args:
+      assert arg.ndim==self.ndim, f"all tensors must have the same number of dimensions, got {arg.ndim=} and {self.ndim=}"
+      assert all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim), f"all tensors must have the same shape except in the cat dimension, got {arg.shape=} and {self.shape=} on {dim=}"
     tensors = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
@@ -3961,6 +3963,7 @@ class Tensor(MathTrait):
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
 
+    ic(qk.shape, sink.shape)
     if sink is not None: attn = qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1)[..., :-1].dropout(dropout_p) @ value
     else: attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
     return attn.fuse() if FUSE_ATTENTION else attn
