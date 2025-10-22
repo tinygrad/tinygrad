@@ -147,14 +147,14 @@ class TestHW(unittest.TestCase):
     np.testing.assert_equal(out, [42, 10])
 
   def test_exec_cmp_vopc(self):
-    out = get_output("""
+    out = get_output2("""
     s_mov_b32 vcc_lo 0 // reset vcc
-    v_mov_b32_e32 v10 42
-    v_mov_b32_e32 v11 10
+    v_mov_b32_e32 %1 42
+    v_mov_b32_e32 %2 10
     s_mov_b32_e32 exec_lo 0b01
-    v_cmp_ne_u32 v10 v11
+    v_cmp_ne_u32 %1 %2
     s_mov_b32_e32 exec_lo 0b11
-    v_mov_b32_e32 v1 vcc_lo
+    v_mov_b32_e32 %2 vcc_lo
     """, n_threads=2)
     np.testing.assert_equal(out, 0b01)
 
