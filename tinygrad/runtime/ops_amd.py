@@ -15,7 +15,7 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
-from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, setup_pci_bars
+from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_ip_offsets, setup_pci_bars
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -138,7 +138,7 @@ class AMDComputeQueue(HWQueue):
   def sqtt_start_9(self, buf0s:HCQBuffer, se_mask:int):
     self.memory_barrier()
     self.wreg(self.gc.regGRBM_GFX_INDEX, se_broadcast_writes=1, sh_broadcast_writes=1, instance_broadcast_writes=1)
-    self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, simd_en=0, cu_sel=0, sq_stall_en=1, spi_stall_en=1, reg_stall_en=1, vm_id_mask=0xf)
+    self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, simd_en=0xf, cu_sel=0, sq_stall_en=1, spi_stall_en=1, reg_stall_en=1, vm_id_mask=0)
     SQTT_TOKEN_MISC = 1 << 0
     SQTT_TOKEN_TIME = 1 << 1
     SQTT_TOKEN_REG = 1 << 2
@@ -151,11 +151,10 @@ class AMDComputeQueue(HWQueue):
     SQTT_TOKEN_ISSUE = 1 << 13
     SQTT_TOKEN_REG_CS_PRIV = 1 << 15
     mask = SQTT_TOKEN_MISC | SQTT_TOKEN_TIME | SQTT_TOKEN_REG | SQTT_TOKEN_WAVE_START | \
-        SQTT_TOKEN_WAVE_END | SQTT_TOKEN_INST | SQTT_TOKEN_INST_PC | SQTT_TOKEN_USERDATA | \
-        SQTT_TOKEN_ISSUE | SQTT_TOKEN_REG_CS | SQTT_TOKEN_REG_CS_PRIV
+        SQTT_TOKEN_WAVE_END | SQTT_TOKEN_REG_CS_PRIV | SQTT_TOKEN_REG_CS | SQTT_TOKEN_USERDATA
     self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
     self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=0) # off
-    # self.wreg(self.gc.regSQ_THREAD_TRACE_HIWATER, 0x6)
+    self.wreg(self.gc.regSQ_THREAD_TRACE_HIWATER, 0x6)
 
     for se in range(len(buf0s)):
       xcc_index = se // 4
@@ -952,6 +951,8 @@ class AMDDevice(HCQCompiled):
         if wptr >= buf0.size - 32:
           print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {i})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
-        print(sqtt_buf[:129].hex())
+        sqtt_buf = bytearray(b'\x11\x80\x1f\x00' + b'\x00'*4) + sqtt_buf
+        print(sqtt_buf[:64].hex())
+        print(sqtt_buf[-64:].hex())
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, self.iface.props, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
