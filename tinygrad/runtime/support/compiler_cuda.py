@@ -60,6 +60,19 @@ class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
 
+class NVCCCompiler(Compiler):
+  def __init__(self, arch:str):
+    self.arch = arch
+    super().__init__(f"compile_nvcc_{self.arch}")
+  def compile(self, src:str) -> bytes:
+    with tempfile.NamedTemporaryFile(suffix=".cu") as srcf, tempfile.NamedTemporaryFile(suffix=".ptx") as libf:
+      srcf.write(src.encode())
+      srcf.flush()
+      subprocess.run(["nvcc", f"-arch={self.arch}", "-ptx", "-o", libf.name, srcf.name],
+                 check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+      return libf.read()
+  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
+
 class PTXCompiler(Compiler):
   def __init__(self, arch:str, cache_key="ptx"):
     self.arch = arch

@@ -177,6 +177,11 @@ class PythonProgram:
               def b_elem(x, col, k, goff): return x[k%2 + (k//8)*2][goff + (k//2)%4 + col*4]
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
 
+            elif dims == (8,16,32):
+              def a_elem(x, k, row, goff): return x[k%4 + (row//8)*4 + (k//16)*8][goff + (k//4)%4 + (row%8)*4]
+              def b_elem(x, col, k, goff): return x[k%4 + (k//16)*4][goff + (k//4)%4  + col*4]
+              ul[i] = wmma_helper(32, 32, 16, 8, 4, a_elem, b_elem, c_map)
+
             elif dims == (8,16,8) and dtype_in == dtypes.half:
               def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2][goff + k//2 + (row%8)*4]
               def b_elem(x, col, k, goff): return x[k%2][goff + k//2 + col*4]
@@ -220,6 +225,7 @@ class PythonRenderer(Renderer):
       case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
       case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
       case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
+      case "CUDA_SM89": self.device, self.tensor_cores = "CUDA", tc.cuda_sm89
       case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
       case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
       case "": pass

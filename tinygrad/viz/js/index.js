@@ -72,13 +72,13 @@ function renderDag(graph, additions, recenter) {
     d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
     const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
       .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
-        if (d.ref != null) return setCtxWithHistory(d.ref);
+        if (d.ref != null) return switchCtx(d.ref);
         const parents = g.predecessors(d.id);
         const children = g.successors(d.id);
         if (parents == null && children == null) return;
         const src = [...parents, ...children, d.id];
         nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
-        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child "  : (parents.includes(v) && w===d.id) ? "highlight " : "";
+        const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
         d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
         d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
         e.stopPropagation();
@@ -92,10 +92,9 @@ function renderDag(graph, additions, recenter) {
     }).selectAll("text").data(d => {
       const ret = [[]];
       for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
-        for (const [i, l] of st.split("\n").entries()) {
-          if (i > 0) ret.push([]);
-          ret.at(-1).push({ st:l, color });
-        }
+        const lines = st.split("\n");
+        ret.at(-1).push({ st:lines[0], color });
+        for (let i=1; i<lines.length; i++) ret.push([{ st:lines[i], color }]);
       }
       return [ret];
     }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
@@ -174,10 +173,16 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
+var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map();
+function focusShape(shape) {
+  saveToHistory({ shape:focusedShape });
+  focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+  return document.querySelector(".metadata").replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+}
+
 async function renderProfiler() {
   displayGraph("profiler");
-  d3.select(".metadata").node().replaceChildren(focusedShape?.html ?? "");
+  d3.select(".metadata").node().replaceChildren(shapeMetadata.get(focusedShape) ?? "");
   // layout once!
   if (data != null) return updateProgress({ start:false });
   const profiler = d3.select(".profiler").html("");
@@ -241,17 +246,15 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const html = document.createElement("div");
-        html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
-        if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
-        if (shapeRef != null) {
-          const a = html.appendChild(document.createElement("a"));
-          a.innerText = "\nView codegen rewrite";
-          a.onclick = () => setCtxWithHistory(shapeRef.ctx, shapeRef.step);
-        }
+        const html = d3.create("div").classed("info", true);
+        html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
+        html.append("div").classed("args", true);
+        if (e.info != null) html.append("p").style("white-space", "pre-wrap").text(e.info);
+        if (shapeRef != null) html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), html, key, ...shapeRef };
+        if (key != null) shapeMetadata.set(key, html.node());
+        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -291,21 +294,33 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const html = document.createElement("div");
+        const html = d3.create("div").classed("info", true);
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         if (users != null) rows.push(["Users", users.length]);
-        const info = html.appendChild(tabulate(rows).node());
+        const info = html.append(() => tabulate(rows).node());
+        const arg = {tooltipText:info.node().outerHTML, key:`${k}-${num}`};
+        const kernels = html.append("div").classed("args", true);
         for (let u=0; u<users?.length; u++) {
-          const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px";
-          const { repr, num, mode, shape } = users[u]; p.appendChild(colored(`[${u}] ${repr} ${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`));
+          const { repr, num, mode, shape } = users[u];
+          const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
+          const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
           const metadata = shape?.tooltipText?.split("\n").at(-1);
-          if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
+          if (metadata != null) p.append("span").text(" "+metadata);
           if (shape != null) {
-            p.style.cursor = "pointer";
-            p.onclick = () => focusShape(shape);
+            p.style("cursor", "pointer").on("click", () => focusShape(shape))
+            const args = shapeMetadata.get(shape.key).querySelector(".args");
+            const bufArg = d3.create("p").text(`${bufInfo} ${rows[2][1]}`).style("cursor", "pointer").on("click", () => {
+              const device = document.getElementById(k);
+              if (!isExpanded(device)) device.click();
+              focusShape(arg);
+            }).node();
+            bufArg.dataset.num = num;
+            let before = null;
+            for (const c of args.children) { if (+c.dataset.num > num) { before = c; break; } }
+            args.insertBefore(bufArg, before);
           }
         }
-        const arg = {tooltipText:info.outerHTML, html, key:`${k}-${num}`};
+        shapeMetadata.set(arg.key, html.node())
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -338,6 +353,7 @@ async function renderProfiler() {
           else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
         data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:"B" } : null;
+        toggleCls(document.getElementById(focusedDevice), document.getElementById(newFocus), "expanded");
         focusedDevice = newFocus;
         return resize();
       });
@@ -396,7 +412,7 @@ async function renderProfiler() {
             lw += e.label[li].width;
           }
         }
-        if (focusedShape?.key && e.arg?.key === focusedShape.key) { paths.push([p, pcolor]); }
+        if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
     }
     // draw axes
@@ -463,15 +479,11 @@ async function renderProfiler() {
     }
   }
 
-  function focusShape(shape) {
-    focusedShape = shape; render(zoomLevel);
-    return document.querySelector(".metadata").replaceChildren(shape?.html ?? "");
-  }
   canvas.addEventListener("click", e => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.step != null && foundRect?.key == null) { return setCtxWithHistory(foundRect.ctx, foundRect.step); }
-    if (foundRect?.key != focusedShape?.key) { focusShape(foundRect); }
+    if (foundRect?.step != null && foundRect?.key == null) { return switchCtx(foundRect.ctx, foundRect.step); }
+    if (foundRect?.key != focusedShape) { focusShape(foundRect); }
   });
 
   canvas.addEventListener("mousemove", e => {
@@ -568,7 +580,10 @@ function setState(ns) {
   // update element styles if needed
   const { ctx, step } = select(state.currentCtx, state.currentStep);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
-  if (ctx?.id !== prevCtx?.id) toggleCls(prevCtx, ctx, "active");
+  if (ctx?.id !== prevCtx?.id) {
+    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentRewrite:0, currentStep:0, expandSteps:false });
+    toggleCls(prevCtx, ctx, "active");
+  }
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
     toggleCls(prevStep, step, "active");
     // walk the tree back until all parents expanded so that the child is visible
@@ -584,15 +599,17 @@ function setState(ns) {
 
 const getSubrewrites = (ul) => ul.querySelectorAll(":scope > ul");
 
-// set a new context and keep the old one in browser history
-function setCtxWithHistory(newCtx, step=0) {
+function saveToHistory(ns) {
   // NOTE: browser does a structured clone, passing a mutable object is safe.
-  history.replaceState(state, "");
-  history.pushState(state, "");
-  setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step, currentRewrite:0 });
+  history.replaceState(ns, "");
+  history.pushState(ns, "");
 }
 
+// switch to the start of a new graph and expand all the steps
+const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0 });
+
 window.addEventListener("popstate", (e) => {
+  if (e.state?.shape != null) return focusShape({ key:e.state?.shape });
   if (e.state != null) setState(e.state);
 });
 

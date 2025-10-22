@@ -4,7 +4,8 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic_flat
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
+from tinygrad.helpers import PCONTIG
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -157,16 +158,19 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     accessed_buffers: list[UOp] = []
     reduces: list[UOp] = []
     def red_gate(x:UOp):
-      if x.op is Ops.INDEX:
+      if x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL:
         accessed_buffers.append(x)
         return False
+      if x.op is Ops.BUFFER:
+        accessed_buffers.append(x)
       if x.op is Ops.REDUCE: reduces.append(x)
       return True
     src.toposort(gate=red_gate)
     del red_gate
+    accessed_buffers = dedup(accessed_buffers)
 
     # if this is generated from multiple buffers, don't remove this buffer
-    if len(dedup([x.src[0] for x in accessed_buffers])) > 2: return None
+    if len(accessed_buffers) > 2 and not (PCONTIG > 2): return None
 
     # if any reduces access a buffer, don't remove this buffer
     buffer_in_reduce = False
@@ -176,38 +180,52 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       return not buffer_in_reduce
     UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
     del buf_gate
-    if buffer_in_reduce: return None
+    if buffer_in_reduce:
+      if PCONTIG > 2:
+        out_in_ratio = (prod(buf.shape)+1) / (sum([x.size for x in accessed_buffers])+1)
+        if out_in_ratio < 10: return None
+      else:
+        return None
 
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
   # NOTE: if buf src is a const, we don't replace it
   return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST}, extra_pm=pm_gate_substitute)
 
-def pre_bufferize(b:UOp, x:UOp, copy:UOp):
-  nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
-  return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
+def remove_noop_bufferize(idx,b2):
+  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
+  new_tag = (idx.src[0].tag or ()) + (b2.tag or ()) or None
+  return idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0].rtag(new_tag)
 
-pm_cleanups = pm_mops+PatternMatcher([
+pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
     and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
-  # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
-  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
-   lambda idx,b2: idx.src[0].replace(tag=nt if len(nt:=(idx.src[0].tag or ()) + (b2.tag or ())) else None) if idx.src[1:] == b2.src[1:] \
-       and idx.src[0].op is not Ops.BUFFER_VIEW else None),
-  # remove reindexing with cost function
-  (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
+  # indexing a const is a const
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
-                       .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  # hack if a noop turned to a const
+  (UPat.cvar("c").f(Ops.NOOP).f(Ops.BUFFERIZE, allow_any_len=True, name="buf"), lambda c,buf: buf.replace(src=(c,)+buf.src[1:])),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
+])
+
+def pre_bufferize(b:UOp, x:UOp, copy:UOp):
+  nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
+  return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
+pm_remove_bufferize = PatternMatcher([
+  # hack so remove_bufferize doesnt remove the buffer before a copy
+  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
+                      .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  # remove reindexing with cost function
+  (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
@@ -301,7 +319,8 @@ def bufferize_to_store(x:UOp):
   tag = x.arg.device
   if tag is None: tag = UOp.unique().arg # TODO: hack
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-  return buf.after(buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)).reshape(shape)
+  do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)
+  return buf.after(do_store.barrier()).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
@@ -412,7 +431,6 @@ class Kernel:
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   if len(x.ranges): return None
-  if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
@@ -422,8 +440,14 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # NOTE: the hack for COPY is here
-  ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None) \
-    if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
+  for u in ret.toposort():
+    # TODO: this can be wrong if there's multiple of these
+    if u.op in {Ops.COPY, Ops.BUFFER_VIEW}:
+      ret = u
+      break
+  else:
+    ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
+
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src if x.op is not Ops.BIND]):
@@ -471,11 +495,10 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
   # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, getenv("DEBUG_RANGEIFY", 0))
+  tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
-  # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
-  tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_unparented, name="symbolic")  # this supports const folding
-  tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
+  tsink = graph_rewrite(tsink, symbolic_flat+pm_reduce_unparented+pm_const_buffer_folding, name="symbolic")  # this supports const folding
+  tsink = graph_rewrite(tsink, pm_remove_bufferize, bottom_up=True, name="remove bufferize with cost function")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph

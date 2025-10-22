@@ -6,7 +6,7 @@ from tinygrad.helpers import CI, DEBUG, getenv, Timing
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
-from tinygrad.uop.spec import spec
+from tinygrad.uop.spec import shared_spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen import full_rewrite
@@ -18,7 +18,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
 
 def _uops_to_prg(uops_list):
-  uops = full_rewrite(ast:=UOp.sink(*uops_list), opts=Device[Device.DEFAULT].renderer)
+  uops = full_rewrite(ast:=UOp.sink(*uops_list), ren=Device[Device.DEFAULT].renderer)
   src = Device[Device.DEFAULT].renderer.render(uops)
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops,
@@ -302,6 +302,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     self.assertIs(gated_uops[-1].op, Ops.STORE)
 
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
+  @unittest.skip("we don't merge ifs anymore")
   def test_merge_ifs_alt(self):
     gmem0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
@@ -331,7 +332,7 @@ class TestLocalAccess(unittest.TestCase):
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0)),))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
   # NOTE: webgpu specific, since only webgpu performs bitpacking
@@ -341,7 +342,7 @@ class TestLocalAccess(unittest.TestCase):
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), barr))
+    sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0)),))
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
   # NOTE: webgpu specific, since only webgpu performs bitpacking
@@ -512,7 +513,7 @@ class TestUOpStr(unittest.TestCase):
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
-    self.assertEqual(spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
+    self.assertEqual(shared_spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
     test_upat = UPat(Ops.CONST, dtypes.bool)
     self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
     test_upat_named = test_upat.named("test_name")

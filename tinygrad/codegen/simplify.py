@@ -18,9 +18,9 @@ pm_flatten_range = PatternMatcher([
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
-  i = range_start[u.op]
-  while i < len(u.src)-1:
-    r0, r1 = u.src[i], u.src[i+1]
+  i = 0
+  while i < len(u.ended_ranges)-1:
+    r0, r1 = u.ended_ranges[i], u.ended_ranges[i+1]
     # check same type
     if r0.arg[-1] == r1.arg[-1]:
       # check if the ranges to merge are in the same reduces
@@ -57,7 +57,7 @@ def do_substitute(ctx, x: UOp):
 
 def dont_sub_ranges_for_image(ctx, x:UOp):
   if isinstance(x.src[0].dtype, ImageDType):
-    for s in x.src[1:]: ctx[s] = None
+    for s in x.src[0].ranges: ctx[s] = None
 
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),

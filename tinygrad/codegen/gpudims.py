@@ -1,7 +1,7 @@
 import math, functools, operator
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
 from tinygrad.helpers import all_int, dedup, get_contraction
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
 
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
@@ -79,6 +79,14 @@ def add_gpudims(ctx:Renderer, s:UOp):
   # apply to multiple ranges
   subs = {}
   for r in s_topo:
+    # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
+    if r.op is Ops.STORE and r.src[0].ptrdtype.addrspace == AddrSpace.GLOBAL:
+      idx = r.src[0]
+      missing_locals = [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]
+      if len(missing_locals):
+        assert len(idx.src) == 2, "index has 2 sources"
+        mask: UOp = functools.reduce(operator.and_, [x.eq(0) for x in missing_locals])
+        subs[idx] = idx.replace(src=(idx.src[0], mask.broadcast(idx.src[1].dtype.count).where(idx.src[1], Invalid)))
     if r.op is not Ops.RANGE: continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0:-1])
@@ -87,15 +95,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
     except ValueError: continue
   return s.substitute(subs)
 
-def add_barrier_and_if(buf:UOp, s:UOp):
-  # TODO: this is not generic
-  local_ranges = [x for x in s.src[1:] if x.op is Ops.RANGE and x.arg[-1] == AxisType.GROUP_REDUCE]
-  if len(local_ranges) == 0: return None
-  return buf.after(UOp(Ops.IF, dtype=dtypes.void, src=(functools.reduce(operator.and_, [x.eq(0) for x in local_ranges]), s.barrier())))
-
 pm_add_gpudims = PatternMatcher([
   # add gpudims must be last
   (UPat(Ops.SINK, name="s"), add_gpudims),
-  # add barrier and if
-  (UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL, name="buf"), UPat(Ops.STORE, name="s"))), add_barrier_and_if),
 ])

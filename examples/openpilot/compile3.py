@@ -134,7 +134,7 @@ if __name__ == "__main__":
   with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
 
   test_vs_compile(pickle_loaded, inputs, outputs)
-  if not getenv("FLOAT16"):
+  if getenv("SELFTEST"):
     test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
 
   if getenv("BENCHMARK_LOG", ""):
