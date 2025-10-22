@@ -483,3 +483,24 @@ def CEnum(typ: type):
     def __repr__(self): return self.name(self) if self.value in self.__class__._val_to_name_ else str(self.value)
 
   return _CEnum
+
+# C11 gcc-compliant __attribute__((packed))
+class MetaPackedStruct(type(ctypes.Structure)):
+  def __new__(mcs, name, bases, dct):
+    if "_fields_" not in dct: return super().__new__(mcs, name, bases, dct)
+
+    dct['_packed_fields_'], o = dct.pop('_fields_'), 0
+    for n,t,b in [(f[0], f[1], f[2] if len(f) == 3 else 0) for f in dct['_packed_fields_']]:
+      if b == 0: o = (o + 7) & ~7
+      m = (1 << (sz:=ctypes.sizeof(t)*8 if b == 0 else b)) - 1
+      def _s(self,v,m,s,b): self._data[:] = ((int.from_bytes(self._data,sys.byteorder)&~(m<<s))|((v&m)<<s)).to_bytes(len(self._data), sys.byteorder)
+      dct[n] = property(functools.partial(lambda self,m,s:(int.from_bytes(self._data,sys.byteorder)>>s)&m,m=m,s=o), functools.partial(_s,m=m,s=o,b=b))
+      o += sz
+
+    dct['_fields_'] = [('_data', ctypes.c_ubyte * ((o + 7) // 8))]
+    return super().__new__(mcs, name, bases, dct)
+
+class PackedStruct(ctypes.Structure, metaclass=MetaPackedStruct):
+  def __init__(self, *args, **kwargs):
+    for f,v in zip(self._packed_fields_, args): setattr(self, f[0], v)
+    for k,v in kwargs.items(): setattr(self, k, v)
