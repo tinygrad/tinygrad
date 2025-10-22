@@ -41,7 +41,7 @@ class TestLinearizer(unittest.TestCase):
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
       range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_REG])
-      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.ENDRANGE and u.src[0] in range_in_acc)]
+      ranges = [u.op for u in l.uops if (u.op is Ops.RANGE and u in range_in_acc) or (u.op is Ops.END and u.src[0] in range_in_acc)]
       for i,u in enumerate(ranges):
         if skip and i in skip: continue
         assert ranges[i-1] != u, f"multireduce nested the ranges! {ranges[i-1], {u}}"
@@ -205,7 +205,7 @@ class TestLinearizer(unittest.TestCase):
     # the uops graph is DEFINE_REG -> 4x STORE 0.0 -> RANGE -> 4x ALU -> 4x STORE -> ENDRANGE
     uops = get_program(ast, opts=opt).uops
     begin_range = [i for i, x in enumerate(uops) if x.op is Ops.RANGE][-1]
-    end_range = [i for i, x in enumerate(uops) if x.op is Ops.ENDRANGE][0]
+    end_range = [i for i, x in enumerate(uops) if x.op is Ops.END][0]
     for i,u in enumerate(uops): print(i, u.op, [uops.index(s) for s in u.src], u.arg, u.dtype)
     for u in uops:
       if u.op is Ops.STORE and isinstance(dt:=u.src[0].dtype, PtrDType) and dt.addrspace is AddrSpace.REG:
@@ -214,8 +214,8 @@ class TestLinearizer(unittest.TestCase):
         else:
           assert u.src[1].op in GroupOp.ALU
           assert begin_range < uops.index(u) < end_range
-      # children of STORE are placed after ENDRANGE
-      if any(x.op is Ops.STORE and x.src[1].op in GroupOp.ALU for x in u.src):
+      # children of END are placed after ENDRANGE
+      if any(x.op is Ops.END and x.src[1].op in GroupOp.ALU for x in u.src):
         assert end_range < uops.index(u)
 
   def test_grouped_dims(self):
@@ -400,7 +400,7 @@ class TestLinearizer(unittest.TestCase):
     # # check the children's vins
     # TODO: src ALU are not the same, should it?
     # assert barrier.src == tuple(local_stores)
-    assert len([u for u in uops if u.op is Ops.IF and u.src[-1] == barrier]) == 1
+    assert len([u for u in uops if u.op is Ops.IF and u.src[1] == barrier]) == 1
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

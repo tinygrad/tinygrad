@@ -5,7 +5,7 @@ from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerPairT
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
-from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler
+from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler, NVCCCompiler
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
 
@@ -118,7 +118,8 @@ class CUDADevice(Compiled):
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
     compilers:list[CompilerPairT] = [(functools.partial(CUDARenderer, self.arch), functools.partial(CUDACompiler, self.arch)),
-                                     (functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch))]
+                                     (functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch)),
+                                     (functools.partial(CUDARenderer, self.arch), functools.partial(NVCCCompiler, self.arch))]
     super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
 
   def synchronize(self):

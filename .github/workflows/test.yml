@@ -204,7 +204,7 @@ jobs:
         DEBUG=2 EMULATE=CUDA FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
         DEBUG=2 EMULATE=CUDA ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm
         DEBUG=2 EMULATE=CUDA_SM75 FORWARD_ONLY=1 PYTHON=1 python3 test/test_ops.py TestOps.test_gemm_fp16
-        DEBUG=2 EMULATE=CUDA ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
+        DEBUG=2 EMULATE=CUDA_SM89 ALLOW_TF32=1 FORWARD_ONLY=1 PYTHON=1 python3 test/opt/test_tensor_cores.py
     - name: Test emulated INTEL OpenCL tensor cores
       run: DEBUG=2 EMULATE=INTEL FORWARD_ONLY=1 PYTHON=1 HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
     - name: Test emulated AMX tensor cores
@@ -378,7 +378,7 @@ jobs:
       - name: Test openpilot CL compile fp16
         run: FLOAT16=1 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
-        run: DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
+        run: DEBUGCL=1 CL=1 IMAGE=2 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
       - name: Test openpilot LLVM compile fp16
         run: FLOAT16=1 CPU=1 CPU_LLVM=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Run process replay tests

@@ -839,12 +839,11 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
-    self.assertSetEqual(set(m.name for m in si.metadata), {"__mul__", "sigmoid", "relu"})
+    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
+    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]
-    self.assertEqual(len(bw), 2)
-    self.assertEqual(bw[0].name, "__mul__")
-    self.assertEqual(bw[1].name, "sigmoid")
+    self.assertEqual(len(bw), 1)
+    self.assertEqual(bw[0].name, "sigmoid")
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):

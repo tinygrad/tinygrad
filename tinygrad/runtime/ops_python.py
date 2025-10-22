@@ -52,11 +52,11 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.STORE}
+        void_ops = {Ops.END, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.STORE}
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
-        if uop is Ops.ENDRANGE:
+        if uop is Ops.END:
           loop_ends[idp[0]] = i
           i = idp[0]
           continue
@@ -72,7 +72,8 @@ class PythonProgram:
               if g: _store(m, o+j, v, dtp[1].scalar())
           i += 1
           continue
-        if uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
+        if uop is Ops.AFTER: ul[i] = inp[0]
+        elif uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
           assert isinstance(dtype, PtrDType), dtype
           storage_fmt = storage_fmt_for_dtype(dtype.base.scalar())
           if storage_fmt is None: raise RuntimeError(f"{dtype=} is not supported")
@@ -182,6 +183,11 @@ class PythonProgram:
               def b_elem(x, col, k, goff): return x[k%2 + (k//8)*2][goff + (k//2)%4 + col*4]
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
 
+            elif dims == (8,16,32):
+              def a_elem(x, k, row, goff): return x[k%4 + (row//8)*4 + (k//16)*8][goff + (k//4)%4 + (row%8)*4]
+              def b_elem(x, col, k, goff): return x[k%4 + (k//16)*4][goff + (k//4)%4  + col*4]
+              ul[i] = wmma_helper(32, 32, 16, 8, 4, a_elem, b_elem, c_map)
+
             elif dims == (8,16,8) and dtype_in == dtypes.half:
               def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2][goff + k//2 + (row%8)*4]
               def b_elem(x, col, k, goff): return x[k%2][goff + k//2 + col*4]
@@ -225,6 +231,7 @@ class PythonRenderer(Renderer):
       case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
       case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
       case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
+      case "CUDA_SM89": self.device, self.tensor_cores = "CUDA", tc.cuda_sm89
       case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
       case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
       case "": pass
