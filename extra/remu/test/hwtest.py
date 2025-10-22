@@ -114,7 +114,7 @@ def get_output2(asm:str, n_threads:int=1):
     unsigned b = 0;
     {input_asm}
     unsigned res;
-    asm volatile("v_mov_b32 %0, v1" : "=v"(res));
+    asm volatile("v_mov_b32 %0, %1" : "=v"(res) : "v"(a));
     *(data0_1+l) = res;
   }}"""
   t = Tensor.zeros(n_threads, dtype=dtypes.uint32).contiguous().realize()
