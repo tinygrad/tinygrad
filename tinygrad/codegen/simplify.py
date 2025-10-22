@@ -115,13 +115,13 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
 ])+symbolic_flat
 
 def reduce_collapse(red:UOp):
-  included, not_included = partition(red.backward_slice, lambda x: any(y in x.backward_slice_with_self for y in red.src[1:]))
+  included = red.src[0].toposort(gate=lambda x: any(y in x.ranges for y in red.src[1:]))
   if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
   replaces: dict[UOp, UOp] = {}
   for u in included:
     for s in u.src:
-      if s in not_included and s not in replaces and s.op not in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}:
-        replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
+      if s in included or s in replaces or s.op in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}: continue
+      replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
   collapse_fxn = red.substitute(replaces)
   sink = graph_rewrite(collapse_fxn, pm_reduce_collapse, name="reduce_collapse")
   return sink.substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
