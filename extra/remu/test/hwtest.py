@@ -4,7 +4,7 @@ import subprocess, struct, math
 from typing import cast
 from tinygrad.runtime.ops_amd import AMDProgram, AMDDevice
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import diskcache, OSX, getenv
+from tinygrad.helpers import diskcache, OSX, getenv, DEBUG
 
 @diskcache
 def assemble(code:str) -> bytes:
@@ -98,16 +98,32 @@ def f16_to_bits(x:float) -> int: return struct.unpack('<H', struct.pack('<e', x)
 def f32_from_bits(x:int) -> float: return struct.unpack('<f', struct.pack('<I', x))[0]
 def f32_to_bits(x:float) -> int: return struct.unpack('<I', struct.pack('<f', x))[0]
 
+from tinygrad.runtime.support.compiler_amd import compile_hip, amdgpu_disassemble
+def get_output2(asm:str):
+  input_asm = "\n".join([f'asm volatile("{ln.strip().lstrip()}");' for ln in asm.strip().splitlines() if ln.strip()])
+  src = f"""
+  extern "C" __attribute__((global)) void test(float* data0) {{
+    asm volatile("v_mov_b32 v0, 0");
+    {input_asm}
+    asm volatile("v_add_u32 v0, v0, 1" ::: "v0");
+    unsigned res;
+    asm volatile("v_mov_b32 %0, v0" : "=v"(res));
+    data0[0] = (float)res;
+  }}"""
+  print(src)
+  lib = compile_hip(src)
+  if DEBUG >= 3: amdgpu_disassemble(lib)
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "tests RDNA3")
 class TestHW(unittest.TestCase):
   def setUp(self):
     if getenv("MOCKGPU"): subprocess.run(["cargo", "build", "--release", "--manifest-path", "./extra/remu/Cargo.toml"], check=True)
 
   def test_simple(self):
-    out = get_output("""
+    out = get_output2("""
     v_mov_b32_e32 v10 42
     v_mov_b32_e32 v1 v10
-    """, n_threads=2)
+    """)
     np.testing.assert_equal(out, 42)
 
   def test_exec_mov(self):
