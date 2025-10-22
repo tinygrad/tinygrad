@@ -473,7 +473,7 @@ class TestUOpGraph(unittest.TestCase):
     l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),)).cast(dtypes.index)
     idx = l0 * 600
     valid = (l0<-1).ne(True)&(l0<3000)
-    l1 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx.valid(valid)),))
+    l1 = valid.where(UOp(Ops.LOAD, dtypes.long, (d1.index(idx),)),0)
     uops = to_uops_list([l1])
     for u in uops:
       if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
