@@ -207,7 +207,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
         if not FUZZ_ALL_ACTIONS and test_lin.applied_opts: print(f"applied opts: {test_lin.applied_opts}")
 
         # stop if kernel uops repeat
-        try: tuops = tuplize_uops(get_program(test_lin.get_optimized_ast(), test_lin.opts).uops)
+        try: tuops = tuplize_uops(get_program(test_lin.get_optimized_ast(), test_lin.ren).uops)
         except KeyboardInterrupt: raise
         except BaseException as e:
           print(test_lin.ast)
@@ -224,7 +224,7 @@ def fuzz_linearizer(lin: Kernel, rtol=1e-2, atol=1e-2, opts_list=None):
         (msg, rawbufs, var_vals, ground_truth, state1) = compare_linearizer(test_lin, rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)
         if state1 is not None and validate_device is not None:
           validate_lin = test_lin.copy()
-          validate_lin.opts = validate_device.renderer
+          validate_lin.ren = validate_device.renderer
           if validate_rawbufs is None:
             validate_rawbufs = [get_fuzz_rawbuf_like(x, copy=True, force_device=validate_device.device) for x in rawbufs]
           (_msg, _, _, _, state2) = compare_linearizer(validate_lin, validate_rawbufs, var_vals, ground_truth, rtol=rtol, atol=atol)

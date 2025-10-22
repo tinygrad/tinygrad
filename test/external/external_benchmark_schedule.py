@@ -33,7 +33,7 @@ if __name__ == "__main__":
           with Timing("***** model rewrite in   "):
             rewritten_uops = []
             for u in asts:
-              rewritten_uops.append(full_rewrite_to_sink(u, opts=Device.default.renderer))
+              rewritten_uops.append(full_rewrite_to_sink(u, ren=Device.default.renderer))
 
         if LINEARIZE:
           with Timing("***** model linearize in "):
