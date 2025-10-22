@@ -67,7 +67,8 @@ class AMDComputeQueue(HWQueue):
     if self.dev.xccs > 1:
       self._q[prev_len-1] |= (len(self._q) - prev_len)
 
-  def set_grbm_broadcast(self): self.wreg(self.gc.regGRBM_GFX_INDEX, **{f'{f}_broadcast_writes': 1 for f in ['se', 'sa', 'instance']})
+  def set_grbm_broadcast(self):
+    self.wreg(self.gc.regGRBM_GFX_INDEX, **{f'{f}_broadcast_writes': 1 for f in ['se', 'sh' if self.dev.target[0] == 9 else 'sa', 'instance']})
   def set_grbm_se(self, se): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg=None, reg_done=0, op=WAIT_REG_MEM_FUNCTION_GEQ):
@@ -138,8 +139,11 @@ class AMDComputeQueue(HWQueue):
       _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
       _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=next(prg.dev.sqtt_next_cmd_id))), *global_size)
 
-    for i in range(8 if prg.dev.target >= (11,0,0) else 4):
-      self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), ((prg.dev.sqtt_itrace_se_mask >> i) & 0b1) if SQTT >= 2 else 0xffffffff)
+    for xcc in range(self.dev.xccs):
+      with self.pred_exec(xcc_mask=1 << xcc):
+        for i in range(8 if prg.dev.target >= (11,0,0) else 4):
+          self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'),
+            ((prg.dev.sqtt_itrace_se_mask >> ((self.dev.se_cnt // self.dev.xccs) * xcc + i)) & 0b1) if SQTT >= 2 else 0xffffffff)
 
   def sqtt_userdata(self, data, *extra_dwords):
     data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
@@ -151,72 +155,94 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, draw_event_en=1, spi_stall_en=1, sq_stall_en=1, reg_at_hwm=2, hiwater=1, util_timer=1,
       mode=int(tracing), **trace_ctrl)
 
-  # Magic values from mesa/src/amd/vulkan/radv_sqtt.c:radv_emit_spi_config_cntl and src/amd/common/ac_sqtt.c:ac_sqtt_emit_start
   def sqtt_start(self, buf0s:list[HCQBuffer], se_mask:int):
     self.memory_barrier()
-    self.spi_config(tracing=True)
-    # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
-    for se in range(len(buf0s)):
-      self.set_grbm_se(se)
+    if self.dev.target[0] == 9:
+      self.set_grbm_broadcast()
+      self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, simd_en=0xf, cu_sel=0, sq_stall_en=1, spi_stall_en=1, reg_stall_en=1, vm_id_mask=0)
+      for se in range(len(buf0s)):
+        mask = (__SQTT_MISC:=1<<0) | (__SQTT_TIME:=1<<1) | (__SQTT_REG:=1<<2) | (__SQTT_WAVE_START:=1<<3) | (__SQTT_WAVE_END:=1<<6) \
+             | (__SQTT_USERDATA:=1<<12) | (__SQTT_REG_CS:=1<<5) | (__SQTT_REG_CS_PRIV:=1<<15)
+        if (se_mask >> se) & 0b1: mask |= (__SQTTINST:=1<<10) | (__SQTT_INST_PC:=1<<11) | (__SQTT_ISSUE:=1<<13)
 
-      buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
-      if self.dev.target >= (12,0,0):
-        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, size=buf0s[se].size >> 12)
-        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_LO, base_lo=buf0_lo)
-        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_HI, base_hi=buf0_hi)
-      else:
-        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size >> 12)
-        self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, base_lo=buf0_lo)
-      # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
-      # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
-      # and on amdgpu/non-AM it also does weird things with dispatch order inside se: around 7 times out of 10 it starts from the last cu, but
-      # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
-      # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
-      # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
-      cs_wtype = (1 << 6) if self.dev.target >= (12,0,0) else self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT
-      self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=cs_wtype, simd_sel=0, wgp_sel=0, sa_sel=0)
-      reg_include = self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_SHDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
-                    self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
-      token_exclude = (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT) if self.dev.target < (12,0,0) else 0
+        with self.pred_exec(xcc_mask=1<<(se // (ses_per_xcc:=(self.dev.se_cnt // self.dev.xccs)))):
+          self.set_grbm_se(se % ses_per_xcc)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK2, inst_mask=0xffffffff)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_BASE, addr=lo32(buf0s[se].va_addr >> 12))
+          self.wreg(self.gc.regSQ_THREAD_TRACE_BASE2, addr_hi=hi32(buf0s[se].va_addr >> 12))
+          self.wreg(self.gc.regSQ_THREAD_TRACE_SIZE, size=buf0s[se].size >> 12)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_CTRL, reset_buffer=1)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=1)
+    else:
+      self.spi_config(tracing=True)
+      # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
+      for se in range(len(buf0s)):
+        self.set_grbm_se(se)
 
-      # disable tracing
-      if not (se_mask >> se) & 0b1:
-        # gfx12 doesn't have enums with all fields, so it's hardcoded, but it's the same as gfx11.
-        token_exclude |= (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
-                         1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
-                         1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) if self.dev.target < (12,0,0) else 0x927
+        buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
+        if self.dev.target >= (12,0,0):
+          self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, size=buf0s[se].size >> 12)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_LO, base_lo=buf0_lo)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE_HI, base_hi=buf0_hi)
+        else:
+          self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_SIZE, base_hi=buf0_hi, size=buf0s[se].size >> 12)
+          self.wreg(self.gc.regSQ_THREAD_TRACE_BUF0_BASE, base_lo=buf0_lo)
+        # NOTE: SQTT can only trace instructions on one simd per se, this selects first simd in first wgp in first sa.
+        # For RGP to display instruction trace it has to see it on first SE. Howerver ACE/MEC/whatever does the dispatching starting with second se,
+        # and on amdgpu/non-AM it also does weird things with dispatch order inside se: around 7 times out of 10 it starts from the last cu, but
+        # sometimes not, especially if the kernel has more than one wavefront which means that kernels with small global size might get unlucky and
+        # be dispatched on something else and not be seen in instruction tracing tab. You can force the wavefronts of a kernel to be dispatched on the
+        # CUs you want to by disabling other CUs via bits in regCOMPUTE_STATIC_THREAD_MGMT_SE<x> and trace even kernels that only have one wavefront.
+        cs_wtype = (1 << 6) if self.dev.target >= (12,0,0) else self.soc.SQ_TT_WTYPE_INCLUDE_CS_BIT
+        self.wreg(self.gc.regSQ_THREAD_TRACE_MASK, wtype_include=cs_wtype, simd_sel=0, wgp_sel=0, sa_sel=0)
+        reg_include = self.soc.SQ_TT_TOKEN_MASK_SQDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_SHDEC_BIT | self.soc.SQ_TT_TOKEN_MASK_GFXUDEC_BIT | \
+                      self.soc.SQ_TT_TOKEN_MASK_COMP_BIT | self.soc.SQ_TT_TOKEN_MASK_CONTEXT_BIT
+        token_exclude = (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT) if self.dev.target < (12,0,0) else 0
 
-      token_mask = {} if self.dev.target < (12,0,0) else {'exclude_barrier_wait': 1}
-      self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1, **token_mask)
-      # Enable SQTT
-      self.sqtt_config(tracing=True)
+        # disable instr tracing
+        if not (se_mask >> se) & 0b1:
+          # gfx12 doesn't have enums with all fields, so it's hardcoded, but it's the same as gfx11.
+          token_exclude |= (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT | \
+                            1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
+                            1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) if self.dev.target < (12,0,0) else 0x927
+
+        self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1,
+                  **({} if self.dev.target < (12,0,0) else {'exclude_barrier_wait': 1}))
+        self.sqtt_config(tracing=True)
 
     self.set_grbm_broadcast()
-    self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 1)
+    if self.dev.target[0] > 9: self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 1)
     self.memory_barrier()
     return self
 
   # Magic values from src/amd/common/ac_sqtt.c:ac_sqtt_emit_stop and src/amd/common/ac_sqtt.c:ac_sqtt_emit_wait
-  def sqtt_stop(self, ses: int, wptrs: HCQBuffer):
+  def sqtt_stop(self, ses:int, wptrs:HCQBuffer):
     self.memory_barrier()
+    self.set_grbm_broadcast()
+
     # Start shutting everything down
-    self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 0)
-    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_FINISH) | self.pm4.EVENT_INDEX(0))
+    if self.dev.target[0] == 9: self.wreg(self.gc.regSQ_THREAD_TRACE_MODE, mask_cs=1, autoflush_en=1, mode=0)
+    else:
+      self.wreg(self.gc.regCOMPUTE_THREAD_TRACE_ENABLE, 0)
+      self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_FINISH) | self.pm4.EVENT_INDEX(0))
+
     # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
     for se in range(ses):
       self.set_grbm_se(se)
 
-      # Check if SQTT is stopped
-      status_reg = self.gc.regSQ_THREAD_TRACE_STATUS.addr[0]
-      self.wait_reg_mem(reg=status_reg, mask=self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_pending'), op=WAIT_REG_MEM_FUNCTION_EQ, value=0)
-      self.sqtt_config(tracing=False)
+      status_reg = self.gc.regSQ_THREAD_TRACE_STATUS.addr[0] - (self.pm4.PACKET3_SET_UCONFIG_REG_START if self.dev.target[0] == 9 else 0)
+      if self.dev.target >= (10, 0, 0):
+        self.wait_reg_mem(reg=status_reg, mask=self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_pending'), op=WAIT_REG_MEM_FUNCTION_EQ, value=0)
+        self.sqtt_config(tracing=False)
       self.wait_reg_mem(reg=status_reg, mask=self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('busy'), op=WAIT_REG_MEM_FUNCTION_EQ, value=0)
+      self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
       # Copy WPTR to memory (src_sel = perf, dst_sel = tc_l2, wr_confirm = True)
       self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regSQ_THREAD_TRACE_WPTR.addr[0], 0, *data64_le(wptrs.va_addr+(se*4)))
 
     self.set_grbm_broadcast()
-    self.spi_config(tracing=False)
+    if self.dev.target[0] > 9: self.spi_config(tracing=False)
     self.memory_barrier()
     return self
 
@@ -814,7 +840,7 @@ class AMDDevice(HCQCompiled):
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and SQTT > 0
     if self.sqtt_enabled:
-      if self.target[0] < 11: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
+      if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
       if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
         raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
@@ -881,12 +907,13 @@ class AMDDevice(HCQCompiled):
       self.synchronize()
       if DEBUG >= 2: print(f'{self.device}: Saving SQTT in profile...')
       for i,buf0 in enumerate(self.sqtt_buffers):
-        wptr = ((wptrs_buf.cpu_view().view(fmt='I')[i] & 0x1FFFFFFF) - (((buf0.va_addr//32) & 0x1FFFFFFF) if self.target < (12,0,0) else 0)) * 32
+        wptr = ((wptrs_buf.cpu_view().view(fmt='I')[i] & 0x1FFFFFFF) - (((buf0.va_addr//32) & 0x1FFFFFFF) if self.target[0] == 11 else 0)) * 32
         if DEBUG >= 2: print(f'\t{self.device}: SE {i} blob size {wptr:#x}')
         assert wptr >= 0 and wptr <= buf0.size, f"{wptr} > {buf0.size}, should never happen"
         # When sqtt buffer overflows, wptr stops at the last dword
         if wptr >= buf0.size - 32:
           print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {i})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
+        if self.target[0] == 9: sqtt_buf = memoryview(bytearray(b'\x11\x80\x1f\x00\x00\x00\x00\x00') + sqtt_buf)
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, self.iface.props, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
