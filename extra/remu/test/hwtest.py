@@ -99,20 +99,26 @@ def f32_from_bits(x:int) -> float: return struct.unpack('<f', struct.pack('<I', 
 def f32_to_bits(x:float) -> int: return struct.unpack('<I', struct.pack('<f', x))[0]
 
 from tinygrad.runtime.support.compiler_amd import compile_hip, amdgpu_disassemble
+from tinygrad.renderer import ProgramSpec
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad import Tensor, dtypes, UOp
+
 def get_output2(asm:str):
-  input_asm = "\n".join([f'asm volatile("{ln.strip().lstrip()}");' for ln in asm.strip().splitlines() if ln.strip()])
+  input_asm = "\n".join([f'asm volatile("{ln.strip().lstrip()}" : "+v"(a), "+v"(b));' for ln in asm.strip().splitlines() if ln.strip()])
   src = f"""
-  extern "C" __attribute__((global)) void test(float* data0) {{
-    asm volatile("v_mov_b32 v0, 0");
+  extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, 1))) test(unsigned int* data0_1) {{
+    unsigned a, b;
     {input_asm}
-    asm volatile("v_add_u32 v0, v0, 1" ::: "v0");
     unsigned res;
-    asm volatile("v_mov_b32 %0, v0" : "=v"(res));
-    data0[0] = (float)res;
+    asm volatile("v_mov_b32 %0, v1" : "=v"(res));
+    *(data0_1+0) = res;
   }}"""
-  print(src)
-  lib = compile_hip(src)
-  if DEBUG >= 3: amdgpu_disassemble(lib)
+  t = Tensor.zeros(1, dtype=dtypes.uint32).contiguous().realize()
+  prg = ProgramSpec("test", src, Device.DEFAULT, UOp.sink(t), global_size=[1, 1, 1], local_size=[1, 1, 1])
+  car = CompiledRunner(prg)
+  if getenv("PRINT_ASM"): amdgpu_disassemble(car.lib)
+  car([t.uop.buffer], {}, wait=True)
+  return t.item()
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "tests RDNA3")
 class TestHW(unittest.TestCase):
@@ -121,8 +127,8 @@ class TestHW(unittest.TestCase):
 
   def test_simple(self):
     out = get_output2("""
-    v_mov_b32_e32 v10 42
-    v_mov_b32_e32 v1 v10
+    v_mov_b32_e32 %1 42
+    v_mov_b32_e32 %2 %1
     """)
     np.testing.assert_equal(out, 42)
 
