@@ -305,7 +305,7 @@ async function renderProfiler() {
           const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
           const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
           const metadata = shape?.tooltipText?.split("\n").at(-1);
-          if (metadata != null) p.append("span").text(metadata);
+          if (metadata != null) p.append("span").text(" "+metadata);
           if (shape != null) {
             p.style("cursor", "pointer").on("click", () => focusShape(shape))
             const args = shapeMetadata.get(shape.key).querySelector(".args");
