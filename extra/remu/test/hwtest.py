@@ -159,16 +159,17 @@ class TestHW(unittest.TestCase):
     np.testing.assert_equal(out, 0b01)
 
   def test_exec_cmpx_vop3(self):
-    out = get_output("""
-    v_mov_b32_e32 v10 42
-    v_mov_b32_e32 v11 10
+    out = get_output2("""
+    s_mov_b32_e32 exec_lo 0b11
+    v_mov_b32_e32 %1 42
+    v_mov_b32_e32 %2 10
     s_mov_b32_e32 exec_lo 0b01
-    v_cmpx_ne_u32 v10 v11
+    v_cmpx_ne_u32 %1 %2
     s_mov_b32_e32 s10 exec_lo
     s_mov_b32_e32 exec_lo 0b11
-    v_mov_b32_e32 v1 s10
-    """, n_threads=2)
-    np.testing.assert_equal(out, 0b01)
+    v_mov_b32_e32 %2 s10
+    """, n_threads=2)[0]
+    np.testing.assert_equal(out & 0b11, 0b01)
 
   def test_fmac_vop3_modifier(self):
     init_state = f"""
