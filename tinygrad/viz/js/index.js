@@ -246,18 +246,14 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const html = document.createElement("div");
-        html.appendChild(tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
-        const argsDiv = document.createElement("div"); argsDiv.id = "args"; html.appendChild(document.createElement("br")); html.appendChild(argsDiv);
-        if (e.info != null) html.appendChild(document.createElement("p")).innerText = "\n"+e.info;
-        if (shapeRef != null) {
-          const a = html.appendChild(document.createElement("a"));
-          a.innerText = "\nView codegen rewrite";
-          a.onclick = () => switchCtx(shapeRef.ctx, shapeRef.step);
-        }
+        const html = d3.create("div").classed("info", true);
+        html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
+        html.append("div").classed("args", true);
+        if (e.info != null) html.append("p").style("white-space", "pre-wrap").text(e.info);
+        if (shapeRef != null) html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        if (key != null) shapeMetadata.set(key, html);
+        if (key != null) shapeMetadata.set(key, html.node());
         const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
@@ -298,23 +294,22 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const html = document.createElement("div");
+        const html = d3.create("div").classed("info", true);
         const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
         if (users != null) rows.push(["Users", users.length]);
-        const info = html.appendChild(tabulate(rows).node());
-        const arg = {tooltipText:info.outerHTML, key:`${k}-${num}`};
+        const info = html.append(() => tabulate(rows).node());
+        const arg = {tooltipText:info.node().outerHTML, key:`${k}-${num}`};
+        const kernels = html.append("div").classed("args", true);
         for (let u=0; u<users?.length; u++) {
-          const p = html.appendChild(document.createElement("p")); p.style.marginTop = "4px";
           const { repr, num, mode, shape } = users[u];
           const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
-          p.appendChild(colored(`[${u}] ${repr} ${bufInfo}`));
+          const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
           const metadata = shape?.tooltipText?.split("\n").at(-1);
-          if (metadata != null) p.appendChild(document.createElement("span")).innerText = "\n"+metadata;
+          if (metadata != null) p.append("span").text(" "+metadata);
           if (shape != null) {
-            p.style.cursor = "pointer";
-            p.onclick = () => focusShape(shape);
-            const args = shapeMetadata.get(shape.key).querySelector("#args");
-            const bufArg = d3.create("p").text(`${bufInfo} ${rows[2][1]}`).style("cursor", "pointer").style("margin-top", "4px").on("click", () => {
+            p.style("cursor", "pointer").on("click", () => focusShape(shape))
+            const args = shapeMetadata.get(shape.key).querySelector(".args");
+            const bufArg = d3.create("p").text(`${bufInfo} ${rows[2][1]}`).style("cursor", "pointer").on("click", () => {
               const device = document.getElementById(k);
               if (!isExpanded(device)) device.click();
               focusShape(arg);
@@ -325,7 +320,7 @@ async function renderProfiler() {
             args.insertBefore(bufArg, before);
           }
         }
-        shapeMetadata.set(arg.key, html)
+        shapeMetadata.set(arg.key, html.node())
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger

@@ -41,6 +41,7 @@
     color: #4a90e2;
     text-decoration: underline;
     cursor: pointer;
+    display: block;
   }
   ul {
     padding: 0;
@@ -148,10 +149,10 @@
     position: relative;
     height: 100%;
   }
-  .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
+  .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
-  ul > * + * {
+  ul > * + *, .args > * + * {
     margin-top: 4px;
   }
   .graph {
