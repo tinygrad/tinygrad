@@ -1,6 +1,27 @@
 import heapq
+from typing import cast
 from collections import defaultdict
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
+
+pm_linearize_cleanups = PatternMatcher([
+  # remove AFTER and replace it with its first source
+  (UPat(Ops.AFTER, name="u"), lambda u: (u.src[0], [])),
+  # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
+  (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))).or_casted(), UPat()),
+        allow_any_len=True), lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate,)), u, UOp(Ops.ENDIF, src=(mif,))]))
+])
+
+# requires lst be toposorted. like graph rewrite, but for lines
+def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
+  newlst = []
+  replaced: dict[UOp, UOp] = {}
+  for u in lst:
+    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
+    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm_linearize_cleanups.rewrite(nu)) or (nu, [nu])
+    replaced[u] = ret[0]
+    newlst.extend(ret[1])
+  return newlst
 
 def linearize(u:UOp) -> list[UOp]:
   lst = list(u.toposort())
@@ -40,7 +61,7 @@ def linearize(u:UOp) -> list[UOp]:
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
 
   assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
-  return newlst
+  return line_rewrite(newlst, pm_linearize_cleanups)
 
 class CFGContext:
   def __init__(self, sink:UOp):
