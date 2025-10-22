@@ -14,7 +14,7 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
-from tinygrad.codegen.late.control_flow import CFGContext, pm_merge_ends, pm_add_control_flow, linearize
+from tinygrad.codegen.late.control_flow import CFGContext, pm_add_ends, pm_add_control_flow, linearize, pm_merge_ends
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
@@ -52,6 +52,9 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
+  # add ends (after reduces are removed, as long as we have reduces we can have stores)
+  sink = graph_rewrite(sink, pm_add_ends, name="add ends of ranges")
+
   # devectorize (TODO: does this need opts?)
   if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
   elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
@@ -76,7 +79,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="final rewrite")
 
   # this was the linearizer
-  sink = graph_rewrite(sink, pm_merge_ends, name="merge ends")
+  sink = graph_rewrite(sink, pm_merge_ends, name="merge ends of ranges")
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow starts", bottom_up=True)
 
   # return the rewritten sink
@@ -88,7 +91,7 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
 
   Args:
     sink: The Ops.SINK rooting the Kernel graph.
-    opts: The Renderer (can change how things are processed, fix this).
+    ren: The Renderer (can change how things are processed, fix this).
 
   Returns:
     Linear program in UOps.

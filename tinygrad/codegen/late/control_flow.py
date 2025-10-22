@@ -95,8 +95,15 @@ def do_merge_ends(s:UOp):
     ret = ret.replace(src=(UOp(Ops.ENDIF, src=(dangling_ifs[0], *ret.src)),))
   return ret
 
-pm_merge_ends = PatternMatcher([
+pm_add_ends = PatternMatcher([
+  # put the end on the store
+  (UPat(Ops.STORE, name="s"), lambda s: s.replace(src=s.src[:2]).end(ends=s.src[2:]) if len(s.src) > 2 else None),
+  # END is only on RANGES
+  (UPat(Ops.END, name="e"), lambda e: UOp.end(*e.src[e.arg:], ends=sorted(UOp.sink(*e.src[:e.arg]).ranges, key=lambda x: x.arg))),
   # for renderering and linearizing, all ends must end one loop
   (UPat(Ops.END, name="e"), lambda e: e.replace(src=e.src[e.arg-1:], arg=1).end(ends=e.src[:e.arg-1]) if e.arg > 1 else None),
+])
+
+pm_merge_ends = PatternMatcher([
   (UPat(Ops.SINK, name="s"), do_merge_ends),
 ])
