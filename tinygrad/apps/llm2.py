@@ -250,7 +250,7 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
       scales = f'blk.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
       weights[f'layers.{l}.ffn_{d}_proj'] = proj
-    return weights
+  return weights
 
 def main(args):
 

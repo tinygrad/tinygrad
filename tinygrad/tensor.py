@@ -19,6 +19,8 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
+def fix(x): return x.cast('float').numpy()
+
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
@@ -3958,10 +3960,9 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    if sink is not None: qk = qk.cat(sink, dim=-1)
-    probs = qk.cast(self.dtype).softmax(-1).dropout(dropout_p)
-    if sink is not None: probs = probs[..., :-1] # remove the attention sink
-    attn = probs @ value
+
+    if sink is not None: attn = qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1)[..., :-1].dropout(dropout_p) @ value
+    else: attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
     return attn.fuse() if FUSE_ATTENTION else attn
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
