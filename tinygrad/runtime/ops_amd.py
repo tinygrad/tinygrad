@@ -231,7 +231,7 @@ class AMDComputeQueue(HWQueue):
     for se in range(ses):
       self.set_grbm_se(se)
 
-      status_reg = self.gc.regSQ_THREAD_TRACE_STATUS.addr[0] - (self.pm4.PACKET3_SET_UCONFIG_REG_START if self.dev.target == 9 else 0)
+      status_reg = self.gc.regSQ_THREAD_TRACE_STATUS.addr[0] - (self.pm4.PACKET3_SET_UCONFIG_REG_START if self.dev.target[0] == 9 else 0)
       if self.dev.target >= (10, 0, 0):
         self.wait_reg_mem(reg=status_reg, mask=self.gc.regSQ_THREAD_TRACE_STATUS.fields_mask('finish_pending'), op=WAIT_REG_MEM_FUNCTION_EQ, value=0)
         self.sqtt_config(tracing=False)
@@ -914,6 +914,6 @@ class AMDDevice(HCQCompiled):
         if wptr >= buf0.size - 32:
           print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {i})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
-        if self.target[0] == 9: sqtt_buf = bytearray(b'\x11\x80\x1f\x00\x00\x00\x00\x00') + sqtt_buf
+        if self.target[0] == 9: sqtt_buf = memoryview(bytearray(b'\x11\x80\x1f\x00\x00\x00\x00\x00') + sqtt_buf)
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, self.iface.props, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
