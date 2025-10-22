@@ -3958,11 +3958,10 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    if sink is not None:
-      ic(qk.shape)
-      qk = qk.cat(sink, dim=-1)
-      ic(qk.shape, qk.float().numpy())
-    attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
+    if sink is not None: qk = qk.cat(sink, dim=-1)
+    probs = qk.cast(self.dtype).softmax(-1).dropout(dropout_p)
+    if sink is not None: probs = probs[..., :-1] # remove the attention sink
+    attn = probs @ value
     return attn.fuse() if FUSE_ATTENTION else attn
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
