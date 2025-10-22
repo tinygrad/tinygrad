@@ -50,7 +50,7 @@ ptx_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.void, x.src[0:1] + (x.src[1].cast(dtypes.uint8),) + x.src[2:])),
   # load/store use pointer arithmetic, and the cast does nothing
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx")), allow_any_len=True),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))),
    lambda buf,idx: (buf.cast(dtypes.int64) + idx.cast(dtypes.int64)*buf.dtype.itemsize) if buf.dtype.addrspace != AddrSpace.REG else None),
   (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
   # move mask from INDEX to the load/store to enable pointer arithmetic
