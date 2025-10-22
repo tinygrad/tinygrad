@@ -185,8 +185,9 @@ spec = PatternMatcher([
   (UPat(Ops.LOAD, src=(index_pat, UPat(Ops.IF, name="cond")), allow_any_len=True), lambda idx,cond: validate_index(idx,cond.src[0])),
   (UPat(Ops.LOAD, src=(index_pat,), allow_any_len=True), validate_index),
 
-  # STORE takes a <bufidx, val, ranges...>
-  (UPat(Ops.STORE, src=(index_pat, UPat(name="val")), allow_any_len=True), validate_store),
+  # STORE takes a <bufidx, val, gate?>
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"), UPat(name="gate"))), validate_store),
+  (UPat(Ops.STORE, src=(index_pat, UPat(name="val"))), validate_store),
 
   # most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
