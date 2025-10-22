@@ -110,18 +110,22 @@ amd_rdna4 = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(8,8,8)
            (('l0', 'l1', 'l2', 'l3', 'r2'), ('r0', 'r1', 'r3'), ('l4', 'u0', 'u1', 'u2'))))
   for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.bfloat16,dtypes.float),(dtypes.bfloat16,dtypes.bfloat16)]]
 
+# https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme
+amd_cdna = [TensorCore(dims=(16,16,16), threads=64, elements_per_thread=(4,4,4), dtype_in=di, dtype_out=do,
+  opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+  swizzle=((('u0', 'u1', 'l4', 'l5', 'r2', 'r3'), ('r0', 'r1'), ('l0', 'l1', 'l2', 'l3')),
+           (('l0', 'l1', 'l2', 'l3', 'r2', 'r3'), ('r0', 'r1'), ('l4', 'l5', 'u0', 'u1'))))
+  for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
+
 amd_cdna_fp8 = [TensorCore(dims=(16,16,32), threads=64, elements_per_thread=(8,8,4), dtype_in=di, dtype_out=do,
   opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
   swizzle=((('u0','u1','l4','l5','r3','r4'), ('r0','r1'), ('l0','l1','l2','l3','r2')),
            (('l0','l1','l2','l3','r3','r4'), ('r0','r1'), ('l4','l5','u0','u1','r2'))))
   for di,do in [(dtypes.fp8e5m2, dtypes.float), (dtypes.fp8e4m3, dtypes.float)]]
 
-# https://gpuopen.com/learn/amd-lab-notes/amd-lab-notes-matrix-cores-readme
-amd_cdna = [TensorCore(dims=(16,16,16), threads=64, elements_per_thread=(4,4,4), dtype_in=di, dtype_out=do,
-  opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
-  swizzle=((('u0', 'u1', 'l4', 'l5', 'r2', 'r3'), ('r0', 'r1'), ('l0', 'l1', 'l2', 'l3')),
-           (('l0', 'l1', 'l2', 'l3', 'r2', 'r3'), ('r0', 'r1'), ('l4', 'l5', 'u0', 'u1'))))
-  for di,do in [(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]] + amd_cdna_fp8
+amd_cdna3 = amd_cdna + amd_cdna_fp8
+
+amd_cdna4 = amd_cdna3
 
 # ***** Apple Metal *****
 
