@@ -17,7 +17,7 @@ class AxisType(Enum):
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
   THREAD = auto()
 
-range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3}
+range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
@@ -270,13 +270,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def ended_ranges(self):
-    # copy of range_start
-    match self.op:
-      case Ops.REDUCE | Ops.BUFFERIZE: return self.src[1:]
-      case Ops.STORE: return self.src[2:]
-      case Ops.WMMA: return self.src[3:]
-      case Ops.END: return self.src[:1]
-      case _: return ()
+    if self.op in range_start: return self.src[range_start[self.op]:]
+    return ()
 
   # determine what ranges this is in
   @recursive_property
@@ -359,7 +354,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
   def end(self, *src:UOp):
-    assert self.op is Ops.RANGE, "end only ends ranges"
+    assert all(x.op is Ops.RANGE for x in src), "end only ends ranges"
     return UOp(Ops.END, src=(self,)+src)
   def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
@@ -1191,7 +1186,7 @@ pm_lower_index_dtype = PatternMatcher([
   # TODO: this is only triggering if they are all casts, correct?
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
   # no CAST on END
-  (UPat(Ops.END, src=(UPat(Ops.CAST),), allow_any_len=True, name="e"), lambda e: e.replace(src=(e.src[0].src[0],)+e.src[1:])),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.CAST)), name="e"), lambda e: e.replace(src=(e.src[0], e.src[1].src[0]))),
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 

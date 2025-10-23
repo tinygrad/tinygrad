@@ -106,15 +106,15 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
   # range
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_entry_{range_str(x)}\nloop_entry_{range_str(x)}:\n"
-   f"  br label %loop_body_{range_str(x)}\nloop_body_{range_str(x)}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{range_str(x)} ], [ {ctx[x]}phi, %loop_latch_{range_str(x)} ]"),
-  (UPat(Ops.END, name="x"), lambda ctx,x:
-   f"  br label %loop_latch_{range_str(x.src[0])}\nloop_latch_{range_str(x.src[0])}:\n"
-   f"  {ctx[x.src[0]]}phi = add {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, 1\n"
-   f"  {ctx[x]} = icmp ult {ldt(x.src[0].dtype)} {ctx[x.src[0]]}phi, {ctx[x.src[0].src[0]]}\n"
-   f"  br i1 {ctx[x]}, label %loop_body_{range_str(x.src[0])}, label %loop_exit_{range_str(x.src[0])}\nloop_exit_{range_str(x.src[0])}:"),
+  (UPat(Ops.RANGE, name="r"), lambda ctx,r:
+   f"  br label %loop_entry_{range_str(r)}\nloop_entry_{range_str(r)}:\n"
+   f"  br label %loop_body_{range_str(r)}\nloop_body_{range_str(r)}:\n"
+   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_latch_{range_str(r)} ]"),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r")), name="x"), lambda ctx,x,r:
+   f"  br label %loop_latch_{range_str(r)}\nloop_latch_{range_str(r)}:\n"
+   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
+   f"  {ctx[x]} = icmp ult {ldt(r.dtype)} {ctx[r]}phi, {ctx[r.src[0]]}\n"
+   f"  br i1 {ctx[x]}, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\nloop_exit_{range_str(r)}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),

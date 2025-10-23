@@ -81,7 +81,7 @@ class CFGContext:
       for s in u.src: deps[u] |= deps[s]
 
       if u.op in (Ops.END, Ops.SINK):
-        nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[0] in deps[x]) and x not in nesting}
+        nesting |= {x:u for x in deps[u] if x.op is Ops.END and (u.op is Ops.SINK or u.src[1] in deps[x]) and x not in nesting}
       if u.op in (Ops.RANGE, Ops.END): deps[u][u] = None
 
     self.edges: dict[UOp, UOp] = {}
@@ -90,11 +90,11 @@ class CFGContext:
     for k,v in siblings.items():
       # range/if that have dependencies on other siblings need to run after them
       order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
-      zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[0]] + order, order)
+      zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
       for x,y in zipped:
         # TODO: is this check correct?
-        if y.src[0] not in x.backward_slice_with_self:
-          self.edges[y.src[0]] = x
+        if y.src[1] not in x.backward_slice_with_self:
+          self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
@@ -103,5 +103,5 @@ pm_add_control_flow = PatternMatcher([
 pm_add_ends = PatternMatcher([
   # put the end on the store
   (UPat(Ops.STORE, name="s"), lambda s:
-    functools.reduce(lambda x,y: y.end(x), [x for x in s.src[2:] if x.op is Ops.RANGE][::-1], s.replace(src=s.src[:2]))),
+    functools.reduce(lambda x,y: x.end(y), [x for x in s.src[2:] if x.op is Ops.RANGE][::-1], s.replace(src=s.src[:2]))),
 ])
