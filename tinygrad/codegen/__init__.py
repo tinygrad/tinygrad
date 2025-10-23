@@ -96,6 +96,8 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
     Linear program in UOps.
   """
 
-  lst = linearize(full_rewrite_to_sink(sink, ren, optimize=sink.tag is None))
+  full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
+  assert len(full_sink.ranges) == 0, "all ranges must end by the sink"
+  lst = linearize(full_sink)
   if __debug__: type_verify(lst, program_spec)
   return lst

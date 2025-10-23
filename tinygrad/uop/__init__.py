@@ -15,6 +15,9 @@ class Ops(FastEnum):
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
   AFTER = auto()
 
+  # GROUP is a NOOP that just merges things together
+  GROUP = auto()
+
   # buffer ops
   COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
 
