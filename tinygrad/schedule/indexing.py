@@ -109,9 +109,18 @@ pm_apply_rangeify = PatternMatcher([
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
 
+INDEX_INPUT: set[Ops] = {Ops.RANGE, Ops.DEFINE_VAR, Ops.CAST}
+def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  # to disable caching replace INDEX_INPUT with Ops.CAST, Ops.CAST should be substituted because you don't want to rewrite the graph of a loaded idx
+  inputs = [u for u in UOp.sink(*rngs).toposort(gate=lambda u:u.dtype in (dtypes.index, dtypes.bool, dtypes.void)) if u.op in INDEX_INPUT]
+  sub = {x:UOp.variable(f"_in{i}", x.vmin, x.vmax) for i,x in enumerate(inputs[::-1])}
+  ret = _apply_movement_op(op, in_shape, arg, UOp.sink(*rngs).substitute(sub).src)
+  # TODO: gate this subsitute so it doesnt walk the whole graph past the inputs (in case there is a loaded index)
+  return UOp.sink(*ret).substitute({v:k for k,v in sub.items()}).src
+
 # this is the definition of the movement ops
 @functools.cache
-def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+def _apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   match op:
     case Ops.SHRINK:  rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, arg))
     case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
