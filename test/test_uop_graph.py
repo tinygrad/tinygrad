@@ -1,11 +1,10 @@
-from typing import List
 import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
 from tinygrad.uop.symbolic import sym
-from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
+from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.expander import expander
 from test.test_uops import to_uops_list
 
