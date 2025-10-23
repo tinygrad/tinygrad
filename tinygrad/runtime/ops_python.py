@@ -209,7 +209,7 @@ class PythonProgram:
         elif uop in GroupOp.ALU:
           assert all_same([len(x) for x in inp]), f"{[len(x) for x in inp]} doesn't match on {uop}"
           assert all_same([dtype] + dtp) or uop in {*GroupOp.Comparison, Ops.WHERE}, f"dtype mismatch on {uop}"
-          ul[i] = [exec_alu(uop, dtype, p) for p in zip(*inp)]
+          ul[i] = [exec_alu(uop, dtype, p, truncate_output=False if dtype in dtypes.fp8s else True) for p in zip(*inp)]
         assert i in ul, (uop, dtype, idp, arg)
         i += 1
     return time.perf_counter() - st
