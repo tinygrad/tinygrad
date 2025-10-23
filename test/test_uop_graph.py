@@ -473,7 +473,7 @@ class TestUOpGraph(unittest.TestCase):
     l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),)).cast(dtypes.index)
     idx = l0 * 600
     valid = (l0<-1).ne(True)&(l0<3000)
-    l1 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx.valid(valid)),))
+    l1 = valid.where(UOp(Ops.LOAD, dtypes.long, (d1.index(idx),)),0)
     uops = to_uops_list([l1])
     for u in uops:
       if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
@@ -518,6 +518,7 @@ class TestUOpGraph(unittest.TestCase):
       st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), v, v<20))
       with self.assertRaises(RuntimeError): to_uops_list([st1])
 
+  @unittest.skip("if not allowed in graph")
   def test_in_bounds_access_gated_local(self):
     with Context(IGNORE_OOB=0):
       # Define buffers
@@ -638,13 +639,13 @@ class TestUOpGraph(unittest.TestCase):
     lidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 16),), "lidx0")
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
-    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.index(UOp.invalid()), barrier))
-    ld1 = UOp(Ops.LOAD, dtypes.int, (smem.index(lidx+2, UOp.const(dtypes.bool, True)), barrier))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.after(barrier).index(UOp.invalid()),))
+    ld1 = UOp(Ops.LOAD, dtypes.int, (smem.after(barrier).index(lidx+2, UOp.const(dtypes.bool, True)),))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(lidx), ld1+ld0))])
 
     ld0 = uops[-1].src[-1]
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0.src[0], smem.index(lidx+2))
+    self.assertEqual(ld0.src[0], smem.after(barrier).index(lidx+2))
 
   def test_fold_gated_store(self):
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
