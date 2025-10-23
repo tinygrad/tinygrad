@@ -350,6 +350,14 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # a range mod its own upper bound is just the range
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")%UPat.var("end"), lambda r,end: r),
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")//UPat.var("end"), lambda r,end: r.const_like(0)),
+  # a range is always positive
+  # (UPat.maximum())
+  # (UPat.cvar("b", arg=0) < UPat(Ops.RANGE, src=UPat.var("end"), name="r"), lambda b,r,end: UOp.const(dtypes.bool, True)),
+  # (UPat.cvar("b", arg=0) != UPat(Ops.RANGE, src=UPat.var("end"), name="r"), lambda b,r,end: UOp.const(dtypes.bool, True), ),
+  # (UPat(Ops.RANGE, src=UPat.var("end"), name="r") < UPat.var("u"), lambda r,end,u: end<=u),
+  # 0 divided by anything is 0 (avoid triggering divide_by_gcd with CONST(0))
+  (UPat.cvar("zero", arg=0, vec=False) // UPat.var("y"), lambda zero,y: zero),
+  (UPat.cvar("zero", arg=0, vec=False) % UPat.var("y"), lambda zero,y: zero),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
   (UPat.var("x", dtypes.index) // UPat.var("d"), lambda x,d: -(x//(-d)) if d.vmax < 0 else None),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
@@ -560,3 +568,5 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
 ])
+
+pm_canonicalize_shape = PatternMatcher([ (UPat(Ops.RANGE, name="r", src=UPat.var("end")), lambda r, end: end) ])+symbolic

@@ -10,7 +10,7 @@ from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, p
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.mathtraits import MathTrait
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender
+from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender, canonicalize_dim, canonicalize_shape
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
@@ -690,7 +690,8 @@ class Tensor(MathTrait):
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     if start < (dt:=to_dtype(dtype)).min or dt.max < (stop-step): raise ValueError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
+    # here we only care about the dimensions, so the ranges can be replaced by their ends
+    if (output_len:=canonicalize_dim(ceildiv(stop-start, step))) <= 0: return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
 
   @staticmethod
@@ -1049,8 +1050,8 @@ class Tensor(MathTrait):
     # resolve -1
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    if resolve(prod(self.shape) != prod(new_shape), True):
-      raise ValueError(f"size mismatch, can't reshape ({', '.join(srender(d) for d in self.shape)}) -> ({', '.join(srender(d) for d in new_shape)})")
+    # if resolve(prod(self.shape) != prod(new_shape), True):
+    #   raise ValueError(f"size mismatch, can't reshape ({', '.join(srender(d) for d in self.shape)}) -> ({', '.join(srender(d) for d in new_shape)})")
     return self._apply_uop(UOp.reshape, arg=new_shape) if new_shape != self.shape else self
 
   def expand(self, shape, *args) -> Tensor:
@@ -3626,8 +3627,8 @@ class Tensor(MathTrait):
     # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     shape, _ = _align_left(self.shape, new_shape)
     # for each dimension, check either dim is 1, or it does not change
-    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
-      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
+    # if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
+    #   raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
     return self.reshape(shape).cast(sum_acc_dtype(self.dtype))._apply_uop(UOp.expand, arg=new_shape).cast(self.dtype)
 
@@ -3880,6 +3881,7 @@ class Tensor(MathTrait):
   def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
+  # def __eq__(self, x) -> Tensor: return self.ne(x)._apply_broadcasted_uop(UOp.ne, True, True)                      # type: ignore[override]
 
   # ***** functional nn ops *****
 

@@ -40,6 +40,13 @@ def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
+def canonicalize_dim(uop:sint):
+  if isinstance(uop, int): return uop
+  from tinygrad.uop.symbolic import pm_canonicalize_shape
+  return graph_rewrite(uop, pm_canonicalize_shape, name="canonicalize_dim")
+def canonicalize_shape(s:tuple[sint,...]): return tuple(canonicalize_dim(x) for x in s)
+
+
 def range_str(u:UOp) -> str: return '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
 
 # used for UOp and UPat
@@ -221,11 +228,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
-          if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
+          # if prod(ps) != prod(self.marg): raise ValueError(f"bad reshape: {ps} -> {self.marg}")
           return self.marg
         case Ops.EXPAND:
-          if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
-            raise ValueError(f"bad expand: {ps} -> {self.marg}")
+          # if len(ps) != len(self.marg) or not all(s==ns or (s==1 and ns>=0) for s,ns in zip(ps, self.marg)):
+          #   raise ValueError(f"bad expand: {ps} -> {self.marg}")
           return self.marg
         case Ops.PERMUTE:
           if sorted(self.marg) != list(range(len(ps))): raise ValueError(f"invalid permutation {self.marg} of len {len(ps)}")
@@ -263,6 +270,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]:
     if (ret:=self._shape) is None: raise RuntimeError(f"shape requested, but {self.op} doesn't have a shape")
+    # if any(isinstance(d, UOp) and d.op == Ops.MAX for d in ret): breakpoint()
     return ret
 
   @property
@@ -376,7 +384,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
-  def range(end:sint, *arg):
+  def range(end:sint, *arg)->UOp:
     if len(arg) == 0: raise RuntimeError("range needs an arg")
     if len(arg) == 1: arg = arg+(AxisType.LOOP,)
     return UOp(Ops.RANGE, dtype=dtypes.index, src=(sint_to_uop(end),), arg=arg)

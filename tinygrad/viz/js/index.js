@@ -535,7 +535,7 @@ function codeBlock(st, language, { loc, wrap }={}) {
   if (wrap) ret.className = "wrap";
   if (loc != null) {
     const link = ret.appendChild(document.createElement("a"));
-    link.href = "vscode://file/"+loc.join(":");
+    link.href = "zed://file/"+loc.join(":");
     link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
   }
   ret.appendChild(code);
@@ -807,7 +807,7 @@ document.addEventListener("keydown", (event) => {
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
   const { step, ctx } = select(currentCtx, currentStep);
-  if (event.key == "ArrowUp") {
+  if (event.key == "ArrowUp" || event.key == "k") {
     event.preventDefault();
     if (changeStep) {
       let prev = deselect(step.previousElementSibling);
@@ -816,7 +816,7 @@ document.addEventListener("keydown", (event) => {
     }
     return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
   }
-  if (event.key == "ArrowDown") {
+  if (event.key == "ArrowDown" || event.key == "j") {
     event.preventDefault();
     if (changeStep) {
       const next = deselect(isExpanded(step) ? step.children[1] : step.nextElementSibling);
@@ -834,11 +834,11 @@ document.addEventListener("keydown", (event) => {
     return setState({ expandSteps:!expandSteps });
   }
   // left and right go through rewrites in a single UOp
-  if (event.key == "ArrowLeft") {
+  if (event.key == "ArrowLeft" || event.key == "h") {
     event.preventDefault()
     return setState({ currentRewrite:Math.max(0, currentRewrite-1) });
   }
-  if (event.key == "ArrowRight") {
+  if (event.key == "ArrowRight" || event.key == "l") {
     event.preventDefault()
     const totalRewrites = ret.length-1;
     return setState({ currentRewrite:Math.min(totalRewrites, currentRewrite+1) });
