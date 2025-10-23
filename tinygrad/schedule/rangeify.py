@@ -296,7 +296,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp, allow_locals=False):
+def bufferize_to_store(x:UOp, allow_locals=True):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
@@ -337,16 +337,13 @@ def bufferize_to_store(x:UOp, allow_locals=False):
     do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)
     return buf.after(do_store.barrier()).reshape(shape)
 
-pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
+# TODO: do all buffer locals in the little graph
+pm_add_buffers = pm_add_buffers_local = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
-])
-
-pm_add_buffers_local = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, allow_locals=True)),
 ])
 
 # *****************
