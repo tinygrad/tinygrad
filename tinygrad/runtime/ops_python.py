@@ -57,8 +57,8 @@ class PythonProgram:
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is Ops.END:
-          loop_ends[idp[0]] = i
-          i = idp[0]
+          loop_ends[idp[1]] = i
+          i = idp[1]
           continue
         if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP):
           # in the python emulator, the warp is always in sync
