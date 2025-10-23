@@ -84,7 +84,7 @@ def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
-      if u.op in {Ops.END, Ops.STORE}:
+      if u.op in {Ops.END, Ops.STORE, Ops.REDUCE}:
         label += "\n"+' '.join([f"{colored(s.arg[0], axis_colors[s.arg[-1]])}({s.vmax+1})" for s in u.src[range_start[u.op]:]])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
