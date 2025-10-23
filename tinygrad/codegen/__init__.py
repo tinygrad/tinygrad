@@ -19,6 +19,9 @@ from tinygrad.codegen.late.control_flow import CFGContext, pm_add_ends, pm_split
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
+  # TODO: fix expander remove this
+  sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
+
   # first we optimize
   if optimize:
     if QUANTIZE and ren.device in {"CPU", "DSP"}: sink = graph_rewrite(sink, pm_quant, name="quantize")
