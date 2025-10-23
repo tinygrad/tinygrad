@@ -1050,8 +1050,8 @@ class Tensor(MathTrait):
     # resolve -1
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    # if resolve(prod(self.shape) != prod(new_shape), True):
-    #   raise ValueError(f"size mismatch, can't reshape ({', '.join(srender(d) for d in self.shape)}) -> ({', '.join(srender(d) for d in new_shape)})")
+    if resolve(prod(canonicalize_shape(self.shape)) != prod(canonicalize_shape(new_shape)), True):
+      raise ValueError(f"size mismatch, can't reshape ({', '.join(srender(d) for d in self.shape)}) -> ({', '.join(srender(d) for d in new_shape)})")
     return self._apply_uop(UOp.reshape, arg=new_shape) if new_shape != self.shape else self
 
   def expand(self, shape, *args) -> Tensor:
@@ -1625,7 +1625,8 @@ class Tensor(MathTrait):
     ```
     """
     start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
-    return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
+    flattened_dim = canonicalize_dim(prod(self.shape[start_dim:end_dim+1]))
+    return self.reshape(self.shape[:start_dim] + (flattened_dim, ) + self.shape[end_dim+1:])
 
   def unflatten(self, dim:int, sizes:tuple[int,...]) -> Tensor:
     """
@@ -3627,8 +3628,8 @@ class Tensor(MathTrait):
     # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     shape, _ = _align_left(self.shape, new_shape)
     # for each dimension, check either dim is 1, or it does not change
-    # if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
-    #   raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
+    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(canonicalize_shape(shape), canonicalize_shape(new_shape))):
+      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
     return self.reshape(shape).cast(sum_acc_dtype(self.dtype))._apply_uop(UOp.expand, arg=new_shape).cast(self.dtype)
 
@@ -3881,7 +3882,6 @@ class Tensor(MathTrait):
   def ne(self, x) -> Tensor: return self._apply_broadcasted_uop(UOp.ne, x, False)
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
-  # def __eq__(self, x) -> Tensor: return self.ne(x)._apply_broadcasted_uop(UOp.ne, True, True)                      # type: ignore[override]
 
   # ***** functional nn ops *****
 

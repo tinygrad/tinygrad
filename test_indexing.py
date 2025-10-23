@@ -1,6 +1,6 @@
 import pytest
 
-from tinygrad import Tensor, UOp
+from tinygrad import Tensor, UOp, dtypes
 
 
 def test_vmap():
@@ -14,7 +14,7 @@ def test_vmap():
 
 def test_flat_indexing():
   n, m, p = 20, 10, 4
-  x = Tensor([list(range(m))]*n, dtype="float64")
+  x = Tensor([list(range(m))]*n, dtype=dtypes.default_float)
   i = [2*k + m*k for k in range(p)]  # row-major idexing of (k, 2*k)
   assert x.flatten()[i].tolist() == pytest.approx([2.0 * k for k in range(p)])
 
@@ -44,7 +44,7 @@ def test_flat_indexing_after_vmap():
   x = Tensor.ones(3, 6)
   r = UOp.range(3, -1)
   o = fn(x[r]).reshape(1, 6).expand(r, 6).flatten()
-  i = [0, 7, 14]
+  i = [0, 8, 16]
   assert o[i].tolist() == pytest.approx([0.0, 2.0, 4.0])
 
 # def test_slicing_after_vmap():

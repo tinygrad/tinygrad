@@ -47,6 +47,9 @@ class IndexingContext:
   range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
+    # canonicalize to extract any RANGE sizes from symbolic shapes
+    if isinstance(s, UOp):
+      s = graph_rewrite(s, pm_canonicalize_shape, name="canonicalize_new_range_size")
     # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
