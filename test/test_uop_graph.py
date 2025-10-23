@@ -16,8 +16,10 @@ simple_pm = PatternMatcher([
 ])
 
 def to_uops_list(u:List[UOp]) -> List[UOp]:
+  sink = UOp.group(*u)
+  for r in sink.ranges: sink = r.end(sink)
   # we strip the SINK here for legacy reasons
-  ret = full_rewrite(UOp.sink(*u, arg=KernelInfo(opts_to_apply=())))
+  ret = full_rewrite(sink.sink(arg=KernelInfo(opts_to_apply=())))
   assert ret[-1].op is Ops.SINK
   return ret[:-1]
 
