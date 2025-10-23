@@ -1,4 +1,4 @@
-import heapq, functools
+import heapq
 from typing import cast
 from collections import defaultdict
 from tinygrad.dtype import dtypes
@@ -100,8 +100,13 @@ pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 
+pm_split_ends = PatternMatcher([
+  # split the ends
+  (UPat(Ops.END, name="e"), lambda e: e.src[0].end(e.src[-1]).end(*e.src[1:-1]) if len(e.src) > 2 else None),
+])
+
+# NOTE: this can be done whenever
 pm_add_ends = PatternMatcher([
   # put the end on the store
-  (UPat(Ops.STORE, name="s"), lambda s:
-    functools.reduce(lambda x,y: x.end(y), [x for x in s.src[2:] if x.op is Ops.RANGE][::-1], s.replace(src=s.src[:2]))),
+  (UPat(Ops.STORE, name="s"), lambda s: s.replace(src=s.src[:2]).end(*[x for x in s.src[2:] if x.op is Ops.RANGE])),
 ])
