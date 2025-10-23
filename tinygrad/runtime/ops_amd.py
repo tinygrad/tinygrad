@@ -914,6 +914,6 @@ class AMDDevice(HCQCompiled):
         if wptr >= buf0.size - 32:
           print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {i})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
-        if self.target[0] == 9: sqtt_buf = memoryview(bytearray(b'\x11\x80\x1f\x00\x00\x00\x00\x00') + sqtt_buf)
+        if self.target[0] == 9: sqtt_buf = struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (i << 24)) + sqtt_buf
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, self.iface.props, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
