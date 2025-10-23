@@ -26,8 +26,10 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     # TODO: fix expander and remove this
     sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
 
-    # split ranges
+    # collapse loads reduce (indexing by a tensor)
     sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
+
+    # split ranges
     sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
