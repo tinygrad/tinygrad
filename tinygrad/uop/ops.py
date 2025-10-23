@@ -325,6 +325,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
+  def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
+    if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
+    return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, *srcs:UOp|None, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
@@ -360,7 +363,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
-  def group(self, *src:UOp): return UOp(Ops.GROUP, src=(self,)+src) if len(src) else self
   def alu(self, op, *src:UOp, **kwargs):
     out_dtype = (self, *src)[-1].dtype
     if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool

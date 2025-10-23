@@ -60,7 +60,8 @@ class TestPcontig(unittest.TestCase):
       loss = (out - target).square().mean()
       loss.backward()
       #ret = [out, Tensor.stack(q.grad, k.grad, v.grad)]
-      ret = [out, q.grad, k.grad, v.grad]
+      ret = [out, Tensor.stack(q.grad, k.grad, dim=-1), v.grad]
+      #ret = [out, q.grad, k.grad, v.grad]
       Tensor.realize(*ret)
       return ret
 

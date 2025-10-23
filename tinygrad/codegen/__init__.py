@@ -13,7 +13,7 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
-from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
 from tinygrad.codegen.late.control_flow import CFGContext, pm_add_ends, pm_split_ends, pm_add_control_flow, linearize
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
@@ -43,7 +43,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_buffers+rangeify_codegen, name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, name="add local buffers")
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
