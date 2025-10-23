@@ -104,14 +104,14 @@ from tinygrad.engine.realize import CompiledRunner
 from tinygrad import Tensor, dtypes, UOp
 
 def get_output2(asm:str, n_threads:int=1):
-  input_asm = "\n".join([f'asm volatile("{ln.strip().lstrip()}" : "+v"(a), "+v"(b));' for ln in asm.strip().splitlines() if ln.strip()])
+  input_asm = "\n".join([ln if ln.strip().startswith('asm volatile') else f'asm volatile("{ln.strip().lstrip()}" : "+v"(a), "+v"(b));'
+                         for ln in asm.strip().splitlines() if ln.strip()])
   src = f"""
   typedef long unsigned int size_t;
   extern "C" __attribute__((device, const)) size_t __ockl_get_local_id(unsigned int);
   extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, {n_threads}))) test(unsigned int* data0_1) {{
     int l = __ockl_get_local_id(0);
-    unsigned a = 0;
-    unsigned b = 0;
+    unsigned a = 0, b = 0, c = 0;
     {input_asm}
     unsigned res;
     asm volatile("v_mov_b32 %0, %1" : "=v"(res) : "v"(a));
@@ -173,13 +173,15 @@ class TestHW(unittest.TestCase):
 
   def test_fmac_vop3_modifier(self):
     init_state = f"""
-    v_mov_b32_e32 v10 {f16_to_bits(4.0)}
-    v_mov_b32_e32 v11 {f16_to_bits(3.0)}
-    v_mov_b32_e32 v1 {f16_to_bits(2.0)}
+    asm volatile("v_mov_b32_e32 %1, {f16_to_bits(4.0)}" : "+v"(a));
+    asm volatile("v_mov_b32_e32 %1, {f16_to_bits(3.0)}" : "+v"(b));
+    asm volatile("v_mov_b32_e32 %1, {f16_to_bits(2.0)}" : "+v"(c));
     """
-    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 v11 v10"), f16_to_bits(14.))
-    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 v10"), f16_to_bits(-10.))
-    self.assertEqual(get_output(init_state+"\n"+"v_fmac_f16_e64 v1 -v11 -v10"), f16_to_bits(14.))
+    mov = f"""asm volatile("v_mov_b32_e32 %1, %2" : "+v"(c), "+v"(a));"""
+    def fmac(a, b, c): return f"""asm volatile("v_fmac_f16_e64 {c}, {a}, {b}" : "+v"(c) : "v"(a), "v"(b));"""+"\n"+mov
+    self.assertEqual(get_output2(init_state+"\n"+fmac("%1", "%2", "%3")), f16_to_bits(14.))
+    self.assertEqual(get_output2(init_state+"\n"+fmac("%1", "-%2", "%3")), f16_to_bits(-10.))
+    self.assertEqual(get_output2(init_state+"\n"+fmac("-%1", "-%2", "%3")), f16_to_bits(14.))
 
   def test_s_abs_i32(self):
     def s_abs_i32(x, y, dst="s10", scc=0):
