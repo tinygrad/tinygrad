@@ -323,7 +323,7 @@ def bufferize_to_store(x:UOp):
   if tag is None: tag = UOp.unique().arg # TODO: hack
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
   do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)
-  return buf.after(do_store).reshape(shape)
+  return buf.after(do_store.barrier()).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),

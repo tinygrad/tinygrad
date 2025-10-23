@@ -57,8 +57,8 @@ class PythonProgram:
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
         if uop is Ops.END:
-          loop_ends[idp[0]] = i
-          i = idp[0]
+          loop_ends[idp[1]] = i
+          i = idp[1]
           continue
         if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP):
           # in the python emulator, the warp is always in sync
@@ -150,10 +150,10 @@ class PythonProgram:
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
           elif device == "AMD" and threads == 64:
-            def a_elem(x, k, row, goff): return x[k%4][goff + (k//4)*16 + row]
-            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff) # pylint: disable=arguments-out-of-order
+            def a_elem(x, k, row, goff): return x[k%(dims[2]//4)][goff + (k//(dims[2]//4))*16 + row]
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
-            ul[i] = wmma_helper(64, 16, 4, 4, 4, a_elem, b_elem, c_map)
+            ul[i] = wmma_helper(64, dims[2], len(inp[0]), len(inp[1]), len(inp[2]), a_elem, b_elem, c_map)
           elif device == "AMD" and len(inp[0]) == 8: # RDNA4
             def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
             def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
@@ -221,7 +221,7 @@ class PythonRenderer(Renderer):
     match cast(str, EMULATE.value):
       case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
       case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
-      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna
+      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
       case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
       case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
       case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
