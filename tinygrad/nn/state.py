@@ -355,3 +355,17 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 
   return kv_data, state_dict
+
+@accept_filename
+def png_load(t:Tensor) -> Tensor:
+  f = io.BufferedReader(TensorIO(t))
+  assert f.read(8) == b'\x89PNG\r\n\x1a\n', "not a PNG"
+  while (slen:=f.read(4)):
+    len, typ = struct.unpack(">I", slen)[0], f.read(4)
+    dat = f.read(len)
+    if typ == b'IHDR':
+      width, height, depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", dat)
+      print(width, height, depth, color_type)
+
+    print(len, typ)
+    f.seek(4, 1)
