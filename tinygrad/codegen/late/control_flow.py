@@ -45,7 +45,7 @@ def linearize(u:UOp) -> list[UOp]:
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
-    if u.op is Ops.RANGE: priority = [2000]
+    #if u.op is Ops.RANGE: priority = [2000]
     # move defines and consts to the top
     if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
     priorities[u] = min(priority)
@@ -102,5 +102,5 @@ pm_add_control_flow = PatternMatcher([
 pm_add_ends = PatternMatcher([
   # put the end on the store
   (UPat(Ops.STORE, name="s"), lambda s:
-    functools.reduce(lambda x,y: y.end(x), [x for x in s.src[2:] if x.op is Ops.RANGE], s.replace(src=s.src[:2]))),
+    functools.reduce(lambda x,y: y.end(x), [x for x in s.src[2:] if x.op is Ops.RANGE][::-1], s.replace(src=s.src[:2]))),
 ])
