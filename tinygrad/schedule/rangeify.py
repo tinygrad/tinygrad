@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
-from tinygrad.helpers import PCONTIG
+from tinygrad.helpers import PCONTIG, partition
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -156,6 +156,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     # if we return None, the bufferize is kept
 
     accessed_buffers: list[UOp] = []
+    indexes: list[UOp] = []
     reduces: list[UOp] = []
     def red_gate(x:UOp):
       if x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL:
@@ -163,6 +164,8 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
         return False
       if x.op is Ops.BUFFER:
         accessed_buffers.append(x)
+      if x.op is Ops.INDEX:
+        indexes.append(x)
       if x.op is Ops.REDUCE: reduces.append(x)
       return True
     src.toposort(gate=red_gate)
@@ -184,6 +187,17 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       if PCONTIG > 2:
         out_in_ratio = (prod(buf.shape)+1) / (sum([x.size for x in accessed_buffers])+1)
         if out_in_ratio < 10: return None
+        # here we have to check the indexes, we might do a partial contig here
+        local_indexes = [x for x in indexes if x.src[0].op is Ops.BUFFERIZE and x.src[0].arg.addrspace == AddrSpace.LOCAL]
+        exclude_ranges = UOp.group(*[UOp.group(*x.src[1:]) for x in local_indexes]).ranges
+        subs = [(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST]
+        # if it's bufferized or a reduce, it's pcontig
+        is_pcontig, is_subs = partition(subs, lambda x: x[0] in exclude_ranges or any([r.arg[-1] == AxisType.REDUCE for r in x[1].ranges]))
+        if not len(is_subs):
+          return None
+        if len(is_pcontig):
+          ret = src.substitute(dict(is_subs), extra_pm=pm_gate_substitute)
+          return ret.bufferize(*[x[0] for x in is_pcontig], arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*[x[1] for x in is_pcontig])
       else:
         return None
 
@@ -285,7 +299,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp):
+def bufferize_to_store(x:UOp, allow_locals=True):
   rngs = x.src[1:]
   shape = tuple([int(r.vmax+1) for r in rngs])
   size = prod(shape)
@@ -318,19 +332,24 @@ def bufferize_to_store(x:UOp):
       ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
     return ret.replace(tag=x.tag)
 
-  # handle locals
-  tag = x.arg.device
-  if tag is None: tag = UOp.unique().arg # TODO: hack
-  buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-  do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)
-  return buf.after(do_store.barrier()).reshape(shape)
+  if allow_locals:
+    # handle locals
+    tag = x.arg.device
+    if tag is None: tag = UOp.unique().arg # TODO: hack
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
+    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)
+    return buf.after(do_store.barrier()).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
+  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
+])
+
+pm_add_buffers_local = pm_mops+to_bufferview+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 ])
 
 # *****************
