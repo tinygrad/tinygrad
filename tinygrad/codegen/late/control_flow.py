@@ -1,4 +1,4 @@
-import heapq
+import heapq, functools
 from typing import cast
 from collections import defaultdict
 from tinygrad.dtype import dtypes
@@ -97,33 +97,11 @@ class CFGContext:
           self.edges[y.src[0]] = x
 
 pm_add_control_flow = PatternMatcher([
-  (UPat((Ops.RANGE, Ops.IF), name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
-
-def do_merge_ends(s:UOp):
-  # NOTE: this can fail
-  stacked: dict[UOp, list[UOp]] = {}
-  for x in s.toposort():
-    if x.op is Ops.END:
-      assert x.arg == 1, "ends must be single ends for linearizer"
-      stacked.setdefault(x.src[0], []).append(x)
-  replaces = {}
-  for k,v in stacked.items():
-    if len(v) == 1: continue
-    rep = UOp(v[0].op, src=tuple([k] + [y for x in v for y in x.src[1:]]), arg=v[0].arg)
-    for x in v: replaces[x] = rep
-    if not len(replaces): return None
-  return s.substitute(replaces)
 
 pm_add_ends = PatternMatcher([
   # put the end on the store
-  (UPat(Ops.STORE, name="s"), lambda s: s.replace(src=s.src[:2]).end(ends=s.src[2:]) if len(s.src) > 2 else None),
-  # END is only on RANGES
-  (UPat(Ops.END, name="e"), lambda e: UOp.end(*e.src[e.arg:], ends=sorted(UOp.sink(*e.src[:e.arg]).ranges, key=lambda x: x.arg))),
-  # for renderering and linearizing, all ends must end one loop
-  (UPat(Ops.END, name="e"), lambda e: e.replace(src=e.src[e.arg-1:], arg=1).end(ends=e.src[:e.arg-1]) if e.arg > 1 else None),
-])
-
-pm_merge_ends = PatternMatcher([
-  (UPat(Ops.SINK, name="s"), do_merge_ends),
+  (UPat(Ops.STORE, name="s"), lambda s:
+    functools.reduce(lambda x,y: y.end(x), [x for x in s.src[2:] if x.op is Ops.RANGE][::-1], s.replace(src=s.src[:2]))),
 ])

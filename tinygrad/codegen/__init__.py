@@ -14,7 +14,7 @@ from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_in
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges
 from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
-from tinygrad.codegen.late.control_flow import CFGContext, pm_add_ends, pm_add_control_flow, linearize, pm_merge_ends
+from tinygrad.codegen.late.control_flow import CFGContext, pm_add_ends, pm_add_control_flow, linearize
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
@@ -79,8 +79,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="final rewrite")
 
   # this was the linearizer
-  sink = graph_rewrite(sink, pm_merge_ends, name="merge ends of ranges")
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow starts", bottom_up=True)
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # return the rewritten sink
   return sink
