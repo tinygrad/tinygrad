@@ -80,7 +80,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
-    for sz in [32, 16]:
+    for sz in [32]:
       try:
         k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
         break
