@@ -109,7 +109,7 @@ pm_apply_rangeify = PatternMatcher([
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
 
-INDEX_INPUT: set[Ops] = {Ops.RANGE, Ops.DEFINE_VAR, Ops.CAST}
+INDEX_INPUT: set[Ops] = {Ops.CAST}
 def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   # to disable caching replace INDEX_INPUT with Ops.CAST, Ops.CAST should be substituted because you don't want to rewrite the graph of a loaded idx
   inputs = [u for u in UOp.sink(*rngs).toposort(gate=lambda u:u.dtype in (dtypes.index, dtypes.bool, dtypes.void)) if u.op in INDEX_INPUT]
