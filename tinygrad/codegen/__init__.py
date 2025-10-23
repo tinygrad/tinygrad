@@ -24,7 +24,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     if QUANTIZE and ren.device in {"CPU", "DSP"}: sink = graph_rewrite(sink, pm_quant, name="quantize")
 
     # TODO: fix expander and remove this
-    sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
+    #sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
 
     # split ranges
     sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")

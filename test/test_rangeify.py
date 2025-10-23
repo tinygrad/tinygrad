@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
+from tinygrad.codegen.opt import OptOps, Opt
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
@@ -42,6 +43,12 @@ elif getenv("BIG") > 0:
 else:
   BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
+def fa():
+  Tensor.manual_seed(1337)
+  with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
+  GlobalCounters.reset()
+  return q.scaled_dot_product_attention(k, v)
+
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
 class TestPcontig(unittest.TestCase):
   def test_flash_attention_bw(self):
@@ -79,18 +86,17 @@ class TestPcontig(unittest.TestCase):
     print(f"mse: {mse}")
     self.assertLessEqual(mse, 1e-6)
 
-  def test_flash_attention(self):
-    def fa():
-      Tensor.manual_seed(1337)
-      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-      GlobalCounters.reset()
-      return q.scaled_dot_product_attention(k, v).realize()
-
+  def test_flash_attention_opt(self):
     with Context(PCONTIG=2, DEBUG=2):
-      ret = fa()
+      opts = (Opt(OptOps.UPCAST, 3, 4),)
+      fa().contiguous(arg=opts).realize()
+
+  def test_flash_attention(self):
+    with Context(PCONTIG=2, DEBUG=2):
+      ret = fa().realize()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
     with Context(DEBUG=2):
-      cmp = fa()
+      cmp = fa().realize()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
     with Context(DEBUG=0):
       mse = ((cmp-ret)**2).sum().item()
