@@ -17,7 +17,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   sink = UOp.group(*u)
-  for r in sink.ranges: sink = r.end(sink)
+  for r in sink.ranges: sink = sink.end(r)
   # we strip the SINK here for legacy reasons
   ret = full_rewrite(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
   assert ret[-1].op is Ops.SINK
