@@ -15,7 +15,13 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 
-def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
+def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
+  sink = UOp.group(*u)
+  for r in sink.ranges: sink = sink.end(r)
+  # we strip the SINK here for legacy reasons
+  ret = full_rewrite(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
+  assert ret[-1].op is Ops.SINK
+  return ret[:-1]
 
 def _uops_to_prg(uops_list):
   uops = full_rewrite(ast:=UOp.sink(*uops_list), ren=Device[Device.DEFAULT].renderer)
@@ -352,7 +358,7 @@ class TestLocalAccess(unittest.TestCase):
     size = 16
     for dtype in _dtypes:
       temp = UOp(Ops.DEFINE_LOCAL, dtype.ptr(size=size, addrspace=AddrSpace.LOCAL), (), 'smem')
-      uops = to_uops_list([temp], opts=Device[Device.DEFAULT].renderer)
+      uops = to_uops_list([temp], ren=Device[Device.DEFAULT].renderer)
       out = Device[Device.DEFAULT].renderer.render(uops)
       # half is supported in wgsl, so it doesn't have to be packed
       corrected_size = size//(4//dtype.itemsize) if dtype != dtypes.half else size
@@ -379,7 +385,7 @@ class TestAssembly(unittest.TestCase):
     l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
     a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
-    uops = to_uops_list([a1,a2], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([a1,a2], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHL, ops)
@@ -391,7 +397,7 @@ class TestAssembly(unittest.TestCase):
       c = UOp(Ops.CONST, dt, (), 2)
       l = UOp(Ops.LOAD, dt, (g.index(c),))
       a = UOp(Ops.IDIV, dt, (l, c))
-      uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
@@ -402,14 +408,14 @@ class TestAssembly(unittest.TestCase):
     c = UOp(Ops.CONST, dtypes.uint, (), 3)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
     a = UOp(Ops.IDIV, dtypes.uint, (l, c))
-    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.IDIV, ops)
 
     b = UOp(Ops.MOD, dtypes.uint, (l, c))
-    uops = to_uops_list([b], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([b], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
@@ -422,7 +428,7 @@ class TestAssembly(unittest.TestCase):
     c = UOp(Ops.CONST, dtypes.uint, (), 7)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
     a = UOp(Ops.IDIV, dtypes.uint, (l, c))
-    uops = to_uops_list([a], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
@@ -430,7 +436,7 @@ class TestAssembly(unittest.TestCase):
 
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
-    uops = to_uops_list([ridx//(7*64)], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
     # this requires shifting out the powers of two before doing fast_idiv
     # (((ridx0>>6)*18725)>>17) instead of (int)((((long)(ridx0)*1198373)>>29))
@@ -454,7 +460,7 @@ class TestAssembly(unittest.TestCase):
     c = UOp(Ops.CONST, dtypes.uint, (), 7)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
     comp = l.ne(c).ne(True)
-    uops = to_uops_list([comp], opts=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.CMPEQ, ops)

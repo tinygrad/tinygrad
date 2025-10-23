@@ -351,7 +351,7 @@ jobs:
       - name: Run Kernel Count Test
         run: CL=1 python -m pytest -n=auto test/external/external_test_opt.py
       - name: Run fused optimizer tests
-        run: CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py
+        run: CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py test/test_optim.py -k "not muon"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

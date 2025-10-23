@@ -17,7 +17,7 @@ class AxisType(Enum):
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
   THREAD = auto()
 
-range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3}
+range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
@@ -268,35 +268,25 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def size(self) -> int: return prod([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
 
+  @functools.cached_property
+  def ended_ranges(self):
+    if self.op in range_start: return self.src[range_start[self.op]:]
+    return ()
+
   # determine what ranges this is in
   @recursive_property
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
-    if self.op in range_start.keys():
-      for s in self.src[:range_start[self.op]]: ret.update(s.ranges)
-      for s in UOp.sink(*self.src[range_start[self.op]:]).ranges:
+    for s in self.src: ret.update(s.ranges)
+    if (er:=self.ended_ranges):
+      for s in UOp.sink(*er).ranges:
         if s in ret: del ret[s]
-    elif self.op is Ops.END:
-      for s in self.src[self.arg:]: ret.update(s.ranges)
-      for s in UOp.sink(*self.src[:self.arg]).ranges:
-        if s in ret: del ret[s]
-    else:
-      for s in self.src: ret.update(s.ranges)
     return ret
 
   @property
   def ranges(self) -> dict[UOp, None]:
     if self.op is Ops.RANGE: return {self:None}
     return self._ranges
-
-  @functools.cached_property
-  def ended_ranges(self):
-    # copy of range_start
-    match self.op:
-      case Ops.REDUCE: return self.src[1:]
-      case Ops.STORE: return self.src[2:]
-      case Ops.END: return self.src[:self.arg]
-      case _: raise RuntimeError(f"{self.op} doesn't end ranges")
 
   # *** uop evaluation ***
 
@@ -335,6 +325,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
+  def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
+    if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
+    return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, *srcs:UOp|None, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
@@ -363,11 +356,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, *src:UOp, **kwargs): return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self,)+src, **kwargs)
-  def end(self, *src:UOp, ends:Sequence[UOp]):
-    if len(ends) == 0:
-      if len(src): return UOp(Ops.NOOP, src=(self, *src))
-      return self
-    return UOp(Ops.END, src=(*ends, self, *src), arg=len(ends))
+  def end(self, *src:UOp):
+    if len(src) == 0: return self
+    assert all(x.op is Ops.RANGE for x in src), "end only ends ranges"
+    return UOp(Ops.END, src=(self,)+src)
   def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
@@ -775,7 +767,7 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 def print_uops(uops:list[UOp]):
   for i,u in enumerate(uops):
     formatted_srcs = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):30s} " f"{str(formatted_srcs):32s} {u.arg}")
+    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # ***** pattern matcher *****
 
@@ -1194,8 +1186,8 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("valid"))), lambda buf,idx,valid: buf.index(idx, valid)),
   (UPat((Ops.STORE, Ops.LOAD), src=(UPat(), UPat(), UPat().cast(dtypes.index)), allow_any_len=True, name="s"),
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
-  # TODO: this is only triggering if they are all casts, correct?
-  (UPat((Ops.SINK, Ops.NOOP), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
+  (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
+   lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.index else s for s in n.src))),
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 

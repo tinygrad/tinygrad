@@ -5,7 +5,7 @@ from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType, AddrSpace
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -87,11 +87,11 @@ class Scheduler:
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
   def colors(self) -> list[str]:
-    globalizible_rngs = self._globalizable_rngs()
+    output_rngs = flatten([s.src[2:] for s in self.ast.src])
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
-      elif r not in globalizible_rngs and x == AxisType.LOOP: ret.append("BLACK")
+      elif r not in output_rngs and x == AxisType.LOOP: ret.append("BLACK")
       else: ret.append(axis_colors[x])
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])

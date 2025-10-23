@@ -5,9 +5,10 @@ from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, TypedDict, TypeVar, Generator
+from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str, pyrender
+from tinygrad.uop.ops import print_uops, range_start
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
@@ -33,6 +34,7 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc),
               "query":f"/ctxs?ctx={i}&idx={j}", "depth":s.depth} for j,s in enumerate(v)]
     if isinstance(k.ret, ProgramSpec):
+      steps.append({"name":"View UOp List", "query":f"/render?ctx={i}&fmt=uops", "depth":0})
       steps.append({"name":"View Program", "query":f"/render?ctx={i}&fmt=src", "depth":0})
       steps.append({"name":"View Disassembly", "query":f"/render?ctx={i}&fmt=asm", "depth":0})
     for key in k.keys: ref_map[key] = i
@@ -82,8 +84,8 @@ def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
-      if u.op is Ops.END:
-        label += "\n"+' '.join([f"{colored(u.src[i].arg[0], axis_colors[u.src[i].arg[-1]])}({u.src[i].vmax+1})" for i in range(u.arg)])
+      if u.op in {Ops.END, Ops.STORE, Ops.REDUCE}:
+        label += "\n"+' '.join([f"{colored(s.arg[0], axis_colors[s.arg[-1]])}({s.vmax+1})" for s in u.src[range_start[u.op]:]])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
@@ -245,12 +247,16 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
+def get_stdout(f:Callable) -> str:
+  with redirect_stdout(buf:=io.StringIO()): f()
+  return buf.getvalue()
+
 def get_render(ctx:list[str], fmt:list[str]):
   if not isinstance(prg:=trace.keys[int(ctx[0])].ret, ProgramSpec): return
+  if fmt[0] == "uops": return json.dumps({"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}).encode()
   if fmt[0] == "src": return json.dumps({"src":prg.src, "lang":"cpp"}).encode()
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
-  with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
-  disasm_str = buf.getvalue()
+  disasm_str = get_stdout(lambda: compiler.disassemble(lib))
   from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
   if isinstance(compiler, LLVMCompiler):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()

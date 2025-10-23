@@ -1,12 +1,12 @@
-from typing import List
 import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp, AxisType
 from tinygrad.uop.symbolic import sym
-from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
+from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.expander import expander
+from test.test_uops import to_uops_list
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -14,12 +14,6 @@ simple_pm = PatternMatcher([
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
-
-def to_uops_list(u:List[UOp]) -> List[UOp]:
-  # we strip the SINK here for legacy reasons
-  ret = full_rewrite(UOp.sink(*u, arg=KernelInfo(opts_to_apply=())))
-  assert ret[-1].op is Ops.SINK
-  return ret[:-1]
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
@@ -466,23 +460,23 @@ class TestUOpGraph(unittest.TestCase):
       if u.op is Ops.STORE: assert u.src[1].arg==5
 
   def test_load_idx_becomes_int(self):
-    # These loads wont overflow int since we know from the gate that the value is bounded
-    r0 = UOp.range(10, 0)
-    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
-    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 1)
-    l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),)).cast(dtypes.index)
-    idx = l0 * 600
-    valid = (l0<-1).ne(True)&(l0<3000)
-    l1 = valid.where(UOp(Ops.LOAD, dtypes.long, (d1.index(idx),)),0)
-    uops = to_uops_list([l1])
+    # mnist indexing with split reduceop
+    # Make sure we are not doign math on the loaded index, which would promote it to long
+    c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(128000), arg=0, src=())
+    c1 = UOp.range(UOp.const(dtypes.index, 512), 1, AxisType.LOOP)
+    c2 = UOp.range(UOp.const(dtypes.index, 250), 2, AxisType.LOOP)
+    c3 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(512), arg=1, src=())
+    c4 = c3.index(c1).load()
+    c5 = UOp.range(UOp.const(dtypes.index, 240), 0, AxisType.REDUCE)
+    c6 = ((c2*UOp.const(dtypes.index, 240))+c5)
+    c7 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(60000), arg=2, src=())
+    c8 = c7.index(c6).load()
+    c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
+    c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9, c1, c2)
+    ast = c10.sink()
+    uops = to_uops_list([ast])
     for u in uops:
-      if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
-
-    valid = (10*r0<5-l0).ne(True)&(l0<3000)
-    l2 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx.valid(valid)),))
-    uops = to_uops_list([l2])
-    for u in uops:
-      if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
+      self.assertNotEqual(u.dtype, dtypes.long)
 
   def test_in_out_of_bounds_access(self):
     with Context(IGNORE_OOB=0):

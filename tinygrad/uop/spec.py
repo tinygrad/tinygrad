@@ -106,8 +106,9 @@ program_spec = PatternMatcher([
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
 
-  # allow AFTER on buffers
+  # allow AFTER on buffers, GROUP anywhere
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
+  (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
   # INDEX is used in new style load/store
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
@@ -120,7 +121,7 @@ program_spec = PatternMatcher([
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
-  (UPat(Ops.END, src=(UPat(Ops.RANGE), UPat()), allow_any_len=True, arg=1, dtype=dtypes.void), lambda: True),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
   # make sure all index dtypes have been lowered
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
