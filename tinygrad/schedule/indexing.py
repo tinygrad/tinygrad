@@ -2,8 +2,9 @@ from typing import Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, srender
-from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses, pm_canonicalize_shape
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, \
+                             canonicalize_shape, canonicalize_dim
+from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
@@ -48,8 +49,7 @@ class IndexingContext:
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
     # canonicalize to extract any RANGE sizes from symbolic shapes
-    if isinstance(s, UOp):
-      s = graph_rewrite(s, pm_canonicalize_shape, name="canonicalize_new_range_size")
+    if isinstance(s, UOp): s = canonicalize_dim(s)
     # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
@@ -120,9 +120,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
     case Ops.FLIP:    rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, in_shape, arg))
     case Ops.EXPAND:
-      in_shape = tuple(d if isinstance(d,int) else graph_rewrite(d, pm_canonicalize_shape, name="canonicalize_shape") for d in in_shape)
-      arg = tuple(d if isinstance(d,int) else graph_rewrite(d, pm_canonicalize_shape, name="canonicalize_shape") for d in arg)
-      rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
+      rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, canonicalize_shape(in_shape), canonicalize_shape(arg)))
     case Ops.PAD:
       # TODO: why is multiple graph_rewrites faster than one here?
       # TODO: the .where(r-s, i) is not inside the graph_rewrite so that `convert_pad_to_where_to_keep_behavior_local`
@@ -130,16 +128,14 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh+s))),
         symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
-      in_shape = tuple(d if isinstance(d,int) else graph_rewrite(d, pm_canonicalize_shape, name="canonicalize_shape") for d in in_shape)
-      arg = tuple(d if isinstance(d,int) else graph_rewrite(d, pm_canonicalize_shape, name="canonicalize_shape") for d in arg)
       acc = 1
       axes_in:list[UOp] = []
-      for s,src in list(zip(arg, rngs))[::-1]:
+      for s,src in list(zip(canonicalize_shape(arg), rngs))[::-1]:
         axes_in.append(acc*src)
         acc *= s
       combined_axes = sum(axes_in, start=UOp.const(dtypes.index, 0))
       axes_out:list[UOp] = []
-      for s in in_shape[::-1]:
+      for s in canonicalize_shape(in_shape)[::-1]:
         axes_out.append(combined_axes % s)
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
@@ -259,7 +255,6 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}", ''.join(disp))
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
-    print(x.op, f"({x.tag[0]})" if x.tag else "", "with shape", tuple(srender(d) for d in x.shape), "in_rngs", [r.render() for r in rngs], "out_rngs", [r.render() for r in out_rngs])
     rctx.range_map[x] = (rngs, out_rngs)
 
   tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
