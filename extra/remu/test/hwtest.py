@@ -186,10 +186,10 @@ class TestHW(unittest.TestCase):
   def test_s_abs_i32(self):
     def s_abs_i32(x, y, dst="s10", scc=0):
       for reg,val in [(dst, y), ("scc", scc)]:
-        self.assertEqual(get_output(f"""
+        self.assertEqual(get_output2(f"""
         s_mov_b32_e32 {dst} {x}
         s_abs_i32 {dst} {dst}
-        v_mov_b32_e32 v1 {reg}
+        v_mov_b32_e32 %2 {reg}
         """)[0], val)
     s_abs_i32(0x00000001, 0x00000001, scc=1)
     s_abs_i32(0x7fffffff, 0x7fffffff, scc=1)
@@ -201,9 +201,9 @@ class TestHW(unittest.TestCase):
 
   def test_v_rcp_f32_neg_vop3(self):
     def v_neg_rcp_f32(x:float, y:float):
-      out = get_output(f"""
-      v_mov_b32_e32 v1 {f32_to_bits(x)}
-      v_rcp_f32_e64 v1, -v1
+      out = get_output2(f"""
+      v_mov_b32_e32 %2 {f32_to_bits(x)}
+      v_rcp_f32_e64 %2, -%2
       """)[0]
       assert out == f32_to_bits(y), f"{f32_from_bits(out)} != {y} / {out} != {f32_to_bits(y)}"
     v_neg_rcp_f32(math.inf, -0.0)
@@ -215,10 +215,11 @@ class TestHW(unittest.TestCase):
 
   def test_v_cndmask_b32_neg(self):
     def v_neg(x:int|float, y:float):
-      out = get_output(f"""
-      v_mov_b32_e32 v1 {f32_to_bits(x)}
-      s_mov_b32_e32 s10 1 // always pick -v1
-      v_cndmask_b32 v1, v1, -v1 s10
+      # always pick -v1
+      out = get_output2(f"""
+      v_mov_b32_e32 %2 {f32_to_bits(x)}
+      s_mov_b32_e32 s10 1
+      v_cndmask_b32 %2, %2, -%2 s10
       """)[0]
       assert out == f32_to_bits(y), f"{f32_from_bits(out)} != {y} / {out} != {f32_to_bits(y)}"
     v_neg(-0.0, 0.0)
