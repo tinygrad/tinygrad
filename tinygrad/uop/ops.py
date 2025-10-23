@@ -1189,7 +1189,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat((Ops.STORE, Ops.LOAD), src=(UPat(), UPat(), UPat().cast(dtypes.index)), allow_any_len=True, name="s"),
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
   # TODO: this is only triggering if they are all casts, correct?
-  (UPat((Ops.SINK, Ops.NOOP), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
+  (UPat((Ops.SINK, Ops.NOOP, Ops.END), src=UPat().cast(dtypes.index), name="n"), lambda n: n.replace(src=tuple(s.src[0] for s in n.src))),
   # no CAST on END
   (UPat(Ops.END, src=(UPat(Ops.CAST),), allow_any_len=True, name="e"), lambda e: e.replace(src=(e.src[0].src[0],)+e.src[1:])),
 ])

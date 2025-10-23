@@ -7,6 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, gra
 from tinygrad.uop.symbolic import sym
 from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
 from tinygrad.codegen.late.expander import expander
+from test.test_uops import to_uops_list
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -14,14 +15,6 @@ simple_pm = PatternMatcher([
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
-
-def to_uops_list(u:List[UOp]) -> List[UOp]:
-  sink = UOp.group(*u)
-  for r in sink.ranges: sink = r.end(sink)
-  # we strip the SINK here for legacy reasons
-  ret = full_rewrite(sink.sink(arg=KernelInfo(opts_to_apply=())))
-  assert ret[-1].op is Ops.SINK
-  return ret[:-1]
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):

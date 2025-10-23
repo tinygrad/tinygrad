@@ -15,7 +15,13 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 
-def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]: return full_rewrite(UOp.sink(*u), opts)
+def to_uops_list(u:list[UOp], opts=None, skip_check=False) -> list[UOp]:
+  sink = UOp.group(*u)
+  for r in sink.ranges: sink = r.end(sink)
+  # we strip the SINK here for legacy reasons
+  ret = full_rewrite(sink.sink(arg=KernelInfo(opts_to_apply=())))
+  assert ret[-1].op is Ops.SINK
+  return ret[:-1]
 
 def _uops_to_prg(uops_list):
   uops = full_rewrite(ast:=UOp.sink(*uops_list), ren=Device[Device.DEFAULT].renderer)
