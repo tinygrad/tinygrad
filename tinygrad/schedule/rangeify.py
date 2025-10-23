@@ -192,7 +192,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
         exclude_ranges = UOp.group(*[UOp.group(*x.src[1:]) for x in local_indexes]).ranges
         subs = [(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST]
         # if it's bufferized or a reduce, it's pcontig
-        is_pcontig, is_subs = partition(subs, lambda x: x[0] in exclude_ranges or x[1].arg[-1] == AxisType.REDUCE)
+        is_pcontig, is_subs = partition(subs, lambda x: x[0] in exclude_ranges or any([r.arg[-1] == AxisType.REDUCE for r in x[1].ranges]))
         if not len(is_subs):
           return None
         if len(is_pcontig):
