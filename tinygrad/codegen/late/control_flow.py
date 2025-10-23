@@ -1,4 +1,4 @@
-import heapq
+import heapq, functools
 from typing import cast
 from collections import defaultdict
 from tinygrad.dtype import dtypes
@@ -45,7 +45,7 @@ def linearize(u:UOp) -> list[UOp]:
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
-    #if u.op is Ops.RANGE: priority = [2000]
+    if u.op is Ops.RANGE: priority = [2000]
     # move defines and consts to the top
     if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
     priorities[u] = min(priority)
@@ -101,9 +101,6 @@ pm_add_control_flow = PatternMatcher([
 
 pm_add_ends = PatternMatcher([
   # put the end on the store
-  (UPat(Ops.STORE, name="s"), lambda s: s.replace(src=s.src[:2]).end(ends=s.src[2:]) if len(s.src) > 2 else None),
-  # END is only on RANGES
-  (UPat(Ops.END, name="e"), lambda e: UOp.end(*e.src[e.arg:], ends=sorted(UOp.sink(*e.src[:e.arg]).ranges, key=lambda x: x.arg))),
-  # for renderering and linearizing, all ends must end one loop
-  (UPat(Ops.END, name="e"), lambda e: e.replace(src=e.src[e.arg-1:], arg=1).end(ends=e.src[:e.arg-1]) if e.arg > 1 else None),
+  (UPat(Ops.STORE, name="s"), lambda s:
+    functools.reduce(lambda x,y: y.end(x), [x for x in s.src[2:] if x.op is Ops.RANGE], s.replace(src=s.src[:2]))),
 ])

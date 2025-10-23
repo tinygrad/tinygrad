@@ -120,7 +120,7 @@ program_spec = PatternMatcher([
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
-  (UPat(Ops.END, src=(UPat(Ops.RANGE), UPat()), allow_any_len=True, arg=1, dtype=dtypes.void), lambda: True),
+  (UPat(Ops.END, src=(UPat(Ops.RANGE), UPat()), dtype=dtypes.void), lambda: True),
 
   # make sure all index dtypes have been lowered
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
