@@ -136,5 +136,12 @@ class TestHW(unittest.TestCase):
     v_neg(math.inf, -math.inf)
     v_neg(-math.inf, math.inf)
 
+  def test_v_subrev_wrap(self):
+    out = get_output("""
+    v_dual_mov_b32 %1, 0xffffffff :: v_dual_mov_b32 %2, 0x0
+    v_subrev_co_u32 %2, vcc_lo, %2, %1
+    """)[0]
+    self.assertEqual(out, 0xffff_ffff)
+
 if __name__ == "__main__":
   unittest.main()
