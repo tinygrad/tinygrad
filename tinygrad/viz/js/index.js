@@ -639,7 +639,7 @@ async function main() {
           e.stopPropagation();
           const subrewrites = getSubrewrites(e.currentTarget.parentElement);
           if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
-          setState({ currentStep:j, currentCtx:i });
+          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
         }
         stack.push(u);
       }
