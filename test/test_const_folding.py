@@ -182,7 +182,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
     np.testing.assert_equal(Tensor(4).sum().numpy(), 4)
 
   def test_padded_const_sum(self):
-    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).sum())
+    _check_ast_count(0, Tensor.ones(4).pad(((1, 1),)).sum())
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).sum().numpy(), 4)
 
     # NOTE: cannot just count the non-padded area because some Ops f do not have f(0) = 0.
