@@ -89,7 +89,10 @@ class TestPcontig(unittest.TestCase):
   def test_flash_attention_opt(self):
     with Context(PCONTIG=2, DEBUG=2):
       opts = ()
+      # this is the first matrix
       opts += (Opt(OptOps.UPCAST, 0, 4),)
+
+      # this is the <rows> output
       opts += (Opt(OptOps.UPCAST, 3, 4),)
       fa().contiguous(arg=opts).realize()
 

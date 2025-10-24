@@ -164,8 +164,8 @@ pm_pre_expander = PatternMatcher([
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
   # collapse any BUFFERIZE to single input BUFFERIZE
-  #(UPat(Ops.BUFFERIZE, src=(UPat(), UPat(), UPat()), allow_any_len=True, name="x"),
-  #  lambda x: x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))),
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(), UPat()), allow_any_len=True, name="x"),
+    lambda x: x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))),
 ])
 
 pm_group_for_reduce = PatternMatcher([
