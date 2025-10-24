@@ -152,5 +152,23 @@ class TestAfterVmap(unittest.TestCase):
     if self.n != 1: self.assertTrue((ret:=TestAfterVmap._vfn(x)).squeeze(0) is ret)
     if self.m != 1: self.assertTrue((ret:=TestAfterVmap._vfn(x)).squeeze(0) is ret)
 
+  def test_cat(self):
+    x = Tensor.ones(self.n, self.m)
+    with self.assertRaises(RuntimeError): # reason: bad broadcasting
+      self.assertListEqual(Tensor.cat(TestAfterVmap._vfn(x), x, dim=0).tolist(),
+                          np.concatenate([self.expected_vmap_res, np.ones(self.n, self.m)], axis=0).tolist())
+      self.assertListEqual(Tensor.cat(x, TestAfterVmap._vfn(x), dim=0).tolist(),
+                          np.concatenate([np.ones(self.n, self.m), self.expected_vmap_res], axis=0).tolist())
+
+  def test_broadcast_to(self):
+    x = Tensor.ones(self.n, self.m)
+    # same shape but with symbolic ones
+    with self.assertRaises(ValueError): # reason: n and UOp(CONST, dtypes.index, arg=n) are not considered equal
+      self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((self.n, self.m)).tolist(), self.expected_vmap_res.tolist())
+      self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((UOp.range(self.n, -2), self.m)).tolist(), self.expected_vmap_res.tolist())
+      self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((self.n, UOp.range(self.m, -2))).tolist(), self.expected_vmap_res.tolist())
+
+
+
 if __name__ == '__main__':
   unittest.main()
