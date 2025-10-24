@@ -94,7 +94,13 @@ class TestPcontig(unittest.TestCase):
 
       # this is the <rows> output
       opts += (Opt(OptOps.UPCAST, 3, 4),)
-      fa().contiguous(arg=opts).realize()
+      ret = fa().contiguous(arg=opts).realize()
+
+    with Context(DEBUG=0):
+      cmp = fa().realize()
+      mse = ((cmp-ret)**2).sum().item()
+      print(f"mse: {mse}")
+      self.assertLessEqual(mse, 1e-6)
 
   def test_flash_attention(self):
     with Context(PCONTIG=2, DEBUG=2):

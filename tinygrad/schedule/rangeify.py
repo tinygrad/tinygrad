@@ -355,8 +355,10 @@ def bufferize_to_store_local(x:UOp):
   buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
   sz = x.src[0].dtype.count // rngs[0].dtype.count
   all_rngs = list(UOp.sink(*rngs).ranges)
-  gg = UOp.group(*[buf.index(rngs[0].gep(i)).store(x.src[0].gep(tuple([i*sz+s for s in range(sz)]))) for i in range(rngs[0].dtype.count)])
-  return buf.after(gg.end(*all_rngs).barrier())
+  stores = []
+  for i in range(rngs[0].dtype.count):
+    stores.append(buf.index(rngs[0].gep(i)).store(x.src[0].gep(tuple([i*sz+s for s in range(sz)]))))
+  return buf.after(UOp.group(*stores).end(*all_rngs).barrier()).forced_reshape(shape)
 
   #do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *UOp.sink(*rngs).ranges)
   #return buf.after(do_store.barrier()).reshape(shape)
