@@ -2090,7 +2090,7 @@ class Tensor(MathTrait):
 
     state = Tensor.zeros(bs, 25, device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
-      state = state.bitwise_xor(data[:,k].reshape(bs, 25))
+      state = state ^ data.shrink((None, (k, k+1), None)).squeeze(1)
       for i in range(24): # f1600
         # θ step
         p = state.reshape(bs, 5, 5).transpose(2, 1)
