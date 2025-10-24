@@ -359,7 +359,7 @@ def bufferize_to_store_local(x:UOp):
   stores = []
   for i in range(skip):
     stores.append(buf.index(rngs[0].gep(i)).store(x.src[0].gep(tuple([i+s*skip for s in range(sz)]))))
-  return buf.after(UOp.group(*stores).end(*all_rngs).barrier()).forced_reshape(shape)
+  return buf.after(UOp.group(*stores).end(*all_rngs).barrier())
 
 pm_add_buffers_local = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store_local),
