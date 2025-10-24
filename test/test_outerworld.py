@@ -171,7 +171,5 @@ class TestAfterVmap(unittest.TestCase):
       self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((UOp.range(self.n, -2), self.m)).tolist(), self.expected_vmap_res.tolist())
       self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((self.n, UOp.range(self.m, -2))).tolist(), self.expected_vmap_res.tolist())
 
-
-
 if __name__ == '__main__':
   unittest.main()
