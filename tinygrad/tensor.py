@@ -319,8 +319,9 @@ class Tensor(MathTrait):
     ```
     """
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
-    assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._buffer().as_typed_buffer(self.shape)
+    # in Tensor._buffer(), a modified version of self has been realized, so we have to canonicalize self.shape ourselves
+    cshape = tuple(map(lambda d: d if isinstance(d, int) else int(d.cast(dtypes.int)), canonicalize_shape(self.shape)))
+    return self._buffer().as_typed_buffer(cshape)
 
   def item(self) -> ConstType:
     """
@@ -1216,7 +1217,8 @@ class Tensor(MathTrait):
 
     indices_parsed, dim = [], 0
     for index in indices:
-      size = 1 if index is None else self.shape[dim]
+      # TODO: is this the best place to canonicalize the dim?
+      size = 1 if index is None else canonicalize_dim(self.shape[dim])
       boundary, stride = [0, size], 1  # defaults
       match index:
         case Tensor():
@@ -1626,7 +1628,8 @@ class Tensor(MathTrait):
     ```
     """
     start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
-    flattened_dim = canonicalize_dim(prod(self.shape[start_dim:end_dim+1]))
+    # flattened_dim = canonicalize_dim(prod(self.shape[start_dim:end_dim+1]))
+    flattened_dim = prod(self.shape[start_dim:end_dim+1])
     return self.reshape(self.shape[:start_dim] + (flattened_dim, ) + self.shape[end_dim+1:])
 
   def unflatten(self, dim:int, sizes:tuple[int,...]) -> Tensor:

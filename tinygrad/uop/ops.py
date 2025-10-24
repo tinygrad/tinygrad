@@ -243,7 +243,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
           return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.marg)):
+          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(canonicalize_shape(ps), self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
           return tuple(ssimplify(e-s) for s,e in self.marg)
         case Ops.FLIP:
