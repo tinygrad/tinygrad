@@ -87,7 +87,7 @@ class Scheduler:
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
   def colors(self) -> list[str]:
-    output_rngs = flatten([s.src[2:] for s in self.ast.src])
+    output_rngs = flatten([list(UOp.sink(*s.src[2:]).ranges) for s in self.ast.src])
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
