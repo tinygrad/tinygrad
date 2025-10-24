@@ -28,6 +28,7 @@ invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 propagate_invalid = PatternMatcher([
   # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
   # propagate invalid, push it past children
+  (invalid_gate.cast(name="cast"), lambda i,x,cond,cast: x.cast(cast.dtype) if cast.dtype is not dtypes.index else None),
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i))
     for op in GroupOp.Binary-GroupOp.Comparison),
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: x.alu(alu.op,y)) for op in GroupOp.Comparison),
@@ -130,7 +131,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
 def lt_folding(x:UOp, c:int) -> UOp|None:
   p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
-    return cast(UOp, functools.reduce(operator.add, np).divides(d))<(c//d)
+    return cast(UOp, UOp.sum(*np).divides(d))<(c//d)
   return None
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
@@ -144,7 +145,7 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
       u = u.src[0]
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
-  return functools.reduce(operator.add, ret) if changed else None
+  return UOp.sum(*ret) if changed else None
 
 def cancel_divmod(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # simple cancel div/mod case when the range of the numerator lies within a single denominator interval
@@ -167,7 +168,7 @@ def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
         something_changed = True
         u = u.src[0]
     new_xs.append(u)
-  new_x: UOp = functools.reduce(operator.add, new_xs)
+  new_x: UOp = UOp.sum(*new_xs)
   if something_changed and new_x.vmin>=0: return new_x % y
   return None
 
@@ -300,6 +301,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   ((UPat.var("y") + UPat.var("x")) + UPat.var("x"), lambda y,x: y+x*2),
   ((UPat.var("x") / UPat.var("x2")) / UPat.var("x3"), lambda x,x2,x3: x/(x2*x3) if x2 is not x3 else None), # (x/x2)/x3 -> x/(x2*x3)
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
+  (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.index) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # -(x+c) -> -x + -c
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)
     if f.arg is not Invalid else None),
@@ -375,6 +377,11 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(GroupOp.Binary, src=(UPat.var("x", dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y:
     x.cast(dtypes.int).alu(u.op, y.cast(dtypes.int)).cast(u.dtype) if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
   ((UPat.var("x", dtypes.index) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
+  # only RANGE/IF/STORE/KERNEL have side effects
+  (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
+    tuple(flatten([(y,) if y.op in {Ops.RANGE, Ops.IF, Ops.STORE, Ops.KERNEL, Ops.BARRIER, Ops.END} else y.src for y in x.src[1:]])))),
+  # after with 1 src is just src[0]
+  (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
@@ -452,9 +459,9 @@ def simplify_valid(valid:UOp) -> UOp|None:
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    ret.append(uop_given_valid(functools.reduce(operator.and_, ret), stmt) if ret else stmt)
+    ret.append(uop_given_valid(UOp.prod(*ret), stmt) if ret else stmt)
     if ret[-1] is not stmt: something_changed = True
-  return functools.reduce(operator.and_, ret) if something_changed else None
+  return UOp.prod(*ret) if something_changed else None
 
 # ******** phase 3 is the complete symbolic, and deals with very complex things like loop rewriting and threefry transform ********
 
@@ -471,7 +478,7 @@ def reduce_mul_chain(r:UOp):
 
 def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if not (dropped_clauses:=[c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]): return None
-  return functools.reduce(operator.and_, [c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses], UOp.const(dtypes.bool, True)).where(x, i)
+  return UOp.const(dtypes.bool, True).prod(*[c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses]).where(x, i)
 pm_drop_and_clauses = PatternMatcher([(UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), drop_and_clauses)])
 
 def where_on_load(l, c1, buf, x):
@@ -480,10 +487,10 @@ def where_on_load(l, c1, buf, x):
   # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
   # also no data dependent loads!
   moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
-    and not c.op_in_backward_slice_with_self(Ops.LOAD)]
+    and all(u in x.backward_slice_with_self for u in c.backward_slice_with_self if u.op is Ops.LOAD)]
   if not (removed:=moved_clauses+duplicate_clauses): return None
   # aditionally we can drop the clause on the where if it already exists in the load
-  remaining_clause = functools.reduce(operator.and_, [c for c in c1.split_uop(Ops.AND) if c not in removed], UOp.const(dtypes.bool, True))
+  remaining_clause = UOp.const(dtypes.bool, True).prod(*[c for c in c1.split_uop(Ops.AND) if c not in removed])
   return remaining_clause.where(UOp.load(buf.index(x.get_idx().valid(functools.reduce(operator.and_, moved_clauses, c2)), *l.src[1:])), 0)
 pm_move_where_on_load = PatternMatcher([
   (UPat.var("c1").where(UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l"), 0), where_on_load),
@@ -498,8 +505,8 @@ pm_simplify_valid = PatternMatcher([
 ])
 
 # this is symbolic 2.0
-REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP}
-REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP}
+REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP, Ops.GROUP}
+REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP, Ops.GROUP}
 sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
@@ -536,8 +543,8 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
   # # Where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
-  (UPat(Ops.BARRIER, name="root"),
-    lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
+  (UPat((Ops.BARRIER, Ops.GROUP), name="root"),
+    lambda root: UOp(root.op, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
       if any(x.op in REMOVE_FROM_BARRIER for x in root.src) else None),
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_SINK else (x,) for x in root.src)), root.arg)

@@ -1,7 +1,9 @@
 import unittest
-from tinygrad import Tensor, nn
-from tinygrad.helpers import Context, GlobalCounters
+from tinygrad import Tensor, nn, Device
+from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
+from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
@@ -17,8 +19,90 @@ class TestRangeifyAssign(unittest.TestCase):
     self.assertListEqual(lst, lst3)
     self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
+class TestRangeifyEdgeCase(unittest.TestCase):
+  def test_matmul_relu_cat(self):
+    a = Tensor.ones(100, 512).contiguous().realize()
+    c = Tensor.ones(1, 512).contiguous().realize()
+    cm = Tensor.ones(512, 512)
+    c = c @ cm
+    c = c.relu()
+
+    res = Tensor.cat(a, c, dim=0)
+    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
+
+if getenv("BIG") > 2:
+  # llama 8B (8192)
+  BS, HEADS, SEQLEN, EMB = 4, 32, 8192, 128
+elif getenv("BIG") > 1:
+  # llama 8B
+  BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
+elif getenv("BIG") > 0:
+  # bigger
+  BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
+else:
+  BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
+class TestPcontig(unittest.TestCase):
+  def test_flash_attention_bw(self):
+    def fa_bw():
+      Tensor.manual_seed(1337)
+      with Context(DEBUG=0):
+        q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize().requires_grad_() for _ in range(3)]
+        attn_output = nn.Linear(HEADS*EMB, HEADS*EMB, bias=False)
+        attn_output.weight.requires_grad_().realize()
+        target = Tensor.rand(BS, SEQLEN, HEADS*EMB).contiguous().realize()
+
+      GlobalCounters.reset()
+      attn = q.scaled_dot_product_attention(k, v).contiguous().contiguous_backward()
+      attn = attn.transpose(1, 2).reshape(BS, SEQLEN, -1)
+      out = attn_output(attn)
+      loss = (out - target).square().mean()
+      loss.backward()
+      #ret = [out, Tensor.stack(q.grad, k.grad, v.grad, dim=-1)]
+      #ret = [out, Tensor.stack(q.grad, k.grad, dim=-1), v.grad]
+      ret = [out, q.grad, k.grad, v.grad]
+      Tensor.realize(*ret)
+      return ret
+
+    with Context(PCONTIG=max(2, PCONTIG.value), DEBUG=2):
+      grads = fa_bw()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+
+    with Context(PCONTIG=0, DEBUG=2):
+      cmp_grads = fa_bw()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+
+    with Context(DEBUG=0):
+      mses = [((x-y)**2).sum().item() for x,y in zip(grads, cmp_grads)]
+    mse = sum(mses)
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-6)
+
+  def test_flash_attention(self):
+    def fa():
+      Tensor.manual_seed(1337)
+      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
+      GlobalCounters.reset()
+      return q.scaled_dot_product_attention(k, v).realize()
+
+    with Context(PCONTIG=2, DEBUG=2):
+      ret = fa()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+    with Context(DEBUG=2):
+      cmp = fa()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+    with Context(DEBUG=0):
+      mse = ((cmp-ret)**2).sum().item()
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-6)
+
+
+# *** non CI rangeify tests below this line ***
+
 N = 256
 
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeifyOpt(unittest.TestCase):
   def test_randperm(self):
     Tensor.randperm(10000).realize()
@@ -54,6 +138,7 @@ class TestRangeifyOpt(unittest.TestCase):
     A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
     A.sum().realize()
 
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
     # ranges 1 and 3 are merging
@@ -200,33 +285,6 @@ class TestRangeify(unittest.TestCase):
     out = blk._feed_forward(x)
     out.realize()
 
-  @unittest.skip("RANGEIFY=0 does nothing")
-  def test_flash_attention(self):
-    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
-
-    # bigger
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
-
-    # llama 8B
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
-
-    def fa():
-      Tensor.manual_seed(1337)
-      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-      return q.scaled_dot_product_attention(k, v).realize()
-
-    with Context(DEBUG=4):
-      GlobalCounters.reset()
-      ret = fa()
-    with Context(RANGEIFY=0):
-      with Context(DEBUG=2):
-        GlobalCounters.reset()
-        cmp = fa()
-      with Context(DEBUG=0):
-        mse = ((cmp-ret)**2).sum().item()
-    print(f"mse: {mse}")
-    self.assertLessEqual(mse, 1e-6)
-
 # contiguous + reduce can support ranges?
 
 @unittest.skip("pm_rangeify no longer exists. test this in a different way")
@@ -279,17 +337,6 @@ class TestRangeifyPM(unittest.TestCase):
     a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))
     b = self.base.pad(((0,1),(0,0))).pad(((0,0),(0,1)))
     self.assert_same(a, b)
-
-class TestRangeifyEdgeCase(unittest.TestCase):
-  def test_matmul_relu_cat(self):
-    a = Tensor.ones(100, 512).contiguous().realize()
-    c = Tensor.ones(1, 512).contiguous().realize()
-    cm = Tensor.ones(512, 512)
-    c = c @ cm
-    c = c.relu()
-
-    res = Tensor.cat(a, c, dim=0)
-    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
 if __name__ == '__main__':
   unittest.main()

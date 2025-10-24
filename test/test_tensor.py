@@ -570,22 +570,6 @@ class TestMoveTensor(unittest.TestCase):
     np.testing.assert_equal(x.grad.numpy(), [[2,2,2],[0,0,0],[-2,-2,-2]])
 
 class TestZeroShapeTensor(unittest.TestCase):
-  def test_shape_is_expanded(self):
-    t = Tensor.empty(3, 2, 0)
-    assert t.shape == (3, 2, 0)
-    # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
-    assert t.uop.st.is_expanded() == (True, True, True)
-
-    t = Tensor.empty(3, 0, 2)
-    assert t.shape == (3, 0, 2)
-    # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
-    assert t.uop.st.is_expanded() == (True, True, True)
-
-    t = Tensor.empty(0, 0, 0)
-    assert t.shape == (0, 0, 0)
-    # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
-    assert t.uop.st.is_expanded() == (True, True, True)
-
   def test_rand(self):
     t = Tensor.rand(3, 2, 0)
     assert t.shape == (3, 2, 0)
@@ -826,6 +810,13 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
 
+  def test_assign(self):
+    x = Tensor.empty(10, 10).realize()
+    x.assign(Tensor.ones(10, 10).contiguous())
+    si = x.schedule()[-1]
+    self.assertEqual(len(si.metadata), 1)
+    self.assertEqual(si.metadata[0].name, "assign")
+
   def test_complex(self):
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
@@ -848,12 +839,11 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
-    self.assertSetEqual(set(m.name for m in si.metadata), {"__mul__", "sigmoid", "relu"})
+    self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
+    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
     bw = [m for m in si.metadata if m.backward]
-    self.assertEqual(len(bw), 2)
-    self.assertEqual(bw[0].name, "__mul__")
-    self.assertEqual(bw[1].name, "sigmoid")
+    self.assertEqual(len(bw), 1)
+    self.assertEqual(bw[0].name, "sigmoid")
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):

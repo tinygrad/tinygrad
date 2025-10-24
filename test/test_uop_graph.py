@@ -1,12 +1,12 @@
-from typing import List
 import unittest, pytest
 from tinygrad import dtypes, Variable
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import DEBUG, Context
-from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp, KernelInfo
+from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, track_rewrites, graph_rewrite, GroupOp
 from tinygrad.uop.symbolic import sym
-from tinygrad.codegen import full_rewrite, full_rewrite_to_sink
+from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.codegen.late.expander import expander
+from test.test_uops import to_uops_list
 
 simple_pm = PatternMatcher([
   (UPat.cvar('x', dtypes.int), lambda x: UOp.const(dtypes.float, 1.0) + UOp.const(dtypes.float, 2.0)),
@@ -14,12 +14,6 @@ simple_pm = PatternMatcher([
   (UPat.cvar('x') * UPat.cvar('y') * UPat.cvar('z'), lambda x,y,z: UOp.const(dtypes.float, x.arg*y.arg*z.arg)),
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.arg+c2.arg)),
 ])
-
-def to_uops_list(u:List[UOp]) -> List[UOp]:
-  # we strip the SINK here for legacy reasons
-  ret = full_rewrite(UOp.sink(*u, arg=KernelInfo(opts_to_apply=())))
-  assert ret[-1].op is Ops.SINK
-  return ret[:-1]
 
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
@@ -473,7 +467,7 @@ class TestUOpGraph(unittest.TestCase):
     l0 = UOp(Ops.LOAD, dtypes.long, (d0.index(UOp.const(dtypes.int, 0)),)).cast(dtypes.index)
     idx = l0 * 600
     valid = (l0<-1).ne(True)&(l0<3000)
-    l1 = UOp(Ops.LOAD, dtypes.long, (d1.index(idx.valid(valid)),))
+    l1 = valid.where(UOp(Ops.LOAD, dtypes.long, (d1.index(idx),)),0)
     uops = to_uops_list([l1])
     for u in uops:
       if u.op is Ops.INDEX: self.assertEqual(u.src[1].dtype, dtypes.int)
@@ -518,6 +512,7 @@ class TestUOpGraph(unittest.TestCase):
       st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), v, v<20))
       with self.assertRaises(RuntimeError): to_uops_list([st1])
 
+  @unittest.skip("if not allowed in graph")
   def test_in_bounds_access_gated_local(self):
     with Context(IGNORE_OOB=0):
       # Define buffers
@@ -638,13 +633,13 @@ class TestUOpGraph(unittest.TestCase):
     lidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 16),), "lidx0")
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
-    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.index(UOp.invalid()), barrier))
-    ld1 = UOp(Ops.LOAD, dtypes.int, (smem.index(lidx+2, UOp.const(dtypes.bool, True)), barrier))
+    ld0 = UOp(Ops.LOAD, dtypes.int, (smem.after(barrier).index(UOp.invalid()),))
+    ld1 = UOp(Ops.LOAD, dtypes.int, (smem.after(barrier).index(lidx+2, UOp.const(dtypes.bool, True)),))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(lidx), ld1+ld0))])
 
     ld0 = uops[-1].src[-1]
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0.src[0], smem.index(lidx+2))
+    self.assertEqual(ld0.src[0], smem.after(barrier).index(lidx+2))
 
   def test_fold_gated_store(self):
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
@@ -664,19 +659,6 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
-
-  def test_switched_range_order(self):
-    glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 0)
-    cf = UOp.const(dtypes.float, 0.0)
-    r1 = UOp.range(2, 0)
-    r2 = UOp.range(2, 1)
-    alu = UOp(Ops.MUL, dtypes.int, (r2, r1))
-    store = UOp(Ops.STORE, dtypes.void, (glbl.index(alu), cf))
-    uops = to_uops_list([store])
-    ranges = [x for x in uops if x.op is Ops.RANGE]
-    endranges = [x for x in uops if x.op is Ops.ENDRANGE]
-    # ranges are closed in the right order
-    self.assertEqual(endranges[-1].src[0], ranges[0])
 
 @track_rewrites()
 def expander_rewrite(sink): return graph_rewrite(sink, sym + expander)
@@ -845,8 +827,6 @@ class TestIFUOps(unittest.TestCase):
     if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
-    for st in sink.src:
-      self.assertEqual(len(st.src), 2)
 
   def test_expand_ifs_one_gate(self):
     gbuf = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
@@ -863,8 +843,6 @@ class TestIFUOps(unittest.TestCase):
     if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
-    for st in sink.src:
-      self.assertEqual(len(st.src), 2)
 
   # this will be fixed with the merge gated stores bounty
   @unittest.expectedFailure
@@ -879,8 +857,6 @@ class TestIFUOps(unittest.TestCase):
     if_uops = [u for u in sink.toposort() if u.op is Ops.IF]
     self.assertEqual(len(if_uops), 1)
     self.assertEqual(if_uops[0].src[0], gate)
-    for st in sink.src:
-      self.assertEqual(len(st.src), 2)
 
 class TestUOpTags(unittest.TestCase):
   def test_inc_by_one(self):

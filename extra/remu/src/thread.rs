@@ -882,6 +882,11 @@ impl<'a> Thread<'a> {
                             let s1 = sign_ext((s1 & 0xffffff) as u64, 24) as i32;
                             (s0 * s1) as u32
                         }
+                        10 => {
+                            let s0 = sign_ext((s0 & 0xffffff) as u64, 24) as i64;
+                            let s1 = sign_ext((s1 & 0xffffff) as u64, 24) as i64;
+                            ((s0 * s1) >> 32) as u32
+                        }
                         17 | 18 | 26 => {
                             let (s0, s1) = (s0 as i32, s1 as i32);
                             (match op {
@@ -930,7 +935,7 @@ impl<'a> Thread<'a> {
 
             let op = ((instr >> 16) & 0x3ff) as u32;
             match op {
-                764 | 765 | 288 | 289 | 290 | 766 | 767 | 768 | 769 => {
+                764 | 765 | 288 | 289 | 290 | 766 | 767 | 768 | 769 | 770 => {
                     let vdst = (instr & 0xff) as usize;
                     let sdst = ((instr >> 8) & 0x7f) as usize;
                     let f = |i: u32| -> usize { ((instr >> i) & 0x1ff) as usize };
@@ -995,6 +1000,10 @@ impl<'a> Thread<'a> {
                                 769 => {
                                     let ret = s0.wrapping_sub(s1);
                                     (ret as u32, s1 > s0)
+                                }
+                                770 => {
+                                    let ret = s1.wrapping_sub(s0);
+                                    (ret as u32, s0 > s1)
                                 }
                                 _ => todo_instr!(instruction)?,
                             };
