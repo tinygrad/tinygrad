@@ -115,8 +115,11 @@ class TestAfterVmap(unittest.TestCase):
     self.assertEqual(TestAfterVmap._vfn(x)[2,4].item(), self.expected_vmap_res[2,4])
     i,j = [0,1,2], [0,2,4]
     self.assertListEqual(TestAfterVmap._vfn(x)[i,j].tolist(), self.expected_vmap_res[i,j].tolist())
+    # self.assertListEqual(TestAfterVmap._vfn(x)[np.array(i), np.array(j)].tolist(), self.expected_vmap_res[i,j].tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x)[Tensor(i), Tensor(j)].tolist(), self.expected_vmap_res[i,j].tolist())
     i = [0, 8, 16]
     self.assertListEqual(TestAfterVmap._vfn(x).flatten()[i].tolist(), self.expected_vmap_res.flatten()[i].tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x).flatten()[Tensor(i)].tolist(), self.expected_vmap_res.flatten()[i].tolist())
 
   def test_slicing(self):
     x = Tensor.ones(self.n, self.m)
