@@ -453,7 +453,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = d0.index(ridx0)
     ld = idx.load()
     val = (ridx0<50).where(5, ld)
-    st = idx.store(val, ridx0)
+    st = idx.store(val).end(ridx0)
     uops = to_uops_list([st])
     for u in uops:
       assert u.op is not Ops.WHERE
@@ -472,7 +472,7 @@ class TestUOpGraph(unittest.TestCase):
     c7 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(60000), arg=2, src=())
     c8 = c7.index(c6).load()
     c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
-    c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9, c1, c2)
+    c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9).end(c1, c2)
     ast = c10.sink()
     uops = to_uops_list([ast])
     for u in uops:

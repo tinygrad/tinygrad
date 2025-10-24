@@ -12,7 +12,7 @@ def flatten_range(r:UOp):
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
-  (UPat((Ops.REDUCE, Ops.STORE), name="r"), flatten_range),
+  (UPat((Ops.REDUCE, Ops.STORE, Ops.END), name="r"), flatten_range),
 ])
 
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
@@ -39,7 +39,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   return u
 
 pm_simplify_ranges = PatternMatcher([
-  (UPat((Ops.STORE, Ops.REDUCE), name="u"), simplify_merge_adjacent),
+  (UPat((Ops.END, Ops.REDUCE), name="u"), simplify_merge_adjacent),
 ])
 
 def mark_range_mod(ctx, r:UOp, c:UOp):

@@ -846,7 +846,7 @@ class AMDDevice(HCQCompiled):
                            f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
                            "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True)) for _ in range(self.se_cnt)]
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE*1024*1024, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", -1 if SQTT >= 2 else (1 << 1)) # se bitmask: -1 enable all, 0 disable all
       self.sqtt_next_cmd_id = itertools.count(0)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
@@ -914,6 +914,6 @@ class AMDDevice(HCQCompiled):
         if wptr >= buf0.size - 32:
           print(colored(f"{self.device}: Warning: SQTT buffer is full (SE {i})! Increase SQTT buffer with SQTT_BUFFER_SIZE=X (in MB)", "yellow"))
         self.allocator._copyout(sqtt_buf:=memoryview(bytearray(wptr)), buf0)
-        if self.target[0] == 9: sqtt_buf = memoryview(bytearray(b'\x11\x80\x1f\x00\x00\x00\x00\x00') + sqtt_buf)
+        if self.target[0] == 9: sqtt_buf = memoryview(struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (i << 24)) + sqtt_buf)
         Compiled.profile_events += [ProfileSQTTEvent(self.device, i, self.iface.props, bytes(sqtt_buf), bool((self.sqtt_itrace_se_mask >> i) & 0b1))]
     super()._at_profile_finalize()
