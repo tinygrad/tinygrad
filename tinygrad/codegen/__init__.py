@@ -24,7 +24,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     if QUANTIZE and ren.device in {"CPU", "DSP"}: sink = graph_rewrite(sink, pm_quant, name="quantize")
 
     # TODO: fix expander and remove this
-    sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
+    sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, name="add locals early")
 
     # collapse loads reduce (indexing by a tensor)
     sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
@@ -58,7 +58,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
   # add ends (after reduces are removed, as long as we have reduces we can have stores)
-  sink = graph_rewrite(sink, pm_add_ends, name="add ends of ranges")
+  #sink = graph_rewrite(sink, pm_add_ends, name="add ends of ranges")
 
   # devectorize (TODO: does this need opts?)
   if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
