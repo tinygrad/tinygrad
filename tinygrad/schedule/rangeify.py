@@ -309,9 +309,11 @@ def bufferize_to_store(x:UOp, allow_locals=True):
   if x.src[0].op is Ops.ASSIGN:
     assign_target, assign_src, assign_mops = x.src[0].src
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
+    buf, ridx = assign_target.src
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, *rngs).replace(tag=x.tag)
+    do_store = buf.store(ridx, assign_src, tag=x.tag).end(*[r for r in rngs if r.op is Ops.RANGE])
+    #do_store = assign_target.replace(dtype=sdtype).store(assign_src, *rngs).replace(tag=x.tag)
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
@@ -326,7 +328,7 @@ def bufferize_to_store(x:UOp, allow_locals=True):
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
 
     single_index = get_single_element(apply_movement_op(Ops.RESHAPE, (size,), shape, rngs))
-    do_store = buf.store(single_index, x.src[0]).replace(tag=x.tag).end(*[r for r in rngs if r.op is Ops.RANGE])
+    do_store = buf.store(single_index, x.src[0], tag=x.tag).end(*[r for r in rngs if r.op is Ops.RANGE])
 
     #do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs).replace(tag=x.tag)
     ret = buf.after(do_store).forced_reshape(shape)
