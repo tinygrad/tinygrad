@@ -8,100 +8,97 @@ CUdeviceptr_v2 = ctypes.c_ulonglong
 CUdeviceptr = ctypes.c_ulonglong
 CUdevice_v1 = ctypes.c_int
 CUdevice = ctypes.c_int
-class struct_CUctx_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUctx_st(ctypes.Structure): pass
+struct_CUctx_st._fields_ = []
 
 CUcontext = ctypes.POINTER(struct_CUctx_st)
-class struct_CUmod_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUmod_st(ctypes.Structure): pass
+struct_CUmod_st._fields_ = []
 
 CUmodule = ctypes.POINTER(struct_CUmod_st)
-class struct_CUfunc_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUfunc_st(ctypes.Structure): pass
+struct_CUfunc_st._fields_ = []
 
 CUfunction = ctypes.POINTER(struct_CUfunc_st)
-class struct_CUlib_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUlib_st(ctypes.Structure): pass
+struct_CUlib_st._fields_ = []
 
 CUlibrary = ctypes.POINTER(struct_CUlib_st)
-class struct_CUkern_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUkern_st(ctypes.Structure): pass
+struct_CUkern_st._fields_ = []
 
 CUkernel = ctypes.POINTER(struct_CUkern_st)
-class struct_CUarray_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUarray_st(ctypes.Structure): pass
+struct_CUarray_st._fields_ = []
 
 CUarray = ctypes.POINTER(struct_CUarray_st)
-class struct_CUmipmappedArray_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUmipmappedArray_st(ctypes.Structure): pass
+struct_CUmipmappedArray_st._fields_ = []
 
 CUmipmappedArray = ctypes.POINTER(struct_CUmipmappedArray_st)
-class struct_CUtexref_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUtexref_st(ctypes.Structure): pass
+struct_CUtexref_st._fields_ = []
 
 CUtexref = ctypes.POINTER(struct_CUtexref_st)
-class struct_CUsurfref_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUsurfref_st(ctypes.Structure): pass
+struct_CUsurfref_st._fields_ = []
 
 CUsurfref = ctypes.POINTER(struct_CUsurfref_st)
-class struct_CUevent_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUevent_st(ctypes.Structure): pass
+struct_CUevent_st._fields_ = []
 
 CUevent = ctypes.POINTER(struct_CUevent_st)
-class struct_CUstream_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUstream_st(ctypes.Structure): pass
+struct_CUstream_st._fields_ = []
 
 CUstream = ctypes.POINTER(struct_CUstream_st)
-class struct_CUgraphicsResource_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUgraphicsResource_st(ctypes.Structure): pass
+struct_CUgraphicsResource_st._fields_ = []
 
 CUgraphicsResource = ctypes.POINTER(struct_CUgraphicsResource_st)
 CUtexObject_v1 = ctypes.c_ulonglong
 CUtexObject = ctypes.c_ulonglong
 CUsurfObject_v1 = ctypes.c_ulonglong
 CUsurfObject = ctypes.c_ulonglong
-class struct_CUextMemory_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUextMemory_st(ctypes.Structure): pass
+struct_CUextMemory_st._fields_ = []
 
 CUexternalMemory = ctypes.POINTER(struct_CUextMemory_st)
-class struct_CUextSemaphore_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUextSemaphore_st(ctypes.Structure): pass
+struct_CUextSemaphore_st._fields_ = []
 
 CUexternalSemaphore = ctypes.POINTER(struct_CUextSemaphore_st)
-class struct_CUgraph_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUgraph_st(ctypes.Structure): pass
+struct_CUgraph_st._fields_ = []
 
 CUgraph = ctypes.POINTER(struct_CUgraph_st)
-class struct_CUgraphNode_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUgraphNode_st(ctypes.Structure): pass
+struct_CUgraphNode_st._fields_ = []
 
 CUgraphNode = ctypes.POINTER(struct_CUgraphNode_st)
-class struct_CUgraphExec_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUgraphExec_st(ctypes.Structure): pass
+struct_CUgraphExec_st._fields_ = []
 
 CUgraphExec = ctypes.POINTER(struct_CUgraphExec_st)
-class struct_CUmemPoolHandle_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUmemPoolHandle_st(ctypes.Structure): pass
+struct_CUmemPoolHandle_st._fields_ = []
 
 CUmemoryPool = ctypes.POINTER(struct_CUmemPoolHandle_st)
-class struct_CUuserObject_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUuserObject_st(ctypes.Structure): pass
+struct_CUuserObject_st._fields_ = []
 
 CUuserObject = ctypes.POINTER(struct_CUuserObject_st)
-class struct_CUuuid_st(ctypes.Structure):
-  _pack_ = 1
-  _fields_ = [('bytes', (ctypes.c_char * 16))]
+class struct_CUuuid_st(ctypes.Structure): pass
+struct_CUuuid_st._fields_ = [('bytes', (ctypes.c_char * 16))]
 
 CUuuid = struct_CUuuid_st
-class struct_CUipcEventHandle_st(ctypes.Structure):
-  _pack_ = 1
-  _fields_ = [('reserved', (ctypes.c_char * 64))]
+class struct_CUipcEventHandle_st(ctypes.Structure): pass
+struct_CUipcEventHandle_st._fields_ = [('reserved', (ctypes.c_char * 64))]
 
 CUipcEventHandle_v1 = struct_CUipcEventHandle_st
 CUipcEventHandle = struct_CUipcEventHandle_st
-class struct_CUipcMemHandle_st(ctypes.Structure):
-  _pack_ = 1
-  _fields_ = [('reserved', (ctypes.c_char * 64))]
+class struct_CUipcMemHandle_st(ctypes.Structure): pass
+struct_CUipcMemHandle_st._fields_ = [('reserved', (ctypes.c_char * 64))]
 
 CUipcMemHandle_v1 = struct_CUipcMemHandle_st
 CUipcMemHandle = struct_CUipcMemHandle_st
@@ -197,45 +194,38 @@ CU_STREAM_MEMORY_BARRIER_TYPE_SYS = enum_CUstreamMemoryBarrier_flags_enum.define
 CU_STREAM_MEMORY_BARRIER_TYPE_GPU = enum_CUstreamMemoryBarrier_flags_enum.define('CU_STREAM_MEMORY_BARRIER_TYPE_GPU', 1)
 
 CUstreamMemoryBarrier_flags = enum_CUstreamMemoryBarrier_flags_enum
-class _anonunion0(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('value', cuuint32_t),
+class _anonunion0(ctypes.Union): pass
+_anonunion0._fields_ = [('value', cuuint32_t),
               ('value64', cuuint64_t)]
 
-class struct_CUstreamMemOpWaitValueParams_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('operation', CUstreamBatchMemOpType),
+class struct_CUstreamMemOpWaitValueParams_st(ctypes.Structure): pass
+struct_CUstreamMemOpWaitValueParams_st._fields_ = [('operation', CUstreamBatchMemOpType),
               ('address', CUdeviceptr),
               ('union CUstreamMemOpWaitValueParams_st::(anonymous at /usr/include/cuda.h:502:9)', _anonunion0),
               ('flags', ctypes.c_uint),
               ('alias', CUdeviceptr)]
 
-class _anonunion1(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('value', cuuint32_t),
+class _anonunion1(ctypes.Union): pass
+_anonunion1._fields_ = [('value', cuuint32_t),
               ('value64', cuuint64_t)]
 
-class struct_CUstreamMemOpWriteValueParams_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('operation', CUstreamBatchMemOpType),
+class struct_CUstreamMemOpWriteValueParams_st(ctypes.Structure): pass
+struct_CUstreamMemOpWriteValueParams_st._fields_ = [('operation', CUstreamBatchMemOpType),
               ('address', CUdeviceptr),
               ('union CUstreamMemOpWriteValueParams_st::(anonymous at /usr/include/cuda.h:512:9)', _anonunion1),
               ('flags', ctypes.c_uint),
               ('alias', CUdeviceptr)]
 
-class struct_CUstreamMemOpFlushRemoteWritesParams_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('operation', CUstreamBatchMemOpType),
+class struct_CUstreamMemOpFlushRemoteWritesParams_st(ctypes.Structure): pass
+struct_CUstreamMemOpFlushRemoteWritesParams_st._fields_ = [('operation', CUstreamBatchMemOpType),
               ('flags', ctypes.c_uint)]
 
-class struct_CUstreamMemOpMemoryBarrierParams_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('operation', CUstreamBatchMemOpType),
+class struct_CUstreamMemOpMemoryBarrierParams_st(ctypes.Structure): pass
+struct_CUstreamMemOpMemoryBarrierParams_st._fields_ = [('operation', CUstreamBatchMemOpType),
               ('flags', ctypes.c_uint)]
 
-class union_CUstreamBatchMemOpParams_union(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('operation', CUstreamBatchMemOpType),
+class union_CUstreamBatchMemOpParams_union(ctypes.Union): pass
+union_CUstreamBatchMemOpParams_union._fields_ = [('operation', CUstreamBatchMemOpType),
               ('waitValue', struct_CUstreamMemOpWaitValueParams_st),
               ('writeValue', struct_CUstreamMemOpWriteValueParams_st),
               ('flushRemoteWrites', struct_CUstreamMemOpFlushRemoteWritesParams_st),
@@ -244,9 +234,8 @@ class union_CUstreamBatchMemOpParams_union(ctypes.Union):
 
 CUstreamBatchMemOpParams_v1 = union_CUstreamBatchMemOpParams_union
 CUstreamBatchMemOpParams = union_CUstreamBatchMemOpParams_union
-class struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('ctx', CUcontext),
+class struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st._fields_ = [('ctx', CUcontext),
               ('count', ctypes.c_uint),
               ('paramArray', ctypes.POINTER(CUstreamBatchMemOpParams)),
               ('flags', ctypes.c_uint)]
@@ -450,9 +439,8 @@ CU_DEVICE_ATTRIBUTE_UNIFIED_FUNCTION_POINTERS = enum_CUdevice_attribute_enum.def
 CU_DEVICE_ATTRIBUTE_MAX = enum_CUdevice_attribute_enum.define('CU_DEVICE_ATTRIBUTE_MAX', 130)
 
 CUdevice_attribute = enum_CUdevice_attribute_enum
-class struct_CUdevprop_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('maxThreadsPerBlock', ctypes.c_int),
+class struct_CUdevprop_st(ctypes.Structure): pass
+struct_CUdevprop_st._fields_ = [('maxThreadsPerBlock', ctypes.c_int),
               ('maxThreadsDim', (ctypes.c_int * 3)),
               ('maxGridSize', (ctypes.c_int * 3)),
               ('sharedMemPerBlock', ctypes.c_int),
@@ -634,8 +622,8 @@ CU_JIT_INPUT_NVVM = enum_CUjitInputType_enum.define('CU_JIT_INPUT_NVVM', 5)
 CU_JIT_NUM_INPUT_TYPES = enum_CUjitInputType_enum.define('CU_JIT_NUM_INPUT_TYPES', 6)
 
 CUjitInputType = enum_CUjitInputType_enum
-class struct_CUlinkState_st(ctypes.Structure):
-  _fields_ = []
+class struct_CUlinkState_st(ctypes.Structure): pass
+struct_CUlinkState_st._fields_ = []
 
 CUlinkState = ctypes.POINTER(struct_CUlinkState_st)
 enum_CUgraphicsRegisterFlags_enum = CEnum(ctypes.c_uint)
@@ -687,9 +675,8 @@ CU_ACCESS_PROPERTY_PERSISTING = enum_CUaccessProperty_enum.define('CU_ACCESS_PRO
 
 CUaccessProperty = enum_CUaccessProperty_enum
 size_t = ctypes.c_ulong
-class struct_CUaccessPolicyWindow_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('base_ptr', ctypes.c_void_p),
+class struct_CUaccessPolicyWindow_st(ctypes.Structure): pass
+struct_CUaccessPolicyWindow_st._fields_ = [('base_ptr', ctypes.c_void_p),
               ('num_bytes', size_t),
               ('hitRatio', ctypes.c_float),
               ('hitProp', CUaccessProperty),
@@ -697,9 +684,8 @@ class struct_CUaccessPolicyWindow_st(ctypes.Structure):
 
 CUaccessPolicyWindow_v1 = struct_CUaccessPolicyWindow_st
 CUaccessPolicyWindow = struct_CUaccessPolicyWindow_st
-class struct_CUDA_KERNEL_NODE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('func', CUfunction),
+class struct_CUDA_KERNEL_NODE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_KERNEL_NODE_PARAMS_st._fields_ = [('func', CUfunction),
               ('gridDimX', ctypes.c_uint),
               ('gridDimY', ctypes.c_uint),
               ('gridDimZ', ctypes.c_uint),
@@ -711,9 +697,8 @@ class struct_CUDA_KERNEL_NODE_PARAMS_st(ctypes.Structure):
               ('extra', ctypes.POINTER(ctypes.c_void_p))]
 
 CUDA_KERNEL_NODE_PARAMS_v1 = struct_CUDA_KERNEL_NODE_PARAMS_st
-class struct_CUDA_KERNEL_NODE_PARAMS_v2_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('func', CUfunction),
+class struct_CUDA_KERNEL_NODE_PARAMS_v2_st(ctypes.Structure): pass
+struct_CUDA_KERNEL_NODE_PARAMS_v2_st._fields_ = [('func', CUfunction),
               ('gridDimX', ctypes.c_uint),
               ('gridDimY', ctypes.c_uint),
               ('gridDimZ', ctypes.c_uint),
@@ -728,9 +713,8 @@ class struct_CUDA_KERNEL_NODE_PARAMS_v2_st(ctypes.Structure):
 
 CUDA_KERNEL_NODE_PARAMS_v2 = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
 CUDA_KERNEL_NODE_PARAMS = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
-class struct_CUDA_MEMSET_NODE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('dst', CUdeviceptr),
+class struct_CUDA_MEMSET_NODE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_MEMSET_NODE_PARAMS_st._fields_ = [('dst', CUdeviceptr),
               ('pitch', size_t),
               ('value', ctypes.c_uint),
               ('elementSize', ctypes.c_uint),
@@ -739,9 +723,8 @@ class struct_CUDA_MEMSET_NODE_PARAMS_st(ctypes.Structure):
 
 CUDA_MEMSET_NODE_PARAMS_v1 = struct_CUDA_MEMSET_NODE_PARAMS_st
 CUDA_MEMSET_NODE_PARAMS = struct_CUDA_MEMSET_NODE_PARAMS_st
-class struct_CUDA_HOST_NODE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('fn', CUhostFn),
+class struct_CUDA_HOST_NODE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_HOST_NODE_PARAMS_st._fields_ = [('fn', CUhostFn),
               ('userData', ctypes.c_void_p)]
 
 CUDA_HOST_NODE_PARAMS_v1 = struct_CUDA_HOST_NODE_PARAMS_st
@@ -770,9 +753,8 @@ CUDA_GRAPH_INSTANTIATE_NODE_OPERATION_NOT_SUPPORTED = enum_CUgraphInstantiateRes
 CUDA_GRAPH_INSTANTIATE_MULTIPLE_CTXS_NOT_SUPPORTED = enum_CUgraphInstantiateResult_enum.define('CUDA_GRAPH_INSTANTIATE_MULTIPLE_CTXS_NOT_SUPPORTED', 4)
 
 CUgraphInstantiateResult = enum_CUgraphInstantiateResult_enum
-class struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('flags', cuuint64_t),
+class struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st._fields_ = [('flags', cuuint64_t),
               ('hUploadStream', CUstream),
               ('hErrNode_out', CUgraphNode),
               ('result_out', CUgraphInstantiateResult)]
@@ -796,9 +778,8 @@ CU_LAUNCH_MEM_SYNC_DOMAIN_DEFAULT = enum_CUlaunchMemSyncDomain_enum.define('CU_L
 CU_LAUNCH_MEM_SYNC_DOMAIN_REMOTE = enum_CUlaunchMemSyncDomain_enum.define('CU_LAUNCH_MEM_SYNC_DOMAIN_REMOTE', 1)
 
 CUlaunchMemSyncDomain = enum_CUlaunchMemSyncDomain_enum
-class struct_CUlaunchMemSyncDomainMap_st(ctypes.Structure):
-  _pack_ = 1
-  _fields_ = [('default_', ctypes.c_ubyte),
+class struct_CUlaunchMemSyncDomainMap_st(ctypes.Structure): pass
+struct_CUlaunchMemSyncDomainMap_st._fields_ = [('default_', ctypes.c_ubyte),
               ('remote', ctypes.c_ubyte)]
 
 CUlaunchMemSyncDomainMap = struct_CUlaunchMemSyncDomainMap_st
@@ -816,21 +797,18 @@ CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP = enum_CUlaunchAttributeID_enum.define('
 CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN = enum_CUlaunchAttributeID_enum.define('CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN', 10)
 
 CUlaunchAttributeID = enum_CUlaunchAttributeID_enum
-class _anonstruct2(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('x', ctypes.c_uint),
+class _anonstruct2(ctypes.Structure): pass
+_anonstruct2._fields_ = [('x', ctypes.c_uint),
               ('y', ctypes.c_uint),
               ('z', ctypes.c_uint)]
 
-class _anonstruct3(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('event', CUevent),
+class _anonstruct3(ctypes.Structure): pass
+_anonstruct3._fields_ = [('event', CUevent),
               ('flags', ctypes.c_int),
               ('triggerAtBlockStart', ctypes.c_int)]
 
-class union_CUlaunchAttributeValue_union(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('pad', (ctypes.c_char * 64)),
+class union_CUlaunchAttributeValue_union(ctypes.Union): pass
+union_CUlaunchAttributeValue_union._fields_ = [('pad', (ctypes.c_char * 64)),
               ('accessPolicyWindow', CUaccessPolicyWindow),
               ('cooperative', ctypes.c_int),
               ('syncPolicy', CUsynchronizationPolicy),
@@ -843,16 +821,14 @@ class union_CUlaunchAttributeValue_union(ctypes.Union):
               ('memSyncDomain', CUlaunchMemSyncDomain)]
 
 CUlaunchAttributeValue = union_CUlaunchAttributeValue_union
-class struct_CUlaunchAttribute_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('id', CUlaunchAttributeID),
+class struct_CUlaunchAttribute_st(ctypes.Structure): pass
+struct_CUlaunchAttribute_st._fields_ = [('id', CUlaunchAttributeID),
               ('pad', (ctypes.c_char * 4)),
               ('value', CUlaunchAttributeValue)]
 
 CUlaunchAttribute = struct_CUlaunchAttribute_st
-class struct_CUlaunchConfig_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('gridDimX', ctypes.c_uint),
+class struct_CUlaunchConfig_st(ctypes.Structure): pass
+struct_CUlaunchConfig_st._fields_ = [('gridDimX', ctypes.c_uint),
               ('gridDimY', ctypes.c_uint),
               ('gridDimZ', ctypes.c_uint),
               ('blockDimX', ctypes.c_uint),
@@ -899,19 +875,16 @@ CU_EXEC_AFFINITY_TYPE_SM_COUNT = enum_CUexecAffinityType_enum.define('CU_EXEC_AF
 CU_EXEC_AFFINITY_TYPE_MAX = enum_CUexecAffinityType_enum.define('CU_EXEC_AFFINITY_TYPE_MAX', 1)
 
 CUexecAffinityType = enum_CUexecAffinityType_enum
-class struct_CUexecAffinitySmCount_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('val', ctypes.c_uint)]
+class struct_CUexecAffinitySmCount_st(ctypes.Structure): pass
+struct_CUexecAffinitySmCount_st._fields_ = [('val', ctypes.c_uint)]
 
 CUexecAffinitySmCount_v1 = struct_CUexecAffinitySmCount_st
 CUexecAffinitySmCount = struct_CUexecAffinitySmCount_st
-class _anonunion4(ctypes.Union):
-  _pack_ = 4
-  _fields_ = [('smCount', CUexecAffinitySmCount)]
+class _anonunion4(ctypes.Union): pass
+_anonunion4._fields_ = [('smCount', CUexecAffinitySmCount)]
 
-class struct_CUexecAffinityParam_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('type', CUexecAffinityType),
+class struct_CUexecAffinityParam_st(ctypes.Structure): pass
+struct_CUexecAffinityParam_st._fields_ = [('type', CUexecAffinityType),
               ('param', _anonunion4)]
 
 CUexecAffinityParam_v1 = struct_CUexecAffinityParam_st
@@ -922,9 +895,8 @@ CU_LIBRARY_BINARY_IS_PRESERVED = enum_CUlibraryOption_enum.define('CU_LIBRARY_BI
 CU_LIBRARY_NUM_OPTIONS = enum_CUlibraryOption_enum.define('CU_LIBRARY_NUM_OPTIONS', 2)
 
 CUlibraryOption = enum_CUlibraryOption_enum
-class struct_CUlibraryHostUniversalFunctionAndDataTable_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('functionTable', ctypes.c_void_p),
+class struct_CUlibraryHostUniversalFunctionAndDataTable_st(ctypes.Structure): pass
+struct_CUlibraryHostUniversalFunctionAndDataTable_st._fields_ = [('functionTable', ctypes.c_void_p),
               ('functionWindowSize', size_t),
               ('dataTable', ctypes.c_void_p),
               ('dataWindowSize', size_t)]
@@ -1035,9 +1007,8 @@ CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute
 CUdevice_P2PAttribute = enum_CUdevice_P2PAttribute_enum
 CUstreamCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_CUstream_st), enum_cudaError_enum, ctypes.c_void_p))
 CUoccupancyB2DSize = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.c_int))
-class struct_CUDA_MEMCPY2D_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('srcXInBytes', size_t),
+class struct_CUDA_MEMCPY2D_st(ctypes.Structure): pass
+struct_CUDA_MEMCPY2D_st._fields_ = [('srcXInBytes', size_t),
               ('srcY', size_t),
               ('srcMemoryType', CUmemorytype),
               ('srcHost', ctypes.c_void_p),
@@ -1056,9 +1027,8 @@ class struct_CUDA_MEMCPY2D_st(ctypes.Structure):
 
 CUDA_MEMCPY2D_v2 = struct_CUDA_MEMCPY2D_st
 CUDA_MEMCPY2D = struct_CUDA_MEMCPY2D_st
-class struct_CUDA_MEMCPY3D_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('srcXInBytes', size_t),
+class struct_CUDA_MEMCPY3D_st(ctypes.Structure): pass
+struct_CUDA_MEMCPY3D_st._fields_ = [('srcXInBytes', size_t),
               ('srcY', size_t),
               ('srcZ', size_t),
               ('srcLOD', size_t),
@@ -1086,9 +1056,8 @@ class struct_CUDA_MEMCPY3D_st(ctypes.Structure):
 
 CUDA_MEMCPY3D_v2 = struct_CUDA_MEMCPY3D_st
 CUDA_MEMCPY3D = struct_CUDA_MEMCPY3D_st
-class struct_CUDA_MEMCPY3D_PEER_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('srcXInBytes', size_t),
+class struct_CUDA_MEMCPY3D_PEER_st(ctypes.Structure): pass
+struct_CUDA_MEMCPY3D_PEER_st._fields_ = [('srcXInBytes', size_t),
               ('srcY', size_t),
               ('srcZ', size_t),
               ('srcLOD', size_t),
@@ -1116,18 +1085,16 @@ class struct_CUDA_MEMCPY3D_PEER_st(ctypes.Structure):
 
 CUDA_MEMCPY3D_PEER_v1 = struct_CUDA_MEMCPY3D_PEER_st
 CUDA_MEMCPY3D_PEER = struct_CUDA_MEMCPY3D_PEER_st
-class struct_CUDA_ARRAY_DESCRIPTOR_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('Width', size_t),
+class struct_CUDA_ARRAY_DESCRIPTOR_st(ctypes.Structure): pass
+struct_CUDA_ARRAY_DESCRIPTOR_st._fields_ = [('Width', size_t),
               ('Height', size_t),
               ('Format', CUarray_format),
               ('NumChannels', ctypes.c_uint)]
 
 CUDA_ARRAY_DESCRIPTOR_v2 = struct_CUDA_ARRAY_DESCRIPTOR_st
 CUDA_ARRAY_DESCRIPTOR = struct_CUDA_ARRAY_DESCRIPTOR_st
-class struct_CUDA_ARRAY3D_DESCRIPTOR_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('Width', size_t),
+class struct_CUDA_ARRAY3D_DESCRIPTOR_st(ctypes.Structure): pass
+struct_CUDA_ARRAY3D_DESCRIPTOR_st._fields_ = [('Width', size_t),
               ('Height', size_t),
               ('Depth', size_t),
               ('Format', CUarray_format),
@@ -1136,15 +1103,13 @@ class struct_CUDA_ARRAY3D_DESCRIPTOR_st(ctypes.Structure):
 
 CUDA_ARRAY3D_DESCRIPTOR_v2 = struct_CUDA_ARRAY3D_DESCRIPTOR_st
 CUDA_ARRAY3D_DESCRIPTOR = struct_CUDA_ARRAY3D_DESCRIPTOR_st
-class _anonstruct5(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('width', ctypes.c_uint),
+class _anonstruct5(ctypes.Structure): pass
+_anonstruct5._fields_ = [('width', ctypes.c_uint),
               ('height', ctypes.c_uint),
               ('depth', ctypes.c_uint)]
 
-class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('tileExtent', _anonstruct5),
+class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st(ctypes.Structure): pass
+struct_CUDA_ARRAY_SPARSE_PROPERTIES_st._fields_ = [('tileExtent', _anonstruct5),
               ('miptailFirstLevel', ctypes.c_uint),
               ('miptailSize', ctypes.c_ulonglong),
               ('flags', ctypes.c_uint),
@@ -1152,61 +1117,52 @@ class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st(ctypes.Structure):
 
 CUDA_ARRAY_SPARSE_PROPERTIES_v1 = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
 CUDA_ARRAY_SPARSE_PROPERTIES = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
-class struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('size', size_t),
+class struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st(ctypes.Structure): pass
+struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st._fields_ = [('size', size_t),
               ('alignment', size_t),
               ('reserved', (ctypes.c_uint * 4))]
 
 CUDA_ARRAY_MEMORY_REQUIREMENTS_v1 = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
 CUDA_ARRAY_MEMORY_REQUIREMENTS = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
-class _anonstruct7(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('hArray', CUarray)]
+class _anonstruct7(ctypes.Structure): pass
+_anonstruct7._fields_ = [('hArray', CUarray)]
 
-class _anonstruct8(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('hMipmappedArray', CUmipmappedArray)]
+class _anonstruct8(ctypes.Structure): pass
+_anonstruct8._fields_ = [('hMipmappedArray', CUmipmappedArray)]
 
-class _anonstruct9(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('devPtr', CUdeviceptr),
+class _anonstruct9(ctypes.Structure): pass
+_anonstruct9._fields_ = [('devPtr', CUdeviceptr),
               ('format', CUarray_format),
               ('numChannels', ctypes.c_uint),
               ('sizeInBytes', size_t)]
 
-class _anonstruct10(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('devPtr', CUdeviceptr),
+class _anonstruct10(ctypes.Structure): pass
+_anonstruct10._fields_ = [('devPtr', CUdeviceptr),
               ('format', CUarray_format),
               ('numChannels', ctypes.c_uint),
               ('width', size_t),
               ('height', size_t),
               ('pitchInBytes', size_t)]
 
-class _anonstruct11(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('reserved', (ctypes.c_int * 32))]
+class _anonstruct11(ctypes.Structure): pass
+_anonstruct11._fields_ = [('reserved', (ctypes.c_int * 32))]
 
-class _anonunion6(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('array', _anonstruct7),
+class _anonunion6(ctypes.Union): pass
+_anonunion6._fields_ = [('array', _anonstruct7),
               ('mipmap', _anonstruct8),
               ('linear', _anonstruct9),
               ('pitch2D', _anonstruct10),
               ('reserved', _anonstruct11)]
 
-class struct_CUDA_RESOURCE_DESC_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('resType', CUresourcetype),
+class struct_CUDA_RESOURCE_DESC_st(ctypes.Structure): pass
+struct_CUDA_RESOURCE_DESC_st._fields_ = [('resType', CUresourcetype),
               ('res', _anonunion6),
               ('flags', ctypes.c_uint)]
 
 CUDA_RESOURCE_DESC_v1 = struct_CUDA_RESOURCE_DESC_st
 CUDA_RESOURCE_DESC = struct_CUDA_RESOURCE_DESC_st
-class struct_CUDA_TEXTURE_DESC_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('addressMode', (CUaddress_mode * 3)),
+class struct_CUDA_TEXTURE_DESC_st(ctypes.Structure): pass
+struct_CUDA_TEXTURE_DESC_st._fields_ = [('addressMode', (CUaddress_mode * 3)),
               ('filterMode', CUfilter_mode),
               ('flags', ctypes.c_uint),
               ('maxAnisotropy', ctypes.c_uint),
@@ -1257,9 +1213,8 @@ CU_RES_VIEW_FORMAT_SIGNED_BC6H = enum_CUresourceViewFormat_enum.define('CU_RES_V
 CU_RES_VIEW_FORMAT_UNSIGNED_BC7 = enum_CUresourceViewFormat_enum.define('CU_RES_VIEW_FORMAT_UNSIGNED_BC7', 34)
 
 CUresourceViewFormat = enum_CUresourceViewFormat_enum
-class struct_CUDA_RESOURCE_VIEW_DESC_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('format', CUresourceViewFormat),
+class struct_CUDA_RESOURCE_VIEW_DESC_st(ctypes.Structure): pass
+struct_CUDA_RESOURCE_VIEW_DESC_st._fields_ = [('format', CUresourceViewFormat),
               ('width', size_t),
               ('height', size_t),
               ('depth', size_t),
@@ -1271,9 +1226,8 @@ class struct_CUDA_RESOURCE_VIEW_DESC_st(ctypes.Structure):
 
 CUDA_RESOURCE_VIEW_DESC_v1 = struct_CUDA_RESOURCE_VIEW_DESC_st
 CUDA_RESOURCE_VIEW_DESC = struct_CUDA_RESOURCE_VIEW_DESC_st
-class struct_CUtensorMap_st(ctypes.Structure):
-  _pack_ = 64
-  _fields_ = [('opaque', (cuuint64_t * 16))]
+class struct_CUtensorMap_st(ctypes.Structure): pass
+struct_CUtensorMap_st._fields_ = [('opaque', (cuuint64_t * 16))]
 
 CUtensorMap = struct_CUtensorMap_st
 enum_CUtensorMapDataType_enum = CEnum(ctypes.c_uint)
@@ -1317,9 +1271,8 @@ CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE = enum_CUtensorMapFloatOOBfill_enum.define('CU
 CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA = enum_CUtensorMapFloatOOBfill_enum.define('CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA', 1)
 
 CUtensorMapFloatOOBfill = enum_CUtensorMapFloatOOBfill_enum
-class struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('p2pToken', ctypes.c_ulonglong),
+class struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st(ctypes.Structure): pass
+struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st._fields_ = [('p2pToken', ctypes.c_ulonglong),
               ('vaSpaceToken', ctypes.c_uint)]
 
 CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_v1 = struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st
@@ -1330,9 +1283,8 @@ CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READ = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS
 CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READWRITE = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum.define('CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READWRITE', 3)
 
 CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum
-class struct_CUDA_LAUNCH_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('function', CUfunction),
+class struct_CUDA_LAUNCH_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_LAUNCH_PARAMS_st._fields_ = [('function', CUfunction),
               ('gridDimX', ctypes.c_uint),
               ('gridDimY', ctypes.c_uint),
               ('gridDimZ', ctypes.c_uint),
@@ -1356,20 +1308,17 @@ CU_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_RESOURCE_KMT = enum_CUexternalMemoryHandleT
 CU_EXTERNAL_MEMORY_HANDLE_TYPE_NVSCIBUF = enum_CUexternalMemoryHandleType_enum.define('CU_EXTERNAL_MEMORY_HANDLE_TYPE_NVSCIBUF', 8)
 
 CUexternalMemoryHandleType = enum_CUexternalMemoryHandleType_enum
-class _anonstruct13(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('handle', ctypes.c_void_p),
+class _anonstruct13(ctypes.Structure): pass
+_anonstruct13._fields_ = [('handle', ctypes.c_void_p),
               ('name', ctypes.c_void_p)]
 
-class _anonunion12(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('fd', ctypes.c_int),
+class _anonunion12(ctypes.Union): pass
+_anonunion12._fields_ = [('fd', ctypes.c_int),
               ('win32', _anonstruct13),
               ('nvSciBufObject', ctypes.c_void_p)]
 
-class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('type', CUexternalMemoryHandleType),
+class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st(ctypes.Structure): pass
+struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st._fields_ = [('type', CUexternalMemoryHandleType),
               ('handle', _anonunion12),
               ('size', ctypes.c_ulonglong),
               ('flags', ctypes.c_uint),
@@ -1377,18 +1326,16 @@ class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st(ctypes.Structure):
 
 CUDA_EXTERNAL_MEMORY_HANDLE_DESC_v1 = struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st
 CUDA_EXTERNAL_MEMORY_HANDLE_DESC = struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st
-class struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('offset', ctypes.c_ulonglong),
+class struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st(ctypes.Structure): pass
+struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st._fields_ = [('offset', ctypes.c_ulonglong),
               ('size', ctypes.c_ulonglong),
               ('flags', ctypes.c_uint),
               ('reserved', (ctypes.c_uint * 16))]
 
 CUDA_EXTERNAL_MEMORY_BUFFER_DESC_v1 = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
 CUDA_EXTERNAL_MEMORY_BUFFER_DESC = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
-class struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('offset', ctypes.c_ulonglong),
+class struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st(ctypes.Structure): pass
+struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st._fields_ = [('offset', ctypes.c_ulonglong),
               ('arrayDesc', CUDA_ARRAY3D_DESCRIPTOR),
               ('numLevels', ctypes.c_uint),
               ('reserved', (ctypes.c_uint * 16))]
@@ -1408,94 +1355,79 @@ CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_FD = enum_CUexternalSemapho
 CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_WIN32 = enum_CUexternalSemaphoreHandleType_enum.define('CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_WIN32', 10)
 
 CUexternalSemaphoreHandleType = enum_CUexternalSemaphoreHandleType_enum
-class _anonstruct15(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('handle', ctypes.c_void_p),
+class _anonstruct15(ctypes.Structure): pass
+_anonstruct15._fields_ = [('handle', ctypes.c_void_p),
               ('name', ctypes.c_void_p)]
 
-class _anonunion14(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('fd', ctypes.c_int),
+class _anonunion14(ctypes.Union): pass
+_anonunion14._fields_ = [('fd', ctypes.c_int),
               ('win32', _anonstruct15),
               ('nvSciSyncObj', ctypes.c_void_p)]
 
-class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('type', CUexternalSemaphoreHandleType),
+class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st(ctypes.Structure): pass
+struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st._fields_ = [('type', CUexternalSemaphoreHandleType),
               ('handle', _anonunion14),
               ('flags', ctypes.c_uint),
               ('reserved', (ctypes.c_uint * 16))]
 
 CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_v1 = struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st
 CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC = struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st
-class _anonstruct17(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('value', ctypes.c_ulonglong)]
+class _anonstruct17(ctypes.Structure): pass
+_anonstruct17._fields_ = [('value', ctypes.c_ulonglong)]
 
-class _anonunion18(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('fence', ctypes.c_void_p),
+class _anonunion18(ctypes.Union): pass
+_anonunion18._fields_ = [('fence', ctypes.c_void_p),
               ('reserved', ctypes.c_ulonglong)]
 
-class _anonstruct19(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('key', ctypes.c_ulonglong)]
+class _anonstruct19(ctypes.Structure): pass
+_anonstruct19._fields_ = [('key', ctypes.c_ulonglong)]
 
-class _anonstruct16(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('fence', _anonstruct17),
+class _anonstruct16(ctypes.Structure): pass
+_anonstruct16._fields_ = [('fence', _anonstruct17),
               ('nvSciSync', _anonunion18),
               ('keyedMutex', _anonstruct19),
               ('reserved', (ctypes.c_uint * 12))]
 
-class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('params', _anonstruct16),
+class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st._fields_ = [('params', _anonstruct16),
               ('flags', ctypes.c_uint),
               ('reserved', (ctypes.c_uint * 16))]
 
 CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_v1 = struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st
 CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS = struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st
-class _anonstruct21(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('value', ctypes.c_ulonglong)]
+class _anonstruct21(ctypes.Structure): pass
+_anonstruct21._fields_ = [('value', ctypes.c_ulonglong)]
 
-class _anonunion22(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('fence', ctypes.c_void_p),
+class _anonunion22(ctypes.Union): pass
+_anonunion22._fields_ = [('fence', ctypes.c_void_p),
               ('reserved', ctypes.c_ulonglong)]
 
-class _anonstruct23(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('key', ctypes.c_ulonglong),
+class _anonstruct23(ctypes.Structure): pass
+_anonstruct23._fields_ = [('key', ctypes.c_ulonglong),
               ('timeoutMs', ctypes.c_uint)]
 
-class _anonstruct20(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('fence', _anonstruct21),
+class _anonstruct20(ctypes.Structure): pass
+_anonstruct20._fields_ = [('fence', _anonstruct21),
               ('nvSciSync', _anonunion22),
               ('keyedMutex', _anonstruct23),
               ('reserved', (ctypes.c_uint * 10))]
 
-class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('params', _anonstruct20),
+class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st._fields_ = [('params', _anonstruct20),
               ('flags', ctypes.c_uint),
               ('reserved', (ctypes.c_uint * 16))]
 
 CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_v1 = struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st
 CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS = struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st
-class struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('extSemArray', ctypes.POINTER(CUexternalSemaphore)),
+class struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st._fields_ = [('extSemArray', ctypes.POINTER(CUexternalSemaphore)),
               ('paramsArray', ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS)),
               ('numExtSems', ctypes.c_uint)]
 
 CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_v1 = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
 CUDA_EXT_SEM_SIGNAL_NODE_PARAMS = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
-class struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('extSemArray', ctypes.POINTER(CUexternalSemaphore)),
+class struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st._fields_ = [('extSemArray', ctypes.POINTER(CUexternalSemaphore)),
               ('paramsArray', ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS)),
               ('numExtSems', ctypes.c_uint)]
 
@@ -1554,14 +1486,12 @@ enum_CUmemHandleType_enum = CEnum(ctypes.c_uint)
 CU_MEM_HANDLE_TYPE_GENERIC = enum_CUmemHandleType_enum.define('CU_MEM_HANDLE_TYPE_GENERIC', 0)
 
 CUmemHandleType = enum_CUmemHandleType_enum
-class _anonunion24(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('mipmap', CUmipmappedArray),
+class _anonunion24(ctypes.Union): pass
+_anonunion24._fields_ = [('mipmap', CUmipmappedArray),
               ('array', CUarray)]
 
-class _anonstruct26(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('level', ctypes.c_uint),
+class _anonstruct26(ctypes.Structure): pass
+_anonstruct26._fields_ = [('level', ctypes.c_uint),
               ('layer', ctypes.c_uint),
               ('offsetX', ctypes.c_uint),
               ('offsetY', ctypes.c_uint),
@@ -1570,24 +1500,20 @@ class _anonstruct26(ctypes.Structure):
               ('extentHeight', ctypes.c_uint),
               ('extentDepth', ctypes.c_uint)]
 
-class _anonstruct27(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('layer', ctypes.c_uint),
+class _anonstruct27(ctypes.Structure): pass
+_anonstruct27._fields_ = [('layer', ctypes.c_uint),
               ('offset', ctypes.c_ulonglong),
               ('size', ctypes.c_ulonglong)]
 
-class _anonunion25(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('sparseLevel', _anonstruct26),
+class _anonunion25(ctypes.Union): pass
+_anonunion25._fields_ = [('sparseLevel', _anonstruct26),
               ('miptail', _anonstruct27)]
 
-class _anonunion28(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('memHandle', CUmemGenericAllocationHandle)]
+class _anonunion28(ctypes.Union): pass
+_anonunion28._fields_ = [('memHandle', CUmemGenericAllocationHandle)]
 
-class struct_CUarrayMapInfo_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('resourceType', CUresourcetype),
+class struct_CUarrayMapInfo_st(ctypes.Structure): pass
+struct_CUarrayMapInfo_st._fields_ = [('resourceType', CUresourcetype),
               ('resource', _anonunion24),
               ('subresourceType', CUarraySparseSubresourceType),
               ('subresource', _anonunion25),
@@ -1601,9 +1527,8 @@ class struct_CUarrayMapInfo_st(ctypes.Structure):
 
 CUarrayMapInfo_v1 = struct_CUarrayMapInfo_st
 CUarrayMapInfo = struct_CUarrayMapInfo_st
-class struct_CUmemLocation_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('type', CUmemLocationType),
+class struct_CUmemLocation_st(ctypes.Structure): pass
+struct_CUmemLocation_st._fields_ = [('type', CUmemLocationType),
               ('id', ctypes.c_int)]
 
 CUmemLocation_v1 = struct_CUmemLocation_st
@@ -1613,16 +1538,14 @@ CU_MEM_ALLOCATION_COMP_NONE = enum_CUmemAllocationCompType_enum.define('CU_MEM_A
 CU_MEM_ALLOCATION_COMP_GENERIC = enum_CUmemAllocationCompType_enum.define('CU_MEM_ALLOCATION_COMP_GENERIC', 1)
 
 CUmemAllocationCompType = enum_CUmemAllocationCompType_enum
-class _anonstruct29(ctypes.Structure):
-  _pack_ = 2
-  _fields_ = [('compressionType', ctypes.c_ubyte),
+class _anonstruct29(ctypes.Structure): pass
+_anonstruct29._fields_ = [('compressionType', ctypes.c_ubyte),
               ('gpuDirectRDMACapable', ctypes.c_ubyte),
               ('usage', ctypes.c_ushort),
               ('reserved', (ctypes.c_ubyte * 4))]
 
-class struct_CUmemAllocationProp_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('type', CUmemAllocationType),
+class struct_CUmemAllocationProp_st(ctypes.Structure): pass
+struct_CUmemAllocationProp_st._fields_ = [('type', CUmemAllocationType),
               ('requestedHandleTypes', CUmemAllocationHandleType),
               ('location', CUmemLocation),
               ('win32HandleMetaData', ctypes.c_void_p),
@@ -1630,9 +1553,8 @@ class struct_CUmemAllocationProp_st(ctypes.Structure):
 
 CUmemAllocationProp_v1 = struct_CUmemAllocationProp_st
 CUmemAllocationProp = struct_CUmemAllocationProp_st
-class struct_CUmemAccessDesc_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('location', CUmemLocation),
+class struct_CUmemAccessDesc_st(ctypes.Structure): pass
+struct_CUmemAccessDesc_st._fields_ = [('location', CUmemLocation),
               ('flags', CUmemAccess_flags)]
 
 CUmemAccessDesc_v1 = struct_CUmemAccessDesc_st
@@ -1649,9 +1571,8 @@ CU_GRAPH_EXEC_UPDATE_ERROR_UNSUPPORTED_FUNCTION_CHANGE = enum_CUgraphExecUpdateR
 CU_GRAPH_EXEC_UPDATE_ERROR_ATTRIBUTES_CHANGED = enum_CUgraphExecUpdateResult_enum.define('CU_GRAPH_EXEC_UPDATE_ERROR_ATTRIBUTES_CHANGED', 8)
 
 CUgraphExecUpdateResult = enum_CUgraphExecUpdateResult_enum
-class struct_CUgraphExecUpdateResultInfo_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('result', CUgraphExecUpdateResult),
+class struct_CUgraphExecUpdateResultInfo_st(ctypes.Structure): pass
+struct_CUgraphExecUpdateResultInfo_st._fields_ = [('result', CUgraphExecUpdateResult),
               ('errorNode', CUgraphNode),
               ('errorFromNode', CUgraphNode)]
 
@@ -1668,9 +1589,8 @@ CU_MEMPOOL_ATTR_USED_MEM_CURRENT = enum_CUmemPool_attribute_enum.define('CU_MEMP
 CU_MEMPOOL_ATTR_USED_MEM_HIGH = enum_CUmemPool_attribute_enum.define('CU_MEMPOOL_ATTR_USED_MEM_HIGH', 8)
 
 CUmemPool_attribute = enum_CUmemPool_attribute_enum
-class struct_CUmemPoolProps_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('allocType', CUmemAllocationType),
+class struct_CUmemPoolProps_st(ctypes.Structure): pass
+struct_CUmemPoolProps_st._fields_ = [('allocType', CUmemAllocationType),
               ('handleTypes', CUmemAllocationHandleType),
               ('location', CUmemLocation),
               ('win32SecurityAttributes', ctypes.c_void_p),
@@ -1678,15 +1598,13 @@ class struct_CUmemPoolProps_st(ctypes.Structure):
 
 CUmemPoolProps_v1 = struct_CUmemPoolProps_st
 CUmemPoolProps = struct_CUmemPoolProps_st
-class struct_CUmemPoolPtrExportData_st(ctypes.Structure):
-  _pack_ = 1
-  _fields_ = [('reserved', (ctypes.c_ubyte * 64))]
+class struct_CUmemPoolPtrExportData_st(ctypes.Structure): pass
+struct_CUmemPoolPtrExportData_st._fields_ = [('reserved', (ctypes.c_ubyte * 64))]
 
 CUmemPoolPtrExportData_v1 = struct_CUmemPoolPtrExportData_st
 CUmemPoolPtrExportData = struct_CUmemPoolPtrExportData_st
-class struct_CUDA_MEM_ALLOC_NODE_PARAMS_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('poolProps', CUmemPoolProps),
+class struct_CUDA_MEM_ALLOC_NODE_PARAMS_st(ctypes.Structure): pass
+struct_CUDA_MEM_ALLOC_NODE_PARAMS_st._fields_ = [('poolProps', CUmemPoolProps),
               ('accessDescs', ctypes.POINTER(CUmemAccessDesc)),
               ('accessDescCount', size_t),
               ('bytesize', size_t),
@@ -3303,9 +3221,8 @@ try: (cuTexRefSetAddress2D_v2:=dll.cuTexRefSetAddress2D_v2).restype,cuTexRefSetA
 except AttributeError: pass
 
 CUdeviceptr_v1 = ctypes.c_uint
-class struct_CUDA_MEMCPY2D_v1_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('srcXInBytes', ctypes.c_uint),
+class struct_CUDA_MEMCPY2D_v1_st(ctypes.Structure): pass
+struct_CUDA_MEMCPY2D_v1_st._fields_ = [('srcXInBytes', ctypes.c_uint),
               ('srcY', ctypes.c_uint),
               ('srcMemoryType', CUmemorytype),
               ('srcHost', ctypes.c_void_p),
@@ -3323,9 +3240,8 @@ class struct_CUDA_MEMCPY2D_v1_st(ctypes.Structure):
               ('Height', ctypes.c_uint)]
 
 CUDA_MEMCPY2D_v1 = struct_CUDA_MEMCPY2D_v1_st
-class struct_CUDA_MEMCPY3D_v1_st(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('srcXInBytes', ctypes.c_uint),
+class struct_CUDA_MEMCPY3D_v1_st(ctypes.Structure): pass
+struct_CUDA_MEMCPY3D_v1_st._fields_ = [('srcXInBytes', ctypes.c_uint),
               ('srcY', ctypes.c_uint),
               ('srcZ', ctypes.c_uint),
               ('srcLOD', ctypes.c_uint),
@@ -3352,17 +3268,15 @@ class struct_CUDA_MEMCPY3D_v1_st(ctypes.Structure):
               ('Depth', ctypes.c_uint)]
 
 CUDA_MEMCPY3D_v1 = struct_CUDA_MEMCPY3D_v1_st
-class struct_CUDA_ARRAY_DESCRIPTOR_v1_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('Width', ctypes.c_uint),
+class struct_CUDA_ARRAY_DESCRIPTOR_v1_st(ctypes.Structure): pass
+struct_CUDA_ARRAY_DESCRIPTOR_v1_st._fields_ = [('Width', ctypes.c_uint),
               ('Height', ctypes.c_uint),
               ('Format', CUarray_format),
               ('NumChannels', ctypes.c_uint)]
 
 CUDA_ARRAY_DESCRIPTOR_v1 = struct_CUDA_ARRAY_DESCRIPTOR_v1_st
-class struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('Width', ctypes.c_uint),
+class struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st(ctypes.Structure): pass
+struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st._fields_ = [('Width', ctypes.c_uint),
               ('Height', ctypes.c_uint),
               ('Depth', ctypes.c_uint),
               ('Format', CUarray_format),

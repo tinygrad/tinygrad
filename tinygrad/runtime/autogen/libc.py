@@ -118,12 +118,11 @@ except AttributeError: pass
 try: (strxfrm:=dll.strxfrm).restype,strxfrm.argtypes = ctypes.c_ulong,[ctypes.c_char_p, ctypes.c_char_p, size_t]
 except AttributeError: pass
 
-class struct___locale_data(ctypes.Structure):
-  _fields_ = []
+class struct___locale_data(ctypes.Structure): pass
+struct___locale_data._fields_ = []
 
-class struct___locale_struct(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('__locales', (ctypes.POINTER(struct___locale_data) * 13)),
+class struct___locale_struct(ctypes.Structure): pass
+struct___locale_struct._fields_ = [('__locales', (ctypes.POINTER(struct___locale_data) * 13)),
               ('__ctype_b', ctypes.POINTER(ctypes.c_ushort)),
               ('__ctype_tolower', ctypes.POINTER(ctypes.c_int)),
               ('__ctype_toupper', ctypes.POINTER(ctypes.c_int)),
@@ -276,9 +275,8 @@ Elf32_Section = ctypes.c_ushort
 Elf64_Section = ctypes.c_ushort
 Elf32_Versym = ctypes.c_ushort
 Elf64_Versym = ctypes.c_ushort
-class Elf32_Ehdr(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('e_ident', (ctypes.c_ubyte * 16)),
+class Elf32_Ehdr(ctypes.Structure): pass
+Elf32_Ehdr._fields_ = [('e_ident', (ctypes.c_ubyte * 16)),
               ('e_type', Elf32_Half),
               ('e_machine', Elf32_Half),
               ('e_version', Elf32_Word),
@@ -293,9 +291,8 @@ class Elf32_Ehdr(ctypes.Structure):
               ('e_shnum', Elf32_Half),
               ('e_shstrndx', Elf32_Half)]
 
-class Elf64_Ehdr(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('e_ident', (ctypes.c_ubyte * 16)),
+class Elf64_Ehdr(ctypes.Structure): pass
+Elf64_Ehdr._fields_ = [('e_ident', (ctypes.c_ubyte * 16)),
               ('e_type', Elf64_Half),
               ('e_machine', Elf64_Half),
               ('e_version', Elf64_Word),
@@ -310,9 +307,8 @@ class Elf64_Ehdr(ctypes.Structure):
               ('e_shnum', Elf64_Half),
               ('e_shstrndx', Elf64_Half)]
 
-class Elf32_Shdr(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('sh_name', Elf32_Word),
+class Elf32_Shdr(ctypes.Structure): pass
+Elf32_Shdr._fields_ = [('sh_name', Elf32_Word),
               ('sh_type', Elf32_Word),
               ('sh_flags', Elf32_Word),
               ('sh_addr', Elf32_Addr),
@@ -323,9 +319,8 @@ class Elf32_Shdr(ctypes.Structure):
               ('sh_addralign', Elf32_Word),
               ('sh_entsize', Elf32_Word)]
 
-class Elf64_Shdr(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('sh_name', Elf64_Word),
+class Elf64_Shdr(ctypes.Structure): pass
+Elf64_Shdr._fields_ = [('sh_name', Elf64_Word),
               ('sh_type', Elf64_Word),
               ('sh_flags', Elf64_Xword),
               ('sh_addr', Elf64_Addr),
@@ -336,74 +331,63 @@ class Elf64_Shdr(ctypes.Structure):
               ('sh_addralign', Elf64_Xword),
               ('sh_entsize', Elf64_Xword)]
 
-class Elf32_Chdr(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('ch_type', Elf32_Word),
+class Elf32_Chdr(ctypes.Structure): pass
+Elf32_Chdr._fields_ = [('ch_type', Elf32_Word),
               ('ch_size', Elf32_Word),
               ('ch_addralign', Elf32_Word)]
 
-class Elf64_Chdr(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('ch_type', Elf64_Word),
+class Elf64_Chdr(ctypes.Structure): pass
+Elf64_Chdr._fields_ = [('ch_type', Elf64_Word),
               ('ch_reserved', Elf64_Word),
               ('ch_size', Elf64_Xword),
               ('ch_addralign', Elf64_Xword)]
 
-class Elf32_Sym(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('st_name', Elf32_Word),
+class Elf32_Sym(ctypes.Structure): pass
+Elf32_Sym._fields_ = [('st_name', Elf32_Word),
               ('st_value', Elf32_Addr),
               ('st_size', Elf32_Word),
               ('st_info', ctypes.c_ubyte),
               ('st_other', ctypes.c_ubyte),
               ('st_shndx', Elf32_Section)]
 
-class Elf64_Sym(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('st_name', Elf64_Word),
+class Elf64_Sym(ctypes.Structure): pass
+Elf64_Sym._fields_ = [('st_name', Elf64_Word),
               ('st_info', ctypes.c_ubyte),
               ('st_other', ctypes.c_ubyte),
               ('st_shndx', Elf64_Section),
               ('st_value', Elf64_Addr),
               ('st_size', Elf64_Xword)]
 
-class Elf32_Syminfo(ctypes.Structure):
-  _pack_ = 2
-  _fields_ = [('si_boundto', Elf32_Half),
+class Elf32_Syminfo(ctypes.Structure): pass
+Elf32_Syminfo._fields_ = [('si_boundto', Elf32_Half),
               ('si_flags', Elf32_Half)]
 
-class Elf64_Syminfo(ctypes.Structure):
-  _pack_ = 2
-  _fields_ = [('si_boundto', Elf64_Half),
+class Elf64_Syminfo(ctypes.Structure): pass
+Elf64_Syminfo._fields_ = [('si_boundto', Elf64_Half),
               ('si_flags', Elf64_Half)]
 
-class Elf32_Rel(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('r_offset', Elf32_Addr),
+class Elf32_Rel(ctypes.Structure): pass
+Elf32_Rel._fields_ = [('r_offset', Elf32_Addr),
               ('r_info', Elf32_Word)]
 
-class Elf64_Rel(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('r_offset', Elf64_Addr),
+class Elf64_Rel(ctypes.Structure): pass
+Elf64_Rel._fields_ = [('r_offset', Elf64_Addr),
               ('r_info', Elf64_Xword)]
 
-class Elf32_Rela(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('r_offset', Elf32_Addr),
+class Elf32_Rela(ctypes.Structure): pass
+Elf32_Rela._fields_ = [('r_offset', Elf32_Addr),
               ('r_info', Elf32_Word),
               ('r_addend', Elf32_Sword)]
 
-class Elf64_Rela(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('r_offset', Elf64_Addr),
+class Elf64_Rela(ctypes.Structure): pass
+Elf64_Rela._fields_ = [('r_offset', Elf64_Addr),
               ('r_info', Elf64_Xword),
               ('r_addend', Elf64_Sxword)]
 
 Elf32_Relr = ctypes.c_uint
 Elf64_Relr = ctypes.c_ulong
-class Elf32_Phdr(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('p_type', Elf32_Word),
+class Elf32_Phdr(ctypes.Structure): pass
+Elf32_Phdr._fields_ = [('p_type', Elf32_Word),
               ('p_offset', Elf32_Off),
               ('p_vaddr', Elf32_Addr),
               ('p_paddr', Elf32_Addr),
@@ -412,9 +396,8 @@ class Elf32_Phdr(ctypes.Structure):
               ('p_flags', Elf32_Word),
               ('p_align', Elf32_Word)]
 
-class Elf64_Phdr(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('p_type', Elf64_Word),
+class Elf64_Phdr(ctypes.Structure): pass
+Elf64_Phdr._fields_ = [('p_type', Elf64_Word),
               ('p_flags', Elf64_Word),
               ('p_offset', Elf64_Off),
               ('p_vaddr', Elf64_Addr),
@@ -423,29 +406,24 @@ class Elf64_Phdr(ctypes.Structure):
               ('p_memsz', Elf64_Xword),
               ('p_align', Elf64_Xword)]
 
-class _anonunion0(ctypes.Union):
-  _pack_ = 4
-  _fields_ = [('d_val', Elf32_Word),
+class _anonunion0(ctypes.Union): pass
+_anonunion0._fields_ = [('d_val', Elf32_Word),
               ('d_ptr', Elf32_Addr)]
 
-class Elf32_Dyn(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('d_tag', Elf32_Sword),
+class Elf32_Dyn(ctypes.Structure): pass
+Elf32_Dyn._fields_ = [('d_tag', Elf32_Sword),
               ('d_un', _anonunion0)]
 
-class _anonunion1(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('d_val', Elf64_Xword),
+class _anonunion1(ctypes.Union): pass
+_anonunion1._fields_ = [('d_val', Elf64_Xword),
               ('d_ptr', Elf64_Addr)]
 
-class Elf64_Dyn(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('d_tag', Elf64_Sxword),
+class Elf64_Dyn(ctypes.Structure): pass
+Elf64_Dyn._fields_ = [('d_tag', Elf64_Sxword),
               ('d_un', _anonunion1)]
 
-class Elf32_Verdef(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vd_version', Elf32_Half),
+class Elf32_Verdef(ctypes.Structure): pass
+Elf32_Verdef._fields_ = [('vd_version', Elf32_Half),
               ('vd_flags', Elf32_Half),
               ('vd_ndx', Elf32_Half),
               ('vd_cnt', Elf32_Half),
@@ -453,9 +431,8 @@ class Elf32_Verdef(ctypes.Structure):
               ('vd_aux', Elf32_Word),
               ('vd_next', Elf32_Word)]
 
-class Elf64_Verdef(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vd_version', Elf64_Half),
+class Elf64_Verdef(ctypes.Structure): pass
+Elf64_Verdef._fields_ = [('vd_version', Elf64_Half),
               ('vd_flags', Elf64_Half),
               ('vd_ndx', Elf64_Half),
               ('vd_cnt', Elf64_Half),
@@ -463,149 +440,126 @@ class Elf64_Verdef(ctypes.Structure):
               ('vd_aux', Elf64_Word),
               ('vd_next', Elf64_Word)]
 
-class Elf32_Verdaux(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vda_name', Elf32_Word),
+class Elf32_Verdaux(ctypes.Structure): pass
+Elf32_Verdaux._fields_ = [('vda_name', Elf32_Word),
               ('vda_next', Elf32_Word)]
 
-class Elf64_Verdaux(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vda_name', Elf64_Word),
+class Elf64_Verdaux(ctypes.Structure): pass
+Elf64_Verdaux._fields_ = [('vda_name', Elf64_Word),
               ('vda_next', Elf64_Word)]
 
-class Elf32_Verneed(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vn_version', Elf32_Half),
+class Elf32_Verneed(ctypes.Structure): pass
+Elf32_Verneed._fields_ = [('vn_version', Elf32_Half),
               ('vn_cnt', Elf32_Half),
               ('vn_file', Elf32_Word),
               ('vn_aux', Elf32_Word),
               ('vn_next', Elf32_Word)]
 
-class Elf64_Verneed(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vn_version', Elf64_Half),
+class Elf64_Verneed(ctypes.Structure): pass
+Elf64_Verneed._fields_ = [('vn_version', Elf64_Half),
               ('vn_cnt', Elf64_Half),
               ('vn_file', Elf64_Word),
               ('vn_aux', Elf64_Word),
               ('vn_next', Elf64_Word)]
 
-class Elf32_Vernaux(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vna_hash', Elf32_Word),
+class Elf32_Vernaux(ctypes.Structure): pass
+Elf32_Vernaux._fields_ = [('vna_hash', Elf32_Word),
               ('vna_flags', Elf32_Half),
               ('vna_other', Elf32_Half),
               ('vna_name', Elf32_Word),
               ('vna_next', Elf32_Word)]
 
-class Elf64_Vernaux(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('vna_hash', Elf64_Word),
+class Elf64_Vernaux(ctypes.Structure): pass
+Elf64_Vernaux._fields_ = [('vna_hash', Elf64_Word),
               ('vna_flags', Elf64_Half),
               ('vna_other', Elf64_Half),
               ('vna_name', Elf64_Word),
               ('vna_next', Elf64_Word)]
 
 uint32_t = ctypes.c_uint
-class _anonunion2(ctypes.Union):
-  _pack_ = 4
-  _fields_ = [('a_val', uint32_t)]
+class _anonunion2(ctypes.Union): pass
+_anonunion2._fields_ = [('a_val', uint32_t)]
 
-class Elf32_auxv_t(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('a_type', uint32_t),
+class Elf32_auxv_t(ctypes.Structure): pass
+Elf32_auxv_t._fields_ = [('a_type', uint32_t),
               ('a_un', _anonunion2)]
 
 uint64_t = ctypes.c_ulong
-class _anonunion3(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('a_val', uint64_t)]
+class _anonunion3(ctypes.Union): pass
+_anonunion3._fields_ = [('a_val', uint64_t)]
 
-class Elf64_auxv_t(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('a_type', uint64_t),
+class Elf64_auxv_t(ctypes.Structure): pass
+Elf64_auxv_t._fields_ = [('a_type', uint64_t),
               ('a_un', _anonunion3)]
 
-class Elf32_Nhdr(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('n_namesz', Elf32_Word),
+class Elf32_Nhdr(ctypes.Structure): pass
+Elf32_Nhdr._fields_ = [('n_namesz', Elf32_Word),
               ('n_descsz', Elf32_Word),
               ('n_type', Elf32_Word)]
 
-class Elf64_Nhdr(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('n_namesz', Elf64_Word),
+class Elf64_Nhdr(ctypes.Structure): pass
+Elf64_Nhdr._fields_ = [('n_namesz', Elf64_Word),
               ('n_descsz', Elf64_Word),
               ('n_type', Elf64_Word)]
 
-class Elf32_Move(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('m_value', Elf32_Xword),
+class Elf32_Move(ctypes.Structure): pass
+Elf32_Move._fields_ = [('m_value', Elf32_Xword),
               ('m_info', Elf32_Word),
               ('m_poffset', Elf32_Word),
               ('m_repeat', Elf32_Half),
               ('m_stride', Elf32_Half)]
 
-class Elf64_Move(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('m_value', Elf64_Xword),
+class Elf64_Move(ctypes.Structure): pass
+Elf64_Move._fields_ = [('m_value', Elf64_Xword),
               ('m_info', Elf64_Xword),
               ('m_poffset', Elf64_Xword),
               ('m_repeat', Elf64_Half),
               ('m_stride', Elf64_Half)]
 
-class _anonstruct4(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('gt_current_g_value', Elf32_Word),
+class _anonstruct4(ctypes.Structure): pass
+_anonstruct4._fields_ = [('gt_current_g_value', Elf32_Word),
               ('gt_unused', Elf32_Word)]
 
-class _anonstruct5(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('gt_g_value', Elf32_Word),
+class _anonstruct5(ctypes.Structure): pass
+_anonstruct5._fields_ = [('gt_g_value', Elf32_Word),
               ('gt_bytes', Elf32_Word)]
 
-class Elf32_gptab(ctypes.Union):
-  _pack_ = 4
-  _fields_ = [('gt_header', _anonstruct4),
+class Elf32_gptab(ctypes.Union): pass
+Elf32_gptab._fields_ = [('gt_header', _anonstruct4),
               ('gt_entry', _anonstruct5)]
 
-class Elf32_RegInfo(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('ri_gprmask', Elf32_Word),
+class Elf32_RegInfo(ctypes.Structure): pass
+Elf32_RegInfo._fields_ = [('ri_gprmask', Elf32_Word),
               ('ri_cprmask', (Elf32_Word * 4)),
               ('ri_gp_value', Elf32_Sword)]
 
-class Elf_Options(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('kind', ctypes.c_ubyte),
+class Elf_Options(ctypes.Structure): pass
+Elf_Options._fields_ = [('kind', ctypes.c_ubyte),
               ('size', ctypes.c_ubyte),
               ('section', Elf32_Section),
               ('info', Elf32_Word)]
 
-class Elf_Options_Hw(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('hwp_flags1', Elf32_Word),
+class Elf_Options_Hw(ctypes.Structure): pass
+Elf_Options_Hw._fields_ = [('hwp_flags1', Elf32_Word),
               ('hwp_flags2', Elf32_Word)]
 
-class Elf32_Lib(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('l_name', Elf32_Word),
+class Elf32_Lib(ctypes.Structure): pass
+Elf32_Lib._fields_ = [('l_name', Elf32_Word),
               ('l_time_stamp', Elf32_Word),
               ('l_checksum', Elf32_Word),
               ('l_version', Elf32_Word),
               ('l_flags', Elf32_Word)]
 
-class Elf64_Lib(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('l_name', Elf64_Word),
+class Elf64_Lib(ctypes.Structure): pass
+Elf64_Lib._fields_ = [('l_name', Elf64_Word),
               ('l_time_stamp', Elf64_Word),
               ('l_checksum', Elf64_Word),
               ('l_version', Elf64_Word),
               ('l_flags', Elf64_Word)]
 
 Elf32_Conflict = ctypes.c_uint
-class Elf_MIPS_ABIFlags_v0(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('version', Elf32_Half),
+class Elf_MIPS_ABIFlags_v0(ctypes.Structure): pass
+Elf_MIPS_ABIFlags_v0._fields_ = [('version', Elf32_Half),
               ('isa_level', ctypes.c_ubyte),
               ('isa_rev', ctypes.c_ubyte),
               ('gpr_size', ctypes.c_ubyte),
