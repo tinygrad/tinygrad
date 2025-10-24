@@ -3,7 +3,6 @@ from typing import Callable
 import unittest
 from tinygrad import Tensor, UOp
 from tinygrad.uop.ops import AxisType, Ops
-from tinygrad.dtype import dtypes, _to_np_dtype
 
 class TestOuterworldReduce(unittest.TestCase):
   def test_reduce(self):
@@ -142,7 +141,8 @@ class TestAfterVmap(unittest.TestCase):
     x = Tensor.ones(self.n, self.m)
     self.assertListEqual((TestAfterVmap._vfn(x) @ Tensor.ones(self.m)).tolist(), (self.expected_vmap_res @ np.ones(self.m)).tolist())
     self.assertTrue((TestAfterVmap._vfn(x) @ Tensor.ones(self.m) == sum(range(self.m))).all().item())
-    self.assertListEqual((TestAfterVmap._vfn(x) @ Tensor.arange(self.m*10).reshape(self.m, 10)).tolist(), (self.expected_vmap_res @ np.arange(10*self.m).reshape(self.m, 10)).tolist())
+    self.assertListEqual((TestAfterVmap._vfn(x) @ Tensor.arange(self.m*10).reshape(self.m, 10)).tolist(),
+                         (self.expected_vmap_res @ np.arange(10*self.m).reshape(self.m, 10)).tolist())
 
 if __name__ == '__main__':
   unittest.main()
