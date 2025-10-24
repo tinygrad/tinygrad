@@ -4,7 +4,7 @@ from collections import defaultdict
 from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
 from tinygrad.device import Buffer
-from tinygrad.dtype import dtypes, ImageDType, AddrSpace
+from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
 from tinygrad.codegen.simplify import pm_flatten_range
@@ -64,19 +64,7 @@ class Scheduler:
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
   def _globalizable_rngs(self) -> list[UOp]:
-    store_rngs = self.ast.src[0].src[2:]
-    # filter any not in local stores
-    local_store_rngs = [x.ranges for x in self.ast.toposort() if (x.op is Ops.STORE and x.src[0].ptrdtype.addrspace == AddrSpace.LOCAL) \
-                        or (x.op is Ops.BUFFERIZE and x.arg == AddrSpace.LOCAL)]
-    for ls in local_store_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
-
-    # filter any not in reduces
-    # TODO: enable this
-    """
-    reduce_rngs = [x.ranges for x in self.ast.toposort() if x.op is Ops.REDUCE]
-    for ls in reduce_rngs: store_rngs = tuple([x for x in store_rngs if x in ls])
-    """
-    return [x for x in UOp.sink(*store_rngs).toposort() if x.op is Ops.RANGE and x.arg[-1] == AxisType.LOOP] if store_rngs else []
+    return flatten([list(UOp.sink(*s.src[1:]).ranges) for s in self.ast.src if s.op is Ops.END])
 
   def convert_loop_to_global(self):
     if not self.ren.has_local: return None
@@ -87,7 +75,7 @@ class Scheduler:
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
   def colors(self) -> list[str]:
-    output_rngs = flatten([list(UOp.sink(*s.src[2:]).ranges) for s in self.ast.src])
+    output_rngs = self._globalizable_rngs()
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
