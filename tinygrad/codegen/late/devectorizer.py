@@ -2,7 +2,7 @@ from typing import Any, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid
+from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
@@ -265,6 +265,12 @@ pm_render = PatternMatcher([
     UPat.var("a")), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
   (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c").logical_not()).or_casted(),),
     allow_any_len=True, name="l").or_casted()), lambda c,idx,l,a: l.replace(src=(l.src[0], a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
+
+  # LOAD/STORE index
+  (UPat(Ops.INDEX, name="idx"), lambda idx: idx.replace(dtype=idx.src[0].dtype).load() if not isinstance(idx.dtype, PtrDType) else None),
+  (UPat(Ops.STORE, src=(UPat.var("b"), UPat.var("i"), UPat.var("v"))), lambda b,i,v: b.index(i, dtype=b.dtype).store(v)),
+  (UPat(Ops.CAST, dtype=dtypes.index, name='d'), lambda d: d.src[0]),
+  (UPat(Ops.CONST, dtype=dtypes.index, name='d'), lambda d: d.replace(dtype=dtypes.int)),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
@@ -288,17 +294,17 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   # if we have a range
   if len(reduce_range) != 0:
     topo = inp.toposort()
-    ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.STORE])
+    ended_ranges = flatten([x.ended_ranges for x in topo if x.op in (Ops.END, Ops.STORE)])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))
-    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
-               acc.index(UOp.const(dtypes.int, 0)).store(identity)
-    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0)).load()] + lst  # put acc as the first element
+    acc_init = acc.after(*input_ranges).store(UOp.const(dtypes.int, 0), identity) if len(input_ranges) else \
+               acc.store(UOp.const(dtypes.int, 0), identity)
+    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0))] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret, *reduce_range)).index(UOp.const(dtypes.int, 0)).load()
+  return acc.after(acc.store(UOp.const(dtypes.int, 0), ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0))
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN

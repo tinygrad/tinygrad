@@ -58,7 +58,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
   # add ends (after reduces are removed, as long as we have reduces we can have stores)
-  sink = graph_rewrite(sink, pm_add_ends, name="add ends of ranges")
+  #sink = graph_rewrite(sink, pm_add_ends, name="add ends of ranges")
 
   # devectorize (TODO: does this need opts?)
   if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
