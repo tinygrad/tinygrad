@@ -159,8 +159,7 @@ class FP8Linear:
     self.weight_scale = Tensor.empty((), dtype=dtypes.float16)
 
   def __call__(self, x:Tensor):
-    xq, scale = quantize_to_fp8(x)
-    y = xq.dot(self.weight.T, dtype=dtypes.float) * self.weight_scale * scale
+    y = x.dot(self.weight.T.cast(dtypes.float32)) * self.weight_scale
     if self.bias is not None: y = y + self.bias.cast(y.dtype)
     return y.cast(x.dtype)
 
