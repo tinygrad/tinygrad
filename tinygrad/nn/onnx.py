@@ -671,7 +671,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return ReduceSum(data.abs(), axes, keepdims, noop_with_empty_axes)
   def ReduceL2(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
     dtype = dtypes.float if data.dtype in (dtypes.float16, dtypes.bfloat16) else data.dtype
-    return ReduceSum(data.square().cast(dtype), axes, keepdims, noop_with_empty_axes).sqrt().cast(data.dtype)
+    return ReduceSum(data.cast(dtype).square(), axes, keepdims, noop_with_empty_axes).sqrt().cast(data.dtype)
   def ReduceLogSum(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
     return ReduceSum(data, axes, keepdims, noop_with_empty_axes).log()
   def ReduceLogSumExp(data:Tensor, axes:list[int]|None=None, keepdims:int=1, noop_with_empty_axes:int=0):
