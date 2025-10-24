@@ -71,6 +71,38 @@ def fa_bw():
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
 class TestPcontig(unittest.TestCase):
+  def test_double_matmul_opt(self):
+    with Context(DEBUG=0):
+      a,b,c = [Tensor.rand(16, 16).contiguous().realize() for _ in range(3)]
+
+    with Context(PCONTIG=2, DEBUG=2):
+      opts = (Opt(OptOps.UPCAST, 1, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 0, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UNROLL, 0, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UNROLL, 1, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 1, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      #opts = (Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4))
+      #(a@b@c).contiguous(arg=opts).realize()
+
   def test_flash_attention_bw(self):
     with Context(PCONTIG=max(2, PCONTIG.value), DEBUG=2):
       grads = fa_bw()
@@ -95,9 +127,13 @@ class TestPcontig(unittest.TestCase):
       # this is the <rows> output
       opts += (Opt(OptOps.UPCAST, 3, 4),)
       ret = fa().contiguous(arg=opts).realize()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+
+    with Context(DEBUG=2):
+      cmp = fa().realize()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
 
     with Context(DEBUG=0):
-      cmp = fa().realize()
       mse = ((cmp-ret)**2).sum().item()
       print(f"mse: {mse}")
       self.assertLessEqual(mse, 1e-6)

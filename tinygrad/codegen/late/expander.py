@@ -101,9 +101,6 @@ expander = PatternMatcher([
   # UNROLL GEP (needed for WMMA, generalize this) -> vectorized ALU
   (UPat(Ops.UNROLL, name="ex", src=tuple(UPat.var('x').gep(i)+UPat.var('y').gep(i) for i in range(256 if AMX else 8))),
     lambda ex,x,y: UOp(Ops.UNROLL, ex.dtype, tuple((x+y).gep(i) for i in range(256 if AMX else 8)), ex.arg)),
-  # AFTER on VECTORIZE
-  #(UPat(Ops.AFTER, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines, name="buf")),), name="aft", allow_any_len=True),
-  # lambda buf, aft: buf.after(*aft.src[1:]).broadcast(len(aft.src[0].src))),
 ])
 
 def create_gate(root:UOp) -> UOp|None:
