@@ -1575,7 +1575,7 @@ class Tensor(MathTrait):
     """
     if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
     dim = self._resolve_dim(dim)
-    return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
+    return self if not self.ndim or canonicalize_dim(self.shape[dim]) != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
   def unsqueeze(self, dim:int) -> Tensor:
     """

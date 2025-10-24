@@ -144,5 +144,13 @@ class TestAfterVmap(unittest.TestCase):
     self.assertListEqual((TestAfterVmap._vfn(x) @ Tensor.arange(self.m*10).reshape(self.m, 10)).tolist(),
                          (self.expected_vmap_res @ np.arange(10*self.m).reshape(self.m, 10)).tolist())
 
+  def test_squeeze(self):
+    x = Tensor.ones(self.n, self.m)
+    self.assertListEqual(TestAfterVmap._vfn(x).unsqueeze(0).tolist(), np.expand_dims(self.expected_vmap_res,0).tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x).unsqueeze(-1).tolist(), np.expand_dims(self.expected_vmap_res,-1).tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x).unsqueeze(-1).squeeze(-1).tolist(), self.expected_vmap_res.tolist())
+    if self.n != 1: self.assertTrue((ret:=TestAfterVmap._vfn(x)).squeeze(0) is ret)
+    if self.m != 1: self.assertTrue((ret:=TestAfterVmap._vfn(x)).squeeze(0) is ret)
+
 if __name__ == '__main__':
   unittest.main()
