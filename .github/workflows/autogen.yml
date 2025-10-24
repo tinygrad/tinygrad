@@ -32,17 +32,11 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         amd: 'true'
-        cuda: 'true'
         webgpu: 'true'
         llvm: 'true'
         pydeps: 'pyyaml mako'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
-    - name: Verify CUDA autogen
-      run: |
-        cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
-        ./autogen_stubs.sh nv
-        diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
     - name: Verify AMD autogen
       run: |
         cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
@@ -103,8 +97,12 @@ jobs:
     - name: Verify CUDA autogen
       run: |
         mv tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
-        python3 -c "from tinygrad.runtime.autogen import cuda"
+        mv tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
+        mv tinygrad/runtime/autogen/nv.py /tmp/nv.py.bak
+        python3 -c "from tinygrad.runtime.autogen import cuda. nv_gpu"
         diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
+        diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
+        diff /tmp/nv.py.bak tinygrad/runtime/autogen/nv.py
     - name: Verify Linux autogen
       run: |
         mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak

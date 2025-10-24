@@ -25,8 +25,8 @@ NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6
 NVJITLINK_INPUT_INDEX = nvJitLinkInputType.define('NVJITLINK_INPUT_INDEX', 7)
 NVJITLINK_INPUT_ANY = nvJitLinkInputType.define('NVJITLINK_INPUT_ANY', 10)
 
-class struct_nvJitLink(ctypes.Structure):
-  _fields_ = []
+class struct_nvJitLink(ctypes.Structure): pass
+struct_nvJitLink._fields_ = []
 
 nvJitLinkHandle = ctypes.POINTER(struct_nvJitLink)
 uint32_t = ctypes.c_uint

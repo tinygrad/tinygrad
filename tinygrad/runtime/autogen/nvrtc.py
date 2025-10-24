@@ -32,8 +32,8 @@ except AttributeError: pass
 try: (nvrtcGetSupportedArchs:=dll.nvrtcGetSupportedArchs).restype,nvrtcGetSupportedArchs.argtypes = nvrtcResult,[ctypes.POINTER(ctypes.c_int)]
 except AttributeError: pass
 
-class struct__nvrtcProgram(ctypes.Structure):
-  _fields_ = []
+class struct__nvrtcProgram(ctypes.Structure): pass
+struct__nvrtcProgram._fields_ = []
 
 nvrtcProgram = ctypes.POINTER(struct__nvrtcProgram)
 # nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog, const char *src, const char *name, int numHeaders, const char *const *headers, const char *const *includeNames)
