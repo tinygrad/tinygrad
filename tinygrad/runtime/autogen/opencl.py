@@ -2,40 +2,40 @@ import ctypes, ctypes.util
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 dll = ctypes.CDLL(ctypes.util.find_library('OpenCL'))
 
-class struct__cl_platform_id(ctypes.Structure):
-  _fields_ = []
+class struct__cl_platform_id(ctypes.Structure): pass
+struct__cl_platform_id._fields_ = []
 
 cl_platform_id = ctypes.POINTER(struct__cl_platform_id)
-class struct__cl_device_id(ctypes.Structure):
-  _fields_ = []
+class struct__cl_device_id(ctypes.Structure): pass
+struct__cl_device_id._fields_ = []
 
 cl_device_id = ctypes.POINTER(struct__cl_device_id)
-class struct__cl_context(ctypes.Structure):
-  _fields_ = []
+class struct__cl_context(ctypes.Structure): pass
+struct__cl_context._fields_ = []
 
 cl_context = ctypes.POINTER(struct__cl_context)
-class struct__cl_command_queue(ctypes.Structure):
-  _fields_ = []
+class struct__cl_command_queue(ctypes.Structure): pass
+struct__cl_command_queue._fields_ = []
 
 cl_command_queue = ctypes.POINTER(struct__cl_command_queue)
-class struct__cl_mem(ctypes.Structure):
-  _fields_ = []
+class struct__cl_mem(ctypes.Structure): pass
+struct__cl_mem._fields_ = []
 
 cl_mem = ctypes.POINTER(struct__cl_mem)
-class struct__cl_program(ctypes.Structure):
-  _fields_ = []
+class struct__cl_program(ctypes.Structure): pass
+struct__cl_program._fields_ = []
 
 cl_program = ctypes.POINTER(struct__cl_program)
-class struct__cl_kernel(ctypes.Structure):
-  _fields_ = []
+class struct__cl_kernel(ctypes.Structure): pass
+struct__cl_kernel._fields_ = []
 
 cl_kernel = ctypes.POINTER(struct__cl_kernel)
-class struct__cl_event(ctypes.Structure):
-  _fields_ = []
+class struct__cl_event(ctypes.Structure): pass
+struct__cl_event._fields_ = []
 
 cl_event = ctypes.POINTER(struct__cl_event)
-class struct__cl_sampler(ctypes.Structure):
-  _fields_ = []
+class struct__cl_sampler(ctypes.Structure): pass
+struct__cl_sampler._fields_ = []
 
 cl_sampler = ctypes.POINTER(struct__cl_sampler)
 cl_bool = ctypes.c_uint
@@ -92,22 +92,19 @@ cl_device_device_enqueue_capabilities = ctypes.c_ulong
 cl_khronos_vendor_id = ctypes.c_uint
 cl_mem_properties = ctypes.c_ulong
 cl_version = ctypes.c_uint
-class struct__cl_image_format(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('image_channel_order', cl_channel_order),
+class struct__cl_image_format(ctypes.Structure): pass
+struct__cl_image_format._fields_ = [('image_channel_order', cl_channel_order),
               ('image_channel_data_type', cl_channel_type)]
 
 cl_image_format = struct__cl_image_format
 size_t = ctypes.c_ulong
 cl_uint = ctypes.c_uint
-class _anonunion0(ctypes.Union):
-  _pack_ = 8
-  _fields_ = [('buffer', cl_mem),
+class _anonunion0(ctypes.Union): pass
+_anonunion0._fields_ = [('buffer', cl_mem),
               ('mem_object', cl_mem)]
 
-class struct__cl_image_desc(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('image_type', cl_mem_object_type),
+class struct__cl_image_desc(ctypes.Structure): pass
+struct__cl_image_desc._fields_ = [('image_type', cl_mem_object_type),
               ('image_width', size_t),
               ('image_height', size_t),
               ('image_depth', size_t),
@@ -119,15 +116,13 @@ class struct__cl_image_desc(ctypes.Structure):
               ('union _cl_image_desc::(anonymous at /usr/include/CL/cl.h:151:5)', _anonunion0)]
 
 cl_image_desc = struct__cl_image_desc
-class struct__cl_buffer_region(ctypes.Structure):
-  _pack_ = 8
-  _fields_ = [('origin', size_t),
+class struct__cl_buffer_region(ctypes.Structure): pass
+struct__cl_buffer_region._fields_ = [('origin', size_t),
               ('size', size_t)]
 
 cl_buffer_region = struct__cl_buffer_region
-class struct__cl_name_version(ctypes.Structure):
-  _pack_ = 4
-  _fields_ = [('version', cl_version),
+class struct__cl_name_version(ctypes.Structure): pass
+struct__cl_name_version._fields_ = [('version', cl_version),
               ('name', (ctypes.c_char * 64))]
 
 cl_name_version = struct__cl_name_version
