@@ -89,8 +89,8 @@ class TestPcontig(unittest.TestCase):
   def test_flash_attention_opt(self):
     with Context(PCONTIG=2, DEBUG=2):
       opts = ()
-      #opts += (Opt(OptOps.UPCAST, 3, 4),)
       opts += (Opt(OptOps.UPCAST, 0, 4),)
+      opts += (Opt(OptOps.UPCAST, 3, 4),)
       fa().contiguous(arg=opts).realize()
 
   def test_flash_attention(self):
