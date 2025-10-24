@@ -299,7 +299,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp, allow_locals=True):
+def bufferize_to_store(x:UOp):
   rngs = x.src[1:]
   shape = x.shape
   size = prod(shape)
@@ -332,24 +332,42 @@ def bufferize_to_store(x:UOp, allow_locals=True):
       ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
     return ret.replace(tag=x.tag)
 
-  if allow_locals:
-    # handle locals
-    tag = x.arg.device
-    if tag is None: tag = UOp.unique().arg # TODO: hack
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)
-    return buf.after(do_store.barrier()).reshape(shape)
-
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
+  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
 ])
 
+def bufferize_to_store_local(x:UOp):
+  rngs = x.src[1:]
+  assert len(rngs) == 1, "this must only have one by here"
+  shape = x.shape
+  size = prod(shape)
+  assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {shape}"
+  sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
+  fdtype = x.dtype.scalar().ptr(size=size*x.dtype.count, addrspace=x.arg.addrspace)
+  assert sdtype.addrspace == AddrSpace.LOCAL
+
+  # handle locals
+  tag = x.arg.device
+  if tag is None: tag = UOp.unique().arg # TODO: hack
+
+  buf = UOp(Ops.DEFINE_LOCAL, fdtype, arg=tag)
+  #all_rngs = list(UOp.sink(*rngs).ranges)
+  #return buf.after(buf.index(rngs[0]).store(x.src[0], *all_rngs).barrier())
+
+  skip = rngs[0].dtype.count
+  sz = x.src[0].dtype.count // skip
+  all_rngs = list(UOp.sink(*rngs).ranges)
+  stores = []
+  for i in range(skip):
+    stores.append(buf.cast(sdtype).index(rngs[0].gep(i)).store(x.src[0].gep(tuple([i+s*skip for s in range(sz)]))))
+  return buf.after(UOp.group(*stores).end(*all_rngs).barrier()).cast(sdtype)
+
 pm_add_buffers_local = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
+  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store_local),
 ])
 
 # *****************
@@ -431,6 +449,16 @@ rangeify_codegen = PatternMatcher([
   (UPat.any(UPat(Ops.DEFINE_GLOBAL, name="dg"), UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg"))
    .f(Ops.INDEX, name="idx", allow_any_len=True),
     lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
+
+  # add load to vectorized index
+  (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg").broadcast(name="b").f(Ops.INDEX, name="idx", allow_any_len=True),
+    lambda dg,b,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else \
+      idx.replace(dtype=dg.dtype.vec(len(b.src)), arg=None).load(dtype=idx.dtype)),
+
+  # add load to gep index
+  (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg").gep(name="g").f(Ops.INDEX, name="idx", allow_any_len=True),
+    lambda dg,g,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else \
+      idx.replace(dtype=idx.dtype.scalar().ptr(dg.dtype.size, dg.dtype.addrspace).vec(idx.dtype.count), arg=None).load(dtype=idx.dtype)),
 ])
 
 def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):

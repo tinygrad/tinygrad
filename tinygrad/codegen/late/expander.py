@@ -1,9 +1,10 @@
 # this converts a lowerer program into a vectorized program
 import functools, itertools, operator
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
-from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, partition
+from tinygrad.helpers import AMX, dedup, flatten, all_same, prod, partition, get_single_element
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, AxisType, range_start
-from tinygrad.schedule.rangeify import BufferizeOpts
+from tinygrad.schedule.rangeify import BufferizeOpts, pm_mops
+from tinygrad.schedule.indexing import apply_movement_op
 
 def _expand_arg_to_idx(args:tuple[tuple[int, int], ...], rpk:dict[int, int]) -> int:
   idx, mul = 0, 1
@@ -82,12 +83,15 @@ def do_contract(con:UOp):
   return UOp(Ops.UNROLL, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
 expander = PatternMatcher([
+  # BUFFERIZE puts UNROLLs for ranges as contract
+  (UPat(Ops.BUFFERIZE, src=(UPat(Ops.UNROLL), UPat(Ops.UNROLL)), name="x"),
+    lambda x: x.replace(src=tuple(UOp(Ops.CONTRACT, dtype=s.dtype.vec(x.src[1].src[0].dtype.count), src=(s,), arg=x.src[1].arg) for s in x.src))),
   # double expand
   (UPat(Ops.UNROLL, name="outer", src=(UPat(Ops.UNROLL, name="inner"),)),
    lambda outer, inner: UOp(Ops.UNROLL, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.BUFFERIZE,
-         Ops.VECTORIZE, Ops.IF, Ops.REDUCE, Ops.END), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
+         Ops.VECTORIZE, Ops.IF, Ops.REDUCE, Ops.END, Ops.AFTER), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # BARRIERs aren't actually expanded
   (UPat(Ops.BARRIER, src=(UPat(Ops.UNROLL, name="ex"),)),
@@ -148,7 +152,7 @@ def fix_group_for_reduce(x:UOp):
   # do the final reduce (if/barrier are added in gpudims step)
   return buf.reduce(*reduce_loop, arg=x.arg)
 
-pm_pre_expander = PatternMatcher([
+pm_pre_expander = pm_mops+PatternMatcher([
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
    lambda r: UOp(Ops.UNROLL, r.dtype, (UOp.const(r.dtype.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
@@ -156,6 +160,9 @@ pm_pre_expander = PatternMatcher([
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
   (UPat(Ops.STORE, name="x"), fix_store_unroll),
+  # collapse any BUFFERIZE to single input BUFFERIZE
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(), UPat()), allow_any_len=True, name="x"),
+    lambda x: x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:])))).reshape(x.shape)),
 ])
 
 pm_group_for_reduce = PatternMatcher([
