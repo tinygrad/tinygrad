@@ -368,7 +368,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # mod folding
   (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
   (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax <  0 else None),
-  # remove cast narrowing cast for better stability
+  # remove narrowing cast for better stability
   (UPat.var("x", dtypes.float).cast((dtypes.half, dtypes.bfloat16)).cast(dtypes.float), lambda x: x),
   # cast/long folding
   # if the intermediate cast doesnt narrow we can do it in one cast
