@@ -271,7 +271,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   @property
   def shape(self) -> tuple[sint, ...]:
     if (ret:=self._shape) is None: raise RuntimeError(f"shape requested, but {self.op} doesn't have a shape")
-    # if any(isinstance(d, UOp) and d.op == Ops.MAX for d in ret): breakpoint()
     return ret
 
   @property

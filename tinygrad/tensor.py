@@ -1628,9 +1628,7 @@ class Tensor(MathTrait):
     ```
     """
     start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
-    # flattened_dim = canonicalize_dim(prod(self.shape[start_dim:end_dim+1]))
-    flattened_dim = prod(self.shape[start_dim:end_dim+1])
-    return self.reshape(self.shape[:start_dim] + (flattened_dim, ) + self.shape[end_dim+1:])
+    return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
 
   def unflatten(self, dim:int, sizes:tuple[int,...]) -> Tensor:
     """
