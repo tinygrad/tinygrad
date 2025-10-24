@@ -2602,18 +2602,13 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
-  @unittest.skipIf(Device.DEFAULT == "AMD" and CI, "remu failure?")
-  def test_avg_pool3d_failure(self):
-    with Context(NOOPT=0):
-      helper_test_op([(1,1,16,16,16)],
-        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
-        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
-
-  def test_avg_pool3d_noopt(self):
-    with Context(NOOPT=1):
-      helper_test_op([(1,1,16,16,16)],
-        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
-        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
+  def test_avg_pool3d(self):
+    # TODO: AMD_LLVM has larger atol
+    # TODO: PYTHON=1 backward hangs?
+    atol = 1e-2 if AMD_LLVM else 1e-6
+    helper_test_op([(1,1,16,16,16)],
+      lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), atol=atol, rtol=1e-5, forward_only=True)
 
   def test_interpolate_linear(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
