@@ -42,7 +42,7 @@ def linearize(u:UOp) -> list[UOp]:
         in_degree[u] += 1
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
     priority = [0] + [priorities[x] for x in local_children[u]]
-    if u.op is Ops.LOAD: priority.append(-1000)
+    # if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
     # if u.op is Ops.RANGE: priority = [2000]
