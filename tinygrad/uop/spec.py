@@ -146,6 +146,19 @@ program_spec = PatternMatcher([
   (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 ])+shared_spec
 
+# ***** UOp spec in kernel graph *****
+
+kernel_spec = PatternMatcher([
+  # index is allowed here
+  (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
+
+  # END can end multiple axes here
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), allow_any_len=True, dtype=dtypes.void), lambda: True),
+
+  # reduce
+  (UPat(Ops.REDUCE, name="r"), lambda r: isinstance(r.arg, Ops) and all([x.op is Ops.RANGE for x in r.src[1:]])),
+])+program_spec+shared_spec
+
 # *** this spec should match all UOps ever created ***
 
 full_spec = PatternMatcher([
