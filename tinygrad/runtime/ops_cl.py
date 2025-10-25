@@ -9,7 +9,7 @@ from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, Compil
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
 
-cl_errors = {attr: k for k in dir(cl) if k.startswith("CL_") and isinstance(attr:=getattr(cl, k), int) and attr <= 0}
+cl_errors = {attr: k for k in dir(cl._mod) if k.startswith("CL_") and isinstance(attr:=getattr(cl, k), int) and attr <= 0}
 def check(status):
   if status != 0: raise RuntimeError(f"OpenCL Error {status}: {cl_errors.get(status, 'Unknown error')}")
 def checked(ret, status): return (check(status.value), ret)[1]
@@ -19,7 +19,7 @@ class CLCompiler(Compiler):
     self.dev = dev
     super().__init__(f"compile_cl_{compile_key}")
   def compile(self, src:str) -> bytes:
-    program = checked(cl.clCreateProgramWithSource(self.dev.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
+    program = checked(cl.clCreateProgramWithSource(self.dev.context, 1, ctypes.c_char_p(src.encode()), None, status := ctypes.c_int32()), status)
     build_status: int = cl.clBuildProgram(program, 1, self.dev.device_id, None, cl.clBuildProgram.argtypes[4](), None)
     if build_status != 0:
       cl.clGetProgramBuildInfo(program, self.dev.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, log_size := ctypes.c_size_t())
@@ -36,8 +36,7 @@ class CLProgram:
   def __init__(self, device:CLDevice, name:str, lib:bytes):
     self.dev, self.name, self.lib = device, name, lib
     self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(lib)),
-                                                        to_char_p_p([lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
-                                                        errcode_ret := ctypes.c_int32()), errcode_ret)
+      ctypes.cast(to_char_p_p([lib]), ctypes.POINTER(ctypes.c_char_p)), binary_status := ctypes.c_int32(), err := ctypes.c_int32()), err)
     check(binary_status.value)
     check(cl.clBuildProgram(self.program, 1, device.device_id, None, cl.clBuildProgram.argtypes[4](), None)) # NOTE: OSX requires this
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), status := ctypes.c_int32()), status)
