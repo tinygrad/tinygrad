@@ -2375,7 +2375,7 @@ class Tensor(MathTrait):
     return x.permute(
         *range(len(noop)),
         *[len(noop) + i*2 + 1 for i in range(len(i_))],
-        *[len(noop) + i*2     for i in range(len(i_))],
+        *[len(noop) + i*2 for i in range(len(i_))],
     )
 
   def _resolve_pool_pads(self, padding:int|Sequence[int], dims:int) -> Sequence[int]:
