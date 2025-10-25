@@ -26,7 +26,7 @@ from transformers import AutoTokenizer
 from icecream import install, ic
 install()
 
-def fix(x): return x.cast('float').numpy()
+def fix(x): return x.shape, x.dtype, x.numpy()
 
 MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] = {
   "20B": {
@@ -72,6 +72,7 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, 
 # arxiv.org/pdf/2002.05202v1
 def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0):
   x_glu, x_up = x[..., ::2].clamp(None, limit), x[..., 1::2].clamp(-limit, limit)
+  ic(limit, fix(x_glu), fix(x_up))
   return x_glu * (alpha * x_glu).sigmoid() * (x_up + 1)
 
 class TransformerBlock:
@@ -87,7 +88,7 @@ class TransformerBlock:
     self.attn_k             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
     self.attn_v             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
     self.attn_o             = nn.Linear(n_heads * head_dim, dim,    bias=True)  # (H*Dh,D)
-    self.attn_sink         = Tensor.empty(n_heads)                              # (H,)
+    self.attn_sink          = Tensor.empty(n_heads)                              # (H,)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm          = nn.RMSNorm(dim, norm_eps)
@@ -103,18 +104,29 @@ class TransformerBlock:
     self.ffn_down_proj_bias = Tensor.empty(n_experts, dim)                      # (E,D)
 
   def _feed_forward(self, x: Tensor) -> Tensor:
+    x_norm = self.ffn_norm(x)
     (B, T, D), E = x.shape, self.n_experts
 
     # Select top-k experts
-    probs, sel = self.ffn_gate(x).softmax(-1).topk(self.n_active_experts, dim=-1)  # (B,T,D) -> (B,T,Ea), (B,T,Ea)
-    probs = Tensor.zeros(B,T,E).scatter(1, sel, probs) # (B,T,Ea) -> (B,T,E)
+    x_norm = x_norm.reshape(B*T, D)
+    ic(fix(x_norm))
+    logits, sel = self.ffn_gate(x_norm).topk(self.n_active_experts, -1)  # (B,T,D) -> (B,T,Ea), (B,T,Ea)
+    ic(fix(self.ffn_gate(x_norm)), fix(logits), fix(logits.softmax(-1)), fix(sel))
+    probs = Tensor.zeros(B*T,E).scatter(1, sel, logits.softmax(-1)) # (B,T,Ea) -> (B,T,E)
+    ic(fix(probs))
 
     # run MoE
     #todo: change ffn_up_proj to ffn_gate_up_proj
-    x = x.reshape(-1, D).repeat(E, 1).reshape(E, -1, D) # (B,T,D) -> (E,B*T,D)
-    x_up_gate = swiglu(x @ self.ffn_up_proj + self.ffn_up_proj_bias.unsqueeze(1)) # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
+    x_norm = x_norm.repeat(E, 1).reshape(E, -1, D) # (B*T,D) -> (E,B*T,D)
+    ic(fix(x_norm))
+    x_up_gate = swiglu(x_norm @ self.ffn_up_proj + self.ffn_up_proj_bias.unsqueeze(1)) # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
+    ic(fix(x_up_gate))
     x_down = x_up_gate @ self.ffn_down_proj + self.ffn_down_proj_bias.unsqueeze(1) # (E,B*T,D2) (E,D2,D) (E,1,D) -> (E,B*T,D)
-    return (x_down.reshape(E, B, T, D) * probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)).sum(0) # (E,B,T,D) (E,B,T,1) -> (B,T,D)
+    ic(fix(x_down))
+    x_out = (x_down.reshape(E, B, T, D) * probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)).sum(0) # (E,B,T,D) (E,B,T,1) -> (B,T,D)
+    ic(fix(x_out))
+    ic(fix(x + x_out))
+    return x + x_out
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
@@ -125,9 +137,12 @@ class TransformerBlock:
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
     s = self.attn_sink.reshape(1, -1, 1, 1).expand(B, self.head_dim, T, 1)  # (B,H,T,1)
+    ic(fix(x), fix(x_norm))
+    ic(fix(q), fix(k), fix(v))
 
     q = apply_rope(q, start_pos)
     k = apply_rope(k, start_pos)
+    ic(fix(q), fix(k))
 
     # TODO: remove these kv cache realizes
     if not hasattr(self, "cache_kv"):
@@ -140,9 +155,11 @@ class TransformerBlock:
     if self.sliding_window:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
+    ic(fix(mask))
 
     attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
+    ic(fix(attn))
     attn = self.attn_o(attn)
     return x + attn
 
@@ -166,6 +183,7 @@ class Transformer:
     x = self.token_embd(tokens)                           # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
     # TODO: add temperature
+    ic(fix(self.output_norm(x)))
     return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
