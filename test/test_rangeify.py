@@ -2,6 +2,7 @@ import unittest
 from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
+from tinygrad.codegen.opt import OptOps, Opt
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
@@ -70,6 +71,47 @@ def fa_bw():
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
 class TestPcontig(unittest.TestCase):
+  @unittest.skip("this doesn't work")
+  def test_double_matmul_opt_e(self):
+    with Context(DEBUG=0):
+      a,b,c = [Tensor.rand(16, 16).contiguous().realize() for _ in range(3)]
+
+    with Context(PCONTIG=2, DEBUG=2):
+      opts = (Opt(OptOps.UPCAST, 2, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+  def test_double_matmul_opt(self):
+    with Context(DEBUG=0):
+      a,b,c = [Tensor.rand(16, 16).contiguous().realize() for _ in range(3)]
+
+    with Context(PCONTIG=2, DEBUG=2):
+      opts = (Opt(OptOps.UPCAST, 1, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 0, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UNROLL, 0, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UNROLL, 1, 4),)
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 1, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
+      opts = (Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4))
+      (a@b@c).contiguous(arg=opts).realize()
+
   def test_flash_attention_bw(self):
     with Context(PCONTIG=max(2, PCONTIG.value), DEBUG=2):
       grads = fa_bw()
