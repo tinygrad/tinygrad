@@ -116,10 +116,11 @@ class CUDADevice(Compiled):
     self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
+    kitten_args = ["-I./include", "-std=c++20", "--expt-relaxed-constexpr", "-DKITTENS_HOPPER"]
     from tinygrad.runtime.graph.cuda import CUDAGraph
     compilers:list[CompilerPairT] = [(functools.partial(CUDARenderer, self.arch), functools.partial(CUDACompiler, self.arch)),
                                      (functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch)),
-                                     (functools.partial(CUDARenderer, self.arch), functools.partial(NVCCCompiler, self.arch))]
+                                     (functools.partial(CUDARenderer, self.arch), functools.partial(NVCCCompiler, self.arch, kitten_args))]
     super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
 
   def synchronize(self):
