@@ -142,7 +142,7 @@ class NVDev(PCIDevImplBase):
     return type(struct).from_address(view.addr), paddrs[0]
 
   def _download(self, file:str) -> str:
-    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
+    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/2b436058a616676ec888ef3814d1db6b2220f2eb/{file}"
     return fetch(url, subdir="defines").read_text()
 
   def extract_fw(self, file:str, dname:str) -> bytes:
