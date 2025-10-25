@@ -64,7 +64,7 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
-    if SPEC:
+    if SPEC > 1:
       from tinygrad.uop.spec import full_spec
       with Context(IGNORE_OOB=1): ret = full_spec.rewrite(created)
       if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {created}")

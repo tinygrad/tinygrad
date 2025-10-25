@@ -173,7 +173,7 @@ full_spec = PatternMatcher([
   # copy on index
   (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
   # assign on index. the third op is the shape
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat(GroupOp.Movement))), lambda: True),
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat())), lambda: True),
 
   # expander: unroll/contract/gep/ptrcat/cat
   #(UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
@@ -194,6 +194,12 @@ full_spec = PatternMatcher([
   # allow index dtype on a restricted set of UOps
   (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX, Ops.WHERE,
          Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.VECTORIZE), dtype=dtypes.index), lambda: True),
+
+  # while BIND is being casted
+  (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(), UPat()), arg=None), lambda: True),
+
+  # in progress MSTACK may lose device
+  (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),

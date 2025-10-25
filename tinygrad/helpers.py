@@ -167,7 +167,7 @@ EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 1)
 VIZ = PROFILE = ContextVar("VIZ", 0)
-SPEC = ContextVar("SPEC", 0)
+SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify

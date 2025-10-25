@@ -41,7 +41,7 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(f2.is_increasing())
     self.assertTrue(f3.is_increasing())
 
-    rng = UOp(Ops.RANGE, dtypes.int, arg=(2, True), src=(UOp(Ops.CONST, dtypes.int, arg=5, src=()),))
+    rng = UOp.range(5, 2)
     self.assertTrue(rng.is_increasing())
     self.assertTrue((rng+2).is_increasing())
 
