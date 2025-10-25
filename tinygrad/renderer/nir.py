@@ -173,7 +173,7 @@ class NIRRenderer(Renderer):
     self.param_idx, ranges = 0, []
 
     for u in uops:
-      if u.op == Ops.NOOP or u.op == Ops.INDEX: pass
+      if u.op in {Ops.NOOP, Ops.GROUP, Ops.INDEX}: pass
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:

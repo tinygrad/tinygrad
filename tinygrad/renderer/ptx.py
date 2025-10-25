@@ -183,7 +183,7 @@ class PTXRenderer(Renderer):
 
     name = "test"
     for u in uops:
-      if u.op is Ops.NOOP: continue
+      if u.op in {Ops.NOOP, Ops.GROUP}: continue
       if u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
         continue
