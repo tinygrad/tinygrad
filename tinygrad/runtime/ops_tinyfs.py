@@ -32,9 +32,6 @@ class TinyFSDevice(Compiled):
     self.conn_pools: dict[str, asyncio.Queue] = {}
     self.conn_pools_lock = asyncio.Lock()
 
-    # current request
-    self.request_id = uuid.UUID(int=0)
-
   def finalize(self):
     self.sfile.close()
 
@@ -88,29 +85,24 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     if DEBUG >= 2: print(f"Copying in {dest.size} bytes to TINYFS:{dest.device.op}")
     self.dev.sfile.write(f"{dest.device.op}_IN {dest.size}\r\n".encode())
 
-    if dest.device.op == "STORE":
-      self.dev.sfile.flush()
-      self.dev.request_id = uuid.UUID(bytes=self.dev.sfile.read(16))
-      if DEBUG >= 2: print(f"Request ID: {self.dev.request_id}")
-
     self.dev.sfile.write(src)
     self.dev.sfile.flush()
 
     if dest.device.op == "LOAD":
       locs = self.dev.sfile.readline()
-      locs = json.loads(locs)
-
-      dest.copyout_queue = locs
+      dest.copyout_queue = json.loads(locs)
       dest.hash_buf[:] = src.tobytes()
+    elif dest.device.op == "STORE":
+      expected_hashes = dest.size // Tensor.CHUNK_SIZE
+      dest.hash_buf = bytearray(expected_hashes * 16)
+      self.dev.sfile.readinto(dest.hash_buf)
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
     if DEBUG >= 2: print(f"Copying out {src.size} bytes from TINYFS:{src.device.op}")
     if src.device.op == "LOAD":
       asyncio.run_coroutine_threadsafe(self._copyout_async(dest, src), src.device.loop).result()
-    else:
-      self.dev.sfile.write(f"{src.device.op}_OUT {src.size} {self.dev.request_id}\r\n".encode())
-      self.dev.sfile.flush()
-      self.dev.sfile.readinto(dest)
+    elif src.device.op == "STORE":
+      dest[:] = src.hash_buf
 
   async def _copyout_async(self, dest:memoryview, src:TinyFSBuffer):
     async def _worker(i, loc):
