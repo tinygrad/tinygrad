@@ -76,35 +76,35 @@ def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0):
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0,):
-    self.n_heads            = n_heads
-    self.n_kv_heads         = n_kv_heads
-    self.head_dim           = head_dim if head_dim else dim // n_heads
-    self.sliding_window     = sliding_window
-    self.max_context        = max_context
+    self.n_heads                = n_heads
+    self.n_kv_heads             = n_kv_heads
+    self.head_dim               = head_dim if head_dim else dim // n_heads
+    self.sliding_window         = sliding_window
+    self.max_context            = max_context
 
     # --- attention projections (linear with bias) ------------------------
-    self.attn_q             = nn.Linear(dim, n_heads * head_dim,    bias=True)  # (D,H*Hd)
-    self.attn_k             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
-    self.attn_v             = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
-    self.attn_o             = nn.Linear(n_heads * head_dim, dim,    bias=True)  # (H*Dh,D)
-    self.attn_sink          = Tensor.empty(n_heads)                              # (H,)
+    self.attn_q                 = nn.Linear(dim, n_heads * head_dim,    bias=True)  # (D,H*Hd)
+    self.attn_k                 = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
+    self.attn_v                 = nn.Linear(dim, n_kv_heads * head_dim, bias=True)  # (D,Hkv*Hd)
+    self.attn_o                 = nn.Linear(n_heads * head_dim, dim,    bias=True)  # (H*Dh,D)
+    self.attn_sink              = Tensor.empty(n_heads)                             # (H,)
 
     # --- RMSNorms --------------------------------------------------------
-    self.attn_norm          = nn.RMSNorm(dim, norm_eps)
-    self.ffn_norm           = nn.RMSNorm(dim, norm_eps)
+    self.attn_norm              = nn.RMSNorm(dim, norm_eps)
+    self.ffn_norm               = nn.RMSNorm(dim, norm_eps)
 
     # --- MoE feed-forward ------------------------------------------------
-    self.n_experts          = n_experts
-    self.n_active_experts   = n_active_experts
-    self.ffn_gate           = nn.Linear(dim, n_experts, bias=True)              # (D,E)
-    self.ffn_up_proj        = Tensor.empty(n_experts, dim, hidden_dim * 2)      # (E,D,D2*2)
-    self.ffn_up_proj_bias   = Tensor.empty(n_experts, hidden_dim * 2)           # (E,D2*2)
-    self.ffn_down_proj      = Tensor.empty(n_experts, hidden_dim, dim)          # (E,D2,D)
-    self.ffn_down_proj_bias = Tensor.empty(n_experts, dim)                      # (E,D)
+    self.n_experts              = n_experts
+    self.n_active_experts       = n_active_experts
+    self.ffn_gate               = nn.Linear(dim, n_experts, bias=True)              # (D,E)
+    self.ffn_gate_up_proj       = Tensor.empty(n_experts, dim, hidden_dim * 2)      # (E,D,D2*2)
+    self.ffn_gate_up_proj_bias  = Tensor.empty(n_experts, hidden_dim * 2)           # (E,D2*2)
+    self.ffn_down_proj          = Tensor.empty(n_experts, hidden_dim, dim)          # (E,D2,D)
+    self.ffn_down_proj_bias     = Tensor.empty(n_experts, dim)                      # (E,D)
 
   def _feed_forward(self, x: Tensor) -> Tensor:
-    x_norm = self.ffn_norm(x)
     (B, T, D), E = x.shape, self.n_experts
+    x_norm = self.ffn_norm(x)
 
     # Select top-k experts
     x_norm = x_norm.reshape(B*T, D)
@@ -112,9 +112,8 @@ class TransformerBlock:
     probs = Tensor.zeros(B*T,E).scatter(1, sel, logits.softmax(-1)) # (B,T,Ea) -> (B,T,E)
 
     # run MoE
-    #todo: change ffn_up_proj to ffn_gate_up_proj
     x_norm = x_norm.repeat(E, 1).reshape(E, -1, D) # (B*T,D) -> (E,B*T,D)
-    x_up_gate = swiglu(x_norm @ self.ffn_up_proj + self.ffn_up_proj_bias.unsqueeze(1)) # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
+    x_up_gate = swiglu(x_norm @ self.ffn_gate_up_proj + self.ffn_gate_up_proj_bias.unsqueeze(1)) # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
     x_down = x_up_gate @ self.ffn_down_proj + self.ffn_down_proj_bias.unsqueeze(1) # (E,B*T,D2) (E,D2,D) (E,1,D) -> (E,B*T,D)
     x_out = (x_down.reshape(E, B, T, D) * probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)).sum(0) # (E,B,T,D) (E,B,T,1) -> (B,T,D)
     return x + x_out
@@ -144,8 +143,8 @@ class TransformerBlock:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
 
-    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
-    attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
+    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)  # (B,H,T,Hd)
+    attn = attn.transpose(1, 2).reshape(B, T, -1)                                         # back to (B,T,D)
     attn = self.attn_o(attn)
     return x + attn
 
@@ -176,7 +175,7 @@ class Transformer:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
   @staticmethod
-  def from_pretrained(model_path:Path, params:dict[str, int|float], fakeweights:bool) -> Transformer:
+  def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool) -> Transformer:
     # load model
     model = Transformer(**params)
 
@@ -208,9 +207,9 @@ def get_keymap(num_blocks):
     **{f"model.layers.{l}.post_attention_layernorm.weight": f"blk.{l}.ffn_norm.weight" for l in range(num_blocks)},
     **{f"model.layers.{l}.mlp.router.weight": f"blk.{l}.ffn_gate.weight" for l in range(num_blocks)},
     **{f"model.layers.{l}.mlp.router.bias": f"blk.{l}.ffn_gate.bias" for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d1}_proj_bias": f"blk.{l}.ffn_{d2}_proj_bias" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d1}_proj_blocks": f"blk.{l}.ffn_{d2}_proj_blocks" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d1}_proj_scales": f"blk.{l}.ffn_{d2}_proj_scales" for d1, d2 in {"gate_up": "up", "down":"down"}.items() for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d}_proj_bias": f"blk.{l}.ffn_{d}_proj_bias" for d in ["gate_up", "down"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d}_proj_blocks": f"blk.{l}.ffn_{d}_proj_blocks" for d in ["gate_up", "down"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d}_proj_scales": f"blk.{l}.ffn_{d}_proj_scales" for d in ["gate_up", "down"] for l in range(num_blocks)},
     "model.norm.weight": "output_norm.weight",
     "lm_head.weight": "output.weight",
   }
@@ -278,7 +277,7 @@ def main(args):
   print(outputted, end="", flush=True)
 
   tok_tensor = None
-  for i in range(args.count):
+  for _ in range(args.count):
     # forward pass
     next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
     tok_tensor = model(next_tok, start_pos) # todo: add temperature
