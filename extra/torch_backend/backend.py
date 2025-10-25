@@ -18,7 +18,36 @@ def _to_torch_device(device: str): return torch.device("tiny", int(device.partit
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
-def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
+
+def compute_strides_and_offset(t: Tensor) -> tuple[tuple[int, ...], int]:
+  from tinygrad.helpers import strides_for_shape
+  from tinygrad.uop.ops import GroupOp
+  
+  # Start with contiguous strides for the tensor's current shape
+  strides = list(strides_for_shape(t.shape))
+  offset = 0
+  
+  # Only tracking permutes since as_strided handles other cases(?)
+  current = t.uop
+  permute_found = None
+  
+  while current.op in GroupOp.Movement:
+    if current.op == Ops.PERMUTE and current.arg is not None:
+      if len(current.src) > 0 and current.src[0].shape == t.shape:
+        permute_found = current.arg
+    
+    if len(current.src) > 0:
+      current = current.src[0]
+    else:
+      break
+  if permute_found is not None:
+    strides = [strides[i] for i in permute_found]
+  return tuple(strides), offset
+
+def wrap(x:Tensor) -> torch.Tensor: 
+  strides, offset = compute_strides_and_offset(x)
+  return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index, strides, offset)
+
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)

@@ -112,17 +112,12 @@ int register_hook() {
 }
 int temp_register_hook = register_hook();
 
-at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
+at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index,
+                       py::tuple strides_tuple, int64_t storage_offset) {
   // Get shape from Tensor.shape
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
 
-  std::vector<int64_t> strides;
-  int64_t stride = 1;
-  for (int i = sizes.size() - 1; i >= 0; i--) {
-    strides.insert(strides.begin(), stride);
-    stride *= sizes[i];
-  }
-  int64_t storage_offset = 0;
+  std::vector<int64_t> strides = strides_tuple.cast<std::vector<int64_t>>();
 
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
