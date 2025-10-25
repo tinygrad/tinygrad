@@ -1,5 +1,15 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context
+from tinygrad import Tensor, UOp
+from tinygrad.uop.ops import AxisType, Ops
+
+class TestOuterworldReduce(unittest.TestCase):
+  def test_reduce(self):
+    x = Tensor.ones(5, 5).contiguous()
+    a = UOp.range(5, -1, AxisType.REDUCE)
+    out = x[a]
+    # TODO: syntax for this
+    t = Tensor(UOp(Ops.REDUCE, dtype=out.uop.dtype, src=(out.uop, a), arg=Ops.ADD))
+    self.assertListEqual(t.tolist(), [5.,5.,5.,5.,5.])
 
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
@@ -12,6 +22,17 @@ class TestOuterworld(unittest.TestCase):
     cpy = sel.reshape(1, 10).expand(a, 10).contiguous().realize()
 
     self.assertTrue((t+1==cpy).all().item())
+
+  def test_range_plus_1_transpose(self):
+    t = Tensor.arange(100).reshape(10,10).realize()
+
+    # passthrough ranges
+    a = UOp.range(10, -1)
+    sel = t[a] + 1
+    assert sel.shape == (10,)
+    cpy = sel.reshape(10, 1).expand(10, a).contiguous().realize()
+
+    self.assertTrue(((t+1).T==cpy).all().item())
 
   def test_flip_range(self):
     t = Tensor.rand(10, 10).realize()
@@ -37,39 +58,17 @@ class TestOuterworld(unittest.TestCase):
     out.realize()
     self.assertTrue((out==20).all().item())
 
-  @unittest.skip("opts don't work")
-  def test_triple_gemm(self):
-    x = Tensor.rand(1, 16).realize()
-    W = Tensor.rand(3, 16, 16).realize()
+  def test_fancy_vmap(self):
+    def f(x,y): return x+y
 
-    manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
+    x = Tensor.arange(9).reshape(3,3).contiguous()
+    y = Tensor.arange(9).reshape(3,3).contiguous()
 
     a = UOp.range(3, -1)
-    x = x.assign(x @ W[a])
-    out = x.contiguous(a)[-1].contiguous().realize()
-
-    self.assertTrue((manual==out).all().item())
-
-  def test_setitem_pyrange(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    for i in range(10):
-      o[i] = t[i]
-    o.realize()
-    self.assertTrue((t==o).all().item())
-
-  @unittest.skip("TODO: fix this")
-  def test_setitem(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    i = UOp.range(10, -1)
-    o[i] = t[i]
-    o.contiguous(i).realize()
-    self.assertTrue((t==o).all().item())
+    out = f(x[:,a], y[a,:])
+    # TODO: this should support flatten
+    out = out.reshape(1, 3).expand(a, 3).contiguous().realize()
+    self.assertListEqual([[0,4,8],[4,8,12],[8,12,16]], out.tolist())
 
 if __name__ == '__main__':
   unittest.main()

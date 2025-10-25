@@ -1,10 +1,9 @@
 import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
 from collections import OrderedDict
-from typing import Any, Callable, BinaryIO, Iterable
+from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T
-from tinygrad.shape.view import strides_for_shape
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, strides_for_shape
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -210,7 +209,7 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
       assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't permute BF16"
-      # TODO: find a nice way to support all shapetracker on disktensors
+      # TODO: find a nice way to support all movement ops on disktensors
       ret = ret.to(None).reshape(intermediate_shape).permute(permute_indexes)
 
     return ret.reshape(size)
@@ -238,11 +237,18 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
 
   if passthrough_reset(zipfile.is_zipfile(fobj)): # NOTE: passthrough_reset required to support python < 3.14
     myzip = zipfile.ZipFile(fobj, 'r')
-    base_name = myzip.namelist()[0].split('/', 1)[0]
-    for n in myzip.namelist():
-      if n.startswith(f'{base_name}/data/'):
-        with myzip.open(n) as myfile:
-          offsets[n.split("/")[-1]] = myfile._orig_compress_start # type: ignore
+    base_name = None
+    header_offsets = {}
+    for zi in myzip.filelist:
+      if base_name is None: base_name = zi.filename.split('/', 1)[0]
+      if zi.filename.startswith(f'{base_name}/data/'): header_offsets[zi.filename.split("/")[-1]] = zi.header_offset
+    # sadly there's no way to get the start of the file in the zip without reading the header
+    # at least here we read them in parallel
+    header_contents = [t[v+26:v+30].bitcast(dtypes.uint16).to('CPU') for v in header_offsets.values()]
+    Tensor.realize(*header_contents)
+    for (n,o),c in zip(header_offsets.items(), header_contents):
+      # header_offset + sizeFileHeader + File name length + Extra field length : https://en.wikipedia.org/wiki/ZIP_(file_format)
+      offsets[n] = o+30+sum(cast(list[int], c.tolist()))
     with myzip.open(f'{base_name}/data.pkl') as myfile:
       return TorchPickle(myfile).load()
   elif passthrough_reset(tarfile.is_tarfile(fobj)): # NOTE: passthrough_reset required to support python < 3.11
