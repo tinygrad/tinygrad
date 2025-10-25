@@ -47,7 +47,7 @@ class TestHelpers(unittest.TestCase):
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
-    with Context(NOOPT=1):
+    with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(load.sink()).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     check_uop_against_string(self, idx, sidx)
@@ -213,7 +213,7 @@ class TestValidIdxSimplification(unittest.TestCase):
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
-    with Context(NOOPT=1):
+    with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(load.sink()).src[0]
     idx = load.src[0].src[1]
     self.assertEqual(idx.op, Ops.VECTORIZE)
@@ -283,7 +283,8 @@ class TestImageSimplification(unittest.TestCase):
 
     # empty -> invalid
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
-    load = full_rewrite_to_sink(load.sink()).src[0]
+    with Context(NOOPT=1, SPEC=0):
+      load = full_rewrite_to_sink(load.sink()).src[0]
     self.assertEqual(load.op, Ops.VECTORIZE)
     self.assertEqual(load.dtype.count, 4)
 
