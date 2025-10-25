@@ -67,8 +67,11 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool) | UPat.cvar("c", vec=False), lambda x,c: c if c.arg else x),
   (UPat(GroupOp.Idempotent, src=(UPat.var("x"), UPat.var("x"))), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
-  (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
-  (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, False), UPat.const(dtypes.bool, True)), lambda x: x.logical_not()),
+  # where -> cast
+  (UPat.var("x", dtype=dtypes.bool).where(UPat.cvar("t"), UPat.cvar("f")), lambda x,t,f: x.cast(t.dtype) \
+   if t is UOp.const(t.dtype, True) and f is UOp.const(f.dtype, False) else None),
+  (UPat.var("x", dtype=dtypes.bool).where(UPat.cvar("f"), UPat.cvar("t")), lambda x,t,f: x.logical_not().cast(t.dtype) \
+   if t is UOp.const(t.dtype, True) and f is UOp.const(f.dtype, False) else None),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)).trunc(), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x < x -> False
