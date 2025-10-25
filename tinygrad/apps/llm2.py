@@ -153,7 +153,7 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self, dim, hidden_dim, head_dim, num_blocks, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, rope_params, vocab_size, sliding_window, max_context):
-     self.blk          = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context, sliding_window*(i%2==0)) for i in range(num_blocks)]
+    self.blk          = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context, sliding_window*(i%2==0)) for i in range(num_blocks)]
     self.token_embd   = nn.Embedding(vocab_size, dim)
     self.output_norm  = nn.RMSNorm(dim, norm_eps)
     self.output       = nn.Linear(dim, vocab_size, bias=False)
