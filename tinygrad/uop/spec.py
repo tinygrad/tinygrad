@@ -147,7 +147,7 @@ program_spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
   (UPat(Ops.BARRIER, dtypes.void), lambda: True), # BARRIERs can also happen at the end of loops
 
-  (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 ])+shared_spec
 
 # ***** UOp spec in kernel graph *****
@@ -176,6 +176,9 @@ kernel_spec = PatternMatcher([
 full_spec = PatternMatcher([
   # any END
   (UPat(Ops.END), lambda: True),
+
+  # NOOP in the full spec
+  (UPat(Ops.NOOP), lambda: True),
 
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
