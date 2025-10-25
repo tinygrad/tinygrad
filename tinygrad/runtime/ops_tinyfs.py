@@ -1,4 +1,4 @@
-import socket, uuid, json, asyncio, threading
+import socket, json, asyncio, threading
 from contextlib import asynccontextmanager
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
