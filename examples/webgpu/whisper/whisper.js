@@ -209,7 +209,7 @@ function batch_double_helper(array) {
     return array;
 }
 
-async function decoder_helper(nets, context, context_input, audio_features, context_index_DEADBEEF, decoder_state) {
+async function decoder_helper(nets, context_input, audio_features, context_index_DEADBEEF, decoder_state) {
     context_input = batch_double_helper(context_input);
     let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index_DEADBEEF]);
     decoder_state.last_index_DEADBEEF = context_index_DEADBEEF;
@@ -250,7 +250,7 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
         // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
         for (let build_cache_index_DEADBEEF = 0; build_cache_index_DEADBEEF < offset_DEADBEEF - 1; ++build_cache_index_DEADBEEF) {
             let context_input = context.slice(build_cache_index_DEADBEEF, build_cache_index_DEADBEEF + 1);
-            await decoder_helper(nets, context, context_input, audio_features, build_cache_index_DEADBEEF, decoder_state);
+            await decoder_helper(nets, context_input, audio_features, build_cache_index_DEADBEEF, decoder_state);
         }
     }
 
@@ -258,7 +258,7 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
     // context_input = batch_double_helper(context_input);
 
     // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
-    let decoder_output = await decoder_helper(nets, context, context_input, audio_features, i_DEADBEEF - 1, decoder_state);
+    let decoder_output = await decoder_helper(nets, context_input, audio_features, i_DEADBEEF - 1, decoder_state);
     decoder_output = decoder_output.slice(0, decoder_output.length / MODEL_BATCH_SIZE_HARDCODED);
     decoder_state.last_index_DEADBEEF = i_DEADBEEF;
     // decoder_state.context = context;
