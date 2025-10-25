@@ -319,7 +319,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   #((UPat.var("x")+UPat.var("z")).maximum(UPat.var("y")+UPat.var("z")), lambda x,y,z: x.maximum(y) + z),
   #((UPat.var("x")*UPat.cvar("c1")).maximum(UPat.var("x")*UPat.cvar("c2")), max_var_const),
   # relu (okay to do after gradient is computed)
-  ((0<UPat.var("x")).where(UPat.var("x"), 0), lambda x: x.maximum(0)),
+  ((0<UPat.var("x", dtype=dtypes.floats)).where(UPat.var("x"), 0), lambda x: x.maximum(0)),
   # ** two stage ALU folding **
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
      lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
