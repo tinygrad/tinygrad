@@ -237,9 +237,9 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
     mxfp4_data = Tensor.cat(scales.unsqueeze(-1), blocks, dim=-1).flatten()  # interleave and flatten to 1D
     return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, 39).reshape(*scales.shape[:2], -1)
 
-  # dequantize only the ffn_up_proj and ffn_down_proj
+  # dequantize only the ffn_gate_up_proj and ffn_down_proj
   for l in range(num_blocks):
-    for d in ['up', 'down']:
+    for d in ['gate_up', 'down']:
       blocks = f'blk.{l}.ffn_{d}_proj_blocks'
       scales = f'blk.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
