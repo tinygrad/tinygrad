@@ -45,7 +45,7 @@ __host__ static inline std::string format_tma_error(
     oss << "\n  cols: " << cols;
     if (!extra_info.empty())
         oss << "\n  " << extra_info;
-    
+
     oss << "\ncuTensorMapEncodeTiled arguments:";
     oss << "\n  tma_map: " << reinterpret_cast<uintptr_t>(tma_map);
     oss << "\n  tma_format: " << tma_format;
@@ -74,27 +74,27 @@ __host__ static inline std::string format_tma_error(
     for (size_t i = 0; i < gmem_shape_size; ++i)
         oss << gmem_shape[i] << (i < gmem_shape_size - 1 ? ", " : "");
     oss << "]";
-    
+
     oss << "\n  gmem_stride: " << reinterpret_cast<uintptr_t>(gmem_stride) << " [";
     for (size_t i = 0; i < gmem_stride_size; ++i)
         oss << gmem_stride[i] << (i < gmem_stride_size - 1 ? ", " : "");
     oss << "]";
-    
+
     oss << "\n  smem_shape: " << reinterpret_cast<uintptr_t>(smem_shape) << " [";
     for (size_t i = 0; i < smem_shape_size; ++i)
         oss << smem_shape[i] << (i < smem_shape_size - 1 ? ", " : "");
     oss << "]";
-    
+
     oss << "\n  smem_stride: " << reinterpret_cast<uintptr_t>(smem_stride) << " [";
     for (size_t i = 0; i < smem_stride_size; ++i)
         oss << smem_stride[i] << (i < smem_stride_size - 1 ? ", " : "");
     oss << "]";
-    
+
     oss << "\n  tma_interleave: " << tma_interleave;
     oss << "\n  tma_swizzle: " << tma_swizzle;
     oss << "\n  tma_l2Promotion: " << tma_l2Promotion;
     oss << "\n  tma_oobFill: " << tma_oobFill;
-    
+
     return oss.str();
 }
 
@@ -117,7 +117,7 @@ template<ducks::st::all ST, int axis, bool enable_swizzle = true>
 __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typename ST::dtype *src, int batch, int depth, int rows, int cols) {
     using dtype = typename ST::dtype;
     static_assert(axis==0 || axis==1 || axis==2, "axis must be 0, 1, or 2");
-    
+
     constexpr uint32_t  tma_dim = enable_swizzle ? 5 : 4;
     void *global_addr = (void*)(src);
 
@@ -138,7 +138,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
     constexpr CUtensorMapSwizzle      tma_swizzle     = enable_swizzle ? (
         ST::swizzle_bytes == 32  ? CU_TENSOR_MAP_SWIZZLE_32B  :
         ST::swizzle_bytes == 64  ? CU_TENSOR_MAP_SWIZZLE_64B  :
-        ST::swizzle_bytes == 128 ? CU_TENSOR_MAP_SWIZZLE_128B : 
+        ST::swizzle_bytes == 128 ? CU_TENSOR_MAP_SWIZZLE_128B :
         CU_TENSOR_MAP_SWIZZLE_NONE
     ) : CU_TENSOR_MAP_SWIZZLE_NONE;
 
@@ -148,7 +148,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
     uint32_t smem_shape [5] = {0, 0, 0, 0, 0};
     uint32_t smem_stride[5] = {1, 1, 1, 1, 1};
 
-    constexpr uint64_t shared_tile_height = ST::rows; 
+    constexpr uint64_t shared_tile_height = ST::rows;
     constexpr uint64_t shared_tile_width  = ST::cols;
 
     constexpr int swizzle_elements = ST::swizzle_bytes / sizeof(dtype);
@@ -160,7 +160,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
             gmem_shape[2] = (uint64_t)(cols+swizzle_elements-1) / swizzle_elements; // round up, note this can potentially screw up out of bounds access handling :/
             gmem_shape[3] = (uint64_t)depth;
             gmem_shape[4] = (uint64_t)batch;
-    
+
             gmem_stride[0] = (uint64_t)cols * sizeof(dtype);
             gmem_stride[1] = ST::swizzle_bytes;
             gmem_stride[2] = (uint64_t)rows * cols * sizeof(dtype);
@@ -172,12 +172,12 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
             gmem_shape[2] = (uint64_t)(cols+swizzle_elements-1) / swizzle_elements; // round up, note this can potentially screw up out of bounds access handling :/
             gmem_shape[3] = (uint64_t)rows;
             gmem_shape[4] = (uint64_t)batch;
-    
+
             gmem_stride[0] = (uint64_t)rows * cols * sizeof(dtype);
             gmem_stride[1] = ST::swizzle_bytes;
             gmem_stride[2] = (uint64_t)cols * sizeof(dtype);
             gmem_stride[3] = (uint64_t)depth * rows * cols * sizeof(dtype);
-    
+
         }
         else {
             gmem_shape[0] = swizzle_elements;
@@ -185,7 +185,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
             gmem_shape[2] = (uint64_t)(cols+swizzle_elements-1) / swizzle_elements; // round up, note this can potentially screw up out of bounds access handling :/
             gmem_shape[3] = (uint64_t)rows;
             gmem_shape[4] = (uint64_t)depth;
-    
+
             gmem_stride[0] = (uint64_t)depth * rows * cols * sizeof(dtype);
             gmem_stride[1] = ST::swizzle_bytes;
             gmem_stride[2] = (uint64_t)cols * sizeof(dtype);
@@ -212,7 +212,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
         smem_shape[3] = 1;
     }
 
-    // ensure that the global address is always 16-byte aligned 
+    // ensure that the global address is always 16-byte aligned
     assert((reinterpret_cast<uint64_t>(global_addr) & 0b1111) == 0);
 
     assert(gmem_stride[0] % 16 == 0); // gmem_stride[0] elements must be a multiple of 16B
@@ -239,7 +239,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
     }
 
     const uint64_t *gmem_shape_ptr = &gmem_shape[0];
-    const uint64_t *gmem_stride_ptr = &gmem_stride[0]; 
+    const uint64_t *gmem_stride_ptr = &gmem_stride[0];
     const uint32_t *smem_shape_ptr = &smem_shape[0];
     const uint32_t *smem_stride_ptr = &smem_stride[0];
 
@@ -249,7 +249,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
         tma_dim,
         global_addr,
         gmem_shape_ptr,
-        gmem_stride_ptr, 
+        gmem_stride_ptr,
         smem_shape_ptr,
         smem_stride_ptr,
         tma_interleave,
@@ -331,7 +331,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
     // There is technically a way around ^ that involves instantiating two separate TMA descriptors, one of size 256
     // and the other of size %256, but this is a fairly mild restriction and the other approach is a real PITA and incurs other costs.
     static_assert(disable_swizzle, "for vector TMA, swizzle should be disabled");
-    
+
     constexpr uint32_t  tma_dim     = 4;
     void               *global_addr = (void*)(src);
 
@@ -359,13 +359,13 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
     uint32_t smem_shape [4] = {(uint32_t)dim1, 1, 1, 1};
     uint32_t smem_stride[4] = {1, 1, 1, 1};
 
-    // ensure that the global address is always 16-byte aligned 
+    // ensure that the global address is always 16-byte aligned
     assert((reinterpret_cast<uint64_t>(global_addr) & 0b1111) == 0);
 
     assert(smem_shape[0] <= 256); // smem_shape[0] elements must be <= 256.
 
     const uint64_t *gmem_shape_ptr = &gmem_shape[0];
-    const uint64_t *gmem_stride_ptr = &gmem_stride[0]; 
+    const uint64_t *gmem_stride_ptr = &gmem_stride[0];
     const uint32_t *smem_shape_ptr = &smem_shape[0];
     const uint32_t *smem_stride_ptr = &smem_stride[0];
 
@@ -375,7 +375,7 @@ __host__ static inline void create_tensor_map(CUtensorMap *tma_map, const typena
         tma_dim,
         global_addr,
         gmem_shape_ptr,
-        gmem_stride_ptr, 
+        gmem_stride_ptr,
         smem_shape_ptr,
         smem_stride_ptr,
         tma_interleave,

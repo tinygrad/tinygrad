@@ -2,7 +2,7 @@
  * @file
  * @brief Templated layouts for global memory.
  */
- 
+
 #pragma once
 
 #include "../../common/common.cuh"
@@ -54,7 +54,7 @@ template<typename _T, int _axis=-9999, bool _swizzle_flag=true> struct descripto
     using T = detail::tma::descriptor_copy_helper_t<_T>;
     static_assert(ducks::st::all<T> || ducks::sv::all<T> || ducks::tma::descriptor::all<T>, "Must be a shared TK type to generate a TMA descriptor.");
     static constexpr int axis = (
-        ducks::tma::descriptor::all<_T> ? detail::tma::descriptor_copy_helper_v<_T> : // if a copy, inherit the axis from the original descriptor. 
+        ducks::tma::descriptor::all<_T> ? detail::tma::descriptor_copy_helper_v<_T> : // if a copy, inherit the axis from the original descriptor.
         (_axis != -9999) ? _axis : detail::tma::descriptor_copy_helper_v<_T>); // if a default value was provided, use it.
     static_assert((kittens::ducks::st::all<T> && axis >= 0 && axis <= 2) || (kittens::ducks::sv::all<T> && axis == -1), "Internal template error detected.");
     static constexpr bool swizzle_flag = ducks::tma::descriptor::all<_T> ? detail::tma::descriptor_copy_helper_swizzle_flag<_T> : _swizzle_flag;
@@ -65,8 +65,8 @@ template<typename _T, int _axis=-9999, bool _swizzle_flag=true> struct descripto
 namespace detail {
 template<typename... Args>
 struct descriptor_dict {
-    __host__ descriptor_dict() {}
-    template<typename T> __host__ descriptor_dict(T _, int b, int d, int r, int c) {}
+    __host__ __device__ descriptor_dict() {}
+    template<typename T> __host__ __device__ descriptor_dict(T _, int b, int d, int r, int c) {}
     __host__ __device__ descriptor_dict(const descriptor_dict &other) {}
 #ifdef KITTENS_HOPPER
     template<typename T, int U> __device__ const CUtensorMap* get() const {
@@ -85,8 +85,8 @@ struct descriptor_dict<_T, Args...> {
     using DESC = kittens::tma::descriptor<_T>; // copy or initialize with a default value
     CUtensorMap tma_desc;
     descriptor_dict<Args...> other_descs;
-    __host__ descriptor_dict() {}
-    __host__ descriptor_dict(typename DESC::T::dtype *data, int b, int d, int r, int c): other_descs(data, b, d, r, c) {
+    __host__ __device__ descriptor_dict() {}
+    __host__ __device__ descriptor_dict(typename DESC::T::dtype *data, int b, int d, int r, int c): other_descs(data, b, d, r, c) {
         kittens::detail::tma::create_tensor_map<typename DESC::T, DESC::axis, DESC::swizzle_flag>(&tma_desc, data, b, d, r, c);
     }
     __host__ __device__ inline descriptor_dict(const descriptor_dict &other) :
@@ -135,7 +135,7 @@ struct gl {
 
     detail::descriptor_dict<TMA_Types...> tma_descs;
 
-    __host__ inline gl(T *_data,
+    __host__ __device__ inline gl(T *_data,
                         ducks::gl::make_arg_t<b> _batch,
                         ducks::gl::make_arg_t<d> _depth,
                         ducks::gl::make_arg_t<r> _rows,
@@ -160,7 +160,7 @@ struct gl {
         else if constexpr (axis==2) { return size_t(rows()); }
         else if constexpr (axis==3) { return size_t(cols()); }
     }
-    template<int axis> __device__ inline size_t stride() const { 
+    template<int axis> __device__ inline size_t stride() const {
         static_assert(axis==0 || axis==1 || axis==2 || axis==3, "Axis must be 0, 1, 2, or 3.");
         if      constexpr (axis==0) { return depth()*rows()*cols(); }
         else if constexpr (axis==1) { return rows()*cols(); }
@@ -198,7 +198,7 @@ template<int N> auto make_unsafe_gl_arg(int param) { // typename std::conditiona
     if constexpr (N > 0) { return nullptr; }
     else                 { return param;   }
 }
-template<ducks::gl::all GL, bool safe=true> __host__ inline GL make_gl(uint64_t data, int b, int d, int r, int c) {
+template<ducks::gl::all GL, bool safe=true> __host__ __device__ inline GL make_gl(uint64_t data, int b, int d, int r, int c) {
     if constexpr (safe) {
         if(GL::__b__ > 0 && b != GL::__b__) {
             throw std::runtime_error("Batch dimension mismatch. Expected: " + std::to_string(GL::__b__) + ", Got: " + std::to_string(b));
