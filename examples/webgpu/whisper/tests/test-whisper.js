@@ -133,6 +133,9 @@ nets.encoder = await encoder.setupNet(device, new Uint8Array(await getPart("enco
 nets.decoder = await decoder.setupNet(device, new Uint8Array(await getPart("decoder")));
 
 const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
+const model_metadata = await fetch(`${BASE_URL}/model_metadata.json`).then(res => res.json());
+nets.mapping = mapping;
+nets.model_metadata = model_metadata;
 
 let currentCancel = null;
 
@@ -148,7 +151,7 @@ function onTranscriptionEvent(event, data) {
 }
 
 currentCancel = { cancelled: false };
-await transcribeAudio(nets, async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, mapping, async () => {});
+await transcribeAudio(nets, async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, async () => {});
 console.log("we're supposed to be done here");
 
 delete globalThis.mel;

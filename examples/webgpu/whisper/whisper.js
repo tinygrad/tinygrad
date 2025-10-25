@@ -295,7 +295,7 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
     decode_sequence.logprobs.push(nextLogprob);
     decode_sequence.eos_logprobs.push(nextLogprobs[TOK_EOS]);
     result.segment_cumlogprob += nextLogprob;
-    // pendingText = format_text(context.slice(offset).map(j => mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+    // pendingText = format_text(context.slice(offset).map(j => nets.mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
     result.last_eos_logprob = nextLogprobs[TOK_EOS];
 
     if (nextTokens[nextTokenIndex] == TOK_EOS) {
@@ -308,7 +308,7 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
     return result;
 }
 
-async function inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updatedCallback) {
+async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updatedCallback) {
     let context = [];
     if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
         let prefix = [TOK_STARTOFPREV];
@@ -378,7 +378,9 @@ async function inferLoop(nets, mapping, log_specs_full, previous_context, temper
             sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
 
             if (!updated) {
-                let pendingText = format_text(tokensToText(sequences[idx].context.slice(offset_DEADBEEF), mapping), sequences[idx].avg_logprob, seek, Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
+                const detokenized = tokensToText(sequences[idx].context.slice(offset_DEADBEEF), nets.mapping);
+                const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
+                let pendingText = format_text(detokenized, sequences[idx].avg_logprob, seek, seek_end);
                 updatedCallback(pendingText);
                 // console.log(pendingText);
                 updated = true;
@@ -402,7 +404,7 @@ async function inferLoop(nets, mapping, log_specs_full, previous_context, temper
     return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, offset_DEADBEEF];
 }
 
-async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, mapping, loadAndInitializeModels) {
+async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAndInitializeModels) {
     let before = performance.now();
     await loadAndInitializeModels();
     const { sampleRate, samples } = await audioFetcher();
@@ -447,7 +449,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, mapping
             pendingText = pd;
             onEvent("chunkUpdate", { pendingText });
         }
-        let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, mapping, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
+        let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
         if (cancelToken.cancelled) {
             console.log("Transcription cancelled");
             onEvent("cancel");

@@ -159,18 +159,13 @@
                 transcribeAudio
             } from "./whisper.js";
 
-        async function setModelName() {
+        function setModelName(model_name) {
             const h = id => document.getElementById(id);
-            try {
-                const r = await fetch('./model_metadata.json', {cache: 'no-cache'});
-                if (r.ok) {
-                    const json = await r.json();
-                    h('whisper-title').textContent = `Whisper Tinygrad WebGPU (${json.model_name})`;
-                }
-
-            } catch (_) { }
+            h('whisper-title').textContent = `Whisper Tinygrad WebGPU (${model_name})`;
         }
-        let _ = setModelName();
+        const model_metadata = await fetch('./model_metadata.json', {cache: 'no-cache'}).then(x => x.json());
+        setModelName(model_metadata.model_name);
+        nets.model_metadata = model_metadata;
 
         let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
         const updateLoop = (now) => {
@@ -214,7 +209,7 @@
             const url = document.getElementById("urlInput").value;
             try {
                 currentCancel = { cancelled: false };
-                await transcribeAudio(nets, async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent, mapping, loadAndInitializeModels);
+                await transcribeAudio(nets, async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent, loadAndInitializeModels);
             } catch (err) {
                 console.error("Fetch failed:", err);
             }
@@ -286,6 +281,7 @@
         }
 
         const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
+        nets.mapping = mapping;
 
         let currentCancel = null;
         const overlay = document.getElementById('overlay');
@@ -330,7 +326,7 @@
                         const file = item.getAsFile();
                         console.log(`... file[${i}].name = ${file.name}`);
                         currentCancel = { cancelled: false };
-                            await transcribeAudio(nets, async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent, mapping, loadAndInitializeModels);
+                            await transcribeAudio(nets, async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent, loadAndInitializeModels);
                     }
                 });
             } else {
@@ -342,7 +338,7 @@
         });
 
         // currentCancel = { cancelled: false };
-        // transcribeAudio(nets, async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel, onTranscriptionEvent, mapping, loadAndInitializeModels);
+        // transcribeAudio(nets, async () => await fetchMonoFloat32Array(`./${AUDIO_PATH}`), currentCancel, onTranscriptionEvent, loadAndInitializeModels);
         loadAndInitializeModels();
     </script>
 </body>
