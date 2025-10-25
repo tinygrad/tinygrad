@@ -24,7 +24,6 @@ def apply_rotary_emb(xq:Tensor, xk:Tensor, freqs_cis:Tensor) -> tuple[Tensor, Te
   xk = xk.reshape(*xk.shape[0:-1], -1, 2)
   assert len(xq.shape) == len(xk.shape) == len(freqs_cis.shape) == 5
   c, d = freqs_cis[..., 0:1], freqs_cis[..., 1:2]
-  ic(c.numpy(), d.numpy())
   xq_out = complex_mult(xq, c, d)
   xk_out = complex_mult(xk, c, d)
   return xq_out.flatten(3), xk_out.flatten(3)
@@ -66,12 +65,9 @@ class Attention:
     xq = xq.reshape(xq.shape[0], xq.shape[1], self.n_heads, self.head_dim)
     xk = xk.reshape(xk.shape[0], xk.shape[1], self.n_kv_heads, self.head_dim)
     xv = xv.reshape(xv.shape[0], xv.shape[1], self.n_kv_heads, self.head_dim)
-    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1])
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     bsz, seqlen, _, _ = xq.shape
-
-    ic(xq.transpose(1, 2).shape, xq.transpose(1, 2).numpy()[:, :8, :, -1])
 
     # create kv cache
     if self.max_context:

@@ -75,7 +75,7 @@ def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0):
   return x_glu * (alpha * x_glu).sigmoid() * (x_up + 1)
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0,):
+  def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0):
     self.n_heads                = n_heads
     self.n_kv_heads             = n_kv_heads
     self.head_dim               = head_dim if head_dim else dim // n_heads
@@ -153,16 +153,13 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self, dim, hidden_dim, head_dim, num_blocks, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, rope_params, vocab_size, sliding_window, max_context):
-    self.blk          = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context) for _ in range(num_blocks)]
+     self.blk          = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context, sliding_window*(i%2==0)) for i in range(num_blocks)]
     self.token_embd   = nn.Embedding(vocab_size, dim)
     self.output_norm  = nn.RMSNorm(dim, norm_eps)
     self.output       = nn.Linear(dim, vocab_size, bias=False)
     self.max_context  = max_context
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
     self.forward_jit  = TinyJit(self.forward)
-
-    # add sliding attention to all even layers
-    for i in range(0, num_blocks, 2): self.blk[i].sliding_window = sliding_window
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                           # (B, T, D)
@@ -253,6 +250,7 @@ def main(args):
 
   model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
+  expected = [12194,    11,  1495,   553,   481,    30,   357,   939,  8975,    13]
 
   if getenv("TORCH"):
     print("Using torch, not tinygrad.")
@@ -263,9 +261,10 @@ def main(args):
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1])
     model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=device)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
-    generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   357,   939,   261]], device='cuda:0')
+    generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   1495,   553,   481,    30]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
+    torch.testing.assert_close(generate_ids[0], torch.tensor(expected, device=device))
     return
 
   # build model
@@ -287,11 +286,14 @@ def main(args):
 
     # add the new token
     toks.append(tok)
+    print(toks)
 
     # display
     cur = tokenizer.decode(toks, skip_special_tokens=True)
     print(cur[len(outputted):], flush=True)
     outputted = cur
+
+  assert toks.list() == expected
 
 
 if __name__ == "__main__":
