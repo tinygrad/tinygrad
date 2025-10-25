@@ -177,6 +177,9 @@ full_spec = PatternMatcher([
   # any END
   (UPat(Ops.END), lambda: True),
 
+  # NOOP in the full spec
+  (UPat(Ops.NOOP), lambda: True),
+
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
   # where on index in rhs position is fine
