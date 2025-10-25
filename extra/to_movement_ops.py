@@ -4,16 +4,15 @@ from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from tinygrad.helpers import prod, tqdm
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import sym_infer
 from tinygrad.tensor import Tensor
 
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 
-def apply_mop(st: Tensor|ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> ShapeTracker:
+def apply_mop(st: Tensor, mop_arg: Tuple[MovementOps, Tuple]):
+  """Apply a movement operation to a Tensor or ShapeTracker."""
   mop, arg = mop_arg
   if mop == MovementOps.RESHAPE:
-    # shapetracker doesn't allow flattening with -1 but required for MovementOps.RESHAPE
     if arg == (-1,): return st.reshape((prod(st.shape),))
     return st.reshape(arg)
   if mop == MovementOps.PERMUTE: return st.permute(arg)
@@ -25,120 +24,50 @@ def apply_mop(st: Tensor|ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> Sh
   if mop == MovementOps.STRIDE:
     assert all(x in [-1, 1] for x in arg)
     return st.flip(tuple(i for i,x in enumerate(arg) if x == -1))
+  if mop == MovementOps.AS_STRIDED:
+    # arg = (size, stride, storage_offset)
+    size, stride, offset = arg
+    real_strides = [abs(s) for s in stride if s != 0]
+    if not real_strides: offset, buf_sz = offset, 1
+    else: offset, buf_sz = offset + sum(s * (sz-1) for s, sz in zip(stride, size) if s < 0), sum((sz-1) * abs(s) for sz, s in zip(size, stride) if s != 0) + 1
+    # Flatten, shrink to buffer, build dims by stride order, handle broadcast/flip
+    st = st.reshape((-1,)).shrink(((offset, offset + buf_sz),))
+    dims = sorted([(i, sz, abs(s)) for i, (sz, s) in enumerate(zip(size, stride)) if s != 0], key=lambda x: (x[2], -x[1]), reverse=True)
+    if dims and (dims[0][1] * dims[0][2] - buf_sz) > 0: st = st.pad(((0, dims[0][1] * dims[0][2] - buf_sz),)); buf_sz = dims[0][1] * dims[0][2]
+    # Build dimensions, handling overlapping strides
+    built_shapes = []
+    for i, (_, sz, s) in enumerate(dims):
+      if i < len(dims) - 1 and s < dims[i+1][1] * dims[i+1][2]:
+        # Overlapping stride - use expand approach
+        # First reshape to add a dimension of size 1, then expand it
+        last_dim = st.shape[-1] if i > 0 else buf_sz
+        st = st.reshape((1, *built_shapes, last_dim)).expand((sz, *built_shapes, last_dim))
+        # Permute to move the new dim to the end, flatten it
+        st = st.permute((*range(1, i+1), 0, i+1)).reshape((*built_shapes, sz * last_dim))
+        # Pad and reshape to the final size
+        st = st.pad((*[(0,0) for _ in range(i)], (0, sz * s))).reshape((*built_shapes, sz, last_dim + s))
+        buf_sz = last_dim + s
+        built_shapes.append(sz)
+      else:
+        # Non-overlapping stride
+        st = st.shrink((*[(0, st.shape[j]) for j in range(i)], (0, sz * s))).reshape((*st.shape[:i], sz, s))
+        buf_sz = s  # Update buf_sz for next iteration
+        built_shapes.append(sz)
+    st = st.shrink((*[(0, d) for d in st.shape[:-1]], (0, 1))).reshape(st.shape[:-1])
+    # Permute to restore original order (only for non-zero stride dims)
+    orig_order = [dims[i][0] for i in range(len(dims))]
+    if orig_order != sorted(orig_order):
+      perm = [orig_order.index(i) for i in sorted(orig_order)]
+      st = st.permute(tuple(perm))
+    # Add broadcast dimensions (stride 0)
+    for i, (sz, s) in enumerate(zip(size, stride)):
+      if s == 0: pos = sum(1 for j in range(i) if stride[j] != 0); st = st.reshape((*st.shape[:pos], 1, *st.shape[pos:])).expand((*st.shape[:pos], sz, *st.shape[pos:]))
+    if any(s < 0 for s in stride): st = st.flip(tuple(i for i, s in enumerate(stride) if s < 0))
+    return st.reshape(size) if st.shape != size else st
   raise ValueError("invalid mop")
 
-def make_scratch_st(st: ShapeTracker) -> ShapeTracker:
-  return ShapeTracker.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
-
-# ShapeTracker to an equivalent series of MovementOps (https://github.com/tinygrad/tinygrad/pull/2216)
-def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
-  to_apply:List[Tuple[MovementOps, Tuple]] = []
-  for i, v in enumerate(st.views):
-    real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    offset = (v.offset or 0) + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
-    real_offset = offset + (sum(x*st for (x,_),st in zip(v.mask, v.strides)) if v.mask else 0)
-    real_real_shape = [s for s,st in zip(real_shape, v.strides) if st]
-    strides: List[int] = [abs(st) if isinstance(st,int) else st for st in v.strides if st]
-    buffer_size = sum((s-1)*st for s,st in zip(real_real_shape,strides)) + 1
-    if i: buffer_size = prod(st.views[i-1].shape) - real_offset if real_shape else 1
-    def sort_by_strides(shape, strides): return sorted(zip(shape, strides), key=lambda k: (k[1],-k[0]), reverse=True), sorted(range(len(strides)), key=lambda k: (strides[k],-real_real_shape[k]), reverse=True)
-    ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
-    to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
-    if strides:
-      if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1])-buffer_size>0: to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
-      for i, shape_stride in enumerate(ordered_shape_strides):
-        if i<len(ordered_shape_strides)-1 and shape_stride[1] < ordered_shape_strides[i+1][0]*ordered_shape_strides[i+1][1]:
-          remaining_buffer = ordered_shape_strides[i-1][1] if i>0 else buffer_size
-          to_apply.append((MovementOps.EXPAND, (shape_stride[0], *(s[0] for s in ordered_shape_strides[:i]), remaining_buffer)))
-          to_apply.append((MovementOps.PERMUTE, (*range(1,i+1), 0, i+1)))
-          to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i]), shape_stride[0]*remaining_buffer)))
-          to_apply.append((MovementOps.PAD, (*((0,0) for _ in range(i)), (0, shape_stride[0]*shape_stride[1]))))
-          to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:i+1]), remaining_buffer+shape_stride[1])))
-          ordered_shape_strides[i] = (ordered_shape_strides[i][0], remaining_buffer+shape_stride[1])
-        else:
-          to_apply.append((MovementOps.SHRINK, (*((0, s[0]) for s in ordered_shape_strides[:i]), (0, shape_stride[0]*shape_stride[1]))))
-          to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:i+1]], shape_stride[1])))
-      to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))), (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
-      if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
-    to_apply.append((MovementOps.RESHAPE, tuple(s if st else 1 for s,st in zip(real_shape, v.strides))))
-    if any(i<0 for i in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if st<0 else 1 for st in v.strides)))
-    # then, we apply pre expand pads
-    if v.mask is not None:
-      pre_expand_pads = tuple((x,s-y) if st != 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      post_expand_pads = tuple((x,s-y) if st == 0 else (0,0) for (x,y),s,st in zip(v.mask, v.shape, v.strides))
-      if any(x != (0,0) for x in pre_expand_pads):
-        to_apply.append((MovementOps.PAD, pre_expand_pads))
-        real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand_pads))
-    # then, we do any expands
-    if any(s != 1 and st == 0 for s,st in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
-    # lastly, we apply post expand pads
-    if v.mask is not None and any(x != (0,0) for x in post_expand_pads): to_apply.append((MovementOps.PAD, post_expand_pads))
-
-  scratch_st = make_scratch_st(st)
-  ret = []
-  seen = {}  # {shapetracker: list of mops to generate that shapetracker}
-  for mop_arg in to_apply:
-    scratch_st = apply_mop(scratch_st, mop_arg)
-    if scratch_st in seen:
-      ret = seen[scratch_st][:]
-    else:
-      if len(ret) and ret[-1][0] == MovementOps.RESHAPE and mop_arg[0] == MovementOps.RESHAPE:
-        ret[-1] = mop_arg
-      else:
-        if mop_arg == (MovementOps.RESHAPE, -1): mop_arg = (MovementOps.RESHAPE, (prod(st.shape),))
-        ret.append(mop_arg)
-      seen[scratch_st] = ret[:]
-  return ret
-
-def get_real_view(shape, strides, offset, mask):
-  real_shape = tuple(y-x for x,y in mask) if mask else shape
-  offset = offset + sum(st * (s-1) for s,st in zip(real_shape, strides) if st<0)
-  real_offset = offset + (sum(x*st for (x,_),st in zip(mask, strides)) if mask else 0)
-  real_real_shape = [s for s,st in zip(real_shape, strides) if st]
-  strides = [abs(st) if isinstance(st,int) else st for st in strides if st]
-  return real_real_shape, strides, real_offset
-
-def get_buffer_size(shape, strides, offset, mask):
-  real_real_shape, strides, real_offset = get_real_view(shape, strides, offset, mask)
-  return real_offset + sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
-
-def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
-  if (idxs1:=st1.expr_idxs()) == (idxs2:=st2.expr_idxs()): return True
-  idx1, valid1 = idxs1
-  idx2, valid2 = idxs2
-  # always invalid
-  if valid1 == 0 and valid2 == 0: return True
-
-  var1 = idx1.vars() | valid1.vars()
-  var2 = idx2.vars() | valid2.vars()
-  # Maybe there are cases that vars are different yet the sts are the same?
-  if var1 != var2: return False
-
-  # brute force over the vars range
-  vs = list(var1)
-  for i, ranges in enumerate(itertools.product(*[range(v.min, v.max+1) for v in vs])):
-    if i > 1000:
-      print("WARNING: did not search all possible combinations")
-      break
-    var_vals = {k.expr:v for k,v in zip(vs, ranges)}
-    r1 = sym_infer(idx1, var_vals) if sym_infer(valid1, var_vals) else 0
-    r2 = sym_infer(idx2, var_vals) if sym_infer(valid2, var_vals) else 0
-    if r1 != r2: return False
-
-  return True
 
 c: DefaultDict[int,int] = defaultdict(int)
-def test_rebuild(st: ShapeTracker):
-  rebuilt_st = make_scratch_st(st)
-  mops = to_movement_ops(st)
-  c[len(mops)] += 1
-  for mop_arg in mops: rebuilt_st = apply_mop(rebuilt_st, mop_arg)
-  rebuilt_st = rebuilt_st.simplify()
-  # why is the "all(x == 0 for x in rebuilt_st.views[-1].strides)" hack needed?
-  assert st_equivalent(st, rebuilt_st) or all(x == 0 for x in rebuilt_st.views[-1].strides), f"mismatch {st} {rebuilt_st}"
-  last_v1 = st.views[-1]
-  last_v2 = rebuilt_st.views[-1]
-  assert last_v1.shape == last_v2.shape, f"{last_v1.shape} != {last_v2.shape}"
 
 def test_rebuild_bufferop_st(ast:UOp):
   if ast.op is Ops.SHAPETRACKER:

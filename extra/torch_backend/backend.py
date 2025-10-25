@@ -3,7 +3,7 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -66,13 +66,13 @@ for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "p
 
 # in place operations with views
 def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.st.contiguous: self.replace(self.contiguous())
+  if not self.uop.is_contiguous(): self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
     if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
-    ret = self
-    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
+    # Get movement chain from v and apply to self
+    v_chain = get_movement_chain(v)
+    ret = apply_movement_chain(self, v_chain)
     v.replace(ret)
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
@@ -168,25 +168,35 @@ def fill_scalar(x, y):
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 @functools.cache
-def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-  return mops
+def get_movement_chain(tensor: Tensor) -> list[UOp]:
+  chain = []
+  current = tensor.uop
 
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+  from tinygrad.uop.ops import GroupOp
+  while current.op in GroupOp.Movement:
+    chain.append(current)
+    current = current.src[0]
+
+  return list(reversed(chain))
+
+def apply_movement_chain(base: Tensor, chain: list[UOp]) -> Tensor:
+  ret = base
+  for uop in chain:
+    match uop.op:
+      case Ops.RESHAPE: ret = ret.reshape(uop.marg)
+      case Ops.EXPAND: ret = ret.expand(uop.marg)
+      case Ops.PERMUTE: ret = ret.permute(uop.marg)
+      case Ops.PAD: ret = ret.pad(uop.marg)
+      case Ops.SHRINK: ret = ret.shrink(uop.marg)
+      case Ops.FLIP: ret = ret.flip(uop.marg)
+  return ret
 
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
-  # multiple as_strided do not compound
+  from extra.to_movement_ops import MovementOps, apply_mop
   base = canonical_base(tensor)
-  # TODO: this is heavyweight
-  st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
-  ret = base
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-  for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-  return ret
+  if TORCH_DEBUG >= 1: print(f"**** as_strided base.shape={base.shape} -> size={size} stride={stride} offset={storage_offset}")
+  return apply_mop(base, (MovementOps.AS_STRIDED, (tuple(size), tuple(stride), storage_offset)))
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
@@ -329,7 +339,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
+    if dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
