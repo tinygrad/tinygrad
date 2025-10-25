@@ -19,6 +19,8 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
+def fix(x): return x.shape, x.dtype, x.numpy()
+
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|None) -> str: return Device.canonicalize(device)
 
@@ -350,7 +352,7 @@ class Tensor(MathTrait):
     ```
     """
     # TODO: remove half once minimum python supports it
-    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
+    if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.float().tolist()
     return self.data().tolist()
 
   def numpy(self) -> 'np.ndarray':  # type: ignore [name-defined] # noqa: F821
@@ -1394,7 +1396,9 @@ class Tensor(MathTrait):
     ```
     """
     dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
+    for arg in args:
+      assert arg.ndim==self.ndim, f"all tensors must have the same number of dimensions, got {arg.ndim=} and {self.ndim=}"
+      assert all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim), f"all tensors must have the same shape except in the cat dimension, got {arg.shape=} and {self.shape=} on {dim=}"
     tensors = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
@@ -3993,7 +3997,7 @@ class Tensor(MathTrait):
     if num_classes == -1: num_classes = (self.max()+1).item()
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
-  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
+  def scaled_dot_product_attention(self, key:Tensor, value:Tensor, sink:Tensor|None=None, attn_mask:Tensor|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
     """
     Computes scaled dot-product attention.
@@ -4018,7 +4022,7 @@ class Tensor(MathTrait):
     if FUSE_ATTENTION: q, key, value = self.contiguous(), key.contiguous(), value.contiguous()
     else: q = self
 
-    qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1])
+    qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1]) # (B,H,T,Hd) (B,H,Hd,T) -> (B,H,T,T)
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
@@ -4026,7 +4030,9 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
+    # use attention sink # https://arxiv.org/abs/2309.17453
+    if sink is not None: attn = qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1)[..., :-1].dropout(dropout_p) @ value
+    else: attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
     return attn.fuse() if FUSE_ATTENTION else attn
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
