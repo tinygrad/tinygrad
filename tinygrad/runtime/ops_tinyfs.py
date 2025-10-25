@@ -74,9 +74,10 @@ class TinyFSDevice(Compiled):
       await self.conn_pools[loc].put((reader, writer))
 
 class TinyFSBuffer:
-  def __init__(self, device:TinyFSDevice, size:int, offset=0, copyout_queue=None):
+  def __init__(self, device:TinyFSDevice, size:int, offset=0, copyout_queue=None, hash_buf=None):
     self.device, self.size, self.offset = device, size, offset
     self.copyout_queue = copyout_queue or []
+    self.hash_buf = hash_buf or bytearray()
   def __repr__(self): return f"<TinyFSBuffer size={self.size} offset={self.offset}>"
 
 class TinyFSAllocator(Allocator[TinyFSDevice]):
@@ -99,9 +100,8 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
       locs = self.dev.sfile.readline()
       locs = json.loads(locs)
 
-      dest.copyout_queue = []
-      for i, loc in enumerate(locs):
-        dest.copyout_queue.append((i, loc, src[i*16:(i+1)*16].tobytes()))
+      dest.copyout_queue = locs
+      dest.hash_buf[:] = src.tobytes()
 
   def _copyout(self, dest:memoryview, src:TinyFSBuffer):
     if DEBUG >= 2: print(f"Copying out {src.size} bytes from TINYFS:{src.device.op}")
@@ -113,14 +113,13 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
       self.dev.sfile.readinto(dest)
 
   async def _copyout_async(self, dest:memoryview, src:TinyFSBuffer):
-    async def _worker(item):
-      i, loc, h = item
+    async def _worker(i, loc):
       async with self.dev.connection(loc) as (reader, writer):
         ptr = i * Tensor.CHUNK_SIZE
         size = min(len(dest[ptr:ptr+Tensor.CHUNK_SIZE]), Tensor.CHUNK_SIZE)
 
         writer.write(f"CHUNK_OUT {size}\r\n".encode())
-        writer.write(h)
+        writer.write(src.hash_buf[i*16:(i+1)*16])
         await writer.drain()
 
         chunk = await reader.readexactly(size)
@@ -129,8 +128,8 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
         view[:] = chunk
         del view
 
-    workers = [asyncio.create_task(_worker(item)) for item in src.copyout_queue]
+    workers = [asyncio.create_task(_worker(i, loc)) for i, loc in enumerate(src.copyout_queue)]
     await asyncio.gather(*workers)
 
   def _offset(self, buf:TinyFSBuffer, size:int, offset:int):
-    return TinyFSBuffer(buf.device, size, offset, buf.copyout_queue)
+    return TinyFSBuffer(buf.device, size, offset, buf.copyout_queue, buf.hash_buf)
