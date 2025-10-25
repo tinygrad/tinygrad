@@ -179,12 +179,12 @@ class ExecItem:
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
         header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
-        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
+        ptm = colored(time_to_str(et, w=9), 88 if et > 0.01 else None) if et is not None else ""
         flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
-        flops_str = colored(f"{flops*1e-6:7.0f} MFLOPS", 235) if flops < 1e9 \
+        flops_str = colored(f"{flops*1e-6:7.0f} MFLOPS", 88) if flops < 1e9 \
           else colored(f"{flops*1e-9:7.0f} GFLOPS", 'white') if flops < 1e14 \
           else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-        mem_str = colored(f"{membw*1e-6:4.0f}|{ldsbw*1e-6:<6.0f} MB/s", 235) if membw < 1e9 and ldsbw < 1e12  \
+        mem_str = colored(f"{membw*1e-6:4.0f}|{ldsbw*1e-6:<6.0f} MB/s", 88) if membw < 1e9 and ldsbw < 1e12  \
           else colored(f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s", 'white') if membw < 1e13 and ldsbw < 1e15 \
           else colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
         print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
