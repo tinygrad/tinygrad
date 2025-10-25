@@ -560,3 +560,5 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # reduce mul chain, move muls after the reduce
   (UPat(Ops.MUL).reduce(name="r", allow_any_len=True), reduce_mul_chain),
 ])
+
+pm_canonicalize_shape = PatternMatcher([ (UPat(Ops.RANGE, name="r", src=UPat.var("end")), lambda r, end: end) ])+symbolic
