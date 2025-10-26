@@ -188,12 +188,12 @@ function tokensToText(tokens, mapping) {
 }
 
 // #region whisper
-function handle_timestamp_tokens(nextTokens, context, token_count, last_token_index_DEADBEEF, one_before_last_token_index_DEADBEEF) {
+function handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index) {
     if (!NO_TIMESTAMPS) {
         if (token_count === 0) {
             nextTokens = nextTokens.filter((t) => t >= TOK_TS_FIRST && t <= TOK_TS_LAST);
-        } else if (context[last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
-            if (context[one_before_last_token_index_DEADBEEF] >= TOK_TS_FIRST) {
+        } else if (context[last_token_index] >= TOK_TS_FIRST) {
+            if (context[one_before_last_token_index] >= TOK_TS_FIRST) {
                 nextTokens = nextTokens.filter((t) => t < TOK_TS_FIRST);
             } else {
                 nextTokens = nextTokens.filter((t) => t >= TOK_EOS);
@@ -209,20 +209,20 @@ function batch_double_helper(array) {
     return array;
 }
 
-async function decoder_helper(nets, context_input, audio_features, context_index_DEADBEEF, decoder_state) {
+async function decoder_helper(nets, context_input, audio_features, context_last_token_index_absolute, decoder_state) {
     context_input = batch_double_helper(context_input);
-    let [decoder_output] = await nets.decoder(context_input, audio_features, [context_index_DEADBEEF]);
-    decoder_state.last_index_DEADBEEF = context_index_DEADBEEF;
-    decoder_state.context = [...decoder_state.context.slice(0, context_index_DEADBEEF * MODEL_BATCH_SIZE_HARDCODED), ...context_input];
+    let [decoder_output] = await nets.decoder(context_input, audio_features, [context_last_token_index_absolute]);
+    // TODO(irwin): this looks horribly wrong for actual batched work
+    decoder_state.context = [...decoder_state.context.slice(0, context_last_token_index_absolute * MODEL_BATCH_SIZE_HARDCODED), ...context_input];
     return decoder_output;
 }
 
 function rebuild_cache_tail_index(c1, c2) {
-    let i_DEADBEEF = 0;
-    for (; i_DEADBEEF < c1.length && i_DEADBEEF < c2.length; ++i_DEADBEEF) {
-        if (c1[i_DEADBEEF] !== c2[i_DEADBEEF]) break;
+    let i = 0;
+    for (; i < c1.length && i < c2.length; ++i) {
+        if (c1[i] !== c2[i]) break;
     }
-    return i_DEADBEEF;
+    return i;
 }
 
 const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61, 62, 63, 90, 91, 92, 93, 357, 366, 438, 532, 685, 705, 796, 930, 1058, 1220, 1267, 1279, 1303, 1343, 1377, 1391, 1635, 1782, 1875, 2162, 2361, 2488, 3467, 4008, 4211, 4600, 4808, 5299, 5855, 6329, 7203, 9609, 9959, 10563, 10786, 11420, 11709, 11907, 13163, 13697, 13700, 14808, 15306, 16410, 16791, 17992, 19203, 19510, 20724, 22305, 22935, 27007, 30109, 30420, 33409, 34949, 40283, 40493, 40549, 47282, 49146, 50257, 50357, 50358, 50359, 50360, 50361];
@@ -248,39 +248,37 @@ const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61,
  * @param {Decode_Sequence} decode_sequence
  */
 async function decodeOne(nets, decode_sequence, decoder_state, temperature, audio_features) {
-    const { index: i_DEADBEEF, max_context_length, last_eos_logprob, context_prompt_length } = decode_sequence;
-    const last_index_DEADBEEF = decoder_state.last_index_DEADBEEF;
+    const { max_context_length, last_eos_logprob, context_prompt_length } = decode_sequence;
     let { context } = decode_sequence;
     let result = {
-        keep: false,
-        context,
+        keep_going: false,
+        context, // TODO(irwin): decide if we want to return the same context or a new copy  @ContextCopyOrReference
         avg_logprob: undefined,
         segment_cumlogprob: decode_sequence.segment_cumlogprob,
         last_eos_logprob: undefined
     }
-    if (i_DEADBEEF >= max_context_length) return result;
+    if (context.length >= max_context_length) return result;
 
-    let last_token_index_DEADBEEF = i_DEADBEEF;
-    let one_before_last_token_index_DEADBEEF = i_DEADBEEF - 1;
+    let last_token_index = context.length - 1;
+    let one_before_last_token_index = context.length - 2;
 
-    let tail_index_DEADBEEF = rebuild_cache_tail_index(context, decoder_state.context);
-    if (tail_index_DEADBEEF < i_DEADBEEF - 1) {
+    let last_common_index = rebuild_cache_tail_index(context, decoder_state.context);
+    if (last_common_index < context.length - 1) {
         // NOTE(irwin): rebuild self attention kv cache
         // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
         const context_length_to_cache = context.length - 1;
-        for (let build_cache_index_DEADBEEF = 0; build_cache_index_DEADBEEF < context_length_to_cache; ++build_cache_index_DEADBEEF) {
-            let context_input = context.slice(build_cache_index_DEADBEEF, build_cache_index_DEADBEEF + 1);
-            let decoder_output_discarded = await decoder_helper(nets, context_input, audio_features, build_cache_index_DEADBEEF, decoder_state);
+        for (let build_cache_index = 0; build_cache_index < context_length_to_cache; ++build_cache_index) {
+            let context_input = context.slice(build_cache_index, build_cache_index + 1);
+            let decoder_output_discarded = await decoder_helper(nets, context_input, audio_features, build_cache_index, decoder_state);
         }
     }
 
-    let context_input = context.slice(i_DEADBEEF - 1, i_DEADBEEF);
+    let context_input = [context.at(-1)];
     // context_input = batch_double_helper(context_input);
 
     // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
-    let decoder_output = await decoder_helper(nets, context_input, audio_features, i_DEADBEEF - 1, decoder_state);
+    let decoder_output = await decoder_helper(nets, context_input, audio_features, context.length - 1, decoder_state);
     decoder_output = decoder_output.slice(0, decoder_output.length / MODEL_BATCH_SIZE_HARDCODED);
-    decoder_state.last_index_DEADBEEF = i_DEADBEEF;
     // decoder_state.context = context;
     let nextLogprobs;
     let nextTokens;
@@ -297,7 +295,7 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
 
     // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
     let token_count = context.length - context_prompt_length;
-    nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index_DEADBEEF, one_before_last_token_index_DEADBEEF);
+    nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index);
     let nextTokenIndex = 0;
     if (temperature > 0) {
         // let sortedSampledIndex = sample(normalize(nextLogprobs));
@@ -310,9 +308,11 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
         ++nextTokenIndex;
     }
 
+    // NOTE(irwin): up until here, context is not modified  @ContextCopyOrReference
     context.push(nextTokens[nextTokenIndex]);
 
-    result.avg_logprob = result.segment_cumlogprob / (i_DEADBEEF - context_prompt_length + 1);
+    const decoded_tokens_so_far = context.length - context_prompt_length;
+    result.avg_logprob = result.segment_cumlogprob / (decoded_tokens_so_far - context_prompt_length);
     let nextLogprob = nextLogprobs[nextTokens[nextTokenIndex]];
     decode_sequence.logprobs.push(nextLogprob);
     decode_sequence.eos_logprobs.push(nextLogprobs[TOK_EOS]);
@@ -322,11 +322,12 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
 
     if (nextTokens[nextTokenIndex] == TOK_EOS) {
         return result;
-    } else if (i_DEADBEEF + 1 >= max_context_length) {
+    } else if (context.length >= max_context_length) {
+        // TODO(irwin): why are we not `keep_going = false` here? forgot?
         context[context.length - 1] = TOK_EOS;
     }
 
-    result.keep = true;
+    result.keep_going = true;
     return result;
 }
 
@@ -356,7 +357,6 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     // v[0] = TOK_NO_TIMESTAMPS;
 
     let decoder_state = {
-        last_index_DEADBEEF: undefined,
         context: []
     };
 
@@ -390,30 +390,26 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         sequences.push(sequence);
     }
 
-    for (; sequences.some(c => c.context.at(-1) !== TOK_EOS);) {
-        let updated = false;
-        for (let idx = 0; idx < sequences.length; ++idx) {
-            if (sequences[idx].context.at(-1) === TOK_EOS) continue;
+    for (let idx = 0; idx < sequences.length; ++idx) {
+        for (let i = 0; i < MAX_TOKENS_TO_DECODE; ++i) {
+            if (sequences[idx].context.at(-1) === TOK_EOS) break;
+
             if (cancelToken.cancelled) return;
 
             let decode_result = await decodeOne(nets, sequences[idx], decoder_state, temperature, audio_features);
-            let keep = decode_result.keep;
+            let keep_going = decode_result.keep_going;
             sequences[idx].context = decode_result.context;
             sequences[idx].avg_logprob = decode_result.avg_logprob;
             sequences[idx].segment_cumlogprob = decode_result.segment_cumlogprob;
             sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
 
-            if (!updated) {
-                const detokenized = tokensToText(sequences[idx].context.slice(context_prompt_length), nets.mapping);
-                const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
-                let pendingText = format_text(detokenized, sequences[idx].avg_logprob, seek, seek_end);
-                updatedCallback(pendingText);
-                // console.log(pendingText);
-                updated = true;
-            }
+            const detokenized = tokensToText(sequences[idx].context.slice(context_prompt_length), nets.mapping);
+            const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
+            let pendingText = format_text(detokenized, sequences[idx].avg_logprob, seek, seek_end);
+            updatedCallback(pendingText);
+            // console.log(pendingText);
 
-            if (!keep) break;
-            ++sequences[idx].index;
+            if (!keep_going) break;
         }
     }
 
