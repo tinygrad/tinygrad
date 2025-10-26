@@ -34,7 +34,6 @@ except AttributeError: pass
 
 class struct__nvrtcProgram(ctypes.Structure): pass
 struct__nvrtcProgram._fields_ = []
-
 nvrtcProgram = ctypes.POINTER(struct__nvrtcProgram)
 # nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog, const char *src, const char *name, int numHeaders, const char *const *headers, const char *const *includeNames)
 try: (nvrtcCreateProgram:=dll.nvrtcCreateProgram).restype,nvrtcCreateProgram.argtypes = nvrtcResult,[ctypes.POINTER(nvrtcProgram), ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_char_p), ctypes.POINTER(ctypes.c_char_p)]

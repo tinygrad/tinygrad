@@ -41,3 +41,6 @@ nv = Autogen("nv",None,[*[f"{{}}/src/nvidia/inc/kernel/gpu/{s}.h" for s in ["fsp
   "-I{}/kernel-open/common/inc","-I{}/src/common/sdk/nvidia/inc","-I{}/src/nvidia/arch/nvalloc/unix/include","-I{}/src/common/sdk/nvidia/inc/ctrl"],
   tarball=nv_gpu.tarball)
 
+# this defines all syscall numbers. should probably unify linux autogen?
+io_uring = Autogen("io_uring",None,["/usr/include/liburing.h","/usr/include/linux/io_uring.h","/usr/include/asm-generic/unistd.h"],
+                   rules=[('__NR','NR')])

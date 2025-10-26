@@ -477,7 +477,7 @@ def CEnum(typ: type):
     @classmethod
     def define(cls, name, val):
       cls._val_to_name_[val] = name
-      return cls(val)
+      return val
 
     def __eq__(self, other): return self.value == other
     def __repr__(self): return self.name(self) if self.value in self.__class__._val_to_name_ else str(self.value)
