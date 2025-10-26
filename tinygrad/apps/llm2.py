@@ -171,7 +171,7 @@ class Transformer:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
   @staticmethod
-  def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool) -> Transformer:
+  def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
     # load model
     model = Transformer(**params)
 
