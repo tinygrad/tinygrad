@@ -252,7 +252,7 @@ class LNXPCIIfaceBase:
       # Acquire va range to avoid collisions.
       FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, 0)
     self.pci_dev, self.dev, self.vram_bar = PCIDevice(cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
-    self.p2p_base_addr = self.pci_dev.bar_info[vram_bar][0]
+    self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     # NOTE: logic on macos is different, since bar is small
