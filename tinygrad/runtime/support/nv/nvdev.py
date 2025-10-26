@@ -1,10 +1,9 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits
-from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
-from tinygrad.runtime.support.system import System, PCIDevImplBase
+from tinygrad.runtime.support.system import System, PCIDevice, PCIDevImplBase
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
@@ -71,8 +70,9 @@ class NVMemoryManager(MemoryManager):
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev(PCIDevImplBase):
-  def __init__(self, devfmt:str, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
-    self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
+  def __init__(self, pci_dev:PCIDevice):
+    self.pci_dev, self.devfmt, self.vram, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(1), pci_dev.map_bar(0, fmt='I')
+
     self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
 
     self.smi_dev, self.is_booting = False, True
