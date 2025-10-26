@@ -31,7 +31,7 @@ def linearize(u:UOp) -> list[UOp]:
   in_degree:dict[UOp, int] = {}
   priorities:dict[UOp, int] = {}
 
-  # get local children and assign priorities
+  # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
     in_degree[u] = 0
@@ -85,7 +85,7 @@ class CFGContext:
     siblings: dict[UOp, list[UOp]] = {}
     for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
-      # range/if that have dependencies on other siblings need to run after them
+      # ranges that have dependencies on other siblings need to be scheduled after them
       order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
       for x,y in zipped: self.edges[y.src[1]] = x
