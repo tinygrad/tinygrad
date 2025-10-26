@@ -264,8 +264,8 @@ jobs:
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
       run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
-    - name: Check SPEC=1
-      run: SPEC=1 python3 test/test_tiny.py
+    - name: Check SPEC=2
+      run: SPEC=2 python3 test/test_tiny.py
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     # TODO: too slow
@@ -522,11 +522,11 @@ jobs:
         pydeps: "pillow"
         llvm: "true"
     - name: Test LLVM=1 DEVECTORIZE=0
-      run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+      run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py
     - name: Test LLVM=1 DEVECTORIZE=0 for model
       run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
     - name: Test CPU=1 DEVECTORIZE=0
-      run: CPU=1 CPU_LLVM=0 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+      run: CPU=1 CPU_LLVM=0 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py
 
   testdsp:
     name: Linux (DSP)

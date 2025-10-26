@@ -1,12 +1,13 @@
 from typing import cast
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import DEBUG, Context
+from tinygrad.helpers import DEBUG, Context, prod
 from tinygrad.uop.validate import validate_index
 
 # four specs:
 #   shared_spec  -- usable anywhere
 #   tensor_spec  -- usable in tensor graph
+#   kernel_spec  -- usable in kernel passed into codegen
 #   program_spec -- usable in linearized program
 #   full_spec    -- all uops ever created
 
@@ -14,6 +15,9 @@ from tinygrad.uop.validate import validate_index
 
 shared_spec = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
+
+  # SENTINEL should never be anywhere
+  (UPat(Ops.SENTINEL), lambda: False),
 
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
@@ -143,8 +147,29 @@ program_spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
   (UPat(Ops.BARRIER, dtypes.void), lambda: True), # BARRIERs can also happen at the end of loops
 
-  (UPat((Ops.NOOP, Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 ])+shared_spec
+
+# ***** UOp spec in kernel graph *****
+
+kernel_spec = PatternMatcher([
+  # index is allowed here
+  (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
+
+  # UNROLL/CONTRACT is used here for WMMA
+  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
+
+  # END can end multiple axes here
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), allow_any_len=True, dtype=dtypes.void), lambda: True),
+
+  # bufferize (must be on ranges)
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
+  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+
+  # intermediate index
+  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
+])+program_spec+shared_spec
 
 # *** this spec should match all UOps ever created ***
 
@@ -152,8 +177,8 @@ full_spec = PatternMatcher([
   # any END
   (UPat(Ops.END), lambda: True),
 
-  # SENTINEL should never be in the graph
-  (UPat(Ops.SENTINEL), lambda: False),
+  # NOOP in the full spec
+  (UPat(Ops.NOOP), lambda: True),
 
   # Invalid must have type Index
   (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
@@ -165,19 +190,12 @@ full_spec = PatternMatcher([
 
   # rangeify: buffer view with index or load is okay
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
-  # bufferize (must be on ranges)
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
-  # intermediate index
-  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
-  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
   # copy on index
   (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
   # assign on index. the third op is the shape
-  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat(GroupOp.Movement))), lambda: True),
+  (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat())), lambda: True),
 
   # expander: unroll/contract/gep/ptrcat/cat
-  #(UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
-  #(UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
   # GEP multi is supported here
   (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
@@ -195,6 +213,12 @@ full_spec = PatternMatcher([
   (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX, Ops.WHERE,
          Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.VECTORIZE), dtype=dtypes.index), lambda: True),
 
+  # while BIND is being casted
+  (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(), UPat()), arg=None), lambda: True),
+
+  # in progress MSTACK may lose device
+  (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
+
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
   # all ifs
@@ -205,7 +229,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
-])+tensor_spec+program_spec
+])+tensor_spec+kernel_spec+program_spec+shared_spec
 
 # ***** uop helpers *****
 

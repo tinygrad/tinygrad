@@ -1,6 +1,6 @@
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, SPEC
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
-from tinygrad.uop.spec import type_verify, program_spec
+from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
@@ -18,6 +18,8 @@ from tinygrad.codegen.late.control_flow import CFGContext, pm_split_ends, pm_add
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
+
+  if SPEC: type_verify(list(sink.toposort()), kernel_spec)
 
   # first we optimize
   if optimize:
@@ -102,5 +104,5 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   assert len(full_sink.ranges) == 0, "all ranges must end by the sink"
   lst = linearize(full_sink)
-  if __debug__: type_verify(lst, program_spec)
+  if SPEC: type_verify(lst, program_spec)
   return lst

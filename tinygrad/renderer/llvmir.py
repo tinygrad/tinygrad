@@ -168,7 +168,7 @@ class LLVMRenderer(Renderer):
 
     name = "test"
     for u in uops:
-      if u.op is Ops.NOOP: continue
+      if u.op in {Ops.NOOP, Ops.GROUP}: continue
       if u.op is Ops.AFTER:
         r[u] = r[u.src[0]]
         continue
