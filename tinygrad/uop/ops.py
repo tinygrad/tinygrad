@@ -40,11 +40,14 @@ def srender(x:sint) -> str: return x.render() if isinstance(x, UOp) else str(x)
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
-def canonicalize_dim(uop:sint)->int:
+def canonicalize_dim(uop:sint)->sint:
+  # Simplify and return an actual integer, execept when unbound variables are involved
   if isinstance(uop, int): return uop
   from tinygrad.uop.symbolic import pm_canonicalize_shape
-  return graph_rewrite(uop, pm_canonicalize_shape, name="canonicalize_dim").arg
-def canonicalize_shape(s:tuple[sint,...])->tuple[int,...]: return tuple(canonicalize_dim(x) for x in s)
+  simplified = graph_rewrite(uop, pm_canonicalize_shape, name="canonicalize_dim")
+  if simplified.op is Ops.CONST: return simplified.arg
+  return simplified
+def canonicalize_shape(s:tuple[sint,...])->tuple[sint,...]: return tuple(canonicalize_dim(x) for x in s)
 
 
 def range_str(u:UOp) -> str: return '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
