@@ -32,15 +32,36 @@ class TestGPTOSS(unittest.TestCase):
     from transformers import GptOssForCausalLM as TorchGptOss
     from transformers import GptOssConfig
 
-    # small params
-    params = {"dim": 2, "hidden_dim": 12, "head_dim": 2, "n_heads": 2, "n_kv_heads": 1, "num_blocks": 2, "n_experts": 3, "n_active_experts": 2,
-              "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "max_context": 128,
+    params = {"dim": 2880, "hidden_dim": 2880, "head_dim": 64,
+              "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24,
+              "n_experts": 32, "n_active_experts": 4,
+              "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "max_context": 128,
               "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
               }
-    torch_params = {"hidden_size": 2, "intermediate_size": 12, "head_dim": 2, "num_attention_heads": 2, "num_key_value_heads": 1, "num_hidden_layers": 2, "num_local_experts": 3, "num_experts_per_tok": 2,
-                    "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "max_context": 128,
+    torch_params = {"hidden_size": 2880, "intermediate_size": 2880, "head_dim": 64,
+                    "num_attention_heads": 64, "num_key_value_heads": 8, "num_hidden_layers": 24,
+                    "num_local_experts": 32, "num_experts_per_tok": 4,
+                    "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "initial_context_length": 128,
                     "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
                     }
+
+    # small params
+    small_params = {"dim": 2, "hidden_dim": 12, "head_dim": 2,
+                    "n_heads": 2, "n_kv_heads": 1, "num_blocks": 2,
+                    "n_experts": 3, "n_active_experts": 2,
+                    "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "max_context": 128,
+                    "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
+                    }
+    small_torch_params = {"hidden_size": 2, "intermediate_size": 12, "head_dim": 2,
+                          "num_attention_heads": 2, "num_key_value_heads": 1, "num_hidden_layers": 2,
+                          "num_local_experts": 3, "num_experts_per_tok": 2,
+                          "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "initial_context_length": 128,
+                          "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
+                          }
+
+    if getenv("SMALL"):
+      params, torch_params = small_params, small_torch_params
+
 
     # Create in tinygrad
     Tensor.manual_seed(1337)
