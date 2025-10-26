@@ -455,10 +455,10 @@ copyreg.pickle(types.ModuleType, _serialize_module)
 
 # *** C autogen ***
 
-def _do_ioctl(idir, base, nr, struct, fd, **kwargs):
+def _do_ioctl(__idir, __base, __nr, __struct, __fd, **kwargs):
   from tinygrad.runtime.support.hcq import FileIOInterface
-  ioctl = fd.ioctl if isinstance(fd, FileIOInterface) else functools.partial(fcntl.ioctl, fd)
-  if (rc:=ioctl((idir<<30)|(ctypes.sizeof(out:=struct(**kwargs))<<16)|(base<<8)|nr, out)) != 0: raise RuntimeError(f"ioctl returned {rc}")
+  ioctl = __fd.ioctl if isinstance(__fd, FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
+  if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=__struct(**kwargs))<<16)|(__base<<8)|__nr, out)): raise RuntimeError(f"ioctl returned {rc}")
   return out
 
 def _IO(base, nr): return functools.partial(_do_ioctl, 0, ord(base) if isinstance(base, str) else base, nr, None)
