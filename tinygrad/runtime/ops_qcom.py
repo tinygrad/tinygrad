@@ -277,7 +277,7 @@ class QCOMProgram(HCQProgram):
       self.buf_info.append(SimpleNamespace(offset=offset_words * 4, type=typ, bindless_id=bindless_id))
       bdoff += length
 
-    self.is_bindless = True # TODO: fixme
+    self.is_bindless = False # TODO: fixme
 
     # Setting correct offsets to textures/ibos.
     self.tex_cnt, self.ibo_cnt = sum(x.type is BUFTYPE_TEX for x in self.buf_info), sum(x.type is BUFTYPE_IBO for x in self.buf_info)
