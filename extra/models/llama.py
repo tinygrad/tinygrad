@@ -7,8 +7,7 @@ from tinygrad.helpers import getenv
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  # todo: remove hardcoding a constant from yarn
-  return Tensor.stack(freqs.cos() * 1.34375, freqs.sin() * 1.34375, dim=-1).reshape(1, end, 1, dim//2, 2)
+  return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).reshape(1, end, 1, dim//2, 2)
 
 # matches meta, non hugging face weights
 # (a+i*b) * (c+i*d) = (ac-bd) + i*(ad+bc)
