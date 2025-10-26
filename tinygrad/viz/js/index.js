@@ -1,8 +1,9 @@
 // ** graph helpers
 
-const displayGraph = (cls) => {
-  for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
+const displaySelection = (sel) => {
+  for (const e of document.getElementsByClassName("view")) e.style.display = e.matches(sel) ? "flex" : "none";
 }
+const metadata = document.querySelector(".metadata");
 
 const darkenHex = (h, p = 0) =>
   `#${(
@@ -126,7 +127,7 @@ function renderDag(graph, additions, recenter) {
   worker = new Worker(workerUrl);
   worker.postMessage({graph, additions});
   worker.onmessage = (e) => {
-    displayGraph("graph");
+    displaySelection("#graph");
     updateProgress({ start:false });
     drawGraph(e.data);
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
@@ -181,15 +182,15 @@ var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, 
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return document.querySelector(".metadata").replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+  return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
 }
 
 async function renderProfiler() {
-  displayGraph("profiler");
-  d3.select(".metadata").node().replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+  displaySelection("#profiler");
+  metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
   // layout once!
   if (data != null) return updateProgress({ start:false });
-  const profiler = d3.select(".profiler").html("");
+  const profiler = d3.select("#profiler").html("");
   const buf = await (await fetch("/get_profile")).arrayBuffer();
   const view = new DataView(buf);
   let offset = 0;
@@ -308,8 +309,8 @@ async function renderProfiler() {
           const { repr, num, mode, shape } = users[u];
           const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
           const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
-          const metadata = shape?.tooltipText?.split("\n").at(-1);
-          if (metadata != null) p.append("span").text(" "+metadata);
+          const shapeTxt = shape?.tooltipText?.split("\n").at(-1);
+          if (shapeTxt != null) p.append("span").text(" "+shapeTxt);
           if (shape != null) {
             p.style("cursor", "pointer").on("click", () => focusShape(shape))
             const args = shapeMetadata.get(shape.key).querySelector(".args");
@@ -450,7 +451,7 @@ async function renderProfiler() {
   }
 
   function resize() {
-    const profiler = document.querySelector(".profiler");
+    const profiler = document.querySelector("#profiler");
     const sideRect = rect("#device-list");
     const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
@@ -675,11 +676,9 @@ async function main() {
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    displayGraph("render");
-    const root = document.createElement("div");
-    root.className = "raw-text";
-    const metadata = document.querySelector(".metadata");
+    displaySelection("#custom");
     metadata.innerHTML = "";
+    const root = d3.create("div").classed("raw-text", true).node();
     // detailed assembly view
     if (ret.cols != null) {
       const asm = root.appendChild(document.createElement("table"));
@@ -710,7 +709,7 @@ async function main() {
         return [s.label.trim(), div.node()];
       })).node());
     } else root.appendChild(codeBlock(ret.src, ret.lang));
-    return document.querySelector(".render").replaceChildren(root);
+    return document.querySelector("#custom").replaceChildren(root);
   }
   // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
@@ -733,7 +732,6 @@ async function main() {
   if (ret.length === 0) return;
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
-  const metadata = document.querySelector(".metadata");
   metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }),
                            codeBlock(ret[currentRewrite].uop, "python", { wrap:false }));
   // ** rewrite steps
