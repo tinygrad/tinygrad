@@ -1,7 +1,8 @@
+# mypy: ignore-errors
 import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-NvUPtr = ctypes.c_ulonglong
 class _anonunion0(ctypes.Union): pass
+NvUPtr = ctypes.c_ulonglong
 _anonunion0._fields_ = [
   ('v', NvUPtr),
   ('p', ctypes.c_void_p),
@@ -11,10 +12,10 @@ _anonunion1._fields_ = [
   ('v', NvUPtr),
   ('p', ctypes.c_void_p),
 ]
+class struct_NV0000_ALLOC_PARAMETERS(ctypes.Structure): pass
 NvHandle = ctypes.c_uint
 NvU32 = ctypes.c_uint
 NvP64 = ctypes.c_void_p
-class struct_NV0000_ALLOC_PARAMETERS(ctypes.Structure): pass
 struct_NV0000_ALLOC_PARAMETERS._fields_ = [
   ('hClient', NvHandle),
   ('processID', NvU32),
@@ -22,9 +23,9 @@ struct_NV0000_ALLOC_PARAMETERS._fields_ = [
   ('pOsPidInfo', NvP64),
 ]
 NV0000_ALLOC_PARAMETERS = struct_NV0000_ALLOC_PARAMETERS
+class struct_NV0080_ALLOC_PARAMETERS(ctypes.Structure): pass
 NvV32 = ctypes.c_uint
 NvU64 = ctypes.c_ulonglong
-class struct_NV0080_ALLOC_PARAMETERS(ctypes.Structure): pass
 struct_NV0080_ALLOC_PARAMETERS._fields_ = [
   ('deviceId', NvU32),
   ('hClientShare', NvHandle),
@@ -340,8 +341,8 @@ volatile_struct__clc9b5_tag0._fields_ = [
   ('Reserved14', (NvV32 * 954)),
 ]
 blackwell_dma_copy_aControlPio = volatile_struct__clc9b5_tag0
-NV_STATUS = ctypes.c_uint
 class UVM_RESERVE_VA_PARAMS(ctypes.Structure): pass
+NV_STATUS = ctypes.c_uint
 UVM_RESERVE_VA_PARAMS._fields_ = [
   ('requestedBase', NvU64),
   ('length', NvU64),
@@ -353,14 +354,14 @@ UVM_RELEASE_VA_PARAMS._fields_ = [
   ('length', NvU64),
   ('rmStatus', NV_STATUS),
 ]
+class UVM_REGION_COMMIT_PARAMS(ctypes.Structure): pass
 UvmStream = ctypes.c_ulonglong
-NvU8 = ctypes.c_ubyte
 class struct_nv_uuid(ctypes.Structure): pass
+NvU8 = ctypes.c_ubyte
 struct_nv_uuid._fields_ = [
   ('uuid', (NvU8 * 16)),
 ]
 NvProcessorUuid = struct_nv_uuid
-class UVM_REGION_COMMIT_PARAMS(ctypes.Structure): pass
 UVM_REGION_COMMIT_PARAMS._fields_ = [
   ('requestedBase', NvU64),
   ('length', NvU64),
@@ -393,21 +394,20 @@ UVM_SET_STREAM_STOPPED_PARAMS._fields_ = [
   ('nStreams', NvU64),
   ('rmStatus', NV_STATUS),
 ]
-class _anonstruct13(ctypes.Structure): pass
-_anonstruct13._fields_ = [
+class UVM_RUN_TEST_PARAMS(ctypes.Structure): pass
+class UVM_RUN_TEST_PARAMS_multiGpu(ctypes.Structure): pass
+UVM_RUN_TEST_PARAMS_multiGpu._fields_ = [
   ('peerGpuUuid', NvProcessorUuid),
   ('peerId', NvU32),
 ]
-class UVM_RUN_TEST_PARAMS(ctypes.Structure): pass
-UVM_RUN_TEST_PARAMS._anonymous_ = ('_0',)
 UVM_RUN_TEST_PARAMS._fields_ = [
   ('gpuUuid', NvProcessorUuid),
   ('test', NvU32),
-  ('_0', _anonstruct13),
+  ('multiGpu', UVM_RUN_TEST_PARAMS_multiGpu),
   ('rmStatus', NV_STATUS),
 ]
-NvS32 = ctypes.c_int
 class UVM_ADD_SESSION_PARAMS(ctypes.Structure): pass
+NvS32 = ctypes.c_int
 UVM_ADD_SESSION_PARAMS._fields_ = [
   ('pidTarget', NvU32),
   ('countersBaseAddress', NvP64),
@@ -419,6 +419,7 @@ UVM_REMOVE_SESSION_PARAMS._fields_ = [
   ('sessionIndex', NvS32),
   ('rmStatus', NV_STATUS),
 ]
+class UVM_ENABLE_COUNTERS_PARAMS(ctypes.Structure): pass
 class UvmCounterConfig(ctypes.Structure): pass
 UvmCounterConfig._fields_ = [
   ('scope', NvU32),
@@ -426,7 +427,6 @@ UvmCounterConfig._fields_ = [
   ('gpuid', NvProcessorUuid),
   ('state', NvU32),
 ]
-class UVM_ENABLE_COUNTERS_PARAMS(ctypes.Structure): pass
 UVM_ENABLE_COUNTERS_PARAMS._fields_ = [
   ('sessionIndex', NvS32),
   ('config', (UvmCounterConfig * 32)),
@@ -553,6 +553,7 @@ UVM_SET_RANGE_GROUP_PARAMS._fields_ = [
   ('length', NvU64),
   ('rmStatus', NV_STATUS),
 ]
+class UVM_MAP_EXTERNAL_ALLOCATION_PARAMS(ctypes.Structure): pass
 class UvmGpuMappingAttributes(ctypes.Structure): pass
 UvmGpuMappingAttributes._fields_ = [
   ('gpuUuid', NvProcessorUuid),
@@ -562,7 +563,6 @@ UvmGpuMappingAttributes._fields_ = [
   ('gpuElementBits', NvU32),
   ('gpuCompressionType', NvU32),
 ]
-class UVM_MAP_EXTERNAL_ALLOCATION_PARAMS(ctypes.Structure): pass
 UVM_MAP_EXTERNAL_ALLOCATION_PARAMS._fields_ = [
   ('base', NvU64),
   ('length', NvU64),
@@ -586,8 +586,8 @@ UVM_MEM_MAP_PARAMS._fields_ = [
   ('regionLength', NvU64),
   ('rmStatus', NV_STATUS),
 ]
-NvBool = ctypes.c_ubyte
 class UVM_DEBUG_ACCESS_MEMORY_PARAMS(ctypes.Structure): pass
+NvBool = ctypes.c_ubyte
 UVM_DEBUG_ACCESS_MEMORY_PARAMS._fields_ = [
   ('sessionIndex', NvS32),
   ('baseAddress', NvU64),
@@ -849,8 +849,8 @@ UVM_INITIALIZE_PARAMS._fields_ = [
   ('flags', NvU64),
   ('rmStatus', NV_STATUS),
 ]
-NvU16 = ctypes.c_ushort
 class nv_pci_info_t(ctypes.Structure): pass
+NvU16 = ctypes.c_ushort
 nv_pci_info_t._fields_ = [
   ('domain', NvU32),
   ('bus', NvU8),
@@ -948,17 +948,17 @@ struct_nv_ioctl_wait_open_complete._fields_ = [
   ('adapterStatus', NvU32),
 ]
 nv_ioctl_wait_open_complete_t = struct_nv_ioctl_wait_open_complete
+class struct_offline_addresses(ctypes.Structure): pass
 uint64_t = ctypes.c_ulong
 uint32_t = ctypes.c_uint
-class struct_offline_addresses(ctypes.Structure): pass
 struct_offline_addresses._fields_ = [
   ('addresses', (uint64_t * 64)),
   ('numEntries', uint32_t),
 ]
 nv_offline_addresses_t = struct_offline_addresses
+class struct_nv_ioctl_numa_info(ctypes.Structure): pass
 int32_t = ctypes.c_int
 uint8_t = ctypes.c_ubyte
-class struct_nv_ioctl_numa_info(ctypes.Structure): pass
 struct_nv_ioctl_numa_info._fields_ = [
   ('nid', int32_t),
   ('status', int32_t),
@@ -974,6 +974,7 @@ struct_nv_ioctl_set_numa_status._fields_ = [
   ('status', int32_t),
 ]
 nv_ioctl_set_numa_status_t = struct_nv_ioctl_set_numa_status
+class nv_ioctl_nvos02_parameters_with_fd(ctypes.Structure): pass
 class NVOS02_PARAMETERS(ctypes.Structure): pass
 NVOS02_PARAMETERS._fields_ = [
   ('hRoot', NvHandle),
@@ -985,11 +986,11 @@ NVOS02_PARAMETERS._fields_ = [
   ('limit', NvU64),
   ('status', NvV32),
 ]
-class nv_ioctl_nvos02_parameters_with_fd(ctypes.Structure): pass
 nv_ioctl_nvos02_parameters_with_fd._fields_ = [
   ('params', NVOS02_PARAMETERS),
   ('fd', ctypes.c_int),
 ]
+class nv_ioctl_nvos33_parameters_with_fd(ctypes.Structure): pass
 class NVOS33_PARAMETERS(ctypes.Structure): pass
 NVOS33_PARAMETERS._fields_ = [
   ('hClient', NvHandle),
@@ -1001,7 +1002,6 @@ NVOS33_PARAMETERS._fields_ = [
   ('status', NvU32),
   ('flags', NvU32),
 ]
-class nv_ioctl_nvos33_parameters_with_fd(ctypes.Structure): pass
 nv_ioctl_nvos33_parameters_with_fd._fields_ = [
   ('params', NVOS33_PARAMETERS),
   ('fd', ctypes.c_int),
@@ -1148,9 +1148,11 @@ NVOS32_BLOCKINFO._fields_ = [
   ('size', NvU64),
   ('flags', NvU32),
 ]
+class NVOS32_PARAMETERS(ctypes.Structure): pass
 NvS16 = ctypes.c_short
-class _anonstruct15(ctypes.Structure): pass
-_anonstruct15._fields_ = [
+class NVOS32_PARAMETERS_data(ctypes.Union): pass
+class NVOS32_PARAMETERS_data_AllocSize(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_AllocSize._fields_ = [
   ('owner', NvU32),
   ('hMemory', NvHandle),
   ('type', NvU32),
@@ -1173,8 +1175,8 @@ _anonstruct15._fields_ = [
   ('ctagOffset', NvU32),
   ('numaNode', NvS32),
 ]
-class _anonstruct16(ctypes.Structure): pass
-_anonstruct16._fields_ = [
+class NVOS32_PARAMETERS_data_AllocTiledPitchHeight(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_AllocTiledPitchHeight._fields_ = [
   ('owner', NvU32),
   ('hMemory', NvHandle),
   ('type', NvU32),
@@ -1198,39 +1200,39 @@ _anonstruct16._fields_ = [
   ('ctagOffset', NvU32),
   ('numaNode', NvS32),
 ]
-class _anonstruct17(ctypes.Structure): pass
-_anonstruct17._fields_ = [
+class NVOS32_PARAMETERS_data_Free(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_Free._fields_ = [
   ('owner', NvU32),
   ('hMemory', NvHandle),
   ('flags', NvU32),
 ]
-class _anonstruct18(ctypes.Structure): pass
-_anonstruct18._fields_ = [
+class NVOS32_PARAMETERS_data_ReleaseCompr(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_ReleaseCompr._fields_ = [
   ('owner', NvU32),
   ('flags', NvU32),
   ('hMemory', NvHandle),
 ]
-class _anonstruct19(ctypes.Structure): pass
-_anonstruct19._fields_ = [
+class NVOS32_PARAMETERS_data_ReacquireCompr(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_ReacquireCompr._fields_ = [
   ('owner', NvU32),
   ('flags', NvU32),
   ('hMemory', NvHandle),
 ]
-class _anonstruct20(ctypes.Structure): pass
-_anonstruct20._fields_ = [
+class NVOS32_PARAMETERS_data_Info(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_Info._fields_ = [
   ('attr', NvU32),
   ('offset', NvU64),
   ('size', NvU64),
   ('base', NvU64),
 ]
-class _anonstruct21(ctypes.Structure): pass
-_anonstruct21._fields_ = [
+class NVOS32_PARAMETERS_data_Dump(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_Dump._fields_ = [
   ('flags', NvU32),
   ('pBuffer', NvP64),
   ('numBlocks', NvU32),
 ]
-class _anonstruct22(ctypes.Structure): pass
-_anonstruct22._fields_ = [
+class NVOS32_PARAMETERS_data_AllocSizeRange(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_AllocSizeRange._fields_ = [
   ('owner', NvU32),
   ('hMemory', NvHandle),
   ('type', NvU32),
@@ -1251,8 +1253,8 @@ _anonstruct22._fields_ = [
   ('ctagOffset', NvU32),
   ('numaNode', NvS32),
 ]
-class _anonstruct23(ctypes.Structure): pass
-_anonstruct23._fields_ = [
+class NVOS32_PARAMETERS_data_AllocHintAlignment(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_AllocHintAlignment._fields_ = [
   ('alignType', NvU32),
   ('alignAttr', NvU32),
   ('alignInputFlags', NvU32),
@@ -1268,8 +1270,9 @@ _anonstruct23._fields_ = [
   ('alignAdjust', NvU32),
   ('alignAttr2', NvU32),
 ]
-class _anonstruct25(ctypes.Structure): pass
-_anonstruct25._fields_ = [
+class NVOS32_PARAMETERS_data_HwAlloc(ctypes.Structure): pass
+class NVOS32_PARAMETERS_data_HwAlloc_comprInfo(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_HwAlloc_comprInfo._fields_ = [
   ('compPageShift', NvU32),
   ('compressedKind', NvU32),
   ('compTagLineMin', NvU32),
@@ -1277,9 +1280,7 @@ _anonstruct25._fields_ = [
   ('compPageIndexHi', NvU32),
   ('compTagLineMultiplier', NvU32),
 ]
-class _anonstruct24(ctypes.Structure): pass
-_anonstruct24._anonymous_ = ('_0',)
-_anonstruct24._fields_ = [
+NVOS32_PARAMETERS_data_HwAlloc._fields_ = [
   ('allocOwner', NvU32),
   ('allochMemory', NvHandle),
   ('flags', NvU32),
@@ -1302,16 +1303,16 @@ _anonstruct24._fields_ = [
   ('allocAttr2', NvU32),
   ('retAttr2', NvU32),
   ('allocAddr', NvU64),
-  ('_0', _anonstruct25),
+  ('comprInfo', NVOS32_PARAMETERS_data_HwAlloc_comprInfo),
   ('uncompressedKind', NvU32),
 ]
-class _anonstruct26(ctypes.Structure): pass
-_anonstruct26._fields_ = [
+class NVOS32_PARAMETERS_data_HwFree(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_HwFree._fields_ = [
   ('hResourceHandle', NvHandle),
   ('flags', NvU32),
 ]
-class _anonstruct27(ctypes.Structure): pass
-_anonstruct27._fields_ = [
+class NVOS32_PARAMETERS_data_AllocOsDesc(ctypes.Structure): pass
+NVOS32_PARAMETERS_data_AllocOsDesc._fields_ = [
   ('hMemory', NvHandle),
   ('type', NvU32),
   ('flags', NvU32),
@@ -1321,24 +1322,20 @@ _anonstruct27._fields_ = [
   ('limit', NvU64),
   ('descriptorType', NvU32),
 ]
-class _anonunion14(ctypes.Union): pass
-_anonunion14._anonymous_ = ('_0','_1','_2','_3','_4','_5','_6','_7','_8','_9','_10','_11',)
-_anonunion14._fields_ = [
-  ('_0', _anonstruct15),
-  ('_1', _anonstruct16),
-  ('_2', _anonstruct17),
-  ('_3', _anonstruct18),
-  ('_4', _anonstruct19),
-  ('_5', _anonstruct20),
-  ('_6', _anonstruct21),
-  ('_7', _anonstruct22),
-  ('_8', _anonstruct23),
-  ('_9', _anonstruct24),
-  ('_10', _anonstruct26),
-  ('_11', _anonstruct27),
+NVOS32_PARAMETERS_data._fields_ = [
+  ('AllocSize', NVOS32_PARAMETERS_data_AllocSize),
+  ('AllocTiledPitchHeight', NVOS32_PARAMETERS_data_AllocTiledPitchHeight),
+  ('Free', NVOS32_PARAMETERS_data_Free),
+  ('ReleaseCompr', NVOS32_PARAMETERS_data_ReleaseCompr),
+  ('ReacquireCompr', NVOS32_PARAMETERS_data_ReacquireCompr),
+  ('Info', NVOS32_PARAMETERS_data_Info),
+  ('Dump', NVOS32_PARAMETERS_data_Dump),
+  ('AllocSizeRange', NVOS32_PARAMETERS_data_AllocSizeRange),
+  ('AllocHintAlignment', NVOS32_PARAMETERS_data_AllocHintAlignment),
+  ('HwAlloc', NVOS32_PARAMETERS_data_HwAlloc),
+  ('HwFree', NVOS32_PARAMETERS_data_HwFree),
+  ('AllocOsDesc', NVOS32_PARAMETERS_data_AllocOsDesc),
 ]
-class NVOS32_PARAMETERS(ctypes.Structure): pass
-NVOS32_PARAMETERS._anonymous_ = ('_0',)
 NVOS32_PARAMETERS._fields_ = [
   ('hRoot', NvHandle),
   ('hObjectParent', NvHandle),
@@ -1348,7 +1345,7 @@ NVOS32_PARAMETERS._fields_ = [
   ('status', NvV32),
   ('total', NvU64),
   ('free', NvU64),
-  ('_0', _anonunion14),
+  ('data', NVOS32_PARAMETERS_data),
 ]
 class NVOS32_HEAP_DUMP_BLOCK(ctypes.Structure): pass
 NVOS32_HEAP_DUMP_BLOCK._fields_ = [
@@ -1567,13 +1564,14 @@ NVOS56_PARAMETERS._fields_ = [
   ('pNewCpuAddress', NvP64),
   ('status', NvV32),
 ]
-RsAccessLimb = ctypes.c_uint
+class NVOS57_PARAMETERS(ctypes.Structure): pass
+class struct_RS_SHARE_POLICY(ctypes.Structure): pass
 class struct_RS_ACCESS_MASK(ctypes.Structure): pass
+RsAccessLimb = ctypes.c_uint
 struct_RS_ACCESS_MASK._fields_ = [
   ('limbs', (RsAccessLimb * 1)),
 ]
 RS_ACCESS_MASK = struct_RS_ACCESS_MASK
-class struct_RS_SHARE_POLICY(ctypes.Structure): pass
 struct_RS_SHARE_POLICY._fields_ = [
   ('target', NvU32),
   ('accessMask', RS_ACCESS_MASK),
@@ -1581,7 +1579,6 @@ struct_RS_SHARE_POLICY._fields_ = [
   ('action', NvU8),
 ]
 RS_SHARE_POLICY = struct_RS_SHARE_POLICY
-class NVOS57_PARAMETERS(ctypes.Structure): pass
 NVOS57_PARAMETERS._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
@@ -1703,8 +1700,8 @@ NV_OFA_ALLOCATION_PARAMETERS._fields_ = [
   ('prohibitMultipleInstances', NvU32),
   ('engineInstance', NvU32),
 ]
-OSVBLANKCALLBACKPROC = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p))
 class NVOS61_PARAMETERS(ctypes.Structure): pass
+OSVBLANKCALLBACKPROC = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p))
 NVOS61_PARAMETERS._fields_ = [
   ('hClient', NvHandle),
   ('hDevice', NvHandle),
@@ -1901,6 +1898,7 @@ struct_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_PARAMS._fields_ = [
   ('t1', NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_FIELD),
 ]
 NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_PARAMS = struct_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_PARAMS
+class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS(ctypes.Structure): pass
 class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO(ctypes.Structure): pass
 struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO._fields_ = [
   ('base', NvU64),
@@ -1910,7 +1908,6 @@ struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO._fields_ = [
   ('cpuCacheAttrib', NvU32),
 ]
 NV2080_CTRL_INTERNAL_MEMDESC_INFO = struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO
-class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS(ctypes.Structure): pass
 struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS._fields_ = [
   ('methodBufferMemdesc', (NV2080_CTRL_INTERNAL_MEMDESC_INFO * 2)),
   ('bar2Addr', (NvU64 * 2)),
@@ -1931,6 +1928,7 @@ struct_NV90F1_CTRL_VASPACE_GET_GMMU_FORMAT_PARAMS._fields_ = [
   ('pFmt', NvP64),
 ]
 NV90F1_CTRL_VASPACE_GET_GMMU_FORMAT_PARAMS = struct_NV90F1_CTRL_VASPACE_GET_GMMU_FORMAT_PARAMS
+class struct_NV_CTRL_VASPACE_PAGE_LEVEL(ctypes.Structure): pass
 class struct_MMU_FMT_LEVEL(ctypes.Structure): pass
 struct_MMU_FMT_LEVEL._fields_ = [
   ('virtAddrBitLo', NvU8),
@@ -1942,7 +1940,6 @@ struct_MMU_FMT_LEVEL._fields_ = [
   ('subLevels', ctypes.POINTER(struct_MMU_FMT_LEVEL)),
 ]
 MMU_FMT_LEVEL = struct_MMU_FMT_LEVEL
-class struct_NV_CTRL_VASPACE_PAGE_LEVEL(ctypes.Structure): pass
 struct_NV_CTRL_VASPACE_PAGE_LEVEL._fields_ = [
   ('pFmt', ctypes.POINTER(struct_MMU_FMT_LEVEL)),
   ('levelFmt', MMU_FMT_LEVEL),
@@ -1983,14 +1980,14 @@ struct_NV90F1_CTRL_VASPACE_RELEASE_ENTRIES_PARAMS._fields_ = [
 ]
 NV90F1_CTRL_VASPACE_RELEASE_ENTRIES_PARAMS = struct_NV90F1_CTRL_VASPACE_RELEASE_ENTRIES_PARAMS
 NV90F1_CTRL_VASPACE_GET_PAGE_LEVEL_INFO_VERIF_PARAMS = struct_NV90F1_CTRL_VASPACE_GET_PAGE_LEVEL_INFO_PARAMS
-class _anonstruct28(ctypes.Structure): pass
-_anonstruct28._fields_ = [
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(ctypes.Structure): pass
+class _anonstruct13(ctypes.Structure): pass
+_anonstruct13._fields_ = [
   ('physAddress', NvU64),
   ('size', NvU64),
   ('aperture', NvU32),
   ('pageShift', NvU8),
 ]
-class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(ctypes.Structure): pass
 struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS._fields_ = [
   ('hSubDevice', NvHandle),
   ('subDeviceId', NvU32),
@@ -1998,7 +1995,7 @@ struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS._fields_ = [
   ('virtAddrLo', NvU64),
   ('virtAddrHi', NvU64),
   ('numLevelsToCopy', NvU32),
-  ('levels', (_anonstruct28 * 6)),
+  ('levels', (_anonstruct13 * 6)),
 ]
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS
 class struct_NV90F1_CTRL_VASPACE_GET_HOST_RM_MANAGED_SIZE_PARAMS(ctypes.Structure): pass
@@ -2027,17 +2024,16 @@ struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS._fields_ = [
   ('addrSpaceType', NvU32),
 ]
 NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS = struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS
-class _anonunion29(ctypes.Union): pass
-_anonunion29._fields_ = [
+class struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS(ctypes.Structure): pass
+class struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data(ctypes.Union): pass
+struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data._fields_ = [
   ('hResult', NvHandle),
   ('iResult', NvU64),
 ]
-class struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS._anonymous_ = ('_0',)
 struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS._fields_ = [
   ('hObject', NvHandle),
   ('index', NvU32),
-  ('_0', _anonunion29),
+  ('data', struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data),
 ]
 NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS = struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS
 class struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS(ctypes.Structure): pass
@@ -2280,37 +2276,35 @@ struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS._fields_ = [
   ('bSkipHwNvlinkDisable', NvBool),
 ]
 NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS = struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS
-class _anonstruct31(ctypes.Structure): pass
-_anonstruct31._fields_ = [
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS(ctypes.Structure): pass
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data(ctypes.Union): pass
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet._fields_ = [
   ('newValue', NvU32),
   ('oldValue', NvU32),
 ]
-class _anonstruct32(ctypes.Structure): pass
-_anonstruct32._fields_ = [
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx._fields_ = [
   ('paramData', (NvU8 * 373)),
   ('paramSize', NvU32),
 ]
-class _anonstruct33(ctypes.Structure): pass
-_anonstruct33._fields_ = [
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty._fields_ = [
   ('propertyId', NvU32),
   ('propertyIn', (NvU32 * 6)),
   ('propertyOut', (NvU32 * 5)),
 ]
-class _anonunion30(ctypes.Union): pass
-_anonunion30._anonymous_ = ('_0','_1','_2',)
-_anonunion30._fields_ = [
-  ('_0', _anonstruct31),
-  ('_1', _anonstruct32),
-  ('_2', _anonstruct33),
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data._fields_ = [
+  ('configSet', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet),
+  ('configEx', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx),
+  ('reservedProperty', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty),
 ]
-class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS._anonymous_ = ('_0',)
 struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS._fields_ = [
   ('hContext', NvHandle),
   ('opType', NvU32),
   ('index', NvV32),
   ('dataType', NvU32),
-  ('_0', _anonunion30),
+  ('data', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data),
 ]
 NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS = struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS
 class struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS(ctypes.Structure): pass
@@ -2652,17 +2646,17 @@ struct_NV0000_CTRL_SYSTEM_GPS_CONTROL_PARAMS._fields_ = [
   ('data', NvU32),
 ]
 NV0000_CTRL_SYSTEM_GPS_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_CONTROL_PARAMS
-class _anonstruct34(ctypes.Structure): pass
-_anonstruct34._fields_ = [
+class struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS(ctypes.Structure): pass
+class _anonstruct14(ctypes.Structure): pass
+_anonstruct14._fields_ = [
   ('command', NvU16),
   ('locale', NvU16),
   ('data', NvU32),
 ]
-class struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS(ctypes.Structure): pass
 struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS._fields_ = [
   ('cmdCount', NvU32),
   ('succeeded', NvU32),
-  ('cmdData', (_anonstruct34 * 16)),
+  ('cmdData', (_anonstruct14 * 16)),
 ]
 NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS
 class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS(ctypes.Structure): pass
@@ -2829,13 +2823,12 @@ struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT._fields_ = [
   ('shortTimescaleBatteryCurrentLimitmA', NvU32),
 ]
 NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT = struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT
-class _anonunion35(ctypes.Union): pass
-_anonunion35._fields_ = [
+class struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS(ctypes.Structure): pass
+class struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS_filterParam(ctypes.Union): pass
+struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS_filterParam._fields_ = [
   ('weight', NvU8),
   ('windowSize', NvU8),
 ]
-class struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS._anonymous_ = ('_0',)
 struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS._fields_ = [
   ('gpuId', NvU32),
   ('tpp', NvU32),
@@ -2859,7 +2852,7 @@ struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS._fields_ = [
   ('samplingPeriodmS', NvU16),
   ('samplingMulti', NvU16),
   ('filterType', NvU8),
-  ('_0', _anonunion35),
+  ('filterParam', struct_NV0000_CTRL_CMD_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS_filterParam),
   ('filterReserved', NvU16),
   ('bIsBoostController', NvBool),
   ('incRatio', NvU16),
@@ -2910,17 +2903,17 @@ struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CONTROL_PARAMS._fields_ = [
   ('data', NvU32),
 ]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CONTROL_PARAMS
-class _anonstruct36(ctypes.Structure): pass
-_anonstruct36._fields_ = [
+class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS(ctypes.Structure): pass
+class _anonstruct15(ctypes.Structure): pass
+_anonstruct15._fields_ = [
   ('command', NvU16),
   ('locale', NvU16),
   ('data', NvU32),
 ]
-class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS(ctypes.Structure): pass
 struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS._fields_ = [
   ('cmdCount', NvU32),
   ('succeeded', NvU32),
-  ('cmdData', (_anonstruct36 * 16)),
+  ('cmdData', (_anonstruct15 * 16)),
 ]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS
 class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CTRL_PARAMS(ctypes.Structure): pass
@@ -2990,22 +2983,20 @@ NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_NONE = enum_NV0000_CTRL_OS_UNIX_EXPORT_OB
 NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_RM = enum_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE.define('NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_RM', 1)
 
 NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE = enum_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE
-class _anonstruct38(ctypes.Structure): pass
-_anonstruct38._fields_ = [
+class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT(ctypes.Structure): pass
+class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data(ctypes.Union): pass
+class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data_rmObject(ctypes.Structure): pass
+struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data_rmObject._fields_ = [
   ('hDevice', NvHandle),
   ('hParent', NvHandle),
   ('hObject', NvHandle),
 ]
-class _anonunion37(ctypes.Union): pass
-_anonunion37._anonymous_ = ('_0',)
-_anonunion37._fields_ = [
-  ('_0', _anonstruct38),
+struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data._fields_ = [
+  ('rmObject', struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data_rmObject),
 ]
-class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT(ctypes.Structure): pass
-struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT._anonymous_ = ('_0',)
 struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT._fields_ = [
   ('type', NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE),
-  ('_0', _anonunion37),
+  ('data', struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data),
 ]
 NV0000_CTRL_OS_UNIX_EXPORT_OBJECT = struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT
 class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TO_FD_PARAMS(ctypes.Structure): pass
@@ -3166,25 +3157,24 @@ struct_NV0080_CTRL_DMA_SET_PTE_INFO_PARAMS._fields_ = [
   ('hVASpace', NvHandle),
 ]
 NV0080_CTRL_DMA_SET_PTE_INFO_PARAMS = struct_NV0080_CTRL_DMA_SET_PTE_INFO_PARAMS
-class _anonstruct39(ctypes.Structure): pass
-_anonstruct39._fields_ = [
+class struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS(ctypes.Structure): pass
+class struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS_hwResource(ctypes.Structure): pass
+struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS_hwResource._fields_ = [
   ('hClient', NvHandle),
   ('hDevice', NvHandle),
   ('hMemory', NvHandle),
   ('subDeviceId', NvU32),
 ]
-class _anonstruct40(ctypes.Structure): pass
-_anonstruct40._fields_ = [
+class struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS_comprInfo(ctypes.Structure): pass
+struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS_comprInfo._fields_ = [
   ('fbKind', NvU32),
   ('sysKind', NvU32),
   ('compTagStartOffset', NvU32),
 ]
-class struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS._anonymous_ = ('_0','_1',)
 struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS._fields_ = [
   ('pageCount', NvU32),
-  ('_0', _anonstruct39),
-  ('_1', _anonstruct40),
+  ('hwResource', struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS_hwResource),
+  ('comprInfo', struct_NV0080_CTRL_DMA_FILL_PTE_MEM_PARAMS_comprInfo),
   ('offset', NvU64),
   ('gpuAddr', NvU64),
   ('pageArray', NvP64),
@@ -3686,18 +3676,17 @@ struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS._fields_ = [
   ('biosInfoList', (NV2080_CTRL_BIOS_INFO * 15)),
 ]
 NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS
-class _anonunion41(ctypes.Union): pass
-_anonunion41._fields_ = [
+class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING(ctypes.Structure): pass
+class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value(ctypes.Union): pass
+struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value._fields_ = [
   ('ascii', (NvU8 * 256)),
   ('unicode', (NvU16 * 256)),
   ('hash', NvU16),
 ]
-class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_NBSI_REG_STRING._anonymous_ = ('_0',)
 struct_NV2080_CTRL_BIOS_NBSI_REG_STRING._fields_ = [
   ('size', NvU32),
   ('type', NvU32),
-  ('_0', _anonunion41),
+  ('value', struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value),
 ]
 NV2080_CTRL_BIOS_NBSI_REG_STRING = struct_NV2080_CTRL_BIOS_NBSI_REG_STRING
 class struct_NV2080_CTRL_BIOS_GET_NBSI_PARAMS(ctypes.Structure): pass
@@ -4762,8 +4751,9 @@ struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS._fields_ = [
   ('logicalLtcEnMask', NvU64),
 ]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS
-class _anonunion42(ctypes.Union): pass
-_anonunion42._fields_ = [
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams(ctypes.Union): pass
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams._fields_ = [
   ('inv', NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS),
   ('fbp', NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS),
   ('ltc', NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS),
@@ -4783,13 +4773,11 @@ _anonunion42._fields_ = [
   ('dmLogicalLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS),
   ('sysl2Lts', NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_QUERY._anonymous_ = ('_0',)
 struct_NV2080_CTRL_FB_FS_INFO_QUERY._fields_ = [
   ('queryType', NvU16),
   ('reserved', (NvU8 * 2)),
   ('status', NvU32),
-  ('_0', _anonunion42),
+  ('queryParams', struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams),
 ]
 NV2080_CTRL_FB_FS_INFO_QUERY = struct_NV2080_CTRL_FB_FS_INFO_QUERY
 class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS(ctypes.Structure): pass
@@ -5007,9 +4995,10 @@ struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS._fields_ = [
   ('attribute', NvU32),
 ]
 NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS = struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS
+class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS(ctypes.Structure): pass
+class _anonstruct16(ctypes.Structure): pass
 NvS64 = ctypes.c_longlong
-class _anonstruct43(ctypes.Structure): pass
-_anonstruct43._fields_ = [
+_anonstruct16._fields_ = [
   ('timestampNs', NvU64),
   ('timeRunTotalNs', NvS64),
   ('timeRunNs', NvU32),
@@ -5018,11 +5007,10 @@ _anonstruct43._fields_ = [
   ('cumulativePreemptionTime', NvU64),
   ('counters', (NvU64 * 8)),
 ]
-class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS._fields_ = [
   ('engineId', NvU32),
   ('count', NvU32),
-  ('entry', (_anonstruct43 * 200)),
+  ('entry', (_anonstruct16 * 200)),
   ('schedPolicy', NvU32),
   ('arrEnabled', NvU32),
   ('arrAvgFactor', NvU32),
@@ -5287,16 +5275,15 @@ struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS._fields_ = [
   ('gpuInfoList', (NV2080_CTRL_GPU_INFO * 65)),
 ]
 NV2080_CTRL_GPU_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS
-class _anonunion44(ctypes.Union): pass
-_anonunion44._fields_ = [
+class struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS_gpuNameString(ctypes.Union): pass
+struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS_gpuNameString._fields_ = [
   ('ascii', (NvU8 * 64)),
   ('unicode', (NvU16 * 64)),
 ]
-class struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS._anonymous_ = ('_0',)
 struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS._fields_ = [
   ('gpuNameStringFlags', NvU32),
-  ('_0', _anonunion44),
+  ('gpuNameString', struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS_gpuNameString),
 ]
 NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS = struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS
 class struct_NV2080_CTRL_GPU_GET_SHORT_NAME_STRING_PARAMS(ctypes.Structure): pass
@@ -5341,8 +5328,8 @@ struct_NV2080_CTRL_GPU_REG_OP._fields_ = [
   ('regAndNMaskLo', NvU32),
 ]
 NV2080_CTRL_GPU_REG_OP = struct_NV2080_CTRL_GPU_REG_OP
-NV2080_CTRL_GR_ROUTE_INFO = struct_NV0080_CTRL_GR_ROUTE_INFO
 class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS(ctypes.Structure): pass
+NV2080_CTRL_GR_ROUTE_INFO = struct_NV0080_CTRL_GR_ROUTE_INFO
 struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS._fields_ = [
   ('hClientTarget', NvHandle),
   ('hChannelTarget', NvHandle),
@@ -5974,15 +5961,14 @@ NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_LONG = enum_NV2080_CTRL_GPU_COMPUTE_POLICY
 NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_MAX = enum_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE.define('NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_MAX', 4)
 
 NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE = enum_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE
-class _anonunion45(ctypes.Union): pass
-_anonunion45._fields_ = [
+class struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_data(ctypes.Union): pass
+struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_data._fields_ = [
   ('timeslice', NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE),
 ]
-class struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG(ctypes.Structure): pass
-struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG._anonymous_ = ('_0',)
 struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG._fields_ = [
   ('type', NvU32),
-  ('_0', _anonunion45),
+  ('data', struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_data),
 ]
 NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG = struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG
 class struct_NV2080_CTRL_GPU_SET_COMPUTE_POLICY_CONFIG_PARAMS(ctypes.Structure): pass
@@ -6314,14 +6300,14 @@ struct_NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS._fields_ = [
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
 ]
 NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS = struct_NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS
-class _anonstruct46(ctypes.Structure): pass
-_anonstruct46._fields_ = [
+class struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS(ctypes.Structure): pass
+class _anonstruct17(ctypes.Structure): pass
+_anonstruct17._fields_ = [
   ('gpcId', NvU32),
   ('tpcId', NvU32),
 ]
-class struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS._fields_ = [
-  ('smId', (_anonstruct46 * 240)),
+  ('smId', (_anonstruct17 * 240)),
   ('smCount', NvU32),
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
 ]
@@ -6418,8 +6404,9 @@ struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS._fields_ = [
   ('ctxBufferInfo', (NV2080_CTRL_GR_CTX_BUFFER_INFO * 64)),
 ]
 NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS
-class _anonstruct47(ctypes.Structure): pass
-_anonstruct47._fields_ = [
+class struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS(ctypes.Structure): pass
+class _anonstruct18(ctypes.Structure): pass
+_anonstruct18._fields_ = [
   ('gpcId', NvU16),
   ('localTpcId', NvU16),
   ('localSmId', NvU16),
@@ -6427,9 +6414,8 @@ _anonstruct47._fields_ = [
   ('virtualGpcId', NvU16),
   ('migratableTpcId', NvU16),
 ]
-class struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS._fields_ = [
-  ('globalSmId', (_anonstruct47 * 512)),
+  ('globalSmId', (_anonstruct18 * 512)),
   ('numSm', NvU16),
   ('numTpc', NvU16),
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
@@ -6693,8 +6679,9 @@ struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS._fields_ = [
   ('syspipeId', NvU32),
 ]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS
-class _anonunion48(ctypes.Union): pass
-_anonunion48._fields_ = [
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData(ctypes.Union): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData._fields_ = [
   ('gpcCountData', NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS),
   ('chipletGpcMapData', NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS),
   ('tpcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS),
@@ -6706,13 +6693,11 @@ _anonunion48._fields_ = [
   ('partitionSyspipeIdData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS),
   ('ropMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS._anonymous_ = ('_0',)
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS._fields_ = [
   ('queryType', NvU16),
   ('reserved', (NvU8 * 2)),
   ('status', NvU32),
-  ('_0', _anonunion48),
+  ('queryData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData),
 ]
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS
 class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS(ctypes.Structure): pass
@@ -6892,8 +6877,9 @@ struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS._fields_ = [
 ]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
-class _anonstruct49(ctypes.Structure): pass
-_anonstruct49._fields_ = [
+class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER(ctypes.Structure): pass
+class _anonstruct19(ctypes.Structure): pass
+_anonstruct19._fields_ = [
   ('gpcId', NvU16),
   ('localTpcId', NvU16),
   ('localSmId', NvU16),
@@ -6901,9 +6887,8 @@ _anonstruct49._fields_ = [
   ('virtualGpcId', NvU16),
   ('migratableTpcId', NvU16),
 ]
-class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER(ctypes.Structure): pass
 struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER._fields_ = [
-  ('globalSmId', (_anonstruct49 * 240)),
+  ('globalSmId', (_anonstruct19 * 240)),
   ('numSm', NvU16),
   ('numTpc', NvU16),
 ]
@@ -7251,6 +7236,8 @@ struct_NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS._fields_ = [
   ('swizzId', NvU32),
 ]
 NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS = struct_NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS
+class struct_NV2080_CTRL_INTERNAL_DISPLAY_SET_IMP_INIT_INFO_PARAMS(ctypes.Structure): pass
+class struct_TEGRA_IMP_IMPORT_DATA(ctypes.Structure): pass
 class struct_DRAM_CLK_INSTANCE(ctypes.Structure): pass
 struct_DRAM_CLK_INSTANCE._fields_ = [
   ('dram_clk_freq_khz', NvU32),
@@ -7260,7 +7247,6 @@ struct_DRAM_CLK_INSTANCE._fields_ = [
   ('switch_latency_ns', NvU32),
 ]
 DRAM_CLK_INSTANCE = struct_DRAM_CLK_INSTANCE
-class struct_TEGRA_IMP_IMPORT_DATA(ctypes.Structure): pass
 struct_TEGRA_IMP_IMPORT_DATA._fields_ = [
   ('max_iso_bw_kbps', NvU32),
   ('num_dram_channels', NvU32),
@@ -7268,7 +7254,6 @@ struct_TEGRA_IMP_IMPORT_DATA._fields_ = [
   ('dram_clk_instance', (DRAM_CLK_INSTANCE * 24)),
 ]
 TEGRA_IMP_IMPORT_DATA = struct_TEGRA_IMP_IMPORT_DATA
-class struct_NV2080_CTRL_INTERNAL_DISPLAY_SET_IMP_INIT_INFO_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_INTERNAL_DISPLAY_SET_IMP_INIT_INFO_PARAMS._fields_ = [
   ('tegraImpImportData', TEGRA_IMP_IMPORT_DATA),
 ]
@@ -7714,6 +7699,7 @@ struct_NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS._fields_ = [
   ('bExtDevFound', NvBool),
 ]
 NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS = struct_NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS_PARAMS(ctypes.Structure): pass
 class struct_NV30F1_CTRL_GSYNC_GET_OPTIMIZED_TIMING_PARAMS(ctypes.Structure): pass
 struct_NV30F1_CTRL_GSYNC_GET_OPTIMIZED_TIMING_PARAMS._fields_ = [
   ('gpuId', NvU32),
@@ -7740,7 +7726,6 @@ struct_NV30F1_CTRL_GSYNC_GET_OPTIMIZED_TIMING_PARAMS._fields_ = [
   ('bOptimized', NvBool),
 ]
 NV30F1_CTRL_GSYNC_GET_OPTIMIZED_TIMING_PARAMS = struct_NV30F1_CTRL_GSYNC_GET_OPTIMIZED_TIMING_PARAMS
-class struct_NV2080_CTRL_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS_PARAMS._fields_ = [
   ('timingParameters', NV30F1_CTRL_GSYNC_GET_OPTIMIZED_TIMING_PARAMS),
 ]
@@ -7825,15 +7810,14 @@ struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI._fields_ = [
   ('limit', NvU32),
 ]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI
-class _anonunion50(ctypes.Union): pass
-_anonunion50._fields_ = [
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA(ctypes.Structure): pass
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_data(ctypes.Union): pass
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_data._fields_ = [
   ('smbpbi', NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI),
 ]
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA._anonymous_ = ('_0',)
 struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA._fields_ = [
   ('type', NvU8),
-  ('_0', _anonunion50),
+  ('data', struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_data),
 ]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA
 class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS(ctypes.Structure): pass
@@ -8176,21 +8160,20 @@ struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS._fi
   ('bPollDone', NvBool),
 ]
 NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS
-class _anonunion51(ctypes.Union): pass
-_anonunion51._fields_ = [
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams(ctypes.Union): pass
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams._fields_ = [
   ('linkModeOffParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS),
   ('linkModePreHsParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS),
   ('linkModeInitPhase1Params', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS),
   ('linkModePostInitNegotiateParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITNEGOTIATE_PARAMS),
   ('linkModePostInitOptimizeParams', NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_POST_INITOPTIMIZE_PARAMS),
 ]
-class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS._anonymous_ = ('_0',)
 struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS._fields_ = [
   ('mode', NvU64),
   ('bSync', NvBool),
   ('linkMode', NvU32),
-  ('_0', _anonunion51),
+  ('linkModeParams', struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS_linkModeParams),
 ]
 NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS
 class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS(ctypes.Structure): pass
@@ -8243,8 +8226,9 @@ struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS._fields_ = [
   ('bUnlocked', NvBool),
 ]
 NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS
-class _anonunion52(ctypes.Union): pass
-_anonunion52._fields_ = [
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE(ctypes.Structure): pass
+class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams(ctypes.Union): pass
+struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams._fields_ = [
   ('getDlLinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS),
   ('setDlLinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_SET_DL_LINK_MODE_PARAMS),
   ('getTlLinkMode', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_TL_LINK_MODE_PARAMS),
@@ -8259,11 +8243,9 @@ _anonunion52._fields_ = [
   ('readDiscoveryToken', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_RD_WR_DISCOVERY_TOKEN_PARAMS),
   ('getUphyLoad', NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_UPHY_LOAD_PARAMS),
 ]
-class struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE._anonymous_ = ('_0',)
 struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE._fields_ = [
   ('type', NvU8),
-  ('_0', _anonunion52),
+  ('callbackParams', struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_callbackParams),
 ]
 NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE = struct_NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE
 class struct_NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS(ctypes.Structure): pass
@@ -8678,18 +8660,17 @@ struct_NV2080CtrlNocatJournalRclog._fields_ = [
   ('processImageName', (NvU8 * 65)),
 ]
 NV2080CtrlNocatJournalRclog = struct_NV2080CtrlNocatJournalRclog
-class _anonunion53(ctypes.Union): pass
-_anonunion53._fields_ = [
+class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData(ctypes.Union): pass
+struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData._fields_ = [
   ('tdrReason', NV2080CtrlNocatJournalDataTdrReason),
   ('tagData', NV2080CtrlNocatJournalSetTag),
   ('rclog', NV2080CtrlNocatJournalRclog),
 ]
-class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS._anonymous_ = ('_0',)
 struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS._fields_ = [
   ('dataType', NvU32),
   ('targetRecordType', NvU32),
-  ('_0', _anonunion53),
+  ('nocatJournalData', struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData),
 ]
 NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS = struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS
 class struct_NV2080CtrlNocatJournalInsertRecord(ctypes.Structure): pass
@@ -9817,15 +9798,14 @@ struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST._fields_ = [
   ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
 ]
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST = struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST
-class _anonstruct54(ctypes.Structure): pass
-_anonstruct54._fields_ = [
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm._fields_ = [
   ('clientActiveMask', NvU32),
   ('bRegkeyLimitRatedTdp', NvU8),
 ]
-class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS._anonymous_ = ('_0',)
 struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS._fields_ = [
-  ('_0', _anonstruct54),
+  ('rm', struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm),
   ('output', NV2080_CTRL_PERF_RATED_TDP_ACTION),
   ('outputVPstate', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
   ('inputs', (NV2080_CTRL_PERF_RATED_TDP_ACTION * 5)),
@@ -9954,31 +9934,29 @@ NV2080_CTRL_GC6_FLAVOR_ID_OPTIMUS = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV208
 NV2080_CTRL_GC6_FLAVOR_ID_MAX = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_MAX', 4)
 
 NV2080_CTRL_GC6_FLAVOR_ID = enum_NV2080_CTRL_GC6_FLAVOR_ID
-class _anonstruct55(ctypes.Structure): pass
-_anonstruct55._fields_ = [
+class struct_NV2080_CTRL_GC6_ENTRY_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params(ctypes.Structure): pass
+struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params._fields_ = [
   ('bIsRTD3Transition', NvBool),
   ('bIsRTD3CoreRailPowerCut', NvBool),
   ('bSkipPstateSanity', NvBool),
 ]
-class struct_NV2080_CTRL_GC6_ENTRY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GC6_ENTRY_PARAMS._anonymous_ = ('_0',)
 struct_NV2080_CTRL_GC6_ENTRY_PARAMS._fields_ = [
   ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
   ('stepMask', NvU32),
-  ('_0', _anonstruct55),
+  ('params', struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params),
 ]
 NV2080_CTRL_GC6_ENTRY_PARAMS = struct_NV2080_CTRL_GC6_ENTRY_PARAMS
-class _anonstruct56(ctypes.Structure): pass
-_anonstruct56._fields_ = [
+class struct_NV2080_CTRL_GC6_EXIT_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_GC6_EXIT_PARAMS_params(ctypes.Structure): pass
+struct_NV2080_CTRL_GC6_EXIT_PARAMS_params._fields_ = [
   ('bIsGpuSelfWake', NvBool),
   ('bIsRTD3Transition', NvBool),
   ('bIsRTD3HotTransition', NvBool),
 ]
-class struct_NV2080_CTRL_GC6_EXIT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GC6_EXIT_PARAMS._anonymous_ = ('_0',)
 struct_NV2080_CTRL_GC6_EXIT_PARAMS._fields_ = [
   ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
-  ('_0', _anonstruct56),
+  ('params', struct_NV2080_CTRL_GC6_EXIT_PARAMS_params),
 ]
 NV2080_CTRL_GC6_EXIT_PARAMS = struct_NV2080_CTRL_GC6_EXIT_PARAMS
 enum_NV2080_CTRL_GC6_STEP_ID = CEnum(ctypes.c_uint)
@@ -10079,6 +10057,8 @@ struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL._fields_ = [
 ]
 RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL
 PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL)
+class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST(ctypes.Structure): pass
+class struct_CC_KMB(ctypes.Structure): pass
 class struct_CC_AES_CRYPTOBUNDLE(ctypes.Structure): pass
 struct_CC_AES_CRYPTOBUNDLE._fields_ = [
   ('iv', (NvU32 * 3)),
@@ -10086,26 +10066,23 @@ struct_CC_AES_CRYPTOBUNDLE._fields_ = [
   ('ivMask', (NvU32 * 3)),
 ]
 CC_AES_CRYPTOBUNDLE = struct_CC_AES_CRYPTOBUNDLE
+class _anonunion20(ctypes.Union): pass
 class struct_CC_HMAC_CRYPTOBUNDLE(ctypes.Structure): pass
 struct_CC_HMAC_CRYPTOBUNDLE._fields_ = [
   ('nonce', (NvU32 * 8)),
   ('key', (NvU32 * 8)),
 ]
 CC_HMAC_CRYPTOBUNDLE = struct_CC_HMAC_CRYPTOBUNDLE
-class _anonunion57(ctypes.Union): pass
-_anonunion57._fields_ = [
+_anonunion20._fields_ = [
   ('hmacBundle', CC_HMAC_CRYPTOBUNDLE),
   ('decryptBundle', CC_AES_CRYPTOBUNDLE),
 ]
-class struct_CC_KMB(ctypes.Structure): pass
-struct_CC_KMB._anonymous_ = ('_0',)
 struct_CC_KMB._fields_ = [
   ('encryptBundle', CC_AES_CRYPTOBUNDLE),
-  ('_0', _anonunion57),
+  ('_0', _anonunion20),
   ('bIsWorkLaunch', NvBool),
 ]
 CC_KMB = struct_CC_KMB
-class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST(ctypes.Structure): pass
 struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST._fields_ = [
   ('cmdType', NvU8),
   ('isEnc', NvU8),
@@ -10254,6 +10231,7 @@ struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS._field
   ('gfid', NvU32),
 ]
 NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS(ctypes.Structure): pass
 class struct_NVA081_CTRL_VGPU_INFO(ctypes.Structure): pass
 struct_NVA081_CTRL_VGPU_INFO._fields_ = [
   ('vgpuType', NvU32),
@@ -10300,19 +10278,18 @@ struct_NVA081_CTRL_VGPU_INFO._fields_ = [
   ('heterogeneousPlacementIds', (NvU32 * 32)),
 ]
 NVA081_CTRL_VGPU_INFO = struct_NVA081_CTRL_VGPU_INFO
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS._fields_ = [
   ('discardVgpuTypes', NvBool),
   ('vgpuInfoCount', NvU32),
   ('vgpuInfo', (NVA081_CTRL_VGPU_INFO * 64)),
 ]
 NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS
+class struct_NV2080_GUEST_VM_INFO(ctypes.Structure): pass
 enum_GUEST_VM_INFO_STATE = CEnum(ctypes.c_uint)
 GUEST_VM_INFO_STATE_UNINITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_UNINITIALIZED', 0)
 GUEST_VM_INFO_STATE_INITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_INITIALIZED', 1)
 
 GUEST_VM_INFO_STATE = enum_GUEST_VM_INFO_STATE
-class struct_NV2080_GUEST_VM_INFO(ctypes.Structure): pass
 struct_NV2080_GUEST_VM_INFO._fields_ = [
   ('vmPid', NvU32),
   ('guestOs', NvU32),
@@ -10643,149 +10620,149 @@ struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS._fields_ = [
   ('value', NvU32),
 ]
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS
-_anonenum58 = CEnum(ctypes.c_uint)
-NV_OK = _anonenum58.define('NV_OK', 0)
-NV_ERR_GENERIC = _anonenum58.define('NV_ERR_GENERIC', 65535)
-NV_ERR_BROKEN_FB = _anonenum58.define('NV_ERR_BROKEN_FB', 1)
-NV_ERR_BUFFER_TOO_SMALL = _anonenum58.define('NV_ERR_BUFFER_TOO_SMALL', 2)
-NV_ERR_BUSY_RETRY = _anonenum58.define('NV_ERR_BUSY_RETRY', 3)
-NV_ERR_CALLBACK_NOT_SCHEDULED = _anonenum58.define('NV_ERR_CALLBACK_NOT_SCHEDULED', 4)
-NV_ERR_CARD_NOT_PRESENT = _anonenum58.define('NV_ERR_CARD_NOT_PRESENT', 5)
-NV_ERR_CYCLE_DETECTED = _anonenum58.define('NV_ERR_CYCLE_DETECTED', 6)
-NV_ERR_DMA_IN_USE = _anonenum58.define('NV_ERR_DMA_IN_USE', 7)
-NV_ERR_DMA_MEM_NOT_LOCKED = _anonenum58.define('NV_ERR_DMA_MEM_NOT_LOCKED', 8)
-NV_ERR_DMA_MEM_NOT_UNLOCKED = _anonenum58.define('NV_ERR_DMA_MEM_NOT_UNLOCKED', 9)
-NV_ERR_DUAL_LINK_INUSE = _anonenum58.define('NV_ERR_DUAL_LINK_INUSE', 10)
-NV_ERR_ECC_ERROR = _anonenum58.define('NV_ERR_ECC_ERROR', 11)
-NV_ERR_FIFO_BAD_ACCESS = _anonenum58.define('NV_ERR_FIFO_BAD_ACCESS', 12)
-NV_ERR_FREQ_NOT_SUPPORTED = _anonenum58.define('NV_ERR_FREQ_NOT_SUPPORTED', 13)
-NV_ERR_GPU_DMA_NOT_INITIALIZED = _anonenum58.define('NV_ERR_GPU_DMA_NOT_INITIALIZED', 14)
-NV_ERR_GPU_IS_LOST = _anonenum58.define('NV_ERR_GPU_IS_LOST', 15)
-NV_ERR_GPU_IN_FULLCHIP_RESET = _anonenum58.define('NV_ERR_GPU_IN_FULLCHIP_RESET', 16)
-NV_ERR_GPU_NOT_FULL_POWER = _anonenum58.define('NV_ERR_GPU_NOT_FULL_POWER', 17)
-NV_ERR_GPU_UUID_NOT_FOUND = _anonenum58.define('NV_ERR_GPU_UUID_NOT_FOUND', 18)
-NV_ERR_HOT_SWITCH = _anonenum58.define('NV_ERR_HOT_SWITCH', 19)
-NV_ERR_I2C_ERROR = _anonenum58.define('NV_ERR_I2C_ERROR', 20)
-NV_ERR_I2C_SPEED_TOO_HIGH = _anonenum58.define('NV_ERR_I2C_SPEED_TOO_HIGH', 21)
-NV_ERR_ILLEGAL_ACTION = _anonenum58.define('NV_ERR_ILLEGAL_ACTION', 22)
-NV_ERR_IN_USE = _anonenum58.define('NV_ERR_IN_USE', 23)
-NV_ERR_INFLATE_COMPRESSED_DATA_FAILED = _anonenum58.define('NV_ERR_INFLATE_COMPRESSED_DATA_FAILED', 24)
-NV_ERR_INSERT_DUPLICATE_NAME = _anonenum58.define('NV_ERR_INSERT_DUPLICATE_NAME', 25)
-NV_ERR_INSUFFICIENT_RESOURCES = _anonenum58.define('NV_ERR_INSUFFICIENT_RESOURCES', 26)
-NV_ERR_INSUFFICIENT_PERMISSIONS = _anonenum58.define('NV_ERR_INSUFFICIENT_PERMISSIONS', 27)
-NV_ERR_INSUFFICIENT_POWER = _anonenum58.define('NV_ERR_INSUFFICIENT_POWER', 28)
-NV_ERR_INVALID_ACCESS_TYPE = _anonenum58.define('NV_ERR_INVALID_ACCESS_TYPE', 29)
-NV_ERR_INVALID_ADDRESS = _anonenum58.define('NV_ERR_INVALID_ADDRESS', 30)
-NV_ERR_INVALID_ARGUMENT = _anonenum58.define('NV_ERR_INVALID_ARGUMENT', 31)
-NV_ERR_INVALID_BASE = _anonenum58.define('NV_ERR_INVALID_BASE', 32)
-NV_ERR_INVALID_CHANNEL = _anonenum58.define('NV_ERR_INVALID_CHANNEL', 33)
-NV_ERR_INVALID_CLASS = _anonenum58.define('NV_ERR_INVALID_CLASS', 34)
-NV_ERR_INVALID_CLIENT = _anonenum58.define('NV_ERR_INVALID_CLIENT', 35)
-NV_ERR_INVALID_COMMAND = _anonenum58.define('NV_ERR_INVALID_COMMAND', 36)
-NV_ERR_INVALID_DATA = _anonenum58.define('NV_ERR_INVALID_DATA', 37)
-NV_ERR_INVALID_DEVICE = _anonenum58.define('NV_ERR_INVALID_DEVICE', 38)
-NV_ERR_INVALID_DMA_SPECIFIER = _anonenum58.define('NV_ERR_INVALID_DMA_SPECIFIER', 39)
-NV_ERR_INVALID_EVENT = _anonenum58.define('NV_ERR_INVALID_EVENT', 40)
-NV_ERR_INVALID_FLAGS = _anonenum58.define('NV_ERR_INVALID_FLAGS', 41)
-NV_ERR_INVALID_FUNCTION = _anonenum58.define('NV_ERR_INVALID_FUNCTION', 42)
-NV_ERR_INVALID_HEAP = _anonenum58.define('NV_ERR_INVALID_HEAP', 43)
-NV_ERR_INVALID_INDEX = _anonenum58.define('NV_ERR_INVALID_INDEX', 44)
-NV_ERR_INVALID_IRQ_LEVEL = _anonenum58.define('NV_ERR_INVALID_IRQ_LEVEL', 45)
-NV_ERR_INVALID_LIMIT = _anonenum58.define('NV_ERR_INVALID_LIMIT', 46)
-NV_ERR_INVALID_LOCK_STATE = _anonenum58.define('NV_ERR_INVALID_LOCK_STATE', 47)
-NV_ERR_INVALID_METHOD = _anonenum58.define('NV_ERR_INVALID_METHOD', 48)
-NV_ERR_INVALID_OBJECT = _anonenum58.define('NV_ERR_INVALID_OBJECT', 49)
-NV_ERR_INVALID_OBJECT_BUFFER = _anonenum58.define('NV_ERR_INVALID_OBJECT_BUFFER', 50)
-NV_ERR_INVALID_OBJECT_HANDLE = _anonenum58.define('NV_ERR_INVALID_OBJECT_HANDLE', 51)
-NV_ERR_INVALID_OBJECT_NEW = _anonenum58.define('NV_ERR_INVALID_OBJECT_NEW', 52)
-NV_ERR_INVALID_OBJECT_OLD = _anonenum58.define('NV_ERR_INVALID_OBJECT_OLD', 53)
-NV_ERR_INVALID_OBJECT_PARENT = _anonenum58.define('NV_ERR_INVALID_OBJECT_PARENT', 54)
-NV_ERR_INVALID_OFFSET = _anonenum58.define('NV_ERR_INVALID_OFFSET', 55)
-NV_ERR_INVALID_OPERATION = _anonenum58.define('NV_ERR_INVALID_OPERATION', 56)
-NV_ERR_INVALID_OWNER = _anonenum58.define('NV_ERR_INVALID_OWNER', 57)
-NV_ERR_INVALID_PARAM_STRUCT = _anonenum58.define('NV_ERR_INVALID_PARAM_STRUCT', 58)
-NV_ERR_INVALID_PARAMETER = _anonenum58.define('NV_ERR_INVALID_PARAMETER', 59)
-NV_ERR_INVALID_PATH = _anonenum58.define('NV_ERR_INVALID_PATH', 60)
-NV_ERR_INVALID_POINTER = _anonenum58.define('NV_ERR_INVALID_POINTER', 61)
-NV_ERR_INVALID_REGISTRY_KEY = _anonenum58.define('NV_ERR_INVALID_REGISTRY_KEY', 62)
-NV_ERR_INVALID_REQUEST = _anonenum58.define('NV_ERR_INVALID_REQUEST', 63)
-NV_ERR_INVALID_STATE = _anonenum58.define('NV_ERR_INVALID_STATE', 64)
-NV_ERR_INVALID_STRING_LENGTH = _anonenum58.define('NV_ERR_INVALID_STRING_LENGTH', 65)
-NV_ERR_INVALID_READ = _anonenum58.define('NV_ERR_INVALID_READ', 66)
-NV_ERR_INVALID_WRITE = _anonenum58.define('NV_ERR_INVALID_WRITE', 67)
-NV_ERR_INVALID_XLATE = _anonenum58.define('NV_ERR_INVALID_XLATE', 68)
-NV_ERR_IRQ_NOT_FIRING = _anonenum58.define('NV_ERR_IRQ_NOT_FIRING', 69)
-NV_ERR_IRQ_EDGE_TRIGGERED = _anonenum58.define('NV_ERR_IRQ_EDGE_TRIGGERED', 70)
-NV_ERR_MEMORY_TRAINING_FAILED = _anonenum58.define('NV_ERR_MEMORY_TRAINING_FAILED', 71)
-NV_ERR_MISMATCHED_SLAVE = _anonenum58.define('NV_ERR_MISMATCHED_SLAVE', 72)
-NV_ERR_MISMATCHED_TARGET = _anonenum58.define('NV_ERR_MISMATCHED_TARGET', 73)
-NV_ERR_MISSING_TABLE_ENTRY = _anonenum58.define('NV_ERR_MISSING_TABLE_ENTRY', 74)
-NV_ERR_MODULE_LOAD_FAILED = _anonenum58.define('NV_ERR_MODULE_LOAD_FAILED', 75)
-NV_ERR_MORE_DATA_AVAILABLE = _anonenum58.define('NV_ERR_MORE_DATA_AVAILABLE', 76)
-NV_ERR_MORE_PROCESSING_REQUIRED = _anonenum58.define('NV_ERR_MORE_PROCESSING_REQUIRED', 77)
-NV_ERR_MULTIPLE_MEMORY_TYPES = _anonenum58.define('NV_ERR_MULTIPLE_MEMORY_TYPES', 78)
-NV_ERR_NO_FREE_FIFOS = _anonenum58.define('NV_ERR_NO_FREE_FIFOS', 79)
-NV_ERR_NO_INTR_PENDING = _anonenum58.define('NV_ERR_NO_INTR_PENDING', 80)
-NV_ERR_NO_MEMORY = _anonenum58.define('NV_ERR_NO_MEMORY', 81)
-NV_ERR_NO_SUCH_DOMAIN = _anonenum58.define('NV_ERR_NO_SUCH_DOMAIN', 82)
-NV_ERR_NO_VALID_PATH = _anonenum58.define('NV_ERR_NO_VALID_PATH', 83)
-NV_ERR_NOT_COMPATIBLE = _anonenum58.define('NV_ERR_NOT_COMPATIBLE', 84)
-NV_ERR_NOT_READY = _anonenum58.define('NV_ERR_NOT_READY', 85)
-NV_ERR_NOT_SUPPORTED = _anonenum58.define('NV_ERR_NOT_SUPPORTED', 86)
-NV_ERR_OBJECT_NOT_FOUND = _anonenum58.define('NV_ERR_OBJECT_NOT_FOUND', 87)
-NV_ERR_OBJECT_TYPE_MISMATCH = _anonenum58.define('NV_ERR_OBJECT_TYPE_MISMATCH', 88)
-NV_ERR_OPERATING_SYSTEM = _anonenum58.define('NV_ERR_OPERATING_SYSTEM', 89)
-NV_ERR_OTHER_DEVICE_FOUND = _anonenum58.define('NV_ERR_OTHER_DEVICE_FOUND', 90)
-NV_ERR_OUT_OF_RANGE = _anonenum58.define('NV_ERR_OUT_OF_RANGE', 91)
-NV_ERR_OVERLAPPING_UVM_COMMIT = _anonenum58.define('NV_ERR_OVERLAPPING_UVM_COMMIT', 92)
-NV_ERR_PAGE_TABLE_NOT_AVAIL = _anonenum58.define('NV_ERR_PAGE_TABLE_NOT_AVAIL', 93)
-NV_ERR_PID_NOT_FOUND = _anonenum58.define('NV_ERR_PID_NOT_FOUND', 94)
-NV_ERR_PROTECTION_FAULT = _anonenum58.define('NV_ERR_PROTECTION_FAULT', 95)
-NV_ERR_RC_ERROR = _anonenum58.define('NV_ERR_RC_ERROR', 96)
-NV_ERR_REJECTED_VBIOS = _anonenum58.define('NV_ERR_REJECTED_VBIOS', 97)
-NV_ERR_RESET_REQUIRED = _anonenum58.define('NV_ERR_RESET_REQUIRED', 98)
-NV_ERR_STATE_IN_USE = _anonenum58.define('NV_ERR_STATE_IN_USE', 99)
-NV_ERR_SIGNAL_PENDING = _anonenum58.define('NV_ERR_SIGNAL_PENDING', 100)
-NV_ERR_TIMEOUT = _anonenum58.define('NV_ERR_TIMEOUT', 101)
-NV_ERR_TIMEOUT_RETRY = _anonenum58.define('NV_ERR_TIMEOUT_RETRY', 102)
-NV_ERR_TOO_MANY_PRIMARIES = _anonenum58.define('NV_ERR_TOO_MANY_PRIMARIES', 103)
-NV_ERR_UVM_ADDRESS_IN_USE = _anonenum58.define('NV_ERR_UVM_ADDRESS_IN_USE', 104)
-NV_ERR_MAX_SESSION_LIMIT_REACHED = _anonenum58.define('NV_ERR_MAX_SESSION_LIMIT_REACHED', 105)
-NV_ERR_LIB_RM_VERSION_MISMATCH = _anonenum58.define('NV_ERR_LIB_RM_VERSION_MISMATCH', 106)
-NV_ERR_PRIV_SEC_VIOLATION = _anonenum58.define('NV_ERR_PRIV_SEC_VIOLATION', 107)
-NV_ERR_GPU_IN_DEBUG_MODE = _anonenum58.define('NV_ERR_GPU_IN_DEBUG_MODE', 108)
-NV_ERR_FEATURE_NOT_ENABLED = _anonenum58.define('NV_ERR_FEATURE_NOT_ENABLED', 109)
-NV_ERR_RESOURCE_LOST = _anonenum58.define('NV_ERR_RESOURCE_LOST', 110)
-NV_ERR_PMU_NOT_READY = _anonenum58.define('NV_ERR_PMU_NOT_READY', 111)
-NV_ERR_FLCN_ERROR = _anonenum58.define('NV_ERR_FLCN_ERROR', 112)
-NV_ERR_FATAL_ERROR = _anonenum58.define('NV_ERR_FATAL_ERROR', 113)
-NV_ERR_MEMORY_ERROR = _anonenum58.define('NV_ERR_MEMORY_ERROR', 114)
-NV_ERR_INVALID_LICENSE = _anonenum58.define('NV_ERR_INVALID_LICENSE', 115)
-NV_ERR_NVLINK_INIT_ERROR = _anonenum58.define('NV_ERR_NVLINK_INIT_ERROR', 116)
-NV_ERR_NVLINK_MINION_ERROR = _anonenum58.define('NV_ERR_NVLINK_MINION_ERROR', 117)
-NV_ERR_NVLINK_CLOCK_ERROR = _anonenum58.define('NV_ERR_NVLINK_CLOCK_ERROR', 118)
-NV_ERR_NVLINK_TRAINING_ERROR = _anonenum58.define('NV_ERR_NVLINK_TRAINING_ERROR', 119)
-NV_ERR_NVLINK_CONFIGURATION_ERROR = _anonenum58.define('NV_ERR_NVLINK_CONFIGURATION_ERROR', 120)
-NV_ERR_RISCV_ERROR = _anonenum58.define('NV_ERR_RISCV_ERROR', 121)
-NV_ERR_FABRIC_MANAGER_NOT_PRESENT = _anonenum58.define('NV_ERR_FABRIC_MANAGER_NOT_PRESENT', 122)
-NV_ERR_ALREADY_SIGNALLED = _anonenum58.define('NV_ERR_ALREADY_SIGNALLED', 123)
-NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE = _anonenum58.define('NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE', 124)
-NV_ERR_KEY_ROTATION_IN_PROGRESS = _anonenum58.define('NV_ERR_KEY_ROTATION_IN_PROGRESS', 125)
-NV_ERR_TEST_ONLY_CODE_NOT_ENABLED = _anonenum58.define('NV_ERR_TEST_ONLY_CODE_NOT_ENABLED', 126)
-NV_ERR_SECURE_BOOT_FAILED = _anonenum58.define('NV_ERR_SECURE_BOOT_FAILED', 127)
-NV_ERR_INSUFFICIENT_ZBC_ENTRY = _anonenum58.define('NV_ERR_INSUFFICIENT_ZBC_ENTRY', 128)
-NV_ERR_NVLINK_FABRIC_NOT_READY = _anonenum58.define('NV_ERR_NVLINK_FABRIC_NOT_READY', 129)
-NV_ERR_NVLINK_FABRIC_FAILURE = _anonenum58.define('NV_ERR_NVLINK_FABRIC_FAILURE', 130)
-NV_ERR_GPU_MEMORY_ONLINING_FAILURE = _anonenum58.define('NV_ERR_GPU_MEMORY_ONLINING_FAILURE', 131)
-NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE = _anonenum58.define('NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE', 132)
-NV_WARN_HOT_SWITCH = _anonenum58.define('NV_WARN_HOT_SWITCH', 65537)
-NV_WARN_INCORRECT_PERFMON_DATA = _anonenum58.define('NV_WARN_INCORRECT_PERFMON_DATA', 65538)
-NV_WARN_MISMATCHED_SLAVE = _anonenum58.define('NV_WARN_MISMATCHED_SLAVE', 65539)
-NV_WARN_MISMATCHED_TARGET = _anonenum58.define('NV_WARN_MISMATCHED_TARGET', 65540)
-NV_WARN_MORE_PROCESSING_REQUIRED = _anonenum58.define('NV_WARN_MORE_PROCESSING_REQUIRED', 65541)
-NV_WARN_NOTHING_TO_DO = _anonenum58.define('NV_WARN_NOTHING_TO_DO', 65542)
-NV_WARN_NULL_OBJECT = _anonenum58.define('NV_WARN_NULL_OBJECT', 65543)
-NV_WARN_OUT_OF_RANGE = _anonenum58.define('NV_WARN_OUT_OF_RANGE', 65544)
+_anonenum21 = CEnum(ctypes.c_uint)
+NV_OK = _anonenum21.define('NV_OK', 0)
+NV_ERR_GENERIC = _anonenum21.define('NV_ERR_GENERIC', 65535)
+NV_ERR_BROKEN_FB = _anonenum21.define('NV_ERR_BROKEN_FB', 1)
+NV_ERR_BUFFER_TOO_SMALL = _anonenum21.define('NV_ERR_BUFFER_TOO_SMALL', 2)
+NV_ERR_BUSY_RETRY = _anonenum21.define('NV_ERR_BUSY_RETRY', 3)
+NV_ERR_CALLBACK_NOT_SCHEDULED = _anonenum21.define('NV_ERR_CALLBACK_NOT_SCHEDULED', 4)
+NV_ERR_CARD_NOT_PRESENT = _anonenum21.define('NV_ERR_CARD_NOT_PRESENT', 5)
+NV_ERR_CYCLE_DETECTED = _anonenum21.define('NV_ERR_CYCLE_DETECTED', 6)
+NV_ERR_DMA_IN_USE = _anonenum21.define('NV_ERR_DMA_IN_USE', 7)
+NV_ERR_DMA_MEM_NOT_LOCKED = _anonenum21.define('NV_ERR_DMA_MEM_NOT_LOCKED', 8)
+NV_ERR_DMA_MEM_NOT_UNLOCKED = _anonenum21.define('NV_ERR_DMA_MEM_NOT_UNLOCKED', 9)
+NV_ERR_DUAL_LINK_INUSE = _anonenum21.define('NV_ERR_DUAL_LINK_INUSE', 10)
+NV_ERR_ECC_ERROR = _anonenum21.define('NV_ERR_ECC_ERROR', 11)
+NV_ERR_FIFO_BAD_ACCESS = _anonenum21.define('NV_ERR_FIFO_BAD_ACCESS', 12)
+NV_ERR_FREQ_NOT_SUPPORTED = _anonenum21.define('NV_ERR_FREQ_NOT_SUPPORTED', 13)
+NV_ERR_GPU_DMA_NOT_INITIALIZED = _anonenum21.define('NV_ERR_GPU_DMA_NOT_INITIALIZED', 14)
+NV_ERR_GPU_IS_LOST = _anonenum21.define('NV_ERR_GPU_IS_LOST', 15)
+NV_ERR_GPU_IN_FULLCHIP_RESET = _anonenum21.define('NV_ERR_GPU_IN_FULLCHIP_RESET', 16)
+NV_ERR_GPU_NOT_FULL_POWER = _anonenum21.define('NV_ERR_GPU_NOT_FULL_POWER', 17)
+NV_ERR_GPU_UUID_NOT_FOUND = _anonenum21.define('NV_ERR_GPU_UUID_NOT_FOUND', 18)
+NV_ERR_HOT_SWITCH = _anonenum21.define('NV_ERR_HOT_SWITCH', 19)
+NV_ERR_I2C_ERROR = _anonenum21.define('NV_ERR_I2C_ERROR', 20)
+NV_ERR_I2C_SPEED_TOO_HIGH = _anonenum21.define('NV_ERR_I2C_SPEED_TOO_HIGH', 21)
+NV_ERR_ILLEGAL_ACTION = _anonenum21.define('NV_ERR_ILLEGAL_ACTION', 22)
+NV_ERR_IN_USE = _anonenum21.define('NV_ERR_IN_USE', 23)
+NV_ERR_INFLATE_COMPRESSED_DATA_FAILED = _anonenum21.define('NV_ERR_INFLATE_COMPRESSED_DATA_FAILED', 24)
+NV_ERR_INSERT_DUPLICATE_NAME = _anonenum21.define('NV_ERR_INSERT_DUPLICATE_NAME', 25)
+NV_ERR_INSUFFICIENT_RESOURCES = _anonenum21.define('NV_ERR_INSUFFICIENT_RESOURCES', 26)
+NV_ERR_INSUFFICIENT_PERMISSIONS = _anonenum21.define('NV_ERR_INSUFFICIENT_PERMISSIONS', 27)
+NV_ERR_INSUFFICIENT_POWER = _anonenum21.define('NV_ERR_INSUFFICIENT_POWER', 28)
+NV_ERR_INVALID_ACCESS_TYPE = _anonenum21.define('NV_ERR_INVALID_ACCESS_TYPE', 29)
+NV_ERR_INVALID_ADDRESS = _anonenum21.define('NV_ERR_INVALID_ADDRESS', 30)
+NV_ERR_INVALID_ARGUMENT = _anonenum21.define('NV_ERR_INVALID_ARGUMENT', 31)
+NV_ERR_INVALID_BASE = _anonenum21.define('NV_ERR_INVALID_BASE', 32)
+NV_ERR_INVALID_CHANNEL = _anonenum21.define('NV_ERR_INVALID_CHANNEL', 33)
+NV_ERR_INVALID_CLASS = _anonenum21.define('NV_ERR_INVALID_CLASS', 34)
+NV_ERR_INVALID_CLIENT = _anonenum21.define('NV_ERR_INVALID_CLIENT', 35)
+NV_ERR_INVALID_COMMAND = _anonenum21.define('NV_ERR_INVALID_COMMAND', 36)
+NV_ERR_INVALID_DATA = _anonenum21.define('NV_ERR_INVALID_DATA', 37)
+NV_ERR_INVALID_DEVICE = _anonenum21.define('NV_ERR_INVALID_DEVICE', 38)
+NV_ERR_INVALID_DMA_SPECIFIER = _anonenum21.define('NV_ERR_INVALID_DMA_SPECIFIER', 39)
+NV_ERR_INVALID_EVENT = _anonenum21.define('NV_ERR_INVALID_EVENT', 40)
+NV_ERR_INVALID_FLAGS = _anonenum21.define('NV_ERR_INVALID_FLAGS', 41)
+NV_ERR_INVALID_FUNCTION = _anonenum21.define('NV_ERR_INVALID_FUNCTION', 42)
+NV_ERR_INVALID_HEAP = _anonenum21.define('NV_ERR_INVALID_HEAP', 43)
+NV_ERR_INVALID_INDEX = _anonenum21.define('NV_ERR_INVALID_INDEX', 44)
+NV_ERR_INVALID_IRQ_LEVEL = _anonenum21.define('NV_ERR_INVALID_IRQ_LEVEL', 45)
+NV_ERR_INVALID_LIMIT = _anonenum21.define('NV_ERR_INVALID_LIMIT', 46)
+NV_ERR_INVALID_LOCK_STATE = _anonenum21.define('NV_ERR_INVALID_LOCK_STATE', 47)
+NV_ERR_INVALID_METHOD = _anonenum21.define('NV_ERR_INVALID_METHOD', 48)
+NV_ERR_INVALID_OBJECT = _anonenum21.define('NV_ERR_INVALID_OBJECT', 49)
+NV_ERR_INVALID_OBJECT_BUFFER = _anonenum21.define('NV_ERR_INVALID_OBJECT_BUFFER', 50)
+NV_ERR_INVALID_OBJECT_HANDLE = _anonenum21.define('NV_ERR_INVALID_OBJECT_HANDLE', 51)
+NV_ERR_INVALID_OBJECT_NEW = _anonenum21.define('NV_ERR_INVALID_OBJECT_NEW', 52)
+NV_ERR_INVALID_OBJECT_OLD = _anonenum21.define('NV_ERR_INVALID_OBJECT_OLD', 53)
+NV_ERR_INVALID_OBJECT_PARENT = _anonenum21.define('NV_ERR_INVALID_OBJECT_PARENT', 54)
+NV_ERR_INVALID_OFFSET = _anonenum21.define('NV_ERR_INVALID_OFFSET', 55)
+NV_ERR_INVALID_OPERATION = _anonenum21.define('NV_ERR_INVALID_OPERATION', 56)
+NV_ERR_INVALID_OWNER = _anonenum21.define('NV_ERR_INVALID_OWNER', 57)
+NV_ERR_INVALID_PARAM_STRUCT = _anonenum21.define('NV_ERR_INVALID_PARAM_STRUCT', 58)
+NV_ERR_INVALID_PARAMETER = _anonenum21.define('NV_ERR_INVALID_PARAMETER', 59)
+NV_ERR_INVALID_PATH = _anonenum21.define('NV_ERR_INVALID_PATH', 60)
+NV_ERR_INVALID_POINTER = _anonenum21.define('NV_ERR_INVALID_POINTER', 61)
+NV_ERR_INVALID_REGISTRY_KEY = _anonenum21.define('NV_ERR_INVALID_REGISTRY_KEY', 62)
+NV_ERR_INVALID_REQUEST = _anonenum21.define('NV_ERR_INVALID_REQUEST', 63)
+NV_ERR_INVALID_STATE = _anonenum21.define('NV_ERR_INVALID_STATE', 64)
+NV_ERR_INVALID_STRING_LENGTH = _anonenum21.define('NV_ERR_INVALID_STRING_LENGTH', 65)
+NV_ERR_INVALID_READ = _anonenum21.define('NV_ERR_INVALID_READ', 66)
+NV_ERR_INVALID_WRITE = _anonenum21.define('NV_ERR_INVALID_WRITE', 67)
+NV_ERR_INVALID_XLATE = _anonenum21.define('NV_ERR_INVALID_XLATE', 68)
+NV_ERR_IRQ_NOT_FIRING = _anonenum21.define('NV_ERR_IRQ_NOT_FIRING', 69)
+NV_ERR_IRQ_EDGE_TRIGGERED = _anonenum21.define('NV_ERR_IRQ_EDGE_TRIGGERED', 70)
+NV_ERR_MEMORY_TRAINING_FAILED = _anonenum21.define('NV_ERR_MEMORY_TRAINING_FAILED', 71)
+NV_ERR_MISMATCHED_SLAVE = _anonenum21.define('NV_ERR_MISMATCHED_SLAVE', 72)
+NV_ERR_MISMATCHED_TARGET = _anonenum21.define('NV_ERR_MISMATCHED_TARGET', 73)
+NV_ERR_MISSING_TABLE_ENTRY = _anonenum21.define('NV_ERR_MISSING_TABLE_ENTRY', 74)
+NV_ERR_MODULE_LOAD_FAILED = _anonenum21.define('NV_ERR_MODULE_LOAD_FAILED', 75)
+NV_ERR_MORE_DATA_AVAILABLE = _anonenum21.define('NV_ERR_MORE_DATA_AVAILABLE', 76)
+NV_ERR_MORE_PROCESSING_REQUIRED = _anonenum21.define('NV_ERR_MORE_PROCESSING_REQUIRED', 77)
+NV_ERR_MULTIPLE_MEMORY_TYPES = _anonenum21.define('NV_ERR_MULTIPLE_MEMORY_TYPES', 78)
+NV_ERR_NO_FREE_FIFOS = _anonenum21.define('NV_ERR_NO_FREE_FIFOS', 79)
+NV_ERR_NO_INTR_PENDING = _anonenum21.define('NV_ERR_NO_INTR_PENDING', 80)
+NV_ERR_NO_MEMORY = _anonenum21.define('NV_ERR_NO_MEMORY', 81)
+NV_ERR_NO_SUCH_DOMAIN = _anonenum21.define('NV_ERR_NO_SUCH_DOMAIN', 82)
+NV_ERR_NO_VALID_PATH = _anonenum21.define('NV_ERR_NO_VALID_PATH', 83)
+NV_ERR_NOT_COMPATIBLE = _anonenum21.define('NV_ERR_NOT_COMPATIBLE', 84)
+NV_ERR_NOT_READY = _anonenum21.define('NV_ERR_NOT_READY', 85)
+NV_ERR_NOT_SUPPORTED = _anonenum21.define('NV_ERR_NOT_SUPPORTED', 86)
+NV_ERR_OBJECT_NOT_FOUND = _anonenum21.define('NV_ERR_OBJECT_NOT_FOUND', 87)
+NV_ERR_OBJECT_TYPE_MISMATCH = _anonenum21.define('NV_ERR_OBJECT_TYPE_MISMATCH', 88)
+NV_ERR_OPERATING_SYSTEM = _anonenum21.define('NV_ERR_OPERATING_SYSTEM', 89)
+NV_ERR_OTHER_DEVICE_FOUND = _anonenum21.define('NV_ERR_OTHER_DEVICE_FOUND', 90)
+NV_ERR_OUT_OF_RANGE = _anonenum21.define('NV_ERR_OUT_OF_RANGE', 91)
+NV_ERR_OVERLAPPING_UVM_COMMIT = _anonenum21.define('NV_ERR_OVERLAPPING_UVM_COMMIT', 92)
+NV_ERR_PAGE_TABLE_NOT_AVAIL = _anonenum21.define('NV_ERR_PAGE_TABLE_NOT_AVAIL', 93)
+NV_ERR_PID_NOT_FOUND = _anonenum21.define('NV_ERR_PID_NOT_FOUND', 94)
+NV_ERR_PROTECTION_FAULT = _anonenum21.define('NV_ERR_PROTECTION_FAULT', 95)
+NV_ERR_RC_ERROR = _anonenum21.define('NV_ERR_RC_ERROR', 96)
+NV_ERR_REJECTED_VBIOS = _anonenum21.define('NV_ERR_REJECTED_VBIOS', 97)
+NV_ERR_RESET_REQUIRED = _anonenum21.define('NV_ERR_RESET_REQUIRED', 98)
+NV_ERR_STATE_IN_USE = _anonenum21.define('NV_ERR_STATE_IN_USE', 99)
+NV_ERR_SIGNAL_PENDING = _anonenum21.define('NV_ERR_SIGNAL_PENDING', 100)
+NV_ERR_TIMEOUT = _anonenum21.define('NV_ERR_TIMEOUT', 101)
+NV_ERR_TIMEOUT_RETRY = _anonenum21.define('NV_ERR_TIMEOUT_RETRY', 102)
+NV_ERR_TOO_MANY_PRIMARIES = _anonenum21.define('NV_ERR_TOO_MANY_PRIMARIES', 103)
+NV_ERR_UVM_ADDRESS_IN_USE = _anonenum21.define('NV_ERR_UVM_ADDRESS_IN_USE', 104)
+NV_ERR_MAX_SESSION_LIMIT_REACHED = _anonenum21.define('NV_ERR_MAX_SESSION_LIMIT_REACHED', 105)
+NV_ERR_LIB_RM_VERSION_MISMATCH = _anonenum21.define('NV_ERR_LIB_RM_VERSION_MISMATCH', 106)
+NV_ERR_PRIV_SEC_VIOLATION = _anonenum21.define('NV_ERR_PRIV_SEC_VIOLATION', 107)
+NV_ERR_GPU_IN_DEBUG_MODE = _anonenum21.define('NV_ERR_GPU_IN_DEBUG_MODE', 108)
+NV_ERR_FEATURE_NOT_ENABLED = _anonenum21.define('NV_ERR_FEATURE_NOT_ENABLED', 109)
+NV_ERR_RESOURCE_LOST = _anonenum21.define('NV_ERR_RESOURCE_LOST', 110)
+NV_ERR_PMU_NOT_READY = _anonenum21.define('NV_ERR_PMU_NOT_READY', 111)
+NV_ERR_FLCN_ERROR = _anonenum21.define('NV_ERR_FLCN_ERROR', 112)
+NV_ERR_FATAL_ERROR = _anonenum21.define('NV_ERR_FATAL_ERROR', 113)
+NV_ERR_MEMORY_ERROR = _anonenum21.define('NV_ERR_MEMORY_ERROR', 114)
+NV_ERR_INVALID_LICENSE = _anonenum21.define('NV_ERR_INVALID_LICENSE', 115)
+NV_ERR_NVLINK_INIT_ERROR = _anonenum21.define('NV_ERR_NVLINK_INIT_ERROR', 116)
+NV_ERR_NVLINK_MINION_ERROR = _anonenum21.define('NV_ERR_NVLINK_MINION_ERROR', 117)
+NV_ERR_NVLINK_CLOCK_ERROR = _anonenum21.define('NV_ERR_NVLINK_CLOCK_ERROR', 118)
+NV_ERR_NVLINK_TRAINING_ERROR = _anonenum21.define('NV_ERR_NVLINK_TRAINING_ERROR', 119)
+NV_ERR_NVLINK_CONFIGURATION_ERROR = _anonenum21.define('NV_ERR_NVLINK_CONFIGURATION_ERROR', 120)
+NV_ERR_RISCV_ERROR = _anonenum21.define('NV_ERR_RISCV_ERROR', 121)
+NV_ERR_FABRIC_MANAGER_NOT_PRESENT = _anonenum21.define('NV_ERR_FABRIC_MANAGER_NOT_PRESENT', 122)
+NV_ERR_ALREADY_SIGNALLED = _anonenum21.define('NV_ERR_ALREADY_SIGNALLED', 123)
+NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE = _anonenum21.define('NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE', 124)
+NV_ERR_KEY_ROTATION_IN_PROGRESS = _anonenum21.define('NV_ERR_KEY_ROTATION_IN_PROGRESS', 125)
+NV_ERR_TEST_ONLY_CODE_NOT_ENABLED = _anonenum21.define('NV_ERR_TEST_ONLY_CODE_NOT_ENABLED', 126)
+NV_ERR_SECURE_BOOT_FAILED = _anonenum21.define('NV_ERR_SECURE_BOOT_FAILED', 127)
+NV_ERR_INSUFFICIENT_ZBC_ENTRY = _anonenum21.define('NV_ERR_INSUFFICIENT_ZBC_ENTRY', 128)
+NV_ERR_NVLINK_FABRIC_NOT_READY = _anonenum21.define('NV_ERR_NVLINK_FABRIC_NOT_READY', 129)
+NV_ERR_NVLINK_FABRIC_FAILURE = _anonenum21.define('NV_ERR_NVLINK_FABRIC_FAILURE', 130)
+NV_ERR_GPU_MEMORY_ONLINING_FAILURE = _anonenum21.define('NV_ERR_GPU_MEMORY_ONLINING_FAILURE', 131)
+NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE = _anonenum21.define('NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE', 132)
+NV_WARN_HOT_SWITCH = _anonenum21.define('NV_WARN_HOT_SWITCH', 65537)
+NV_WARN_INCORRECT_PERFMON_DATA = _anonenum21.define('NV_WARN_INCORRECT_PERFMON_DATA', 65538)
+NV_WARN_MISMATCHED_SLAVE = _anonenum21.define('NV_WARN_MISMATCHED_SLAVE', 65539)
+NV_WARN_MISMATCHED_TARGET = _anonenum21.define('NV_WARN_MISMATCHED_TARGET', 65540)
+NV_WARN_MORE_PROCESSING_REQUIRED = _anonenum21.define('NV_WARN_MORE_PROCESSING_REQUIRED', 65541)
+NV_WARN_NOTHING_TO_DO = _anonenum21.define('NV_WARN_NOTHING_TO_DO', 65542)
+NV_WARN_NULL_OBJECT = _anonenum21.define('NV_WARN_NULL_OBJECT', 65543)
+NV_WARN_OUT_OF_RANGE = _anonenum21.define('NV_WARN_OUT_OF_RANGE', 65544)
 
 NVC6C0_QMDV02_03_OUTER_PUT = (30, 0)
 NVC6C0_QMDV02_03_OUTER_OVERFLOW = (31, 31)

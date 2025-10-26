@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import ctypes, ctypes.util
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 dll = ctypes.CDLL(ctypes.util.find_library('OpenCL'))
@@ -89,6 +90,7 @@ struct__cl_image_format._fields_ = [
   ('image_channel_data_type', cl_channel_type),
 ]
 cl_image_format = struct__cl_image_format
+class struct__cl_image_desc(ctypes.Structure): pass
 size_t = ctypes.c_ulong
 cl_uint = ctypes.c_uint
 class _anonunion0(ctypes.Union): pass
@@ -96,8 +98,6 @@ _anonunion0._fields_ = [
   ('buffer', cl_mem),
   ('mem_object', cl_mem),
 ]
-class struct__cl_image_desc(ctypes.Structure): pass
-struct__cl_image_desc._anonymous_ = ('_0',)
 struct__cl_image_desc._fields_ = [
   ('image_type', cl_mem_object_type),
   ('image_width', size_t),

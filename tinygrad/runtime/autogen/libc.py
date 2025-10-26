@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import ctypes, ctypes.util
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 dll = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
@@ -118,9 +119,9 @@ except AttributeError: pass
 try: (strxfrm:=dll.strxfrm).restype,strxfrm.argtypes = ctypes.c_ulong,[ctypes.c_char_p, ctypes.c_char_p, size_t]
 except AttributeError: pass
 
+class struct___locale_struct(ctypes.Structure): pass
 class struct___locale_data(ctypes.Structure): pass
 struct___locale_data._fields_ = []
-class struct___locale_struct(ctypes.Structure): pass
 struct___locale_struct._fields_ = [
   ('__locales', (ctypes.POINTER(struct___locale_data) * 13)),
   ('__ctype_b', ctypes.POINTER(ctypes.c_ushort)),
@@ -422,27 +423,25 @@ Elf64_Phdr._fields_ = [
   ('p_memsz', Elf64_Xword),
   ('p_align', Elf64_Xword),
 ]
-class _anonunion0(ctypes.Union): pass
-_anonunion0._fields_ = [
+class Elf32_Dyn(ctypes.Structure): pass
+class Elf32_Dyn_d_un(ctypes.Union): pass
+Elf32_Dyn_d_un._fields_ = [
   ('d_val', Elf32_Word),
   ('d_ptr', Elf32_Addr),
 ]
-class Elf32_Dyn(ctypes.Structure): pass
-Elf32_Dyn._anonymous_ = ('_0',)
 Elf32_Dyn._fields_ = [
   ('d_tag', Elf32_Sword),
-  ('_0', _anonunion0),
+  ('d_un', Elf32_Dyn_d_un),
 ]
-class _anonunion1(ctypes.Union): pass
-_anonunion1._fields_ = [
+class Elf64_Dyn(ctypes.Structure): pass
+class Elf64_Dyn_d_un(ctypes.Union): pass
+Elf64_Dyn_d_un._fields_ = [
   ('d_val', Elf64_Xword),
   ('d_ptr', Elf64_Addr),
 ]
-class Elf64_Dyn(ctypes.Structure): pass
-Elf64_Dyn._anonymous_ = ('_0',)
 Elf64_Dyn._fields_ = [
   ('d_tag', Elf64_Sxword),
-  ('_0', _anonunion1),
+  ('d_un', Elf64_Dyn_d_un),
 ]
 class Elf32_Verdef(ctypes.Structure): pass
 Elf32_Verdef._fields_ = [
@@ -506,27 +505,25 @@ Elf64_Vernaux._fields_ = [
   ('vna_name', Elf64_Word),
   ('vna_next', Elf64_Word),
 ]
+class Elf32_auxv_t(ctypes.Structure): pass
 uint32_t = ctypes.c_uint
-class _anonunion2(ctypes.Union): pass
-_anonunion2._fields_ = [
+class Elf32_auxv_t_a_un(ctypes.Union): pass
+Elf32_auxv_t_a_un._fields_ = [
   ('a_val', uint32_t),
 ]
-class Elf32_auxv_t(ctypes.Structure): pass
-Elf32_auxv_t._anonymous_ = ('_0',)
 Elf32_auxv_t._fields_ = [
   ('a_type', uint32_t),
-  ('_0', _anonunion2),
-]
-uint64_t = ctypes.c_ulong
-class _anonunion3(ctypes.Union): pass
-_anonunion3._fields_ = [
-  ('a_val', uint64_t),
+  ('a_un', Elf32_auxv_t_a_un),
 ]
 class Elf64_auxv_t(ctypes.Structure): pass
-Elf64_auxv_t._anonymous_ = ('_0',)
+uint64_t = ctypes.c_ulong
+class Elf64_auxv_t_a_un(ctypes.Union): pass
+Elf64_auxv_t_a_un._fields_ = [
+  ('a_val', uint64_t),
+]
 Elf64_auxv_t._fields_ = [
   ('a_type', uint64_t),
-  ('_0', _anonunion3),
+  ('a_un', Elf64_auxv_t_a_un),
 ]
 class Elf32_Nhdr(ctypes.Structure): pass
 Elf32_Nhdr._fields_ = [
@@ -556,21 +553,20 @@ Elf64_Move._fields_ = [
   ('m_repeat', Elf64_Half),
   ('m_stride', Elf64_Half),
 ]
-class _anonstruct4(ctypes.Structure): pass
-_anonstruct4._fields_ = [
+class Elf32_gptab(ctypes.Union): pass
+class Elf32_gptab_gt_header(ctypes.Structure): pass
+Elf32_gptab_gt_header._fields_ = [
   ('gt_current_g_value', Elf32_Word),
   ('gt_unused', Elf32_Word),
 ]
-class _anonstruct5(ctypes.Structure): pass
-_anonstruct5._fields_ = [
+class Elf32_gptab_gt_entry(ctypes.Structure): pass
+Elf32_gptab_gt_entry._fields_ = [
   ('gt_g_value', Elf32_Word),
   ('gt_bytes', Elf32_Word),
 ]
-class Elf32_gptab(ctypes.Union): pass
-Elf32_gptab._anonymous_ = ('_0','_1',)
 Elf32_gptab._fields_ = [
-  ('_0', _anonstruct4),
-  ('_1', _anonstruct5),
+  ('gt_header', Elf32_gptab_gt_header),
+  ('gt_entry', Elf32_gptab_gt_entry),
 ]
 class Elf32_RegInfo(ctypes.Structure): pass
 Elf32_RegInfo._fields_ = [
@@ -621,16 +617,16 @@ Elf_MIPS_ABIFlags_v0._fields_ = [
   ('flags1', Elf32_Word),
   ('flags2', Elf32_Word),
 ]
-_anonenum6 = CEnum(ctypes.c_uint)
-Val_GNU_MIPS_ABI_FP_ANY = _anonenum6.define('Val_GNU_MIPS_ABI_FP_ANY', 0)
-Val_GNU_MIPS_ABI_FP_DOUBLE = _anonenum6.define('Val_GNU_MIPS_ABI_FP_DOUBLE', 1)
-Val_GNU_MIPS_ABI_FP_SINGLE = _anonenum6.define('Val_GNU_MIPS_ABI_FP_SINGLE', 2)
-Val_GNU_MIPS_ABI_FP_SOFT = _anonenum6.define('Val_GNU_MIPS_ABI_FP_SOFT', 3)
-Val_GNU_MIPS_ABI_FP_OLD_64 = _anonenum6.define('Val_GNU_MIPS_ABI_FP_OLD_64', 4)
-Val_GNU_MIPS_ABI_FP_XX = _anonenum6.define('Val_GNU_MIPS_ABI_FP_XX', 5)
-Val_GNU_MIPS_ABI_FP_64 = _anonenum6.define('Val_GNU_MIPS_ABI_FP_64', 6)
-Val_GNU_MIPS_ABI_FP_64A = _anonenum6.define('Val_GNU_MIPS_ABI_FP_64A', 7)
-Val_GNU_MIPS_ABI_FP_MAX = _anonenum6.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
+_anonenum0 = CEnum(ctypes.c_uint)
+Val_GNU_MIPS_ABI_FP_ANY = _anonenum0.define('Val_GNU_MIPS_ABI_FP_ANY', 0)
+Val_GNU_MIPS_ABI_FP_DOUBLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_DOUBLE', 1)
+Val_GNU_MIPS_ABI_FP_SINGLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SINGLE', 2)
+Val_GNU_MIPS_ABI_FP_SOFT = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SOFT', 3)
+Val_GNU_MIPS_ABI_FP_OLD_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_OLD_64', 4)
+Val_GNU_MIPS_ABI_FP_XX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_XX', 5)
+Val_GNU_MIPS_ABI_FP_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64', 6)
+Val_GNU_MIPS_ABI_FP_64A = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64A', 7)
+Val_GNU_MIPS_ABI_FP_MAX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
 
 ssize_t = ctypes.c_long
 gid_t = ctypes.c_uint

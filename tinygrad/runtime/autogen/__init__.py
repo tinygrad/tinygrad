@@ -44,3 +44,6 @@ nv = Autogen("nv",None,[*[f"{{}}/src/nvidia/inc/kernel/gpu/{s}.h" for s in ["fsp
 # this defines all syscall numbers. should probably unify linux autogen?
 io_uring = Autogen("io_uring",None,["/usr/include/liburing.h","/usr/include/linux/io_uring.h","/usr/include/asm-generic/unistd.h"],
                    rules=[('__NR','NR')])
+
+ib = Autogen("ib", "ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)", ["/usr/include/infiniband/verbs.h",
+             "/usr/include/infiniband/verbs_api.h","/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"])

@@ -1,6 +1,5 @@
 import ctypes.util, importlib, importlib.metadata, itertools, os, pathlib, re, functools, tarfile
 from tinygrad.helpers import fetch, unwrap
-from itertools import takewhile
 
 def fst(c): return next(c.get_children())
 def last(c): return list(c.get_children())[-1]
@@ -42,9 +41,9 @@ class Autogen:
         base = f"/tmp/{tf.getnames()[0]}"
         self.files, self.args = [str(f).format(base) for f in self.files], [a.format(base) for a in self.args]
 
-    idx, self.lines = Index.create(), [f"import {', '.join(['ctypes'] + [i for i in ['ctypes.util'] if i in (self.dll or '')])}",
+    idx, self.lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', ctypes.util' if 'ctypes.util' in (self.dll or '') else ''),
       "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *([f"dll = {self.dll}\n"] if self.dll else []), *self.prelude]
-    self.types, self.macros, self.anoncnt = {}, set(), 0
+    self.types, self.macros, self.anoncnt = {}, set(), itertools.count().__next__
     macros:list[str] = []
     for f in self.files:
       tu = idx.parse(f, self.args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
@@ -59,11 +58,12 @@ class Autogen:
           case CK.MACRO_DEFINITION if len(toks:=list(c.get_tokens())) > 1:
             if toks[1].spelling == '(' and toks[0].extent.end.column == toks[1].extent.start.column:
               it = iter(toks[1:])
-              args = [t.spelling for t in takewhile(lambda t:t.spelling!=')', it) if t.kind == ToK.IDENTIFIER]
+              args = [t.spelling for t in itertools.takewhile(lambda t:t.spelling!=')', it) if t.kind == ToK.IDENTIFIER]
               if len(body:=list(it)) == 0: continue
               macros += [f"{c.spelling} = lambda {','.join(args)}: {pread(f, toks[-1].extent.end.offset - (begin:=body[0].location.offset), begin)}"]
             else: macros += [f"{c.spelling} = {pread(f, toks[-1].extent.end.offset - (begin:=toks[1].location.offset), begin)}"]
     main, macros = '\n'.join(self.lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), self.rules, m))]
+    with open("tmp.py", "w") as f: f.write(main + '\n'.join(macros))
     while True:
       try:
         exec(main + '\n'.join(macros), {})
@@ -76,7 +76,7 @@ class Autogen:
     with open(pathlib.Path(__file__).parent / f"{self.name}.py", "w") as f: f.write(main + '\n'.join(macros))
     importlib.invalidate_caches()
 
-  def tname(self, t) -> str:
+  def tname(self, t, suggested_name=None) -> str:
     from clang.cindex import Cursor, CursorKind as CK, TypeKind as TK
 
     tmap = {TK.VOID:"None", TK.CHAR_U:"ctypes.c_ubyte", TK.UCHAR:"ctypes.c_ubyte", TK.CHAR_S:"ctypes.c_char", TK.SCHAR:"ctypes.c_char",
@@ -88,7 +88,7 @@ class Autogen:
     if t.spelling in self.types: return self.types[t.spelling]
     match t.kind:
       case TK.POINTER: return pmap[t.get_pointee().kind] if t.get_pointee().kind in pmap else f"ctypes.POINTER({self.tname(t.get_pointee())})"
-      case TK.ELABORATED: return self.tname(t.get_named_type())
+      case TK.ELABORATED: return self.tname(t.get_named_type(), suggested_name)
       case TK.TYPEDEF if t.spelling == t.get_canonical().spelling: return self.tname(t.get_canonical())
       case TK.TYPEDEF:
         self.types[t.spelling] = self.tname(t.get_canonical()) if t.spelling.startswith("__") else t.spelling
@@ -96,19 +96,16 @@ class Autogen:
         return self.types[t.spelling]
       case TK.RECORD:
         if (decl:=t.get_declaration()).is_anonymous():
-          self.types[t.spelling] = nm = f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{self.anoncnt}"
-          self.anoncnt += 1
+          self.types[t.spelling] = nm = suggested_name or (f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{self.anoncnt()}")
         else: self.types[t.spelling] = nm = t.spelling.replace(' ', '_')
-        cfn = itertools.count().__next__
-        self.lines.extend([f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass", *([f"{nm}._anonymous_ = ("+','.join(
-          f"'_{i}'" for i in range(c))+",)"] if (c:=len([f for f in t.get_fields() if f.is_anonymous()])) else []), *([f"{nm}._fields_ = [", *[
-          f"  ('{f'_{cfn()}' if f.is_anonymous() else f.spelling}', {self.tname(f.type)}{f', {f.get_bitfield_width()}'*f.is_bitfield()}),"
-            for f in t.get_fields()], "]"] if len(list(t.get_fields())) else [f"{nm}._fields_ = []"])])
+        self.lines.append(f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass")
+        aa, acnt = [], itertools.count().__next__
+        ll=["  ("+((aa.append(fn:=f"'_{acnt()}'") or fn)+f", {self.tname(f.type)}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
+            self.tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
+        self.lines.extend((aa if acnt() != 1 else [])+[f"{nm}._fields_ = [",*ll,"]"] if ll else [f"{nm}._fields_ = []"])
         return nm
       case TK.ENUM:
-        if (decl:=t.get_declaration()).is_anonymous():
-          self.types[t.spelling] = f"_anonenum{self.anoncnt}"
-          self.anoncnt += 1
+        if (decl:=t.get_declaration()).is_anonymous(): self.types[t.spelling] = suggested_name or f"_anonenum{self.anoncnt()}"
         else: self.types[t.spelling] = t.spelling.replace(' ', '_')
         self.lines.append(f"{self.types[t.spelling]} = CEnum({self.tname(decl.enum_type)})\n" +
           "\n".join(f"{e.spelling} = {self.types[t.spelling]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()) + "\n")

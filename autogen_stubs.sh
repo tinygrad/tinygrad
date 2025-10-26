@@ -100,21 +100,6 @@ generate_hsa() {
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
-generate_ib() {
-  clang2py -k cdefstum \
-    /usr/include/infiniband/verbs.h \
-    /usr/include/infiniband/verbs_api.h \
-    /usr/include/infiniband/ib_user_ioctl_verbs.h \
-    /usr/include/rdma/ib_user_verbs.h \
-    -o $BASE/ib.py
-
-  sed -i "s\import ctypes\import ctypes, ctypes.util\g" "$BASE/ib.py"
-  sed -i "s\FIXME_STUB\libibverbs\g" "$BASE/ib.py"
-  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)\g" "$BASE/ib.py"
-
-  fixup $BASE/ib.py
-}
-
 generate_llvm() {
   INC="$(llvm-config-14 --includedir)"
   clang2py -k cdefstum \
@@ -391,7 +376,6 @@ elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
-elif [ "$1" == "ib" ]; then generate_ib
 elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
