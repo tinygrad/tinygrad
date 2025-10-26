@@ -293,7 +293,7 @@ def main(args):
     print(cur[len(outputted):], flush=True)
     outputted = cur
 
-  assert toks.list() == expected
+  assert toks == expected, f"generated {toks} but expected {expected}"
 
 
 if __name__ == "__main__":

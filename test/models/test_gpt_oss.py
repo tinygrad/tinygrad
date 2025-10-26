@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv
 
 from icecream import ic
 
+
 def set_equal_weights(model, torch_model):
   from tinygrad.nn.state import get_state_dict
   from tinygrad.dtype import _from_torch_dtype
@@ -23,7 +24,7 @@ def set_equal_weights(model, torch_model):
     torch_v = torch_state[torch_k]
     assert torch_k in torch_state, f"State Mismatch: {k} in tinygrad model but {torch_k} not in torch model"
     torch_v.copy_(torch.from_numpy(v.numpy()))
-    np.testing.assert_allclose(v.numpy(), torch_v.numpy(), strict=True) # check dtype, shape, and value
+    np.testing.assert_allclose(v.numpy(), torch_v.cpu().numpy(), strict=True) # check dtype, shape, and value
   torch_model.eval()
 
 class TestGPTOSS(unittest.TestCase):
@@ -35,13 +36,13 @@ class TestGPTOSS(unittest.TestCase):
     params = {"dim": 2880, "hidden_dim": 2880, "head_dim": 64,
               "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24,
               "n_experts": 32, "n_active_experts": 4,
-              "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "max_context": 128,
+              "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "max_context": 4096,
               "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
               }
     torch_params = {"hidden_size": 2880, "intermediate_size": 2880, "head_dim": 64,
                     "num_attention_heads": 64, "num_key_value_heads": 8, "num_hidden_layers": 24,
                     "num_local_experts": 32, "num_experts_per_tok": 4,
-                    "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "initial_context_length": 128,
+                    "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "initial_context_length": 4096,
                     "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
                     }
 
@@ -60,7 +61,8 @@ class TestGPTOSS(unittest.TestCase):
                           }
 
     if getenv("SMALL"):
-      params, torch_params = small_params, small_torch_params
+      params["num_blocks"] = torch_params["num_hidden_layers"] = 2
+      params["max_context"] = torch_params["initial_context_length"] = 32
 
 
     # Create in tinygrad
@@ -69,7 +71,8 @@ class TestGPTOSS(unittest.TestCase):
 
     # Create in torch
     with torch.no_grad():
-      torch_model = TorchGptOss(GptOssConfig(**torch_params))
+      torch_device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
+      torch_model = TorchGptOss(GptOssConfig(**torch_params)).to(torch_device)
 
     # set weights and check each weight has the same shape, dtype
     set_equal_weights(model, torch_model)
@@ -83,9 +86,9 @@ class TestGPTOSS(unittest.TestCase):
 
       out = model(Tensor(input_ids))
       with torch.no_grad():
-        torch_logits = torch_model.forward(torch.from_numpy(input_ids).long()).logits
+        torch_logits = torch_model.forward(torch.from_numpy(input_ids).long().to(torch_device)).logits
         torch_out = torch_logits[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
-      np.testing.assert_allclose(out.numpy(), torch_out.detach().numpy(), atol=5e-4, rtol=5e-4)
+      np.testing.assert_allclose(out.numpy(), torch_out.cpu().numpy(), atol=5e-4, rtol=5e-4)
 
 if __name__ == '__main__':
   unittest.main()

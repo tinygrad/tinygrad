@@ -2944,6 +2944,7 @@ class Tensor(MathTrait):
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
     x = x.pad(pads, value=dtypes.min(x.dtype) if descending else dtypes.max(x.dtype)).unflatten(dim, (2,)*n_stages)
     # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
+    ic(n_stages)
     for stage in range(1, n_stages+1):
       if stage != n_stages:
         # flip so arrows of green boxes point the same way as blue boxes
