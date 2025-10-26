@@ -80,7 +80,7 @@ class TestGPTOSS(unittest.TestCase):
       model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
       model = GptOss.from_pretrained(model_path, MODELS["20B"]["params"])
       print("set tinygrad model weights")
-      torch_model = torch_model.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=torch_device)
+      torch_model = torch_model.from_pretrained(model_path, local_files_only=True, cache_dir=model_path).to(torch_device)
       print("set torch model weights")
 
     # set weights and check each weight has the same shape, dtype
