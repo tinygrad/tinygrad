@@ -190,7 +190,7 @@ class QCOMComputeQueue(HWQueue):
     else: cs_cfg = qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.prg.samp_cnt, ntex=args_state.prg.tex_cnt, nibo=args_state.prg.ibo_cnt)
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, cs_cfg)
     self.cmd(adreno.CP_RUN_OPENCL, 0)
-    self._cache_flush(write_back=True, invalidate=False, sync=True, memsync=False)
+    self._cache_flush(write_back=True, invalidate=False, sync=True, memsync=True)
     return self
 
 class QCOMArgsState(HCQArgsState):
