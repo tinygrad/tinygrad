@@ -98,16 +98,6 @@ generate_hsa() {
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
-generate_io_uring() {
-  clang2py -k cdefstum \
-    /usr/include/liburing.h \
-    /usr/include/linux/io_uring.h \
-    -o $BASE/io_uring.py
-
-  sed -r '/^#define __NR_io_uring/ s/^#define __(NR_io_uring[^ ]+) (.*)$/\1 = \2/; t; d' /usr/include/asm-generic/unistd.h >> $BASE/io_uring.py # io_uring syscalls numbers
-  fixup $BASE/io_uring.py
-}
-
 generate_ib() {
   clang2py -k cdefstum \
     /usr/include/infiniband/verbs.h \
@@ -395,10 +385,8 @@ elif [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
-elif [ "$1" == "nvdrv" ]; then generate_nvdrv
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
-elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "ib" ]; then generate_ib
 elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
@@ -408,6 +396,6 @@ elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
+elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_amd; generate_am; generate_webgpu; generate_mesa
 else echo "usage: $0 <type>"
 fi

@@ -27,7 +27,6 @@ NVJITLINK_INPUT_ANY = nvJitLinkInputType.define('NVJITLINK_INPUT_ANY', 10)
 
 class struct_nvJitLink(ctypes.Structure): pass
 struct_nvJitLink._fields_ = []
-
 nvJitLinkHandle = ctypes.POINTER(struct_nvJitLink)
 uint32_t = ctypes.c_uint
 # extern nvJitLinkResult __nvJitLinkCreate_12_6(nvJitLinkHandle *handle, uint32_t numOptions, const char **options)
