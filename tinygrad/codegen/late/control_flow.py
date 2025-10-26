@@ -34,7 +34,6 @@ def linearize(u:UOp) -> list[UOp]:
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    in_degree[u] = 0
     for s in u.src: consumers[s].append(u)
     in_degree[u] = len(u.src)
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
