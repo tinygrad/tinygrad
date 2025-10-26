@@ -525,7 +525,7 @@ class NV_GSP(NV_IP):
     def bdf_as_int(s): return 0x000 if s.startswith("usb") else (int(s[5:7],16)<<8) | (int(s[8:10],16)<<3) | int(s[-1],16)
 
     pcidev = self.nvdev.pci_dev
-    data = nv.GspSystemInfo(gpuPhysAddr=pcidev.bar_info[0][0], gpuPhysFbAddr=pcidev.bar_info[1][0], gpuPhysInstAddr=pcidev.bar_info[3][0],
+    data = nv.GspSystemInfo(gpuPhysAddr=pcidev.bar_info[0].addr, gpuPhysFbAddr=pcidev.bar_info[1].addr, gpuPhysInstAddr=pcidev.bar_info[3].addr,
       pciConfigMirrorBase=[0x88000, 0x92000][self.nvdev.fmc_boot], pciConfigMirrorSize=0x1000, nvDomainBusDeviceFunc=bdf_as_int(self.nvdev.devfmt),
       bIsPassthru=1, PCIDeviceID=pcidev.read_config(pci.PCI_VENDOR_ID, 4), PCISubDeviceID=pcidev.read_config(pci.PCI_SUBSYSTEM_VENDOR_ID, 4),
       PCIRevisionID=pcidev.read_config(pci.PCI_REVISION_ID, 1), maxUserVa=0x7ffffffff000)
