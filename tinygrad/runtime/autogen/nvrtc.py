@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 import ctypes, ctypes.util
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 dll = ctypes.CDLL(ctypes.util.find_library('nvrtc'))

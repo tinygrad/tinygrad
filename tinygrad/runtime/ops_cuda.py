@@ -42,7 +42,7 @@ class CUDAProgram:
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.name(status)}")
+      raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.get(status)}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))

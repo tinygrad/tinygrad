@@ -1,13 +1,14 @@
+# mypy: ignore-errors
 import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-__u32 = ctypes.c_uint
 class struct_kfd_ioctl_get_version_args(ctypes.Structure): pass
+__u32 = ctypes.c_uint
 struct_kfd_ioctl_get_version_args._fields_ = [
   ('major_version', ctypes.c_uint),
   ('minor_version', ctypes.c_uint),
 ]
-__u64 = ctypes.c_ulonglong
 class struct_kfd_ioctl_create_queue_args(ctypes.Structure): pass
+__u64 = ctypes.c_ulonglong
 struct_kfd_ioctl_create_queue_args._fields_ = [
   ('ring_base_address', ctypes.c_ulonglong),
   ('write_pointer_address', ctypes.c_ulonglong),
@@ -197,14 +198,13 @@ class struct_kfd_hsa_signal_event_data(ctypes.Structure): pass
 struct_kfd_hsa_signal_event_data._fields_ = [
   ('last_event_age', ctypes.c_ulonglong),
 ]
+class struct_kfd_event_data(ctypes.Structure): pass
 class _anonunion0(ctypes.Union): pass
 _anonunion0._fields_ = [
   ('memory_exception_data', struct_kfd_hsa_memory_exception_data),
   ('hw_exception_data', struct_kfd_hsa_hw_exception_data),
   ('signal_event_data', struct_kfd_hsa_signal_event_data),
 ]
-class struct_kfd_event_data(ctypes.Structure): pass
-struct_kfd_event_data._anonymous_ = ('_0',)
 struct_kfd_event_data._fields_ = [
   ('_0', _anonunion0),
   ('kfd_event_data_ext', ctypes.c_ulonglong),
@@ -415,8 +415,8 @@ struct_kfd_ioctl_svm_args._fields_ = [
   ('nattr', ctypes.c_uint),
   ('attrs', (struct_kfd_ioctl_svm_attribute * 0)),
 ]
-__s32 = ctypes.c_int
 class struct_kfd_ioctl_set_xnack_mode_args(ctypes.Structure): pass
+__s32 = ctypes.c_int
 struct_kfd_ioctl_set_xnack_mode_args._fields_ = [
   ('xnack_enabled', ctypes.c_int),
 ]
@@ -510,17 +510,16 @@ struct_kfd_queue_snapshot_entry._fields_ = [
   ('ctx_save_restore_area_size', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class _anonstruct1(ctypes.Structure): pass
-_anonstruct1._fields_ = [
+class struct_kfd_context_save_area_header(ctypes.Structure): pass
+class struct_kfd_context_save_area_header_wave_state(ctypes.Structure): pass
+struct_kfd_context_save_area_header_wave_state._fields_ = [
   ('control_stack_offset', ctypes.c_uint),
   ('control_stack_size', ctypes.c_uint),
   ('wave_state_offset', ctypes.c_uint),
   ('wave_state_size', ctypes.c_uint),
 ]
-class struct_kfd_context_save_area_header(ctypes.Structure): pass
-struct_kfd_context_save_area_header._anonymous_ = ('_0',)
 struct_kfd_context_save_area_header._fields_ = [
-  ('_0', _anonstruct1),
+  ('wave_state', struct_kfd_context_save_area_header_wave_state),
   ('debug_offset', ctypes.c_uint),
   ('debug_size', ctypes.c_uint),
   ('err_payload_addr', ctypes.c_ulonglong),
@@ -632,8 +631,9 @@ struct_kfd_ioctl_dbg_trap_device_snapshot_args._fields_ = [
   ('num_devices', ctypes.c_uint),
   ('entry_size', ctypes.c_uint),
 ]
-class _anonunion2(ctypes.Union): pass
-_anonunion2._fields_ = [
+class struct_kfd_ioctl_dbg_trap_args(ctypes.Structure): pass
+class _anonunion1(ctypes.Union): pass
+_anonunion1._fields_ = [
   ('enable', struct_kfd_ioctl_dbg_trap_enable_args),
   ('send_runtime_event', struct_kfd_ioctl_dbg_trap_send_runtime_event_args),
   ('set_exceptions_enabled', struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args),
@@ -649,12 +649,10 @@ _anonunion2._fields_ = [
   ('queue_snapshot', struct_kfd_ioctl_dbg_trap_queue_snapshot_args),
   ('device_snapshot', struct_kfd_ioctl_dbg_trap_device_snapshot_args),
 ]
-class struct_kfd_ioctl_dbg_trap_args(ctypes.Structure): pass
-struct_kfd_ioctl_dbg_trap_args._anonymous_ = ('_0',)
 struct_kfd_ioctl_dbg_trap_args._fields_ = [
   ('pid', ctypes.c_uint),
   ('op', ctypes.c_uint),
-  ('_0', _anonunion2),
+  ('_0', _anonunion1),
 ]
 KFD_IOCTL_MAJOR_VERSION = 1
 KFD_IOCTL_MINOR_VERSION = 14

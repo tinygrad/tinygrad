@@ -51,11 +51,6 @@ jobs:
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
-    - name: Verify Linux autogen
-      run: |
-        cp tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
-        ./autogen_stubs.sh ib
-        diff /tmp/ib.py.bak tinygrad/runtime/autogen/ib.py
     - name: Verify WebGPU autogen
       run: |
         cp tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
@@ -105,7 +100,9 @@ jobs:
         mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
         mv tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
         mv tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
-        python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring"
+        mv tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
+        python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, ib"
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/kfd.py.bak tinygrad/runtime/autogen/kfd.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+        diff /tmp/ib.py.bak tinygrad/runtime/autogen/ib.py

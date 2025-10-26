@@ -21,7 +21,7 @@ def nvrtc_check(status, ctx=None):
 def jitlink_check(status, ctx=None):
   if status != 0:
     err_log = _get_bytes(ctx, jitlink.nvJitLinkGetErrorLog, jitlink.nvJitLinkGetErrorLogSize, lambda _: None).decode() if ctx else ""
-    raise CompileError(f"jitlink Error {status}, {jitlink.nvJitLinkResult.name(status)}\n{err_log}")
+    raise CompileError(f"jitlink Error {status}, {jitlink.nvJitLinkResult.get(status)}\n{err_log}")
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
