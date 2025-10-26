@@ -108,7 +108,9 @@ class TestAfterVmap(unittest.TestCase):
 
   def test_pad(self):
     x = Tensor.ones(self.n, self.m)
-    self.assertListEqual(TestAfterVmap._vfn(x).pad(((0,0), (1,0))).tolist(),np.pad(self.expected_vmap_res, ((0,0), (1, 0))).tolist())
+    # numpy convention
+    for pad_width in [((1,0), (0,0)),((0,1),(0,0)), ((0,0), (1,0)), ((0,0), (0,1))]:
+      self.assertListEqual(TestAfterVmap._vfn(x).pad(pad_width).tolist(),np.pad(self.expected_vmap_res, pad_width).tolist())
 
   def test_indexing(self):
     x = Tensor.ones(self.n, self.m)
@@ -157,19 +159,17 @@ class TestAfterVmap(unittest.TestCase):
 
   def test_cat(self):
     x = Tensor.ones(self.n, self.m)
-    with self.assertRaises(RuntimeError): # reason: bad broadcasting
-      self.assertListEqual(Tensor.cat(TestAfterVmap._vfn(x), x, dim=0).tolist(),
-                          np.concatenate([self.expected_vmap_res, np.ones(self.n, self.m)], axis=0).tolist())
-      self.assertListEqual(Tensor.cat(x, TestAfterVmap._vfn(x), dim=0).tolist(),
-                          np.concatenate([np.ones(self.n, self.m), self.expected_vmap_res], axis=0).tolist())
+    self.assertListEqual(Tensor.cat(TestAfterVmap._vfn(x), x, dim=0).tolist(),
+                        np.concatenate([self.expected_vmap_res, np.ones((self.n, self.m))], axis=0).tolist())
+    self.assertListEqual(Tensor.cat(x, TestAfterVmap._vfn(x), dim=0).tolist(),
+                        np.concatenate([np.ones((self.n, self.m)), self.expected_vmap_res], axis=0).tolist())
 
   def test_broadcast_to(self):
     x = Tensor.ones(self.n, self.m)
     # same shape but with symbolic ones
-    with self.assertRaises(ValueError): # reason: n and UOp(CONST, dtypes.index, arg=n) are not considered equal
-      self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((self.n, self.m)).tolist(), self.expected_vmap_res.tolist())
-      self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((UOp.range(self.n, -2), self.m)).tolist(), self.expected_vmap_res.tolist())
-      self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((self.n, UOp.range(self.m, -2))).tolist(), self.expected_vmap_res.tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((self.n, self.m)).tolist(), self.expected_vmap_res.tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((UOp.range(self.n, -2), self.m)).tolist(), self.expected_vmap_res.tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x)._broadcast_to((self.n, UOp.range(self.m, -2))).tolist(), self.expected_vmap_res.tolist())
 
 if __name__ == '__main__':
   unittest.main()
