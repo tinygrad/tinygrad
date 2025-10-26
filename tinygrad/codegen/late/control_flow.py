@@ -27,21 +27,17 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
 
 def linearize(u:UOp) -> list[UOp]:
   lst = list(u.toposort())
-  in_this_block = set(lst)
-  local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
+  consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
   priorities:dict[UOp, int] = {}
 
-  # get local children and assign priorities
+  # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    in_degree[u] = 0
-    for s in u.src:
-      if s in in_this_block:
-        local_children[s].append(u)
-        in_degree[u] += 1
+    for s in u.src: consumers[s].append(u)
+    in_degree[u] = len(u.src)
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x] for x in local_children[u]]
+    priority = [0] + [priorities[x] for x in consumers[u]]
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
@@ -59,7 +55,7 @@ def linearize(u:UOp) -> list[UOp]:
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in local_children[u]:
+    for v in consumers[u]:
       in_degree[v] -= 1
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
 
@@ -88,13 +84,10 @@ class CFGContext:
     siblings: dict[UOp, list[UOp]] = {}
     for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
-      # range/if that have dependencies on other siblings need to run after them
+      # ranges that have dependencies on other siblings need to be scheduled after them
       order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
-      for x,y in zipped:
-        # TODO: is this check correct?
-        if y.src[1] not in x.backward_slice_with_self:
-          self.edges[y.src[1]] = x
+      for x,y in zipped: self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
