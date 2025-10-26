@@ -131,7 +131,6 @@ def parse_cmd_buf(dat):
         elif state_block == SB6_CS_TEX:
           # print("SKIP TEXTURE STATE BLOCK")
           if state_type == ST6_SHADER:
-            # CAPTURED_STATE['bindless_base']
             if state_src == 0x1:
               samplers_bytes = get_mem(CAPTURED_STATE['bindless_base'] + ((vals[2] << 32) | vals[1]) * 4, num_unit * 64)
             else: samplers_bytes = get_mem((vals[2] << 32) | vals[1], num_unit * 4 * 4)
@@ -147,7 +146,6 @@ def parse_cmd_buf(dat):
             if IOCTL > 1:
               print('texture descriptors')
               hexdump(descriptors_bytes)
-        print("EXIT")
       elif ops[opcode] == "CP_REG_TO_MEM":
         reg, cnt, b64, accum = vals[0] & 0x3FFFF, (vals[0] >> 18) & 0xFFF, (vals[0] >> 30) & 0x1, (vals[0] >> 31) & 0x1
         dest = vals[1] | (vals[2] << 32)
@@ -200,7 +198,6 @@ def ioctl(fd, request, argp):
     if IOCTL > 0: print(f"{ret:2d} = {name:40s}", ' '.join(format_struct(s)))
     if name == "IOCTL_KGSL_GPUOBJ_INFO":
       mmaped[s.gpuaddr] = mmap.mmap(fd, s.size, offset=s.id*0x1000)
-      print(mmaped[s.gpuaddr])
     if name == "IOCTL_KGSL_GPU_COMMAND":
       for i in range(s.numcmds):
         cmd = get_struct(s.cmdlist+ctypes.sizeof(msm_kgsl.struct_kgsl_command_object)*i, msm_kgsl.struct_kgsl_command_object)

@@ -1,9 +1,10 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno, itertools
 from typing import cast, ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp
-from tinygrad.runtime.autogen import libc, vfio
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
+from tinygrad.runtime.autogen import libc, vfio, pci
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
+from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
 
@@ -77,15 +78,14 @@ class _System:
       sysmem_view = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE))
       paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem_view.view(fmt='Q')[0::2], sysmem_view.view(fmt='Q')[1::2])))
       assert not contiguous or len(paddrs) == 1, "not contiguous, but required"
-      paged_paddrs = [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:round_up(size, 0x1000)//0x1000]
     else:
       assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-      flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > 0x1000 else 0) | (MAP_FIXED if vaddr else 0)
+      flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
-      sysmem_view, paged_paddrs = MMIOInterface(va, size), self.system_paddrs(va, size)
+      sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in self.system_paddrs(va, size)]
 
     if data is not None: sysmem_view[:len(data)] = data
-    return sysmem_view, paged_paddrs
+    return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
 
   def pci_reset(self, gpu):
     if OSX: System.iokit_pci_rpc(__TinyGPURPCReset:=2)
@@ -98,6 +98,56 @@ class _System:
       device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
       if vendor == target_vendor and device in target_devices: result.append(pcibus)
     return sorted(result)
+
+  def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
+    for bus in range(gpu_bus):
+      # All 3 values must be written at the same time.
+      buses = (0 << 0) | ((bus+1) << 8) | ((gpu_bus) << 16)
+      usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=buses, size=4)
+
+      usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=(mem_base>>16) & 0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=(pref_mem_base>>16) & 0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_BASE_UPPER32,  bus=bus, dev=0, fn=0, value=pref_mem_base >> 32, size=4)
+      usb.pcie_cfg_req(pci.PCI_PREF_LIMIT_UPPER32, bus=bus, dev=0, fn=0, value=0xffffffff, size=4)
+
+      usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+
+    # resize bar 0
+    cap_ptr = 0x100
+    while cap_ptr:
+      if pci.PCI_EXT_CAP_ID(hdr:=usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, dev=0, fn=0, size=4)) == pci.PCI_EXT_CAP_ID_REBAR:
+        cap = usb.pcie_cfg_req(cap_ptr + 0x04, bus=gpu_bus, dev=0, fn=0, size=4)
+        new_ctrl = (usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, size=4) & ~0x1F00) | ((int(cap >> 4).bit_length() - 1) << 8)
+        usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, value=new_ctrl, size=4)
+
+      cap_ptr = pci.PCI_EXT_CAP_NEXT(hdr)
+
+    mem_space_addr, bar_off, bars = [mem_base, pref_mem_base], 0, {}
+    while bar_off < 24:
+      cfg = usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
+      bar_mem, bar_64 = bool(cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH), cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64
+
+      if (cfg & pci.PCI_BASE_ADDRESS_SPACE) == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
+        usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
+        lo = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4) & 0xfffffff0)
+
+        if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
+        hi = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, size=4) if bar_64 else 0)
+
+        bar_size = ((~(((hi << 32) | lo) & ~0xf)) + 1) & (0xffffffffffffffff if bar_64 else 0xffffffff)
+
+        usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] & 0xffffffff, size=4)
+        if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] >> 32, size=4)
+
+        bars[bar_off // 4] = (mem_space_addr[bar_mem], bar_size)
+        mem_space_addr[bar_mem] += round_up(bar_size, 2 << 20)
+
+      bar_off += 8 if bar_64 else 4
+
+    usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+    return bars
 
   def flock_acquire(self, name:str) -> int:
     import fcntl # to support windows
@@ -172,6 +222,13 @@ class APLPCIDevice(PCIDevice):
   def read_config(self, offset:int, size:int): return System.iokit_pci_rpc(__TinyGPURPCReadCfg:=0, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): System.iokit_pci_rpc(__TinyGPURPCWriteCfg:=1, offset, size, value)
 
+class USBPCIDevice(PCIDevice):
+  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    self.usb = ASM24Controller()
+    self.pcibus, self.bars = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+  def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'): return USBMMIOInterface(self.usb, self.bars[bar][0]+off, size or self.bars[bar][1], fmt)
+  def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
+
 class PCIDevImplBase:
   mm: MemoryManager
 
@@ -202,7 +259,7 @@ class LNXPCIIfaceBase:
       mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], system=True, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
 
-    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 4 << 10), uncached=uncached, contiguous=cpu_access)
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
     barview = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
     return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 

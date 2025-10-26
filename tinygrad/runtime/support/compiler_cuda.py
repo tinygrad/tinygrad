@@ -60,6 +60,19 @@ class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
 
+class NVCCCompiler(Compiler):
+  def __init__(self, arch:str, extra_options:list[str]=[]):
+    self.arch, self.extra_options = arch, extra_options
+    super().__init__(f"compile_nvcc_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
+  def compile(self, src:str) -> bytes:
+    with tempfile.NamedTemporaryFile(suffix=".cu") as srcf, tempfile.NamedTemporaryFile(suffix=".ptx") as libf:
+      srcf.write(src.encode())
+      srcf.flush()
+      subprocess.run(["nvcc", f"-arch={self.arch}", "-ptx", "-o", libf.name, srcf.name] + self.extra_options,
+                 check=True)
+      return libf.read()
+  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
+
 class PTXCompiler(Compiler):
   def __init__(self, arch:str, cache_key="ptx"):
     self.arch = arch
@@ -69,7 +82,9 @@ class PTXCompiler(Compiler):
   def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
 
 class NVPTXCompiler(PTXCompiler):
-  def __init__(self, arch:str): super().__init__(arch, cache_key="nv_ptx")
+  def __init__(self, arch:str):
+    nvrtc_check(nvrtc.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
+    super().__init__(arch, cache_key="nv_ptx")
   def compile(self, src:str) -> bytes:
     jitlink_check(nvrtc.nvJitLinkCreate(handle := nvrtc.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
     jitlink_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)

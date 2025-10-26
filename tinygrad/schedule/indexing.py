@@ -2,9 +2,9 @@ from typing import Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, TracingKey, PCONTIG, colored
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
@@ -52,11 +52,11 @@ class IndexingContext:
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.KERNEL}: return None
-  if x.op is Ops.ASSIGN and x.src[1].op is Ops.KERNEL: return None
+  if x.op is Ops.AFTER and x.src[1].op is Ops.KERNEL: return None
   new_srcs = []
   for s in x.src:
     new_src = s
-    if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.ASSIGN and s.src[1].op is Ops.KERNEL):
+    if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.AFTER and s.src[1].op is Ops.KERNEL):
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
@@ -139,15 +139,16 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
-@cpu_profile(TracingKey("run_rangeify"), "TINY")
+@profile_matches
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
+  if debug: print("**************************")
   rctx = IndexingContext()
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")
 
   # get the traversal order
-  with cpu_profile(TracingKey("reverse toposort"), "TINY"):
+  with cpu_profile("reverse toposort", "TINY"):
     tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
 
   # explicit rangeify

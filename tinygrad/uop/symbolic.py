@@ -28,6 +28,7 @@ invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 propagate_invalid = PatternMatcher([
   # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
   # propagate invalid, push it past children
+  (invalid_gate.cast(name="cast"), lambda i,x,cond,cast: x.cast(cast.dtype) if cast.dtype is not dtypes.index else None),
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: cond.where(x.alu(alu.op,y), i))
     for op in GroupOp.Binary-GroupOp.Comparison),
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: x.alu(alu.op,y)) for op in GroupOp.Comparison),
@@ -376,6 +377,11 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(GroupOp.Binary, src=(UPat.var("x", dtypes.long), UPat.var("y", dtypes.long)), name="u"), lambda u,x,y:
     x.cast(dtypes.int).alu(u.op, y.cast(dtypes.int)).cast(u.dtype) if not any(v.overflows(dtypes.int) for v in (u,x,y)) else None),
   ((UPat.var("x", dtypes.index) + UPat.cvar("c")).cast(dtypes.sints, name="cast"), lambda x,c,cast:x.cast(cast.dtype)+c.cast(cast.dtype)),
+  # only RANGE/IF/STORE/KERNEL have side effects
+  (UPat(Ops.AFTER, name="x"), lambda x: x.replace(src=(x.src[0],)+
+    tuple(flatten([(y,) if y.op in {Ops.RANGE, Ops.IF, Ops.STORE, Ops.KERNEL, Ops.BARRIER, Ops.END, Ops.UNROLL} else y.src for y in x.src[1:]])))),
+  # after with 1 src is just src[0]
+  (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
@@ -481,7 +487,7 @@ def where_on_load(l, c1, buf, x):
   # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
   # also no data dependent loads!
   moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
-    and not c.op_in_backward_slice_with_self(Ops.LOAD)]
+    and all(u in x.backward_slice_with_self for u in c.backward_slice_with_self if u.op is Ops.LOAD)]
   if not (removed:=moved_clauses+duplicate_clauses): return None
   # aditionally we can drop the clause on the where if it already exists in the load
   remaining_clause = UOp.const(dtypes.bool, True).prod(*[c for c in c1.split_uop(Ops.AND) if c not in removed])
@@ -499,8 +505,8 @@ pm_simplify_valid = PatternMatcher([
 ])
 
 # this is symbolic 2.0
-REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP}
-REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP}
+REMOVE_FROM_SINK = {Ops.SINK, Ops.UNROLL, Ops.PTRCAT, Ops.CAT, Ops.NOOP, Ops.GROUP}
+REMOVE_FROM_BARRIER = {Ops.VECTORIZE, Ops.SINK, Ops.CAT, Ops.PTRCAT, Ops.NOOP, Ops.GROUP}
 sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
@@ -537,8 +543,8 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
     lambda x: UOp(Ops.NOOP) if x.op is Ops.STORE else x.const_like(0)), # invalid store does nothing. invalid load produces 0
   # # Where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
   # remove VECTORIZE from SINK/BARRIER. TODO: SINK/BARRIER are really the same thing at GLOBAL/LOCAL levels
-  (UPat(Ops.BARRIER, name="root"),
-    lambda root: UOp(Ops.BARRIER, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
+  (UPat((Ops.BARRIER, Ops.GROUP), name="root"),
+    lambda root: UOp(root.op, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_BARRIER else (x,) for x in root.src)), root.arg)
       if any(x.op in REMOVE_FROM_BARRIER for x in root.src) else None),
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_SINK else (x,) for x in root.src)), root.arg)
