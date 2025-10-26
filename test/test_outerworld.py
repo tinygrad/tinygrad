@@ -112,6 +112,12 @@ class TestAfterVmap(unittest.TestCase):
     for pad_width in [((1,0), (0,0)),((0,1),(0,0)), ((0,0), (1,0)), ((0,0), (0,1))]:
       self.assertListEqual(TestAfterVmap._vfn(x).pad(pad_width).tolist(),np.pad(self.expected_vmap_res, pad_width).tolist())
 
+  def test_flip(self):
+    x = Tensor.ones(self.n, self.m)
+    self.assertListEqual(TestAfterVmap._vfn(x).flip(0).tolist(), np.flip(self.expected_vmap_res, 0).tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x).flip(1).tolist(), np.flip(self.expected_vmap_res, 1).tolist())
+    self.assertListEqual(TestAfterVmap._vfn(x).flip((0,1)).tolist(), np.flip(self.expected_vmap_res, (0,1)).tolist())
+
   def test_indexing(self):
     x = Tensor.ones(self.n, self.m)
     self.assertEqual(TestAfterVmap._vfn(x)[2,4].item(), self.expected_vmap_res[2,4])
