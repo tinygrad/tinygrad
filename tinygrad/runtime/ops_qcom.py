@@ -285,7 +285,7 @@ class QCOMProgram(HCQProgram):
     if self.is_bindless: self.ibo_off, self.tex_off, self.samp_off, self.bindless_off = 2048, 2048, 2048, 2048
     else:
       self.ibo_off, self.tex_off, self.samp_off, self.bindless_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt, 0
-      cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off, self.bindless_off
+      cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off
 
     for x in self.buf_info:
       if x.type is BUFTYPE_IBO:
