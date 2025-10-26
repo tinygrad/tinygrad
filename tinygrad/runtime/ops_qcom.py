@@ -242,8 +242,8 @@ class QCOMProgram(HCQProgram):
   def _parse_lib(self):
     def _read_lib(off) -> int: return struct.unpack("I", self.lib[off:off+4])[0]
 
-    # from hexdump import hexdump
-    # hexdump(self.lib)
+    from hexdump import hexdump
+    hexdump(self.lib)
 
     # Extract image binary
     self.image_size = _read_lib(0x100)
