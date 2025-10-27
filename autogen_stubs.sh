@@ -130,24 +130,6 @@ generate_qcom() {
   python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
 }
 
-generate_pci() {
-  clang2py -k cdefstum \
-    /usr/include/linux/pci_regs.h \
-    -o $BASE/pci.py
-  fixup $BASE/pci.py
-}
-
-generate_vfio() {
-  clang2py -k cdefstum \
-    /usr/include/linux/vfio.h \
-    -o $BASE/vfio.py
-  fixup $BASE/vfio.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/vfio.py
-  sed -i "s\import fcntl, functools\import functools" $BASE/vfio.py
-  sed -i "s\import ctypes,os\a from tinygrad.runtime.support import FileIOInterface\g" $BASE/vfio.py
-  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\return __fd.ioctl((__idir<<30)\g" $BASE/vfio.py
-}
-
 generate_am() {
   AMKERN_COMMIT_HASH=ceb12c04e2b5b53ec0779362831f5ee40c4921e4
   AMKERN_SRC=/tmp/ROCK-Kernel-Driver-$AMKERN_COMMIT_HASH
@@ -360,8 +342,6 @@ elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
-elif [ "$1" == "pci" ]; then generate_pci
-elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa

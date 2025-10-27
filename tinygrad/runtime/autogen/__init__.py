@@ -46,3 +46,5 @@ ib = Autogen("ib", "ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=T
 llvm = Autogen("llvm","ctypes.CDLL(LLVM_PATH)",lambda:[subprocess.check_output(["llvm-config-14","--includedir"]).decode().strip()+"/llvm-c/**/*.h"],
   lambda: subprocess.check_output(["llvm-config-14", "--cflags"]).decode().split(), prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
 
+pci = Autogen("pci", None, ["/usr/include/linux/pci_regs.h"])
+vfio = Autogen("vfio", None, ["/usr/include/linux/vfio.h"])
