@@ -504,7 +504,6 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     usrcs = []
     for arg in src_args:
       if len(arg) == 0: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(0)))
-      elif len(arg) == 1 and isinstance(arg[0], UOp): usrcs.append(arg[0])
       elif all(isinstance(x, int) for x in arg): usrcs.append(UOp.const(dtypes.index.vec(len(arg)), arg))
       else: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(len(arg)), tuple(UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in arg)))
     ret = UOp(op, self.dtype, (self,)+tuple(usrcs), arg if len(usrcs) == 0 else None)
@@ -1253,21 +1252,24 @@ pm_pyrender = PatternMatcher([
     arg=f"{x.src[0].arg}.{sugar[x.op]}({', '.join([y.arg for y in x.src[1:]] + ([f'arg={str(x.arg)}'] if x.arg is not None else []))})")),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.NOOP),), name="x"),
    lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.f({x.op}, arg=({', '.join([str(y) for y in x.arg])}))")),
-  (UPat(GroupOp.Movement, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=
-    f"{x.src[0].arg}.f({x.op}, src=({', '.join([y.arg for y in x.src[1:]])},))")),
+  # UNIQUE/DEVICE aren't rendered
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d: UOp(Ops.NOOP, arg=
     f"UOp.new_buffer(\"{d.arg}\", {x.size}, {x.dtype}, {u.arg})")),
   (UPat(Ops.COPY, src=(UPat(Ops.NOOP, name="x"), UPat(Ops.DEVICE, name="d"))), lambda x,d: UOp(Ops.NOOP, arg=
     f"{x.arg}.copy_to_device(\"{d.arg}\")")),
+  # MovementOp render is short circuited
+  #(UPat(GroupOp.Movement, name="x"), lambda x: UOp(Ops.NOOP, arg=
+  #  f"{x.src[0].arg}.{x.op.name.lower()}()")),
 ])
 
 @Context(SPEC=0)
 def pyrender(ast:UOp) -> list[str]:
   cmap = ast.get_consumer_map()
   to_render = set({ast})
+  not_rendered = {Ops.CONST, Ops.DEVICE, Ops.BUFFER}
   for u in ast.toposort():
     if u.op is Ops.STORE: to_render.add(u.src[1])
-    if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.BUFFER, Ops.COPY} or u.op in {Ops.CONST, Ops.DEVICE}: continue
+    if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.BUFFER, Ops.COPY} or u.op in not_rendered: continue
     if u.op in {Ops.SINK}:
       for s in u.src: to_render.add(s)
     to_render.add(u)

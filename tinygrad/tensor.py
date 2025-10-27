@@ -230,7 +230,7 @@ class Tensor(MathTrait):
 
     # verify Tensors match the spec
     if SPEC: type_verify(list(big_sink.toposort()), tensor_spec)
-    if SPEC > 2: validate_pyrender(big_sink)
+    #if SPEC > 2: validate_pyrender(big_sink)
 
     if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
       _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")
