@@ -6,11 +6,12 @@ from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, Suppor
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, FUSE_ATTENTION
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, FUSE_ATTENTION, SPEC
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.mathtraits import MathTrait
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender
+from tinygrad.uop.ops import test_pyrender
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
@@ -229,7 +230,8 @@ class Tensor(MathTrait):
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # verify Tensors match the spec
-    if __debug__: type_verify(list(big_sink.toposort()), tensor_spec)
+    if SPEC: type_verify(list(big_sink.toposort()), tensor_spec)
+    if SPEC > 1: test_pyrender(big_sink)
 
     if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
       _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
-from tinygrad.runtime.support.system import System
-import argparse, glob, os, re, time, subprocess, sys
+import argparse, glob, os, time, subprocess, sys
 
 def scan_devs_based_on_lock(prefix:str, args) -> list[str]:
   target_dev = args.pci_bus if 'pci_bus' in args.__dir__() else ""
@@ -12,7 +11,7 @@ def scan_devs_based_on_lock(prefix:str, args) -> list[str]:
     if os.path.exists(f"/sys/bus/pci/devices/{dev_id}") and dev_id.startswith(target_dev): devs.append(dev_id)
   return devs
 
-def _do_reset_device(pci_bus): System.pci_reset(pci_bus)
+def _do_reset_device(pci_bus): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{pci_bus}/reset'")
 def _is_module_loaded(name: str) -> bool: return os.path.isdir(f"/sys/module/{name}")
 
 def cmd_remove_module(args):

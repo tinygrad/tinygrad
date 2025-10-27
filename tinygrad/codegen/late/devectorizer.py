@@ -109,7 +109,7 @@ def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count))), *sto.src[2:]))
     offset += s.dtype.count
-  return UOp(Ops.NOOP, src=tuple(ret))
+  return UOp.group(*ret)
 
 def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
@@ -179,7 +179,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 
   # if it wasn't split, we return None. otherwise we CAT them
   if len(ret) <= 1: return None
-  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp(Ops.NOOP, src=tuple(ret))
+  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
