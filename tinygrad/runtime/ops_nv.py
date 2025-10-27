@@ -462,9 +462,7 @@ class PCIIface(PCIIfaceBase):
     if not OSX: System.reserve_hugepages(64)
 
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-    self.dev_impl:NVDev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1),
-      self.pci_dev.read_config(pci.PCI_VENDOR_ID, 4), self.pci_dev.read_config(pci.PCI_SUBSYSTEM_VENDOR_ID, 4),
-      self.pci_dev.read_config(pci.PCI_REVISION_ID, 1), self.pci_dev.bar_info)
+    self.dev_impl:NVDev = NVDev(self.pci_dev)
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 

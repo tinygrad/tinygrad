@@ -1,6 +1,6 @@
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, SPEC
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
-from tinygrad.uop.spec import type_verify, program_spec
+from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
 
 # import all pattern matchers here
@@ -12,16 +12,24 @@ from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_ex
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.opt.postrange import apply_opts
-from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify, pm_flatten_range, pm_split_ranges, pm_split_store
-from tinygrad.schedule.rangeify import pm_add_buffers, rangeify_codegen
-from tinygrad.codegen.late.control_flow import CFGContext, pm_add_ends, pm_add_control_flow, linearize
+from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
+from tinygrad.codegen.late.control_flow import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
+  if SPEC: type_verify(list(sink.toposort()), kernel_spec)
+
   # first we optimize
   if optimize:
     if QUANTIZE and ren.device in {"CPU", "DSP"}: sink = graph_rewrite(sink, pm_quant, name="quantize")
+
+    # TODO: fix expander and remove this
+    sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
+
+    # collapse loads reduce (indexing by a tensor)
+    sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
 
     # split ranges
     sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
@@ -31,8 +39,9 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
     # optimize (schedule) the AST
     sink = graph_rewrite(sink, pm_simplify_ranges, name="simplify ranges")
+
+    # split store range (only on CPU for now)
     sink = graph_rewrite(sink, pm_split_store+pm_flatten_range, ctx=ren.device, name="cut store ranges")
-    sink = graph_rewrite(sink, pm_reduce_simplify, name="simplify reduces")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)
@@ -44,7 +53,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_buffers+rangeify_codegen, name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, name="add local buffers")
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
@@ -52,9 +61,6 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
-
-  # add ends (after reduces are removed, as long as we have reduces we can have stores)
-  sink = graph_rewrite(sink, pm_add_ends, name="add ends of ranges")
 
   # devectorize (TODO: does this need opts?)
   if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
@@ -80,6 +86,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="final rewrite")
 
   # this was the linearizer
+  sink = graph_rewrite(sink, pm_split_ends, name="split ends of ranges")
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # return the rewritten sink
@@ -97,6 +104,8 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
     Linear program in UOps.
   """
 
-  lst = linearize(full_rewrite_to_sink(sink, ren, optimize=sink.tag is None))
-  if __debug__: type_verify(lst, program_spec)
+  full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
+  assert len(full_sink.ranges) == 0, "all ranges must end by the sink"
+  lst = linearize(full_sink)
+  if SPEC: type_verify(lst, program_spec)
   return lst

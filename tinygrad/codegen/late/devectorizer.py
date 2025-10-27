@@ -50,7 +50,6 @@ def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp,
   # remove the gate from the index
   return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val, *store.src[2:])
 
-def no_load(u:UOp) -> bool: return not any(x.op is Ops.LOAD for x in u.backward_slice_with_self)
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
@@ -61,8 +60,6 @@ load_store_indexing = PatternMatcher([
   # delete_redundant_gates (after expand)
   (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
                                   UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
-  # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes a pattern in reduce_collapse
-  (UPat.var("c")<(UPat.var("x", dtypes.index)+UPat.var("y")), lambda x,y,c: (-x < -(c-y)) if no_load(y) and no_load(c) and not no_load(x) else None),
 ])
 
 # ***** load/store grouping *****
@@ -112,7 +109,7 @@ def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count))), *sto.src[2:]))
     offset += s.dtype.count
-  return UOp(Ops.NOOP, src=tuple(ret))
+  return UOp.group(*ret)
 
 def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
@@ -182,7 +179,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 
   # if it wasn't split, we return None. otherwise we CAT them
   if len(ret) <= 1: return None
-  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp(Ops.NOOP, src=tuple(ret))
+  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -291,7 +288,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   # if we have a range
   if len(reduce_range) != 0:
     topo = inp.toposort()
-    ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.STORE])
+    ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))
@@ -301,7 +298,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret, *reduce_range)).index(UOp.const(dtypes.int, 0)).load()
+  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0)).load()
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN

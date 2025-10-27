@@ -78,7 +78,7 @@
     align-items: center;
     gap: 4px;
   }
-  .graph svg {
+  #graph svg {
     width: 100%;
     height: 100%;
   }
@@ -155,12 +155,12 @@
   ul > * + *, .args > * + * {
     margin-top: 4px;
   }
-  .graph {
+  #graph {
     position: absolute;
     inset: 0;
     z-index: 1;
   }
-  .profiler, .render {
+  #profiler, #custom {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
@@ -349,9 +349,8 @@
     </div>
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
-    <div class="view profiler"></div>
-    <div class="view render"></div>
-    <div class="view graph">
+    <div class="view" id="profiler"></div>
+    <div class="view" id="graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
           <g id="edges"></g>
@@ -365,6 +364,7 @@
         </defs>
       </svg>
     </div>
+    <div class="view" id="custom"></div>
     <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
   <div id="tooltip" class="wrap"></div>
