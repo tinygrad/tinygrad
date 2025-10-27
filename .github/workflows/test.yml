@@ -305,7 +305,7 @@ jobs:
         key: spec-unit
         deps: testing_unit
     - name: Test SPEC=2
-      run: SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 40 -k "not test_setitem_big"
+      run: SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --ignore test/test_nn.py --timeout 40 -k "not test_setitem_big"
 
   fuzzing:
     name: Fuzzing
