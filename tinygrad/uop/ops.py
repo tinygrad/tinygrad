@@ -726,9 +726,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     fxn, varnames = self._sym_fxn
     return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
 
-  def render(self, simplify=True, pm:PatternMatcher|None=None, bottom_up=False) -> str:
+  def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
     with Context(TRACK_MATCH_STATS=0, SPEC=0):
-      ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm, bottom_up=bottom_up)
+      ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
 @dataclass(frozen=True)
