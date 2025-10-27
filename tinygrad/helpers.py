@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, fcntl
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -456,8 +456,8 @@ copyreg.pickle(types.ModuleType, _serialize_module)
 # *** C autogen ***
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, **kwargs):
-  from tinygrad.runtime.support.hcq import FileIOInterface
-  ioctl = __fd.ioctl if isinstance(__fd, FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
+  import tinygrad.runtime.support.hcq as hcq, fcntl
+  ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
   if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=__struct(**kwargs))<<16)|(__base<<8)|__nr, out)): raise RuntimeError(f"ioctl returned {rc}")
   return out
 
