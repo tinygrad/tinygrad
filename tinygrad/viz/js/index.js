@@ -731,8 +731,8 @@ async function main() {
   if (ret.length === 0) return;
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
-  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }),
-                           codeBlock(ret[currentRewrite].uop, "python", { wrap:false }));
+  const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
+  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -755,7 +755,7 @@ async function main() {
         diffCode.className = "wrap";
       }
     }
-  }
+  } else codeElement.classList.add("full-height");
 }
 
 // **** collapse/expand
