@@ -71,7 +71,7 @@ class NVMemoryManager(MemoryManager):
 
 class NVDev(PCIDevImplBase):
   def __init__(self, pci_dev:PCIDevice):
-    self.pci_dev, self.devfmt, self.vram, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(1), pci_dev.map_bar(0, fmt='I')
+    self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
 
     self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
 
@@ -120,7 +120,7 @@ class NVDev(PCIDevImplBase):
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
-      System.pci_reset(self.devfmt)
+      self.pci_dev.reset()
       time.sleep(0.5)
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
@@ -134,6 +134,8 @@ class NVDev(PCIDevImplBase):
     self.pte_t, self.pde_t, self.dual_pde_t = tuple([self.__dict__[name] for name in mmu_pd_names])
 
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
+
+    self.vram, self.mmio = self.pci_dev.map_bar(1), self.pci_dev.map_bar(0, fmt='I')
     self.large_bar = self.vram.nbytes >= self.vram_size
 
   def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:
