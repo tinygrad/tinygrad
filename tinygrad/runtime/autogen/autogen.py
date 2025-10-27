@@ -12,7 +12,7 @@ def until(pred, f, x):
   while not pred(x): x = f(x)
   return x
 
-base_rules = [(r'\s*\\\n\s*', ' '), (r'//.*', ''), (r'\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b', r'\1'), (r'\b0+(?=\d)', ''),
+base_rules = [(r'\s*\\\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b', r'\1'), (r'\b0+(?=\d)', ''),
          (r'\s*&&\s*', r' and '), (r'\s*\|\|\s*', r' or '), (r'\s*!\s*', ' not '),
          (r'(struct|union|enum)\s*([a-zA-Z_][a-zA-Z0-9_]*\b)', r'\1_\2'),
          (r'\((unsigned )?(char)\)', ''), (r'^.*[?;].*$', ''), (r'^.*\d+:\d+.*$', ''), (r'^.*\w##\w.*$', '')]
@@ -68,11 +68,12 @@ class Autogen:
       try:
         exec(main + '\n'.join(macros), {})
         break
-      except Exception as e:
+      except (SyntaxError, NameError, TypeError) as e:
         macrono = unwrap(e.lineno if isinstance(e, SyntaxError) else unwrap(unwrap(e.__traceback__).tb_next).tb_lineno) - main.count('\n') - 1
         assert macrono >= 0 and macrono < len(macros)
         print(f"Skipping {macros[macrono]}: {e}")
         del macros[macrono]
+      except FileNotFoundError: break
     with open(pathlib.Path(__file__).parent / f"{self.name}.py", "w") as f: f.write(main + '\n'.join(macros))
     importlib.invalidate_caches()
 

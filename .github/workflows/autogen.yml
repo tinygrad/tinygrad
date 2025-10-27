@@ -32,7 +32,6 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         amd: 'true'
-        webgpu: 'true'
         pydeps: 'pyyaml mako'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
@@ -50,11 +49,6 @@ jobs:
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
-    - name: Verify WebGPU autogen
-      run: |
-        cp tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
-        ./autogen_stubs.sh webgpu
-        diff /tmp/webgpu.py.bak tinygrad/runtime/autogen/webgpu.py
     - name: Verify mesa autogen
       run: |
         cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
@@ -73,6 +67,7 @@ jobs:
         opencl: 'true'
         cuda: 'true'
         llvm: 'true'
+        webgpu: 'true'
         pydeps: 'clang>=20'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev
@@ -106,3 +101,8 @@ jobs:
         mv tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
         python3 -c "from tinygrad.runtime.autogen import llvm"
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
+    - name: Verify WebGPU autogen
+      run: |
+        mv tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
+        python3 -c "from tinygrad.runtime.autogen import webgpu"
+        diff /tmp/webgpu.py.bak tinygrad/runtime/autogen/webgpu.py
