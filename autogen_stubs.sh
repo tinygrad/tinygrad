@@ -100,24 +100,6 @@ generate_hsa() {
   python3 -c "import tinygrad.runtime.autogen.hsa"
 }
 
-generate_llvm() {
-  INC="$(llvm-config-14 --includedir)"
-  clang2py -k cdefstum \
-    $(find "$INC/llvm-c/" -type f -name '*.h' | sort) \
-    "$INC/llvm/Config/Targets.def" \
-    "$INC/llvm/Config/AsmPrinters.def" \
-    "$INC/llvm/Config/AsmParsers.def" \
-    "$INC/llvm/Config/Disassemblers.def" \
-    --clang-args="$(llvm-config-14 --cflags)" \
-    -o "$BASE/llvm.py"
-
-  sed -i "s\import ctypes\import ctypes, tinygrad.runtime.support.llvm as llvm_support\g" "$BASE/llvm.py"
-  sed -i "s\FIXME_STUB\llvm\g" "$BASE/llvm.py"
-  sed -i "s\FunctionFactoryStub()\ctypes.CDLL(llvm_support.LLVM_PATH)\g" "$BASE/llvm.py"
-
-  fixup "$BASE/llvm.py"
-}
-
 generate_kgsl() {
   clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
   fixup $BASE/kgsl.py
@@ -376,7 +358,6 @@ elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
-elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "pci" ]; then generate_pci

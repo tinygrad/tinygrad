@@ -20,13 +20,8 @@ nv_gpu = Autogen("nv_gpu",None,[*[root/"extra/nv_gpu_driver"/s for s in ["clc6c0
   *[f"{{}}/kernel-open/nvidia-uvm/{s}.h" for s in ["clc6b5","clc9b5","uvm_ioctl","uvm_linux_ioctl","hwref/ampere/ga100/dev_fault"]],
   *[f"{{}}/src/nvidia/arch/nvalloc/unix/include/nv{s}.h" for s in ["_escape","-ioctl","-ioctl-numbers","-ioctl-numa","-unix-nvos-params-wrappers"]],
   *[f"{{}}/src/common/sdk/nvidia/inc/{s}.h" for s in ["alloc/alloc_channel","nvos","ctrl/ctrlc36f","ctrl/ctrlcb33","ctrl/ctrla06c","ctrl/ctrl90f1"]],
-  *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{k}/ctrl{k}{s}.h" for k,v in {
-    "0000":["base","client","diag","event","gpu","gpuacct","gsync","nvd","proc","syncgpuboost","system","unix","vgpu"],
-    "0080":["base","bif","bsp","cipher","dma","fb","fifo","gpu","gr","host","internal","msenc","nvjpg","perf","unix"],
-    "2080":["acr","base","bios","boardobj","boardobjgrpclasses","bus","ce","cipher","clk","clkavfs","dma","dmabuf","ecc","event","fan","fb","fifo",
-      "fla","flcn","fuse","gpio","gpu","gpumon","gr","grmgr","gsp","hshub","i2c","illum","internal","lpwr","mc","nvd","nvlink","perf","perf_cf",
-      "perf_cf_pwr_model","pmgr","pmu","pmumon","power","rc","spdm","spi","thermal","tmr","ucodefuzzer","unix","vfe","vgpumgrinternal","volt"],
-    "83de":["base","debug"]}.items() for s in v],"{}/kernel-open/common/inc/nvstatus.h","{}/src/nvidia/generated/g_allclasses.h"],
+  *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000", "0080", "2080", "83de"]],
+  "{}/kernel-open/common/inc/nvstatus.h","{}/src/nvidia/generated/g_allclasses.h"],
   ["-I{}/src/common/inc", "-I{}/kernel-open/nvidia-uvm","-I{}/kernel-open/common/inc","-I{}/src/common/sdk/nvidia/inc",
    "-I{}/src/nvidia/arch/nvalloc/unix/include","-I{}/src/common/sdk/nvidia/inc/ctrl"], rules=[(r'MW\(([^:]+):(.+)\)',r'(\1, \2)')],
   tarball="https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8ac3b9bdcc1d56827d116743892a5.tar.gz")
@@ -47,3 +42,7 @@ io_uring = Autogen("io_uring",None,["/usr/include/liburing.h","/usr/include/linu
 
 ib = Autogen("ib", "ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)", ["/usr/include/infiniband/verbs.h",
              "/usr/include/infiniband/verbs_api.h","/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"])
+
+llvm = Autogen("llvm","ctypes.CDLL(LLVM_PATH)",lambda:[subprocess.check_output(["llvm-config-14","--includedir"]).decode().strip()+"/llvm-c/**/*.h"],
+  lambda: subprocess.check_output(["llvm-config-14", "--cflags"]).decode().split(), prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
+
