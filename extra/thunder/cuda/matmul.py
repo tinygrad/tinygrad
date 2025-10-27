@@ -15,17 +15,15 @@ if __name__ == "__main__":
   prg = device.runtime(kernel_name, lib)
   prg.smem = 10000
 
-  N = 1024
+  N = 8192
   a = Tensor.randn(N, N, device='CUDA', dtype="bfloat16")
   b = Tensor.randn(N, N, device='CUDA', dtype="bfloat16")
   c = Tensor.empty(N, N, device='CUDA', dtype="bfloat16")
   Tensor.realize(a, b, c)
 
-  TILE_DIM = 8
-  N_BLOCK = 4
-  M_BLOCK = 4
+  BLOCK_SIZE = 32
 
-  gsz = (N // (M_BLOCK * TILE_DIM), N // (N_BLOCK * TILE_DIM), 1)
+  gsz = (N // BLOCK_SIZE, N // BLOCK_SIZE, 1)
   for _ in range(5):
     et = prg(c.uop.buffer.ensure_allocated()._buf, a.uop.buffer._buf, b.uop.buffer._buf,
              global_size=gsz, local_size=(32,1,1), wait=True)

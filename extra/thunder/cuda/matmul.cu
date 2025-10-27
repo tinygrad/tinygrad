@@ -2,7 +2,7 @@
 #include "kittens.cuh"
 using namespace kittens;
 
-constexpr int g_N = 1024;
+constexpr int g_N = 8192;
 constexpr int BLOCK_SIZE = 32;
 #define NUM_WORKERS (1)
 #define NUM_THREADS (NUM_WORKERS*kittens::WARP_THREADS)
