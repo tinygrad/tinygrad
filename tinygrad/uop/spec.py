@@ -243,8 +243,10 @@ def type_verify(uops:list[UOp], check_spec:PatternMatcher):
 
 @Context(SPEC=0)
 def validate_pyrender(test_ast:UOp):
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.uop.ops import KernelInfo
   code = '\n'.join(pyrender(test_ast))
-  lcls:dict[str, Any] = {"inf": math.inf}
+  lcls:dict[str, Any] = {"inf": math.inf, "KernelInfo": KernelInfo, "Opt": Opt, "OptOps": OptOps}
   exec(code, None, lcls)
   if lcls['ast'] is not test_ast:
     raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{test_ast}\nPRODUCED:\n{lcls['ast']}")

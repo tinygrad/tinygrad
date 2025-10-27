@@ -1233,7 +1233,7 @@ renderer_infer = PatternMatcher([
 ])
 
 sugar = { Ops.SINK: "sink", Ops.STORE: "store", Ops.LOAD: "load", Ops.SQRT: "sqrt", Ops.INDEX: "index", Ops.REDUCE: "reduce",
-          Ops.BIND: "bind", Ops.ASSIGN: "assign",
+          Ops.BIND: "bind", Ops.ASSIGN: "assign", Ops.DETACH: "detach", Ops.TRUNC: "trunc",
           Ops.WHERE: "where", Ops.RECIP: "reciprocal", Ops.EXP2: "exp2", Ops.LOG2: "log2", Ops.SIN: "sin", Ops.CONTIGUOUS: "contiguous"}
 pm_pyrender = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),), name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.const({x.dtype}, {x.arg}, device=\"{x.src[0].arg}\")")),
