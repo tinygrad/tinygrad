@@ -264,6 +264,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.VECTORIZE]), 0)
 
+  @unittest.skip("this test isn't valid uops")
   def test_gep_vec_fold(self):
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)

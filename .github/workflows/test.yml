@@ -264,8 +264,6 @@ jobs:
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
       run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
-    - name: Check SPEC=2
-      run: SPEC=2 python3 test/test_tiny.py
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     # TODO: too slow
@@ -295,7 +293,7 @@ jobs:
       run: MAX_LINE_COUNT=18000 python sz.py
 
   fuzzing:
-    name: Fuzzing
+    name: Fuzzing + Spec
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -312,6 +310,8 @@ jobs:
       run: python test/external/fuzz_fast_idiv.py
     - name: Fuzz Test shape ops
       run: python test/external/fuzz_shape_ops.py
+    - name: Test SPEC=2
+      run: SPEC=2 PYTHONPATH="." pytest -n auto --durations=20 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 40 -k "not test_setitem_big"
 
   testopenclimage:
     name: CL IMAGE Tests

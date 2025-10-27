@@ -1303,7 +1303,7 @@ def pyrender(ast:UOp) -> str:
   r: dict[UOp, str] = {}
 
   not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
-  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE}
+  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE, Ops.END}
   to_render: set[UOp] = {ast}
   for u in uops:
     if u.op in {Ops.SINK}:

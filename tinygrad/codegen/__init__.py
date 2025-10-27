@@ -1,7 +1,10 @@
+from typing import cast
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, SPEC
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, test_pyrender
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, test_pyrender, Ops, UPat
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
+from tinygrad.dtype import dtypes
+from tinygrad.helpers import panic
 
 # import all pattern matchers here
 from tinygrad.codegen.quantize import pm_quant
@@ -80,16 +83,35 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_decomp+pm_render+extra_matcher
+  pm_final_rewrite = pm_decomp+pm_render+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="final rewrite")
 
   # this was the linearizer
-  sink = graph_rewrite(sink, pm_split_ends, name="split ends of ranges")
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # return the rewritten sink
   if SPEC > 1: test_pyrender(sink)
   return sink
+
+# inject IF/ENDIF. only needed if device doesn't support gated stores
+pm_linearize_cleanups = PatternMatcher([
+  # if statements are not allowed in the graph
+  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError("if not allowed in graph"))),
+  # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
+  (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))).or_casted(), UPat()),
+        allow_any_len=True), lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate, u.src[0])), u, UOp(Ops.ENDIF, src=(mif,))]))
+])
+
+# requires lst be toposorted. like graph rewrite, but for lines
+def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
+  newlst = []
+  replaced: dict[UOp, UOp] = {}
+  for u in lst:
+    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
+    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
+    replaced[u] = ret[0]
+    newlst.extend(ret[1])
+  return newlst
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """
@@ -105,6 +127,6 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
 
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   assert len(full_sink.ranges) == 0, "all ranges must end by the sink"
-  lst = linearize(full_sink)
+  lst = line_rewrite(linearize(full_sink), pm_linearize_cleanups)
   if SPEC: type_verify(lst, program_spec)
   return lst
