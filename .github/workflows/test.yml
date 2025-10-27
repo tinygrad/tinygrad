@@ -292,8 +292,23 @@ jobs:
     - name: Repo line count < 18000 lines
       run: MAX_LINE_COUNT=18000 python sz.py
 
+  spec:
+    name: SPEC=2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: spec-unit
+        deps: testing_unit
+    - name: Test SPEC=2
+      run: SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 40 -k "not test_setitem_big"
+
   fuzzing:
-    name: Fuzzing + Spec
+    name: Fuzzing
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -310,8 +325,6 @@ jobs:
       run: python test/external/fuzz_fast_idiv.py
     - name: Fuzz Test shape ops
       run: python test/external/fuzz_shape_ops.py
-    - name: Test SPEC=2
-      run: SPEC=2 PYTHONPATH="." pytest -n auto --durations=20 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 40 -k "not test_setitem_big"
 
   testopenclimage:
     name: CL IMAGE Tests
