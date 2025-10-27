@@ -51,8 +51,9 @@ def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str,
   return to_str(new_sink), to_str(big_sink.substitute(ret)), (big_sink,)
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
-  # NOTE: this always uses the opts_to_apply path
-  sink_arg = ast.arg or KernelInfo(opts_to_apply=p.applied_opts)
+  # if this is replaying get_program called in search.py, the arg will be non-None
+  sink_arg = ast.arg or KernelInfo(opts_to_apply=tuple(opts) if opts is not None else None)
+  # we always use the name from the captured ProgramSpec
   input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
   # if no renderer was provided, open the device to get it
   if renderer is None: renderer = Device[p.device].renderer
