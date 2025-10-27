@@ -69,8 +69,12 @@ const drawGraph = (data) => {
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
-  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
-  labels.selectAll("text").data(d => {
+  const STROKE_WIDTH = 1.4;
+  nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
+    const x = d.labelWidth/2;
+    const y = d.labelHeight/2+STROKE_WIDTH*2;
+    return `translate(-${x}, -${y})`;
+  }).selectAll("text").data(d => {
     const ret = [[]];
     for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
       const lines = st.split("\n");
@@ -80,10 +84,6 @@ const drawGraph = (data) => {
     return [ret];
   }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
     .attr("fill", d => darkenHex(d.color, 25)).text(d => d.st).attr("xml:space", "preserve");
-  labels.attr("transform", (_, i, els) => {
-    const b = els[i].getBBox();
-    return `translate(${-b.x-b.width/2}, ${-b.y-b.height/2})`
-  });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
