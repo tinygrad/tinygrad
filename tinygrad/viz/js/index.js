@@ -70,7 +70,7 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
-  nodes.selectAll("g.label").data(d => d.label != null ? [d] : []).join("g").attr("class", "label").attr("transform", d => {
+  nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
     const x = d.labelWidth/2;
     const y = d.labelHeight/2+STROKE_WIDTH*2;
     return `translate(-${x}, -${y})`;
