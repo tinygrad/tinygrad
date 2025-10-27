@@ -114,7 +114,8 @@ class MathTrait:
     return self._binop(Ops.IDIV, x, reverse)
   def mod(self:TMT, x:TMT|ConstType, reverse:bool=False): return self._binop(Ops.MOD, x, reverse)
   def sub(self:TMT, x:TMT|ConstType, reverse:bool=False): return self.ufix(x).alu(Ops.ADD, -self) if reverse else self.alu(Ops.ADD, self.ufix(-x))
-  def div(self:TMT, x:TMT|ConstType, reverse:bool=False): return (self.ufix(x)*self.alu(Ops.RECIPROCAL)) if reverse else (self*self.ufix(x).alu(Ops.RECIPROCAL))
+  def div(self:TMT, x:TMT|ConstType, reverse:bool=False):
+    return (self.ufix(x)*self.alu(Ops.RECIPROCAL)) if reverse else (self*self.ufix(x).alu(Ops.RECIPROCAL))
 
   def __neg__(self): return self.neg()
 
