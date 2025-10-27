@@ -1256,7 +1256,7 @@ pm_pyrender = PatternMatcher([
 ])
 
 @Context(SPEC=0)
-def pyrender(ast:UOp) -> list[str]:
+def pyrender(ast:UOp) -> str:
   cmap = ast.get_consumer_map()
   to_render = set()
   for u in ast.toposort():
@@ -1271,7 +1271,7 @@ def pyrender(ast:UOp) -> list[str]:
     if u not in to_render: continue
     ret.append(f"c{len(ret)} = {u.substitute(rep).render(simplify=False, pm=pm_pyrender+renderer)}")
     rep[u] = UOp(Ops.NOOP, arg=f"c{len(ret)-1}")
-  return ret[0:-1] + ["ast ="+ret[-1].split("=", 1)[1]]
+  return "\n".join(ret[0:-1] + ["ast ="+ret[-1].split("=", 1)[1]])
 
 # *** what was symbolic.py ***
 
