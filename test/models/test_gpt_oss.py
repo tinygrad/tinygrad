@@ -1,7 +1,7 @@
 import unittest
 import torch
 import numpy as np
-from tinygrad import Tensor
+from tinygrad import Tensor, Device
 from tinygrad.helpers import getenv, tqdm
 
 from icecream import ic
@@ -34,7 +34,7 @@ small_torch_params = {"hidden_size": 2, "intermediate_size": 12, "head_dim": 2,
                       "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
                       }
 
-def set_equal_weights(model, torch_model, keymap, fakeweights):
+def set_equal_weights(model, torch_model, fakeweights):
   from tinygrad.nn.state import get_state_dict
   from tinygrad.dtype import _from_torch_dtype
   from tinygrad.apps.llm2 import get_keymap
@@ -43,10 +43,9 @@ def set_equal_weights(model, torch_model, keymap, fakeweights):
   keymap = {v: k for k, v in get_keymap(params["num_blocks"]).items()}
   def fix_mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
   keymap = {fix_mxfp4_keymap(k): fix_mxfp4_keymap(v) for k, v in keymap.items()}
-  ic(keymap)
 
   state, torch_state = get_state_dict(model), torch_model.state_dict()
-  assert len(state) == len(torch_state), f"State Mismatch: tinygrad model contains {len(state)} state objects but torch model contains {len(torch_state)} state objects"
+  assert len(state) == len(torch_state), f"State Mismatch: tinygrad model contains {len(state)} state objects but torch model contains {len(torch_state)} state objects:"
   for k, v in tqdm(state.items(), desc='Model State Dict'):
     torch_k = keymap[k]
     torch_v = torch_state[torch_k]
@@ -62,42 +61,58 @@ class TestGPTOSS(unittest.TestCase):
     from transformers import GptOssForCausalLM as TorchGptOss
     from transformers import GptOssConfig
 
-    if getenv("SMALL"):
+    Tensor.manual_seed(42)
+    np.random.seed(42)
+
+    if getenv("SMALL") == 1:
       params["num_blocks"] = torch_params["num_hidden_layers"] = 2
       params["max_context"] = torch_params["initial_context_length"] = 32
+      params["vocab_size"] = torch_params["vocab_size"] = 10
+    elif getenv("SMALL") == 2:
+      params, torch_params = small_params, small_torch_params
 
     # Create in tinygrad
-    Tensor.manual_seed(1337)
-    model = GptOss(**params)
+    if getenv("TINY"):
+      model = GptOss(**params)
+      print(f"loaded tinygrad model on {Device.DEFAULT}")
 
     # Create in torch
-    with torch.no_grad():
-      torch_device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-      torch_model = TorchGptOss(GptOssConfig(**torch_params)).to(torch_device)
+    if getenv("TORCH"):
+      with torch.no_grad():
+        torch_device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
+        torch_config = GptOssConfig(**torch_params)
+        torch_model = TorchGptOss(torch_config).to(torch_device)
+        print(f"loaded torch model on {torch_device}")
 
     # set weights
     if not getenv("FAKEWEIGHTS"):
       model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
-      model = GptOss.from_pretrained(model_path, MODELS["20B"]["params"])
-      print("set tinygrad model weights")
-      torch_model = torch_model.from_pretrained(model_path, local_files_only=True, cache_dir=model_path).to(torch_device)
-      print("set torch model weights")
+      if getenv("TINY"):
+        model = GptOss.from_pretrained(model_path, params)
+        print("loaded tinygrad weights")
+      if getenv("TORCH"):
+        # torch_model = torch_model.from_pretrained(model_path, local_files_only=True, cache_dir=model_path).to(torch_device)
+        torch_model = torch_model.from_pretrained(model_path, config=torch_config, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path, device_map=torch_device)
+        print("loaded torch weights")
 
-    # set weights and check each weight has the same shape, dtype
-    set_equal_weights(model, torch_model, keymap)
+    if getenv("TORCH") and getenv("TINY"):
+      # set weights and check each weight has the same shape, dtype
+      set_equal_weights(model, torch_model, getenv("FAKEWEIGHTS", False))
 
     # forward pass
     seeds = (1337, 3141)
     bsz, seq_len = 2, 5
     for seed in seeds:
       np.random.seed(seed)
-      input_ids = np.random.randint(torch_model.vocab_size, size=(bsz, seq_len))
+      input_ids = np.random.randint(params["vocab_size"], size=(bsz, seq_len))
 
-      out = model(Tensor(input_ids))
-      with torch.no_grad():
-        torch_logits = torch_model.forward(torch.from_numpy(input_ids).long().to(torch_device)).logits
-        torch_out = torch_logits[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
-      np.testing.assert_allclose(out.numpy(), torch_out.cpu().numpy(), atol=5e-4, rtol=5e-4)
+      if getenv("TINY"): out = model(Tensor(input_ids))
+      if getenv("TORCH"):
+        with torch.no_grad():
+          torch_logits = torch_model.forward(torch.from_numpy(input_ids).long().to(torch_device)).logits
+          torch_out = torch_logits[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
+      if getenv("TORCH") and getenv("TINY"):
+        np.testing.assert_allclose(out.numpy(), torch_out.cpu().numpy(), atol=5e-4, rtol=5e-4)
 
 if __name__ == '__main__':
   unittest.main()

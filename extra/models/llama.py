@@ -189,9 +189,7 @@ class Transformer:
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
-    for layer in self.layers:
-      h = layer(h, start_pos, freqs_cis, mask)
-      break
+    for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 

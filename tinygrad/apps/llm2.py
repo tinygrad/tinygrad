@@ -17,10 +17,10 @@ from __future__ import annotations
 import argparse, functools, math, os
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
-from tinygrad.helpers import fetch, getenv
+from tinygrad.helpers import fetch, getenv, DEBUG
 from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters, get_state_dict
 from examples.llama3 import load
-from extra.models.llama import fix_bf16
+from extra.models.llama import fix_bf16, sample
 from transformers import AutoTokenizer
 
 from icecream import install, ic
@@ -95,7 +95,7 @@ class TransformerBlock:
 
     # --- MoE feed-forward ------------------------------------------------
     self.n_experts              = n_experts
-    self.n_active_experts       = n_active_experts
+    self.n_active_experts       = n_active_experts                                  # k
     self.ffn_gate               = nn.Linear(dim, n_experts, bias=True)              # (D,E)
     self.ffn_gate_up_proj       = Tensor.empty(n_experts, dim, hidden_dim * 2)      # (E,D,D2*2)
     self.ffn_gate_up_proj_bias  = Tensor.empty(n_experts, hidden_dim * 2)           # (E,D2*2)
@@ -103,30 +103,32 @@ class TransformerBlock:
     self.ffn_down_proj_bias     = Tensor.empty(n_experts, dim)                      # (E,D)
 
   def _feed_forward(self, x: Tensor) -> Tensor:
-    (B, T, D), E = x.shape, self.n_experts
     x_norm = self.ffn_norm(x)
+    (B, T, D), E = x.shape, self.n_experts
 
     # Select top-k experts
-    x_norm = x_norm.reshape(B*T, D)
-    logits, sel = self.ffn_gate(x_norm).topk(self.n_active_experts, -1)  # (B,T,D) -> (B,T,Ea), (B,T,Ea)
-    probs = Tensor.zeros(B*T,E).scatter(1, sel, logits.softmax(-1)) # (B,T,Ea) -> (B,T,E)
+    x_norm = x_norm.reshape(B*T, D)                                       # (B,T,D)  -> (B*T,D)
+    logits, sel = self.ffn_gate(x_norm).topk(self.n_active_experts, -1)   # (B*T,D)  -> (B,T,k), (B,T,k)
+    probs = Tensor.zeros(B*T, E).scatter(1, sel, logits.softmax(-1))      # (B*T,k)  -> (B*T,E)
 
     # run MoE
-    x_norm = x_norm.repeat(E, 1).reshape(E, -1, D) # (B*T,D) -> (E,B*T,D)
-    x_up_gate = swiglu(x_norm @ self.ffn_gate_up_proj + self.ffn_gate_up_proj_bias.unsqueeze(1)) # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
-    x_down = x_up_gate @ self.ffn_down_proj + self.ffn_down_proj_bias.unsqueeze(1) # (E,B*T,D2) (E,D2,D) (E,1,D) -> (E,B*T,D)
-    x_out = (x_down.reshape(E, B, T, D) * probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)).sum(0) # (E,B,T,D) (E,B,T,1) -> (B,T,D)
+    x_norm = x_norm.repeat(E, 1).reshape(E, B*T, D)                       # (B*T,D) -> (E,B*T,D)
+    probs = probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)         # (B*T,E) -> (E,B,T,1)
+
+    x_up_gate = swiglu(x_norm @ self.ffn_gate_up_proj + self.ffn_gate_up_proj_bias.unsqueeze(1))  # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
+    x_down = x_up_gate @ self.ffn_down_proj + self.ffn_down_proj_bias.unsqueeze(1)                # (E,B*T,D2) (E,D2,D) (E,1,D)     -> (E,B*T,D)
+    x_out = (x_down.reshape(E, B, T, D) * probs).sum(0)                                           # (E,B,T,D) (E,B,T,1)             -> (B,T,D)
     return x + x_out
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    x_norm = self.attn_norm(x)                       # (B,T,D)
-    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm) # (B,T,D)
+    x_norm = self.attn_norm(x)                                              # (B,T,D) -> (B,T,D)
+    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm) # (B,T,D) -> (B,T,D)
 
     B, T, _ = x.shape
-    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)     # (B,H,T,Hd)
-    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
-    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,KvH,T,Hd)
-    s = self.attn_sink.reshape(1, -1, 1, 1).expand(B, self.head_dim, T, 1)  # (B,H,T,1)
+    q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)     # (B,T,D) -> (B,H,T,Hd)
+    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,T,D) -> (B,KvH,T,Hd)
+    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,T,D) -> (B,KvH,T,Hd)
+    s = self.attn_sink.reshape(1, -1, 1, 1).expand(B, self.head_dim, T, 1)  # (B)     -> (B,H,T,1)
 
     q = apply_rope(q, start_pos)
     k = apply_rope(k, start_pos)
@@ -143,9 +145,9 @@ class TransformerBlock:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
 
-    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)  # (B,H,T,Hd)
-    attn = attn.transpose(1, 2).reshape(B, T, -1)                                         # back to (B,T,D)
-    attn = self.attn_o(attn)
+    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)  #             -> (B,H,T,Hd)
+    attn = attn.transpose(1, 2).reshape(B, T, -1)                                         # (B,H,T,Hd)  -> (B,T,D)
+    attn = self.attn_o(attn)                                                              # (B,T,D)     -> (B,T,D)
     return x + attn
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
@@ -161,14 +163,15 @@ class Transformer:
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
     self.forward_jit  = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
-    x = self.token_embd(tokens)                           # (B, T, D)
-    for block in self.blk: x = block(x, start_pos)
-    # TODO: add temperature
-    return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
+  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float) -> Tensor:
+    x = self.token_embd(tokens)                                                             # (B,T)   -> (B,T,D)
+    for block in self.blk: x = block(x, start_pos)                                          # (B,T,D) -> (B,T,D)
+    logits = self.output(self.output_norm(x))                                               # (B,T,D) -> (B,T)
+    return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)  # (B,T)   -> (B)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
-    return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
+  def __call__(self, tokens:Tensor, start_pos:int|UOp=0, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0) -> Tensor:
+    forward = self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward
+    return forward(tokens, start_pos, temperature, top_k, top_p, alpha_f, alpha_p)
 
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
@@ -211,9 +214,6 @@ def get_keymap(num_blocks):
   }
 
 def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads: int, n_kv_heads: int, permute_layers: bool = True):
-  # huggingface stores Q and K permuted! it is mostly correct without this, but without it makes RoPE different, so it will diverge after 10+ toks.
-  def permute(v: Tensor, n_heads: int):
-    return v.reshape(n_heads, 2, v.shape[0] // n_heads // 2, v.shape[1] if len(v.shape) > 1 else 1).transpose(1, 2).reshape(*v.shape[:2])
 
   keymap = get_keymap(num_blocks) # map hf to tinygrad keys
   sd = {}
@@ -223,6 +223,9 @@ def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads
     if "model.layers" in k:
       if "q_proj" in k and permute_layers: v = permute(v, n_heads)
       elif "k_proj" in k and permute_layers: v = permute(v, n_kv_heads)
+    if k not in keymap:
+      if DEBUG >= 1: print(f"WARNING: {k} not in {keymap.keys()}")
+      continue
     sd[keymap[k]] = v
   return sd
 
@@ -278,7 +281,7 @@ def main(args):
   for _ in range(args.count):
     # forward pass
     next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
-    tok_tensor = model(next_tok, start_pos) # todo: add temperature
+    tok_tensor = model(next_tok, start_pos, temperature=args.temperature)
     tok = tok_tensor.item()
 
     # use the kv cache
@@ -293,19 +296,20 @@ def main(args):
     print(cur[len(outputted):], flush=True)
     outputted = cur
 
-  assert toks == expected, f"generated {toks} but expected {expected}"
+  if args.temperature == 0:
+    assert toks == expected, f"generated {toks} but expected {expected}"
 
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--size", choices=list(MODELS.keys()), default=list(MODELS.keys())[0], help="Model size")
-  parser.add_argument("--count", type=int, default=4, help="Max number of tokens to generate")
-  parser.add_argument("--seed", type=int, help="Random seed")
-  parser.add_argument("--temperature", type=float, default=0.7, help="Temperature in the softmax")
-  parser.add_argument("--prompt", type=str, default="Hi, how are you?", help="Phrase to start with")
   parser.add_argument("--weights", type=str, default=None, help="Path to the downloaded weights")
-  parser.add_argument("--timing", action="store_true", help="Print timing per token")
   parser.add_argument('--fakeweights',  action='store_true', help="Load fake weights")
+  parser.add_argument("--seed", type=int, help="Random seed")
+  parser.add_argument("--prompt", type=str, default="Hi, how are you?", help="Phrase to start with")
+  parser.add_argument("--count", type=int, default=4, help="Max number of tokens to generate")
+  parser.add_argument("--temperature", type=float, default=0.0, help="Temperature in the softmax")
+  parser.add_argument("--timing", action="store_true", help="Print timing per token")
   args = parser.parse_args()
 
   main(args)
