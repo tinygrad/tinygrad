@@ -90,10 +90,6 @@ class _System:
     if data is not None: sysmem_view[:len(data)] = data
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
 
-  def pci_reset(self, gpu):
-    if OSX: System.iokit_pci_rpc(__TinyGPURPCReset:=2)
-    else: os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{gpu}/reset'")
-
   def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
     result = []
     for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
@@ -216,6 +212,7 @@ class PCIDevice:
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar].size - off)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
+  def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
 
 class APLPCIDevice(PCIDevice):
   def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
@@ -224,6 +221,7 @@ class APLPCIDevice(PCIDevice):
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(off, size, fmt)
   def read_config(self, offset:int, size:int): return System.iokit_pci_rpc(__TinyGPURPCReadCfg:=0, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): System.iokit_pci_rpc(__TinyGPURPCWriteCfg:=1, offset, size, value)
+  def reset(self): System.iokit_pci_rpc(__TinyGPURPCReset:=2)
 
 class USBPCIDevice(PCIDevice):
   def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
