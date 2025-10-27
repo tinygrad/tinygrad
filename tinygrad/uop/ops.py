@@ -361,7 +361,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def end(self, *src:UOp):
     if len(src) == 0: return self
     return UOp(Ops.END, src=(self,)+src)
-  def after(self, *src:UOp): return UOp(Ops.AFTER, self.dtype, (self,)+src)
+  def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, self.dtype, (self,)+src, **kwargs)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
   def alu(self, op, *src:UOp, **kwargs):
@@ -1282,6 +1282,9 @@ pm_pyrender_extra = PatternMatcher([
 
 # NOTE: you can remove pm_pyrender_extra and it'll still be correct
 pm_pyrender = pm_pyrender_extra+PatternMatcher([
+  (UPat(Ops.KERNEL, name="u"), lambda ctx,u: "UOp(Ops.KERNEL, src="+', '.join( \
+    ([f"({ctx[u.src[0]]},)"] if len(u.src) == 1 else ([f"({', '.join([ctx[x] for x in u.src])})"] if len(u.src) > 1 else []))) + \
+    f", arg=Kernel({ctx[u.arg.ast]}(), {u.arg.metadata}))"),
   (UPat(GroupOp.All, name="u"), lambda ctx,u: "UOp("+', '.join([str(u.op), str(u.dtype)] + \
     ([f"({ctx[u.src[0]]},)"] if len(u.src) == 1 else ([f"({', '.join([ctx[x] for x in u.src])})"] if len(u.src) > 1 else [])) + \
     ([f"arg={repr(u.arg)}"] if u.arg is not None else []) + ([f"tag={repr(u.tag)}"] if u.tag is not None else []))+")"),
@@ -1294,7 +1297,7 @@ def pyrender(ast:UOp) -> str:
   r: dict[UOp, str] = {}
 
   not_rendered = {Ops.CONST}
-  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.WHERE}
+  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.WHERE, Ops.KERNEL}
   to_render = {ast}
   for u in uops:
     if u.op is Ops.STORE: to_render.add(u.src[1])
@@ -1304,7 +1307,12 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     to_render.add(u)
 
+  kernels = {}
   for i,u in enumerate(uops):
+    if u.op is Ops.KERNEL:
+      if u.arg.ast not in kernels:
+        kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
+      r[u.arg.ast] = kernels[u.arg.ast][0]
     ren = pm_pyrender.rewrite(u, ctx=r)
     assert isinstance(ren, str)
     #if u.tag is not None: ren += f".rtag({u.tag})"
@@ -1312,7 +1320,7 @@ def pyrender(ast:UOp) -> str:
     else:
       r[u] = f"c{i}" if u is not uops[-1] else "ast"
       ret[r[u]] = ren
-  return '\n'.join([f"{k} = {v}" for k,v in ret.items()])
+  return '\n'.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {v}" for k,v in ret.items()])
 
 def eval_pyrender(code:str) -> UOp:
   from tinygrad.dtype import AddrSpace
