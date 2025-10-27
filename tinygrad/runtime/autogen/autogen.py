@@ -1,5 +1,5 @@
-import ctypes.util, importlib, importlib.metadata, itertools, os, pathlib, re, functools, tarfile
-from tinygrad.helpers import fetch, unwrap
+import ctypes.util, glob, importlib, importlib.metadata, itertools, os, pathlib, re, functools, tarfile
+from tinygrad.helpers import fetch, flatten, unwrap
 
 def fst(c): return next(c.get_children())
 def last(c): return list(c.get_children())[-1]
@@ -33,16 +33,17 @@ class Autogen:
     assert importlib.metadata.version('clang')[:2] == "20"
     if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
 
-    if callable(self.files): self.files = self.files()
+    self.files, self.args = self.files() if callable(self.files) else self.files, self.args() if callable(self.args) else self.args
     if self.tarball:
       # dangerous for arbitrary urls!
       with tarfile.open(fetch(self.tarball, gunzip=self.tarball.endswith("gz"))) as tf:
         tf.extractall("/tmp")
         base = f"/tmp/{tf.getnames()[0]}"
         self.files, self.args = [str(f).format(base) for f in self.files], [a.format(base) for a in self.args]
+    self.files = flatten(glob.glob(p, recursive=True) if isinstance(p, str) and '*' in p else [p] for p in self.files)
 
     idx, self.lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', ctypes.util' if 'ctypes.util' in (self.dll or '') else ''),
-      "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *([f"dll = {self.dll}\n"] if self.dll else []), *self.prelude]
+      "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *self.prelude, *([f"dll = {self.dll}\n"] if self.dll else [])]
     self.types, self.macros, self.anoncnt = {}, set(), itertools.count().__next__
     macros:list[str] = []
     for f in self.files:
@@ -63,7 +64,6 @@ class Autogen:
               macros += [f"{c.spelling} = lambda {','.join(args)}: {pread(f, toks[-1].extent.end.offset - (begin:=body[0].location.offset), begin)}"]
             else: macros += [f"{c.spelling} = {pread(f, toks[-1].extent.end.offset - (begin:=toks[1].location.offset), begin)}"]
     main, macros = '\n'.join(self.lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), self.rules, m))]
-    with open("tmp.py", "w") as f: f.write(main + '\n'.join(macros))
     while True:
       try:
         exec(main + '\n'.join(macros), {})
