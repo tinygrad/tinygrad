@@ -88,10 +88,11 @@ const drawGraph = (data) => {
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
-    const edge = g.edge(e), src = edge.points;
-    src[0] = intersectRect(g.node(e.v), src[1]);
-    src[src.length-1] = intersectRect(g.node(e.w), src[src.length-2]);
-    return line(src);
+    const edge = g.edge(e);
+    const points = edge.points.slice(1, edge.points.length-1);
+    points.unshift(intersectRect(g.node(e.v), points[0]));
+    points.push(intersectRect(g.node(e.w), points[points.length-1]));
+    return line(points);
   }).attr("marker-end", "url(#arrowhead)");
   addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e) => {
     // get a point near the end
