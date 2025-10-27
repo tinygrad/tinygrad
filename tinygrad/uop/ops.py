@@ -65,6 +65,19 @@ class UOpMetaClass(type):
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
     if SPEC > 1:
+      if SPEC > 2:
+        with Context(SPEC=0):
+          from tinygrad.dtype import AddrSpace
+          from tinygrad.codegen.opt import Opt, OptOps
+          from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
+          code = pyrender(created)
+          lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan,
+                                 "KernelInfo": KernelInfo, "Kernel": Kernel,
+                                 "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
+          print(code)
+          exec(code, None, lcls)
+          if lcls['ast'] is not created:
+            raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{created}\nPRODUCED:\n{lcls['ast']}")
       from tinygrad.uop.spec import full_spec
       with Context(IGNORE_OOB=1): ret = full_spec.rewrite(created)
       if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {created}")
@@ -1252,7 +1265,21 @@ pm_pyrender = PatternMatcher([
 ])
 
 @Context(SPEC=0)
-def pyrender(ast:UOp) -> list[str]:
+def pyrender(ast:UOp) -> str:
+  uops = list(ast.toposort())
+  ret = []
+  r: dict[UOp, str] = {}
+  for i,u in enumerate(uops):
+    r[u] = f"c{i}" if u is not uops[-1] else "ast"
+    pieces = [str(u.op), str(u.dtype)]
+    if len(u.src) == 1: pieces.append(f"src=({r[u.src[0]]},)")
+    elif len(u.src) > 1: pieces.append(f"src=({','.join([r[x] for x in u.src])})")
+    if u.arg is not None: pieces.append(f"arg={repr(u.arg)}")
+    if u.tag is not None: pieces.append(f"tag={repr(u.tag)}")
+    ret.append(f"{r[u]} = UOp({', '.join(pieces)})")
+  return '\n'.join(ret)
+
+  """
   cmap = ast.get_consumer_map()
   to_render = set()
   for u in ast.toposort():
@@ -1268,6 +1295,7 @@ def pyrender(ast:UOp) -> list[str]:
     ret.append(f"c{len(ret)} = {u.substitute(rep).render(simplify=False, pm=pm_pyrender+renderer)}")
     rep[u] = UOp(Ops.NOOP, arg=f"c{len(ret)-1}")
   return ret[0:-1] + ["ast ="+ret[-1].split("=", 1)[1]]
+  """
 
 # *** what was symbolic.py ***
 
