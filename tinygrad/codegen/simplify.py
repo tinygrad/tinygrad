@@ -84,6 +84,10 @@ def reduce_unparented(red:UOp):
 pm_reduce_unparented = PatternMatcher([
   # remove any ranges from a REDUCE that aren't referenced in the reduce source
   (UPat(Ops.REDUCE, name="red"), reduce_unparented),
+  (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("x")+UPat.var("y"),), allow_any_len=True, name="red"), lambda red,x,y:
+    x.reduce(*red.src[1:], arg=Ops.ADD) + y.reduce(*red.src[1:], arg=Ops.ADD) if any(r not in x.ranges for r in red.src[1:]) else None),
+  (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("x")*UPat.var("y"),), allow_any_len=True, name="red"), lambda red,x,y:
+    x.reduce(*red.src[1:], arg=Ops.ADD)*y if all(r not in y.ranges for r in red.src[1:]) else None),
 ])
 
 pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
