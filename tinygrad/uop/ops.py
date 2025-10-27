@@ -53,25 +53,6 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
-def test_pyrender(test_ast:UOp):
-  from tinygrad.dtype import AddrSpace
-  from tinygrad.codegen.opt import Opt, OptOps
-  from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
-  code = pyrender(test_ast)
-  print("\n\n"+code)
-  lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan,
-                         "KernelInfo": KernelInfo, "Kernel": Kernel,
-                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
-  exec(code, None, lcls)
-  ast:UOp = lcls['ast']
-  if ast is not test_ast:
-    if str(test_ast) == str(ast):
-      for u1,u2 in zip(list(test_ast.toposort()), list(ast.toposort())):
-        if u1 is not u2:
-          raise RuntimeError("STRING SAME, UOP MISMATCH", u1, u2, id(u1), id(u2), id(u1.arg), id(u2.arg))
-    raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}")
-  return code
-
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
@@ -531,16 +512,15 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
 
   # in these four, if the shape doesn't change we can return self
-  def reshape(self, arg:tuple[sint, ...], can_fold=True): return self._mop(Ops.RESHAPE, arg, same_shape_noop=can_fold)
-  def expand(self, arg:tuple[sint, ...], can_fold=True): return self._mop(Ops.EXPAND, arg, same_shape_noop=can_fold)
-  def shrink(self, arg:tuple[tuple[sint, sint], ...], can_fold=True): return self._mop(Ops.SHRINK, arg, same_shape_noop=can_fold)
-  def pad(self, arg:tuple[tuple[sint, sint], ...], can_fold=True): return self._mop(Ops.PAD, arg, same_shape_noop=can_fold)
+  def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=False)
+  def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=True)
+  def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
+  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
+  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, same_shape_noop=True)
 
   # in these two, we have custom logic to check if they are a no-op
-  def permute(self, arg:tuple[int, ...], can_fold=True):
-    return self._mop(Ops.PERMUTE, arg, same_shape_noop=False) if arg != tuple(range(len(self.shape))) and can_fold else self
-  def flip(self, arg:tuple[bool, ...], can_fold=True):
-    return self._mop(Ops.FLIP, arg, same_shape_noop=False) if any(arg) and len(arg) == len(self.shape) and can_fold else self
+  def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg, same_shape_noop=False) if arg != tuple(range(len(self.shape))) else self
+  def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg, same_shape_noop=False) if any(arg) and len(arg) == len(self.shape) else self
 
   # *** uop UNIQUE ***
 
@@ -1274,28 +1254,37 @@ pm_pyrender = PatternMatcher([
 ])
 """
 
-sugar = { Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.UNIQUE,
-          Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER,
-          Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS}
-pm_pyrender = PatternMatcher([
+sugar = { Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.UNIQUE, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER,
+          Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER}
+pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"),), name="x"), lambda x,d: f"UOp.const({x.dtype}, {x.arg}, device={repr(d.arg)})"),
   (UPat(Ops.CONST, name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
-  #(UPat(Ops.DEFINE_VAR, name="x"), lambda x:
-  #  f"UOp.variable(\"{x.arg[0]}\", {x.arg[1]}, {x.arg[2]}{', dtype='+str(x.dtype) if x.dtype is not dtypes.index else ''})"),
-  #(UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d:
-  #  f"UOp.new_buffer(\"{d.arg}\", {x.size}, {x.dtype}, {u.arg})"),
-  #(UPat(Ops.COPY, src=(UPat(name="x"), UPat(Ops.DEVICE, name="d"))), lambda ctx,x,d: f"{ctx[x]}.copy_to_device({repr(d.arg)})"),
-  #(UPat(Ops.RANGE, name="x"), lambda ctx,x:
-  #  "UOp.range("+', '.join([ctx[x.src[0]]] + [str(y) for y in x.arg])+
-  #    (', dtype='+str(x.dtype) if x.dtype is not dtypes.index else '')+\
-  #    (', tag='+str(x.tag) if x.tag is not None else '')+")"),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x:
+    f"UOp.variable(\"{x.arg[0]}\", {x.arg[1]}, {x.arg[2]}{', dtype='+str(x.dtype) if x.dtype is not dtypes.index else ''})"),
+  (UPat(Ops.SPECIAL, src=(UPat(Ops.CONST),), name="x"), lambda x: f"UOp.special({x.src[0].arg}, {repr(x.arg)}, dtype={x.dtype})"),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d:
+    f"UOp.new_buffer(\"{d.arg}\", {x.size}, {x.dtype}, {u.arg})"),
+  (UPat(Ops.COPY, src=(UPat(name="x"), UPat(Ops.DEVICE, name="d"))), lambda ctx,x,d: f"{ctx[x]}.copy_to_device({repr(d.arg)})"),
+  # NOTE: range has srcs sometimes after control flow
+  (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), name="x"), lambda ctx,x,c:
+    "UOp.range("+', '.join([str(c.arg)] + [str(y) for y in x.arg])+
+      (', dtype='+str(x.dtype) if x.dtype is not dtypes.index else '')+\
+      (', tag='+str(x.tag) if x.tag is not None else '')+")"),
   # simplest
-  #(UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.marg}, can_fold=False)"),
-  (UPat(set(syms.keys()), name="x"), lambda ctx,x: f"({ctx[x.src[0]]}{syms[x.op]}{ctx[x.src[1]]})"),
-  (UPat(sugar, src=(), name="x"), lambda ctx,x: f"UOp.{x.op.name.lower()}("+', '.join( \
+  # TODO: fix forced_reshape
+  (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({x.marg})"),
+  (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({x.marg})"),
+  # NOTE: sub doesn't work cause it's written as add/mul
+  (UPat(set(syms.keys())-{Ops.SUB}, src=(UPat(name="y"), UPat(Ops.CONST, name="z")), name="x"), lambda ctx,x,y,z: f"({ctx[y]}{syms[x.op]}{z.arg})"),
+  (UPat(set(syms.keys())-{Ops.SUB}, src=(UPat(Ops.CONST, name="y"), UPat(name="z")), name="x"), lambda ctx,x,y,z: f"({y.arg}{syms[x.op]}{ctx[z]})"),
+  (UPat(set(syms.keys())-{Ops.SUB}, name="x"), lambda ctx,x: f"({ctx[x.src[0]]}{syms[x.op]}{ctx[x.src[1]]})"),
+  (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join( \
     ([f'arg={repr(x.arg)}'] if x.arg is not None else []) + ([f'tag={repr(x.tag)}'] if x.tag is not None else []))+")"),
   (UPat(sugar, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}("+', '.join([ctx[y] for y in x.src[1:]] + \
     ([f'arg={repr(x.arg)}'] if x.arg is not None else []) + ([f'tag={repr(x.tag)}'] if x.tag is not None else []))+")"),
+])
+
+pm_pyrender = pm_pyrender_extra+PatternMatcher([
   (UPat(GroupOp.All, name="u"), lambda ctx,u: "UOp("+', '.join([str(u.op), str(u.dtype)] + \
     ([f"({ctx[u.src[0]]},)"] if len(u.src) == 1 else ([f"({', '.join([ctx[x] for x in u.src])})"] if len(u.src) > 1 else [])) + \
     ([f"arg={repr(u.arg)}"] if u.arg is not None else []) + ([f"tag={repr(u.tag)}"] if u.tag is not None else []))+")"),
@@ -1313,7 +1302,8 @@ def pyrender(ast:UOp) -> str:
   to_render = {ast}
   for u in uops:
     if u.op is Ops.STORE: to_render.add(u.src[1])
-    if len(cmap[u]) == 1 and u.op not in always_rendered or u.op in not_rendered: continue
+    if u.op in {Ops.REDUCE, Ops.REDUCE_AXIS}: to_render.add(u.src[0])
+    if (len(cmap[u]) == 1 or u.dtype == dtypes.index) and u.op not in always_rendered or u.op in not_rendered: continue
     if u.op in {Ops.SINK}:
       for s in u.src: to_render.add(s)
     to_render.add(u)
@@ -1321,30 +1311,30 @@ def pyrender(ast:UOp) -> str:
   for i,u in enumerate(uops):
     ren = pm_pyrender.rewrite(u, ctx=r)
     assert isinstance(ren, str)
-    if u not in to_render:
-      r[u] = ren
+    #if u.tag is not None: ren += f".rtag({u.tag})"
+    if u not in to_render: r[u] = ren
     else:
       r[u] = f"c{i}" if u is not uops[-1] else "ast"
       ret[r[u]] = ren
   return '\n'.join([f"{k} = {v}" for k,v in ret.items()])
 
-  """
-  cmap = ast.get_consumer_map()
-  to_render = set()
-  for u in ast.toposort():
-    if u.op is Ops.STORE: to_render.add(u.src[1])
-    if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.LOAD} or u.op in {Ops.CONST}: continue
-    if u.op in {Ops.SINK}:
-      for s in u.src: to_render.add(s)
-    to_render.add(u)
-  ret: list[str] = []
-  rep: dict[UOp, UOp] = {}
-  for u in ast.toposort():
-    if u not in to_render: continue
-    ret.append(f"c{len(ret)} = {u.substitute(rep).render(simplify=False, pm=pm_pyrender+renderer)}")
-    rep[u] = UOp(Ops.NOOP, arg=f"c{len(ret)-1}")
-  return ret[0:-1] + ["ast ="+ret[-1].split("=", 1)[1]]
-  """
+def eval_pyrender(code:str) -> UOp:
+  from tinygrad.dtype import AddrSpace
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
+  lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan,
+                         "KernelInfo": KernelInfo, "Kernel": Kernel,
+                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
+  exec(code, None, lcls)
+  return lcls['ast']
+
+def test_pyrender(test_ast:UOp):
+  code = pyrender(test_ast)
+  print("\n\n"+code)
+  ast:UOp = eval_pyrender(code)
+  if ast is not test_ast:
+    raise RuntimeError(f"PYRENDER ISSUE:\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}\nCODE:\n{code}")
+  return code
 
 # *** what was symbolic.py ***
 
