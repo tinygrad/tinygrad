@@ -1326,7 +1326,7 @@ def pyrender(ast:UOp) -> str:
     else:
       r[u] = f"c{i}" if u is not uops[-1] else "ast"
       ret[r[u]] = ren
-  return '\n'.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {v}" for k,v in ret.items()])
+  return ''.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {v}" for k,v in ret.items()])
 
 def eval_pyrender(code:str) -> UOp:
   from tinygrad.dtype import AddrSpace
@@ -1340,7 +1340,6 @@ def eval_pyrender(code:str) -> UOp:
 
 def test_pyrender(test_ast:UOp, check_parents=True):
   code = pyrender(test_ast)
-  print("\n\n"+code)
   ast:UOp = eval_pyrender(code)
   if ast is not test_ast:
     if check_parents:
