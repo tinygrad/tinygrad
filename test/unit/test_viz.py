@@ -148,12 +148,20 @@ class TestViz(BaseTestViz):
     a2 = uop_to_json(a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
+  def test_colored_label_multiline(self):
+    arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
+    src = [Tensor.empty(1).uop for _ in range(10)]
+    a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
+    exec_rewrite(a, [PatternMatcher([])])
+    a2 = next(get_viz_details(0, 0))["graph"][id(a)]
+    self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
+
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.int)
-    b = a.replace(op=Ops.CONST)
+    a = UOp.const(dtypes.int, 3)
+    b = UOp.const(dtypes.int, 4)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
-      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
     graphs = flatten(x["graph"].values() for x in get_viz_details(0, 0))

@@ -3,7 +3,7 @@
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
 from typing import Any, TYPE_CHECKING, cast
-import pickle, base64, itertools, time, struct, sys
+import pickle, base64, itertools, time, struct, sys, functools
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_bf16, float_to_fp8, fp8_to_float
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
 from tinygrad.device import Compiled, Compiler, Allocator
@@ -36,6 +36,20 @@ def _store(m, i, v, dtype: DType):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
   m[i] = to_storage_scalar(v, dtype)
 
+# here are the models for the WMMA instruction on the different hardware
+def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
+  for cc, tinp, num in zip(("A", "B", "C"), inp, (NUM_A, NUM_B, NUM_C)):
+    assert len(tinp) == num, f"{cc} must have {num} elements per thread, it has {len(tinp)}"
+    assert len(flatten(tinp)) == num * warp_size, f"WMMA must have {num * warp_size} total elements for {cc} in WMMA"
+  assert warp_size > 0 and warp_size % WARP_THREADS == 0, f"must have multiples of {WARP_THREADS} warp threads"
+  out = [inp[2][elem_idx][:] for elem_idx in range(NUM_C)]
+  for goff in range(0, warp_size, WARP_THREADS):
+    for lane_id in range(WARP_THREADS):
+      for elem_idx in range(NUM_C): # calculate new muls and add to acc
+        (c_i, c_j) = c_map(lane_id, elem_idx)
+        out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
+  return out
+
 class PythonProgram:
   def __init__(self, name:str, lib:bytes):
     self.uops: list[tuple[Ops, DType|None, list[int], Any]] = pickle.loads(lib)
@@ -52,15 +66,15 @@ class PythonProgram:
       loop_ends: dict[int, int] = {}
       while i < len(self.uops):
         uop, dtype, idp, arg = self.uops[i]
-        void_ops = {Ops.ENDRANGE, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.STORE}
+        void_ops = {Ops.END, Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.GROUP, Ops.STORE}
         inp = [ul[v] for v in idp if self.uops[v][0] not in void_ops]
         dtp = [dl[v] for v in idp if self.uops[v][0] not in void_ops]
         if getenv("TRACE"): print(i, uop, dtype, arg, inp, dtp)
-        if uop is Ops.ENDRANGE:
-          loop_ends[idp[0]] = i
-          i = idp[0]
+        if uop is Ops.END:
+          loop_ends[idp[1]] = i
+          i = idp[1]
           continue
-        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP):
+        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.GROUP):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
@@ -125,23 +139,10 @@ class PythonProgram:
             ul[i] = load(inp, 0, dtype)
         elif uop is Ops.GEP: ul[i] = inp[0][get_single_element(arg)]
         elif uop is Ops.WMMA:
-          # here are the models for the WMMA instruction on the different hardware
-          def wmma_helper(WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_elem, b_elem, c_map):
-            for cc, tinp, num in zip(("A", "B", "C"), inp, (NUM_A, NUM_B, NUM_C)):
-              assert len(tinp) == num, f"{cc} must have {num} elements per thread, it has {len(tinp)}"
-              assert len(flatten(tinp)) == num * warp_size, f"WMMA must have {num * warp_size} total elements for {cc} in WMMA"
-            assert warp_size > 0 and warp_size % WARP_THREADS == 0, f"must have multiples of {WARP_THREADS} warp threads"
-            out = [inp[2][elem_idx][:] for elem_idx in range(NUM_C)]
-            for goff in range(0, warp_size, WARP_THREADS):
-              for lane_id in range(WARP_THREADS):
-                for elem_idx in range(NUM_C): # calculate new muls and add to acc
-                  (c_i, c_j) = c_map(lane_id, elem_idx)
-                  out[elem_idx][goff+lane_id] += sum(a_elem(inp[0], _k, c_j, goff) * b_elem(inp[1], c_i, _k, goff) for _k in range(K))
-            return out
-
           first_src_dtype = self.uops[idp[0]][1]
           assert isinstance(first_src_dtype, DType) # mypy
           dims, dtype_in, device, threads = arg[1], first_src_dtype.scalar(), arg[4], arg[5]
+          wmma_helper = functools.partial(generic_wmma_helper, inp, warp_size)
           # TODO: refactor these to a shared TensorCoreLayout in kernel.py
           if device == "METAL":
             # A (2 elements on 32 threads): row major
@@ -150,10 +151,10 @@ class PythonProgram:
             def c_map(lane, elem): return (elem + ((lane%2)*2) + ((lane//8)%2)*4, ((lane//2)%4) + (lane//16)*4)
             ul[i] = wmma_helper(32, 8, 2, 2, 2, a_b_elem, a_b_elem, c_map)
           elif device == "AMD" and threads == 64:
-            def a_elem(x, k, row, goff): return x[k%4][goff + (k//4)*16 + row]
-            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff) # pylint: disable=arguments-out-of-order
+            def a_elem(x, k, row, goff): return x[k%(dims[2]//4)][goff + (k//(dims[2]//4))*16 + row]
+            def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)  # pylint: disable=arguments-out-of-order
             def c_map(lane, elem): return (lane%16, (lane//16)*4 + elem)
-            ul[i] = wmma_helper(64, 16, 4, 4, 4, a_elem, b_elem, c_map)
+            ul[i] = wmma_helper(64, dims[2], len(inp[0]), len(inp[1]), len(inp[2]), a_elem, b_elem, c_map)
           elif device == "AMD" and len(inp[0]) == 8: # RDNA4
             def a_elem(x, k, row, goff): return x[k - [0, 4, 4, 8][k//4]][goff + row + [0, 16, 0, 16][k//4]]
             def b_elem(x, col, k, goff): return a_elem(x, k, col, goff)
@@ -177,6 +178,11 @@ class PythonProgram:
               def b_elem(x, col, k, goff): return x[k%2 + (k//8)*2][goff + (k//2)%4 + col*4]
               ul[i] = wmma_helper(32, 16, 8, 4, 4, a_elem, b_elem, c_map)
 
+            elif dims == (8,16,32):
+              def a_elem(x, k, row, goff): return x[k%4 + (row//8)*4 + (k//16)*8][goff + (k//4)%4 + (row%8)*4]
+              def b_elem(x, col, k, goff): return x[k%4 + (k//16)*4][goff + (k//4)%4  + col*4]
+              ul[i] = wmma_helper(32, 32, 16, 8, 4, a_elem, b_elem, c_map)
+
             elif dims == (8,16,8) and dtype_in == dtypes.half:
               def a_elem(x, k, row, goff): return x[k%2 + (row//8)*2][goff + k//2 + (row%8)*4]
               def b_elem(x, col, k, goff): return x[k%2][goff + k//2 + col*4]
@@ -198,7 +204,7 @@ class PythonProgram:
             ul[i] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
           elif device == "CPU":
             def elem(x, col, row, _): return x[col+row][0] # k is always 0
-            def c_map(_, elem): return (elem%16, elem//16)
+            def c_map(lane, elem): return (elem%16, elem//16)
             ul[i] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {arg}")
         elif uop in GroupOp.ALU:
@@ -216,10 +222,11 @@ class PythonRenderer(Renderer):
     match cast(str, EMULATE.value):
       case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
       case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
-      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna
+      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
       case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
       case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
       case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
+      case "CUDA_SM89": self.device, self.tensor_cores = "CUDA", tc.cuda_sm89
       case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
       case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
       case "": pass

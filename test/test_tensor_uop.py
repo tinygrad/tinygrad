@@ -3,7 +3,7 @@ import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import run_schedule
-from tinygrad.uop.ops import Ops, UOp, UPat
+from tinygrad.uop.ops import UOp
 from tinygrad.helpers import SPLIT_REDUCEOP
 
 class TestTensorUOp(unittest.TestCase):
@@ -93,7 +93,6 @@ class TestTensorUOp(unittest.TestCase):
     out.realize()
     self.assertEqual(out.tolist(), Tensor.zeros(4, 8).tolist())
 
-reduce_kernel = UPat(Ops.SINK, src=(UPat(Ops.STORE, allow_any_len=True, src=(UPat(), UPat((Ops.REDUCE_AXIS, Ops.REDUCE))))))
 @unittest.skipUnless(SPLIT_REDUCEOP, "only for SPLIT_REDUCEOP")
 class TestReduceOp(unittest.TestCase):
   def test_no_split_reduce_kernel(self):
@@ -101,23 +100,18 @@ class TestReduceOp(unittest.TestCase):
     a = a.sum()
     sched = a.schedule()
     assert len(sched) == 1
-    assert reduce_kernel.match(sched[0].ast, {})
 
   def test_split_reduce_kernel_dim0(self):
     a = Tensor.rand(256, 255).realize()
     a = a.sum()
     sched = a.schedule()
     assert len(sched) == 2
-    for s in sched:
-      assert reduce_kernel.match(s.ast, {})
 
   def test_split_reduce_kernel_dim1(self):
     a = Tensor.rand(255, 256).realize()
     a = a.sum()
     sched = a.schedule()
     assert len(sched) == 2
-    for s in sched:
-      assert reduce_kernel.match(s.ast, {})
 
 if __name__ == "__main__":
   unittest.main()

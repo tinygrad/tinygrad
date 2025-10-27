@@ -28,9 +28,12 @@ class Estimates:
     mult_stack: list[sint] = []
     dont_count: set[UOp] = set()
     if ignore_indexing:
+      def range_gate(x): return x.op is not Ops.RANGE
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE} and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
-          dont_count = dont_count.union(u.src[0].toposort())
+          # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
+          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
+          # TODO: is this correct? this all needs to be cleaned up
           if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
@@ -45,7 +48,7 @@ class Estimates:
         mults *= cast(sint, u.src[0].ssimplify())
         # SPECIAL are already counted in mults
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
-      elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
+      elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
         lds += u.dtype.itemsize * mults
@@ -78,8 +81,12 @@ class ProgramSpec:
       for u in self.uops:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
-        if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.STORE and (u.src[0].op is Ops.INDEX or (u.src[0].op is Ops.CAST and u.src[0].src[0].op is Ops.INDEX)):
+          idx = u.src[0] if u.src[0].op is Ops.INDEX else u.src[0].src[0]
+          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: self.outs.append(buf.arg)
+        if u.op is Ops.LOAD and (u.src[0].op is Ops.INDEX or (u.src[0].op is Ops.CAST and u.src[0].src[0].op is Ops.INDEX)):
+          idx = u.src[0] if u.src[0].op is Ops.INDEX else u.src[0].src[0]
+          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: self.ins.append(buf.arg)
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0] == 'i': self.local_size = None
