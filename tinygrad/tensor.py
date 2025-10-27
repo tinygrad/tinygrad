@@ -2360,8 +2360,8 @@ class Tensor(MathTrait):
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
     # input size scaling factor to make sure shrink for stride is possible
-    f_ = [max(1, ceildiv(o*s - d, i)) for o,s,i,d in zip(o_,s_,i_,d_)]
-    # # repeats such that we don't need padding
+    f_ = [ceildiv(o*s - d, i) for o,s,i,d in zip(o_,s_,i_,d_)]
+    # repeats such that we don't need padding
     x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
     # handle dilation
     x = x.shrink(tuple(noop + [(0,k*(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)])).reshape(noop + flatten((k,(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)))
