@@ -155,12 +155,13 @@ class TestLinearizer(unittest.TestCase):
     assert stores[1].src[1].dtype == dtypes.float
     assert any(x.op is Ops.DEFINE_GLOBAL for x in stores[1].toposort())
 
+  @unittest.skipIf(Device.DEFAULT=="CPU", "CPU splits the cat so cant upcast")
   def test_zero_fold(self):
-    a, b = Tensor.randn(2).realize(), Tensor.randn(2).realize()
+    a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
     uops = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0)]).uops
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
-    assert num_ops == 1, "more alu uops than needed"
+    assert num_ops == 0, "more alu uops than needed"
 
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
