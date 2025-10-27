@@ -71,8 +71,8 @@ const drawGraph = (data) => {
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
   nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
-    const x = (d.width-d.padding*2)/2;
-    const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
+    const x = d.labelWidth/2;
+    const y = d.labelHeight/2+STROKE_WIDTH*2;
     return `translate(-${x}, -${y})`;
   }).selectAll("text").data(d => {
     const ret = [[]];
