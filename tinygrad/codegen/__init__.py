@@ -41,7 +41,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = graph_rewrite(sink, pm_simplify_ranges, name="simplify ranges")
 
     # split store range (only on CPU for now)
-    sink = graph_rewrite(sink, pm_split_store+pm_flatten_range, ctx=ren.device, name="cut store ranges")
+    sink = graph_rewrite(sink, pm_split_store, ctx=ren.device, name="cut store ranges")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)
