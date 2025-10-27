@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.helpers import DEBUG, Context, prod
 from tinygrad.uop.validate import validate_index
@@ -239,3 +239,10 @@ def type_verify(uops:list[UOp], check_spec:PatternMatcher):
     if cast(bool|None, ret) is not True:
       if DEBUG >= 3: print_uops(uops)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+
+@Context(SPEC=0)
+def validate_pyrender(test_ast:UOp):
+  code = '\n'.join(pyrender(test_ast))
+  lcls:dict[str, UOp] = {}
+  exec(code, None, lcls)
+  if lcls['ast'] is not test_ast: raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{test_ast}\nPRODUCED:\n{lcls['ast']}")

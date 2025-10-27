@@ -65,12 +65,6 @@ class UOpMetaClass(type):
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
     if SPEC > 1:
-      if SPEC > 2:
-        with Context(SPEC=0):
-          code = '\n'.join(pyrender(created))
-          lcls:dict[str, UOp] = {}
-          exec(code, None, lcls)
-          if lcls['ast'] is not created: raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{created}\nPRODUCED:\n{lcls['ast']}")
       from tinygrad.uop.spec import full_spec
       with Context(IGNORE_OOB=1): ret = full_spec.rewrite(created)
       if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {created}")
@@ -124,7 +118,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
-  def f(self, op, **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,), **kwargs)
+  def f(self, op, src=(), **kwargs): return UOp(op, dtype=kwargs.pop("dtype", self.dtype), src=(self,)+src, **kwargs)
 
   @functools.cached_property
   def backward_slice(self:UOp) -> dict[UOp, None]:
@@ -382,10 +376,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
-  def range(end:sint, *arg, dtype=dtypes.index):
+  def range(end:sint, *arg, dtype=dtypes.index, **kwargs):
     if len(arg) == 0: raise RuntimeError("range needs an arg")
     if len(arg) == 1: arg = arg+(AxisType.LOOP,)
-    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=arg)
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=arg, **kwargs)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def r(self, op:Ops, axis:tuple[int, ...]):
@@ -510,6 +504,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     usrcs = []
     for arg in src_args:
       if len(arg) == 0: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(0)))
+      elif len(arg) == 1 and isinstance(arg[0], UOp): usrcs.append(arg[0])
       elif all(isinstance(x, int) for x in arg): usrcs.append(UOp.const(dtypes.index.vec(len(arg)), arg))
       else: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(len(arg)), tuple(UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in arg)))
     ret = UOp(op, self.dtype, (self,)+tuple(usrcs), arg if len(usrcs) == 0 else None)
@@ -533,12 +528,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # TODO: use this in Buffer
   unique_num = itertools.count(0)
   @staticmethod
-  def unique(): return UOp(Ops.UNIQUE, arg=next(UOp.unique_num))
+  def unique(num:int|None=None): return UOp(Ops.UNIQUE, arg=next(UOp.unique_num) if num is None else num)
 
   # *** uop Buffer stuff ***
 
   @staticmethod
-  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType): return UOp(Ops.BUFFER, dtype, (UOp.unique(), UOp(Ops.DEVICE, arg=device)), size)
+  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
+    return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
   @property
   def device(self) -> str|tuple[str, ...]: return cast(str|tuple[str, ...], unwrap(self._device))
   @recursive_property
@@ -1237,7 +1233,7 @@ renderer_infer = PatternMatcher([
 ])
 
 sugar = { Ops.SINK: "sink", Ops.STORE: "store", Ops.LOAD: "load", Ops.SQRT: "sqrt", Ops.INDEX: "index", Ops.REDUCE: "reduce",
-          Ops.WHERE: "where", Ops.RECIP: "reciprocal", Ops.EXP2: "exp2", Ops.LOG2: "log2", Ops.SIN: "sin"}
+          Ops.WHERE: "where", Ops.RECIP: "reciprocal", Ops.EXP2: "exp2", Ops.LOG2: "log2", Ops.SIN: "sin", Ops.CONTIGUOUS: "contiguous"}
 pm_pyrender = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.NOOP),), name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.const({x.dtype}, {x.arg}, src={x.src[0].arg})")),
   (UPat(Ops.CONST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.const({x.dtype}, {x.arg})")),
@@ -1247,7 +1243,9 @@ pm_pyrender = PatternMatcher([
   (UPat({Ops.MAX, Ops.THREEFRY, Ops.CMPLT, Ops.CMPNE, Ops.POW}, src=UPat(Ops.NOOP), name="x"),
    lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.alu({x.op}, {x.src[1].arg})")),
   (UPat(Ops.RANGE, src=(UPat(Ops.NOOP),), name="x"), lambda x: UOp(Ops.NOOP, arg=
-    f"UOp.range({x.src[0].arg}, {str(x.arg[0])}, {str(x.arg[1])}{', dtype='+str(x.dtype) if x.dtype is not dtypes.index else ''})")),
+    f"UOp.range({x.src[0].arg}, {str(x.arg[0])}, {str(x.arg[1])}"+\
+      (', dtype='+str(x.dtype) if x.dtype is not dtypes.index else '')+\
+      (', tag='+str(x.tag) if x.tag is not None else '')+")")),
   (UPat(Ops.SPECIAL, src=(UPat(Ops.NOOP),), name="x"), lambda x: UOp(Ops.NOOP, arg= f"UOp.special({x.src[0].arg}, \"{x.arg}\", dtype={x.dtype})")),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: UOp(Ops.NOOP, arg=
     f"UOp.variable(\"{x.arg[0]}\", {x.arg[1]}, {x.arg[2]}{', dtype='+str(x.dtype) if x.dtype is not dtypes.index else ''})")),
@@ -1255,6 +1253,12 @@ pm_pyrender = PatternMatcher([
     arg=f"{x.src[0].arg}.{sugar[x.op]}({', '.join([y.arg for y in x.src[1:]] + ([f'arg={str(x.arg)}'] if x.arg is not None else []))})")),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.NOOP),), name="x"),
    lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.f({x.op}, arg=({', '.join([str(y) for y in x.arg])}))")),
+  (UPat(GroupOp.Movement, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=
+    f"{x.src[0].arg}.f({x.op}, src=({', '.join([y.arg for y in x.src[1:]])},))")),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d: UOp(Ops.NOOP, arg=
+    f"UOp.new_buffer(\"{d.arg}\", {x.size}, {x.dtype}, {u.arg})")),
+  (UPat(Ops.COPY, src=(UPat(Ops.NOOP, name="x"), UPat(Ops.DEVICE, name="d"))), lambda x,d: UOp(Ops.NOOP, arg=
+    f"{x.arg}.copy_to_device(\"{d.arg}\")")),
 ])
 
 @Context(SPEC=0)
@@ -1263,7 +1267,7 @@ def pyrender(ast:UOp) -> list[str]:
   to_render = set({ast})
   for u in ast.toposort():
     if u.op is Ops.STORE: to_render.add(u.src[1])
-    if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.LOAD} or u.op in {Ops.CONST}: continue
+    if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.BUFFER, Ops.COPY} or u.op in {Ops.CONST, Ops.DEVICE}: continue
     if u.op in {Ops.SINK}:
       for s in u.src: to_render.add(s)
     to_render.add(u)
