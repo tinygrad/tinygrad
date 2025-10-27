@@ -238,6 +238,8 @@ jobs:
       run: BENCHMARK_LOG=llama3_beam NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --size 8B --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_beam.txt
     - name: Run LLaMA-3 8B on 4 GPUs with BEAM
       run: BENCHMARK_LOG=llama3_beam_4gpu NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_four_gpu.txt
+    - name: Run quantized LLaMA3
+      run: BENCHMARK_LOG=llama3_fp8 python3 examples/llama3.py --size 8B --model weights/LLaMA-3/8B-SF-DPO/ --temperature 0 --benchmark --quantize fp8 | tee llama3_fp8.txt
     # - name: Run LLaMA-3 8B on 6 GPUs
     #   run: NV=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_six_gpu.txt
     # - name: Run LLaMA-2 70B
@@ -271,6 +273,7 @@ jobs:
           llama3_beam.txt
           llama3_four_gpu.txt
           llama3_six_gpu.txt
+          llama3_fp8.txt
           llama_2_70B.txt
           mixtral.txt
           gpt2_unjitted.txt
