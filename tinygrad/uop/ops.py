@@ -379,10 +379,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
-  def range(end:sint, *arg, dtype=dtypes.index, **kwargs):
+  def range(end:sint, *arg, dtype=dtypes.index, src=(), **kwargs):
     if len(arg) == 0: raise RuntimeError("range needs an arg")
     if len(arg) == 1: arg = arg+(AxisType.LOOP,)
-    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=arg, **kwargs)
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=arg, **kwargs)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def r(self, op:Ops, axis:tuple[int, ...]):
@@ -1246,6 +1246,8 @@ def render_marg(ctx,x:UOp):
     pieces = [f"({ctx[a[0]] if isinstance(a[0], UOp) else str(a[0])}, {ctx[a[1]] if isinstance(a[1], UOp) else str(a[1])})" for a in x.marg]
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
+def srcs(ctx, src): return f"({ctx[src[0]]},)" if len(src) == 1 else f"({', '.join([ctx[x] for x in src])})"
+
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.UNIQUE, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER,
          Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER}
 pm_pyrender_extra = PatternMatcher([
@@ -1259,8 +1261,9 @@ pm_pyrender_extra = PatternMatcher([
     f"UOp.new_buffer({repr(d.arg)}, {x.size}, {x.dtype}, {u.arg})"),
   (UPat(Ops.COPY, src=(UPat(name="x"), UPat(Ops.DEVICE, name="d"))), lambda ctx,x,d: f"{ctx[x]}.copy_to_device({repr(d.arg)})"),
   # NOTE: range has srcs sometimes after control flow
-  (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), name="x"), lambda ctx,x,c:
+  (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
     "UOp.range("+', '.join([str(c.arg)] + [str(y) for y in x.arg])+
+      (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+\
       (', dtype='+str(x.dtype) if x.dtype is not dtypes.index else '')+\
       (', tag='+str(x.tag) if x.tag is not None else '')+")"),
   # TODO: index shouldn't mismatch dtype
@@ -1269,10 +1272,11 @@ pm_pyrender_extra = PatternMatcher([
   # TODO: fix forced_reshape
   (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})"),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
-  # TODO: why don't these work?
-  #(UPat(set(syms.keys())-{Ops.SUB}, src=(UPat(name="y"), UPat(Ops.CONST, name="z")), name="x"), lambda ctx,x,y,z: f"({ctx[y]}{syms[x.op]}{z.arg})"),
-  #(UPat(set(syms.keys())-{Ops.SUB}, src=(UPat(Ops.CONST, name="y"), UPat(name="z")), name="x"), lambda ctx,x,y,z: f"({y.arg}{syms[x.op]}{ctx[z]})"),
+  # NOTE: CMPNE doesn't work cause there's no __rne__
+  (UPat(set(syms.keys())-{Ops.SUB, Ops.CMPNE}, src=(UPat(Ops.CONST, name="y"), UPat(name="z")), name="x"),
+   lambda ctx,x,y,z: f"({y.arg}{syms[x.op]}{ctx[z]})"),
   # NOTE: sub doesn't work cause it's written as add/mul
+  (UPat(set(syms.keys())-{Ops.SUB}, src=(UPat(name="y"), UPat(Ops.CONST, name="z")), name="x"), lambda ctx,x,y,z: f"({ctx[y]}{syms[x.op]}{z.arg})"),
   (UPat(set(syms.keys())-{Ops.SUB}, name="x"), lambda ctx,x: f"({ctx[x.src[0]]}{syms[x.op]}{ctx[x.src[1]]})"),
   (UPat(sugar, src=(), name="x"), lambda x: f"UOp.{x.op.name.lower()}("+', '.join( \
     ([f'arg={repr(x.arg)}'] if x.arg is not None else []) + ([f'tag={repr(x.tag)}'] if x.tag is not None else []))+")"),
@@ -1284,7 +1288,7 @@ pm_pyrender_extra = PatternMatcher([
 pm_pyrender = pm_pyrender_extra+PatternMatcher([
   (UPat(Ops.KERNEL, name="u"), lambda ctx,u: "UOp(Ops.KERNEL, src="+', '.join( \
     ([f"({ctx[u.src[0]]},)"] if len(u.src) == 1 else ([f"({', '.join([ctx[x] for x in u.src])})"] if len(u.src) > 1 else []))) + \
-    f", arg=Kernel({ctx[u.arg.ast]}(), {u.arg.metadata}))"),
+    f", arg=Kernel({ctx[u.arg.ast]}(), {u.arg.metadata})"+(f", tag={repr(u.tag)}" if u.tag is not None else "")+")"),
   (UPat(GroupOp.All, name="u"), lambda ctx,u: "UOp("+', '.join([str(u.op), str(u.dtype)] + \
     ([f"({ctx[u.src[0]]},)"] if len(u.src) == 1 else ([f"({', '.join([ctx[x] for x in u.src])})"] if len(u.src) > 1 else [])) + \
     ([f"arg={repr(u.arg)}"] if u.arg is not None else []) + ([f"tag={repr(u.tag)}"] if u.tag is not None else []))+")"),
@@ -1297,23 +1301,25 @@ def pyrender(ast:UOp) -> str:
   r: dict[UOp, str] = {}
 
   not_rendered = {Ops.CONST}
-  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.WHERE, Ops.KERNEL}
-  to_render = {ast}
+  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE}
+  to_render: set[UOp] = {ast}
   for u in uops:
-    if u.op is Ops.STORE: to_render.add(u.src[1])
-    if u.op in {Ops.REDUCE, Ops.REDUCE_AXIS}: to_render.add(u.src[0])
-    if (len(cmap[u]) == 1 or u.dtype == dtypes.index) and u.op not in always_rendered or u.op in not_rendered: continue
     if u.op in {Ops.SINK}:
       for s in u.src: to_render.add(s)
+    if u.op is Ops.STORE: to_render.add(u.src[1])
+    if u.op in {Ops.REDUCE, Ops.REDUCE_AXIS}: to_render.add(u.src[0])
+    if u.op in not_rendered: continue
+    # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
+    if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue
     to_render.add(u)
 
-  kernels = {}
+  kernels: dict[UOp, tuple[str, str]] = {}
   for i,u in enumerate(uops):
     if u.op is Ops.KERNEL:
       if u.arg.ast not in kernels:
         kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
       r[u.arg.ast] = kernels[u.arg.ast][0]
-    ren = pm_pyrender.rewrite(u, ctx=r)
+    ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
     assert isinstance(ren, str)
     #if u.tag is not None: ren += f".rtag({u.tag})"
     if u not in to_render: r[u] = ren
