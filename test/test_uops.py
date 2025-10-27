@@ -548,10 +548,16 @@ class TestUopsObject(unittest.TestCase):
 class TestUOpRender(unittest.TestCase):
   def test_render_vectorize_same(self):
     u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
-    self.assertEqual(u.render(), "{0, ...}")
+    self.assertEqual(u.render(simplify=False), "{0, ...}")
   def test_render_vectorize_different(self):
     u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
-    self.assertEqual(u.render(), "{0,1,2}")
+    self.assertEqual(u.render(simplify=False), "{0,1,2}")
+  def test_render_vectorize_same_simplified(self):
+    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    self.assertEqual(u.render(), "0")
+  def test_render_vectorize_different_simplified(self):
+    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    self.assertEqual(u.render(), "(0, 1, 2)")
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

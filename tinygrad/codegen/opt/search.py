@@ -137,7 +137,7 @@ def beam_search(lin:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=Tr
   min_progress = getenv("BEAM_MIN_PROGRESS", 0.01)/1e6
   if BEAM_DEBUG:
     print("BEAM_SEARCH:")
-    print('\n'.join(pyrender(lin.ast.replace(arg=None))))
+    print(pyrender(lin.ast.replace(arg=None)))
   if DEBUG >= 2: print(f"   0.00s:                from   1 ->   1 actions {lin.colored_shape()}")
 
   try:
