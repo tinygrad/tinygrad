@@ -237,19 +237,6 @@ generate_sqtt() {
   sed -i "s|FunctionFactoryStub()|_try_dlopen_rocprof_trace_decoder()|g" $BASE/rocprof.py
 }
 
-generate_libusb() {
-  clang2py -k cdefstum \
-    /usr/include/libusb-1.0/libusb.h \
-    -o $BASE/libusb.py
-
-  fixup $BASE/libusb.py
-  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libusb.py
-  sed -i "s/FIXME_STUB/libusb/g" "$BASE/libusb.py"
-  sed -i "s/libusb_le16_to_cpu = libusb_cpu_to_le16//g" "$BASE/libusb.py"
-  sed -i "s/FunctionFactoryStub()/None if (lib_path:=os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0'))) is None else ctypes.CDLL(lib_path)/g" "$BASE/libusb.py"
-  python3 -c "import tinygrad.runtime.autogen.libusb"
-}
-
 generate_mesa() {
   MESA_TAG="mesa-25.2.4"
   MESA_SRC=/tmp/mesa-$MESA_TAG
@@ -333,7 +320,6 @@ elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
-elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa
 elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_amd; generate_am; generate_mesa
 else echo "usage: $0 <type>"

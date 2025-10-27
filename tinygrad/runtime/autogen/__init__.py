@@ -52,3 +52,9 @@ vfio = Autogen("vfio", None, ["/usr/include/linux/vfio.h"])
 # could add rule: WGPU_COMMA -> ','
 webgpu = Autogen("webgpu", "ctypes.CDLL(WEBGPU_PATH)", [root/"extra/webgpu/webgpu.h"],
                  prelude=["from tinygrad.runtime.support.webgpu import WEBGPU_PATH"])
+libusb = Autogen("libusb", "ctypes.CDLL(os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0')))", ["/usr/include/libusb-1.0/libusb.h"],
+                 prelude=["import os"])
+
+"""
+sed -i "s/libusb_le16_to_cpu = libusb_cpu_to_le16//g" "$BASE/libusb.py"
+"""
