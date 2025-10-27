@@ -246,7 +246,11 @@ def validate_pyrender(test_ast:UOp):
   from tinygrad.codegen.opt import Opt, OptOps
   from tinygrad.uop.ops import KernelInfo
   code = '\n'.join(pyrender(test_ast))
-  lcls:dict[str, Any] = {"inf": math.inf, "KernelInfo": KernelInfo, "Opt": Opt, "OptOps": OptOps}
+  lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Opt": Opt, "OptOps": OptOps}
   exec(code, None, lcls)
   if lcls['ast'] is not test_ast:
-    raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{test_ast}\nPRODUCED:\n{lcls['ast']}")
+    if str(test_ast) == str(lcls['ast']):
+      for u1,u2 in zip(list(test_ast.toposort()), list(lcls['ast'].toposort())):
+        if u1 is not u2:
+          raise RuntimeError("STRING SAME, UOP MISMATCH", u1, u2, id(u1), id(u2), id(u1.arg), id(u2.arg))
+    raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nSTR MATCH: {str(test_ast) == str(lcls['ast'])}\nUOP:\n{test_ast}\nPRODUCED:\n{lcls['ast']}")
