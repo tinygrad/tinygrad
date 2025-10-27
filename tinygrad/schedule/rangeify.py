@@ -319,13 +319,13 @@ def bufferize_to_store(x:UOp, allow_locals=True):
       mops.append((walk.op, walk.marg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
-    return ret.forced_reshape(shape).replace(tag=x.tag)
+    return ret.reshape(shape, can_fold=False).replace(tag=x.tag)
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
     do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], tag=x.tag).end(*[x for x in rngs if x.op is Ops.RANGE])
-    ret = buf.after(do_store).forced_reshape(shape)
+    ret = buf.after(do_store).reshape(shape, can_fold=False)
     # TODO: is this right? what if it's offset
     if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
       sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
