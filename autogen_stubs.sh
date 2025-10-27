@@ -237,15 +237,6 @@ generate_sqtt() {
   sed -i "s|FunctionFactoryStub()|_try_dlopen_rocprof_trace_decoder()|g" $BASE/rocprof.py
 }
 
-generate_webgpu() {
-  clang2py extra/webgpu/webgpu.h -o $BASE/webgpu.py
-  fixup $BASE/webgpu.py
-  sed -i "s/FIXME_STUB/webgpu/g" "$BASE/webgpu.py"
-  sed -i "s/FunctionFactoryStub()/ctypes.CDLL(webgpu_support.WEBGPU_PATH)/g" "$BASE/webgpu.py"
-  sed -i "s/import ctypes/import ctypes, tinygrad.runtime.support.webgpu as webgpu_support/g" "$BASE/webgpu.py"
-  python3 -c "import tinygrad.runtime.autogen.webgpu"
-}
-
 generate_libusb() {
   clang2py -k cdefstum \
     /usr/include/libusb-1.0/libusb.h \
@@ -342,9 +333,8 @@ elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
-elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_amd; generate_am; generate_webgpu; generate_mesa
+elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_amd; generate_am; generate_mesa
 else echo "usage: $0 <type>"
 fi

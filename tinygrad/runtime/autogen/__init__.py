@@ -48,3 +48,7 @@ llvm = Autogen("llvm","ctypes.CDLL(LLVM_PATH)",lambda:[subprocess.check_output([
 
 pci = Autogen("pci", None, ["/usr/include/linux/pci_regs.h"])
 vfio = Autogen("vfio", None, ["/usr/include/linux/vfio.h"])
+
+# could add rule: WGPU_COMMA -> ','
+webgpu = Autogen("webgpu", "ctypes.CDLL(WEBGPU_PATH)", [root/"extra/webgpu/webgpu.h"],
+                 prelude=["from tinygrad.runtime.support.webgpu import WEBGPU_PATH"])
