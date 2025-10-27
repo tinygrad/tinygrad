@@ -6,41 +6,13 @@ from tinygrad.helpers import getenv, tqdm
 
 from icecream import ic
 
-
-params = {"dim": 2880, "hidden_dim": 2880, "head_dim": 64,
-          "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24,
-          "n_experts": 32, "n_active_experts": 4,
-          "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "max_context": 4096,
-          "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
-          }
-torch_params = {"hidden_size": 2880, "intermediate_size": 2880, "head_dim": 64,
-                "num_attention_heads": 64, "num_key_value_heads": 8, "num_hidden_layers": 24,
-                "num_local_experts": 32, "num_experts_per_tok": 4,
-                "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "initial_context_length": 4096,
-                "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
-                }
-
-# small params
-small_params = {"dim": 2, "hidden_dim": 12, "head_dim": 2,
-                "n_heads": 2, "n_kv_heads": 1, "num_blocks": 2,
-                "n_experts": 3, "n_active_experts": 2,
-                "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "max_context": 128,
-                "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
-                }
-small_torch_params = {"hidden_size": 2, "intermediate_size": 12, "head_dim": 2,
-                      "num_attention_heads": 2, "num_key_value_heads": 1, "num_hidden_layers": 2,
-                      "num_local_experts": 3, "num_experts_per_tok": 2,
-                      "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "initial_context_length": 128,
-                      "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
-                      }
-
-def set_equal_weights(model, torch_model, fakeweights):
+def set_equal_weights(model, torch_model, fakeweights, num_blocks):
   from tinygrad.nn.state import get_state_dict
   from tinygrad.dtype import _from_torch_dtype
   from tinygrad.apps.llm2 import get_keymap
 
   # map hf to tinygrad model state keys
-  keymap = {v: k for k, v in get_keymap(params["num_blocks"]).items()}
+  keymap = {v: k for k, v in get_keymap(num_blocks).items()}
   def fix_mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
   keymap = {fix_mxfp4_keymap(k): fix_mxfp4_keymap(v) for k, v in keymap.items()}
 
@@ -64,10 +36,36 @@ class TestGPTOSS(unittest.TestCase):
     Tensor.manual_seed(42)
     np.random.seed(42)
 
+    params = {"dim": 2880, "hidden_dim": 2880, "head_dim": 64,
+              "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24,
+              "n_experts": 32, "n_active_experts": 4,
+              "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "max_context": 4096,
+              "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
+              }
+    torch_params = {"hidden_size": 2880, "intermediate_size": 2880, "head_dim": 64,
+                    "num_attention_heads": 64, "num_key_value_heads": 8, "num_hidden_layers": 24,
+                    "num_local_experts": 32, "num_experts_per_tok": 4,
+                    "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "initial_context_length": 4096,
+                    "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
+                    }
+
+    # small params
+    small_params = {"dim": 2, "hidden_dim": 12, "head_dim": 2,
+                    "n_heads": 2, "n_kv_heads": 1, "num_blocks": 2,
+                    "n_experts": 3, "n_active_experts": 2,
+                    "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "max_context": 128,
+                    "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
+                    }
+    small_torch_params = {"hidden_size": 2, "intermediate_size": 12, "head_dim": 2,
+                          "num_attention_heads": 2, "num_key_value_heads": 1, "num_hidden_layers": 2,
+                          "num_local_experts": 3, "num_experts_per_tok": 2,
+                          "norm_eps": 1e-5, "vocab_size": 24, "sliding_window": 2, "initial_context_length": 128,
+                          "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
+                          }
+
     if getenv("SMALL") == 1:
-      params["num_blocks"] = torch_params["num_hidden_layers"] = 2
-      params["max_context"] = torch_params["initial_context_length"] = 32
-      params["vocab_size"] = torch_params["vocab_size"] = 10
+      params["num_blocks"] = torch_params["num_hidden_layers"] = 2 # fewer layers
+      params["max_context"] = torch_params["initial_context_length"] = 32 # reduce kv cache
     elif getenv("SMALL") == 2:
       params, torch_params = small_params, small_torch_params
 
@@ -79,7 +77,7 @@ class TestGPTOSS(unittest.TestCase):
     # Create in torch
     if getenv("TORCH"):
       with torch.no_grad():
-        torch_device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
+        torch_device = torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
         torch_config = GptOssConfig(**torch_params)
         torch_model = TorchGptOss(torch_config).to(torch_device)
         print(f"loaded torch model on {torch_device}")
@@ -91,13 +89,12 @@ class TestGPTOSS(unittest.TestCase):
         model = GptOss.from_pretrained(model_path, params)
         print("loaded tinygrad weights")
       if getenv("TORCH"):
-        # torch_model = torch_model.from_pretrained(model_path, local_files_only=True, cache_dir=model_path).to(torch_device)
         torch_model = torch_model.from_pretrained(model_path, config=torch_config, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path, device_map=torch_device)
         print("loaded torch weights")
 
     if getenv("TORCH") and getenv("TINY"):
       # set weights and check each weight has the same shape, dtype
-      set_equal_weights(model, torch_model, getenv("FAKEWEIGHTS", False))
+      set_equal_weights(model, torch_model, getenv("FAKEWEIGHTS", False), params["num_blocks"])
 
     # forward pass
     seeds = (1337, 3141)
