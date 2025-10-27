@@ -14,6 +14,8 @@ class InvalidTypeMetaClass(type):
 
 class InvalidType(metaclass=InvalidTypeMetaClass):
   def __eq__(self, other): return self is other
+  def __lt__(self, other): return self is not other
+  def __gt__(self, other): return self is not other
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
   def __reduce__(self): return (InvalidType, ())  # Return the global Invalid instance

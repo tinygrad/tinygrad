@@ -264,8 +264,6 @@ jobs:
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
       run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
-    - name: Check SPEC=2
-      run: SPEC=2 python3 test/test_tiny.py
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     # TODO: too slow
@@ -293,6 +291,21 @@ jobs:
         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
     - name: Repo line count < 18000 lines
       run: MAX_LINE_COUNT=18000 python sz.py
+
+  spec:
+    name: SPEC=2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: spec-unit
+        deps: testing_unit
+    - name: Test SPEC=2
+      run: SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --ignore test/test_nn.py --timeout 40 -k "not test_setitem_big"
 
   fuzzing:
     name: Fuzzing
