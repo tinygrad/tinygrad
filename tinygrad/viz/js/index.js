@@ -70,11 +70,10 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
-  nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
-    const x = d.labelWidth/2;
-    const y = d.labelHeight/2+STROKE_WIDTH*2;
-    return `translate(-${x}, -${y})`;
-  }).selectAll("text").data(d => {
+  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
+    return d.labelWidth != null ? `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})` : null;
+  });
+  labels.selectAll("text").data(d => {
     const ret = [[]];
     for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
       const lines = st.split("\n");
