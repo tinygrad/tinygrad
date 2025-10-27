@@ -335,6 +335,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
+  def vectorize(self, *src, **kwargs): return UOp(Ops.VECTORIZE, self.dtype.vec(1+len(src)), (self,)+src, **kwargs)
   def broadcast(self, count:int):
     assert self.dtype.count == 1
     if count == 1: return self
@@ -723,9 +724,9 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     fxn, varnames = self._sym_fxn
     return fxn(**{k:v for k,v in var_vals.items() if k in varnames})
 
-  def render(self, simplify=True, pm:PatternMatcher|None=None) -> str:
+  def render(self, simplify=True, pm:PatternMatcher|None=None, bottom_up=False) -> str:
     with Context(TRACK_MATCH_STATS=0, SPEC=0):
-      ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
+      ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm, bottom_up=bottom_up)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
 
 @dataclass(frozen=True)
@@ -1232,10 +1233,12 @@ renderer_infer = PatternMatcher([
 ])
 
 sugar = { Ops.SINK: "sink", Ops.STORE: "store", Ops.LOAD: "load", Ops.SQRT: "sqrt", Ops.INDEX: "index", Ops.REDUCE: "reduce",
+          Ops.BIND: "bind", Ops.ASSIGN: "assign",
           Ops.WHERE: "where", Ops.RECIP: "reciprocal", Ops.EXP2: "exp2", Ops.LOG2: "log2", Ops.SIN: "sin", Ops.CONTIGUOUS: "contiguous"}
 pm_pyrender = PatternMatcher([
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),), name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.const({x.dtype}, {x.arg}, device=\"{x.src[0].arg}\")")),
   (UPat(Ops.CONST, src=(UPat(Ops.NOOP),), name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.const({x.dtype}, {x.arg}, src={x.src[0].arg})")),
-  (UPat(Ops.CONST, name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.const({x.dtype}, {x.arg})")),
+  (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.const({x.dtype}, {x.arg})")),
   (UPat(Ops.END, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.end({', '.join([y.arg for y in x.src[1:]])})")),
   (UPat(Ops.CAST, src=(UPat(Ops.NOOP),), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.cast({x.dtype})")),
   (UPat(Ops.BITCAST, src=(UPat(Ops.NOOP),), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.bitcast({x.dtype})")),
@@ -1258,18 +1261,22 @@ pm_pyrender = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.NOOP, name="x"), UPat(Ops.DEVICE, name="d"))), lambda x,d: UOp(Ops.NOOP, arg=
     f"{x.arg}.copy_to_device(\"{d.arg}\")")),
   # MovementOp render is short circuited
-  #(UPat(GroupOp.Movement, name="x"), lambda x: UOp(Ops.NOOP, arg=
-  #  f"{x.src[0].arg}.{x.op.name.lower()}()")),
+  (UPat({Ops.PERMUTE, Ops.FLIP}, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.{x.op.name.lower()}({x.arg})")),
+  (UPat({Ops.RESHAPE, Ops.EXPAND, Ops.SHRINK, Ops.PAD}, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=
+    f"{x.src[0].arg}.f({x.op}, src=({', '.join([y.arg for y in x.src[1:]])},))")),
+  (UPat(Ops.VECTORIZE, src=(), name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp({x.op}, dtype={x.dtype})")),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.NOOP), name="x"), lambda x: UOp(Ops.NOOP, arg=f"UOp.vectorize({', '.join([y.arg for y in x.src])})")),
 ])
 
 @Context(SPEC=0)
 def pyrender(ast:UOp) -> list[str]:
   cmap = ast.get_consumer_map()
   to_render = set({ast})
-  not_rendered = {Ops.CONST, Ops.DEVICE, Ops.BUFFER}
+  always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.BUFFER, Ops.COPY, Ops.CONTIGUOUS} | GroupOp.Movement
+  not_rendered = {Ops.VCONST, Ops.CONST, Ops.DEVICE, Ops.BUFFER, Ops.VECTORIZE}
   for u in ast.toposort():
     if u.op is Ops.STORE: to_render.add(u.src[1])
-    if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.BUFFER, Ops.COPY} or u.op in not_rendered: continue
+    if len(cmap[u]) == 1 and u.op not in always_rendered or u.op in not_rendered: continue
     if u.op in {Ops.SINK}:
       for s in u.src: to_render.add(s)
     to_render.add(u)

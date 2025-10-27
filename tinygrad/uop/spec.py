@@ -1,4 +1,5 @@
-from typing import cast
+import math
+from typing import cast, Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.helpers import DEBUG, Context, prod
@@ -243,6 +244,7 @@ def type_verify(uops:list[UOp], check_spec:PatternMatcher):
 @Context(SPEC=0)
 def validate_pyrender(test_ast:UOp):
   code = '\n'.join(pyrender(test_ast))
-  lcls:dict[str, UOp] = {}
+  lcls:dict[str, Any] = {"inf": math.inf}
   exec(code, None, lcls)
-  if lcls['ast'] is not test_ast: raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{test_ast}\nPRODUCED:\n{lcls['ast']}")
+  if lcls['ast'] is not test_ast:
+    raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{test_ast}\nPRODUCED:\n{lcls['ast']}")
