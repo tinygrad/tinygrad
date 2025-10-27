@@ -759,7 +759,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_pow_neg_05_is_rsqrt(self):
     t = Tensor([1.0, 2.0, 3.0]) ** -0.5
-    self.assertEqual(self._alu_from_tensor(t), [Ops.RECIP, Ops.SQRT])
+    self.assertEqual(self._alu_from_tensor(t), [Ops.RECIPROCAL, Ops.SQRT])
 
   def test_pow_2_has_1_mul(self):
     t = Tensor([1.0, 2.0, 3.0]) ** Tensor(2.0)
