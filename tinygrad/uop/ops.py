@@ -1270,7 +1270,7 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(), UPat()), name="x"), lambda ctx,x:
    f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, dtype={x.dtype})" if x.src[0].dtype != x.dtype else None),
   # TODO: fix forced_reshape
-  (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})"),
+  (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})" if x.src[0].shape == x.shape else None),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
   (UPat(set(syms.keys())-{Ops.SUB, Ops.CMPNE}, src=(UPat(Ops.CONST, name="y"), UPat(name="z")), name="x"),
@@ -1300,7 +1300,7 @@ def pyrender(ast:UOp) -> str:
   ret: dict[str, str] = {}
   r: dict[UOp, str] = {}
 
-  not_rendered = {Ops.CONST}
+  not_rendered = {Ops.CONST, Ops.VCONST}
   always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE}
   to_render: set[UOp] = {ast}
   for u in uops:
