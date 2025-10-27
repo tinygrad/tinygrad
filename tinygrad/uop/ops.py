@@ -65,6 +65,12 @@ class UOpMetaClass(type):
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
     if SPEC > 1:
+      if SPEC > 2:
+        with Context(SPEC=0):
+          code = '\n'.join(pyrender(created))
+          lcls:dict[str, UOp] = {}
+          exec(code, None, lcls)
+          if lcls['ast'] is not created: raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{created}\nPRODUCED:\n{lcls['ast']}")
       from tinygrad.uop.spec import full_spec
       with Context(IGNORE_OOB=1): ret = full_spec.rewrite(created)
       if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {created}")
@@ -1254,7 +1260,7 @@ pm_pyrender = PatternMatcher([
 @Context(SPEC=0)
 def pyrender(ast:UOp) -> list[str]:
   cmap = ast.get_consumer_map()
-  to_render = set()
+  to_render = set({ast})
   for u in ast.toposort():
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if len(cmap[u]) == 1 and u.op not in {Ops.DEFINE_GLOBAL, Ops.LOAD} or u.op in {Ops.CONST}: continue
