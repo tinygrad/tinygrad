@@ -1,5 +1,5 @@
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, SPEC
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, test_pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
 
@@ -20,6 +20,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   if ren is None: ren = Renderer()
 
   if SPEC: type_verify(list(sink.toposort()), kernel_spec)
+  if SPEC > 1: test_pyrender(sink)
 
   # first we optimize
   if optimize:
@@ -87,6 +88,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   # return the rewritten sink
+  if SPEC > 1: test_pyrender(sink)
   return sink
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:

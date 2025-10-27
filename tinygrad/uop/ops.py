@@ -53,6 +53,19 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
+def test_pyrender(u:UOp):
+  from tinygrad.dtype import AddrSpace
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
+  code = pyrender(u)
+  print(code)
+  lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan,
+                          "KernelInfo": KernelInfo, "Kernel": Kernel,
+                          "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
+  exec(code, None, lcls)
+  if lcls['ast'] is not u: raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{u}\nPRODUCED:\n{lcls['ast']}")
+  return code
+
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
@@ -65,19 +78,7 @@ class UOpMetaClass(type):
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
     if SPEC > 1:
-      if SPEC > 2:
-        with Context(SPEC=0):
-          from tinygrad.dtype import AddrSpace
-          from tinygrad.codegen.opt import Opt, OptOps
-          from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
-          code = pyrender(created)
-          lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan,
-                                 "KernelInfo": KernelInfo, "Kernel": Kernel,
-                                 "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
-          print(code)
-          exec(code, None, lcls)
-          if lcls['ast'] is not created:
-            raise RuntimeError(f"PYRENDER ISSUE:\nCODE:\n{code}\nUOP:\n{created}\nPRODUCED:\n{lcls['ast']}")
+      if SPEC > 2: test_pyrender(created)
       from tinygrad.uop.spec import full_spec
       with Context(IGNORE_OOB=1): ret = full_spec.rewrite(created)
       if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {created}")
@@ -1243,6 +1244,7 @@ renderer_infer = PatternMatcher([
   *renderer.patterns
 ])
 
+"""
 sugar = { Ops.SINK: "sink", Ops.STORE: "store", Ops.LOAD: "load", Ops.SQRT: "sqrt", Ops.INDEX: "index", Ops.REDUCE: "reduce",
           Ops.WHERE: "where", Ops.RECIP: "reciprocal", Ops.EXP2: "exp2", Ops.LOG2: "log2", Ops.SIN: "sin"}
 pm_pyrender = PatternMatcher([
@@ -1263,21 +1265,31 @@ pm_pyrender = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.NOOP),), name="x"),
    lambda x: UOp(Ops.NOOP, arg=f"{x.src[0].arg}.f({x.op}, arg=({', '.join([str(y) for y in x.arg])}))")),
 ])
+"""
+
+sugar = { Ops.SINK: "sink" } #, Ops.STORE: "store", Ops.LOAD: "load" }
+#, Ops.SQRT: "sqrt", Ops.INDEX: "index", Ops.REDUCE: "reduce",
+#          Ops.WHERE: "where", Ops.RECIP: "reciprocal", Ops.EXP2: "exp2", Ops.LOG2: "log2", Ops.SIN: "sin"}
+pm_pyrender = PatternMatcher([
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"),), name="x"), lambda x,d: f"UOp.const({x.dtype}, {x.arg}, device={repr(d.arg)})"),
+  (UPat(Ops.CONST, name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
+  (UPat(Ops.SINK, src=()), lambda: UOp.sink()),
+  (UPat(set(sugar.keys()), name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{sugar[x.op]}("+', '.join([ctx[y] for y in x.src[1:]] + \
+    ([f'arg={repr(x.arg)}'] if x.arg is not None else []) + ([f'tag={repr(x.tag)}'] if x.tag is not None else []))+")"),
+  (UPat(GroupOp.All, name="u"), lambda ctx,u: "UOp("+', '.join([str(u.op), str(u.dtype)] + \
+    [f"({ctx[u.src[0]]},)" if len(u.src) == 1 else f"({','.join([ctx[x] for x in u.src])})"] + \
+    ([f"arg={repr(u.arg)}"] if u.arg is not None else []) + ([f"tag={repr(u.tag)}"] if u.tag is not None else []))+")"),
+])
 
 @Context(SPEC=0)
 def pyrender(ast:UOp) -> str:
   uops = list(ast.toposort())
-  ret = []
+  ret: dict[str, str] = {}
   r: dict[UOp, str] = {}
   for i,u in enumerate(uops):
     r[u] = f"c{i}" if u is not uops[-1] else "ast"
-    pieces = [str(u.op), str(u.dtype)]
-    if len(u.src) == 1: pieces.append(f"src=({r[u.src[0]]},)")
-    elif len(u.src) > 1: pieces.append(f"src=({','.join([r[x] for x in u.src])})")
-    if u.arg is not None: pieces.append(f"arg={repr(u.arg)}")
-    if u.tag is not None: pieces.append(f"tag={repr(u.tag)}")
-    ret.append(f"{r[u]} = UOp({', '.join(pieces)})")
-  return '\n'.join(ret)
+    ret[r[u]] = cast(str, pm_pyrender.rewrite(u, ctx=r))
+  return '\n'.join([f"{k} = {v}" for k,v in ret.items()])
 
   """
   cmap = ast.get_consumer_map()
