@@ -123,7 +123,7 @@ program_spec = PatternMatcher([
 
   # LOAD (idx, alt_value) / STORE(if gated) / LOAD(idx) / STORE(idx, val)
   (UPat().index(UPat(), UPat(dtype=dtypes.bool, name="gate"), name="idx").or_casted().load(UPat()), validate_index),
-  (UPat().after(UPat(Ops.RANGE, src=(UPat.var("gate"),), allow_any_len=True)).index(UPat(), name="idx").or_casted().store(UPat()), validate_index),
+  (UPat().index(UPat(), UPat(dtype=dtypes.bool, name="gate"), name="idx").or_casted().store(UPat()), validate_index),
   (UPat().index(UPat(), name="idx").or_casted().load(), validate_index),
   (UPat().index(UPat(), name="idx").or_casted().store(UPat()), validate_index),
 

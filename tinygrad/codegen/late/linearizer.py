@@ -1,7 +1,7 @@
 import heapq
 from collections import defaultdict
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, AxisType
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, AxisType, GroupOp
 
 def linearize(u:UOp) -> list[UOp]:
   # this is a toposort with priority
@@ -80,8 +80,7 @@ pm_prepare_control_flow = PatternMatcher([
   # split the ends
   (UPat(Ops.END, name="e"), do_split_ends),
   # add if ranges
-  (UPat(Ops.STORE, src=(
-    UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"), UPat(name="gate", dtype=dtypes.bool))).or_casted("cast"), UPat.var("val"))),
-      lambda ctx,buf,idx,gate,cast,val:
-        buf.after(r:=UOp.range(gate.cast(dtypes.int), next(ctx), AxisType.IF, dtype=dtypes.int)).index(idx).cast(cast.dtype).store(val).end(r)),
+  (UPat(GroupOp.Defines, name="buf").index(UPat.var("idx"), UPat(name="gate", dtype=dtypes.bool)).or_casted("cast").store(UPat.var("val")),
+    lambda ctx,buf,idx,gate,cast,val:
+      buf.after(r:=UOp.range(gate.cast(dtypes.int), next(ctx), AxisType.IF, dtype=dtypes.int)).index(idx, gate).cast(cast.dtype).store(val).end(r)),
 ])
