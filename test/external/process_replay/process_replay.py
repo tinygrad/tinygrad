@@ -51,21 +51,18 @@ def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str,
   return to_str(new_sink), to_str(big_sink.substitute(ret)), (big_sink,)
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
-  # if this is replaying get_program called in search.py, the arg and tag will be non-None
-  sink_arg = ast.arg or KernelInfo(opts_to_apply=tuple(opts) if opts is not None else None)
-  # we always use the name from the captured ProgramSpec
+  # the ast.arg is non None if we are inside of search.py
+  sink_arg = ast.arg or KernelInfo(opts_to_apply=p.applied_opts if BEAM>=1 else None)
   input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
-  # properly color the name arg
-  ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   # if no renderer was provided, open the device to get it
   if renderer is None: renderer = Device[p.device].renderer
+  p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
     if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
     return ret.src
-  # if this is a beamed kernle we skip it
-  if BEAM>=1 and input_ast.tag is None: return to_str(p), to_str(p), (ast_repr, renderer)
-  p2 = get_program(input_ast, renderer=renderer)
+  # properly color the name arg
+  ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_rangeify_map":replay_get_rangeify_map, "get_program":replay_get_program}
