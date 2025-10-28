@@ -69,6 +69,9 @@ def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
     if u in excluded: continue
     argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
+    if u.op is Ops.KERNEL:
+      ast_str = f"SINK{tuple(s.op for s in u.arg.ast.src)}" if u.arg.ast.op is Ops.SINK else repr(u.arg.ast.op)
+      argst = f"<Kernel {len(list(u.arg.ast.toposort()))} {ast_str} {[str(m) for m in u.arg.metadata]}>"
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.BUFFERIZE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
