@@ -121,10 +121,12 @@ program_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
 
-  # LOAD(idx) / LOAD (idx, alt_value) / STORE(idx, val)
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), )), validate_index),
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
+  # LOAD (idx, alt_value) / STORE(if gated) / LOAD(idx) / STORE(idx, val)
+  (UPat(Ops.LOAD,  src=(UPat().index(UPat(), UPat(dtype=dtypes.bool, name="gate"), name="idx").or_casted(), UPat())), validate_index),
+  (UPat(Ops.STORE, src=(
+    UPat().after(UPat(Ops.RANGE, src=(UPat.var("gate"),), allow_any_len=True)).index(UPat(), name="idx").or_casted(), UPat())), validate_index),
+  (UPat(Ops.LOAD,  src=(UPat().index(UPat(), name="idx").or_casted(), )), validate_index),
+  (UPat(Ops.STORE, src=(UPat().index(UPat(), name="idx").or_casted(), UPat())), validate_index),
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
