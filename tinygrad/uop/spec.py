@@ -126,14 +126,16 @@ shared_codegen_spec = PatternMatcher([
 
   # all CUSTOM + PRECAST
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
+
+  # Index
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx"))), validate_index),
 ])
 
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
-  # INDEX is used in new style load/store
+  # INDEX with a gate as third src
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx"))), validate_index),
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
@@ -142,7 +144,9 @@ program_spec = PatternMatcher([
   # make sure all index dtypes have been lowered
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
-  (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.src)),
+  (UPat(Ops.VCONST, name="x"), lambda x: len(x.arg)>1 and len(x.arg) == x.dtype.vcount and
+    type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)) and all(v is not Invalid for v in x.src)),
+
   # specials are always int32
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
 
@@ -177,9 +181,6 @@ kernel_spec = PatternMatcher([
   # bufferize (must be on ranges)
   (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
-
-  # intermediate index
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx", dtypes.index))), validate_index),
 ])+shared_codegen_spec+shared_spec
 
 # *** this spec should match all UOps ever created ***
