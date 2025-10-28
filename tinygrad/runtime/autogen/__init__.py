@@ -44,7 +44,8 @@ ib = Autogen("ib", "ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=T
              "/usr/include/infiniband/verbs_api.h","/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"])
 
 llvm = Autogen("llvm","ctypes.CDLL(LLVM_PATH)",lambda:[subprocess.check_output(["llvm-config-14","--includedir"]).decode().strip()+"/llvm-c/**/*.h"],
-  lambda: subprocess.check_output(["llvm-config-14", "--cflags"]).decode().split(), prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
+  lambda: subprocess.check_output(["llvm-config-14", "--cflags"]).decode().split(), recsym=True,
+  prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
 
 pci = Autogen("pci", None, ["/usr/include/linux/pci_regs.h"])
 vfio = Autogen("vfio", None, ["/usr/include/linux/vfio.h"])

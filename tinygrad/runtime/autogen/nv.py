@@ -467,10 +467,10 @@ msgqRxHeader._fields_ = [
 ]
 class msgqMetadata(ctypes.Structure): pass
 NvU8 = ctypes.c_ubyte
-msgqFcnNotifyRemote = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p))
-msgqFcnBackendRw = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p))
-msgqFcnCacheOp = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint))
-msgqFcnBarrier = ctypes.POINTER(ctypes.CFUNCTYPE(None))
+msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
+msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p)
+msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint)
+msgqFcnBarrier = ctypes.CFUNCTYPE(None)
 msgqMetadata._fields_ = [
   ('pOurTxHdr', ctypes.POINTER(msgqTxHeader)),
   ('pTheirTxHdr', ctypes.POINTER(msgqTxHeader)),

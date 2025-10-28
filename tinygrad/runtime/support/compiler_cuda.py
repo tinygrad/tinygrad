@@ -1,11 +1,8 @@
 import subprocess, hashlib, tempfile, ctypes, re, pathlib
 from typing import Callable
-from tinygrad.helpers import colored, init_c_var, getenv
+from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
 import tinygrad.runtime.autogen.nvrtc as nvrtc, tinygrad.runtime.autogen.nvjitlink as jitlink
 from tinygrad.device import Compiler, CompileError
-
-def to_char_p_p(options: list[bytes]):
-  return ctypes.cast((ctypes.c_char_p * len(options))(*options), ctypes.POINTER(ctypes.c_char_p))
 
 CUDA_PATH = getenv("CUDA_PATH", "")
 

@@ -18,9 +18,9 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[x
          (r'\((unsigned )?(char)\)', ''), (r'^.*[?;].*$', ''), (r'^.*\d+:\d+.*$', ''), (r'^.*\w##\w.*$', '')]
 
 class Autogen:
-  def __init__(self, name, dll, files, args=[], prelude=[], rules=[], tarball=None):
+  def __init__(self, name, dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False):
     self.name, self.dll, self.loaded, self.files, self.args, self.prelude, self.tarball = name, dll, False, files, args, prelude, tarball
-    self.rules = rules + base_rules
+    self.rules, self.recsym = rules + base_rules, recsym
     if not os.path.exists(pathlib.Path(__file__).parent / f"{self.name}.py"): self.gen()
 
   @functools.cached_property
@@ -50,11 +50,11 @@ class Autogen:
       tu = idx.parse(f, self.args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
       (pp:=PP.create(tu.cursor)).set_property(PPP.TerseOutput, 1)
       for c in tu.cursor.walk_preorder():
-        if str(c.location.file) != str(f): continue
+        if str(c.location.file) != str(f) and (not self.recsym or c.kind not in (CK.FUNCTION_DECL,)): continue
         match c.kind:
           case CK.FUNCTION_DECL if c.linkage == LK.EXTERNAL and self.dll is not None:
-            self.lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype,{c.spelling}.argtypes = "
-              f"{self.tname(c.result_type)},[{', '.join(self.tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
+            self.lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype, {c.spelling}.argtypes = "
+              f"{self.tname(c.result_type)}, [{', '.join(self.tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
           case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: self.tname(c.type)
           case CK.MACRO_DEFINITION if len(toks:=list(c.get_tokens())) > 1:
             if toks[1].spelling == '(' and toks[0].extent.end.column == toks[1].extent.start.column:
@@ -78,17 +78,18 @@ class Autogen:
     importlib.invalidate_caches()
 
   def tname(self, t, suggested_name=None) -> str:
-    from clang.cindex import Cursor, CursorKind as CK, TypeKind as TK
+    from clang.cindex import CursorKind as CK, TypeKind as TK
 
     tmap = {TK.VOID:"None", TK.CHAR_U:"ctypes.c_ubyte", TK.UCHAR:"ctypes.c_ubyte", TK.CHAR_S:"ctypes.c_char", TK.SCHAR:"ctypes.c_char",
             **{getattr(TK, k):f"ctypes.c_{k.lower()}" for k in
             ["BOOL", "USHORT", "UINT", "ULONG", "ULONGLONG", "WCHAR", "SHORT", "INT", "LONG", "LONGLONG", "FLOAT", "DOUBLE", "LONGDOUBLE"]}}
-    pmap = {TK.VOID:"ctypes.c_void_p", TK.WCHAR:"ctypes.c_wchar_p", **{k:"ctypes.c_char_p" for k in [TK.UCHAR, TK.SCHAR, TK.CHAR_S, TK.CHAR_U]}}
 
     if t.kind in tmap: return tmap[t.kind]
     if t.spelling in self.types: return self.types[t.spelling]
     match t.kind:
-      case TK.POINTER: return pmap[t.get_pointee().kind] if t.get_pointee().kind in pmap else f"ctypes.POINTER({self.tname(t.get_pointee())})"
+      case TK.POINTER if (f:=t.get_pointee()).kind == TK.FUNCTIONPROTO:
+        return f"ctypes.CFUNCTYPE({self.tname(f.get_result())}{((', '+', '.join(self.tname(a) for a in ats)) if (ats:=f.argument_types()) else '')})"
+      case TK.POINTER: return "ctypes.c_void_p" if t.get_pointee().kind == TK.VOID else f"ctypes.POINTER({self.tname(t.get_pointee())})"
       case TK.ELABORATED: return self.tname(t.get_named_type(), suggested_name)
       case TK.TYPEDEF if t.spelling == t.get_canonical().spelling: return self.tname(t.get_canonical())
       case TK.TYPEDEF:
@@ -111,8 +112,6 @@ class Autogen:
         self.lines.append(f"{self.types[t.spelling]} = CEnum({self.tname(decl.enum_type)})\n" +
           "\n".join(f"{e.spelling} = {self.types[t.spelling]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()) + "\n")
         return self.types[t.spelling]
-      case TK.FUNCTIONPROTO:
-        return f"ctypes.CFUNCTYPE({self.tname(t.get_result())}{((', '+', '.join(self.tname(a) for a in ats)) if (ats:=t.argument_types()) else '')})"
       case TK.CONSTANTARRAY: return f"({self.tname(t.get_array_element_type())} * {t.get_array_size()})"
       case TK.INCOMPLETEARRAY: return f"({self.tname(t.get_array_element_type())} * {0})"
       case _: raise NotImplementedError(f"unsupported type {t.kind} at {t.location.file}:{t.location.line}:{t.location.column}")

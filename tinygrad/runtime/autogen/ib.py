@@ -98,8 +98,8 @@ class struct_ibv_context(ctypes.Structure): pass
 class struct_ibv_device(ctypes.Structure): pass
 class struct__ibv_device_ops(ctypes.Structure): pass
 struct__ibv_device_ops._fields_ = [
-  ('_dummy1', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device), ctypes.c_int))),
-  ('_dummy2', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_context)))),
+  ('_dummy1', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device), ctypes.c_int)),
+  ('_dummy2', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_context))),
 ]
 struct_ibv_device._fields_ = [
   ('_ops', struct__ibv_device_ops),
@@ -485,38 +485,38 @@ struct_ibv_send_wr._fields_ = [
   ('_1', _anonunion2),
 ]
 struct_ibv_context_ops._fields_ = [
-  ('_compat_query_device', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr)))),
-  ('_compat_query_port', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr)))),
-  ('_compat_alloc_pd', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_dealloc_pd', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_reg_mr', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_rereg_mr', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_dereg_mr', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('alloc_mw', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_pd), enum_ibv_mw_type))),
-  ('bind_mw', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_mw_bind)))),
-  ('dealloc_mw', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_mw)))),
-  ('_compat_create_cq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('poll_cq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.c_int, ctypes.POINTER(struct_ibv_wc)))),
-  ('req_notify_cq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.c_int))),
-  ('_compat_cq_event', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_resize_cq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_destroy_cq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_create_srq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_modify_srq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_query_srq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_destroy_srq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('post_srq_recv', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr))))),
-  ('_compat_create_qp', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_query_qp', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_modify_qp', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_destroy_qp', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('post_send', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_send_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_send_wr))))),
-  ('post_recv', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr))))),
-  ('_compat_create_ah', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_destroy_ah', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_attach_mcast', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_detach_mcast', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
-  ('_compat_async_event', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p))),
+  ('_compat_query_device', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr))),
+  ('_compat_query_port', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr))),
+  ('_compat_alloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_dealloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_reg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_rereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_dereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('alloc_mw', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_pd), enum_ibv_mw_type)),
+  ('bind_mw', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_mw_bind))),
+  ('dealloc_mw', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_mw))),
+  ('_compat_create_cq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('poll_cq', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.c_int, ctypes.POINTER(struct_ibv_wc))),
+  ('req_notify_cq', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.c_int)),
+  ('_compat_cq_event', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_resize_cq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_destroy_cq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_create_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_modify_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_query_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_destroy_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('post_srq_recv', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr)))),
+  ('_compat_create_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_query_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_modify_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_destroy_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('post_send', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_send_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_send_wr)))),
+  ('post_recv', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr)))),
+  ('_compat_create_ah', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_destroy_ah', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_attach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_detach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_async_event', ctypes.CFUNCTYPE(ctypes.c_void_p)),
 ]
 struct_ibv_context._fields_ = [
   ('device', ctypes.POINTER(struct_ibv_device)),
@@ -529,8 +529,8 @@ struct_ibv_context._fields_ = [
 ]
 struct_ibv_dm._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
-  ('memcpy_to_dm', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_dm), uint64_t, ctypes.c_void_p, size_t))),
-  ('memcpy_from_dm', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(struct_ibv_dm), uint64_t, size_t))),
+  ('memcpy_to_dm', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_dm), uint64_t, ctypes.c_void_p, size_t)),
+  ('memcpy_from_dm', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(struct_ibv_dm), uint64_t, size_t)),
   ('comp_mask', uint32_t),
   ('handle', uint32_t),
 ]
@@ -773,7 +773,7 @@ struct_ibv_wq._fields_ = [
   ('handle', uint32_t),
   ('state', enum_ibv_wq_state),
   ('wq_type', enum_ibv_wq_type),
-  ('post_recv', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr))))),
+  ('post_recv', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr)))),
   ('mutex', pthread_mutex_t),
   ('cond', pthread_cond_t),
   ('events_completed', uint32_t),
@@ -791,7 +791,7 @@ struct_ibv_async_event._fields_ = [
   ('event_type', enum_ibv_event_type),
 ]
 # const char *ibv_wc_status_str(enum ibv_wc_status status)
-try: (ibv_wc_status_str:=dll.ibv_wc_status_str).restype,ibv_wc_status_str.argtypes = ctypes.c_char_p,[enum_ibv_wc_status]
+try: (ibv_wc_status_str:=dll.ibv_wc_status_str).restype, ibv_wc_status_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_wc_status]
 except AttributeError: pass
 
 _anonenum4 = CEnum(ctypes.c_uint)
@@ -913,19 +913,19 @@ IBV_RATE_800_GBPS = enum_ibv_rate.define('IBV_RATE_800_GBPS', 23)
 IBV_RATE_1200_GBPS = enum_ibv_rate.define('IBV_RATE_1200_GBPS', 24)
 
 # __attribute__((const)) int ibv_rate_to_mult(enum ibv_rate rate)
-try: (ibv_rate_to_mult:=dll.ibv_rate_to_mult).restype,ibv_rate_to_mult.argtypes = ctypes.c_int,[enum_ibv_rate]
+try: (ibv_rate_to_mult:=dll.ibv_rate_to_mult).restype, ibv_rate_to_mult.argtypes = ctypes.c_int, [enum_ibv_rate]
 except AttributeError: pass
 
 # __attribute__((const)) enum ibv_rate mult_to_ibv_rate(int mult)
-try: (mult_to_ibv_rate:=dll.mult_to_ibv_rate).restype,mult_to_ibv_rate.argtypes = enum_ibv_rate,[ctypes.c_int]
+try: (mult_to_ibv_rate:=dll.mult_to_ibv_rate).restype, mult_to_ibv_rate.argtypes = enum_ibv_rate, [ctypes.c_int]
 except AttributeError: pass
 
 # __attribute__((const)) int ibv_rate_to_mbps(enum ibv_rate rate)
-try: (ibv_rate_to_mbps:=dll.ibv_rate_to_mbps).restype,ibv_rate_to_mbps.argtypes = ctypes.c_int,[enum_ibv_rate]
+try: (ibv_rate_to_mbps:=dll.ibv_rate_to_mbps).restype, ibv_rate_to_mbps.argtypes = ctypes.c_int, [enum_ibv_rate]
 except AttributeError: pass
 
 # __attribute__((const)) enum ibv_rate mbps_to_ibv_rate(int mbps)
-try: (mbps_to_ibv_rate:=dll.mbps_to_ibv_rate).restype,mbps_to_ibv_rate.argtypes = enum_ibv_rate,[ctypes.c_int]
+try: (mbps_to_ibv_rate:=dll.mbps_to_ibv_rate).restype, mbps_to_ibv_rate.argtypes = enum_ibv_rate, [ctypes.c_int]
 except AttributeError: pass
 
 class struct_ibv_ah_attr(ctypes.Structure): pass
@@ -1197,7 +1197,7 @@ struct_ibv_qp_rate_limit_attr._fields_ = [
   ('comp_mask', uint32_t),
 ]
 # const char *ibv_wr_opcode_str(enum ibv_wr_opcode opcode)
-try: (ibv_wr_opcode_str:=dll.ibv_wr_opcode_str).restype,ibv_wr_opcode_str.argtypes = ctypes.c_char_p,[enum_ibv_wr_opcode]
+try: (ibv_wr_opcode_str:=dll.ibv_wr_opcode_str).restype, ibv_wr_opcode_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_wr_opcode]
 except AttributeError: pass
 
 enum_ibv_send_flags = CEnum(ctypes.c_uint)
@@ -1257,31 +1257,31 @@ struct_ibv_qp_ex._fields_ = [
   ('comp_mask', uint64_t),
   ('wr_id', uint64_t),
   ('wr_flags', ctypes.c_uint),
-  ('wr_atomic_cmp_swp', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint64_t, uint64_t))),
-  ('wr_atomic_fetch_add', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint64_t))),
-  ('wr_bind_mw', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.POINTER(struct_ibv_mw), uint32_t, ctypes.POINTER(struct_ibv_mw_bind_info)))),
-  ('wr_local_inv', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t))),
-  ('wr_rdma_read', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t))),
-  ('wr_rdma_write', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t))),
-  ('wr_rdma_write_imm', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_uint))),
-  ('wr_send', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex)))),
-  ('wr_send_imm', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_uint))),
-  ('wr_send_inv', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t))),
-  ('wr_send_tso', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_void_p, uint16_t, uint16_t))),
-  ('wr_set_ud_addr', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.POINTER(struct_ibv_ah), uint32_t, uint32_t))),
-  ('wr_set_xrc_srqn', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t))),
-  ('wr_set_inline_data', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_void_p, size_t))),
-  ('wr_set_inline_data_list', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), size_t, ctypes.POINTER(struct_ibv_data_buf)))),
-  ('wr_set_sge', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint32_t))),
-  ('wr_set_sge_list', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), size_t, ctypes.POINTER(struct_ibv_sge)))),
-  ('wr_start', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex)))),
-  ('wr_complete', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp_ex)))),
-  ('wr_abort', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex)))),
-  ('wr_atomic_write', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_void_p))),
-  ('wr_flush', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, size_t, uint8_t, uint8_t))),
+  ('wr_atomic_cmp_swp', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint64_t, uint64_t)),
+  ('wr_atomic_fetch_add', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint64_t)),
+  ('wr_bind_mw', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.POINTER(struct_ibv_mw), uint32_t, ctypes.POINTER(struct_ibv_mw_bind_info))),
+  ('wr_local_inv', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t)),
+  ('wr_rdma_read', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t)),
+  ('wr_rdma_write', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t)),
+  ('wr_rdma_write_imm', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_uint)),
+  ('wr_send', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex))),
+  ('wr_send_imm', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_uint)),
+  ('wr_send_inv', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t)),
+  ('wr_send_tso', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_void_p, uint16_t, uint16_t)),
+  ('wr_set_ud_addr', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.POINTER(struct_ibv_ah), uint32_t, uint32_t)),
+  ('wr_set_xrc_srqn', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t)),
+  ('wr_set_inline_data', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_void_p, size_t)),
+  ('wr_set_inline_data_list', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), size_t, ctypes.POINTER(struct_ibv_data_buf))),
+  ('wr_set_sge', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint32_t)),
+  ('wr_set_sge_list', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), size_t, ctypes.POINTER(struct_ibv_sge))),
+  ('wr_start', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex))),
+  ('wr_complete', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp_ex))),
+  ('wr_abort', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex))),
+  ('wr_atomic_write', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_void_p)),
+  ('wr_flush', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, size_t, uint8_t, uint8_t)),
 ]
 # struct ibv_qp_ex *ibv_qp_to_qp_ex(struct ibv_qp *qp)
-try: (ibv_qp_to_qp_ex:=dll.ibv_qp_to_qp_ex).restype,ibv_qp_to_qp_ex.argtypes = ctypes.POINTER(struct_ibv_qp_ex),[ctypes.POINTER(struct_ibv_qp)]
+try: (ibv_qp_to_qp_ex:=dll.ibv_qp_to_qp_ex).restype, ibv_qp_to_qp_ex.argtypes = ctypes.POINTER(struct_ibv_qp_ex), [ctypes.POINTER(struct_ibv_qp)]
 except AttributeError: pass
 
 class struct_ibv_ece(ctypes.Structure): pass
@@ -1313,24 +1313,24 @@ struct_ibv_cq_ex._fields_ = [
   ('comp_mask', uint32_t),
   ('status', enum_ibv_wc_status),
   ('wr_id', uint64_t),
-  ('start_poll', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_poll_cq_attr)))),
-  ('next_poll', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('end_poll', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_opcode', ctypes.POINTER(ctypes.CFUNCTYPE(enum_ibv_wc_opcode, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_vendor_err', ctypes.POINTER(ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_byte_len', ctypes.POINTER(ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_imm_data', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_qp_num', ctypes.POINTER(ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_src_qp', ctypes.POINTER(ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_wc_flags', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_slid', ctypes.POINTER(ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_sl', ctypes.POINTER(ctypes.CFUNCTYPE(uint8_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_dlid_path_bits', ctypes.POINTER(ctypes.CFUNCTYPE(uint8_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_completion_ts', ctypes.POINTER(ctypes.CFUNCTYPE(uint64_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_cvlan', ctypes.POINTER(ctypes.CFUNCTYPE(uint16_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_flow_tag', ctypes.POINTER(ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)))),
-  ('read_tm_info', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_wc_tm_info)))),
-  ('read_completion_wallclock_ns', ctypes.POINTER(ctypes.CFUNCTYPE(uint64_t, ctypes.POINTER(struct_ibv_cq_ex)))),
+  ('start_poll', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_poll_cq_attr))),
+  ('next_poll', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('end_poll', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_opcode', ctypes.CFUNCTYPE(enum_ibv_wc_opcode, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_vendor_err', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_byte_len', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_imm_data', ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_qp_num', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_src_qp', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_wc_flags', ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_slid', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_sl', ctypes.CFUNCTYPE(uint8_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_dlid_path_bits', ctypes.CFUNCTYPE(uint8_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_completion_ts', ctypes.CFUNCTYPE(uint64_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_cvlan', ctypes.CFUNCTYPE(uint16_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_flow_tag', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex))),
+  ('read_tm_info', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_wc_tm_info))),
+  ('read_completion_wallclock_ns', ctypes.CFUNCTYPE(uint64_t, ctypes.POINTER(struct_ibv_cq_ex))),
 ]
 enum_ibv_cq_attr_mask = CEnum(ctypes.c_uint)
 IBV_CQ_ATTR_MODERATE = enum_ibv_cq_attr_mask.define('IBV_CQ_ATTR_MODERATE', 1)
@@ -1648,8 +1648,8 @@ struct_ibv_parent_domain_init_attr._fields_ = [
   ('pd', ctypes.POINTER(struct_ibv_pd)),
   ('td', ctypes.POINTER(struct_ibv_td)),
   ('comp_mask', uint32_t),
-  ('alloc', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, size_t, uint64_t))),
-  ('free', ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, ctypes.c_void_p, uint64_t))),
+  ('alloc', ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, size_t, uint64_t)),
+  ('free', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, ctypes.c_void_p, uint64_t)),
   ('pd_context', ctypes.c_void_p),
 ]
 class struct_ibv_counters_init_attr(ctypes.Structure): pass
@@ -1694,163 +1694,163 @@ IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT = enum_ib_uverbs_advise_mr_advice.d
 class struct_verbs_ex_private(ctypes.Structure): pass
 struct_verbs_ex_private._fields_ = []
 struct_verbs_context._fields_ = [
-  ('query_port', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_port_attr), size_t))),
-  ('advise_mr', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_pd), enum_ib_uverbs_advise_mr_advice, uint32_t, ctypes.POINTER(struct_ibv_sge), uint32_t))),
-  ('alloc_null_mr', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd)))),
-  ('read_counters', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(uint64_t), uint32_t, uint32_t))),
-  ('attach_counters_point_flow', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(struct_ibv_counter_attach_attr), ctypes.POINTER(struct_ibv_flow)))),
-  ('create_counters', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_counters_init_attr)))),
-  ('destroy_counters', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_counters)))),
-  ('reg_dm_mr', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_dm), uint64_t, size_t, ctypes.c_uint))),
-  ('alloc_dm', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_dm), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_alloc_dm_attr)))),
-  ('free_dm', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_dm)))),
-  ('modify_flow_action_esp', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_flow_action), ctypes.POINTER(struct_ibv_flow_action_esp_attr)))),
-  ('destroy_flow_action', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_flow_action)))),
-  ('create_flow_action_esp', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_flow_action), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_flow_action_esp_attr)))),
-  ('modify_qp_rate_limit', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_rate_limit_attr)))),
-  ('alloc_parent_domain', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_parent_domain_init_attr)))),
-  ('dealloc_td', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_td)))),
-  ('alloc_td', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_td), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_td_init_attr)))),
-  ('modify_cq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.POINTER(struct_ibv_modify_cq_attr)))),
-  ('post_srq_ops', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_ops_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_ops_wr))))),
-  ('destroy_rwq_ind_table', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_rwq_ind_table)))),
-  ('create_rwq_ind_table', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_rwq_ind_table), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_rwq_ind_table_init_attr)))),
-  ('destroy_wq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_wq)))),
-  ('modify_wq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_wq_attr)))),
-  ('create_wq', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_wq_init_attr)))),
-  ('query_rt_values', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_values_ex)))),
-  ('create_cq_ex', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_cq_init_attr_ex)))),
+  ('query_port', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_port_attr), size_t)),
+  ('advise_mr', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_pd), enum_ib_uverbs_advise_mr_advice, uint32_t, ctypes.POINTER(struct_ibv_sge), uint32_t)),
+  ('alloc_null_mr', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd))),
+  ('read_counters', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(uint64_t), uint32_t, uint32_t)),
+  ('attach_counters_point_flow', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(struct_ibv_counter_attach_attr), ctypes.POINTER(struct_ibv_flow))),
+  ('create_counters', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_counters_init_attr))),
+  ('destroy_counters', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_counters))),
+  ('reg_dm_mr', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_dm), uint64_t, size_t, ctypes.c_uint)),
+  ('alloc_dm', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_dm), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_alloc_dm_attr))),
+  ('free_dm', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_dm))),
+  ('modify_flow_action_esp', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_flow_action), ctypes.POINTER(struct_ibv_flow_action_esp_attr))),
+  ('destroy_flow_action', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_flow_action))),
+  ('create_flow_action_esp', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_flow_action), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_flow_action_esp_attr))),
+  ('modify_qp_rate_limit', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_rate_limit_attr))),
+  ('alloc_parent_domain', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_parent_domain_init_attr))),
+  ('dealloc_td', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_td))),
+  ('alloc_td', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_td), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_td_init_attr))),
+  ('modify_cq', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.POINTER(struct_ibv_modify_cq_attr))),
+  ('post_srq_ops', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_ops_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_ops_wr)))),
+  ('destroy_rwq_ind_table', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_rwq_ind_table))),
+  ('create_rwq_ind_table', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_rwq_ind_table), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_rwq_ind_table_init_attr))),
+  ('destroy_wq', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_wq))),
+  ('modify_wq', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_wq_attr))),
+  ('create_wq', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_wq_init_attr))),
+  ('query_rt_values', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_values_ex))),
+  ('create_cq_ex', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_cq_init_attr_ex))),
   ('priv', ctypes.POINTER(struct_verbs_ex_private)),
-  ('query_device_ex', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_query_device_ex_input), ctypes.POINTER(struct_ibv_device_attr_ex), size_t))),
-  ('ibv_destroy_flow', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_flow)))),
-  ('ABI_placeholder2', ctypes.POINTER(ctypes.CFUNCTYPE(None))),
-  ('ibv_create_flow', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_flow), ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_flow_attr)))),
-  ('ABI_placeholder1', ctypes.POINTER(ctypes.CFUNCTYPE(None))),
-  ('open_qp', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_open_attr)))),
-  ('create_qp_ex', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_init_attr_ex)))),
-  ('get_srq_num', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(uint32_t)))),
-  ('create_srq_ex', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_srq_init_attr_ex)))),
-  ('open_xrcd', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_xrcd), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_xrcd_init_attr)))),
-  ('close_xrcd', ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_xrcd)))),
+  ('query_device_ex', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_query_device_ex_input), ctypes.POINTER(struct_ibv_device_attr_ex), size_t)),
+  ('ibv_destroy_flow', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_flow))),
+  ('ABI_placeholder2', ctypes.CFUNCTYPE(None)),
+  ('ibv_create_flow', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_flow), ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_flow_attr))),
+  ('ABI_placeholder1', ctypes.CFUNCTYPE(None)),
+  ('open_qp', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_open_attr))),
+  ('create_qp_ex', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_init_attr_ex))),
+  ('get_srq_num', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(uint32_t))),
+  ('create_srq_ex', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_srq_init_attr_ex))),
+  ('open_xrcd', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_xrcd), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_xrcd_init_attr))),
+  ('close_xrcd', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_xrcd))),
   ('_ABI_placeholder3', uint64_t),
   ('sz', size_t),
   ('context', struct_ibv_context),
 ]
 # struct ibv_device **ibv_get_device_list(int *num_devices)
-try: (ibv_get_device_list:=dll.ibv_get_device_list).restype,ibv_get_device_list.argtypes = ctypes.POINTER(ctypes.POINTER(struct_ibv_device)),[ctypes.POINTER(ctypes.c_int)]
+try: (ibv_get_device_list:=dll.ibv_get_device_list).restype, ibv_get_device_list.argtypes = ctypes.POINTER(ctypes.POINTER(struct_ibv_device)), [ctypes.POINTER(ctypes.c_int)]
 except AttributeError: pass
 
 # void ibv_free_device_list(struct ibv_device **list)
-try: (ibv_free_device_list:=dll.ibv_free_device_list).restype,ibv_free_device_list.argtypes = None,[ctypes.POINTER(ctypes.POINTER(struct_ibv_device))]
+try: (ibv_free_device_list:=dll.ibv_free_device_list).restype, ibv_free_device_list.argtypes = None, [ctypes.POINTER(ctypes.POINTER(struct_ibv_device))]
 except AttributeError: pass
 
 # const char *ibv_get_device_name(struct ibv_device *device)
-try: (ibv_get_device_name:=dll.ibv_get_device_name).restype,ibv_get_device_name.argtypes = ctypes.c_char_p,[ctypes.POINTER(struct_ibv_device)]
+try: (ibv_get_device_name:=dll.ibv_get_device_name).restype, ibv_get_device_name.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
 # int ibv_get_device_index(struct ibv_device *device)
-try: (ibv_get_device_index:=dll.ibv_get_device_index).restype,ibv_get_device_index.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_device)]
+try: (ibv_get_device_index:=dll.ibv_get_device_index).restype, ibv_get_device_index.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
 # __be64 ibv_get_device_guid(struct ibv_device *device)
-try: (ibv_get_device_guid:=dll.ibv_get_device_guid).restype,ibv_get_device_guid.argtypes = ctypes.c_ulonglong,[ctypes.POINTER(struct_ibv_device)]
+try: (ibv_get_device_guid:=dll.ibv_get_device_guid).restype, ibv_get_device_guid.argtypes = ctypes.c_ulonglong, [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
 # struct ibv_context *ibv_open_device(struct ibv_device *device)
-try: (ibv_open_device:=dll.ibv_open_device).restype,ibv_open_device.argtypes = ctypes.POINTER(struct_ibv_context),[ctypes.POINTER(struct_ibv_device)]
+try: (ibv_open_device:=dll.ibv_open_device).restype, ibv_open_device.argtypes = ctypes.POINTER(struct_ibv_context), [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
 # int ibv_close_device(struct ibv_context *context)
-try: (ibv_close_device:=dll.ibv_close_device).restype,ibv_close_device.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context)]
+try: (ibv_close_device:=dll.ibv_close_device).restype, ibv_close_device.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context)]
 except AttributeError: pass
 
 # struct ibv_context *ibv_import_device(int cmd_fd)
-try: (ibv_import_device:=dll.ibv_import_device).restype,ibv_import_device.argtypes = ctypes.POINTER(struct_ibv_context),[ctypes.c_int]
+try: (ibv_import_device:=dll.ibv_import_device).restype, ibv_import_device.argtypes = ctypes.POINTER(struct_ibv_context), [ctypes.c_int]
 except AttributeError: pass
 
 # struct ibv_pd *ibv_import_pd(struct ibv_context *context, uint32_t pd_handle)
-try: (ibv_import_pd:=dll.ibv_import_pd).restype,ibv_import_pd.argtypes = ctypes.POINTER(struct_ibv_pd),[ctypes.POINTER(struct_ibv_context), uint32_t]
+try: (ibv_import_pd:=dll.ibv_import_pd).restype, ibv_import_pd.argtypes = ctypes.POINTER(struct_ibv_pd), [ctypes.POINTER(struct_ibv_context), uint32_t]
 except AttributeError: pass
 
 # void ibv_unimport_pd(struct ibv_pd *pd)
-try: (ibv_unimport_pd:=dll.ibv_unimport_pd).restype,ibv_unimport_pd.argtypes = None,[ctypes.POINTER(struct_ibv_pd)]
+try: (ibv_unimport_pd:=dll.ibv_unimport_pd).restype, ibv_unimport_pd.argtypes = None, [ctypes.POINTER(struct_ibv_pd)]
 except AttributeError: pass
 
 # struct ibv_mr *ibv_import_mr(struct ibv_pd *pd, uint32_t mr_handle)
-try: (ibv_import_mr:=dll.ibv_import_mr).restype,ibv_import_mr.argtypes = ctypes.POINTER(struct_ibv_mr),[ctypes.POINTER(struct_ibv_pd), uint32_t]
+try: (ibv_import_mr:=dll.ibv_import_mr).restype, ibv_import_mr.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), uint32_t]
 except AttributeError: pass
 
 # void ibv_unimport_mr(struct ibv_mr *mr)
-try: (ibv_unimport_mr:=dll.ibv_unimport_mr).restype,ibv_unimport_mr.argtypes = None,[ctypes.POINTER(struct_ibv_mr)]
+try: (ibv_unimport_mr:=dll.ibv_unimport_mr).restype, ibv_unimport_mr.argtypes = None, [ctypes.POINTER(struct_ibv_mr)]
 except AttributeError: pass
 
 # struct ibv_dm *ibv_import_dm(struct ibv_context *context, uint32_t dm_handle)
-try: (ibv_import_dm:=dll.ibv_import_dm).restype,ibv_import_dm.argtypes = ctypes.POINTER(struct_ibv_dm),[ctypes.POINTER(struct_ibv_context), uint32_t]
+try: (ibv_import_dm:=dll.ibv_import_dm).restype, ibv_import_dm.argtypes = ctypes.POINTER(struct_ibv_dm), [ctypes.POINTER(struct_ibv_context), uint32_t]
 except AttributeError: pass
 
 # void ibv_unimport_dm(struct ibv_dm *dm)
-try: (ibv_unimport_dm:=dll.ibv_unimport_dm).restype,ibv_unimport_dm.argtypes = None,[ctypes.POINTER(struct_ibv_dm)]
+try: (ibv_unimport_dm:=dll.ibv_unimport_dm).restype, ibv_unimport_dm.argtypes = None, [ctypes.POINTER(struct_ibv_dm)]
 except AttributeError: pass
 
 # int ibv_get_async_event(struct ibv_context *context, struct ibv_async_event *event)
-try: (ibv_get_async_event:=dll.ibv_get_async_event).restype,ibv_get_async_event.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_async_event)]
+try: (ibv_get_async_event:=dll.ibv_get_async_event).restype, ibv_get_async_event.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_async_event)]
 except AttributeError: pass
 
 # void ibv_ack_async_event(struct ibv_async_event *event)
-try: (ibv_ack_async_event:=dll.ibv_ack_async_event).restype,ibv_ack_async_event.argtypes = None,[ctypes.POINTER(struct_ibv_async_event)]
+try: (ibv_ack_async_event:=dll.ibv_ack_async_event).restype, ibv_ack_async_event.argtypes = None, [ctypes.POINTER(struct_ibv_async_event)]
 except AttributeError: pass
 
 # int ibv_query_device(struct ibv_context *context, struct ibv_device_attr *device_attr)
-try: (ibv_query_device:=dll.ibv_query_device).restype,ibv_query_device.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr)]
+try: (ibv_query_device:=dll.ibv_query_device).restype, ibv_query_device.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr)]
 except AttributeError: pass
 
 # int ibv_query_port(struct ibv_context *context, uint8_t port_num, struct _compat_ibv_port_attr *port_attr)
-try: (ibv_query_port:=dll.ibv_query_port).restype,ibv_query_port.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr)]
+try: (ibv_query_port:=dll.ibv_query_port).restype, ibv_query_port.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr)]
 except AttributeError: pass
 
 # int ibv_query_gid(struct ibv_context *context, uint8_t port_num, int index, union ibv_gid *gid)
-try: (ibv_query_gid:=dll.ibv_query_gid).restype,ibv_query_gid.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int, ctypes.POINTER(union_ibv_gid)]
+try: (ibv_query_gid:=dll.ibv_query_gid).restype, ibv_query_gid.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int, ctypes.POINTER(union_ibv_gid)]
 except AttributeError: pass
 
 # int _ibv_query_gid_ex(struct ibv_context *context, uint32_t port_num, uint32_t gid_index, struct ibv_gid_entry *entry, uint32_t flags, size_t entry_size)
-try: (_ibv_query_gid_ex:=dll._ibv_query_gid_ex).restype,_ibv_query_gid_ex.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), uint32_t, uint32_t, ctypes.POINTER(struct_ibv_gid_entry), uint32_t, size_t]
+try: (_ibv_query_gid_ex:=dll._ibv_query_gid_ex).restype, _ibv_query_gid_ex.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), uint32_t, uint32_t, ctypes.POINTER(struct_ibv_gid_entry), uint32_t, size_t]
 except AttributeError: pass
 
 ssize_t = ctypes.c_long
 # ssize_t _ibv_query_gid_table(struct ibv_context *context, struct ibv_gid_entry *entries, size_t max_entries, uint32_t flags, size_t entry_size)
-try: (_ibv_query_gid_table:=dll._ibv_query_gid_table).restype,_ibv_query_gid_table.argtypes = ssize_t,[ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_gid_entry), size_t, uint32_t, size_t]
+try: (_ibv_query_gid_table:=dll._ibv_query_gid_table).restype, _ibv_query_gid_table.argtypes = ssize_t, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_gid_entry), size_t, uint32_t, size_t]
 except AttributeError: pass
 
 # int ibv_query_pkey(struct ibv_context *context, uint8_t port_num, int index, __be16 *pkey)
-try: (ibv_query_pkey:=dll.ibv_query_pkey).restype,ibv_query_pkey.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int, ctypes.POINTER(ctypes.c_ushort)]
+try: (ibv_query_pkey:=dll.ibv_query_pkey).restype, ibv_query_pkey.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int, ctypes.POINTER(ctypes.c_ushort)]
 except AttributeError: pass
 
 # int ibv_get_pkey_index(struct ibv_context *context, uint8_t port_num, __be16 pkey)
-try: (ibv_get_pkey_index:=dll.ibv_get_pkey_index).restype,ibv_get_pkey_index.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_ushort]
+try: (ibv_get_pkey_index:=dll.ibv_get_pkey_index).restype, ibv_get_pkey_index.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_ushort]
 except AttributeError: pass
 
 # struct ibv_pd *ibv_alloc_pd(struct ibv_context *context)
-try: (ibv_alloc_pd:=dll.ibv_alloc_pd).restype,ibv_alloc_pd.argtypes = ctypes.POINTER(struct_ibv_pd),[ctypes.POINTER(struct_ibv_context)]
+try: (ibv_alloc_pd:=dll.ibv_alloc_pd).restype, ibv_alloc_pd.argtypes = ctypes.POINTER(struct_ibv_pd), [ctypes.POINTER(struct_ibv_context)]
 except AttributeError: pass
 
 # int ibv_dealloc_pd(struct ibv_pd *pd)
-try: (ibv_dealloc_pd:=dll.ibv_dealloc_pd).restype,ibv_dealloc_pd.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_pd)]
+try: (ibv_dealloc_pd:=dll.ibv_dealloc_pd).restype, ibv_dealloc_pd.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_pd)]
 except AttributeError: pass
 
 # struct ibv_mr *ibv_reg_mr_iova2(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, unsigned int access)
-try: (ibv_reg_mr_iova2:=dll.ibv_reg_mr_iova2).restype,ibv_reg_mr_iova2.argtypes = ctypes.POINTER(struct_ibv_mr),[ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_uint]
+try: (ibv_reg_mr_iova2:=dll.ibv_reg_mr_iova2).restype, ibv_reg_mr_iova2.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_uint]
 except AttributeError: pass
 
 # struct ibv_mr *ibv_reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
-try: (ibv_reg_mr:=dll.ibv_reg_mr).restype,ibv_reg_mr.argtypes = ctypes.POINTER(struct_ibv_mr),[ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int]
+try: (ibv_reg_mr:=dll.ibv_reg_mr).restype, ibv_reg_mr.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int]
 except AttributeError: pass
 
 # struct ibv_mr *ibv_reg_mr_iova(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access)
-try: (ibv_reg_mr_iova:=dll.ibv_reg_mr_iova).restype,ibv_reg_mr_iova.argtypes = ctypes.POINTER(struct_ibv_mr),[ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_int]
+try: (ibv_reg_mr_iova:=dll.ibv_reg_mr_iova).restype, ibv_reg_mr_iova.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_int]
 except AttributeError: pass
 
 # struct ibv_mr *ibv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access)
-try: (ibv_reg_dmabuf_mr:=dll.ibv_reg_dmabuf_mr).restype,ibv_reg_dmabuf_mr.argtypes = ctypes.POINTER(struct_ibv_mr),[ctypes.POINTER(struct_ibv_pd), uint64_t, size_t, uint64_t, ctypes.c_int, ctypes.c_int]
+try: (ibv_reg_dmabuf_mr:=dll.ibv_reg_dmabuf_mr).restype, ibv_reg_dmabuf_mr.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), uint64_t, size_t, uint64_t, ctypes.c_int, ctypes.c_int]
 except AttributeError: pass
 
 enum_ibv_rereg_mr_err_code = CEnum(ctypes.c_int)
@@ -1861,131 +1861,131 @@ IBV_REREG_MR_ERR_CMD = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD',
 IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW', -5)
 
 # int ibv_rereg_mr(struct ibv_mr *mr, int flags, struct ibv_pd *pd, void *addr, size_t length, int access)
-try: (ibv_rereg_mr:=dll.ibv_rereg_mr).restype,ibv_rereg_mr.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_mr), ctypes.c_int, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int]
+try: (ibv_rereg_mr:=dll.ibv_rereg_mr).restype, ibv_rereg_mr.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_mr), ctypes.c_int, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int]
 except AttributeError: pass
 
 # int ibv_dereg_mr(struct ibv_mr *mr)
-try: (ibv_dereg_mr:=dll.ibv_dereg_mr).restype,ibv_dereg_mr.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_mr)]
+try: (ibv_dereg_mr:=dll.ibv_dereg_mr).restype, ibv_dereg_mr.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_mr)]
 except AttributeError: pass
 
 # struct ibv_comp_channel *ibv_create_comp_channel(struct ibv_context *context)
-try: (ibv_create_comp_channel:=dll.ibv_create_comp_channel).restype,ibv_create_comp_channel.argtypes = ctypes.POINTER(struct_ibv_comp_channel),[ctypes.POINTER(struct_ibv_context)]
+try: (ibv_create_comp_channel:=dll.ibv_create_comp_channel).restype, ibv_create_comp_channel.argtypes = ctypes.POINTER(struct_ibv_comp_channel), [ctypes.POINTER(struct_ibv_context)]
 except AttributeError: pass
 
 # int ibv_destroy_comp_channel(struct ibv_comp_channel *channel)
-try: (ibv_destroy_comp_channel:=dll.ibv_destroy_comp_channel).restype,ibv_destroy_comp_channel.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_comp_channel)]
+try: (ibv_destroy_comp_channel:=dll.ibv_destroy_comp_channel).restype, ibv_destroy_comp_channel.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_comp_channel)]
 except AttributeError: pass
 
 # struct ibv_cq *ibv_create_cq(struct ibv_context *context, int cqe, void *cq_context, struct ibv_comp_channel *channel, int comp_vector)
-try: (ibv_create_cq:=dll.ibv_create_cq).restype,ibv_create_cq.argtypes = ctypes.POINTER(struct_ibv_cq),[ctypes.POINTER(struct_ibv_context), ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(struct_ibv_comp_channel), ctypes.c_int]
+try: (ibv_create_cq:=dll.ibv_create_cq).restype, ibv_create_cq.argtypes = ctypes.POINTER(struct_ibv_cq), [ctypes.POINTER(struct_ibv_context), ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(struct_ibv_comp_channel), ctypes.c_int]
 except AttributeError: pass
 
 # int ibv_resize_cq(struct ibv_cq *cq, int cqe)
-try: (ibv_resize_cq:=dll.ibv_resize_cq).restype,ibv_resize_cq.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_cq), ctypes.c_int]
+try: (ibv_resize_cq:=dll.ibv_resize_cq).restype, ibv_resize_cq.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_cq), ctypes.c_int]
 except AttributeError: pass
 
 # int ibv_destroy_cq(struct ibv_cq *cq)
-try: (ibv_destroy_cq:=dll.ibv_destroy_cq).restype,ibv_destroy_cq.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_cq)]
+try: (ibv_destroy_cq:=dll.ibv_destroy_cq).restype, ibv_destroy_cq.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_cq)]
 except AttributeError: pass
 
 # int ibv_get_cq_event(struct ibv_comp_channel *channel, struct ibv_cq **cq, void **cq_context)
-try: (ibv_get_cq_event:=dll.ibv_get_cq_event).restype,ibv_get_cq_event.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_comp_channel), ctypes.POINTER(ctypes.POINTER(struct_ibv_cq)), ctypes.POINTER(ctypes.c_void_p)]
+try: (ibv_get_cq_event:=dll.ibv_get_cq_event).restype, ibv_get_cq_event.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_comp_channel), ctypes.POINTER(ctypes.POINTER(struct_ibv_cq)), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # void ibv_ack_cq_events(struct ibv_cq *cq, unsigned int nevents)
-try: (ibv_ack_cq_events:=dll.ibv_ack_cq_events).restype,ibv_ack_cq_events.argtypes = None,[ctypes.POINTER(struct_ibv_cq), ctypes.c_uint]
+try: (ibv_ack_cq_events:=dll.ibv_ack_cq_events).restype, ibv_ack_cq_events.argtypes = None, [ctypes.POINTER(struct_ibv_cq), ctypes.c_uint]
 except AttributeError: pass
 
 # struct ibv_srq *ibv_create_srq(struct ibv_pd *pd, struct ibv_srq_init_attr *srq_init_attr)
-try: (ibv_create_srq:=dll.ibv_create_srq).restype,ibv_create_srq.argtypes = ctypes.POINTER(struct_ibv_srq),[ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_srq_init_attr)]
+try: (ibv_create_srq:=dll.ibv_create_srq).restype, ibv_create_srq.argtypes = ctypes.POINTER(struct_ibv_srq), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_srq_init_attr)]
 except AttributeError: pass
 
 # int ibv_modify_srq(struct ibv_srq *srq, struct ibv_srq_attr *srq_attr, int srq_attr_mask)
-try: (ibv_modify_srq:=dll.ibv_modify_srq).restype,ibv_modify_srq.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr), ctypes.c_int]
+try: (ibv_modify_srq:=dll.ibv_modify_srq).restype, ibv_modify_srq.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr), ctypes.c_int]
 except AttributeError: pass
 
 # int ibv_query_srq(struct ibv_srq *srq, struct ibv_srq_attr *srq_attr)
-try: (ibv_query_srq:=dll.ibv_query_srq).restype,ibv_query_srq.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr)]
+try: (ibv_query_srq:=dll.ibv_query_srq).restype, ibv_query_srq.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr)]
 except AttributeError: pass
 
 # int ibv_destroy_srq(struct ibv_srq *srq)
-try: (ibv_destroy_srq:=dll.ibv_destroy_srq).restype,ibv_destroy_srq.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_srq)]
+try: (ibv_destroy_srq:=dll.ibv_destroy_srq).restype, ibv_destroy_srq.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_srq)]
 except AttributeError: pass
 
 # struct ibv_qp *ibv_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
-try: (ibv_create_qp:=dll.ibv_create_qp).restype,ibv_create_qp.argtypes = ctypes.POINTER(struct_ibv_qp),[ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_qp_init_attr)]
+try: (ibv_create_qp:=dll.ibv_create_qp).restype, ibv_create_qp.argtypes = ctypes.POINTER(struct_ibv_qp), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_qp_init_attr)]
 except AttributeError: pass
 
 # int ibv_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask)
-try: (ibv_modify_qp:=dll.ibv_modify_qp).restype,ibv_modify_qp.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int]
+try: (ibv_modify_qp:=dll.ibv_modify_qp).restype, ibv_modify_qp.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int]
 except AttributeError: pass
 
 # int ibv_query_qp_data_in_order(struct ibv_qp *qp, enum ibv_wr_opcode op, uint32_t flags)
-try: (ibv_query_qp_data_in_order:=dll.ibv_query_qp_data_in_order).restype,ibv_query_qp_data_in_order.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp), enum_ibv_wr_opcode, uint32_t]
+try: (ibv_query_qp_data_in_order:=dll.ibv_query_qp_data_in_order).restype, ibv_query_qp_data_in_order.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp), enum_ibv_wr_opcode, uint32_t]
 except AttributeError: pass
 
 # int ibv_query_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask, struct ibv_qp_init_attr *init_attr)
-try: (ibv_query_qp:=dll.ibv_query_qp).restype,ibv_query_qp.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int, ctypes.POINTER(struct_ibv_qp_init_attr)]
+try: (ibv_query_qp:=dll.ibv_query_qp).restype, ibv_query_qp.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int, ctypes.POINTER(struct_ibv_qp_init_attr)]
 except AttributeError: pass
 
 # int ibv_destroy_qp(struct ibv_qp *qp)
-try: (ibv_destroy_qp:=dll.ibv_destroy_qp).restype,ibv_destroy_qp.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp)]
+try: (ibv_destroy_qp:=dll.ibv_destroy_qp).restype, ibv_destroy_qp.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp)]
 except AttributeError: pass
 
 # struct ibv_ah *ibv_create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr)
-try: (ibv_create_ah:=dll.ibv_create_ah).restype,ibv_create_ah.argtypes = ctypes.POINTER(struct_ibv_ah),[ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_ah_attr)]
+try: (ibv_create_ah:=dll.ibv_create_ah).restype, ibv_create_ah.argtypes = ctypes.POINTER(struct_ibv_ah), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_ah_attr)]
 except AttributeError: pass
 
 # int ibv_init_ah_from_wc(struct ibv_context *context, uint8_t port_num, struct ibv_wc *wc, struct ibv_grh *grh, struct ibv_ah_attr *ah_attr)
-try: (ibv_init_ah_from_wc:=dll.ibv_init_ah_from_wc).restype,ibv_init_ah_from_wc.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), ctypes.POINTER(struct_ibv_ah_attr)]
+try: (ibv_init_ah_from_wc:=dll.ibv_init_ah_from_wc).restype, ibv_init_ah_from_wc.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), ctypes.POINTER(struct_ibv_ah_attr)]
 except AttributeError: pass
 
 # struct ibv_ah *ibv_create_ah_from_wc(struct ibv_pd *pd, struct ibv_wc *wc, struct ibv_grh *grh, uint8_t port_num)
-try: (ibv_create_ah_from_wc:=dll.ibv_create_ah_from_wc).restype,ibv_create_ah_from_wc.argtypes = ctypes.POINTER(struct_ibv_ah),[ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), uint8_t]
+try: (ibv_create_ah_from_wc:=dll.ibv_create_ah_from_wc).restype, ibv_create_ah_from_wc.argtypes = ctypes.POINTER(struct_ibv_ah), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), uint8_t]
 except AttributeError: pass
 
 # int ibv_destroy_ah(struct ibv_ah *ah)
-try: (ibv_destroy_ah:=dll.ibv_destroy_ah).restype,ibv_destroy_ah.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_ah)]
+try: (ibv_destroy_ah:=dll.ibv_destroy_ah).restype, ibv_destroy_ah.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_ah)]
 except AttributeError: pass
 
 # int ibv_attach_mcast(struct ibv_qp *qp, const union ibv_gid *gid, uint16_t lid)
-try: (ibv_attach_mcast:=dll.ibv_attach_mcast).restype,ibv_attach_mcast.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t]
+try: (ibv_attach_mcast:=dll.ibv_attach_mcast).restype, ibv_attach_mcast.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t]
 except AttributeError: pass
 
 # int ibv_detach_mcast(struct ibv_qp *qp, const union ibv_gid *gid, uint16_t lid)
-try: (ibv_detach_mcast:=dll.ibv_detach_mcast).restype,ibv_detach_mcast.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t]
+try: (ibv_detach_mcast:=dll.ibv_detach_mcast).restype, ibv_detach_mcast.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t]
 except AttributeError: pass
 
 # int ibv_fork_init(void)
-try: (ibv_fork_init:=dll.ibv_fork_init).restype,ibv_fork_init.argtypes = ctypes.c_int,[]
+try: (ibv_fork_init:=dll.ibv_fork_init).restype, ibv_fork_init.argtypes = ctypes.c_int, []
 except AttributeError: pass
 
 # enum ibv_fork_status ibv_is_fork_initialized(void)
-try: (ibv_is_fork_initialized:=dll.ibv_is_fork_initialized).restype,ibv_is_fork_initialized.argtypes = enum_ibv_fork_status,[]
+try: (ibv_is_fork_initialized:=dll.ibv_is_fork_initialized).restype, ibv_is_fork_initialized.argtypes = enum_ibv_fork_status, []
 except AttributeError: pass
 
 # const char *ibv_node_type_str(enum ibv_node_type node_type)
-try: (ibv_node_type_str:=dll.ibv_node_type_str).restype,ibv_node_type_str.argtypes = ctypes.c_char_p,[enum_ibv_node_type]
+try: (ibv_node_type_str:=dll.ibv_node_type_str).restype, ibv_node_type_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_node_type]
 except AttributeError: pass
 
 # const char *ibv_port_state_str(enum ibv_port_state port_state)
-try: (ibv_port_state_str:=dll.ibv_port_state_str).restype,ibv_port_state_str.argtypes = ctypes.c_char_p,[enum_ibv_port_state]
+try: (ibv_port_state_str:=dll.ibv_port_state_str).restype, ibv_port_state_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_port_state]
 except AttributeError: pass
 
 # const char *ibv_event_type_str(enum ibv_event_type event)
-try: (ibv_event_type_str:=dll.ibv_event_type_str).restype,ibv_event_type_str.argtypes = ctypes.c_char_p,[enum_ibv_event_type]
+try: (ibv_event_type_str:=dll.ibv_event_type_str).restype, ibv_event_type_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_event_type]
 except AttributeError: pass
 
 # int ibv_resolve_eth_l2_from_gid(struct ibv_context *context, struct ibv_ah_attr *attr, uint8_t eth_mac[6], uint16_t *vid)
-try: (ibv_resolve_eth_l2_from_gid:=dll.ibv_resolve_eth_l2_from_gid).restype,ibv_resolve_eth_l2_from_gid.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_ah_attr), (uint8_t * 6), ctypes.POINTER(uint16_t)]
+try: (ibv_resolve_eth_l2_from_gid:=dll.ibv_resolve_eth_l2_from_gid).restype, ibv_resolve_eth_l2_from_gid.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_ah_attr), (uint8_t * 6), ctypes.POINTER(uint16_t)]
 except AttributeError: pass
 
 # int ibv_set_ece(struct ibv_qp *qp, struct ibv_ece *ece)
-try: (ibv_set_ece:=dll.ibv_set_ece).restype,ibv_set_ece.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece)]
+try: (ibv_set_ece:=dll.ibv_set_ece).restype, ibv_set_ece.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece)]
 except AttributeError: pass
 
 # int ibv_query_ece(struct ibv_qp *qp, struct ibv_ece *ece)
-try: (ibv_query_ece:=dll.ibv_query_ece).restype,ibv_query_ece.argtypes = ctypes.c_int,[ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece)]
+try: (ibv_query_ece:=dll.ibv_query_ece).restype, ibv_query_ece.argtypes = ctypes.c_int, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece)]
 except AttributeError: pass
 
 enum_ib_uverbs_core_support = CEnum(ctypes.c_uint)

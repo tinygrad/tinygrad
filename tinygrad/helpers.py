@@ -480,7 +480,7 @@ def CEnum(typ: type):
       return val
 
     def __eq__(self, other): return self.value == other
-    def __repr__(self): return self.name(self) if self.value in self.__class__._val_to_name_ else str(self.value)
+    def __repr__(self): return self.get(self) if self.value in self.__class__._val_to_name_ else str(self.value)
 
   return _CEnum
 
