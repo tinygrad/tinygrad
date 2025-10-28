@@ -39,6 +39,7 @@ shared_spec = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
+  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
 ])
 
 # ***** UOp spec in the Tensor graph *****
@@ -103,9 +104,9 @@ tensor_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 ])+shared_spec
 
-# ***** UOp spec in linearized programs *****
+# ***** UOp spec in codegen shared between kernel and program *****
 
-program_spec = PatternMatcher([
+shared_codegen_spec = PatternMatcher([
   # DEFINEs
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
@@ -115,14 +116,24 @@ program_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
   (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
-  # INDEX is used in new style load/store
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
+  # RANGE/SPECIAL define loops, END closes them
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
   # LOAD(idx) / LOAD (idx, alt_value) / STORE(idx, val)
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), )), validate_index),
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
+  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), )), lambda: True),
+  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
+
+  # all CUSTOM + PRECAST
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
+])
+
+# ***** UOp spec in linearized programs *****
+
+program_spec = PatternMatcher([
+  # INDEX is used in new style load/store
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx"))), validate_index),
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
@@ -132,6 +143,8 @@ program_spec = PatternMatcher([
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
   (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.src)),
+  # specials are always int32
+  (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
@@ -146,20 +159,13 @@ program_spec = PatternMatcher([
 
   # BARRIER
   (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
-
-  # all CUSTOM + PRECAST
-  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
-])+shared_spec
+])+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in kernel graph *****
 
 kernel_spec = PatternMatcher([
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
-
-  # LOAD(idx) / STORE(idx, val) -- NOTE: we do this here to not run validate_index since z3 doesn't support Invalid
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), )), lambda: True),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
 
   # UNROLL/CONTRACT is used here for WMMA
   (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
@@ -173,8 +179,8 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
 
   # intermediate index
-  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
-])+program_spec+shared_spec
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx", dtypes.index))), validate_index),
+])+shared_codegen_spec+shared_spec
 
 # *** this spec should match all UOps ever created ***
 

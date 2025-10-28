@@ -394,11 +394,10 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def invalid(count=1): return UOp(Ops.CONST, dtypes.index.vec(count), src=(), arg=Invalid)
   def valid(self, cond): return self if cond.op is Ops.WHERE and cond.arg else cond.where(self, UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:
-    assert self.dtype.scalar() is dtypes.index, "Can only call get_idx on index dtype"
-    return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
+    return self.src[1] if self.dtype.scalar()==dtypes.index and self.op is Ops.WHERE and self.src[2].arg is Invalid else self
   def get_valid(self) -> UOp:
-    assert self.dtype.scalar() is dtypes.index, "Can only call get_valid on index dtype"
-    return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
+    return self.src[0] if self.dtype.scalar()==dtypes.index and self.op is Ops.WHERE and self.src[2].arg is Invalid else \
+              UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
 
   def is_contiguous(self):
