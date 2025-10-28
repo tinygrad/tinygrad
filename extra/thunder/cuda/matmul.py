@@ -6,7 +6,7 @@ from tinygrad.runtime.support.compiler_cuda import pretty_ptx, NVCCCompiler
 if __name__ == "__main__":
   code = (pathlib.Path(__file__).parent / "matmul.cu").read_text()
   device = Device["CUDA"]
-  kitten_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "--expt-relaxed-constexpr", "-DKITTENS_HOPPER"]
+  kitten_args = [f"-I{(pathlib.Path(__file__).parent / 'include').as_posix()}", "-std=c++20", "--expt-relaxed-constexpr"]
   lib = NVCCCompiler(device.compiler.arch, kitten_args).compile(code)
   kernel_name = lib.decode().split(".globl\t")[1].split("\n")[0]
   print("kernel name", kernel_name)
