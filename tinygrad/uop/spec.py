@@ -122,6 +122,17 @@ shared_codegen_spec = PatternMatcher([
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
+  # WMMA has a <a, b, acc>
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
+
+  # UNROLL/CONTRACT is used here for WMMA
+  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
+
+  # VECTORIZE/GEP
+  (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
+  (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
+
   # LOAD(idx) / LOAD (idx, alt_value) / STORE(idx, val)
   (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), )), lambda: True),
   (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
@@ -152,16 +163,9 @@ program_spec = PatternMatcher([
   (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
     type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
-  # WMMA has a <a, b, acc>
-  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
-
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
-
-  # VECTORIZE/GEP
-  (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
-  (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 ])+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in kernel graph *****
@@ -169,10 +173,6 @@ program_spec = PatternMatcher([
 kernel_spec = PatternMatcher([
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
-
-  # UNROLL/CONTRACT is used here for WMMA
-  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
-  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # END can end multiple axes here
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
