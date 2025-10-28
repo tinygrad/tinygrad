@@ -1,7 +1,7 @@
 from typing import cast
 from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, SPEC
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, test_pyrender, Ops, UPat
-from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
+from tinygrad.uop.spec import type_verify, program_spec, kernel_spec, test_pyrender
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import panic
@@ -22,8 +22,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
-  if SPEC: type_verify(list(sink.toposort()), kernel_spec)
-  if SPEC > 1: test_pyrender(sink)
+  if SPEC: type_verify(sink, kernel_spec)
 
   # first we optimize
   if optimize:

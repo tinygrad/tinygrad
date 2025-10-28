@@ -1,7 +1,8 @@
-from typing import cast
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType
+import math
+from typing import cast, Any
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import DEBUG, Context, prod
+from tinygrad.helpers import DEBUG, Context, prod, SPEC
 from tinygrad.uop.validate import validate_index
 
 # four specs:
@@ -233,9 +234,30 @@ full_spec = PatternMatcher([
 
 # ***** uop helpers *****
 
-def type_verify(uops:list[UOp], check_spec:PatternMatcher):
-  for i,u in enumerate(uops):
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
+  if SPEC > 1 and isinstance(ast, UOp): test_pyrender(ast)
+  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
+
+  for i,u in enumerate(lst):
     with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
     if cast(bool|None, ret) is not True:
-      if DEBUG >= 3: print_uops(uops)
+      if DEBUG >= 3: print_uops(lst)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+
+def eval_pyrender(code:str) -> UOp:
+  from tinygrad.dtype import AddrSpace
+  from tinygrad.codegen.opt import Opt, OptOps
+  from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
+  lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel,
+                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
+  exec(code, None, lcls)
+  return lcls['ast']
+
+def test_pyrender(test_ast:UOp, check_parents=True):
+  code = pyrender(test_ast)
+  ast:UOp = eval_pyrender(code)
+  if ast is not test_ast:
+    if check_parents:
+      for u in test_ast.toposort(): test_pyrender(u, check_parents=False)
+    raise RuntimeError(f"PYRENDER ISSUE:\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}\nCODE:\n{code}")
+  return code
