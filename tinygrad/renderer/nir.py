@@ -191,7 +191,7 @@ class NIRRenderer(Renderer):
         r = u.src[1]
         next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
         # TODO: this nif should be removable ... but TestMultiTensor.test_double_matmul_shard_W_0 segfaults with it gone
-        #nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
         nstore(self.b, AddrSpace.REG, ranges.pop(), next_i, r.dtype),
         mesa.nir_pop_loop(self.b, None)
       else:
