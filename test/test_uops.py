@@ -277,7 +277,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gmem = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     gate = gidx0<UOp.const(dtypes.int, 1)
-    idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, gidx0 * UOp.const(dtypes.int, 2), gate))
+    idx = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem, (gidx0 * UOp.const(dtypes.int, 2)).valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     store = UOp(Ops.STORE, dtypes.void, (idx, val))
     uops = to_uops_list([store])
@@ -294,7 +294,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gmem1 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 1)
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     idx = gidx0 * UOp.const(dtypes.int, 2)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx, gidx0<UOp.const(dtypes.int, 1)))
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx.valid(gidx0<UOp.const(dtypes.int, 1))))
     idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
