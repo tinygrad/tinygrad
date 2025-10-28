@@ -294,6 +294,7 @@ jobs:
 
   spec:
     strategy:
+      fail-fast: false
       matrix:
         group: [1, 2]
     name: SPEC=2 (${{ matrix.group }})
