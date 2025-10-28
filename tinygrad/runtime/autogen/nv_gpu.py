@@ -1061,8 +1061,8 @@ NVOS05_PARAMETERS._fields_ = [
   ('hClass', NvV32),
   ('status', NvV32),
 ]
-Callback1ArgVoidReturn = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p))
-Callback5ArgVoidReturn = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint))
+Callback1ArgVoidReturn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+Callback5ArgVoidReturn = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint)
 class NVOS10_EVENT_KERNEL_CALLBACK(ctypes.Structure): pass
 NVOS10_EVENT_KERNEL_CALLBACK._fields_ = [
   ('func', Callback1ArgVoidReturn),
@@ -1136,7 +1136,7 @@ NVOS30_PARAMETERS._fields_ = [
   ('timeout', NvV32),
   ('status', NvV32),
 ]
-BindResultFunc = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint))
+BindResultFunc = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint)
 class NVOS32_DESCRIPTOR_TYPE_OS_SGT_PTR_PARAMETERS(ctypes.Structure): pass
 NVOS32_DESCRIPTOR_TYPE_OS_SGT_PTR_PARAMETERS._fields_ = [
   ('sgt', NvP64),
@@ -1701,7 +1701,7 @@ NV_OFA_ALLOCATION_PARAMETERS._fields_ = [
   ('engineInstance', NvU32),
 ]
 class NVOS61_PARAMETERS(ctypes.Structure): pass
-OSVBLANKCALLBACKPROC = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p))
+OSVBLANKCALLBACKPROC = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
 NVOS61_PARAMETERS._fields_ = [
   ('hClient', NvHandle),
   ('hDevice', NvHandle),
