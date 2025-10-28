@@ -144,8 +144,7 @@ program_spec = PatternMatcher([
   # INDEX with a gate as third src
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="buf").or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
 
-  # RANGE/SPECIAL define loops, END closes them
-  (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
+  # END closes ranges
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
   # make sure all index dtypes have been lowered
@@ -153,9 +152,6 @@ program_spec = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
   (UPat(Ops.VCONST, name="x"), lambda x: len(x.arg)>1 and len(x.arg) == x.dtype.vcount and
     type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)) and all(v is not Invalid for v in x.src)),
-
-  # specials are always int32
-  (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
