@@ -112,13 +112,13 @@ base_rewrite = PatternMatcher([
    f"  br label %loop_latch_{range_str(r)}\n"
    f"loop_latch_{range_str(r)}:\n"
    f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
+   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
    f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype)} {ctx[r]}, {ctx[r.src[0]]}\n"
    f"  br i1 {ctx[r]}cmp, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\n"
    f"loop_body_{range_str(r)}:"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda ctx,r:
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
    f"  br label %loop_footer_{range_str(r)}\n"
    f"loop_footer_{range_str(r)}:\n"
-   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
    f"  br label %loop_latch_{range_str(r)}\n"
    f"loop_exit_{range_str(r)}:"),
 
