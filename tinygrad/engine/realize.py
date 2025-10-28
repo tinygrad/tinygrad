@@ -176,18 +176,24 @@ class ExecItem:
       GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.estimates.mem, var_vals))
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
+        def _units_to_str(x:float, units:dict, digits:int=3):
+          def align(x, sym, x_width=digits, sym_width=max(len(sym) for sym in units.keys())): return f"{x:{x_width}}{sym:{sym_width}}"
+          return next((align(int(x//val)%(10**digits), sym) for sym, val in units.items() if x//val > 0), align(0, list(units.keys())[-1]))
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
         header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
-        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-        flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
-        flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-        mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
-          colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
+
+        mem_str = _units_to_str(mem_est, {"GB":1e9, "MB":1e6, "KB":1e3, "B":1})
+        ops_str = _units_to_str(op_est, {"TFLOPs":1e12, "GFLOPs":1e9, "MFLOPs":1e6, "KFLOPs":1e3, "FLOPs":1})
+        time_str = "" if et is None else _units_to_str(et,  {"s":1, "ms":1e-3, "us":1e-6, "ns":1e-9})
+        flops_str = _units_to_str(op_est/(et or 1e-20), {"TFLOPS":1e12, "GFLOPS":1e9, "MFLOPS":1e6, "KFLOPS":1e3, "FLOPS":1})
+        membw_str = _units_to_str(mem_est/(et or 1e-20), {"TB/s":1e12, "GB/s":1e9, "MB/s":1e6, "KB/s":1e3, "B/s":1})
         print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-          f" {self.prg.display_name+' '*(46-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-          ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
-          f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
+              f" {self.prg.display_name+' '*(46-ansilen(self.prg.display_name))} arg {len(bufs):2d}"+
+              f" {colored('mem:', 'blue')} {colored(mem_str, 'BLUE')} {colored('ops', 'yellow')} {colored(ops_str, 'YELLOW')}"+
+              f" {colored('tm', 'blue')} {colored(time_str, 'BLUE')} {colored('FLOPS', 'yellow')} {colored(flops_str, 'YELLOW')}"+
+              f" {colored('membw', 'blue')} {colored(membw_str, 'BLUE')}"+
+              f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
       self.prg.first_run = False
     return et
 
