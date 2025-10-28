@@ -181,7 +181,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if threads > k.ren.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
       for axis in k.axes_of(AxisType.LOOP):
         if k.full_shape[axis] % threads == 0:
-          k.apply_opt(Opt(OptOps.THREAD, axis, threads))
+          try: k.apply_opt(Opt(OptOps.THREAD, axis, threads))
+          except KernelOptError: pass
           break
       if k.applied_opts and k.applied_opts[-1].op is OptOps.THREAD: break
 

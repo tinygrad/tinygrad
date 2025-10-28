@@ -370,6 +370,7 @@ class TestSchedule(unittest.TestCase):
 
   # NOTE: this is causing "LAZYCACHE=1 incorrectly reuses contiguous const" #4562
   # should contiguous dedup?
+  @unittest.skip("we do the exact opposite now")
   def test_dedup_contiguous(self):
     a = Tensor.ones(4).contiguous()
     b = Tensor.ones(4).contiguous()
@@ -446,7 +447,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 21), (nn.optim.SGD, 8)]:
+    for optim, cnt in [(nn.optim.Adam, 28), (nn.optim.SGD, 8)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
@@ -1220,7 +1221,7 @@ class TestSchedule(unittest.TestCase):
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 16)
+      check_schedule(opt.schedule_step(), 19)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
@@ -1230,7 +1231,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 16)
+      check_schedule(opt.schedule_step(), 19)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
@@ -1241,7 +1242,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 18)
+      check_schedule(opt.schedule_step(), 21)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():

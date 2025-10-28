@@ -550,6 +550,7 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   (UPat(Ops.SINK, name="root"),
     lambda root: UOp(Ops.SINK, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_SINK else (x,) for x in root.src)), root.arg)
       if any(x.op in REMOVE_FROM_SINK for x in root.src) else None),
+  (UPat(Ops.END, src=(UPat(Ops.NOOP, name="noop"),), allow_any_len=True), lambda noop:noop),
   ((UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()),  # 1/(x^c) -> (1/x)^c
   ((UPat.var("x") * UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()*x.reciprocal()),
   ((UPat.var("x") * UPat.cvar("c")).reciprocal(), lambda x,c: x.reciprocal()*c.reciprocal()), # 1/(x*c) -> (1/c)*(1/x)
