@@ -721,7 +721,7 @@ class TestExpander(unittest.TestCase):
     self.assertTupleEqual(sink.src[0].arg, (0,2,1,3,4,6,5,7))
 
   def test_contract_no_expand(self):
-    e1 = UOp(Ops.DEFINE_VAR, dtypes.int)
+    e1 = UOp.variable("i", 0, 10, dtype=dtypes.int)
     con = UOp(Ops.CONTRACT, dtypes.int.vec(2), (e1,), ((2,2),))
     sink = expander_rewrite(con)
     assert sink.op is Ops.VECTORIZE and len(sink.src) == 2
