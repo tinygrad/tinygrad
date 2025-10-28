@@ -1,7 +1,8 @@
-from typing import cast
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType
+import math
+from typing import cast, Any
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import DEBUG, Context, prod
+from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata
 from tinygrad.uop.validate import validate_index
 
 # four specs:
@@ -118,9 +119,9 @@ program_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
 
-  # LOAD (idx, alt_value) / LOAD(idx) / STORE(idx, val)
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
+  # LOAD(idx) / LOAD (idx, alt_value) / STORE(idx, val)
   (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), )), validate_index),
+  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
 
   # RANGE/SPECIAL define loops, END closes them
@@ -144,9 +145,9 @@ program_spec = PatternMatcher([
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # BARRIER
-  (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
-  (UPat(Ops.BARRIER, dtypes.void), lambda: True), # BARRIERs can also happen at the end of loops
+  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
 
+  # all CUSTOM + PRECAST
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 ])+shared_spec
 
@@ -156,12 +157,16 @@ kernel_spec = PatternMatcher([
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
 
+  # LOAD(idx) / STORE(idx, val) -- NOTE: we do this here to not run validate_index since z3 doesn't support Invalid
+  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), )), lambda: True),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
+
   # UNROLL/CONTRACT is used here for WMMA
   (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
   (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # END can end multiple axes here
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), allow_any_len=True, dtype=dtypes.void), lambda: True),
+  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
 
   # bufferize (must be on ranges)
   (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
@@ -174,24 +179,14 @@ kernel_spec = PatternMatcher([
 # *** this spec should match all UOps ever created ***
 
 full_spec = PatternMatcher([
-  # any END
-  (UPat(Ops.END), lambda: True),
-
   # NOOP in the full spec
   (UPat(Ops.NOOP), lambda: True),
-
-  # Invalid must have type Index
-  (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
-  # where on index in rhs position is fine
-  (UPat(Ops.WHERE, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
 
   # all rewrite error are okay
   (UPat(Ops.REWRITE_ERROR), lambda: True),
 
   # rangeify: buffer view with index or load is okay
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
-  # copy on index
-  (UPat(Ops.COPY, src=(UPat(Ops.INDEX), UPat())), lambda: True),
   # assign on index. the third op is the shape
   (UPat(Ops.ASSIGN, src=(UPat(), UPat(), UPat())), lambda: True),
 
@@ -209,33 +204,56 @@ full_spec = PatternMatcher([
   # linearizer: outputs + intermediate KERNELs
   (UPat(Ops.KERNEL, dtype=dtypes.void), lambda: True),
 
+  # Invalid must have type Index
+  (UPat(Ops.CONST, arg=Invalid, name="x"), lambda x: x.dtype.scalar() == dtypes.index),
+  # where on index in rhs position is fine
+  (UPat(Ops.WHERE, dtype=dtypes.index, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.index))), lambda: True),
   # allow index dtype on a restricted set of UOps
-  (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX, Ops.WHERE,
+  (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX,
          Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.VECTORIZE), dtype=dtypes.index), lambda: True),
 
   # while BIND is being casted
-  (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(), UPat()), arg=None), lambda: True),
+  (UPat(Ops.BIND, (dtypes.int, dtypes.index), (UPat(), UPat()), arg=None), lambda: True),
 
   # in progress MSTACK may lose device
   (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
-  # all ifs
-  (UPat(Ops.IF), lambda: True),
-  # all DEFINE_VAR to deal with the floats used in reduce collapse
-  (UPat(Ops.DEFINE_VAR), lambda: True),
-  # reshape on STORE
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.STORE),)), lambda: True),
+  # DEFINE_VAR to deal with the floats used in reduce collapse
+  (UPat(Ops.DEFINE_VAR, dtype=dtypes.floats), lambda: True),
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 ])+tensor_spec+kernel_spec+program_spec+shared_spec
 
 # ***** uop helpers *****
 
-def type_verify(uops:list[UOp], check_spec:PatternMatcher):
-  for i,u in enumerate(uops):
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
+  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
+  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
+
+  for i,u in enumerate(lst):
     with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
     if cast(bool|None, ret) is not True:
-      if DEBUG >= 3: print_uops(uops)
+      if DEBUG >= 3: print_uops(lst)
       raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+
+# late imports to avoid circular import
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
+glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel, "Metadata": Metadata,
+                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
+                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
+def eval_pyrender(code:str) -> UOp:
+  lcls:dict[str, Any] = {}
+  exec(code, glbls, lcls)
+  return lcls['ast']
+
+def test_pyrender(test_ast:UOp, assert_parents=True):
+  code = pyrender(test_ast)
+  ast:UOp = eval_pyrender(code)
+  if ast is not test_ast:
+    if assert_parents:
+      for u in test_ast.toposort(): test_pyrender(u, assert_parents=False)
+    raise RuntimeError(f"PYRENDER ISSUE:\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}\nCODE:\n{code}")
+  return code

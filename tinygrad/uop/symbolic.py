@@ -382,6 +382,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
     tuple(flatten([(y,) if y.op in {Ops.RANGE, Ops.IF, Ops.STORE, Ops.KERNEL, Ops.BARRIER, Ops.END, Ops.UNROLL} else y.src for y in x.src[1:]])))),
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
+  # VECTORIZE/CONST
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
 ])+gep_pushing
 
 symbolic_flat = symbolic+PatternMatcher([
@@ -511,8 +513,7 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
   (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
-  # VECTORIZE/CONST, VECTORIZE/GEP
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
+  # VECTORIZE/GEP
   (UPat(Ops.VECTORIZE, src=UPat(Ops.GEP, src=(UPat.var("x"),)), name="vec"), lambda vec,x: x.gep(tuple(y.arg[0] for y in vec.src))),
   # reorder ALU/VECTORIZE
   (UPat(GroupOp.ALU, src=(UPat(Ops.VECTORIZE, src=UPat(name='x')), UPat(Ops.VECTORIZE, src=UPat(name='y'))), name='alu'),
