@@ -119,9 +119,9 @@ program_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
 
-  # LOAD (idx, alt_value) / LOAD(idx) / STORE(idx, val)
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
+  # LOAD(idx) / LOAD (idx, alt_value) / STORE(idx, val)
   (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), )), validate_index),
+  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="idx").or_casted(), UPat())), validate_index),
 
   # RANGE/SPECIAL define loops, END closes them
@@ -145,9 +145,9 @@ program_spec = PatternMatcher([
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # BARRIER
-  (UPat(Ops.BARRIER, dtypes.void, src=UPat(Ops.STORE, allow_any_len=True)), lambda: True), # NOTE: all pointers must be local
-  (UPat(Ops.BARRIER, dtypes.void), lambda: True), # BARRIERs can also happen at the end of loops
+  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
 
+  # all CUSTOM + PRECAST
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 ])+shared_spec
 
@@ -156,6 +156,10 @@ program_spec = PatternMatcher([
 kernel_spec = PatternMatcher([
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
+
+  # LOAD(idx) / STORE(idx, val) -- NOTE: we do this here to not run validate_index since z3 doesn't support Invalid
+  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), )), lambda: True),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
 
   # UNROLL/CONTRACT is used here for WMMA
   (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
