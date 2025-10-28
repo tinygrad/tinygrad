@@ -2,7 +2,7 @@ from typing import cast, Generator, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.helpers import DEVECTORIZE, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -176,9 +176,10 @@ class ExecItem:
       GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.estimates.mem, var_vals))
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
-        def _units_to_str(x:float, units:dict, digits:int=3) -> str:
-          colors = ['GREEN', 'green', 'yellow', 'yellow', 'RED']
-          def align(x, sym, color, x_width=digits, sym_width=max(len(sym) for sym in units.keys())): return colored(f"{x:{x_width}}{sym:{sym_width}}", color)
+
+        def _units_to_str(x:float, units:dict, digits:int=3, colors:list[str]=['GREEN', 'green', 'yellow', 'yellow', 'RED']) -> str:
+          def align(x, sym, color, x_width=digits, sym_width=max(len(sym) for sym in units.keys())):
+            return colored(f"{x:{x_width}}{sym:{sym_width}}", color)
           for i, (sym, val) in enumerate(units.items()):
             if x//val > 0: return align(int(x//val), sym, colors[i])
           return align(0, list(units.keys())[-1], colors[-1])
