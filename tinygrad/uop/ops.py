@@ -371,16 +371,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(op, out_dtype, (self,)+src, **kwargs)
   @staticmethod
-  def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None, src=None, unique=False):
+  def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None, src=None, unique:bool|int=False):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(b, float) and math.isnan(b): b = math.nan
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype), src=() if src is None else (src,))
     if device is not None:
-      if unique: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device), UOp.unique(None if unique is True else unique)))
+      if unique or not isinstance(unique, bool): ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device), UOp.unique(None if unique is True else unique)))
       else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
-    elif unique: raise RuntimeError("unique consts only with DEVICE")
+    elif unique or not isinstance(unique, bool): raise RuntimeError("unique consts only with DEVICE")
     if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
