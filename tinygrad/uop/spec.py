@@ -39,8 +39,7 @@ shared_spec = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
-  (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"),
-    lambda s,x: s.dtype == x.dtype and x.dtype in (dtypes.index, dtypes.int32) and isinstance(s.arg, str)),
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
 ])
 
@@ -150,8 +149,8 @@ program_spec = PatternMatcher([
   # make sure all index dtypes have been lowered
   (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
-  (UPat(Ops.VCONST, name="x"), lambda x: len(x.arg)>1 and len(x.arg) == x.dtype.vcount and
-    type(x.arg) is type(dtypes.as_const(x.arg, x.dtype)) and all(v is not Invalid for v in x.src)),
+  (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
+    type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
