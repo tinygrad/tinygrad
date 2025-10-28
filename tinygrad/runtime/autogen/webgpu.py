@@ -258,7 +258,7 @@ struct_WGPUBufferBindingLayout._fields_ = [
   ('minBindingSize', uint64_t),
 ]
 class struct_WGPUBufferHostMappedPointer(ctypes.Structure): pass
-WGPUCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p))
+WGPUCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 struct_WGPUBufferHostMappedPointer._fields_ = [
   ('chain', WGPUChainedStruct),
   ('pointer', ctypes.c_void_p),
@@ -286,7 +286,7 @@ WGPUBufferMapAsyncStatus_OffsetOutOfRange = enum_WGPUBufferMapAsyncStatus.define
 WGPUBufferMapAsyncStatus_SizeOutOfRange = enum_WGPUBufferMapAsyncStatus.define('WGPUBufferMapAsyncStatus_SizeOutOfRange', 10)
 WGPUBufferMapAsyncStatus_Force32 = enum_WGPUBufferMapAsyncStatus.define('WGPUBufferMapAsyncStatus_Force32', 2147483647)
 
-WGPUBufferMapCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUBufferMapAsyncStatus, ctypes.c_void_p))
+WGPUBufferMapCallback = ctypes.CFUNCTYPE(None, enum_WGPUBufferMapAsyncStatus, ctypes.c_void_p)
 struct_WGPUBufferMapCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -319,7 +319,7 @@ size_t = ctypes.c_ulong
 class struct_WGPUCompilationMessage(ctypes.Structure): pass
 class struct_WGPUStringView(ctypes.Structure): pass
 struct_WGPUStringView._fields_ = [
-  ('data', ctypes.c_char_p),
+  ('data', ctypes.POINTER(ctypes.c_char)),
   ('length', size_t),
 ]
 WGPUStringView = struct_WGPUStringView
@@ -348,7 +348,7 @@ const_struct_WGPUCompilationInfo._fields_ = [
   ('messageCount', size_t),
   ('messages', ctypes.POINTER(WGPUCompilationMessage)),
 ]
-WGPUCompilationInfoCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCompilationInfoRequestStatus, ctypes.POINTER(const_struct_WGPUCompilationInfo), ctypes.c_void_p))
+WGPUCompilationInfoCallback = ctypes.CFUNCTYPE(None, enum_WGPUCompilationInfoRequestStatus, ctypes.POINTER(const_struct_WGPUCompilationInfo), ctypes.c_void_p)
 struct_WGPUCompilationInfoCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -391,7 +391,7 @@ WGPUCreatePipelineAsyncStatus_DeviceDestroyed = enum_WGPUCreatePipelineAsyncStat
 WGPUCreatePipelineAsyncStatus_Unknown = enum_WGPUCreatePipelineAsyncStatus.define('WGPUCreatePipelineAsyncStatus_Unknown', 7)
 WGPUCreatePipelineAsyncStatus_Force32 = enum_WGPUCreatePipelineAsyncStatus.define('WGPUCreatePipelineAsyncStatus_Force32', 2147483647)
 
-WGPUCreateComputePipelineAsyncCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView, ctypes.c_void_p))
+WGPUCreateComputePipelineAsyncCallback = ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView, ctypes.c_void_p)
 struct_WGPUCreateComputePipelineAsyncCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -399,7 +399,7 @@ struct_WGPUCreateComputePipelineAsyncCallbackInfo._fields_ = [
   ('userdata', ctypes.c_void_p),
 ]
 class struct_WGPUCreateRenderPipelineAsyncCallbackInfo(ctypes.Structure): pass
-WGPUCreateRenderPipelineAsyncCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView, ctypes.c_void_p))
+WGPUCreateRenderPipelineAsyncCallback = ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView, ctypes.c_void_p)
 struct_WGPUCreateRenderPipelineAsyncCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -410,7 +410,7 @@ class struct_WGPUDawnWGSLBlocklist(ctypes.Structure): pass
 struct_WGPUDawnWGSLBlocklist._fields_ = [
   ('chain', WGPUChainedStruct),
   ('blocklistedFeatureCount', size_t),
-  ('blocklistedFeatures', ctypes.POINTER(ctypes.c_char_p)),
+  ('blocklistedFeatures', ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
 ]
 class struct_WGPUDawnAdapterPropertiesPowerPreference(ctypes.Structure): pass
 enum_WGPUPowerPreference = CEnum(ctypes.c_uint)
@@ -470,9 +470,9 @@ class struct_WGPUDawnTogglesDescriptor(ctypes.Structure): pass
 struct_WGPUDawnTogglesDescriptor._fields_ = [
   ('chain', WGPUChainedStruct),
   ('enabledToggleCount', size_t),
-  ('enabledToggles', ctypes.POINTER(ctypes.c_char_p)),
+  ('enabledToggles', ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
   ('disabledToggleCount', size_t),
-  ('disabledToggles', ctypes.POINTER(ctypes.c_char_p)),
+  ('disabledToggles', ctypes.POINTER(ctypes.POINTER(ctypes.c_char))),
 ]
 class struct_WGPUDawnWireWGSLControl(ctypes.Structure): pass
 struct_WGPUDawnWireWGSLControl._fields_ = [
@@ -489,7 +489,7 @@ WGPUDeviceLostReason_InstanceDropped = enum_WGPUDeviceLostReason.define('WGPUDev
 WGPUDeviceLostReason_FailedCreation = enum_WGPUDeviceLostReason.define('WGPUDeviceLostReason_FailedCreation', 4)
 WGPUDeviceLostReason_Force32 = enum_WGPUDeviceLostReason.define('WGPUDeviceLostReason_Force32', 2147483647)
 
-WGPUDeviceLostCallbackNew = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.POINTER(struct_WGPUDeviceImpl)), enum_WGPUDeviceLostReason, struct_WGPUStringView, ctypes.c_void_p))
+WGPUDeviceLostCallbackNew = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.POINTER(struct_WGPUDeviceImpl)), enum_WGPUDeviceLostReason, struct_WGPUStringView, ctypes.c_void_p)
 struct_WGPUDeviceLostCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -732,8 +732,8 @@ WGPUErrorType_Unknown = enum_WGPUErrorType.define('WGPUErrorType_Unknown', 5)
 WGPUErrorType_DeviceLost = enum_WGPUErrorType.define('WGPUErrorType_DeviceLost', 6)
 WGPUErrorType_Force32 = enum_WGPUErrorType.define('WGPUErrorType_Force32', 2147483647)
 
-WGPUPopErrorScopeCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUPopErrorScopeStatus, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p))
-WGPUErrorCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p))
+WGPUPopErrorScopeCallback = ctypes.CFUNCTYPE(None, enum_WGPUPopErrorScopeStatus, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p)
+WGPUErrorCallback = ctypes.CFUNCTYPE(None, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p)
 struct_WGPUPopErrorScopeCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -791,7 +791,7 @@ WGPUQueueWorkDoneStatus_Unknown = enum_WGPUQueueWorkDoneStatus.define('WGPUQueue
 WGPUQueueWorkDoneStatus_DeviceLost = enum_WGPUQueueWorkDoneStatus.define('WGPUQueueWorkDoneStatus_DeviceLost', 5)
 WGPUQueueWorkDoneStatus_Force32 = enum_WGPUQueueWorkDoneStatus.define('WGPUQueueWorkDoneStatus_Force32', 2147483647)
 
-WGPUQueueWorkDoneCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUQueueWorkDoneStatus, ctypes.c_void_p))
+WGPUQueueWorkDoneCallback = ctypes.CFUNCTYPE(None, enum_WGPUQueueWorkDoneStatus, ctypes.c_void_p)
 struct_WGPUQueueWorkDoneCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -853,7 +853,7 @@ WGPURequestAdapterStatus_Error = enum_WGPURequestAdapterStatus.define('WGPUReque
 WGPURequestAdapterStatus_Unknown = enum_WGPURequestAdapterStatus.define('WGPURequestAdapterStatus_Unknown', 5)
 WGPURequestAdapterStatus_Force32 = enum_WGPURequestAdapterStatus.define('WGPURequestAdapterStatus_Force32', 2147483647)
 
-WGPURequestAdapterCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPURequestAdapterStatus, ctypes.POINTER(struct_WGPUAdapterImpl), struct_WGPUStringView, ctypes.c_void_p))
+WGPURequestAdapterCallback = ctypes.CFUNCTYPE(None, enum_WGPURequestAdapterStatus, ctypes.POINTER(struct_WGPUAdapterImpl), struct_WGPUStringView, ctypes.c_void_p)
 struct_WGPURequestAdapterCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -898,7 +898,7 @@ WGPURequestDeviceStatus_Error = enum_WGPURequestDeviceStatus.define('WGPURequest
 WGPURequestDeviceStatus_Unknown = enum_WGPURequestDeviceStatus.define('WGPURequestDeviceStatus_Unknown', 4)
 WGPURequestDeviceStatus_Force32 = enum_WGPURequestDeviceStatus.define('WGPURequestDeviceStatus_Force32', 2147483647)
 
-WGPURequestDeviceCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPURequestDeviceStatus, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView, ctypes.c_void_p))
+WGPURequestDeviceCallback = ctypes.CFUNCTYPE(None, enum_WGPURequestDeviceStatus, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView, ctypes.c_void_p)
 struct_WGPURequestDeviceCallbackInfo._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -1550,8 +1550,8 @@ struct_WGPUConstantEntry._fields_ = [
   ('value', ctypes.c_double),
 ]
 class struct_WGPUDawnCacheDeviceDescriptor(ctypes.Structure): pass
-WGPUDawnLoadCacheDataFunction = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p))
-WGPUDawnStoreCacheDataFunction = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p))
+WGPUDawnLoadCacheDataFunction = ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p)
+WGPUDawnStoreCacheDataFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p)
 struct_WGPUDawnCacheDeviceDescriptor._fields_ = [
   ('chain', WGPUChainedStruct),
   ('isolationKey', WGPUStringView),
@@ -1914,7 +1914,7 @@ class struct_WGPUDeviceDescriptor(ctypes.Structure): pass
 WGPURequiredLimits = struct_WGPURequiredLimits
 WGPUQueueDescriptor = struct_WGPUQueueDescriptor
 class struct_WGPUDeviceLostCallbackInfo2(ctypes.Structure): pass
-WGPUDeviceLostCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.POINTER(struct_WGPUDeviceImpl)), enum_WGPUDeviceLostReason, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
+WGPUDeviceLostCallback2 = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.POINTER(struct_WGPUDeviceImpl)), enum_WGPUDeviceLostReason, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
 struct_WGPUDeviceLostCallbackInfo2._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('mode', WGPUCallbackMode),
@@ -1924,7 +1924,7 @@ struct_WGPUDeviceLostCallbackInfo2._fields_ = [
 ]
 WGPUDeviceLostCallbackInfo2 = struct_WGPUDeviceLostCallbackInfo2
 class struct_WGPUUncapturedErrorCallbackInfo2(ctypes.Structure): pass
-WGPUUncapturedErrorCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.POINTER(struct_WGPUDeviceImpl)), enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
+WGPUUncapturedErrorCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.POINTER(struct_WGPUDeviceImpl)), enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
 struct_WGPUUncapturedErrorCallbackInfo2._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('callback', WGPUUncapturedErrorCallback),
@@ -2079,17 +2079,17 @@ WGPUWaitStatus_Force32 = enum_WGPUWaitStatus.define('WGPUWaitStatus_Force32', 21
 
 WGPUWaitStatus = enum_WGPUWaitStatus
 WGPUMapMode = ctypes.c_ulong
-WGPUDeviceLostCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUDeviceLostReason, struct_WGPUStringView, ctypes.c_void_p))
-WGPULoggingCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPULoggingType, struct_WGPUStringView, ctypes.c_void_p))
-WGPUProc = ctypes.POINTER(ctypes.CFUNCTYPE(None))
-WGPUBufferMapCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUMapAsyncStatus, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
-WGPUCompilationInfoCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCompilationInfoRequestStatus, ctypes.POINTER(const_struct_WGPUCompilationInfo), ctypes.c_void_p, ctypes.c_void_p))
-WGPUCreateComputePipelineAsyncCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
-WGPUCreateRenderPipelineAsyncCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
-WGPUPopErrorScopeCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUPopErrorScopeStatus, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
-WGPUQueueWorkDoneCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUQueueWorkDoneStatus, ctypes.c_void_p, ctypes.c_void_p))
-WGPURequestAdapterCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPURequestAdapterStatus, ctypes.POINTER(struct_WGPUAdapterImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
-WGPURequestDeviceCallback2 = ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPURequestDeviceStatus, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p))
+WGPUDeviceLostCallback = ctypes.CFUNCTYPE(None, enum_WGPUDeviceLostReason, struct_WGPUStringView, ctypes.c_void_p)
+WGPULoggingCallback = ctypes.CFUNCTYPE(None, enum_WGPULoggingType, struct_WGPUStringView, ctypes.c_void_p)
+WGPUProc = ctypes.CFUNCTYPE(None)
+WGPUBufferMapCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUMapAsyncStatus, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
+WGPUCompilationInfoCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUCompilationInfoRequestStatus, ctypes.POINTER(const_struct_WGPUCompilationInfo), ctypes.c_void_p, ctypes.c_void_p)
+WGPUCreateComputePipelineAsyncCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
+WGPUCreateRenderPipelineAsyncCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
+WGPUPopErrorScopeCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUPopErrorScopeStatus, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
+WGPUQueueWorkDoneCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUQueueWorkDoneStatus, ctypes.c_void_p, ctypes.c_void_p)
+WGPURequestAdapterCallback2 = ctypes.CFUNCTYPE(None, enum_WGPURequestAdapterStatus, ctypes.POINTER(struct_WGPUAdapterImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
+WGPURequestDeviceCallback2 = ctypes.CFUNCTYPE(None, enum_WGPURequestDeviceStatus, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
 class struct_WGPUBufferMapCallbackInfo2(ctypes.Structure): pass
 struct_WGPUBufferMapCallbackInfo2._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2291,21 +2291,21 @@ WGPUSurfaceDescriptorFromWaylandSurface = struct_WGPUSurfaceSourceWaylandSurface
 WGPUSurfaceDescriptorFromWindowsHWND = struct_WGPUSurfaceSourceWindowsHWND
 WGPUSurfaceDescriptorFromXcbWindow = struct_WGPUSurfaceSourceXCBWindow
 WGPUSurfaceDescriptorFromXlibWindow = struct_WGPUSurfaceSourceXlibWindow
-WGPUProcAdapterInfoFreeMembers = ctypes.POINTER(ctypes.CFUNCTYPE(None, struct_WGPUAdapterInfo))
-WGPUProcAdapterPropertiesMemoryHeapsFreeMembers = ctypes.POINTER(ctypes.CFUNCTYPE(None, struct_WGPUAdapterPropertiesMemoryHeaps))
+WGPUProcAdapterInfoFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUAdapterInfo)
+WGPUProcAdapterPropertiesMemoryHeapsFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUAdapterPropertiesMemoryHeaps)
 class const_struct_WGPUInstanceDescriptor(ctypes.Structure): pass
 const_struct_WGPUInstanceDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('features', WGPUInstanceFeatures),
 ]
-WGPUProcCreateInstance = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPUInstanceDescriptor)))
-WGPUProcDrmFormatCapabilitiesFreeMembers = ctypes.POINTER(ctypes.CFUNCTYPE(None, struct_WGPUDrmFormatCapabilities))
-WGPUProcGetInstanceFeatures = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUInstanceFeatures)))
-WGPUProcGetProcAddress = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.CFUNCTYPE(None)), struct_WGPUStringView))
-WGPUProcSharedBufferMemoryEndAccessStateFreeMembers = ctypes.POINTER(ctypes.CFUNCTYPE(None, struct_WGPUSharedBufferMemoryEndAccessState))
-WGPUProcSharedTextureMemoryEndAccessStateFreeMembers = ctypes.POINTER(ctypes.CFUNCTYPE(None, struct_WGPUSharedTextureMemoryEndAccessState))
-WGPUProcSupportedFeaturesFreeMembers = ctypes.POINTER(ctypes.CFUNCTYPE(None, struct_WGPUSupportedFeatures))
-WGPUProcSurfaceCapabilitiesFreeMembers = ctypes.POINTER(ctypes.CFUNCTYPE(None, struct_WGPUSurfaceCapabilities))
+WGPUProcCreateInstance = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPUInstanceDescriptor))
+WGPUProcDrmFormatCapabilitiesFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUDrmFormatCapabilities)
+WGPUProcGetInstanceFeatures = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUInstanceFeatures))
+WGPUProcGetProcAddress = ctypes.CFUNCTYPE(ctypes.CFUNCTYPE(None), struct_WGPUStringView)
+WGPUProcSharedBufferMemoryEndAccessStateFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUSharedBufferMemoryEndAccessState)
+WGPUProcSharedTextureMemoryEndAccessStateFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUSharedTextureMemoryEndAccessState)
+WGPUProcSupportedFeaturesFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUSupportedFeatures)
+WGPUProcSurfaceCapabilitiesFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUSurfaceCapabilities)
 class const_struct_WGPUDeviceDescriptor(ctypes.Structure): pass
 const_struct_WGPUDeviceDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2317,47 +2317,47 @@ const_struct_WGPUDeviceDescriptor._fields_ = [
   ('deviceLostCallbackInfo2', WGPUDeviceLostCallbackInfo2),
   ('uncapturedErrorCallbackInfo2', WGPUUncapturedErrorCallbackInfo2),
 ]
-WGPUProcAdapterCreateDevice = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor)))
-WGPUProcAdapterGetFeatures = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUSupportedFeatures)))
-WGPUProcAdapterGetFormatCapabilities = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUAdapterImpl), enum_WGPUTextureFormat, ctypes.POINTER(struct_WGPUFormatCapabilities)))
-WGPUProcAdapterGetInfo = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUAdapterInfo)))
-WGPUProcAdapterGetInstance = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(struct_WGPUAdapterImpl)))
-WGPUProcAdapterGetLimits = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUSupportedLimits)))
-WGPUProcAdapterHasFeature = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUAdapterImpl), enum_WGPUFeatureName))
-WGPUProcAdapterRequestDevice = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPURequestDeviceStatus, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcAdapterRequestDevice2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor), struct_WGPURequestDeviceCallbackInfo2))
-WGPUProcAdapterRequestDeviceF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor), struct_WGPURequestDeviceCallbackInfo))
-WGPUProcAdapterAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl)))
-WGPUProcAdapterRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl)))
-WGPUProcBindGroupSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupImpl), struct_WGPUStringView))
-WGPUProcBindGroupAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupImpl)))
-WGPUProcBindGroupRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupImpl)))
-WGPUProcBindGroupLayoutSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), struct_WGPUStringView))
-WGPUProcBindGroupLayoutAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupLayoutImpl)))
-WGPUProcBindGroupLayoutRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupLayoutImpl)))
-WGPUProcBufferDestroy = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl)))
-WGPUProcBufferGetConstMappedRange = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong))
-WGPUProcBufferGetMapState = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUBufferMapState, ctypes.POINTER(struct_WGPUBufferImpl)))
-WGPUProcBufferGetMappedRange = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong))
-WGPUProcBufferGetSize = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUBufferImpl)))
-WGPUProcBufferGetUsage = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUBufferImpl)))
-WGPUProcBufferMapAsync = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUBufferMapAsyncStatus, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcBufferMapAsync2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, struct_WGPUBufferMapCallbackInfo2))
-WGPUProcBufferMapAsyncF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, struct_WGPUBufferMapCallbackInfo))
-WGPUProcBufferSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl), struct_WGPUStringView))
-WGPUProcBufferUnmap = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl)))
-WGPUProcBufferAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl)))
-WGPUProcBufferRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl)))
-WGPUProcCommandBufferSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandBufferImpl), struct_WGPUStringView))
-WGPUProcCommandBufferAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandBufferImpl)))
-WGPUProcCommandBufferRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandBufferImpl)))
+WGPUProcAdapterCreateDevice = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor))
+WGPUProcAdapterGetFeatures = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUSupportedFeatures))
+WGPUProcAdapterGetFormatCapabilities = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUAdapterImpl), enum_WGPUTextureFormat, ctypes.POINTER(struct_WGPUFormatCapabilities))
+WGPUProcAdapterGetInfo = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUAdapterInfo))
+WGPUProcAdapterGetInstance = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(struct_WGPUAdapterImpl))
+WGPUProcAdapterGetLimits = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUSupportedLimits))
+WGPUProcAdapterHasFeature = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUAdapterImpl), enum_WGPUFeatureName)
+WGPUProcAdapterRequestDevice = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor), ctypes.CFUNCTYPE(None, enum_WGPURequestDeviceStatus, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcAdapterRequestDevice2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor), struct_WGPURequestDeviceCallbackInfo2)
+WGPUProcAdapterRequestDeviceF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(const_struct_WGPUDeviceDescriptor), struct_WGPURequestDeviceCallbackInfo)
+WGPUProcAdapterAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl))
+WGPUProcAdapterRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUAdapterImpl))
+WGPUProcBindGroupSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupImpl), struct_WGPUStringView)
+WGPUProcBindGroupAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupImpl))
+WGPUProcBindGroupRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupImpl))
+WGPUProcBindGroupLayoutSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), struct_WGPUStringView)
+WGPUProcBindGroupLayoutAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupLayoutImpl))
+WGPUProcBindGroupLayoutRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBindGroupLayoutImpl))
+WGPUProcBufferDestroy = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl))
+WGPUProcBufferGetConstMappedRange = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong)
+WGPUProcBufferGetMapState = ctypes.CFUNCTYPE(enum_WGPUBufferMapState, ctypes.POINTER(struct_WGPUBufferImpl))
+WGPUProcBufferGetMappedRange = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong)
+WGPUProcBufferGetSize = ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUBufferImpl))
+WGPUProcBufferGetUsage = ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUBufferImpl))
+WGPUProcBufferMapAsync = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.CFUNCTYPE(None, enum_WGPUBufferMapAsyncStatus, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcBufferMapAsync2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, struct_WGPUBufferMapCallbackInfo2)
+WGPUProcBufferMapAsyncF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, struct_WGPUBufferMapCallbackInfo)
+WGPUProcBufferSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl), struct_WGPUStringView)
+WGPUProcBufferUnmap = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl))
+WGPUProcBufferAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl))
+WGPUProcBufferRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUBufferImpl))
+WGPUProcCommandBufferSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandBufferImpl), struct_WGPUStringView)
+WGPUProcCommandBufferAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandBufferImpl))
+WGPUProcCommandBufferRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandBufferImpl))
 class const_struct_WGPUComputePassDescriptor(ctypes.Structure): pass
 const_struct_WGPUComputePassDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
   ('timestampWrites', ctypes.POINTER(WGPUComputePassTimestampWrites)),
 ]
-WGPUProcCommandEncoderBeginComputePass = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUComputePassDescriptor)))
+WGPUProcCommandEncoderBeginComputePass = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUComputePassDescriptor))
 class const_struct_WGPURenderPassDescriptor(ctypes.Structure): pass
 const_struct_WGPURenderPassDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2368,9 +2368,9 @@ const_struct_WGPURenderPassDescriptor._fields_ = [
   ('occlusionQuerySet', WGPUQuerySet),
   ('timestampWrites', ctypes.POINTER(WGPURenderPassTimestampWrites)),
 ]
-WGPUProcCommandEncoderBeginRenderPass = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPURenderPassDescriptor)))
-WGPUProcCommandEncoderClearBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong))
-WGPUProcCommandEncoderCopyBufferToBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong))
+WGPUProcCommandEncoderBeginRenderPass = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPURenderPassDescriptor))
+WGPUProcCommandEncoderClearBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong)
+WGPUProcCommandEncoderCopyBufferToBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong)
 class const_struct_WGPUImageCopyBuffer(ctypes.Structure): pass
 const_struct_WGPUImageCopyBuffer._fields_ = [
   ('layout', WGPUTextureDataLayout),
@@ -2389,41 +2389,41 @@ const_struct_WGPUExtent3D._fields_ = [
   ('height', uint32_t),
   ('depthOrArrayLayers', uint32_t),
 ]
-WGPUProcCommandEncoderCopyBufferToTexture = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUImageCopyBuffer), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D)))
-WGPUProcCommandEncoderCopyTextureToBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUImageCopyBuffer), ctypes.POINTER(const_struct_WGPUExtent3D)))
-WGPUProcCommandEncoderCopyTextureToTexture = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D)))
+WGPUProcCommandEncoderCopyBufferToTexture = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUImageCopyBuffer), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D))
+WGPUProcCommandEncoderCopyTextureToBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUImageCopyBuffer), ctypes.POINTER(const_struct_WGPUExtent3D))
+WGPUProcCommandEncoderCopyTextureToTexture = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D))
 class const_struct_WGPUCommandBufferDescriptor(ctypes.Structure): pass
 const_struct_WGPUCommandBufferDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcCommandEncoderFinish = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUCommandBufferImpl), ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUCommandBufferDescriptor)))
-WGPUProcCommandEncoderInjectValidationError = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView))
-WGPUProcCommandEncoderInsertDebugMarker = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView))
-WGPUProcCommandEncoderPopDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl)))
-WGPUProcCommandEncoderPushDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView))
-WGPUProcCommandEncoderResolveQuerySet = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
-WGPUProcCommandEncoderSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView))
-WGPUProcCommandEncoderWriteBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_char_p, ctypes.c_ulong))
-WGPUProcCommandEncoderWriteTimestamp = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint))
-WGPUProcCommandEncoderAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl)))
-WGPUProcCommandEncoderRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl)))
-WGPUProcComputePassEncoderDispatchWorkgroups = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint))
-WGPUProcComputePassEncoderDispatchWorkgroupsIndirect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
-WGPUProcComputePassEncoderEnd = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl)))
-WGPUProcComputePassEncoderInsertDebugMarker = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), struct_WGPUStringView))
-WGPUProcComputePassEncoderPopDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl)))
-WGPUProcComputePassEncoderPushDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), struct_WGPUStringView))
-WGPUProcComputePassEncoderSetBindGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint)))
-WGPUProcComputePassEncoderSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), struct_WGPUStringView))
-WGPUProcComputePassEncoderSetPipeline = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUComputePipelineImpl)))
-WGPUProcComputePassEncoderWriteTimestamp = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint))
-WGPUProcComputePassEncoderAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl)))
-WGPUProcComputePassEncoderRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl)))
-WGPUProcComputePipelineGetBindGroupLayout = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), ctypes.POINTER(struct_WGPUComputePipelineImpl), ctypes.c_uint))
-WGPUProcComputePipelineSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView))
-WGPUProcComputePipelineAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePipelineImpl)))
-WGPUProcComputePipelineRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePipelineImpl)))
+WGPUProcCommandEncoderFinish = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUCommandBufferImpl), ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(const_struct_WGPUCommandBufferDescriptor))
+WGPUProcCommandEncoderInjectValidationError = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView)
+WGPUProcCommandEncoderInsertDebugMarker = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView)
+WGPUProcCommandEncoderPopDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl))
+WGPUProcCommandEncoderPushDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView)
+WGPUProcCommandEncoderResolveQuerySet = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
+WGPUProcCommandEncoderSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), struct_WGPUStringView)
+WGPUProcCommandEncoderWriteBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_ulong)
+WGPUProcCommandEncoderWriteTimestamp = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint)
+WGPUProcCommandEncoderAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl))
+WGPUProcCommandEncoderRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUCommandEncoderImpl))
+WGPUProcComputePassEncoderDispatchWorkgroups = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint)
+WGPUProcComputePassEncoderDispatchWorkgroupsIndirect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
+WGPUProcComputePassEncoderEnd = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl))
+WGPUProcComputePassEncoderInsertDebugMarker = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), struct_WGPUStringView)
+WGPUProcComputePassEncoderPopDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl))
+WGPUProcComputePassEncoderPushDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), struct_WGPUStringView)
+WGPUProcComputePassEncoderSetBindGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint))
+WGPUProcComputePassEncoderSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), struct_WGPUStringView)
+WGPUProcComputePassEncoderSetPipeline = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUComputePipelineImpl))
+WGPUProcComputePassEncoderWriteTimestamp = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint)
+WGPUProcComputePassEncoderAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl))
+WGPUProcComputePassEncoderRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePassEncoderImpl))
+WGPUProcComputePipelineGetBindGroupLayout = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), ctypes.POINTER(struct_WGPUComputePipelineImpl), ctypes.c_uint)
+WGPUProcComputePipelineSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView)
+WGPUProcComputePipelineAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePipelineImpl))
+WGPUProcComputePipelineRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUComputePipelineImpl))
 class const_struct_WGPUBindGroupDescriptor(ctypes.Structure): pass
 const_struct_WGPUBindGroupDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2432,7 +2432,7 @@ const_struct_WGPUBindGroupDescriptor._fields_ = [
   ('entryCount', size_t),
   ('entries', ctypes.POINTER(WGPUBindGroupEntry)),
 ]
-WGPUProcDeviceCreateBindGroup = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBindGroupDescriptor)))
+WGPUProcDeviceCreateBindGroup = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBindGroupDescriptor))
 class const_struct_WGPUBindGroupLayoutDescriptor(ctypes.Structure): pass
 const_struct_WGPUBindGroupLayoutDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2440,7 +2440,7 @@ const_struct_WGPUBindGroupLayoutDescriptor._fields_ = [
   ('entryCount', size_t),
   ('entries', ctypes.POINTER(WGPUBindGroupLayoutEntry)),
 ]
-WGPUProcDeviceCreateBindGroupLayout = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBindGroupLayoutDescriptor)))
+WGPUProcDeviceCreateBindGroupLayout = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBindGroupLayoutDescriptor))
 class const_struct_WGPUBufferDescriptor(ctypes.Structure): pass
 const_struct_WGPUBufferDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2449,13 +2449,13 @@ const_struct_WGPUBufferDescriptor._fields_ = [
   ('size', uint64_t),
   ('mappedAtCreation', WGPUBool),
 ]
-WGPUProcDeviceCreateBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBufferDescriptor)))
+WGPUProcDeviceCreateBuffer = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBufferDescriptor))
 class const_struct_WGPUCommandEncoderDescriptor(ctypes.Structure): pass
 const_struct_WGPUCommandEncoderDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcDeviceCreateCommandEncoder = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUCommandEncoderDescriptor)))
+WGPUProcDeviceCreateCommandEncoder = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUCommandEncoderImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUCommandEncoderDescriptor))
 class const_struct_WGPUComputePipelineDescriptor(ctypes.Structure): pass
 const_struct_WGPUComputePipelineDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2463,18 +2463,18 @@ const_struct_WGPUComputePipelineDescriptor._fields_ = [
   ('layout', WGPUPipelineLayout),
   ('compute', WGPUComputeState),
 ]
-WGPUProcDeviceCreateComputePipeline = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUComputePipelineImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor)))
-WGPUProcDeviceCreateComputePipelineAsync = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcDeviceCreateComputePipelineAsync2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor), struct_WGPUCreateComputePipelineAsyncCallbackInfo2))
-WGPUProcDeviceCreateComputePipelineAsyncF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor), struct_WGPUCreateComputePipelineAsyncCallbackInfo))
-WGPUProcDeviceCreateErrorBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBufferDescriptor)))
-WGPUProcDeviceCreateErrorExternalTexture = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUExternalTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl)))
+WGPUProcDeviceCreateComputePipeline = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUComputePipelineImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor))
+WGPUProcDeviceCreateComputePipelineAsync = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor), ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcDeviceCreateComputePipelineAsync2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor), struct_WGPUCreateComputePipelineAsyncCallbackInfo2)
+WGPUProcDeviceCreateComputePipelineAsyncF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUComputePipelineDescriptor), struct_WGPUCreateComputePipelineAsyncCallbackInfo)
+WGPUProcDeviceCreateErrorBuffer = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUBufferDescriptor))
+WGPUProcDeviceCreateErrorExternalTexture = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUExternalTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl))
 class const_struct_WGPUShaderModuleDescriptor(ctypes.Structure): pass
 const_struct_WGPUShaderModuleDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcDeviceCreateErrorShaderModule = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUShaderModuleImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUShaderModuleDescriptor), struct_WGPUStringView))
+WGPUProcDeviceCreateErrorShaderModule = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUShaderModuleImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUShaderModuleDescriptor), struct_WGPUStringView)
 class const_struct_WGPUTextureDescriptor(ctypes.Structure): pass
 const_struct_WGPUTextureDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2488,7 +2488,7 @@ const_struct_WGPUTextureDescriptor._fields_ = [
   ('viewFormatCount', size_t),
   ('viewFormats', ctypes.POINTER(WGPUTextureFormat)),
 ]
-WGPUProcDeviceCreateErrorTexture = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor)))
+WGPUProcDeviceCreateErrorTexture = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor))
 class const_struct_WGPUExternalTextureDescriptor(ctypes.Structure): pass
 const_struct_WGPUExternalTextureDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2506,7 +2506,7 @@ const_struct_WGPUExternalTextureDescriptor._fields_ = [
   ('mirrored', WGPUBool),
   ('rotation', WGPUExternalTextureRotation),
 ]
-WGPUProcDeviceCreateExternalTexture = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUExternalTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUExternalTextureDescriptor)))
+WGPUProcDeviceCreateExternalTexture = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUExternalTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUExternalTextureDescriptor))
 class const_struct_WGPUPipelineLayoutDescriptor(ctypes.Structure): pass
 const_struct_WGPUPipelineLayoutDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2515,7 +2515,7 @@ const_struct_WGPUPipelineLayoutDescriptor._fields_ = [
   ('bindGroupLayouts', ctypes.POINTER(WGPUBindGroupLayout)),
   ('immediateDataRangeByteSize', uint32_t),
 ]
-WGPUProcDeviceCreatePipelineLayout = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUPipelineLayoutImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUPipelineLayoutDescriptor)))
+WGPUProcDeviceCreatePipelineLayout = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUPipelineLayoutImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUPipelineLayoutDescriptor))
 class const_struct_WGPUQuerySetDescriptor(ctypes.Structure): pass
 const_struct_WGPUQuerySetDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2523,7 +2523,7 @@ const_struct_WGPUQuerySetDescriptor._fields_ = [
   ('type', WGPUQueryType),
   ('count', uint32_t),
 ]
-WGPUProcDeviceCreateQuerySet = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUQuerySetDescriptor)))
+WGPUProcDeviceCreateQuerySet = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUQuerySetDescriptor))
 class const_struct_WGPURenderBundleEncoderDescriptor(ctypes.Structure): pass
 const_struct_WGPURenderBundleEncoderDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2535,7 +2535,7 @@ const_struct_WGPURenderBundleEncoderDescriptor._fields_ = [
   ('depthReadOnly', WGPUBool),
   ('stencilReadOnly', WGPUBool),
 ]
-WGPUProcDeviceCreateRenderBundleEncoder = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderBundleEncoderDescriptor)))
+WGPUProcDeviceCreateRenderBundleEncoder = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderBundleEncoderDescriptor))
 class const_struct_WGPURenderPipelineDescriptor(ctypes.Structure): pass
 const_struct_WGPURenderPipelineDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2547,10 +2547,10 @@ const_struct_WGPURenderPipelineDescriptor._fields_ = [
   ('multisample', WGPUMultisampleState),
   ('fragment', ctypes.POINTER(WGPUFragmentState)),
 ]
-WGPUProcDeviceCreateRenderPipeline = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderPipelineImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor)))
-WGPUProcDeviceCreateRenderPipelineAsync = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcDeviceCreateRenderPipelineAsync2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor), struct_WGPUCreateRenderPipelineAsyncCallbackInfo2))
-WGPUProcDeviceCreateRenderPipelineAsyncF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor), struct_WGPUCreateRenderPipelineAsyncCallbackInfo))
+WGPUProcDeviceCreateRenderPipeline = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderPipelineImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor))
+WGPUProcDeviceCreateRenderPipelineAsync = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor), ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcDeviceCreateRenderPipelineAsync2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor), struct_WGPUCreateRenderPipelineAsyncCallbackInfo2)
+WGPUProcDeviceCreateRenderPipelineAsyncF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPURenderPipelineDescriptor), struct_WGPUCreateRenderPipelineAsyncCallbackInfo)
 class const_struct_WGPUSamplerDescriptor(ctypes.Structure): pass
 const_struct_WGPUSamplerDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2566,63 +2566,63 @@ const_struct_WGPUSamplerDescriptor._fields_ = [
   ('compare', WGPUCompareFunction),
   ('maxAnisotropy', uint16_t),
 ]
-WGPUProcDeviceCreateSampler = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSamplerImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSamplerDescriptor)))
-WGPUProcDeviceCreateShaderModule = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUShaderModuleImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUShaderModuleDescriptor)))
-WGPUProcDeviceCreateTexture = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor)))
-WGPUProcDeviceDestroy = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl)))
-WGPUProcDeviceForceLoss = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUDeviceLostReason, struct_WGPUStringView))
-WGPUProcDeviceGetAHardwareBufferProperties = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.c_void_p, ctypes.POINTER(struct_WGPUAHardwareBufferProperties)))
-WGPUProcDeviceGetAdapter = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUDeviceImpl)))
-WGPUProcDeviceGetAdapterInfo = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUAdapterInfo)))
-WGPUProcDeviceGetFeatures = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUSupportedFeatures)))
-WGPUProcDeviceGetLimits = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUSupportedLimits)))
-WGPUProcDeviceGetLostFuture = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl)))
-WGPUProcDeviceGetQueue = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(struct_WGPUDeviceImpl)))
-WGPUProcDeviceHasFeature = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUFeatureName))
+WGPUProcDeviceCreateSampler = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSamplerImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSamplerDescriptor))
+WGPUProcDeviceCreateShaderModule = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUShaderModuleImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUShaderModuleDescriptor))
+WGPUProcDeviceCreateTexture = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor))
+WGPUProcDeviceDestroy = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl))
+WGPUProcDeviceForceLoss = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUDeviceLostReason, struct_WGPUStringView)
+WGPUProcDeviceGetAHardwareBufferProperties = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.c_void_p, ctypes.POINTER(struct_WGPUAHardwareBufferProperties))
+WGPUProcDeviceGetAdapter = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUDeviceImpl))
+WGPUProcDeviceGetAdapterInfo = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUAdapterInfo))
+WGPUProcDeviceGetFeatures = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUSupportedFeatures))
+WGPUProcDeviceGetLimits = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(struct_WGPUSupportedLimits))
+WGPUProcDeviceGetLostFuture = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl))
+WGPUProcDeviceGetQueue = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(struct_WGPUDeviceImpl))
+WGPUProcDeviceHasFeature = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUFeatureName)
 class const_struct_WGPUSharedBufferMemoryDescriptor(ctypes.Structure): pass
 const_struct_WGPUSharedBufferMemoryDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcDeviceImportSharedBufferMemory = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSharedBufferMemoryDescriptor)))
+WGPUProcDeviceImportSharedBufferMemory = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSharedBufferMemoryDescriptor))
 class const_struct_WGPUSharedFenceDescriptor(ctypes.Structure): pass
 const_struct_WGPUSharedFenceDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcDeviceImportSharedFence = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSharedFenceImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSharedFenceDescriptor)))
+WGPUProcDeviceImportSharedFence = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSharedFenceImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSharedFenceDescriptor))
 class const_struct_WGPUSharedTextureMemoryDescriptor(ctypes.Structure): pass
 const_struct_WGPUSharedTextureMemoryDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcDeviceImportSharedTextureMemory = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSharedTextureMemoryDescriptor)))
-WGPUProcDeviceInjectError = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUErrorType, struct_WGPUStringView))
-WGPUProcDevicePopErrorScope = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcDevicePopErrorScope2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUPopErrorScopeCallbackInfo2))
-WGPUProcDevicePopErrorScopeF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUPopErrorScopeCallbackInfo))
-WGPUProcDevicePushErrorScope = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUErrorFilter))
-WGPUProcDeviceSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView))
-WGPUProcDeviceSetLoggingCallback = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPULoggingType, struct_WGPUStringView, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcDeviceTick = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl)))
-WGPUProcDeviceValidateTextureDescriptor = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor)))
-WGPUProcDeviceAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl)))
-WGPUProcDeviceRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl)))
-WGPUProcExternalTextureDestroy = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl)))
-WGPUProcExternalTextureExpire = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl)))
-WGPUProcExternalTextureRefresh = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl)))
-WGPUProcExternalTextureSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl), struct_WGPUStringView))
-WGPUProcExternalTextureAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl)))
-WGPUProcExternalTextureRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl)))
+WGPUProcDeviceImportSharedTextureMemory = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUSharedTextureMemoryDescriptor))
+WGPUProcDeviceInjectError = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUErrorType, struct_WGPUStringView)
+WGPUProcDevicePopErrorScope = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.CFUNCTYPE(None, enum_WGPUErrorType, struct_WGPUStringView, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcDevicePopErrorScope2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUPopErrorScopeCallbackInfo2)
+WGPUProcDevicePopErrorScopeF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUPopErrorScopeCallbackInfo)
+WGPUProcDevicePushErrorScope = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), enum_WGPUErrorFilter)
+WGPUProcDeviceSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), struct_WGPUStringView)
+WGPUProcDeviceSetLoggingCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.CFUNCTYPE(None, enum_WGPULoggingType, struct_WGPUStringView, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcDeviceTick = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl))
+WGPUProcDeviceValidateTextureDescriptor = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor))
+WGPUProcDeviceAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl))
+WGPUProcDeviceRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUDeviceImpl))
+WGPUProcExternalTextureDestroy = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl))
+WGPUProcExternalTextureExpire = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl))
+WGPUProcExternalTextureRefresh = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl))
+WGPUProcExternalTextureSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl), struct_WGPUStringView)
+WGPUProcExternalTextureAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl))
+WGPUProcExternalTextureRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUExternalTextureImpl))
 class const_struct_WGPUSurfaceDescriptor(ctypes.Structure): pass
 const_struct_WGPUSurfaceDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcInstanceCreateSurface = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPUSurfaceDescriptor)))
-WGPUProcInstanceEnumerateWGSLLanguageFeatures = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(enum_WGPUWGSLFeatureName)))
-WGPUProcInstanceHasWGSLLanguageFeature = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUInstanceImpl), enum_WGPUWGSLFeatureName))
-WGPUProcInstanceProcessEvents = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl)))
+WGPUProcInstanceCreateSurface = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPUSurfaceDescriptor))
+WGPUProcInstanceEnumerateWGSLLanguageFeatures = ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(enum_WGPUWGSLFeatureName))
+WGPUProcInstanceHasWGSLLanguageFeature = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUInstanceImpl), enum_WGPUWGSLFeatureName)
+WGPUProcInstanceProcessEvents = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl))
 class const_struct_WGPURequestAdapterOptions(ctypes.Structure): pass
 const_struct_WGPURequestAdapterOptions._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2633,21 +2633,21 @@ const_struct_WGPURequestAdapterOptions._fields_ = [
   ('forceFallbackAdapter', WGPUBool),
   ('compatibilityMode', WGPUBool),
 ]
-WGPUProcInstanceRequestAdapter = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPURequestAdapterOptions), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPURequestAdapterStatus, ctypes.POINTER(struct_WGPUAdapterImpl), struct_WGPUStringView, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcInstanceRequestAdapter2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPURequestAdapterOptions), struct_WGPURequestAdapterCallbackInfo2))
-WGPUProcInstanceRequestAdapterF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPURequestAdapterOptions), struct_WGPURequestAdapterCallbackInfo))
-WGPUProcInstanceWaitAny = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUWaitStatus, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.c_ulong, ctypes.POINTER(struct_WGPUFutureWaitInfo), ctypes.c_ulong))
-WGPUProcInstanceAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl)))
-WGPUProcInstanceRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl)))
-WGPUProcPipelineLayoutSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUPipelineLayoutImpl), struct_WGPUStringView))
-WGPUProcPipelineLayoutAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUPipelineLayoutImpl)))
-WGPUProcPipelineLayoutRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUPipelineLayoutImpl)))
-WGPUProcQuerySetDestroy = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl)))
-WGPUProcQuerySetGetCount = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUQuerySetImpl)))
-WGPUProcQuerySetGetType = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUQueryType, ctypes.POINTER(struct_WGPUQuerySetImpl)))
-WGPUProcQuerySetSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl), struct_WGPUStringView))
-WGPUProcQuerySetAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl)))
-WGPUProcQuerySetRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl)))
+WGPUProcInstanceRequestAdapter = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPURequestAdapterOptions), ctypes.CFUNCTYPE(None, enum_WGPURequestAdapterStatus, ctypes.POINTER(struct_WGPUAdapterImpl), struct_WGPUStringView, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcInstanceRequestAdapter2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPURequestAdapterOptions), struct_WGPURequestAdapterCallbackInfo2)
+WGPUProcInstanceRequestAdapterF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPURequestAdapterOptions), struct_WGPURequestAdapterCallbackInfo)
+WGPUProcInstanceWaitAny = ctypes.CFUNCTYPE(enum_WGPUWaitStatus, ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.c_ulong, ctypes.POINTER(struct_WGPUFutureWaitInfo), ctypes.c_ulong)
+WGPUProcInstanceAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl))
+WGPUProcInstanceRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUInstanceImpl))
+WGPUProcPipelineLayoutSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUPipelineLayoutImpl), struct_WGPUStringView)
+WGPUProcPipelineLayoutAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUPipelineLayoutImpl))
+WGPUProcPipelineLayoutRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUPipelineLayoutImpl))
+WGPUProcQuerySetDestroy = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl))
+WGPUProcQuerySetGetCount = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUQuerySetImpl))
+WGPUProcQuerySetGetType = ctypes.CFUNCTYPE(enum_WGPUQueryType, ctypes.POINTER(struct_WGPUQuerySetImpl))
+WGPUProcQuerySetSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl), struct_WGPUStringView)
+WGPUProcQuerySetAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl))
+WGPUProcQuerySetRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQuerySetImpl))
 class const_struct_WGPUImageCopyExternalTexture(ctypes.Structure): pass
 const_struct_WGPUImageCopyExternalTexture._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2667,14 +2667,14 @@ const_struct_WGPUCopyTextureForBrowserOptions._fields_ = [
   ('dstAlphaMode', WGPUAlphaMode),
   ('internalUsage', WGPUBool),
 ]
-WGPUProcQueueCopyExternalTextureForBrowser = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(const_struct_WGPUImageCopyExternalTexture), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D), ctypes.POINTER(const_struct_WGPUCopyTextureForBrowserOptions)))
-WGPUProcQueueCopyTextureForBrowser = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D), ctypes.POINTER(const_struct_WGPUCopyTextureForBrowserOptions)))
-WGPUProcQueueOnSubmittedWorkDone = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUQueueWorkDoneStatus, ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcQueueOnSubmittedWorkDone2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUQueueImpl), struct_WGPUQueueWorkDoneCallbackInfo2))
-WGPUProcQueueOnSubmittedWorkDoneF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUQueueImpl), struct_WGPUQueueWorkDoneCallbackInfo))
-WGPUProcQueueSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), struct_WGPUStringView))
-WGPUProcQueueSubmit = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.POINTER(struct_WGPUCommandBufferImpl))))
-WGPUProcQueueWriteBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong))
+WGPUProcQueueCopyExternalTextureForBrowser = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(const_struct_WGPUImageCopyExternalTexture), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D), ctypes.POINTER(const_struct_WGPUCopyTextureForBrowserOptions))
+WGPUProcQueueCopyTextureForBrowser = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.POINTER(const_struct_WGPUExtent3D), ctypes.POINTER(const_struct_WGPUCopyTextureForBrowserOptions))
+WGPUProcQueueOnSubmittedWorkDone = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.CFUNCTYPE(None, enum_WGPUQueueWorkDoneStatus, ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcQueueOnSubmittedWorkDone2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUQueueImpl), struct_WGPUQueueWorkDoneCallbackInfo2)
+WGPUProcQueueOnSubmittedWorkDoneF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUQueueImpl), struct_WGPUQueueWorkDoneCallbackInfo)
+WGPUProcQueueSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), struct_WGPUStringView)
+WGPUProcQueueSubmit = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.POINTER(struct_WGPUCommandBufferImpl)))
+WGPUProcQueueWriteBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong)
 class const_struct_WGPUTextureDataLayout(ctypes.Structure): pass
 const_struct_WGPUTextureDataLayout._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2682,47 +2682,47 @@ const_struct_WGPUTextureDataLayout._fields_ = [
   ('bytesPerRow', uint32_t),
   ('rowsPerImage', uint32_t),
 ]
-WGPUProcQueueWriteTexture = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(const_struct_WGPUTextureDataLayout), ctypes.POINTER(const_struct_WGPUExtent3D)))
-WGPUProcQueueAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl)))
-WGPUProcQueueRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl)))
-WGPUProcRenderBundleSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleImpl), struct_WGPUStringView))
-WGPUProcRenderBundleAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleImpl)))
-WGPUProcRenderBundleRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleImpl)))
-WGPUProcRenderBundleEncoderDraw = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint))
-WGPUProcRenderBundleEncoderDrawIndexed = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_int, ctypes.c_uint))
-WGPUProcRenderBundleEncoderDrawIndexedIndirect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
-WGPUProcRenderBundleEncoderDrawIndirect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
+WGPUProcQueueWriteTexture = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl), ctypes.POINTER(const_struct_WGPUImageCopyTexture), ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(const_struct_WGPUTextureDataLayout), ctypes.POINTER(const_struct_WGPUExtent3D))
+WGPUProcQueueAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl))
+WGPUProcQueueRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUQueueImpl))
+WGPUProcRenderBundleSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleImpl), struct_WGPUStringView)
+WGPUProcRenderBundleAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleImpl))
+WGPUProcRenderBundleRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleImpl))
+WGPUProcRenderBundleEncoderDraw = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint)
+WGPUProcRenderBundleEncoderDrawIndexed = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_int, ctypes.c_uint)
+WGPUProcRenderBundleEncoderDrawIndexedIndirect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
+WGPUProcRenderBundleEncoderDrawIndirect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
 class const_struct_WGPURenderBundleDescriptor(ctypes.Structure): pass
 const_struct_WGPURenderBundleDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
   ('label', WGPUStringView),
 ]
-WGPUProcRenderBundleEncoderFinish = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderBundleImpl), ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(const_struct_WGPURenderBundleDescriptor)))
-WGPUProcRenderBundleEncoderInsertDebugMarker = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), struct_WGPUStringView))
-WGPUProcRenderBundleEncoderPopDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl)))
-WGPUProcRenderBundleEncoderPushDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), struct_WGPUStringView))
-WGPUProcRenderBundleEncoderSetBindGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint)))
-WGPUProcRenderBundleEncoderSetIndexBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), enum_WGPUIndexFormat, ctypes.c_ulong, ctypes.c_ulong))
-WGPUProcRenderBundleEncoderSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), struct_WGPUStringView))
-WGPUProcRenderBundleEncoderSetPipeline = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPURenderPipelineImpl)))
-WGPUProcRenderBundleEncoderSetVertexBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong))
-WGPUProcRenderBundleEncoderAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl)))
-WGPUProcRenderBundleEncoderRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl)))
-WGPUProcRenderPassEncoderBeginOcclusionQuery = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint))
-WGPUProcRenderPassEncoderDraw = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint))
-WGPUProcRenderPassEncoderDrawIndexed = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_int, ctypes.c_uint))
-WGPUProcRenderPassEncoderDrawIndexedIndirect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
-WGPUProcRenderPassEncoderDrawIndirect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
-WGPUProcRenderPassEncoderEnd = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl)))
-WGPUProcRenderPassEncoderEndOcclusionQuery = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl)))
-WGPUProcRenderPassEncoderExecuteBundles = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.POINTER(struct_WGPURenderBundleImpl))))
-WGPUProcRenderPassEncoderInsertDebugMarker = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), struct_WGPUStringView))
-WGPUProcRenderPassEncoderMultiDrawIndexedIndirect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
-WGPUProcRenderPassEncoderMultiDrawIndirect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong))
-WGPUProcRenderPassEncoderPixelLocalStorageBarrier = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl)))
-WGPUProcRenderPassEncoderPopDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl)))
-WGPUProcRenderPassEncoderPushDebugGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), struct_WGPUStringView))
-WGPUProcRenderPassEncoderSetBindGroup = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint)))
+WGPUProcRenderBundleEncoderFinish = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPURenderBundleImpl), ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(const_struct_WGPURenderBundleDescriptor))
+WGPUProcRenderBundleEncoderInsertDebugMarker = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), struct_WGPUStringView)
+WGPUProcRenderBundleEncoderPopDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl))
+WGPUProcRenderBundleEncoderPushDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), struct_WGPUStringView)
+WGPUProcRenderBundleEncoderSetBindGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint))
+WGPUProcRenderBundleEncoderSetIndexBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), enum_WGPUIndexFormat, ctypes.c_ulong, ctypes.c_ulong)
+WGPUProcRenderBundleEncoderSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), struct_WGPUStringView)
+WGPUProcRenderBundleEncoderSetPipeline = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.POINTER(struct_WGPURenderPipelineImpl))
+WGPUProcRenderBundleEncoderSetVertexBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong)
+WGPUProcRenderBundleEncoderAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl))
+WGPUProcRenderBundleEncoderRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderBundleEncoderImpl))
+WGPUProcRenderPassEncoderBeginOcclusionQuery = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint)
+WGPUProcRenderPassEncoderDraw = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint)
+WGPUProcRenderPassEncoderDrawIndexed = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_int, ctypes.c_uint)
+WGPUProcRenderPassEncoderDrawIndexedIndirect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
+WGPUProcRenderPassEncoderDrawIndirect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
+WGPUProcRenderPassEncoderEnd = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl))
+WGPUProcRenderPassEncoderEndOcclusionQuery = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl))
+WGPUProcRenderPassEncoderExecuteBundles = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.POINTER(struct_WGPURenderBundleImpl)))
+WGPUProcRenderPassEncoderInsertDebugMarker = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), struct_WGPUStringView)
+WGPUProcRenderPassEncoderMultiDrawIndexedIndirect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
+WGPUProcRenderPassEncoderMultiDrawIndirect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong)
+WGPUProcRenderPassEncoderPixelLocalStorageBarrier = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl))
+WGPUProcRenderPassEncoderPopDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl))
+WGPUProcRenderPassEncoderPushDebugGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), struct_WGPUStringView)
+WGPUProcRenderPassEncoderSetBindGroup = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBindGroupImpl), ctypes.c_ulong, ctypes.POINTER(ctypes.c_uint))
 class const_struct_WGPUColor(ctypes.Structure): pass
 const_struct_WGPUColor._fields_ = [
   ('r', ctypes.c_double),
@@ -2730,30 +2730,30 @@ const_struct_WGPUColor._fields_ = [
   ('b', ctypes.c_double),
   ('a', ctypes.c_double),
 ]
-WGPUProcRenderPassEncoderSetBlendConstant = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(const_struct_WGPUColor)))
-WGPUProcRenderPassEncoderSetIndexBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), enum_WGPUIndexFormat, ctypes.c_ulong, ctypes.c_ulong))
-WGPUProcRenderPassEncoderSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), struct_WGPUStringView))
-WGPUProcRenderPassEncoderSetPipeline = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPURenderPipelineImpl)))
-WGPUProcRenderPassEncoderSetScissorRect = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint))
-WGPUProcRenderPassEncoderSetStencilReference = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint))
-WGPUProcRenderPassEncoderSetVertexBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong))
-WGPUProcRenderPassEncoderSetViewport = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float))
-WGPUProcRenderPassEncoderWriteTimestamp = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint))
-WGPUProcRenderPassEncoderAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl)))
-WGPUProcRenderPassEncoderRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl)))
-WGPUProcRenderPipelineGetBindGroupLayout = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), ctypes.POINTER(struct_WGPURenderPipelineImpl), ctypes.c_uint))
-WGPUProcRenderPipelineSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView))
-WGPUProcRenderPipelineAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPipelineImpl)))
-WGPUProcRenderPipelineRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPipelineImpl)))
-WGPUProcSamplerSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSamplerImpl), struct_WGPUStringView))
-WGPUProcSamplerAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSamplerImpl)))
-WGPUProcSamplerRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSamplerImpl)))
-WGPUProcShaderModuleGetCompilationInfo = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl), ctypes.POINTER(ctypes.CFUNCTYPE(None, enum_WGPUCompilationInfoRequestStatus, ctypes.POINTER(const_struct_WGPUCompilationInfo), ctypes.c_void_p)), ctypes.c_void_p))
-WGPUProcShaderModuleGetCompilationInfo2 = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUShaderModuleImpl), struct_WGPUCompilationInfoCallbackInfo2))
-WGPUProcShaderModuleGetCompilationInfoF = ctypes.POINTER(ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUShaderModuleImpl), struct_WGPUCompilationInfoCallbackInfo))
-WGPUProcShaderModuleSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl), struct_WGPUStringView))
-WGPUProcShaderModuleAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl)))
-WGPUProcShaderModuleRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl)))
+WGPUProcRenderPassEncoderSetBlendConstant = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(const_struct_WGPUColor))
+WGPUProcRenderPassEncoderSetIndexBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUBufferImpl), enum_WGPUIndexFormat, ctypes.c_ulong, ctypes.c_ulong)
+WGPUProcRenderPassEncoderSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), struct_WGPUStringView)
+WGPUProcRenderPassEncoderSetPipeline = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPURenderPipelineImpl))
+WGPUProcRenderPassEncoderSetScissorRect = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint)
+WGPUProcRenderPassEncoderSetStencilReference = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint)
+WGPUProcRenderPassEncoderSetVertexBuffer = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_uint, ctypes.POINTER(struct_WGPUBufferImpl), ctypes.c_ulong, ctypes.c_ulong)
+WGPUProcRenderPassEncoderSetViewport = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float)
+WGPUProcRenderPassEncoderWriteTimestamp = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl), ctypes.POINTER(struct_WGPUQuerySetImpl), ctypes.c_uint)
+WGPUProcRenderPassEncoderAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl))
+WGPUProcRenderPassEncoderRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPassEncoderImpl))
+WGPUProcRenderPipelineGetBindGroupLayout = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBindGroupLayoutImpl), ctypes.POINTER(struct_WGPURenderPipelineImpl), ctypes.c_uint)
+WGPUProcRenderPipelineSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPipelineImpl), struct_WGPUStringView)
+WGPUProcRenderPipelineAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPipelineImpl))
+WGPUProcRenderPipelineRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPURenderPipelineImpl))
+WGPUProcSamplerSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSamplerImpl), struct_WGPUStringView)
+WGPUProcSamplerAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSamplerImpl))
+WGPUProcSamplerRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSamplerImpl))
+WGPUProcShaderModuleGetCompilationInfo = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl), ctypes.CFUNCTYPE(None, enum_WGPUCompilationInfoRequestStatus, ctypes.POINTER(const_struct_WGPUCompilationInfo), ctypes.c_void_p), ctypes.c_void_p)
+WGPUProcShaderModuleGetCompilationInfo2 = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUShaderModuleImpl), struct_WGPUCompilationInfoCallbackInfo2)
+WGPUProcShaderModuleGetCompilationInfoF = ctypes.CFUNCTYPE(struct_WGPUFuture, ctypes.POINTER(struct_WGPUShaderModuleImpl), struct_WGPUCompilationInfoCallbackInfo)
+WGPUProcShaderModuleSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl), struct_WGPUStringView)
+WGPUProcShaderModuleAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl))
+WGPUProcShaderModuleRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUShaderModuleImpl))
 class const_struct_WGPUSharedBufferMemoryBeginAccessDescriptor(ctypes.Structure): pass
 const_struct_WGPUSharedBufferMemoryBeginAccessDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2762,17 +2762,17 @@ const_struct_WGPUSharedBufferMemoryBeginAccessDescriptor._fields_ = [
   ('fences', ctypes.POINTER(WGPUSharedFence)),
   ('signaledValues', ctypes.POINTER(uint64_t)),
 ]
-WGPUProcSharedBufferMemoryBeginAccess = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(const_struct_WGPUSharedBufferMemoryBeginAccessDescriptor)))
-WGPUProcSharedBufferMemoryCreateBuffer = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(const_struct_WGPUBufferDescriptor)))
-WGPUProcSharedBufferMemoryEndAccess = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUSharedBufferMemoryEndAccessState)))
-WGPUProcSharedBufferMemoryGetProperties = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUSharedBufferMemoryProperties)))
-WGPUProcSharedBufferMemoryIsDeviceLost = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl)))
-WGPUProcSharedBufferMemorySetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), struct_WGPUStringView))
-WGPUProcSharedBufferMemoryAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl)))
-WGPUProcSharedBufferMemoryRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl)))
-WGPUProcSharedFenceExportInfo = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedFenceImpl), ctypes.POINTER(struct_WGPUSharedFenceExportInfo)))
-WGPUProcSharedFenceAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedFenceImpl)))
-WGPUProcSharedFenceRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedFenceImpl)))
+WGPUProcSharedBufferMemoryBeginAccess = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(const_struct_WGPUSharedBufferMemoryBeginAccessDescriptor))
+WGPUProcSharedBufferMemoryCreateBuffer = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(const_struct_WGPUBufferDescriptor))
+WGPUProcSharedBufferMemoryEndAccess = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUBufferImpl), ctypes.POINTER(struct_WGPUSharedBufferMemoryEndAccessState))
+WGPUProcSharedBufferMemoryGetProperties = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), ctypes.POINTER(struct_WGPUSharedBufferMemoryProperties))
+WGPUProcSharedBufferMemoryIsDeviceLost = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl))
+WGPUProcSharedBufferMemorySetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl), struct_WGPUStringView)
+WGPUProcSharedBufferMemoryAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl))
+WGPUProcSharedBufferMemoryRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedBufferMemoryImpl))
+WGPUProcSharedFenceExportInfo = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedFenceImpl), ctypes.POINTER(struct_WGPUSharedFenceExportInfo))
+WGPUProcSharedFenceAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedFenceImpl))
+WGPUProcSharedFenceRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedFenceImpl))
 class const_struct_WGPUSharedTextureMemoryBeginAccessDescriptor(ctypes.Structure): pass
 const_struct_WGPUSharedTextureMemoryBeginAccessDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2782,14 +2782,14 @@ const_struct_WGPUSharedTextureMemoryBeginAccessDescriptor._fields_ = [
   ('fences', ctypes.POINTER(WGPUSharedFence)),
   ('signaledValues', ctypes.POINTER(uint64_t)),
 ]
-WGPUProcSharedTextureMemoryBeginAccess = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(const_struct_WGPUSharedTextureMemoryBeginAccessDescriptor)))
-WGPUProcSharedTextureMemoryCreateTexture = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor)))
-WGPUProcSharedTextureMemoryEndAccess = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUSharedTextureMemoryEndAccessState)))
-WGPUProcSharedTextureMemoryGetProperties = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUSharedTextureMemoryProperties)))
-WGPUProcSharedTextureMemoryIsDeviceLost = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl)))
-WGPUProcSharedTextureMemorySetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), struct_WGPUStringView))
-WGPUProcSharedTextureMemoryAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl)))
-WGPUProcSharedTextureMemoryRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl)))
+WGPUProcSharedTextureMemoryBeginAccess = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(const_struct_WGPUSharedTextureMemoryBeginAccessDescriptor))
+WGPUProcSharedTextureMemoryCreateTexture = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(const_struct_WGPUTextureDescriptor))
+WGPUProcSharedTextureMemoryEndAccess = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(struct_WGPUSharedTextureMemoryEndAccessState))
+WGPUProcSharedTextureMemoryGetProperties = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), ctypes.POINTER(struct_WGPUSharedTextureMemoryProperties))
+WGPUProcSharedTextureMemoryIsDeviceLost = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl))
+WGPUProcSharedTextureMemorySetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl), struct_WGPUStringView)
+WGPUProcSharedTextureMemoryAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl))
+WGPUProcSharedTextureMemoryRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSharedTextureMemoryImpl))
 class const_struct_WGPUSurfaceConfiguration(ctypes.Structure): pass
 const_struct_WGPUSurfaceConfiguration._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2803,14 +2803,14 @@ const_struct_WGPUSurfaceConfiguration._fields_ = [
   ('height', uint32_t),
   ('presentMode', WGPUPresentMode),
 ]
-WGPUProcSurfaceConfigure = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(const_struct_WGPUSurfaceConfiguration)))
-WGPUProcSurfaceGetCapabilities = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUSurfaceCapabilities)))
-WGPUProcSurfaceGetCurrentTexture = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(struct_WGPUSurfaceTexture)))
-WGPUProcSurfacePresent = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl)))
-WGPUProcSurfaceSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl), struct_WGPUStringView))
-WGPUProcSurfaceUnconfigure = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl)))
-WGPUProcSurfaceAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl)))
-WGPUProcSurfaceRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl)))
+WGPUProcSurfaceConfigure = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(const_struct_WGPUSurfaceConfiguration))
+WGPUProcSurfaceGetCapabilities = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(struct_WGPUAdapterImpl), ctypes.POINTER(struct_WGPUSurfaceCapabilities))
+WGPUProcSurfaceGetCurrentTexture = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl), ctypes.POINTER(struct_WGPUSurfaceTexture))
+WGPUProcSurfacePresent = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl))
+WGPUProcSurfaceSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl), struct_WGPUStringView)
+WGPUProcSurfaceUnconfigure = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl))
+WGPUProcSurfaceAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl))
+WGPUProcSurfaceRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUSurfaceImpl))
 class const_struct_WGPUTextureViewDescriptor(ctypes.Structure): pass
 const_struct_WGPUTextureViewDescriptor._fields_ = [
   ('nextInChain', ctypes.POINTER(WGPUChainedStruct)),
@@ -2824,1079 +2824,1069 @@ const_struct_WGPUTextureViewDescriptor._fields_ = [
   ('aspect', WGPUTextureAspect),
   ('usage', WGPUTextureUsage),
 ]
-WGPUProcTextureCreateErrorView = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureViewImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(const_struct_WGPUTextureViewDescriptor)))
-WGPUProcTextureCreateView = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureViewImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(const_struct_WGPUTextureViewDescriptor)))
-WGPUProcTextureDestroy = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetDepthOrArrayLayers = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetDimension = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUTextureDimension, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetFormat = ctypes.POINTER(ctypes.CFUNCTYPE(enum_WGPUTextureFormat, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetHeight = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetMipLevelCount = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetSampleCount = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetUsage = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureGetWidth = ctypes.POINTER(ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl), struct_WGPUStringView))
-WGPUProcTextureAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl)))
-WGPUProcTextureViewSetLabel = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureViewImpl), struct_WGPUStringView))
-WGPUProcTextureViewAddRef = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureViewImpl)))
-WGPUProcTextureViewRelease = ctypes.POINTER(ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureViewImpl)))
+WGPUProcTextureCreateErrorView = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureViewImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(const_struct_WGPUTextureViewDescriptor))
+WGPUProcTextureCreateView = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUTextureViewImpl), ctypes.POINTER(struct_WGPUTextureImpl), ctypes.POINTER(const_struct_WGPUTextureViewDescriptor))
+WGPUProcTextureDestroy = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetDepthOrArrayLayers = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetDimension = ctypes.CFUNCTYPE(enum_WGPUTextureDimension, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetFormat = ctypes.CFUNCTYPE(enum_WGPUTextureFormat, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetHeight = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetMipLevelCount = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetSampleCount = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetUsage = ctypes.CFUNCTYPE(ctypes.c_ulong, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureGetWidth = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl), struct_WGPUStringView)
+WGPUProcTextureAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureImpl))
+WGPUProcTextureViewSetLabel = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureViewImpl), struct_WGPUStringView)
+WGPUProcTextureViewAddRef = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureViewImpl))
+WGPUProcTextureViewRelease = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_WGPUTextureViewImpl))
 # void wgpuAdapterInfoFreeMembers(WGPUAdapterInfo value)
-try: (wgpuAdapterInfoFreeMembers:=dll.wgpuAdapterInfoFreeMembers).restype,wgpuAdapterInfoFreeMembers.argtypes = None,[WGPUAdapterInfo]
+try: (wgpuAdapterInfoFreeMembers:=dll.wgpuAdapterInfoFreeMembers).restype, wgpuAdapterInfoFreeMembers.argtypes = None, [WGPUAdapterInfo]
 except AttributeError: pass
 
 # void wgpuAdapterPropertiesMemoryHeapsFreeMembers(WGPUAdapterPropertiesMemoryHeaps value)
-try: (wgpuAdapterPropertiesMemoryHeapsFreeMembers:=dll.wgpuAdapterPropertiesMemoryHeapsFreeMembers).restype,wgpuAdapterPropertiesMemoryHeapsFreeMembers.argtypes = None,[WGPUAdapterPropertiesMemoryHeaps]
+try: (wgpuAdapterPropertiesMemoryHeapsFreeMembers:=dll.wgpuAdapterPropertiesMemoryHeapsFreeMembers).restype, wgpuAdapterPropertiesMemoryHeapsFreeMembers.argtypes = None, [WGPUAdapterPropertiesMemoryHeaps]
 except AttributeError: pass
 
 # WGPUInstance wgpuCreateInstance(const WGPUInstanceDescriptor *descriptor)
-try: (wgpuCreateInstance:=dll.wgpuCreateInstance).restype,wgpuCreateInstance.argtypes = WGPUInstance,[ctypes.POINTER(WGPUInstanceDescriptor)]
+try: (wgpuCreateInstance:=dll.wgpuCreateInstance).restype, wgpuCreateInstance.argtypes = WGPUInstance, [ctypes.POINTER(WGPUInstanceDescriptor)]
 except AttributeError: pass
 
 # void wgpuDrmFormatCapabilitiesFreeMembers(WGPUDrmFormatCapabilities value)
-try: (wgpuDrmFormatCapabilitiesFreeMembers:=dll.wgpuDrmFormatCapabilitiesFreeMembers).restype,wgpuDrmFormatCapabilitiesFreeMembers.argtypes = None,[WGPUDrmFormatCapabilities]
+try: (wgpuDrmFormatCapabilitiesFreeMembers:=dll.wgpuDrmFormatCapabilitiesFreeMembers).restype, wgpuDrmFormatCapabilitiesFreeMembers.argtypes = None, [WGPUDrmFormatCapabilities]
 except AttributeError: pass
 
 # WGPUStatus wgpuGetInstanceFeatures(WGPUInstanceFeatures *features)
-try: (wgpuGetInstanceFeatures:=dll.wgpuGetInstanceFeatures).restype,wgpuGetInstanceFeatures.argtypes = WGPUStatus,[ctypes.POINTER(WGPUInstanceFeatures)]
+try: (wgpuGetInstanceFeatures:=dll.wgpuGetInstanceFeatures).restype, wgpuGetInstanceFeatures.argtypes = WGPUStatus, [ctypes.POINTER(WGPUInstanceFeatures)]
 except AttributeError: pass
 
 # WGPUProc wgpuGetProcAddress(WGPUStringView procName)
-try: (wgpuGetProcAddress:=dll.wgpuGetProcAddress).restype,wgpuGetProcAddress.argtypes = WGPUProc,[WGPUStringView]
+try: (wgpuGetProcAddress:=dll.wgpuGetProcAddress).restype, wgpuGetProcAddress.argtypes = WGPUProc, [WGPUStringView]
 except AttributeError: pass
 
 # void wgpuSharedBufferMemoryEndAccessStateFreeMembers(WGPUSharedBufferMemoryEndAccessState value)
-try: (wgpuSharedBufferMemoryEndAccessStateFreeMembers:=dll.wgpuSharedBufferMemoryEndAccessStateFreeMembers).restype,wgpuSharedBufferMemoryEndAccessStateFreeMembers.argtypes = None,[WGPUSharedBufferMemoryEndAccessState]
+try: (wgpuSharedBufferMemoryEndAccessStateFreeMembers:=dll.wgpuSharedBufferMemoryEndAccessStateFreeMembers).restype, wgpuSharedBufferMemoryEndAccessStateFreeMembers.argtypes = None, [WGPUSharedBufferMemoryEndAccessState]
 except AttributeError: pass
 
 # void wgpuSharedTextureMemoryEndAccessStateFreeMembers(WGPUSharedTextureMemoryEndAccessState value)
-try: (wgpuSharedTextureMemoryEndAccessStateFreeMembers:=dll.wgpuSharedTextureMemoryEndAccessStateFreeMembers).restype,wgpuSharedTextureMemoryEndAccessStateFreeMembers.argtypes = None,[WGPUSharedTextureMemoryEndAccessState]
+try: (wgpuSharedTextureMemoryEndAccessStateFreeMembers:=dll.wgpuSharedTextureMemoryEndAccessStateFreeMembers).restype, wgpuSharedTextureMemoryEndAccessStateFreeMembers.argtypes = None, [WGPUSharedTextureMemoryEndAccessState]
 except AttributeError: pass
 
 # void wgpuSupportedFeaturesFreeMembers(WGPUSupportedFeatures value)
-try: (wgpuSupportedFeaturesFreeMembers:=dll.wgpuSupportedFeaturesFreeMembers).restype,wgpuSupportedFeaturesFreeMembers.argtypes = None,[WGPUSupportedFeatures]
+try: (wgpuSupportedFeaturesFreeMembers:=dll.wgpuSupportedFeaturesFreeMembers).restype, wgpuSupportedFeaturesFreeMembers.argtypes = None, [WGPUSupportedFeatures]
 except AttributeError: pass
 
 # void wgpuSurfaceCapabilitiesFreeMembers(WGPUSurfaceCapabilities value)
-try: (wgpuSurfaceCapabilitiesFreeMembers:=dll.wgpuSurfaceCapabilitiesFreeMembers).restype,wgpuSurfaceCapabilitiesFreeMembers.argtypes = None,[WGPUSurfaceCapabilities]
+try: (wgpuSurfaceCapabilitiesFreeMembers:=dll.wgpuSurfaceCapabilitiesFreeMembers).restype, wgpuSurfaceCapabilitiesFreeMembers.argtypes = None, [WGPUSurfaceCapabilities]
 except AttributeError: pass
 
 # WGPUDevice wgpuAdapterCreateDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor *descriptor)
-try: (wgpuAdapterCreateDevice:=dll.wgpuAdapterCreateDevice).restype,wgpuAdapterCreateDevice.argtypes = WGPUDevice,[WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor)]
+try: (wgpuAdapterCreateDevice:=dll.wgpuAdapterCreateDevice).restype, wgpuAdapterCreateDevice.argtypes = WGPUDevice, [WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor)]
 except AttributeError: pass
 
 # void wgpuAdapterGetFeatures(WGPUAdapter adapter, WGPUSupportedFeatures *features)
-try: (wgpuAdapterGetFeatures:=dll.wgpuAdapterGetFeatures).restype,wgpuAdapterGetFeatures.argtypes = None,[WGPUAdapter, ctypes.POINTER(WGPUSupportedFeatures)]
+try: (wgpuAdapterGetFeatures:=dll.wgpuAdapterGetFeatures).restype, wgpuAdapterGetFeatures.argtypes = None, [WGPUAdapter, ctypes.POINTER(WGPUSupportedFeatures)]
 except AttributeError: pass
 
 # WGPUStatus wgpuAdapterGetFormatCapabilities(WGPUAdapter adapter, WGPUTextureFormat format, WGPUFormatCapabilities *capabilities)
-try: (wgpuAdapterGetFormatCapabilities:=dll.wgpuAdapterGetFormatCapabilities).restype,wgpuAdapterGetFormatCapabilities.argtypes = WGPUStatus,[WGPUAdapter, WGPUTextureFormat, ctypes.POINTER(WGPUFormatCapabilities)]
+try: (wgpuAdapterGetFormatCapabilities:=dll.wgpuAdapterGetFormatCapabilities).restype, wgpuAdapterGetFormatCapabilities.argtypes = WGPUStatus, [WGPUAdapter, WGPUTextureFormat, ctypes.POINTER(WGPUFormatCapabilities)]
 except AttributeError: pass
 
 # WGPUStatus wgpuAdapterGetInfo(WGPUAdapter adapter, WGPUAdapterInfo *info)
-try: (wgpuAdapterGetInfo:=dll.wgpuAdapterGetInfo).restype,wgpuAdapterGetInfo.argtypes = WGPUStatus,[WGPUAdapter, ctypes.POINTER(WGPUAdapterInfo)]
+try: (wgpuAdapterGetInfo:=dll.wgpuAdapterGetInfo).restype, wgpuAdapterGetInfo.argtypes = WGPUStatus, [WGPUAdapter, ctypes.POINTER(WGPUAdapterInfo)]
 except AttributeError: pass
 
 # WGPUInstance wgpuAdapterGetInstance(WGPUAdapter adapter)
-try: (wgpuAdapterGetInstance:=dll.wgpuAdapterGetInstance).restype,wgpuAdapterGetInstance.argtypes = WGPUInstance,[WGPUAdapter]
+try: (wgpuAdapterGetInstance:=dll.wgpuAdapterGetInstance).restype, wgpuAdapterGetInstance.argtypes = WGPUInstance, [WGPUAdapter]
 except AttributeError: pass
 
 # WGPUStatus wgpuAdapterGetLimits(WGPUAdapter adapter, WGPUSupportedLimits *limits)
-try: (wgpuAdapterGetLimits:=dll.wgpuAdapterGetLimits).restype,wgpuAdapterGetLimits.argtypes = WGPUStatus,[WGPUAdapter, ctypes.POINTER(WGPUSupportedLimits)]
+try: (wgpuAdapterGetLimits:=dll.wgpuAdapterGetLimits).restype, wgpuAdapterGetLimits.argtypes = WGPUStatus, [WGPUAdapter, ctypes.POINTER(WGPUSupportedLimits)]
 except AttributeError: pass
 
 # WGPUBool wgpuAdapterHasFeature(WGPUAdapter adapter, WGPUFeatureName feature)
-try: (wgpuAdapterHasFeature:=dll.wgpuAdapterHasFeature).restype,wgpuAdapterHasFeature.argtypes = WGPUBool,[WGPUAdapter, WGPUFeatureName]
+try: (wgpuAdapterHasFeature:=dll.wgpuAdapterHasFeature).restype, wgpuAdapterHasFeature.argtypes = WGPUBool, [WGPUAdapter, WGPUFeatureName]
 except AttributeError: pass
 
 # void wgpuAdapterRequestDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor *descriptor, WGPURequestDeviceCallback callback, void *userdata)
-try: (wgpuAdapterRequestDevice:=dll.wgpuAdapterRequestDevice).restype,wgpuAdapterRequestDevice.argtypes = None,[WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor), WGPURequestDeviceCallback, ctypes.c_void_p]
+try: (wgpuAdapterRequestDevice:=dll.wgpuAdapterRequestDevice).restype, wgpuAdapterRequestDevice.argtypes = None, [WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor), WGPURequestDeviceCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuAdapterRequestDevice2(WGPUAdapter adapter, const WGPUDeviceDescriptor *options, WGPURequestDeviceCallbackInfo2 callbackInfo)
-try: (wgpuAdapterRequestDevice2:=dll.wgpuAdapterRequestDevice2).restype,wgpuAdapterRequestDevice2.argtypes = WGPUFuture,[WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor), WGPURequestDeviceCallbackInfo2]
+try: (wgpuAdapterRequestDevice2:=dll.wgpuAdapterRequestDevice2).restype, wgpuAdapterRequestDevice2.argtypes = WGPUFuture, [WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor), WGPURequestDeviceCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuAdapterRequestDeviceF(WGPUAdapter adapter, const WGPUDeviceDescriptor *options, WGPURequestDeviceCallbackInfo callbackInfo)
-try: (wgpuAdapterRequestDeviceF:=dll.wgpuAdapterRequestDeviceF).restype,wgpuAdapterRequestDeviceF.argtypes = WGPUFuture,[WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor), WGPURequestDeviceCallbackInfo]
+try: (wgpuAdapterRequestDeviceF:=dll.wgpuAdapterRequestDeviceF).restype, wgpuAdapterRequestDeviceF.argtypes = WGPUFuture, [WGPUAdapter, ctypes.POINTER(WGPUDeviceDescriptor), WGPURequestDeviceCallbackInfo]
 except AttributeError: pass
 
 # void wgpuAdapterAddRef(WGPUAdapter adapter)
-try: (wgpuAdapterAddRef:=dll.wgpuAdapterAddRef).restype,wgpuAdapterAddRef.argtypes = None,[WGPUAdapter]
+try: (wgpuAdapterAddRef:=dll.wgpuAdapterAddRef).restype, wgpuAdapterAddRef.argtypes = None, [WGPUAdapter]
 except AttributeError: pass
 
 # void wgpuAdapterRelease(WGPUAdapter adapter)
-try: (wgpuAdapterRelease:=dll.wgpuAdapterRelease).restype,wgpuAdapterRelease.argtypes = None,[WGPUAdapter]
+try: (wgpuAdapterRelease:=dll.wgpuAdapterRelease).restype, wgpuAdapterRelease.argtypes = None, [WGPUAdapter]
 except AttributeError: pass
 
 # void wgpuBindGroupSetLabel(WGPUBindGroup bindGroup, WGPUStringView label)
-try: (wgpuBindGroupSetLabel:=dll.wgpuBindGroupSetLabel).restype,wgpuBindGroupSetLabel.argtypes = None,[WGPUBindGroup, WGPUStringView]
+try: (wgpuBindGroupSetLabel:=dll.wgpuBindGroupSetLabel).restype, wgpuBindGroupSetLabel.argtypes = None, [WGPUBindGroup, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuBindGroupAddRef(WGPUBindGroup bindGroup)
-try: (wgpuBindGroupAddRef:=dll.wgpuBindGroupAddRef).restype,wgpuBindGroupAddRef.argtypes = None,[WGPUBindGroup]
+try: (wgpuBindGroupAddRef:=dll.wgpuBindGroupAddRef).restype, wgpuBindGroupAddRef.argtypes = None, [WGPUBindGroup]
 except AttributeError: pass
 
 # void wgpuBindGroupRelease(WGPUBindGroup bindGroup)
-try: (wgpuBindGroupRelease:=dll.wgpuBindGroupRelease).restype,wgpuBindGroupRelease.argtypes = None,[WGPUBindGroup]
+try: (wgpuBindGroupRelease:=dll.wgpuBindGroupRelease).restype, wgpuBindGroupRelease.argtypes = None, [WGPUBindGroup]
 except AttributeError: pass
 
 # void wgpuBindGroupLayoutSetLabel(WGPUBindGroupLayout bindGroupLayout, WGPUStringView label)
-try: (wgpuBindGroupLayoutSetLabel:=dll.wgpuBindGroupLayoutSetLabel).restype,wgpuBindGroupLayoutSetLabel.argtypes = None,[WGPUBindGroupLayout, WGPUStringView]
+try: (wgpuBindGroupLayoutSetLabel:=dll.wgpuBindGroupLayoutSetLabel).restype, wgpuBindGroupLayoutSetLabel.argtypes = None, [WGPUBindGroupLayout, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuBindGroupLayoutAddRef(WGPUBindGroupLayout bindGroupLayout)
-try: (wgpuBindGroupLayoutAddRef:=dll.wgpuBindGroupLayoutAddRef).restype,wgpuBindGroupLayoutAddRef.argtypes = None,[WGPUBindGroupLayout]
+try: (wgpuBindGroupLayoutAddRef:=dll.wgpuBindGroupLayoutAddRef).restype, wgpuBindGroupLayoutAddRef.argtypes = None, [WGPUBindGroupLayout]
 except AttributeError: pass
 
 # void wgpuBindGroupLayoutRelease(WGPUBindGroupLayout bindGroupLayout)
-try: (wgpuBindGroupLayoutRelease:=dll.wgpuBindGroupLayoutRelease).restype,wgpuBindGroupLayoutRelease.argtypes = None,[WGPUBindGroupLayout]
+try: (wgpuBindGroupLayoutRelease:=dll.wgpuBindGroupLayoutRelease).restype, wgpuBindGroupLayoutRelease.argtypes = None, [WGPUBindGroupLayout]
 except AttributeError: pass
 
 # void wgpuBufferDestroy(WGPUBuffer buffer)
-try: (wgpuBufferDestroy:=dll.wgpuBufferDestroy).restype,wgpuBufferDestroy.argtypes = None,[WGPUBuffer]
+try: (wgpuBufferDestroy:=dll.wgpuBufferDestroy).restype, wgpuBufferDestroy.argtypes = None, [WGPUBuffer]
 except AttributeError: pass
 
 # const void *wgpuBufferGetConstMappedRange(WGPUBuffer buffer, size_t offset, size_t size)
-try: (wgpuBufferGetConstMappedRange:=dll.wgpuBufferGetConstMappedRange).restype,wgpuBufferGetConstMappedRange.argtypes = ctypes.c_void_p,[WGPUBuffer, size_t, size_t]
+try: (wgpuBufferGetConstMappedRange:=dll.wgpuBufferGetConstMappedRange).restype, wgpuBufferGetConstMappedRange.argtypes = ctypes.c_void_p, [WGPUBuffer, size_t, size_t]
 except AttributeError: pass
 
 # WGPUBufferMapState wgpuBufferGetMapState(WGPUBuffer buffer)
-try: (wgpuBufferGetMapState:=dll.wgpuBufferGetMapState).restype,wgpuBufferGetMapState.argtypes = WGPUBufferMapState,[WGPUBuffer]
+try: (wgpuBufferGetMapState:=dll.wgpuBufferGetMapState).restype, wgpuBufferGetMapState.argtypes = WGPUBufferMapState, [WGPUBuffer]
 except AttributeError: pass
 
 # void *wgpuBufferGetMappedRange(WGPUBuffer buffer, size_t offset, size_t size)
-try: (wgpuBufferGetMappedRange:=dll.wgpuBufferGetMappedRange).restype,wgpuBufferGetMappedRange.argtypes = ctypes.c_void_p,[WGPUBuffer, size_t, size_t]
+try: (wgpuBufferGetMappedRange:=dll.wgpuBufferGetMappedRange).restype, wgpuBufferGetMappedRange.argtypes = ctypes.c_void_p, [WGPUBuffer, size_t, size_t]
 except AttributeError: pass
 
 # uint64_t wgpuBufferGetSize(WGPUBuffer buffer)
-try: (wgpuBufferGetSize:=dll.wgpuBufferGetSize).restype,wgpuBufferGetSize.argtypes = uint64_t,[WGPUBuffer]
+try: (wgpuBufferGetSize:=dll.wgpuBufferGetSize).restype, wgpuBufferGetSize.argtypes = uint64_t, [WGPUBuffer]
 except AttributeError: pass
 
 # WGPUBufferUsage wgpuBufferGetUsage(WGPUBuffer buffer)
-try: (wgpuBufferGetUsage:=dll.wgpuBufferGetUsage).restype,wgpuBufferGetUsage.argtypes = WGPUBufferUsage,[WGPUBuffer]
+try: (wgpuBufferGetUsage:=dll.wgpuBufferGetUsage).restype, wgpuBufferGetUsage.argtypes = WGPUBufferUsage, [WGPUBuffer]
 except AttributeError: pass
 
 # void wgpuBufferMapAsync(WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size, WGPUBufferMapCallback callback, void *userdata)
-try: (wgpuBufferMapAsync:=dll.wgpuBufferMapAsync).restype,wgpuBufferMapAsync.argtypes = None,[WGPUBuffer, WGPUMapMode, size_t, size_t, WGPUBufferMapCallback, ctypes.c_void_p]
+try: (wgpuBufferMapAsync:=dll.wgpuBufferMapAsync).restype, wgpuBufferMapAsync.argtypes = None, [WGPUBuffer, WGPUMapMode, size_t, size_t, WGPUBufferMapCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuBufferMapAsync2(WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size, WGPUBufferMapCallbackInfo2 callbackInfo)
-try: (wgpuBufferMapAsync2:=dll.wgpuBufferMapAsync2).restype,wgpuBufferMapAsync2.argtypes = WGPUFuture,[WGPUBuffer, WGPUMapMode, size_t, size_t, WGPUBufferMapCallbackInfo2]
+try: (wgpuBufferMapAsync2:=dll.wgpuBufferMapAsync2).restype, wgpuBufferMapAsync2.argtypes = WGPUFuture, [WGPUBuffer, WGPUMapMode, size_t, size_t, WGPUBufferMapCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuBufferMapAsyncF(WGPUBuffer buffer, WGPUMapMode mode, size_t offset, size_t size, WGPUBufferMapCallbackInfo callbackInfo)
-try: (wgpuBufferMapAsyncF:=dll.wgpuBufferMapAsyncF).restype,wgpuBufferMapAsyncF.argtypes = WGPUFuture,[WGPUBuffer, WGPUMapMode, size_t, size_t, WGPUBufferMapCallbackInfo]
+try: (wgpuBufferMapAsyncF:=dll.wgpuBufferMapAsyncF).restype, wgpuBufferMapAsyncF.argtypes = WGPUFuture, [WGPUBuffer, WGPUMapMode, size_t, size_t, WGPUBufferMapCallbackInfo]
 except AttributeError: pass
 
 # void wgpuBufferSetLabel(WGPUBuffer buffer, WGPUStringView label)
-try: (wgpuBufferSetLabel:=dll.wgpuBufferSetLabel).restype,wgpuBufferSetLabel.argtypes = None,[WGPUBuffer, WGPUStringView]
+try: (wgpuBufferSetLabel:=dll.wgpuBufferSetLabel).restype, wgpuBufferSetLabel.argtypes = None, [WGPUBuffer, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuBufferUnmap(WGPUBuffer buffer)
-try: (wgpuBufferUnmap:=dll.wgpuBufferUnmap).restype,wgpuBufferUnmap.argtypes = None,[WGPUBuffer]
+try: (wgpuBufferUnmap:=dll.wgpuBufferUnmap).restype, wgpuBufferUnmap.argtypes = None, [WGPUBuffer]
 except AttributeError: pass
 
 # void wgpuBufferAddRef(WGPUBuffer buffer)
-try: (wgpuBufferAddRef:=dll.wgpuBufferAddRef).restype,wgpuBufferAddRef.argtypes = None,[WGPUBuffer]
+try: (wgpuBufferAddRef:=dll.wgpuBufferAddRef).restype, wgpuBufferAddRef.argtypes = None, [WGPUBuffer]
 except AttributeError: pass
 
 # void wgpuBufferRelease(WGPUBuffer buffer)
-try: (wgpuBufferRelease:=dll.wgpuBufferRelease).restype,wgpuBufferRelease.argtypes = None,[WGPUBuffer]
+try: (wgpuBufferRelease:=dll.wgpuBufferRelease).restype, wgpuBufferRelease.argtypes = None, [WGPUBuffer]
 except AttributeError: pass
 
 # void wgpuCommandBufferSetLabel(WGPUCommandBuffer commandBuffer, WGPUStringView label)
-try: (wgpuCommandBufferSetLabel:=dll.wgpuCommandBufferSetLabel).restype,wgpuCommandBufferSetLabel.argtypes = None,[WGPUCommandBuffer, WGPUStringView]
+try: (wgpuCommandBufferSetLabel:=dll.wgpuCommandBufferSetLabel).restype, wgpuCommandBufferSetLabel.argtypes = None, [WGPUCommandBuffer, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuCommandBufferAddRef(WGPUCommandBuffer commandBuffer)
-try: (wgpuCommandBufferAddRef:=dll.wgpuCommandBufferAddRef).restype,wgpuCommandBufferAddRef.argtypes = None,[WGPUCommandBuffer]
+try: (wgpuCommandBufferAddRef:=dll.wgpuCommandBufferAddRef).restype, wgpuCommandBufferAddRef.argtypes = None, [WGPUCommandBuffer]
 except AttributeError: pass
 
 # void wgpuCommandBufferRelease(WGPUCommandBuffer commandBuffer)
-try: (wgpuCommandBufferRelease:=dll.wgpuCommandBufferRelease).restype,wgpuCommandBufferRelease.argtypes = None,[WGPUCommandBuffer]
+try: (wgpuCommandBufferRelease:=dll.wgpuCommandBufferRelease).restype, wgpuCommandBufferRelease.argtypes = None, [WGPUCommandBuffer]
 except AttributeError: pass
 
 # WGPUComputePassEncoder wgpuCommandEncoderBeginComputePass(WGPUCommandEncoder commandEncoder, const WGPUComputePassDescriptor *descriptor)
-try: (wgpuCommandEncoderBeginComputePass:=dll.wgpuCommandEncoderBeginComputePass).restype,wgpuCommandEncoderBeginComputePass.argtypes = WGPUComputePassEncoder,[WGPUCommandEncoder, ctypes.POINTER(WGPUComputePassDescriptor)]
+try: (wgpuCommandEncoderBeginComputePass:=dll.wgpuCommandEncoderBeginComputePass).restype, wgpuCommandEncoderBeginComputePass.argtypes = WGPUComputePassEncoder, [WGPUCommandEncoder, ctypes.POINTER(WGPUComputePassDescriptor)]
 except AttributeError: pass
 
 # WGPURenderPassEncoder wgpuCommandEncoderBeginRenderPass(WGPUCommandEncoder commandEncoder, const WGPURenderPassDescriptor *descriptor)
-try: (wgpuCommandEncoderBeginRenderPass:=dll.wgpuCommandEncoderBeginRenderPass).restype,wgpuCommandEncoderBeginRenderPass.argtypes = WGPURenderPassEncoder,[WGPUCommandEncoder, ctypes.POINTER(WGPURenderPassDescriptor)]
+try: (wgpuCommandEncoderBeginRenderPass:=dll.wgpuCommandEncoderBeginRenderPass).restype, wgpuCommandEncoderBeginRenderPass.argtypes = WGPURenderPassEncoder, [WGPUCommandEncoder, ctypes.POINTER(WGPURenderPassDescriptor)]
 except AttributeError: pass
 
 # void wgpuCommandEncoderClearBuffer(WGPUCommandEncoder commandEncoder, WGPUBuffer buffer, uint64_t offset, uint64_t size)
-try: (wgpuCommandEncoderClearBuffer:=dll.wgpuCommandEncoderClearBuffer).restype,wgpuCommandEncoderClearBuffer.argtypes = None,[WGPUCommandEncoder, WGPUBuffer, uint64_t, uint64_t]
+try: (wgpuCommandEncoderClearBuffer:=dll.wgpuCommandEncoderClearBuffer).restype, wgpuCommandEncoderClearBuffer.argtypes = None, [WGPUCommandEncoder, WGPUBuffer, uint64_t, uint64_t]
 except AttributeError: pass
 
 # void wgpuCommandEncoderCopyBufferToBuffer(WGPUCommandEncoder commandEncoder, WGPUBuffer source, uint64_t sourceOffset, WGPUBuffer destination, uint64_t destinationOffset, uint64_t size)
-try: (wgpuCommandEncoderCopyBufferToBuffer:=dll.wgpuCommandEncoderCopyBufferToBuffer).restype,wgpuCommandEncoderCopyBufferToBuffer.argtypes = None,[WGPUCommandEncoder, WGPUBuffer, uint64_t, WGPUBuffer, uint64_t, uint64_t]
+try: (wgpuCommandEncoderCopyBufferToBuffer:=dll.wgpuCommandEncoderCopyBufferToBuffer).restype, wgpuCommandEncoderCopyBufferToBuffer.argtypes = None, [WGPUCommandEncoder, WGPUBuffer, uint64_t, WGPUBuffer, uint64_t, uint64_t]
 except AttributeError: pass
 
 # void wgpuCommandEncoderCopyBufferToTexture(WGPUCommandEncoder commandEncoder, const WGPUImageCopyBuffer *source, const WGPUImageCopyTexture *destination, const WGPUExtent3D *copySize)
-try: (wgpuCommandEncoderCopyBufferToTexture:=dll.wgpuCommandEncoderCopyBufferToTexture).restype,wgpuCommandEncoderCopyBufferToTexture.argtypes = None,[WGPUCommandEncoder, ctypes.POINTER(WGPUImageCopyBuffer), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D)]
+try: (wgpuCommandEncoderCopyBufferToTexture:=dll.wgpuCommandEncoderCopyBufferToTexture).restype, wgpuCommandEncoderCopyBufferToTexture.argtypes = None, [WGPUCommandEncoder, ctypes.POINTER(WGPUImageCopyBuffer), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D)]
 except AttributeError: pass
 
 # void wgpuCommandEncoderCopyTextureToBuffer(WGPUCommandEncoder commandEncoder, const WGPUImageCopyTexture *source, const WGPUImageCopyBuffer *destination, const WGPUExtent3D *copySize)
-try: (wgpuCommandEncoderCopyTextureToBuffer:=dll.wgpuCommandEncoderCopyTextureToBuffer).restype,wgpuCommandEncoderCopyTextureToBuffer.argtypes = None,[WGPUCommandEncoder, ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUImageCopyBuffer), ctypes.POINTER(WGPUExtent3D)]
+try: (wgpuCommandEncoderCopyTextureToBuffer:=dll.wgpuCommandEncoderCopyTextureToBuffer).restype, wgpuCommandEncoderCopyTextureToBuffer.argtypes = None, [WGPUCommandEncoder, ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUImageCopyBuffer), ctypes.POINTER(WGPUExtent3D)]
 except AttributeError: pass
 
 # void wgpuCommandEncoderCopyTextureToTexture(WGPUCommandEncoder commandEncoder, const WGPUImageCopyTexture *source, const WGPUImageCopyTexture *destination, const WGPUExtent3D *copySize)
-try: (wgpuCommandEncoderCopyTextureToTexture:=dll.wgpuCommandEncoderCopyTextureToTexture).restype,wgpuCommandEncoderCopyTextureToTexture.argtypes = None,[WGPUCommandEncoder, ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D)]
+try: (wgpuCommandEncoderCopyTextureToTexture:=dll.wgpuCommandEncoderCopyTextureToTexture).restype, wgpuCommandEncoderCopyTextureToTexture.argtypes = None, [WGPUCommandEncoder, ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D)]
 except AttributeError: pass
 
 # WGPUCommandBuffer wgpuCommandEncoderFinish(WGPUCommandEncoder commandEncoder, const WGPUCommandBufferDescriptor *descriptor)
-try: (wgpuCommandEncoderFinish:=dll.wgpuCommandEncoderFinish).restype,wgpuCommandEncoderFinish.argtypes = WGPUCommandBuffer,[WGPUCommandEncoder, ctypes.POINTER(WGPUCommandBufferDescriptor)]
+try: (wgpuCommandEncoderFinish:=dll.wgpuCommandEncoderFinish).restype, wgpuCommandEncoderFinish.argtypes = WGPUCommandBuffer, [WGPUCommandEncoder, ctypes.POINTER(WGPUCommandBufferDescriptor)]
 except AttributeError: pass
 
 # void wgpuCommandEncoderInjectValidationError(WGPUCommandEncoder commandEncoder, WGPUStringView message)
-try: (wgpuCommandEncoderInjectValidationError:=dll.wgpuCommandEncoderInjectValidationError).restype,wgpuCommandEncoderInjectValidationError.argtypes = None,[WGPUCommandEncoder, WGPUStringView]
+try: (wgpuCommandEncoderInjectValidationError:=dll.wgpuCommandEncoderInjectValidationError).restype, wgpuCommandEncoderInjectValidationError.argtypes = None, [WGPUCommandEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuCommandEncoderInsertDebugMarker(WGPUCommandEncoder commandEncoder, WGPUStringView markerLabel)
-try: (wgpuCommandEncoderInsertDebugMarker:=dll.wgpuCommandEncoderInsertDebugMarker).restype,wgpuCommandEncoderInsertDebugMarker.argtypes = None,[WGPUCommandEncoder, WGPUStringView]
+try: (wgpuCommandEncoderInsertDebugMarker:=dll.wgpuCommandEncoderInsertDebugMarker).restype, wgpuCommandEncoderInsertDebugMarker.argtypes = None, [WGPUCommandEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuCommandEncoderPopDebugGroup(WGPUCommandEncoder commandEncoder)
-try: (wgpuCommandEncoderPopDebugGroup:=dll.wgpuCommandEncoderPopDebugGroup).restype,wgpuCommandEncoderPopDebugGroup.argtypes = None,[WGPUCommandEncoder]
+try: (wgpuCommandEncoderPopDebugGroup:=dll.wgpuCommandEncoderPopDebugGroup).restype, wgpuCommandEncoderPopDebugGroup.argtypes = None, [WGPUCommandEncoder]
 except AttributeError: pass
 
 # void wgpuCommandEncoderPushDebugGroup(WGPUCommandEncoder commandEncoder, WGPUStringView groupLabel)
-try: (wgpuCommandEncoderPushDebugGroup:=dll.wgpuCommandEncoderPushDebugGroup).restype,wgpuCommandEncoderPushDebugGroup.argtypes = None,[WGPUCommandEncoder, WGPUStringView]
+try: (wgpuCommandEncoderPushDebugGroup:=dll.wgpuCommandEncoderPushDebugGroup).restype, wgpuCommandEncoderPushDebugGroup.argtypes = None, [WGPUCommandEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuCommandEncoderResolveQuerySet(WGPUCommandEncoder commandEncoder, WGPUQuerySet querySet, uint32_t firstQuery, uint32_t queryCount, WGPUBuffer destination, uint64_t destinationOffset)
-try: (wgpuCommandEncoderResolveQuerySet:=dll.wgpuCommandEncoderResolveQuerySet).restype,wgpuCommandEncoderResolveQuerySet.argtypes = None,[WGPUCommandEncoder, WGPUQuerySet, uint32_t, uint32_t, WGPUBuffer, uint64_t]
+try: (wgpuCommandEncoderResolveQuerySet:=dll.wgpuCommandEncoderResolveQuerySet).restype, wgpuCommandEncoderResolveQuerySet.argtypes = None, [WGPUCommandEncoder, WGPUQuerySet, uint32_t, uint32_t, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # void wgpuCommandEncoderSetLabel(WGPUCommandEncoder commandEncoder, WGPUStringView label)
-try: (wgpuCommandEncoderSetLabel:=dll.wgpuCommandEncoderSetLabel).restype,wgpuCommandEncoderSetLabel.argtypes = None,[WGPUCommandEncoder, WGPUStringView]
+try: (wgpuCommandEncoderSetLabel:=dll.wgpuCommandEncoderSetLabel).restype, wgpuCommandEncoderSetLabel.argtypes = None, [WGPUCommandEncoder, WGPUStringView]
 except AttributeError: pass
 
 uint8_t = ctypes.c_ubyte
 # void wgpuCommandEncoderWriteBuffer(WGPUCommandEncoder commandEncoder, WGPUBuffer buffer, uint64_t bufferOffset, const uint8_t *data, uint64_t size)
-try: (wgpuCommandEncoderWriteBuffer:=dll.wgpuCommandEncoderWriteBuffer).restype,wgpuCommandEncoderWriteBuffer.argtypes = None,[WGPUCommandEncoder, WGPUBuffer, uint64_t, ctypes.POINTER(uint8_t), uint64_t]
+try: (wgpuCommandEncoderWriteBuffer:=dll.wgpuCommandEncoderWriteBuffer).restype, wgpuCommandEncoderWriteBuffer.argtypes = None, [WGPUCommandEncoder, WGPUBuffer, uint64_t, ctypes.POINTER(uint8_t), uint64_t]
 except AttributeError: pass
 
 # void wgpuCommandEncoderWriteTimestamp(WGPUCommandEncoder commandEncoder, WGPUQuerySet querySet, uint32_t queryIndex)
-try: (wgpuCommandEncoderWriteTimestamp:=dll.wgpuCommandEncoderWriteTimestamp).restype,wgpuCommandEncoderWriteTimestamp.argtypes = None,[WGPUCommandEncoder, WGPUQuerySet, uint32_t]
+try: (wgpuCommandEncoderWriteTimestamp:=dll.wgpuCommandEncoderWriteTimestamp).restype, wgpuCommandEncoderWriteTimestamp.argtypes = None, [WGPUCommandEncoder, WGPUQuerySet, uint32_t]
 except AttributeError: pass
 
 # void wgpuCommandEncoderAddRef(WGPUCommandEncoder commandEncoder)
-try: (wgpuCommandEncoderAddRef:=dll.wgpuCommandEncoderAddRef).restype,wgpuCommandEncoderAddRef.argtypes = None,[WGPUCommandEncoder]
+try: (wgpuCommandEncoderAddRef:=dll.wgpuCommandEncoderAddRef).restype, wgpuCommandEncoderAddRef.argtypes = None, [WGPUCommandEncoder]
 except AttributeError: pass
 
 # void wgpuCommandEncoderRelease(WGPUCommandEncoder commandEncoder)
-try: (wgpuCommandEncoderRelease:=dll.wgpuCommandEncoderRelease).restype,wgpuCommandEncoderRelease.argtypes = None,[WGPUCommandEncoder]
+try: (wgpuCommandEncoderRelease:=dll.wgpuCommandEncoderRelease).restype, wgpuCommandEncoderRelease.argtypes = None, [WGPUCommandEncoder]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderDispatchWorkgroups(WGPUComputePassEncoder computePassEncoder, uint32_t workgroupCountX, uint32_t workgroupCountY, uint32_t workgroupCountZ)
-try: (wgpuComputePassEncoderDispatchWorkgroups:=dll.wgpuComputePassEncoderDispatchWorkgroups).restype,wgpuComputePassEncoderDispatchWorkgroups.argtypes = None,[WGPUComputePassEncoder, uint32_t, uint32_t, uint32_t]
+try: (wgpuComputePassEncoderDispatchWorkgroups:=dll.wgpuComputePassEncoderDispatchWorkgroups).restype, wgpuComputePassEncoderDispatchWorkgroups.argtypes = None, [WGPUComputePassEncoder, uint32_t, uint32_t, uint32_t]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderDispatchWorkgroupsIndirect(WGPUComputePassEncoder computePassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset)
-try: (wgpuComputePassEncoderDispatchWorkgroupsIndirect:=dll.wgpuComputePassEncoderDispatchWorkgroupsIndirect).restype,wgpuComputePassEncoderDispatchWorkgroupsIndirect.argtypes = None,[WGPUComputePassEncoder, WGPUBuffer, uint64_t]
+try: (wgpuComputePassEncoderDispatchWorkgroupsIndirect:=dll.wgpuComputePassEncoderDispatchWorkgroupsIndirect).restype, wgpuComputePassEncoderDispatchWorkgroupsIndirect.argtypes = None, [WGPUComputePassEncoder, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderEnd(WGPUComputePassEncoder computePassEncoder)
-try: (wgpuComputePassEncoderEnd:=dll.wgpuComputePassEncoderEnd).restype,wgpuComputePassEncoderEnd.argtypes = None,[WGPUComputePassEncoder]
+try: (wgpuComputePassEncoderEnd:=dll.wgpuComputePassEncoderEnd).restype, wgpuComputePassEncoderEnd.argtypes = None, [WGPUComputePassEncoder]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderInsertDebugMarker(WGPUComputePassEncoder computePassEncoder, WGPUStringView markerLabel)
-try: (wgpuComputePassEncoderInsertDebugMarker:=dll.wgpuComputePassEncoderInsertDebugMarker).restype,wgpuComputePassEncoderInsertDebugMarker.argtypes = None,[WGPUComputePassEncoder, WGPUStringView]
+try: (wgpuComputePassEncoderInsertDebugMarker:=dll.wgpuComputePassEncoderInsertDebugMarker).restype, wgpuComputePassEncoderInsertDebugMarker.argtypes = None, [WGPUComputePassEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderPopDebugGroup(WGPUComputePassEncoder computePassEncoder)
-try: (wgpuComputePassEncoderPopDebugGroup:=dll.wgpuComputePassEncoderPopDebugGroup).restype,wgpuComputePassEncoderPopDebugGroup.argtypes = None,[WGPUComputePassEncoder]
+try: (wgpuComputePassEncoderPopDebugGroup:=dll.wgpuComputePassEncoderPopDebugGroup).restype, wgpuComputePassEncoderPopDebugGroup.argtypes = None, [WGPUComputePassEncoder]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderPushDebugGroup(WGPUComputePassEncoder computePassEncoder, WGPUStringView groupLabel)
-try: (wgpuComputePassEncoderPushDebugGroup:=dll.wgpuComputePassEncoderPushDebugGroup).restype,wgpuComputePassEncoderPushDebugGroup.argtypes = None,[WGPUComputePassEncoder, WGPUStringView]
+try: (wgpuComputePassEncoderPushDebugGroup:=dll.wgpuComputePassEncoderPushDebugGroup).restype, wgpuComputePassEncoderPushDebugGroup.argtypes = None, [WGPUComputePassEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderSetBindGroup(WGPUComputePassEncoder computePassEncoder, uint32_t groupIndex, WGPUBindGroup group, size_t dynamicOffsetCount, const uint32_t *dynamicOffsets)
-try: (wgpuComputePassEncoderSetBindGroup:=dll.wgpuComputePassEncoderSetBindGroup).restype,wgpuComputePassEncoderSetBindGroup.argtypes = None,[WGPUComputePassEncoder, uint32_t, WGPUBindGroup, size_t, ctypes.POINTER(uint32_t)]
+try: (wgpuComputePassEncoderSetBindGroup:=dll.wgpuComputePassEncoderSetBindGroup).restype, wgpuComputePassEncoderSetBindGroup.argtypes = None, [WGPUComputePassEncoder, uint32_t, WGPUBindGroup, size_t, ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderSetLabel(WGPUComputePassEncoder computePassEncoder, WGPUStringView label)
-try: (wgpuComputePassEncoderSetLabel:=dll.wgpuComputePassEncoderSetLabel).restype,wgpuComputePassEncoderSetLabel.argtypes = None,[WGPUComputePassEncoder, WGPUStringView]
+try: (wgpuComputePassEncoderSetLabel:=dll.wgpuComputePassEncoderSetLabel).restype, wgpuComputePassEncoderSetLabel.argtypes = None, [WGPUComputePassEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderSetPipeline(WGPUComputePassEncoder computePassEncoder, WGPUComputePipeline pipeline)
-try: (wgpuComputePassEncoderSetPipeline:=dll.wgpuComputePassEncoderSetPipeline).restype,wgpuComputePassEncoderSetPipeline.argtypes = None,[WGPUComputePassEncoder, WGPUComputePipeline]
+try: (wgpuComputePassEncoderSetPipeline:=dll.wgpuComputePassEncoderSetPipeline).restype, wgpuComputePassEncoderSetPipeline.argtypes = None, [WGPUComputePassEncoder, WGPUComputePipeline]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderWriteTimestamp(WGPUComputePassEncoder computePassEncoder, WGPUQuerySet querySet, uint32_t queryIndex)
-try: (wgpuComputePassEncoderWriteTimestamp:=dll.wgpuComputePassEncoderWriteTimestamp).restype,wgpuComputePassEncoderWriteTimestamp.argtypes = None,[WGPUComputePassEncoder, WGPUQuerySet, uint32_t]
+try: (wgpuComputePassEncoderWriteTimestamp:=dll.wgpuComputePassEncoderWriteTimestamp).restype, wgpuComputePassEncoderWriteTimestamp.argtypes = None, [WGPUComputePassEncoder, WGPUQuerySet, uint32_t]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderAddRef(WGPUComputePassEncoder computePassEncoder)
-try: (wgpuComputePassEncoderAddRef:=dll.wgpuComputePassEncoderAddRef).restype,wgpuComputePassEncoderAddRef.argtypes = None,[WGPUComputePassEncoder]
+try: (wgpuComputePassEncoderAddRef:=dll.wgpuComputePassEncoderAddRef).restype, wgpuComputePassEncoderAddRef.argtypes = None, [WGPUComputePassEncoder]
 except AttributeError: pass
 
 # void wgpuComputePassEncoderRelease(WGPUComputePassEncoder computePassEncoder)
-try: (wgpuComputePassEncoderRelease:=dll.wgpuComputePassEncoderRelease).restype,wgpuComputePassEncoderRelease.argtypes = None,[WGPUComputePassEncoder]
+try: (wgpuComputePassEncoderRelease:=dll.wgpuComputePassEncoderRelease).restype, wgpuComputePassEncoderRelease.argtypes = None, [WGPUComputePassEncoder]
 except AttributeError: pass
 
 # WGPUBindGroupLayout wgpuComputePipelineGetBindGroupLayout(WGPUComputePipeline computePipeline, uint32_t groupIndex)
-try: (wgpuComputePipelineGetBindGroupLayout:=dll.wgpuComputePipelineGetBindGroupLayout).restype,wgpuComputePipelineGetBindGroupLayout.argtypes = WGPUBindGroupLayout,[WGPUComputePipeline, uint32_t]
+try: (wgpuComputePipelineGetBindGroupLayout:=dll.wgpuComputePipelineGetBindGroupLayout).restype, wgpuComputePipelineGetBindGroupLayout.argtypes = WGPUBindGroupLayout, [WGPUComputePipeline, uint32_t]
 except AttributeError: pass
 
 # void wgpuComputePipelineSetLabel(WGPUComputePipeline computePipeline, WGPUStringView label)
-try: (wgpuComputePipelineSetLabel:=dll.wgpuComputePipelineSetLabel).restype,wgpuComputePipelineSetLabel.argtypes = None,[WGPUComputePipeline, WGPUStringView]
+try: (wgpuComputePipelineSetLabel:=dll.wgpuComputePipelineSetLabel).restype, wgpuComputePipelineSetLabel.argtypes = None, [WGPUComputePipeline, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuComputePipelineAddRef(WGPUComputePipeline computePipeline)
-try: (wgpuComputePipelineAddRef:=dll.wgpuComputePipelineAddRef).restype,wgpuComputePipelineAddRef.argtypes = None,[WGPUComputePipeline]
+try: (wgpuComputePipelineAddRef:=dll.wgpuComputePipelineAddRef).restype, wgpuComputePipelineAddRef.argtypes = None, [WGPUComputePipeline]
 except AttributeError: pass
 
 # void wgpuComputePipelineRelease(WGPUComputePipeline computePipeline)
-try: (wgpuComputePipelineRelease:=dll.wgpuComputePipelineRelease).restype,wgpuComputePipelineRelease.argtypes = None,[WGPUComputePipeline]
+try: (wgpuComputePipelineRelease:=dll.wgpuComputePipelineRelease).restype, wgpuComputePipelineRelease.argtypes = None, [WGPUComputePipeline]
 except AttributeError: pass
 
 # WGPUBindGroup wgpuDeviceCreateBindGroup(WGPUDevice device, const WGPUBindGroupDescriptor *descriptor)
-try: (wgpuDeviceCreateBindGroup:=dll.wgpuDeviceCreateBindGroup).restype,wgpuDeviceCreateBindGroup.argtypes = WGPUBindGroup,[WGPUDevice, ctypes.POINTER(WGPUBindGroupDescriptor)]
+try: (wgpuDeviceCreateBindGroup:=dll.wgpuDeviceCreateBindGroup).restype, wgpuDeviceCreateBindGroup.argtypes = WGPUBindGroup, [WGPUDevice, ctypes.POINTER(WGPUBindGroupDescriptor)]
 except AttributeError: pass
 
 # WGPUBindGroupLayout wgpuDeviceCreateBindGroupLayout(WGPUDevice device, const WGPUBindGroupLayoutDescriptor *descriptor)
-try: (wgpuDeviceCreateBindGroupLayout:=dll.wgpuDeviceCreateBindGroupLayout).restype,wgpuDeviceCreateBindGroupLayout.argtypes = WGPUBindGroupLayout,[WGPUDevice, ctypes.POINTER(WGPUBindGroupLayoutDescriptor)]
+try: (wgpuDeviceCreateBindGroupLayout:=dll.wgpuDeviceCreateBindGroupLayout).restype, wgpuDeviceCreateBindGroupLayout.argtypes = WGPUBindGroupLayout, [WGPUDevice, ctypes.POINTER(WGPUBindGroupLayoutDescriptor)]
 except AttributeError: pass
 
 # WGPUBuffer wgpuDeviceCreateBuffer(WGPUDevice device, const WGPUBufferDescriptor *descriptor)
-try: (wgpuDeviceCreateBuffer:=dll.wgpuDeviceCreateBuffer).restype,wgpuDeviceCreateBuffer.argtypes = WGPUBuffer,[WGPUDevice, ctypes.POINTER(WGPUBufferDescriptor)]
+try: (wgpuDeviceCreateBuffer:=dll.wgpuDeviceCreateBuffer).restype, wgpuDeviceCreateBuffer.argtypes = WGPUBuffer, [WGPUDevice, ctypes.POINTER(WGPUBufferDescriptor)]
 except AttributeError: pass
 
 # WGPUCommandEncoder wgpuDeviceCreateCommandEncoder(WGPUDevice device, const WGPUCommandEncoderDescriptor *descriptor)
-try: (wgpuDeviceCreateCommandEncoder:=dll.wgpuDeviceCreateCommandEncoder).restype,wgpuDeviceCreateCommandEncoder.argtypes = WGPUCommandEncoder,[WGPUDevice, ctypes.POINTER(WGPUCommandEncoderDescriptor)]
+try: (wgpuDeviceCreateCommandEncoder:=dll.wgpuDeviceCreateCommandEncoder).restype, wgpuDeviceCreateCommandEncoder.argtypes = WGPUCommandEncoder, [WGPUDevice, ctypes.POINTER(WGPUCommandEncoderDescriptor)]
 except AttributeError: pass
 
 # WGPUComputePipeline wgpuDeviceCreateComputePipeline(WGPUDevice device, const WGPUComputePipelineDescriptor *descriptor)
-try: (wgpuDeviceCreateComputePipeline:=dll.wgpuDeviceCreateComputePipeline).restype,wgpuDeviceCreateComputePipeline.argtypes = WGPUComputePipeline,[WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor)]
+try: (wgpuDeviceCreateComputePipeline:=dll.wgpuDeviceCreateComputePipeline).restype, wgpuDeviceCreateComputePipeline.argtypes = WGPUComputePipeline, [WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor)]
 except AttributeError: pass
 
 # void wgpuDeviceCreateComputePipelineAsync(WGPUDevice device, const WGPUComputePipelineDescriptor *descriptor, WGPUCreateComputePipelineAsyncCallback callback, void *userdata)
-try: (wgpuDeviceCreateComputePipelineAsync:=dll.wgpuDeviceCreateComputePipelineAsync).restype,wgpuDeviceCreateComputePipelineAsync.argtypes = None,[WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor), WGPUCreateComputePipelineAsyncCallback, ctypes.c_void_p]
+try: (wgpuDeviceCreateComputePipelineAsync:=dll.wgpuDeviceCreateComputePipelineAsync).restype, wgpuDeviceCreateComputePipelineAsync.argtypes = None, [WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor), WGPUCreateComputePipelineAsyncCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuDeviceCreateComputePipelineAsync2(WGPUDevice device, const WGPUComputePipelineDescriptor *descriptor, WGPUCreateComputePipelineAsyncCallbackInfo2 callbackInfo)
-try: (wgpuDeviceCreateComputePipelineAsync2:=dll.wgpuDeviceCreateComputePipelineAsync2).restype,wgpuDeviceCreateComputePipelineAsync2.argtypes = WGPUFuture,[WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor), WGPUCreateComputePipelineAsyncCallbackInfo2]
+try: (wgpuDeviceCreateComputePipelineAsync2:=dll.wgpuDeviceCreateComputePipelineAsync2).restype, wgpuDeviceCreateComputePipelineAsync2.argtypes = WGPUFuture, [WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor), WGPUCreateComputePipelineAsyncCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuDeviceCreateComputePipelineAsyncF(WGPUDevice device, const WGPUComputePipelineDescriptor *descriptor, WGPUCreateComputePipelineAsyncCallbackInfo callbackInfo)
-try: (wgpuDeviceCreateComputePipelineAsyncF:=dll.wgpuDeviceCreateComputePipelineAsyncF).restype,wgpuDeviceCreateComputePipelineAsyncF.argtypes = WGPUFuture,[WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor), WGPUCreateComputePipelineAsyncCallbackInfo]
+try: (wgpuDeviceCreateComputePipelineAsyncF:=dll.wgpuDeviceCreateComputePipelineAsyncF).restype, wgpuDeviceCreateComputePipelineAsyncF.argtypes = WGPUFuture, [WGPUDevice, ctypes.POINTER(WGPUComputePipelineDescriptor), WGPUCreateComputePipelineAsyncCallbackInfo]
 except AttributeError: pass
 
 # WGPUBuffer wgpuDeviceCreateErrorBuffer(WGPUDevice device, const WGPUBufferDescriptor *descriptor)
-try: (wgpuDeviceCreateErrorBuffer:=dll.wgpuDeviceCreateErrorBuffer).restype,wgpuDeviceCreateErrorBuffer.argtypes = WGPUBuffer,[WGPUDevice, ctypes.POINTER(WGPUBufferDescriptor)]
+try: (wgpuDeviceCreateErrorBuffer:=dll.wgpuDeviceCreateErrorBuffer).restype, wgpuDeviceCreateErrorBuffer.argtypes = WGPUBuffer, [WGPUDevice, ctypes.POINTER(WGPUBufferDescriptor)]
 except AttributeError: pass
 
 # WGPUExternalTexture wgpuDeviceCreateErrorExternalTexture(WGPUDevice device)
-try: (wgpuDeviceCreateErrorExternalTexture:=dll.wgpuDeviceCreateErrorExternalTexture).restype,wgpuDeviceCreateErrorExternalTexture.argtypes = WGPUExternalTexture,[WGPUDevice]
+try: (wgpuDeviceCreateErrorExternalTexture:=dll.wgpuDeviceCreateErrorExternalTexture).restype, wgpuDeviceCreateErrorExternalTexture.argtypes = WGPUExternalTexture, [WGPUDevice]
 except AttributeError: pass
 
 # WGPUShaderModule wgpuDeviceCreateErrorShaderModule(WGPUDevice device, const WGPUShaderModuleDescriptor *descriptor, WGPUStringView errorMessage)
-try: (wgpuDeviceCreateErrorShaderModule:=dll.wgpuDeviceCreateErrorShaderModule).restype,wgpuDeviceCreateErrorShaderModule.argtypes = WGPUShaderModule,[WGPUDevice, ctypes.POINTER(WGPUShaderModuleDescriptor), WGPUStringView]
+try: (wgpuDeviceCreateErrorShaderModule:=dll.wgpuDeviceCreateErrorShaderModule).restype, wgpuDeviceCreateErrorShaderModule.argtypes = WGPUShaderModule, [WGPUDevice, ctypes.POINTER(WGPUShaderModuleDescriptor), WGPUStringView]
 except AttributeError: pass
 
 # WGPUTexture wgpuDeviceCreateErrorTexture(WGPUDevice device, const WGPUTextureDescriptor *descriptor)
-try: (wgpuDeviceCreateErrorTexture:=dll.wgpuDeviceCreateErrorTexture).restype,wgpuDeviceCreateErrorTexture.argtypes = WGPUTexture,[WGPUDevice, ctypes.POINTER(WGPUTextureDescriptor)]
+try: (wgpuDeviceCreateErrorTexture:=dll.wgpuDeviceCreateErrorTexture).restype, wgpuDeviceCreateErrorTexture.argtypes = WGPUTexture, [WGPUDevice, ctypes.POINTER(WGPUTextureDescriptor)]
 except AttributeError: pass
 
 # WGPUExternalTexture wgpuDeviceCreateExternalTexture(WGPUDevice device, const WGPUExternalTextureDescriptor *externalTextureDescriptor)
-try: (wgpuDeviceCreateExternalTexture:=dll.wgpuDeviceCreateExternalTexture).restype,wgpuDeviceCreateExternalTexture.argtypes = WGPUExternalTexture,[WGPUDevice, ctypes.POINTER(WGPUExternalTextureDescriptor)]
+try: (wgpuDeviceCreateExternalTexture:=dll.wgpuDeviceCreateExternalTexture).restype, wgpuDeviceCreateExternalTexture.argtypes = WGPUExternalTexture, [WGPUDevice, ctypes.POINTER(WGPUExternalTextureDescriptor)]
 except AttributeError: pass
 
 # WGPUPipelineLayout wgpuDeviceCreatePipelineLayout(WGPUDevice device, const WGPUPipelineLayoutDescriptor *descriptor)
-try: (wgpuDeviceCreatePipelineLayout:=dll.wgpuDeviceCreatePipelineLayout).restype,wgpuDeviceCreatePipelineLayout.argtypes = WGPUPipelineLayout,[WGPUDevice, ctypes.POINTER(WGPUPipelineLayoutDescriptor)]
+try: (wgpuDeviceCreatePipelineLayout:=dll.wgpuDeviceCreatePipelineLayout).restype, wgpuDeviceCreatePipelineLayout.argtypes = WGPUPipelineLayout, [WGPUDevice, ctypes.POINTER(WGPUPipelineLayoutDescriptor)]
 except AttributeError: pass
 
 # WGPUQuerySet wgpuDeviceCreateQuerySet(WGPUDevice device, const WGPUQuerySetDescriptor *descriptor)
-try: (wgpuDeviceCreateQuerySet:=dll.wgpuDeviceCreateQuerySet).restype,wgpuDeviceCreateQuerySet.argtypes = WGPUQuerySet,[WGPUDevice, ctypes.POINTER(WGPUQuerySetDescriptor)]
+try: (wgpuDeviceCreateQuerySet:=dll.wgpuDeviceCreateQuerySet).restype, wgpuDeviceCreateQuerySet.argtypes = WGPUQuerySet, [WGPUDevice, ctypes.POINTER(WGPUQuerySetDescriptor)]
 except AttributeError: pass
 
 # WGPURenderBundleEncoder wgpuDeviceCreateRenderBundleEncoder(WGPUDevice device, const WGPURenderBundleEncoderDescriptor *descriptor)
-try: (wgpuDeviceCreateRenderBundleEncoder:=dll.wgpuDeviceCreateRenderBundleEncoder).restype,wgpuDeviceCreateRenderBundleEncoder.argtypes = WGPURenderBundleEncoder,[WGPUDevice, ctypes.POINTER(WGPURenderBundleEncoderDescriptor)]
+try: (wgpuDeviceCreateRenderBundleEncoder:=dll.wgpuDeviceCreateRenderBundleEncoder).restype, wgpuDeviceCreateRenderBundleEncoder.argtypes = WGPURenderBundleEncoder, [WGPUDevice, ctypes.POINTER(WGPURenderBundleEncoderDescriptor)]
 except AttributeError: pass
 
 # WGPURenderPipeline wgpuDeviceCreateRenderPipeline(WGPUDevice device, const WGPURenderPipelineDescriptor *descriptor)
-try: (wgpuDeviceCreateRenderPipeline:=dll.wgpuDeviceCreateRenderPipeline).restype,wgpuDeviceCreateRenderPipeline.argtypes = WGPURenderPipeline,[WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor)]
+try: (wgpuDeviceCreateRenderPipeline:=dll.wgpuDeviceCreateRenderPipeline).restype, wgpuDeviceCreateRenderPipeline.argtypes = WGPURenderPipeline, [WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor)]
 except AttributeError: pass
 
 # void wgpuDeviceCreateRenderPipelineAsync(WGPUDevice device, const WGPURenderPipelineDescriptor *descriptor, WGPUCreateRenderPipelineAsyncCallback callback, void *userdata)
-try: (wgpuDeviceCreateRenderPipelineAsync:=dll.wgpuDeviceCreateRenderPipelineAsync).restype,wgpuDeviceCreateRenderPipelineAsync.argtypes = None,[WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor), WGPUCreateRenderPipelineAsyncCallback, ctypes.c_void_p]
+try: (wgpuDeviceCreateRenderPipelineAsync:=dll.wgpuDeviceCreateRenderPipelineAsync).restype, wgpuDeviceCreateRenderPipelineAsync.argtypes = None, [WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor), WGPUCreateRenderPipelineAsyncCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuDeviceCreateRenderPipelineAsync2(WGPUDevice device, const WGPURenderPipelineDescriptor *descriptor, WGPUCreateRenderPipelineAsyncCallbackInfo2 callbackInfo)
-try: (wgpuDeviceCreateRenderPipelineAsync2:=dll.wgpuDeviceCreateRenderPipelineAsync2).restype,wgpuDeviceCreateRenderPipelineAsync2.argtypes = WGPUFuture,[WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor), WGPUCreateRenderPipelineAsyncCallbackInfo2]
+try: (wgpuDeviceCreateRenderPipelineAsync2:=dll.wgpuDeviceCreateRenderPipelineAsync2).restype, wgpuDeviceCreateRenderPipelineAsync2.argtypes = WGPUFuture, [WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor), WGPUCreateRenderPipelineAsyncCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuDeviceCreateRenderPipelineAsyncF(WGPUDevice device, const WGPURenderPipelineDescriptor *descriptor, WGPUCreateRenderPipelineAsyncCallbackInfo callbackInfo)
-try: (wgpuDeviceCreateRenderPipelineAsyncF:=dll.wgpuDeviceCreateRenderPipelineAsyncF).restype,wgpuDeviceCreateRenderPipelineAsyncF.argtypes = WGPUFuture,[WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor), WGPUCreateRenderPipelineAsyncCallbackInfo]
+try: (wgpuDeviceCreateRenderPipelineAsyncF:=dll.wgpuDeviceCreateRenderPipelineAsyncF).restype, wgpuDeviceCreateRenderPipelineAsyncF.argtypes = WGPUFuture, [WGPUDevice, ctypes.POINTER(WGPURenderPipelineDescriptor), WGPUCreateRenderPipelineAsyncCallbackInfo]
 except AttributeError: pass
 
 # WGPUSampler wgpuDeviceCreateSampler(WGPUDevice device, const WGPUSamplerDescriptor *descriptor)
-try: (wgpuDeviceCreateSampler:=dll.wgpuDeviceCreateSampler).restype,wgpuDeviceCreateSampler.argtypes = WGPUSampler,[WGPUDevice, ctypes.POINTER(WGPUSamplerDescriptor)]
+try: (wgpuDeviceCreateSampler:=dll.wgpuDeviceCreateSampler).restype, wgpuDeviceCreateSampler.argtypes = WGPUSampler, [WGPUDevice, ctypes.POINTER(WGPUSamplerDescriptor)]
 except AttributeError: pass
 
 # WGPUShaderModule wgpuDeviceCreateShaderModule(WGPUDevice device, const WGPUShaderModuleDescriptor *descriptor)
-try: (wgpuDeviceCreateShaderModule:=dll.wgpuDeviceCreateShaderModule).restype,wgpuDeviceCreateShaderModule.argtypes = WGPUShaderModule,[WGPUDevice, ctypes.POINTER(WGPUShaderModuleDescriptor)]
+try: (wgpuDeviceCreateShaderModule:=dll.wgpuDeviceCreateShaderModule).restype, wgpuDeviceCreateShaderModule.argtypes = WGPUShaderModule, [WGPUDevice, ctypes.POINTER(WGPUShaderModuleDescriptor)]
 except AttributeError: pass
 
 # WGPUTexture wgpuDeviceCreateTexture(WGPUDevice device, const WGPUTextureDescriptor *descriptor)
-try: (wgpuDeviceCreateTexture:=dll.wgpuDeviceCreateTexture).restype,wgpuDeviceCreateTexture.argtypes = WGPUTexture,[WGPUDevice, ctypes.POINTER(WGPUTextureDescriptor)]
+try: (wgpuDeviceCreateTexture:=dll.wgpuDeviceCreateTexture).restype, wgpuDeviceCreateTexture.argtypes = WGPUTexture, [WGPUDevice, ctypes.POINTER(WGPUTextureDescriptor)]
 except AttributeError: pass
 
 # void wgpuDeviceDestroy(WGPUDevice device)
-try: (wgpuDeviceDestroy:=dll.wgpuDeviceDestroy).restype,wgpuDeviceDestroy.argtypes = None,[WGPUDevice]
+try: (wgpuDeviceDestroy:=dll.wgpuDeviceDestroy).restype, wgpuDeviceDestroy.argtypes = None, [WGPUDevice]
 except AttributeError: pass
 
 # void wgpuDeviceForceLoss(WGPUDevice device, WGPUDeviceLostReason type, WGPUStringView message)
-try: (wgpuDeviceForceLoss:=dll.wgpuDeviceForceLoss).restype,wgpuDeviceForceLoss.argtypes = None,[WGPUDevice, WGPUDeviceLostReason, WGPUStringView]
+try: (wgpuDeviceForceLoss:=dll.wgpuDeviceForceLoss).restype, wgpuDeviceForceLoss.argtypes = None, [WGPUDevice, WGPUDeviceLostReason, WGPUStringView]
 except AttributeError: pass
 
 # WGPUStatus wgpuDeviceGetAHardwareBufferProperties(WGPUDevice device, void *handle, WGPUAHardwareBufferProperties *properties)
-try: (wgpuDeviceGetAHardwareBufferProperties:=dll.wgpuDeviceGetAHardwareBufferProperties).restype,wgpuDeviceGetAHardwareBufferProperties.argtypes = WGPUStatus,[WGPUDevice, ctypes.c_void_p, ctypes.POINTER(WGPUAHardwareBufferProperties)]
+try: (wgpuDeviceGetAHardwareBufferProperties:=dll.wgpuDeviceGetAHardwareBufferProperties).restype, wgpuDeviceGetAHardwareBufferProperties.argtypes = WGPUStatus, [WGPUDevice, ctypes.c_void_p, ctypes.POINTER(WGPUAHardwareBufferProperties)]
 except AttributeError: pass
 
 # WGPUAdapter wgpuDeviceGetAdapter(WGPUDevice device)
-try: (wgpuDeviceGetAdapter:=dll.wgpuDeviceGetAdapter).restype,wgpuDeviceGetAdapter.argtypes = WGPUAdapter,[WGPUDevice]
+try: (wgpuDeviceGetAdapter:=dll.wgpuDeviceGetAdapter).restype, wgpuDeviceGetAdapter.argtypes = WGPUAdapter, [WGPUDevice]
 except AttributeError: pass
 
 # WGPUStatus wgpuDeviceGetAdapterInfo(WGPUDevice device, WGPUAdapterInfo *adapterInfo)
-try: (wgpuDeviceGetAdapterInfo:=dll.wgpuDeviceGetAdapterInfo).restype,wgpuDeviceGetAdapterInfo.argtypes = WGPUStatus,[WGPUDevice, ctypes.POINTER(WGPUAdapterInfo)]
+try: (wgpuDeviceGetAdapterInfo:=dll.wgpuDeviceGetAdapterInfo).restype, wgpuDeviceGetAdapterInfo.argtypes = WGPUStatus, [WGPUDevice, ctypes.POINTER(WGPUAdapterInfo)]
 except AttributeError: pass
 
 # void wgpuDeviceGetFeatures(WGPUDevice device, WGPUSupportedFeatures *features)
-try: (wgpuDeviceGetFeatures:=dll.wgpuDeviceGetFeatures).restype,wgpuDeviceGetFeatures.argtypes = None,[WGPUDevice, ctypes.POINTER(WGPUSupportedFeatures)]
+try: (wgpuDeviceGetFeatures:=dll.wgpuDeviceGetFeatures).restype, wgpuDeviceGetFeatures.argtypes = None, [WGPUDevice, ctypes.POINTER(WGPUSupportedFeatures)]
 except AttributeError: pass
 
 # WGPUStatus wgpuDeviceGetLimits(WGPUDevice device, WGPUSupportedLimits *limits)
-try: (wgpuDeviceGetLimits:=dll.wgpuDeviceGetLimits).restype,wgpuDeviceGetLimits.argtypes = WGPUStatus,[WGPUDevice, ctypes.POINTER(WGPUSupportedLimits)]
+try: (wgpuDeviceGetLimits:=dll.wgpuDeviceGetLimits).restype, wgpuDeviceGetLimits.argtypes = WGPUStatus, [WGPUDevice, ctypes.POINTER(WGPUSupportedLimits)]
 except AttributeError: pass
 
 # WGPUFuture wgpuDeviceGetLostFuture(WGPUDevice device)
-try: (wgpuDeviceGetLostFuture:=dll.wgpuDeviceGetLostFuture).restype,wgpuDeviceGetLostFuture.argtypes = WGPUFuture,[WGPUDevice]
+try: (wgpuDeviceGetLostFuture:=dll.wgpuDeviceGetLostFuture).restype, wgpuDeviceGetLostFuture.argtypes = WGPUFuture, [WGPUDevice]
 except AttributeError: pass
 
 # WGPUQueue wgpuDeviceGetQueue(WGPUDevice device)
-try: (wgpuDeviceGetQueue:=dll.wgpuDeviceGetQueue).restype,wgpuDeviceGetQueue.argtypes = WGPUQueue,[WGPUDevice]
+try: (wgpuDeviceGetQueue:=dll.wgpuDeviceGetQueue).restype, wgpuDeviceGetQueue.argtypes = WGPUQueue, [WGPUDevice]
 except AttributeError: pass
 
 # WGPUBool wgpuDeviceHasFeature(WGPUDevice device, WGPUFeatureName feature)
-try: (wgpuDeviceHasFeature:=dll.wgpuDeviceHasFeature).restype,wgpuDeviceHasFeature.argtypes = WGPUBool,[WGPUDevice, WGPUFeatureName]
+try: (wgpuDeviceHasFeature:=dll.wgpuDeviceHasFeature).restype, wgpuDeviceHasFeature.argtypes = WGPUBool, [WGPUDevice, WGPUFeatureName]
 except AttributeError: pass
 
 # WGPUSharedBufferMemory wgpuDeviceImportSharedBufferMemory(WGPUDevice device, const WGPUSharedBufferMemoryDescriptor *descriptor)
-try: (wgpuDeviceImportSharedBufferMemory:=dll.wgpuDeviceImportSharedBufferMemory).restype,wgpuDeviceImportSharedBufferMemory.argtypes = WGPUSharedBufferMemory,[WGPUDevice, ctypes.POINTER(WGPUSharedBufferMemoryDescriptor)]
+try: (wgpuDeviceImportSharedBufferMemory:=dll.wgpuDeviceImportSharedBufferMemory).restype, wgpuDeviceImportSharedBufferMemory.argtypes = WGPUSharedBufferMemory, [WGPUDevice, ctypes.POINTER(WGPUSharedBufferMemoryDescriptor)]
 except AttributeError: pass
 
 # WGPUSharedFence wgpuDeviceImportSharedFence(WGPUDevice device, const WGPUSharedFenceDescriptor *descriptor)
-try: (wgpuDeviceImportSharedFence:=dll.wgpuDeviceImportSharedFence).restype,wgpuDeviceImportSharedFence.argtypes = WGPUSharedFence,[WGPUDevice, ctypes.POINTER(WGPUSharedFenceDescriptor)]
+try: (wgpuDeviceImportSharedFence:=dll.wgpuDeviceImportSharedFence).restype, wgpuDeviceImportSharedFence.argtypes = WGPUSharedFence, [WGPUDevice, ctypes.POINTER(WGPUSharedFenceDescriptor)]
 except AttributeError: pass
 
 # WGPUSharedTextureMemory wgpuDeviceImportSharedTextureMemory(WGPUDevice device, const WGPUSharedTextureMemoryDescriptor *descriptor)
-try: (wgpuDeviceImportSharedTextureMemory:=dll.wgpuDeviceImportSharedTextureMemory).restype,wgpuDeviceImportSharedTextureMemory.argtypes = WGPUSharedTextureMemory,[WGPUDevice, ctypes.POINTER(WGPUSharedTextureMemoryDescriptor)]
+try: (wgpuDeviceImportSharedTextureMemory:=dll.wgpuDeviceImportSharedTextureMemory).restype, wgpuDeviceImportSharedTextureMemory.argtypes = WGPUSharedTextureMemory, [WGPUDevice, ctypes.POINTER(WGPUSharedTextureMemoryDescriptor)]
 except AttributeError: pass
 
 # void wgpuDeviceInjectError(WGPUDevice device, WGPUErrorType type, WGPUStringView message)
-try: (wgpuDeviceInjectError:=dll.wgpuDeviceInjectError).restype,wgpuDeviceInjectError.argtypes = None,[WGPUDevice, WGPUErrorType, WGPUStringView]
+try: (wgpuDeviceInjectError:=dll.wgpuDeviceInjectError).restype, wgpuDeviceInjectError.argtypes = None, [WGPUDevice, WGPUErrorType, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuDevicePopErrorScope(WGPUDevice device, WGPUErrorCallback oldCallback, void *userdata)
-try: (wgpuDevicePopErrorScope:=dll.wgpuDevicePopErrorScope).restype,wgpuDevicePopErrorScope.argtypes = None,[WGPUDevice, WGPUErrorCallback, ctypes.c_void_p]
+try: (wgpuDevicePopErrorScope:=dll.wgpuDevicePopErrorScope).restype, wgpuDevicePopErrorScope.argtypes = None, [WGPUDevice, WGPUErrorCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuDevicePopErrorScope2(WGPUDevice device, WGPUPopErrorScopeCallbackInfo2 callbackInfo)
-try: (wgpuDevicePopErrorScope2:=dll.wgpuDevicePopErrorScope2).restype,wgpuDevicePopErrorScope2.argtypes = WGPUFuture,[WGPUDevice, WGPUPopErrorScopeCallbackInfo2]
+try: (wgpuDevicePopErrorScope2:=dll.wgpuDevicePopErrorScope2).restype, wgpuDevicePopErrorScope2.argtypes = WGPUFuture, [WGPUDevice, WGPUPopErrorScopeCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuDevicePopErrorScopeF(WGPUDevice device, WGPUPopErrorScopeCallbackInfo callbackInfo)
-try: (wgpuDevicePopErrorScopeF:=dll.wgpuDevicePopErrorScopeF).restype,wgpuDevicePopErrorScopeF.argtypes = WGPUFuture,[WGPUDevice, WGPUPopErrorScopeCallbackInfo]
+try: (wgpuDevicePopErrorScopeF:=dll.wgpuDevicePopErrorScopeF).restype, wgpuDevicePopErrorScopeF.argtypes = WGPUFuture, [WGPUDevice, WGPUPopErrorScopeCallbackInfo]
 except AttributeError: pass
 
 # void wgpuDevicePushErrorScope(WGPUDevice device, WGPUErrorFilter filter)
-try: (wgpuDevicePushErrorScope:=dll.wgpuDevicePushErrorScope).restype,wgpuDevicePushErrorScope.argtypes = None,[WGPUDevice, WGPUErrorFilter]
+try: (wgpuDevicePushErrorScope:=dll.wgpuDevicePushErrorScope).restype, wgpuDevicePushErrorScope.argtypes = None, [WGPUDevice, WGPUErrorFilter]
 except AttributeError: pass
 
 # void wgpuDeviceSetLabel(WGPUDevice device, WGPUStringView label)
-try: (wgpuDeviceSetLabel:=dll.wgpuDeviceSetLabel).restype,wgpuDeviceSetLabel.argtypes = None,[WGPUDevice, WGPUStringView]
+try: (wgpuDeviceSetLabel:=dll.wgpuDeviceSetLabel).restype, wgpuDeviceSetLabel.argtypes = None, [WGPUDevice, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuDeviceSetLoggingCallback(WGPUDevice device, WGPULoggingCallback callback, void *userdata)
-try: (wgpuDeviceSetLoggingCallback:=dll.wgpuDeviceSetLoggingCallback).restype,wgpuDeviceSetLoggingCallback.argtypes = None,[WGPUDevice, WGPULoggingCallback, ctypes.c_void_p]
+try: (wgpuDeviceSetLoggingCallback:=dll.wgpuDeviceSetLoggingCallback).restype, wgpuDeviceSetLoggingCallback.argtypes = None, [WGPUDevice, WGPULoggingCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # void wgpuDeviceTick(WGPUDevice device)
-try: (wgpuDeviceTick:=dll.wgpuDeviceTick).restype,wgpuDeviceTick.argtypes = None,[WGPUDevice]
+try: (wgpuDeviceTick:=dll.wgpuDeviceTick).restype, wgpuDeviceTick.argtypes = None, [WGPUDevice]
 except AttributeError: pass
 
 # void wgpuDeviceValidateTextureDescriptor(WGPUDevice device, const WGPUTextureDescriptor *descriptor)
-try: (wgpuDeviceValidateTextureDescriptor:=dll.wgpuDeviceValidateTextureDescriptor).restype,wgpuDeviceValidateTextureDescriptor.argtypes = None,[WGPUDevice, ctypes.POINTER(WGPUTextureDescriptor)]
+try: (wgpuDeviceValidateTextureDescriptor:=dll.wgpuDeviceValidateTextureDescriptor).restype, wgpuDeviceValidateTextureDescriptor.argtypes = None, [WGPUDevice, ctypes.POINTER(WGPUTextureDescriptor)]
 except AttributeError: pass
 
 # void wgpuDeviceAddRef(WGPUDevice device)
-try: (wgpuDeviceAddRef:=dll.wgpuDeviceAddRef).restype,wgpuDeviceAddRef.argtypes = None,[WGPUDevice]
+try: (wgpuDeviceAddRef:=dll.wgpuDeviceAddRef).restype, wgpuDeviceAddRef.argtypes = None, [WGPUDevice]
 except AttributeError: pass
 
 # void wgpuDeviceRelease(WGPUDevice device)
-try: (wgpuDeviceRelease:=dll.wgpuDeviceRelease).restype,wgpuDeviceRelease.argtypes = None,[WGPUDevice]
+try: (wgpuDeviceRelease:=dll.wgpuDeviceRelease).restype, wgpuDeviceRelease.argtypes = None, [WGPUDevice]
 except AttributeError: pass
 
 # void wgpuExternalTextureDestroy(WGPUExternalTexture externalTexture)
-try: (wgpuExternalTextureDestroy:=dll.wgpuExternalTextureDestroy).restype,wgpuExternalTextureDestroy.argtypes = None,[WGPUExternalTexture]
+try: (wgpuExternalTextureDestroy:=dll.wgpuExternalTextureDestroy).restype, wgpuExternalTextureDestroy.argtypes = None, [WGPUExternalTexture]
 except AttributeError: pass
 
 # void wgpuExternalTextureExpire(WGPUExternalTexture externalTexture)
-try: (wgpuExternalTextureExpire:=dll.wgpuExternalTextureExpire).restype,wgpuExternalTextureExpire.argtypes = None,[WGPUExternalTexture]
+try: (wgpuExternalTextureExpire:=dll.wgpuExternalTextureExpire).restype, wgpuExternalTextureExpire.argtypes = None, [WGPUExternalTexture]
 except AttributeError: pass
 
 # void wgpuExternalTextureRefresh(WGPUExternalTexture externalTexture)
-try: (wgpuExternalTextureRefresh:=dll.wgpuExternalTextureRefresh).restype,wgpuExternalTextureRefresh.argtypes = None,[WGPUExternalTexture]
+try: (wgpuExternalTextureRefresh:=dll.wgpuExternalTextureRefresh).restype, wgpuExternalTextureRefresh.argtypes = None, [WGPUExternalTexture]
 except AttributeError: pass
 
 # void wgpuExternalTextureSetLabel(WGPUExternalTexture externalTexture, WGPUStringView label)
-try: (wgpuExternalTextureSetLabel:=dll.wgpuExternalTextureSetLabel).restype,wgpuExternalTextureSetLabel.argtypes = None,[WGPUExternalTexture, WGPUStringView]
+try: (wgpuExternalTextureSetLabel:=dll.wgpuExternalTextureSetLabel).restype, wgpuExternalTextureSetLabel.argtypes = None, [WGPUExternalTexture, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuExternalTextureAddRef(WGPUExternalTexture externalTexture)
-try: (wgpuExternalTextureAddRef:=dll.wgpuExternalTextureAddRef).restype,wgpuExternalTextureAddRef.argtypes = None,[WGPUExternalTexture]
+try: (wgpuExternalTextureAddRef:=dll.wgpuExternalTextureAddRef).restype, wgpuExternalTextureAddRef.argtypes = None, [WGPUExternalTexture]
 except AttributeError: pass
 
 # void wgpuExternalTextureRelease(WGPUExternalTexture externalTexture)
-try: (wgpuExternalTextureRelease:=dll.wgpuExternalTextureRelease).restype,wgpuExternalTextureRelease.argtypes = None,[WGPUExternalTexture]
+try: (wgpuExternalTextureRelease:=dll.wgpuExternalTextureRelease).restype, wgpuExternalTextureRelease.argtypes = None, [WGPUExternalTexture]
 except AttributeError: pass
 
 # WGPUSurface wgpuInstanceCreateSurface(WGPUInstance instance, const WGPUSurfaceDescriptor *descriptor)
-try: (wgpuInstanceCreateSurface:=dll.wgpuInstanceCreateSurface).restype,wgpuInstanceCreateSurface.argtypes = WGPUSurface,[WGPUInstance, ctypes.POINTER(WGPUSurfaceDescriptor)]
+try: (wgpuInstanceCreateSurface:=dll.wgpuInstanceCreateSurface).restype, wgpuInstanceCreateSurface.argtypes = WGPUSurface, [WGPUInstance, ctypes.POINTER(WGPUSurfaceDescriptor)]
 except AttributeError: pass
 
 # size_t wgpuInstanceEnumerateWGSLLanguageFeatures(WGPUInstance instance, WGPUWGSLFeatureName *features)
-try: (wgpuInstanceEnumerateWGSLLanguageFeatures:=dll.wgpuInstanceEnumerateWGSLLanguageFeatures).restype,wgpuInstanceEnumerateWGSLLanguageFeatures.argtypes = size_t,[WGPUInstance, ctypes.POINTER(WGPUWGSLFeatureName)]
+try: (wgpuInstanceEnumerateWGSLLanguageFeatures:=dll.wgpuInstanceEnumerateWGSLLanguageFeatures).restype, wgpuInstanceEnumerateWGSLLanguageFeatures.argtypes = size_t, [WGPUInstance, ctypes.POINTER(WGPUWGSLFeatureName)]
 except AttributeError: pass
 
 # WGPUBool wgpuInstanceHasWGSLLanguageFeature(WGPUInstance instance, WGPUWGSLFeatureName feature)
-try: (wgpuInstanceHasWGSLLanguageFeature:=dll.wgpuInstanceHasWGSLLanguageFeature).restype,wgpuInstanceHasWGSLLanguageFeature.argtypes = WGPUBool,[WGPUInstance, WGPUWGSLFeatureName]
+try: (wgpuInstanceHasWGSLLanguageFeature:=dll.wgpuInstanceHasWGSLLanguageFeature).restype, wgpuInstanceHasWGSLLanguageFeature.argtypes = WGPUBool, [WGPUInstance, WGPUWGSLFeatureName]
 except AttributeError: pass
 
 # void wgpuInstanceProcessEvents(WGPUInstance instance)
-try: (wgpuInstanceProcessEvents:=dll.wgpuInstanceProcessEvents).restype,wgpuInstanceProcessEvents.argtypes = None,[WGPUInstance]
+try: (wgpuInstanceProcessEvents:=dll.wgpuInstanceProcessEvents).restype, wgpuInstanceProcessEvents.argtypes = None, [WGPUInstance]
 except AttributeError: pass
 
 # void wgpuInstanceRequestAdapter(WGPUInstance instance, const WGPURequestAdapterOptions *options, WGPURequestAdapterCallback callback, void *userdata)
-try: (wgpuInstanceRequestAdapter:=dll.wgpuInstanceRequestAdapter).restype,wgpuInstanceRequestAdapter.argtypes = None,[WGPUInstance, ctypes.POINTER(WGPURequestAdapterOptions), WGPURequestAdapterCallback, ctypes.c_void_p]
+try: (wgpuInstanceRequestAdapter:=dll.wgpuInstanceRequestAdapter).restype, wgpuInstanceRequestAdapter.argtypes = None, [WGPUInstance, ctypes.POINTER(WGPURequestAdapterOptions), WGPURequestAdapterCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuInstanceRequestAdapter2(WGPUInstance instance, const WGPURequestAdapterOptions *options, WGPURequestAdapterCallbackInfo2 callbackInfo)
-try: (wgpuInstanceRequestAdapter2:=dll.wgpuInstanceRequestAdapter2).restype,wgpuInstanceRequestAdapter2.argtypes = WGPUFuture,[WGPUInstance, ctypes.POINTER(WGPURequestAdapterOptions), WGPURequestAdapterCallbackInfo2]
+try: (wgpuInstanceRequestAdapter2:=dll.wgpuInstanceRequestAdapter2).restype, wgpuInstanceRequestAdapter2.argtypes = WGPUFuture, [WGPUInstance, ctypes.POINTER(WGPURequestAdapterOptions), WGPURequestAdapterCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuInstanceRequestAdapterF(WGPUInstance instance, const WGPURequestAdapterOptions *options, WGPURequestAdapterCallbackInfo callbackInfo)
-try: (wgpuInstanceRequestAdapterF:=dll.wgpuInstanceRequestAdapterF).restype,wgpuInstanceRequestAdapterF.argtypes = WGPUFuture,[WGPUInstance, ctypes.POINTER(WGPURequestAdapterOptions), WGPURequestAdapterCallbackInfo]
+try: (wgpuInstanceRequestAdapterF:=dll.wgpuInstanceRequestAdapterF).restype, wgpuInstanceRequestAdapterF.argtypes = WGPUFuture, [WGPUInstance, ctypes.POINTER(WGPURequestAdapterOptions), WGPURequestAdapterCallbackInfo]
 except AttributeError: pass
 
 # WGPUWaitStatus wgpuInstanceWaitAny(WGPUInstance instance, size_t futureCount, WGPUFutureWaitInfo *futures, uint64_t timeoutNS)
-try: (wgpuInstanceWaitAny:=dll.wgpuInstanceWaitAny).restype,wgpuInstanceWaitAny.argtypes = WGPUWaitStatus,[WGPUInstance, size_t, ctypes.POINTER(WGPUFutureWaitInfo), uint64_t]
+try: (wgpuInstanceWaitAny:=dll.wgpuInstanceWaitAny).restype, wgpuInstanceWaitAny.argtypes = WGPUWaitStatus, [WGPUInstance, size_t, ctypes.POINTER(WGPUFutureWaitInfo), uint64_t]
 except AttributeError: pass
 
 # void wgpuInstanceAddRef(WGPUInstance instance)
-try: (wgpuInstanceAddRef:=dll.wgpuInstanceAddRef).restype,wgpuInstanceAddRef.argtypes = None,[WGPUInstance]
+try: (wgpuInstanceAddRef:=dll.wgpuInstanceAddRef).restype, wgpuInstanceAddRef.argtypes = None, [WGPUInstance]
 except AttributeError: pass
 
 # void wgpuInstanceRelease(WGPUInstance instance)
-try: (wgpuInstanceRelease:=dll.wgpuInstanceRelease).restype,wgpuInstanceRelease.argtypes = None,[WGPUInstance]
+try: (wgpuInstanceRelease:=dll.wgpuInstanceRelease).restype, wgpuInstanceRelease.argtypes = None, [WGPUInstance]
 except AttributeError: pass
 
 # void wgpuPipelineLayoutSetLabel(WGPUPipelineLayout pipelineLayout, WGPUStringView label)
-try: (wgpuPipelineLayoutSetLabel:=dll.wgpuPipelineLayoutSetLabel).restype,wgpuPipelineLayoutSetLabel.argtypes = None,[WGPUPipelineLayout, WGPUStringView]
+try: (wgpuPipelineLayoutSetLabel:=dll.wgpuPipelineLayoutSetLabel).restype, wgpuPipelineLayoutSetLabel.argtypes = None, [WGPUPipelineLayout, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuPipelineLayoutAddRef(WGPUPipelineLayout pipelineLayout)
-try: (wgpuPipelineLayoutAddRef:=dll.wgpuPipelineLayoutAddRef).restype,wgpuPipelineLayoutAddRef.argtypes = None,[WGPUPipelineLayout]
+try: (wgpuPipelineLayoutAddRef:=dll.wgpuPipelineLayoutAddRef).restype, wgpuPipelineLayoutAddRef.argtypes = None, [WGPUPipelineLayout]
 except AttributeError: pass
 
 # void wgpuPipelineLayoutRelease(WGPUPipelineLayout pipelineLayout)
-try: (wgpuPipelineLayoutRelease:=dll.wgpuPipelineLayoutRelease).restype,wgpuPipelineLayoutRelease.argtypes = None,[WGPUPipelineLayout]
+try: (wgpuPipelineLayoutRelease:=dll.wgpuPipelineLayoutRelease).restype, wgpuPipelineLayoutRelease.argtypes = None, [WGPUPipelineLayout]
 except AttributeError: pass
 
 # void wgpuQuerySetDestroy(WGPUQuerySet querySet)
-try: (wgpuQuerySetDestroy:=dll.wgpuQuerySetDestroy).restype,wgpuQuerySetDestroy.argtypes = None,[WGPUQuerySet]
+try: (wgpuQuerySetDestroy:=dll.wgpuQuerySetDestroy).restype, wgpuQuerySetDestroy.argtypes = None, [WGPUQuerySet]
 except AttributeError: pass
 
 # uint32_t wgpuQuerySetGetCount(WGPUQuerySet querySet)
-try: (wgpuQuerySetGetCount:=dll.wgpuQuerySetGetCount).restype,wgpuQuerySetGetCount.argtypes = uint32_t,[WGPUQuerySet]
+try: (wgpuQuerySetGetCount:=dll.wgpuQuerySetGetCount).restype, wgpuQuerySetGetCount.argtypes = uint32_t, [WGPUQuerySet]
 except AttributeError: pass
 
 # WGPUQueryType wgpuQuerySetGetType(WGPUQuerySet querySet)
-try: (wgpuQuerySetGetType:=dll.wgpuQuerySetGetType).restype,wgpuQuerySetGetType.argtypes = WGPUQueryType,[WGPUQuerySet]
+try: (wgpuQuerySetGetType:=dll.wgpuQuerySetGetType).restype, wgpuQuerySetGetType.argtypes = WGPUQueryType, [WGPUQuerySet]
 except AttributeError: pass
 
 # void wgpuQuerySetSetLabel(WGPUQuerySet querySet, WGPUStringView label)
-try: (wgpuQuerySetSetLabel:=dll.wgpuQuerySetSetLabel).restype,wgpuQuerySetSetLabel.argtypes = None,[WGPUQuerySet, WGPUStringView]
+try: (wgpuQuerySetSetLabel:=dll.wgpuQuerySetSetLabel).restype, wgpuQuerySetSetLabel.argtypes = None, [WGPUQuerySet, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuQuerySetAddRef(WGPUQuerySet querySet)
-try: (wgpuQuerySetAddRef:=dll.wgpuQuerySetAddRef).restype,wgpuQuerySetAddRef.argtypes = None,[WGPUQuerySet]
+try: (wgpuQuerySetAddRef:=dll.wgpuQuerySetAddRef).restype, wgpuQuerySetAddRef.argtypes = None, [WGPUQuerySet]
 except AttributeError: pass
 
 # void wgpuQuerySetRelease(WGPUQuerySet querySet)
-try: (wgpuQuerySetRelease:=dll.wgpuQuerySetRelease).restype,wgpuQuerySetRelease.argtypes = None,[WGPUQuerySet]
+try: (wgpuQuerySetRelease:=dll.wgpuQuerySetRelease).restype, wgpuQuerySetRelease.argtypes = None, [WGPUQuerySet]
 except AttributeError: pass
 
 # void wgpuQueueCopyExternalTextureForBrowser(WGPUQueue queue, const WGPUImageCopyExternalTexture *source, const WGPUImageCopyTexture *destination, const WGPUExtent3D *copySize, const WGPUCopyTextureForBrowserOptions *options)
-try: (wgpuQueueCopyExternalTextureForBrowser:=dll.wgpuQueueCopyExternalTextureForBrowser).restype,wgpuQueueCopyExternalTextureForBrowser.argtypes = None,[WGPUQueue, ctypes.POINTER(WGPUImageCopyExternalTexture), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D), ctypes.POINTER(WGPUCopyTextureForBrowserOptions)]
+try: (wgpuQueueCopyExternalTextureForBrowser:=dll.wgpuQueueCopyExternalTextureForBrowser).restype, wgpuQueueCopyExternalTextureForBrowser.argtypes = None, [WGPUQueue, ctypes.POINTER(WGPUImageCopyExternalTexture), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D), ctypes.POINTER(WGPUCopyTextureForBrowserOptions)]
 except AttributeError: pass
 
 # void wgpuQueueCopyTextureForBrowser(WGPUQueue queue, const WGPUImageCopyTexture *source, const WGPUImageCopyTexture *destination, const WGPUExtent3D *copySize, const WGPUCopyTextureForBrowserOptions *options)
-try: (wgpuQueueCopyTextureForBrowser:=dll.wgpuQueueCopyTextureForBrowser).restype,wgpuQueueCopyTextureForBrowser.argtypes = None,[WGPUQueue, ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D), ctypes.POINTER(WGPUCopyTextureForBrowserOptions)]
+try: (wgpuQueueCopyTextureForBrowser:=dll.wgpuQueueCopyTextureForBrowser).restype, wgpuQueueCopyTextureForBrowser.argtypes = None, [WGPUQueue, ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUImageCopyTexture), ctypes.POINTER(WGPUExtent3D), ctypes.POINTER(WGPUCopyTextureForBrowserOptions)]
 except AttributeError: pass
 
 # void wgpuQueueOnSubmittedWorkDone(WGPUQueue queue, WGPUQueueWorkDoneCallback callback, void *userdata)
-try: (wgpuQueueOnSubmittedWorkDone:=dll.wgpuQueueOnSubmittedWorkDone).restype,wgpuQueueOnSubmittedWorkDone.argtypes = None,[WGPUQueue, WGPUQueueWorkDoneCallback, ctypes.c_void_p]
+try: (wgpuQueueOnSubmittedWorkDone:=dll.wgpuQueueOnSubmittedWorkDone).restype, wgpuQueueOnSubmittedWorkDone.argtypes = None, [WGPUQueue, WGPUQueueWorkDoneCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuQueueOnSubmittedWorkDone2(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo2 callbackInfo)
-try: (wgpuQueueOnSubmittedWorkDone2:=dll.wgpuQueueOnSubmittedWorkDone2).restype,wgpuQueueOnSubmittedWorkDone2.argtypes = WGPUFuture,[WGPUQueue, WGPUQueueWorkDoneCallbackInfo2]
+try: (wgpuQueueOnSubmittedWorkDone2:=dll.wgpuQueueOnSubmittedWorkDone2).restype, wgpuQueueOnSubmittedWorkDone2.argtypes = WGPUFuture, [WGPUQueue, WGPUQueueWorkDoneCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuQueueOnSubmittedWorkDoneF(WGPUQueue queue, WGPUQueueWorkDoneCallbackInfo callbackInfo)
-try: (wgpuQueueOnSubmittedWorkDoneF:=dll.wgpuQueueOnSubmittedWorkDoneF).restype,wgpuQueueOnSubmittedWorkDoneF.argtypes = WGPUFuture,[WGPUQueue, WGPUQueueWorkDoneCallbackInfo]
+try: (wgpuQueueOnSubmittedWorkDoneF:=dll.wgpuQueueOnSubmittedWorkDoneF).restype, wgpuQueueOnSubmittedWorkDoneF.argtypes = WGPUFuture, [WGPUQueue, WGPUQueueWorkDoneCallbackInfo]
 except AttributeError: pass
 
 # void wgpuQueueSetLabel(WGPUQueue queue, WGPUStringView label)
-try: (wgpuQueueSetLabel:=dll.wgpuQueueSetLabel).restype,wgpuQueueSetLabel.argtypes = None,[WGPUQueue, WGPUStringView]
+try: (wgpuQueueSetLabel:=dll.wgpuQueueSetLabel).restype, wgpuQueueSetLabel.argtypes = None, [WGPUQueue, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuQueueSubmit(WGPUQueue queue, size_t commandCount, const WGPUCommandBuffer *commands)
-try: (wgpuQueueSubmit:=dll.wgpuQueueSubmit).restype,wgpuQueueSubmit.argtypes = None,[WGPUQueue, size_t, ctypes.POINTER(WGPUCommandBuffer)]
+try: (wgpuQueueSubmit:=dll.wgpuQueueSubmit).restype, wgpuQueueSubmit.argtypes = None, [WGPUQueue, size_t, ctypes.POINTER(WGPUCommandBuffer)]
 except AttributeError: pass
 
 # void wgpuQueueWriteBuffer(WGPUQueue queue, WGPUBuffer buffer, uint64_t bufferOffset, const void *data, size_t size)
-try: (wgpuQueueWriteBuffer:=dll.wgpuQueueWriteBuffer).restype,wgpuQueueWriteBuffer.argtypes = None,[WGPUQueue, WGPUBuffer, uint64_t, ctypes.c_void_p, size_t]
+try: (wgpuQueueWriteBuffer:=dll.wgpuQueueWriteBuffer).restype, wgpuQueueWriteBuffer.argtypes = None, [WGPUQueue, WGPUBuffer, uint64_t, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
 # void wgpuQueueWriteTexture(WGPUQueue queue, const WGPUImageCopyTexture *destination, const void *data, size_t dataSize, const WGPUTextureDataLayout *dataLayout, const WGPUExtent3D *writeSize)
-try: (wgpuQueueWriteTexture:=dll.wgpuQueueWriteTexture).restype,wgpuQueueWriteTexture.argtypes = None,[WGPUQueue, ctypes.POINTER(WGPUImageCopyTexture), ctypes.c_void_p, size_t, ctypes.POINTER(WGPUTextureDataLayout), ctypes.POINTER(WGPUExtent3D)]
+try: (wgpuQueueWriteTexture:=dll.wgpuQueueWriteTexture).restype, wgpuQueueWriteTexture.argtypes = None, [WGPUQueue, ctypes.POINTER(WGPUImageCopyTexture), ctypes.c_void_p, size_t, ctypes.POINTER(WGPUTextureDataLayout), ctypes.POINTER(WGPUExtent3D)]
 except AttributeError: pass
 
 # void wgpuQueueAddRef(WGPUQueue queue)
-try: (wgpuQueueAddRef:=dll.wgpuQueueAddRef).restype,wgpuQueueAddRef.argtypes = None,[WGPUQueue]
+try: (wgpuQueueAddRef:=dll.wgpuQueueAddRef).restype, wgpuQueueAddRef.argtypes = None, [WGPUQueue]
 except AttributeError: pass
 
 # void wgpuQueueRelease(WGPUQueue queue)
-try: (wgpuQueueRelease:=dll.wgpuQueueRelease).restype,wgpuQueueRelease.argtypes = None,[WGPUQueue]
+try: (wgpuQueueRelease:=dll.wgpuQueueRelease).restype, wgpuQueueRelease.argtypes = None, [WGPUQueue]
 except AttributeError: pass
 
 # void wgpuRenderBundleSetLabel(WGPURenderBundle renderBundle, WGPUStringView label)
-try: (wgpuRenderBundleSetLabel:=dll.wgpuRenderBundleSetLabel).restype,wgpuRenderBundleSetLabel.argtypes = None,[WGPURenderBundle, WGPUStringView]
+try: (wgpuRenderBundleSetLabel:=dll.wgpuRenderBundleSetLabel).restype, wgpuRenderBundleSetLabel.argtypes = None, [WGPURenderBundle, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderBundleAddRef(WGPURenderBundle renderBundle)
-try: (wgpuRenderBundleAddRef:=dll.wgpuRenderBundleAddRef).restype,wgpuRenderBundleAddRef.argtypes = None,[WGPURenderBundle]
+try: (wgpuRenderBundleAddRef:=dll.wgpuRenderBundleAddRef).restype, wgpuRenderBundleAddRef.argtypes = None, [WGPURenderBundle]
 except AttributeError: pass
 
 # void wgpuRenderBundleRelease(WGPURenderBundle renderBundle)
-try: (wgpuRenderBundleRelease:=dll.wgpuRenderBundleRelease).restype,wgpuRenderBundleRelease.argtypes = None,[WGPURenderBundle]
+try: (wgpuRenderBundleRelease:=dll.wgpuRenderBundleRelease).restype, wgpuRenderBundleRelease.argtypes = None, [WGPURenderBundle]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderDraw(WGPURenderBundleEncoder renderBundleEncoder, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
-try: (wgpuRenderBundleEncoderDraw:=dll.wgpuRenderBundleEncoderDraw).restype,wgpuRenderBundleEncoderDraw.argtypes = None,[WGPURenderBundleEncoder, uint32_t, uint32_t, uint32_t, uint32_t]
+try: (wgpuRenderBundleEncoderDraw:=dll.wgpuRenderBundleEncoderDraw).restype, wgpuRenderBundleEncoderDraw.argtypes = None, [WGPURenderBundleEncoder, uint32_t, uint32_t, uint32_t, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderDrawIndexed(WGPURenderBundleEncoder renderBundleEncoder, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t baseVertex, uint32_t firstInstance)
-try: (wgpuRenderBundleEncoderDrawIndexed:=dll.wgpuRenderBundleEncoderDrawIndexed).restype,wgpuRenderBundleEncoderDrawIndexed.argtypes = None,[WGPURenderBundleEncoder, uint32_t, uint32_t, uint32_t, int32_t, uint32_t]
+try: (wgpuRenderBundleEncoderDrawIndexed:=dll.wgpuRenderBundleEncoderDrawIndexed).restype, wgpuRenderBundleEncoderDrawIndexed.argtypes = None, [WGPURenderBundleEncoder, uint32_t, uint32_t, uint32_t, int32_t, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderDrawIndexedIndirect(WGPURenderBundleEncoder renderBundleEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset)
-try: (wgpuRenderBundleEncoderDrawIndexedIndirect:=dll.wgpuRenderBundleEncoderDrawIndexedIndirect).restype,wgpuRenderBundleEncoderDrawIndexedIndirect.argtypes = None,[WGPURenderBundleEncoder, WGPUBuffer, uint64_t]
+try: (wgpuRenderBundleEncoderDrawIndexedIndirect:=dll.wgpuRenderBundleEncoderDrawIndexedIndirect).restype, wgpuRenderBundleEncoderDrawIndexedIndirect.argtypes = None, [WGPURenderBundleEncoder, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderDrawIndirect(WGPURenderBundleEncoder renderBundleEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset)
-try: (wgpuRenderBundleEncoderDrawIndirect:=dll.wgpuRenderBundleEncoderDrawIndirect).restype,wgpuRenderBundleEncoderDrawIndirect.argtypes = None,[WGPURenderBundleEncoder, WGPUBuffer, uint64_t]
+try: (wgpuRenderBundleEncoderDrawIndirect:=dll.wgpuRenderBundleEncoderDrawIndirect).restype, wgpuRenderBundleEncoderDrawIndirect.argtypes = None, [WGPURenderBundleEncoder, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # WGPURenderBundle wgpuRenderBundleEncoderFinish(WGPURenderBundleEncoder renderBundleEncoder, const WGPURenderBundleDescriptor *descriptor)
-try: (wgpuRenderBundleEncoderFinish:=dll.wgpuRenderBundleEncoderFinish).restype,wgpuRenderBundleEncoderFinish.argtypes = WGPURenderBundle,[WGPURenderBundleEncoder, ctypes.POINTER(WGPURenderBundleDescriptor)]
+try: (wgpuRenderBundleEncoderFinish:=dll.wgpuRenderBundleEncoderFinish).restype, wgpuRenderBundleEncoderFinish.argtypes = WGPURenderBundle, [WGPURenderBundleEncoder, ctypes.POINTER(WGPURenderBundleDescriptor)]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderInsertDebugMarker(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView markerLabel)
-try: (wgpuRenderBundleEncoderInsertDebugMarker:=dll.wgpuRenderBundleEncoderInsertDebugMarker).restype,wgpuRenderBundleEncoderInsertDebugMarker.argtypes = None,[WGPURenderBundleEncoder, WGPUStringView]
+try: (wgpuRenderBundleEncoderInsertDebugMarker:=dll.wgpuRenderBundleEncoderInsertDebugMarker).restype, wgpuRenderBundleEncoderInsertDebugMarker.argtypes = None, [WGPURenderBundleEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderPopDebugGroup(WGPURenderBundleEncoder renderBundleEncoder)
-try: (wgpuRenderBundleEncoderPopDebugGroup:=dll.wgpuRenderBundleEncoderPopDebugGroup).restype,wgpuRenderBundleEncoderPopDebugGroup.argtypes = None,[WGPURenderBundleEncoder]
+try: (wgpuRenderBundleEncoderPopDebugGroup:=dll.wgpuRenderBundleEncoderPopDebugGroup).restype, wgpuRenderBundleEncoderPopDebugGroup.argtypes = None, [WGPURenderBundleEncoder]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderPushDebugGroup(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView groupLabel)
-try: (wgpuRenderBundleEncoderPushDebugGroup:=dll.wgpuRenderBundleEncoderPushDebugGroup).restype,wgpuRenderBundleEncoderPushDebugGroup.argtypes = None,[WGPURenderBundleEncoder, WGPUStringView]
+try: (wgpuRenderBundleEncoderPushDebugGroup:=dll.wgpuRenderBundleEncoderPushDebugGroup).restype, wgpuRenderBundleEncoderPushDebugGroup.argtypes = None, [WGPURenderBundleEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderSetBindGroup(WGPURenderBundleEncoder renderBundleEncoder, uint32_t groupIndex, WGPUBindGroup group, size_t dynamicOffsetCount, const uint32_t *dynamicOffsets)
-try: (wgpuRenderBundleEncoderSetBindGroup:=dll.wgpuRenderBundleEncoderSetBindGroup).restype,wgpuRenderBundleEncoderSetBindGroup.argtypes = None,[WGPURenderBundleEncoder, uint32_t, WGPUBindGroup, size_t, ctypes.POINTER(uint32_t)]
+try: (wgpuRenderBundleEncoderSetBindGroup:=dll.wgpuRenderBundleEncoderSetBindGroup).restype, wgpuRenderBundleEncoderSetBindGroup.argtypes = None, [WGPURenderBundleEncoder, uint32_t, WGPUBindGroup, size_t, ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderSetIndexBuffer(WGPURenderBundleEncoder renderBundleEncoder, WGPUBuffer buffer, WGPUIndexFormat format, uint64_t offset, uint64_t size)
-try: (wgpuRenderBundleEncoderSetIndexBuffer:=dll.wgpuRenderBundleEncoderSetIndexBuffer).restype,wgpuRenderBundleEncoderSetIndexBuffer.argtypes = None,[WGPURenderBundleEncoder, WGPUBuffer, WGPUIndexFormat, uint64_t, uint64_t]
+try: (wgpuRenderBundleEncoderSetIndexBuffer:=dll.wgpuRenderBundleEncoderSetIndexBuffer).restype, wgpuRenderBundleEncoderSetIndexBuffer.argtypes = None, [WGPURenderBundleEncoder, WGPUBuffer, WGPUIndexFormat, uint64_t, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderSetLabel(WGPURenderBundleEncoder renderBundleEncoder, WGPUStringView label)
-try: (wgpuRenderBundleEncoderSetLabel:=dll.wgpuRenderBundleEncoderSetLabel).restype,wgpuRenderBundleEncoderSetLabel.argtypes = None,[WGPURenderBundleEncoder, WGPUStringView]
+try: (wgpuRenderBundleEncoderSetLabel:=dll.wgpuRenderBundleEncoderSetLabel).restype, wgpuRenderBundleEncoderSetLabel.argtypes = None, [WGPURenderBundleEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderSetPipeline(WGPURenderBundleEncoder renderBundleEncoder, WGPURenderPipeline pipeline)
-try: (wgpuRenderBundleEncoderSetPipeline:=dll.wgpuRenderBundleEncoderSetPipeline).restype,wgpuRenderBundleEncoderSetPipeline.argtypes = None,[WGPURenderBundleEncoder, WGPURenderPipeline]
+try: (wgpuRenderBundleEncoderSetPipeline:=dll.wgpuRenderBundleEncoderSetPipeline).restype, wgpuRenderBundleEncoderSetPipeline.argtypes = None, [WGPURenderBundleEncoder, WGPURenderPipeline]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderSetVertexBuffer(WGPURenderBundleEncoder renderBundleEncoder, uint32_t slot, WGPUBuffer buffer, uint64_t offset, uint64_t size)
-try: (wgpuRenderBundleEncoderSetVertexBuffer:=dll.wgpuRenderBundleEncoderSetVertexBuffer).restype,wgpuRenderBundleEncoderSetVertexBuffer.argtypes = None,[WGPURenderBundleEncoder, uint32_t, WGPUBuffer, uint64_t, uint64_t]
+try: (wgpuRenderBundleEncoderSetVertexBuffer:=dll.wgpuRenderBundleEncoderSetVertexBuffer).restype, wgpuRenderBundleEncoderSetVertexBuffer.argtypes = None, [WGPURenderBundleEncoder, uint32_t, WGPUBuffer, uint64_t, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderAddRef(WGPURenderBundleEncoder renderBundleEncoder)
-try: (wgpuRenderBundleEncoderAddRef:=dll.wgpuRenderBundleEncoderAddRef).restype,wgpuRenderBundleEncoderAddRef.argtypes = None,[WGPURenderBundleEncoder]
+try: (wgpuRenderBundleEncoderAddRef:=dll.wgpuRenderBundleEncoderAddRef).restype, wgpuRenderBundleEncoderAddRef.argtypes = None, [WGPURenderBundleEncoder]
 except AttributeError: pass
 
 # void wgpuRenderBundleEncoderRelease(WGPURenderBundleEncoder renderBundleEncoder)
-try: (wgpuRenderBundleEncoderRelease:=dll.wgpuRenderBundleEncoderRelease).restype,wgpuRenderBundleEncoderRelease.argtypes = None,[WGPURenderBundleEncoder]
+try: (wgpuRenderBundleEncoderRelease:=dll.wgpuRenderBundleEncoderRelease).restype, wgpuRenderBundleEncoderRelease.argtypes = None, [WGPURenderBundleEncoder]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderBeginOcclusionQuery(WGPURenderPassEncoder renderPassEncoder, uint32_t queryIndex)
-try: (wgpuRenderPassEncoderBeginOcclusionQuery:=dll.wgpuRenderPassEncoderBeginOcclusionQuery).restype,wgpuRenderPassEncoderBeginOcclusionQuery.argtypes = None,[WGPURenderPassEncoder, uint32_t]
+try: (wgpuRenderPassEncoderBeginOcclusionQuery:=dll.wgpuRenderPassEncoderBeginOcclusionQuery).restype, wgpuRenderPassEncoderBeginOcclusionQuery.argtypes = None, [WGPURenderPassEncoder, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderDraw(WGPURenderPassEncoder renderPassEncoder, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
-try: (wgpuRenderPassEncoderDraw:=dll.wgpuRenderPassEncoderDraw).restype,wgpuRenderPassEncoderDraw.argtypes = None,[WGPURenderPassEncoder, uint32_t, uint32_t, uint32_t, uint32_t]
+try: (wgpuRenderPassEncoderDraw:=dll.wgpuRenderPassEncoderDraw).restype, wgpuRenderPassEncoderDraw.argtypes = None, [WGPURenderPassEncoder, uint32_t, uint32_t, uint32_t, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderDrawIndexed(WGPURenderPassEncoder renderPassEncoder, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t baseVertex, uint32_t firstInstance)
-try: (wgpuRenderPassEncoderDrawIndexed:=dll.wgpuRenderPassEncoderDrawIndexed).restype,wgpuRenderPassEncoderDrawIndexed.argtypes = None,[WGPURenderPassEncoder, uint32_t, uint32_t, uint32_t, int32_t, uint32_t]
+try: (wgpuRenderPassEncoderDrawIndexed:=dll.wgpuRenderPassEncoderDrawIndexed).restype, wgpuRenderPassEncoderDrawIndexed.argtypes = None, [WGPURenderPassEncoder, uint32_t, uint32_t, uint32_t, int32_t, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderDrawIndexedIndirect(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset)
-try: (wgpuRenderPassEncoderDrawIndexedIndirect:=dll.wgpuRenderPassEncoderDrawIndexedIndirect).restype,wgpuRenderPassEncoderDrawIndexedIndirect.argtypes = None,[WGPURenderPassEncoder, WGPUBuffer, uint64_t]
+try: (wgpuRenderPassEncoderDrawIndexedIndirect:=dll.wgpuRenderPassEncoderDrawIndexedIndirect).restype, wgpuRenderPassEncoderDrawIndexedIndirect.argtypes = None, [WGPURenderPassEncoder, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderDrawIndirect(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset)
-try: (wgpuRenderPassEncoderDrawIndirect:=dll.wgpuRenderPassEncoderDrawIndirect).restype,wgpuRenderPassEncoderDrawIndirect.argtypes = None,[WGPURenderPassEncoder, WGPUBuffer, uint64_t]
+try: (wgpuRenderPassEncoderDrawIndirect:=dll.wgpuRenderPassEncoderDrawIndirect).restype, wgpuRenderPassEncoderDrawIndirect.argtypes = None, [WGPURenderPassEncoder, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderEnd(WGPURenderPassEncoder renderPassEncoder)
-try: (wgpuRenderPassEncoderEnd:=dll.wgpuRenderPassEncoderEnd).restype,wgpuRenderPassEncoderEnd.argtypes = None,[WGPURenderPassEncoder]
+try: (wgpuRenderPassEncoderEnd:=dll.wgpuRenderPassEncoderEnd).restype, wgpuRenderPassEncoderEnd.argtypes = None, [WGPURenderPassEncoder]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderEndOcclusionQuery(WGPURenderPassEncoder renderPassEncoder)
-try: (wgpuRenderPassEncoderEndOcclusionQuery:=dll.wgpuRenderPassEncoderEndOcclusionQuery).restype,wgpuRenderPassEncoderEndOcclusionQuery.argtypes = None,[WGPURenderPassEncoder]
+try: (wgpuRenderPassEncoderEndOcclusionQuery:=dll.wgpuRenderPassEncoderEndOcclusionQuery).restype, wgpuRenderPassEncoderEndOcclusionQuery.argtypes = None, [WGPURenderPassEncoder]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderExecuteBundles(WGPURenderPassEncoder renderPassEncoder, size_t bundleCount, const WGPURenderBundle *bundles)
-try: (wgpuRenderPassEncoderExecuteBundles:=dll.wgpuRenderPassEncoderExecuteBundles).restype,wgpuRenderPassEncoderExecuteBundles.argtypes = None,[WGPURenderPassEncoder, size_t, ctypes.POINTER(WGPURenderBundle)]
+try: (wgpuRenderPassEncoderExecuteBundles:=dll.wgpuRenderPassEncoderExecuteBundles).restype, wgpuRenderPassEncoderExecuteBundles.argtypes = None, [WGPURenderPassEncoder, size_t, ctypes.POINTER(WGPURenderBundle)]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderInsertDebugMarker(WGPURenderPassEncoder renderPassEncoder, WGPUStringView markerLabel)
-try: (wgpuRenderPassEncoderInsertDebugMarker:=dll.wgpuRenderPassEncoderInsertDebugMarker).restype,wgpuRenderPassEncoderInsertDebugMarker.argtypes = None,[WGPURenderPassEncoder, WGPUStringView]
+try: (wgpuRenderPassEncoderInsertDebugMarker:=dll.wgpuRenderPassEncoderInsertDebugMarker).restype, wgpuRenderPassEncoderInsertDebugMarker.argtypes = None, [WGPURenderPassEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderMultiDrawIndexedIndirect(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, WGPUBuffer drawCountBuffer, uint64_t drawCountBufferOffset)
-try: (wgpuRenderPassEncoderMultiDrawIndexedIndirect:=dll.wgpuRenderPassEncoderMultiDrawIndexedIndirect).restype,wgpuRenderPassEncoderMultiDrawIndexedIndirect.argtypes = None,[WGPURenderPassEncoder, WGPUBuffer, uint64_t, uint32_t, WGPUBuffer, uint64_t]
+try: (wgpuRenderPassEncoderMultiDrawIndexedIndirect:=dll.wgpuRenderPassEncoderMultiDrawIndexedIndirect).restype, wgpuRenderPassEncoderMultiDrawIndexedIndirect.argtypes = None, [WGPURenderPassEncoder, WGPUBuffer, uint64_t, uint32_t, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderMultiDrawIndirect(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer indirectBuffer, uint64_t indirectOffset, uint32_t maxDrawCount, WGPUBuffer drawCountBuffer, uint64_t drawCountBufferOffset)
-try: (wgpuRenderPassEncoderMultiDrawIndirect:=dll.wgpuRenderPassEncoderMultiDrawIndirect).restype,wgpuRenderPassEncoderMultiDrawIndirect.argtypes = None,[WGPURenderPassEncoder, WGPUBuffer, uint64_t, uint32_t, WGPUBuffer, uint64_t]
+try: (wgpuRenderPassEncoderMultiDrawIndirect:=dll.wgpuRenderPassEncoderMultiDrawIndirect).restype, wgpuRenderPassEncoderMultiDrawIndirect.argtypes = None, [WGPURenderPassEncoder, WGPUBuffer, uint64_t, uint32_t, WGPUBuffer, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderPixelLocalStorageBarrier(WGPURenderPassEncoder renderPassEncoder)
-try: (wgpuRenderPassEncoderPixelLocalStorageBarrier:=dll.wgpuRenderPassEncoderPixelLocalStorageBarrier).restype,wgpuRenderPassEncoderPixelLocalStorageBarrier.argtypes = None,[WGPURenderPassEncoder]
+try: (wgpuRenderPassEncoderPixelLocalStorageBarrier:=dll.wgpuRenderPassEncoderPixelLocalStorageBarrier).restype, wgpuRenderPassEncoderPixelLocalStorageBarrier.argtypes = None, [WGPURenderPassEncoder]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderPopDebugGroup(WGPURenderPassEncoder renderPassEncoder)
-try: (wgpuRenderPassEncoderPopDebugGroup:=dll.wgpuRenderPassEncoderPopDebugGroup).restype,wgpuRenderPassEncoderPopDebugGroup.argtypes = None,[WGPURenderPassEncoder]
+try: (wgpuRenderPassEncoderPopDebugGroup:=dll.wgpuRenderPassEncoderPopDebugGroup).restype, wgpuRenderPassEncoderPopDebugGroup.argtypes = None, [WGPURenderPassEncoder]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderPushDebugGroup(WGPURenderPassEncoder renderPassEncoder, WGPUStringView groupLabel)
-try: (wgpuRenderPassEncoderPushDebugGroup:=dll.wgpuRenderPassEncoderPushDebugGroup).restype,wgpuRenderPassEncoderPushDebugGroup.argtypes = None,[WGPURenderPassEncoder, WGPUStringView]
+try: (wgpuRenderPassEncoderPushDebugGroup:=dll.wgpuRenderPassEncoderPushDebugGroup).restype, wgpuRenderPassEncoderPushDebugGroup.argtypes = None, [WGPURenderPassEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetBindGroup(WGPURenderPassEncoder renderPassEncoder, uint32_t groupIndex, WGPUBindGroup group, size_t dynamicOffsetCount, const uint32_t *dynamicOffsets)
-try: (wgpuRenderPassEncoderSetBindGroup:=dll.wgpuRenderPassEncoderSetBindGroup).restype,wgpuRenderPassEncoderSetBindGroup.argtypes = None,[WGPURenderPassEncoder, uint32_t, WGPUBindGroup, size_t, ctypes.POINTER(uint32_t)]
+try: (wgpuRenderPassEncoderSetBindGroup:=dll.wgpuRenderPassEncoderSetBindGroup).restype, wgpuRenderPassEncoderSetBindGroup.argtypes = None, [WGPURenderPassEncoder, uint32_t, WGPUBindGroup, size_t, ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetBlendConstant(WGPURenderPassEncoder renderPassEncoder, const WGPUColor *color)
-try: (wgpuRenderPassEncoderSetBlendConstant:=dll.wgpuRenderPassEncoderSetBlendConstant).restype,wgpuRenderPassEncoderSetBlendConstant.argtypes = None,[WGPURenderPassEncoder, ctypes.POINTER(WGPUColor)]
+try: (wgpuRenderPassEncoderSetBlendConstant:=dll.wgpuRenderPassEncoderSetBlendConstant).restype, wgpuRenderPassEncoderSetBlendConstant.argtypes = None, [WGPURenderPassEncoder, ctypes.POINTER(WGPUColor)]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetIndexBuffer(WGPURenderPassEncoder renderPassEncoder, WGPUBuffer buffer, WGPUIndexFormat format, uint64_t offset, uint64_t size)
-try: (wgpuRenderPassEncoderSetIndexBuffer:=dll.wgpuRenderPassEncoderSetIndexBuffer).restype,wgpuRenderPassEncoderSetIndexBuffer.argtypes = None,[WGPURenderPassEncoder, WGPUBuffer, WGPUIndexFormat, uint64_t, uint64_t]
+try: (wgpuRenderPassEncoderSetIndexBuffer:=dll.wgpuRenderPassEncoderSetIndexBuffer).restype, wgpuRenderPassEncoderSetIndexBuffer.argtypes = None, [WGPURenderPassEncoder, WGPUBuffer, WGPUIndexFormat, uint64_t, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetLabel(WGPURenderPassEncoder renderPassEncoder, WGPUStringView label)
-try: (wgpuRenderPassEncoderSetLabel:=dll.wgpuRenderPassEncoderSetLabel).restype,wgpuRenderPassEncoderSetLabel.argtypes = None,[WGPURenderPassEncoder, WGPUStringView]
+try: (wgpuRenderPassEncoderSetLabel:=dll.wgpuRenderPassEncoderSetLabel).restype, wgpuRenderPassEncoderSetLabel.argtypes = None, [WGPURenderPassEncoder, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetPipeline(WGPURenderPassEncoder renderPassEncoder, WGPURenderPipeline pipeline)
-try: (wgpuRenderPassEncoderSetPipeline:=dll.wgpuRenderPassEncoderSetPipeline).restype,wgpuRenderPassEncoderSetPipeline.argtypes = None,[WGPURenderPassEncoder, WGPURenderPipeline]
+try: (wgpuRenderPassEncoderSetPipeline:=dll.wgpuRenderPassEncoderSetPipeline).restype, wgpuRenderPassEncoderSetPipeline.argtypes = None, [WGPURenderPassEncoder, WGPURenderPipeline]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetScissorRect(WGPURenderPassEncoder renderPassEncoder, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
-try: (wgpuRenderPassEncoderSetScissorRect:=dll.wgpuRenderPassEncoderSetScissorRect).restype,wgpuRenderPassEncoderSetScissorRect.argtypes = None,[WGPURenderPassEncoder, uint32_t, uint32_t, uint32_t, uint32_t]
+try: (wgpuRenderPassEncoderSetScissorRect:=dll.wgpuRenderPassEncoderSetScissorRect).restype, wgpuRenderPassEncoderSetScissorRect.argtypes = None, [WGPURenderPassEncoder, uint32_t, uint32_t, uint32_t, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetStencilReference(WGPURenderPassEncoder renderPassEncoder, uint32_t reference)
-try: (wgpuRenderPassEncoderSetStencilReference:=dll.wgpuRenderPassEncoderSetStencilReference).restype,wgpuRenderPassEncoderSetStencilReference.argtypes = None,[WGPURenderPassEncoder, uint32_t]
+try: (wgpuRenderPassEncoderSetStencilReference:=dll.wgpuRenderPassEncoderSetStencilReference).restype, wgpuRenderPassEncoderSetStencilReference.argtypes = None, [WGPURenderPassEncoder, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetVertexBuffer(WGPURenderPassEncoder renderPassEncoder, uint32_t slot, WGPUBuffer buffer, uint64_t offset, uint64_t size)
-try: (wgpuRenderPassEncoderSetVertexBuffer:=dll.wgpuRenderPassEncoderSetVertexBuffer).restype,wgpuRenderPassEncoderSetVertexBuffer.argtypes = None,[WGPURenderPassEncoder, uint32_t, WGPUBuffer, uint64_t, uint64_t]
+try: (wgpuRenderPassEncoderSetVertexBuffer:=dll.wgpuRenderPassEncoderSetVertexBuffer).restype, wgpuRenderPassEncoderSetVertexBuffer.argtypes = None, [WGPURenderPassEncoder, uint32_t, WGPUBuffer, uint64_t, uint64_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderSetViewport(WGPURenderPassEncoder renderPassEncoder, float x, float y, float width, float height, float minDepth, float maxDepth)
-try: (wgpuRenderPassEncoderSetViewport:=dll.wgpuRenderPassEncoderSetViewport).restype,wgpuRenderPassEncoderSetViewport.argtypes = None,[WGPURenderPassEncoder, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float]
+try: (wgpuRenderPassEncoderSetViewport:=dll.wgpuRenderPassEncoderSetViewport).restype, wgpuRenderPassEncoderSetViewport.argtypes = None, [WGPURenderPassEncoder, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderWriteTimestamp(WGPURenderPassEncoder renderPassEncoder, WGPUQuerySet querySet, uint32_t queryIndex)
-try: (wgpuRenderPassEncoderWriteTimestamp:=dll.wgpuRenderPassEncoderWriteTimestamp).restype,wgpuRenderPassEncoderWriteTimestamp.argtypes = None,[WGPURenderPassEncoder, WGPUQuerySet, uint32_t]
+try: (wgpuRenderPassEncoderWriteTimestamp:=dll.wgpuRenderPassEncoderWriteTimestamp).restype, wgpuRenderPassEncoderWriteTimestamp.argtypes = None, [WGPURenderPassEncoder, WGPUQuerySet, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderAddRef(WGPURenderPassEncoder renderPassEncoder)
-try: (wgpuRenderPassEncoderAddRef:=dll.wgpuRenderPassEncoderAddRef).restype,wgpuRenderPassEncoderAddRef.argtypes = None,[WGPURenderPassEncoder]
+try: (wgpuRenderPassEncoderAddRef:=dll.wgpuRenderPassEncoderAddRef).restype, wgpuRenderPassEncoderAddRef.argtypes = None, [WGPURenderPassEncoder]
 except AttributeError: pass
 
 # void wgpuRenderPassEncoderRelease(WGPURenderPassEncoder renderPassEncoder)
-try: (wgpuRenderPassEncoderRelease:=dll.wgpuRenderPassEncoderRelease).restype,wgpuRenderPassEncoderRelease.argtypes = None,[WGPURenderPassEncoder]
+try: (wgpuRenderPassEncoderRelease:=dll.wgpuRenderPassEncoderRelease).restype, wgpuRenderPassEncoderRelease.argtypes = None, [WGPURenderPassEncoder]
 except AttributeError: pass
 
 # WGPUBindGroupLayout wgpuRenderPipelineGetBindGroupLayout(WGPURenderPipeline renderPipeline, uint32_t groupIndex)
-try: (wgpuRenderPipelineGetBindGroupLayout:=dll.wgpuRenderPipelineGetBindGroupLayout).restype,wgpuRenderPipelineGetBindGroupLayout.argtypes = WGPUBindGroupLayout,[WGPURenderPipeline, uint32_t]
+try: (wgpuRenderPipelineGetBindGroupLayout:=dll.wgpuRenderPipelineGetBindGroupLayout).restype, wgpuRenderPipelineGetBindGroupLayout.argtypes = WGPUBindGroupLayout, [WGPURenderPipeline, uint32_t]
 except AttributeError: pass
 
 # void wgpuRenderPipelineSetLabel(WGPURenderPipeline renderPipeline, WGPUStringView label)
-try: (wgpuRenderPipelineSetLabel:=dll.wgpuRenderPipelineSetLabel).restype,wgpuRenderPipelineSetLabel.argtypes = None,[WGPURenderPipeline, WGPUStringView]
+try: (wgpuRenderPipelineSetLabel:=dll.wgpuRenderPipelineSetLabel).restype, wgpuRenderPipelineSetLabel.argtypes = None, [WGPURenderPipeline, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuRenderPipelineAddRef(WGPURenderPipeline renderPipeline)
-try: (wgpuRenderPipelineAddRef:=dll.wgpuRenderPipelineAddRef).restype,wgpuRenderPipelineAddRef.argtypes = None,[WGPURenderPipeline]
+try: (wgpuRenderPipelineAddRef:=dll.wgpuRenderPipelineAddRef).restype, wgpuRenderPipelineAddRef.argtypes = None, [WGPURenderPipeline]
 except AttributeError: pass
 
 # void wgpuRenderPipelineRelease(WGPURenderPipeline renderPipeline)
-try: (wgpuRenderPipelineRelease:=dll.wgpuRenderPipelineRelease).restype,wgpuRenderPipelineRelease.argtypes = None,[WGPURenderPipeline]
+try: (wgpuRenderPipelineRelease:=dll.wgpuRenderPipelineRelease).restype, wgpuRenderPipelineRelease.argtypes = None, [WGPURenderPipeline]
 except AttributeError: pass
 
 # void wgpuSamplerSetLabel(WGPUSampler sampler, WGPUStringView label)
-try: (wgpuSamplerSetLabel:=dll.wgpuSamplerSetLabel).restype,wgpuSamplerSetLabel.argtypes = None,[WGPUSampler, WGPUStringView]
+try: (wgpuSamplerSetLabel:=dll.wgpuSamplerSetLabel).restype, wgpuSamplerSetLabel.argtypes = None, [WGPUSampler, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuSamplerAddRef(WGPUSampler sampler)
-try: (wgpuSamplerAddRef:=dll.wgpuSamplerAddRef).restype,wgpuSamplerAddRef.argtypes = None,[WGPUSampler]
+try: (wgpuSamplerAddRef:=dll.wgpuSamplerAddRef).restype, wgpuSamplerAddRef.argtypes = None, [WGPUSampler]
 except AttributeError: pass
 
 # void wgpuSamplerRelease(WGPUSampler sampler)
-try: (wgpuSamplerRelease:=dll.wgpuSamplerRelease).restype,wgpuSamplerRelease.argtypes = None,[WGPUSampler]
+try: (wgpuSamplerRelease:=dll.wgpuSamplerRelease).restype, wgpuSamplerRelease.argtypes = None, [WGPUSampler]
 except AttributeError: pass
 
 # void wgpuShaderModuleGetCompilationInfo(WGPUShaderModule shaderModule, WGPUCompilationInfoCallback callback, void *userdata)
-try: (wgpuShaderModuleGetCompilationInfo:=dll.wgpuShaderModuleGetCompilationInfo).restype,wgpuShaderModuleGetCompilationInfo.argtypes = None,[WGPUShaderModule, WGPUCompilationInfoCallback, ctypes.c_void_p]
+try: (wgpuShaderModuleGetCompilationInfo:=dll.wgpuShaderModuleGetCompilationInfo).restype, wgpuShaderModuleGetCompilationInfo.argtypes = None, [WGPUShaderModule, WGPUCompilationInfoCallback, ctypes.c_void_p]
 except AttributeError: pass
 
 # WGPUFuture wgpuShaderModuleGetCompilationInfo2(WGPUShaderModule shaderModule, WGPUCompilationInfoCallbackInfo2 callbackInfo)
-try: (wgpuShaderModuleGetCompilationInfo2:=dll.wgpuShaderModuleGetCompilationInfo2).restype,wgpuShaderModuleGetCompilationInfo2.argtypes = WGPUFuture,[WGPUShaderModule, WGPUCompilationInfoCallbackInfo2]
+try: (wgpuShaderModuleGetCompilationInfo2:=dll.wgpuShaderModuleGetCompilationInfo2).restype, wgpuShaderModuleGetCompilationInfo2.argtypes = WGPUFuture, [WGPUShaderModule, WGPUCompilationInfoCallbackInfo2]
 except AttributeError: pass
 
 # WGPUFuture wgpuShaderModuleGetCompilationInfoF(WGPUShaderModule shaderModule, WGPUCompilationInfoCallbackInfo callbackInfo)
-try: (wgpuShaderModuleGetCompilationInfoF:=dll.wgpuShaderModuleGetCompilationInfoF).restype,wgpuShaderModuleGetCompilationInfoF.argtypes = WGPUFuture,[WGPUShaderModule, WGPUCompilationInfoCallbackInfo]
+try: (wgpuShaderModuleGetCompilationInfoF:=dll.wgpuShaderModuleGetCompilationInfoF).restype, wgpuShaderModuleGetCompilationInfoF.argtypes = WGPUFuture, [WGPUShaderModule, WGPUCompilationInfoCallbackInfo]
 except AttributeError: pass
 
 # void wgpuShaderModuleSetLabel(WGPUShaderModule shaderModule, WGPUStringView label)
-try: (wgpuShaderModuleSetLabel:=dll.wgpuShaderModuleSetLabel).restype,wgpuShaderModuleSetLabel.argtypes = None,[WGPUShaderModule, WGPUStringView]
+try: (wgpuShaderModuleSetLabel:=dll.wgpuShaderModuleSetLabel).restype, wgpuShaderModuleSetLabel.argtypes = None, [WGPUShaderModule, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuShaderModuleAddRef(WGPUShaderModule shaderModule)
-try: (wgpuShaderModuleAddRef:=dll.wgpuShaderModuleAddRef).restype,wgpuShaderModuleAddRef.argtypes = None,[WGPUShaderModule]
+try: (wgpuShaderModuleAddRef:=dll.wgpuShaderModuleAddRef).restype, wgpuShaderModuleAddRef.argtypes = None, [WGPUShaderModule]
 except AttributeError: pass
 
 # void wgpuShaderModuleRelease(WGPUShaderModule shaderModule)
-try: (wgpuShaderModuleRelease:=dll.wgpuShaderModuleRelease).restype,wgpuShaderModuleRelease.argtypes = None,[WGPUShaderModule]
+try: (wgpuShaderModuleRelease:=dll.wgpuShaderModuleRelease).restype, wgpuShaderModuleRelease.argtypes = None, [WGPUShaderModule]
 except AttributeError: pass
 
 # WGPUStatus wgpuSharedBufferMemoryBeginAccess(WGPUSharedBufferMemory sharedBufferMemory, WGPUBuffer buffer, const WGPUSharedBufferMemoryBeginAccessDescriptor *descriptor)
-try: (wgpuSharedBufferMemoryBeginAccess:=dll.wgpuSharedBufferMemoryBeginAccess).restype,wgpuSharedBufferMemoryBeginAccess.argtypes = WGPUStatus,[WGPUSharedBufferMemory, WGPUBuffer, ctypes.POINTER(WGPUSharedBufferMemoryBeginAccessDescriptor)]
+try: (wgpuSharedBufferMemoryBeginAccess:=dll.wgpuSharedBufferMemoryBeginAccess).restype, wgpuSharedBufferMemoryBeginAccess.argtypes = WGPUStatus, [WGPUSharedBufferMemory, WGPUBuffer, ctypes.POINTER(WGPUSharedBufferMemoryBeginAccessDescriptor)]
 except AttributeError: pass
 
 # WGPUBuffer wgpuSharedBufferMemoryCreateBuffer(WGPUSharedBufferMemory sharedBufferMemory, const WGPUBufferDescriptor *descriptor)
-try: (wgpuSharedBufferMemoryCreateBuffer:=dll.wgpuSharedBufferMemoryCreateBuffer).restype,wgpuSharedBufferMemoryCreateBuffer.argtypes = WGPUBuffer,[WGPUSharedBufferMemory, ctypes.POINTER(WGPUBufferDescriptor)]
+try: (wgpuSharedBufferMemoryCreateBuffer:=dll.wgpuSharedBufferMemoryCreateBuffer).restype, wgpuSharedBufferMemoryCreateBuffer.argtypes = WGPUBuffer, [WGPUSharedBufferMemory, ctypes.POINTER(WGPUBufferDescriptor)]
 except AttributeError: pass
 
 # WGPUStatus wgpuSharedBufferMemoryEndAccess(WGPUSharedBufferMemory sharedBufferMemory, WGPUBuffer buffer, WGPUSharedBufferMemoryEndAccessState *descriptor)
-try: (wgpuSharedBufferMemoryEndAccess:=dll.wgpuSharedBufferMemoryEndAccess).restype,wgpuSharedBufferMemoryEndAccess.argtypes = WGPUStatus,[WGPUSharedBufferMemory, WGPUBuffer, ctypes.POINTER(WGPUSharedBufferMemoryEndAccessState)]
+try: (wgpuSharedBufferMemoryEndAccess:=dll.wgpuSharedBufferMemoryEndAccess).restype, wgpuSharedBufferMemoryEndAccess.argtypes = WGPUStatus, [WGPUSharedBufferMemory, WGPUBuffer, ctypes.POINTER(WGPUSharedBufferMemoryEndAccessState)]
 except AttributeError: pass
 
 # WGPUStatus wgpuSharedBufferMemoryGetProperties(WGPUSharedBufferMemory sharedBufferMemory, WGPUSharedBufferMemoryProperties *properties)
-try: (wgpuSharedBufferMemoryGetProperties:=dll.wgpuSharedBufferMemoryGetProperties).restype,wgpuSharedBufferMemoryGetProperties.argtypes = WGPUStatus,[WGPUSharedBufferMemory, ctypes.POINTER(WGPUSharedBufferMemoryProperties)]
+try: (wgpuSharedBufferMemoryGetProperties:=dll.wgpuSharedBufferMemoryGetProperties).restype, wgpuSharedBufferMemoryGetProperties.argtypes = WGPUStatus, [WGPUSharedBufferMemory, ctypes.POINTER(WGPUSharedBufferMemoryProperties)]
 except AttributeError: pass
 
 # WGPUBool wgpuSharedBufferMemoryIsDeviceLost(WGPUSharedBufferMemory sharedBufferMemory)
-try: (wgpuSharedBufferMemoryIsDeviceLost:=dll.wgpuSharedBufferMemoryIsDeviceLost).restype,wgpuSharedBufferMemoryIsDeviceLost.argtypes = WGPUBool,[WGPUSharedBufferMemory]
+try: (wgpuSharedBufferMemoryIsDeviceLost:=dll.wgpuSharedBufferMemoryIsDeviceLost).restype, wgpuSharedBufferMemoryIsDeviceLost.argtypes = WGPUBool, [WGPUSharedBufferMemory]
 except AttributeError: pass
 
 # void wgpuSharedBufferMemorySetLabel(WGPUSharedBufferMemory sharedBufferMemory, WGPUStringView label)
-try: (wgpuSharedBufferMemorySetLabel:=dll.wgpuSharedBufferMemorySetLabel).restype,wgpuSharedBufferMemorySetLabel.argtypes = None,[WGPUSharedBufferMemory, WGPUStringView]
+try: (wgpuSharedBufferMemorySetLabel:=dll.wgpuSharedBufferMemorySetLabel).restype, wgpuSharedBufferMemorySetLabel.argtypes = None, [WGPUSharedBufferMemory, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuSharedBufferMemoryAddRef(WGPUSharedBufferMemory sharedBufferMemory)
-try: (wgpuSharedBufferMemoryAddRef:=dll.wgpuSharedBufferMemoryAddRef).restype,wgpuSharedBufferMemoryAddRef.argtypes = None,[WGPUSharedBufferMemory]
+try: (wgpuSharedBufferMemoryAddRef:=dll.wgpuSharedBufferMemoryAddRef).restype, wgpuSharedBufferMemoryAddRef.argtypes = None, [WGPUSharedBufferMemory]
 except AttributeError: pass
 
 # void wgpuSharedBufferMemoryRelease(WGPUSharedBufferMemory sharedBufferMemory)
-try: (wgpuSharedBufferMemoryRelease:=dll.wgpuSharedBufferMemoryRelease).restype,wgpuSharedBufferMemoryRelease.argtypes = None,[WGPUSharedBufferMemory]
+try: (wgpuSharedBufferMemoryRelease:=dll.wgpuSharedBufferMemoryRelease).restype, wgpuSharedBufferMemoryRelease.argtypes = None, [WGPUSharedBufferMemory]
 except AttributeError: pass
 
 # void wgpuSharedFenceExportInfo(WGPUSharedFence sharedFence, WGPUSharedFenceExportInfo *info)
-try: (wgpuSharedFenceExportInfo:=dll.wgpuSharedFenceExportInfo).restype,wgpuSharedFenceExportInfo.argtypes = None,[WGPUSharedFence, ctypes.POINTER(WGPUSharedFenceExportInfo)]
+try: (wgpuSharedFenceExportInfo:=dll.wgpuSharedFenceExportInfo).restype, wgpuSharedFenceExportInfo.argtypes = None, [WGPUSharedFence, ctypes.POINTER(WGPUSharedFenceExportInfo)]
 except AttributeError: pass
 
 # void wgpuSharedFenceAddRef(WGPUSharedFence sharedFence)
-try: (wgpuSharedFenceAddRef:=dll.wgpuSharedFenceAddRef).restype,wgpuSharedFenceAddRef.argtypes = None,[WGPUSharedFence]
+try: (wgpuSharedFenceAddRef:=dll.wgpuSharedFenceAddRef).restype, wgpuSharedFenceAddRef.argtypes = None, [WGPUSharedFence]
 except AttributeError: pass
 
 # void wgpuSharedFenceRelease(WGPUSharedFence sharedFence)
-try: (wgpuSharedFenceRelease:=dll.wgpuSharedFenceRelease).restype,wgpuSharedFenceRelease.argtypes = None,[WGPUSharedFence]
+try: (wgpuSharedFenceRelease:=dll.wgpuSharedFenceRelease).restype, wgpuSharedFenceRelease.argtypes = None, [WGPUSharedFence]
 except AttributeError: pass
 
 # WGPUStatus wgpuSharedTextureMemoryBeginAccess(WGPUSharedTextureMemory sharedTextureMemory, WGPUTexture texture, const WGPUSharedTextureMemoryBeginAccessDescriptor *descriptor)
-try: (wgpuSharedTextureMemoryBeginAccess:=dll.wgpuSharedTextureMemoryBeginAccess).restype,wgpuSharedTextureMemoryBeginAccess.argtypes = WGPUStatus,[WGPUSharedTextureMemory, WGPUTexture, ctypes.POINTER(WGPUSharedTextureMemoryBeginAccessDescriptor)]
+try: (wgpuSharedTextureMemoryBeginAccess:=dll.wgpuSharedTextureMemoryBeginAccess).restype, wgpuSharedTextureMemoryBeginAccess.argtypes = WGPUStatus, [WGPUSharedTextureMemory, WGPUTexture, ctypes.POINTER(WGPUSharedTextureMemoryBeginAccessDescriptor)]
 except AttributeError: pass
 
 # WGPUTexture wgpuSharedTextureMemoryCreateTexture(WGPUSharedTextureMemory sharedTextureMemory, const WGPUTextureDescriptor *descriptor)
-try: (wgpuSharedTextureMemoryCreateTexture:=dll.wgpuSharedTextureMemoryCreateTexture).restype,wgpuSharedTextureMemoryCreateTexture.argtypes = WGPUTexture,[WGPUSharedTextureMemory, ctypes.POINTER(WGPUTextureDescriptor)]
+try: (wgpuSharedTextureMemoryCreateTexture:=dll.wgpuSharedTextureMemoryCreateTexture).restype, wgpuSharedTextureMemoryCreateTexture.argtypes = WGPUTexture, [WGPUSharedTextureMemory, ctypes.POINTER(WGPUTextureDescriptor)]
 except AttributeError: pass
 
 # WGPUStatus wgpuSharedTextureMemoryEndAccess(WGPUSharedTextureMemory sharedTextureMemory, WGPUTexture texture, WGPUSharedTextureMemoryEndAccessState *descriptor)
-try: (wgpuSharedTextureMemoryEndAccess:=dll.wgpuSharedTextureMemoryEndAccess).restype,wgpuSharedTextureMemoryEndAccess.argtypes = WGPUStatus,[WGPUSharedTextureMemory, WGPUTexture, ctypes.POINTER(WGPUSharedTextureMemoryEndAccessState)]
+try: (wgpuSharedTextureMemoryEndAccess:=dll.wgpuSharedTextureMemoryEndAccess).restype, wgpuSharedTextureMemoryEndAccess.argtypes = WGPUStatus, [WGPUSharedTextureMemory, WGPUTexture, ctypes.POINTER(WGPUSharedTextureMemoryEndAccessState)]
 except AttributeError: pass
 
 # WGPUStatus wgpuSharedTextureMemoryGetProperties(WGPUSharedTextureMemory sharedTextureMemory, WGPUSharedTextureMemoryProperties *properties)
-try: (wgpuSharedTextureMemoryGetProperties:=dll.wgpuSharedTextureMemoryGetProperties).restype,wgpuSharedTextureMemoryGetProperties.argtypes = WGPUStatus,[WGPUSharedTextureMemory, ctypes.POINTER(WGPUSharedTextureMemoryProperties)]
+try: (wgpuSharedTextureMemoryGetProperties:=dll.wgpuSharedTextureMemoryGetProperties).restype, wgpuSharedTextureMemoryGetProperties.argtypes = WGPUStatus, [WGPUSharedTextureMemory, ctypes.POINTER(WGPUSharedTextureMemoryProperties)]
 except AttributeError: pass
 
 # WGPUBool wgpuSharedTextureMemoryIsDeviceLost(WGPUSharedTextureMemory sharedTextureMemory)
-try: (wgpuSharedTextureMemoryIsDeviceLost:=dll.wgpuSharedTextureMemoryIsDeviceLost).restype,wgpuSharedTextureMemoryIsDeviceLost.argtypes = WGPUBool,[WGPUSharedTextureMemory]
+try: (wgpuSharedTextureMemoryIsDeviceLost:=dll.wgpuSharedTextureMemoryIsDeviceLost).restype, wgpuSharedTextureMemoryIsDeviceLost.argtypes = WGPUBool, [WGPUSharedTextureMemory]
 except AttributeError: pass
 
 # void wgpuSharedTextureMemorySetLabel(WGPUSharedTextureMemory sharedTextureMemory, WGPUStringView label)
-try: (wgpuSharedTextureMemorySetLabel:=dll.wgpuSharedTextureMemorySetLabel).restype,wgpuSharedTextureMemorySetLabel.argtypes = None,[WGPUSharedTextureMemory, WGPUStringView]
+try: (wgpuSharedTextureMemorySetLabel:=dll.wgpuSharedTextureMemorySetLabel).restype, wgpuSharedTextureMemorySetLabel.argtypes = None, [WGPUSharedTextureMemory, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuSharedTextureMemoryAddRef(WGPUSharedTextureMemory sharedTextureMemory)
-try: (wgpuSharedTextureMemoryAddRef:=dll.wgpuSharedTextureMemoryAddRef).restype,wgpuSharedTextureMemoryAddRef.argtypes = None,[WGPUSharedTextureMemory]
+try: (wgpuSharedTextureMemoryAddRef:=dll.wgpuSharedTextureMemoryAddRef).restype, wgpuSharedTextureMemoryAddRef.argtypes = None, [WGPUSharedTextureMemory]
 except AttributeError: pass
 
 # void wgpuSharedTextureMemoryRelease(WGPUSharedTextureMemory sharedTextureMemory)
-try: (wgpuSharedTextureMemoryRelease:=dll.wgpuSharedTextureMemoryRelease).restype,wgpuSharedTextureMemoryRelease.argtypes = None,[WGPUSharedTextureMemory]
+try: (wgpuSharedTextureMemoryRelease:=dll.wgpuSharedTextureMemoryRelease).restype, wgpuSharedTextureMemoryRelease.argtypes = None, [WGPUSharedTextureMemory]
 except AttributeError: pass
 
 # void wgpuSurfaceConfigure(WGPUSurface surface, const WGPUSurfaceConfiguration *config)
-try: (wgpuSurfaceConfigure:=dll.wgpuSurfaceConfigure).restype,wgpuSurfaceConfigure.argtypes = None,[WGPUSurface, ctypes.POINTER(WGPUSurfaceConfiguration)]
+try: (wgpuSurfaceConfigure:=dll.wgpuSurfaceConfigure).restype, wgpuSurfaceConfigure.argtypes = None, [WGPUSurface, ctypes.POINTER(WGPUSurfaceConfiguration)]
 except AttributeError: pass
 
 # WGPUStatus wgpuSurfaceGetCapabilities(WGPUSurface surface, WGPUAdapter adapter, WGPUSurfaceCapabilities *capabilities)
-try: (wgpuSurfaceGetCapabilities:=dll.wgpuSurfaceGetCapabilities).restype,wgpuSurfaceGetCapabilities.argtypes = WGPUStatus,[WGPUSurface, WGPUAdapter, ctypes.POINTER(WGPUSurfaceCapabilities)]
+try: (wgpuSurfaceGetCapabilities:=dll.wgpuSurfaceGetCapabilities).restype, wgpuSurfaceGetCapabilities.argtypes = WGPUStatus, [WGPUSurface, WGPUAdapter, ctypes.POINTER(WGPUSurfaceCapabilities)]
 except AttributeError: pass
 
 # void wgpuSurfaceGetCurrentTexture(WGPUSurface surface, WGPUSurfaceTexture *surfaceTexture)
-try: (wgpuSurfaceGetCurrentTexture:=dll.wgpuSurfaceGetCurrentTexture).restype,wgpuSurfaceGetCurrentTexture.argtypes = None,[WGPUSurface, ctypes.POINTER(WGPUSurfaceTexture)]
+try: (wgpuSurfaceGetCurrentTexture:=dll.wgpuSurfaceGetCurrentTexture).restype, wgpuSurfaceGetCurrentTexture.argtypes = None, [WGPUSurface, ctypes.POINTER(WGPUSurfaceTexture)]
 except AttributeError: pass
 
 # void wgpuSurfacePresent(WGPUSurface surface)
-try: (wgpuSurfacePresent:=dll.wgpuSurfacePresent).restype,wgpuSurfacePresent.argtypes = None,[WGPUSurface]
+try: (wgpuSurfacePresent:=dll.wgpuSurfacePresent).restype, wgpuSurfacePresent.argtypes = None, [WGPUSurface]
 except AttributeError: pass
 
 # void wgpuSurfaceSetLabel(WGPUSurface surface, WGPUStringView label)
-try: (wgpuSurfaceSetLabel:=dll.wgpuSurfaceSetLabel).restype,wgpuSurfaceSetLabel.argtypes = None,[WGPUSurface, WGPUStringView]
+try: (wgpuSurfaceSetLabel:=dll.wgpuSurfaceSetLabel).restype, wgpuSurfaceSetLabel.argtypes = None, [WGPUSurface, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuSurfaceUnconfigure(WGPUSurface surface)
-try: (wgpuSurfaceUnconfigure:=dll.wgpuSurfaceUnconfigure).restype,wgpuSurfaceUnconfigure.argtypes = None,[WGPUSurface]
+try: (wgpuSurfaceUnconfigure:=dll.wgpuSurfaceUnconfigure).restype, wgpuSurfaceUnconfigure.argtypes = None, [WGPUSurface]
 except AttributeError: pass
 
 # void wgpuSurfaceAddRef(WGPUSurface surface)
-try: (wgpuSurfaceAddRef:=dll.wgpuSurfaceAddRef).restype,wgpuSurfaceAddRef.argtypes = None,[WGPUSurface]
+try: (wgpuSurfaceAddRef:=dll.wgpuSurfaceAddRef).restype, wgpuSurfaceAddRef.argtypes = None, [WGPUSurface]
 except AttributeError: pass
 
 # void wgpuSurfaceRelease(WGPUSurface surface)
-try: (wgpuSurfaceRelease:=dll.wgpuSurfaceRelease).restype,wgpuSurfaceRelease.argtypes = None,[WGPUSurface]
+try: (wgpuSurfaceRelease:=dll.wgpuSurfaceRelease).restype, wgpuSurfaceRelease.argtypes = None, [WGPUSurface]
 except AttributeError: pass
 
 # WGPUTextureView wgpuTextureCreateErrorView(WGPUTexture texture, const WGPUTextureViewDescriptor *descriptor)
-try: (wgpuTextureCreateErrorView:=dll.wgpuTextureCreateErrorView).restype,wgpuTextureCreateErrorView.argtypes = WGPUTextureView,[WGPUTexture, ctypes.POINTER(WGPUTextureViewDescriptor)]
+try: (wgpuTextureCreateErrorView:=dll.wgpuTextureCreateErrorView).restype, wgpuTextureCreateErrorView.argtypes = WGPUTextureView, [WGPUTexture, ctypes.POINTER(WGPUTextureViewDescriptor)]
 except AttributeError: pass
 
 # WGPUTextureView wgpuTextureCreateView(WGPUTexture texture, const WGPUTextureViewDescriptor *descriptor)
-try: (wgpuTextureCreateView:=dll.wgpuTextureCreateView).restype,wgpuTextureCreateView.argtypes = WGPUTextureView,[WGPUTexture, ctypes.POINTER(WGPUTextureViewDescriptor)]
+try: (wgpuTextureCreateView:=dll.wgpuTextureCreateView).restype, wgpuTextureCreateView.argtypes = WGPUTextureView, [WGPUTexture, ctypes.POINTER(WGPUTextureViewDescriptor)]
 except AttributeError: pass
 
 # void wgpuTextureDestroy(WGPUTexture texture)
-try: (wgpuTextureDestroy:=dll.wgpuTextureDestroy).restype,wgpuTextureDestroy.argtypes = None,[WGPUTexture]
+try: (wgpuTextureDestroy:=dll.wgpuTextureDestroy).restype, wgpuTextureDestroy.argtypes = None, [WGPUTexture]
 except AttributeError: pass
 
 # uint32_t wgpuTextureGetDepthOrArrayLayers(WGPUTexture texture)
-try: (wgpuTextureGetDepthOrArrayLayers:=dll.wgpuTextureGetDepthOrArrayLayers).restype,wgpuTextureGetDepthOrArrayLayers.argtypes = uint32_t,[WGPUTexture]
+try: (wgpuTextureGetDepthOrArrayLayers:=dll.wgpuTextureGetDepthOrArrayLayers).restype, wgpuTextureGetDepthOrArrayLayers.argtypes = uint32_t, [WGPUTexture]
 except AttributeError: pass
 
 # WGPUTextureDimension wgpuTextureGetDimension(WGPUTexture texture)
-try: (wgpuTextureGetDimension:=dll.wgpuTextureGetDimension).restype,wgpuTextureGetDimension.argtypes = WGPUTextureDimension,[WGPUTexture]
+try: (wgpuTextureGetDimension:=dll.wgpuTextureGetDimension).restype, wgpuTextureGetDimension.argtypes = WGPUTextureDimension, [WGPUTexture]
 except AttributeError: pass
 
 # WGPUTextureFormat wgpuTextureGetFormat(WGPUTexture texture)
-try: (wgpuTextureGetFormat:=dll.wgpuTextureGetFormat).restype,wgpuTextureGetFormat.argtypes = WGPUTextureFormat,[WGPUTexture]
+try: (wgpuTextureGetFormat:=dll.wgpuTextureGetFormat).restype, wgpuTextureGetFormat.argtypes = WGPUTextureFormat, [WGPUTexture]
 except AttributeError: pass
 
 # uint32_t wgpuTextureGetHeight(WGPUTexture texture)
-try: (wgpuTextureGetHeight:=dll.wgpuTextureGetHeight).restype,wgpuTextureGetHeight.argtypes = uint32_t,[WGPUTexture]
+try: (wgpuTextureGetHeight:=dll.wgpuTextureGetHeight).restype, wgpuTextureGetHeight.argtypes = uint32_t, [WGPUTexture]
 except AttributeError: pass
 
 # uint32_t wgpuTextureGetMipLevelCount(WGPUTexture texture)
-try: (wgpuTextureGetMipLevelCount:=dll.wgpuTextureGetMipLevelCount).restype,wgpuTextureGetMipLevelCount.argtypes = uint32_t,[WGPUTexture]
+try: (wgpuTextureGetMipLevelCount:=dll.wgpuTextureGetMipLevelCount).restype, wgpuTextureGetMipLevelCount.argtypes = uint32_t, [WGPUTexture]
 except AttributeError: pass
 
 # uint32_t wgpuTextureGetSampleCount(WGPUTexture texture)
-try: (wgpuTextureGetSampleCount:=dll.wgpuTextureGetSampleCount).restype,wgpuTextureGetSampleCount.argtypes = uint32_t,[WGPUTexture]
+try: (wgpuTextureGetSampleCount:=dll.wgpuTextureGetSampleCount).restype, wgpuTextureGetSampleCount.argtypes = uint32_t, [WGPUTexture]
 except AttributeError: pass
 
 # WGPUTextureUsage wgpuTextureGetUsage(WGPUTexture texture)
-try: (wgpuTextureGetUsage:=dll.wgpuTextureGetUsage).restype,wgpuTextureGetUsage.argtypes = WGPUTextureUsage,[WGPUTexture]
+try: (wgpuTextureGetUsage:=dll.wgpuTextureGetUsage).restype, wgpuTextureGetUsage.argtypes = WGPUTextureUsage, [WGPUTexture]
 except AttributeError: pass
 
 # uint32_t wgpuTextureGetWidth(WGPUTexture texture)
-try: (wgpuTextureGetWidth:=dll.wgpuTextureGetWidth).restype,wgpuTextureGetWidth.argtypes = uint32_t,[WGPUTexture]
+try: (wgpuTextureGetWidth:=dll.wgpuTextureGetWidth).restype, wgpuTextureGetWidth.argtypes = uint32_t, [WGPUTexture]
 except AttributeError: pass
 
 # void wgpuTextureSetLabel(WGPUTexture texture, WGPUStringView label)
-try: (wgpuTextureSetLabel:=dll.wgpuTextureSetLabel).restype,wgpuTextureSetLabel.argtypes = None,[WGPUTexture, WGPUStringView]
+try: (wgpuTextureSetLabel:=dll.wgpuTextureSetLabel).restype, wgpuTextureSetLabel.argtypes = None, [WGPUTexture, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuTextureAddRef(WGPUTexture texture)
-try: (wgpuTextureAddRef:=dll.wgpuTextureAddRef).restype,wgpuTextureAddRef.argtypes = None,[WGPUTexture]
+try: (wgpuTextureAddRef:=dll.wgpuTextureAddRef).restype, wgpuTextureAddRef.argtypes = None, [WGPUTexture]
 except AttributeError: pass
 
 # void wgpuTextureRelease(WGPUTexture texture)
-try: (wgpuTextureRelease:=dll.wgpuTextureRelease).restype,wgpuTextureRelease.argtypes = None,[WGPUTexture]
+try: (wgpuTextureRelease:=dll.wgpuTextureRelease).restype, wgpuTextureRelease.argtypes = None, [WGPUTexture]
 except AttributeError: pass
 
 # void wgpuTextureViewSetLabel(WGPUTextureView textureView, WGPUStringView label)
-try: (wgpuTextureViewSetLabel:=dll.wgpuTextureViewSetLabel).restype,wgpuTextureViewSetLabel.argtypes = None,[WGPUTextureView, WGPUStringView]
+try: (wgpuTextureViewSetLabel:=dll.wgpuTextureViewSetLabel).restype, wgpuTextureViewSetLabel.argtypes = None, [WGPUTextureView, WGPUStringView]
 except AttributeError: pass
 
 # void wgpuTextureViewAddRef(WGPUTextureView textureView)
-try: (wgpuTextureViewAddRef:=dll.wgpuTextureViewAddRef).restype,wgpuTextureViewAddRef.argtypes = None,[WGPUTextureView]
+try: (wgpuTextureViewAddRef:=dll.wgpuTextureViewAddRef).restype, wgpuTextureViewAddRef.argtypes = None, [WGPUTextureView]
 except AttributeError: pass
 
 # void wgpuTextureViewRelease(WGPUTextureView textureView)
-try: (wgpuTextureViewRelease:=dll.wgpuTextureViewRelease).restype,wgpuTextureViewRelease.argtypes = None,[WGPUTextureView]
+try: (wgpuTextureViewRelease:=dll.wgpuTextureViewRelease).restype, wgpuTextureViewRelease.argtypes = None, [WGPUTextureView]
 except AttributeError: pass
 
-WGPU_ARRAY_LAYER_COUNT_UNDEFINED = UINT32_MAX
-WGPU_COPY_STRIDE_UNDEFINED = UINT32_MAX
-WGPU_DEPTH_SLICE_UNDEFINED = UINT32_MAX
-WGPU_LIMIT_U32_UNDEFINED = UINT32_MAX
-WGPU_LIMIT_U64_UNDEFINED = UINT64_MAX
-WGPU_MIP_LEVEL_COUNT_UNDEFINED = UINT32_MAX
-WGPU_QUERY_SET_INDEX_UNDEFINED = UINT32_MAX
-WGPU_STRLEN = SIZE_MAX
-WGPU_WHOLE_MAP_SIZE = SIZE_MAX
-WGPU_WHOLE_SIZE = UINT64_MAX
