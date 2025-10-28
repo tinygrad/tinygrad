@@ -3,7 +3,7 @@ from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
 from tinygrad.helpers import DEBUG, OSX, unwrap
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 import tinygrad.runtime.autogen.mesa as mesa
 import base64, ctypes, ctypes.util, struct, functools, inspect
 
@@ -182,7 +182,7 @@ class NIRRenderer(Renderer):
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.dtype.nbytes()
       elif u.op == Ops.RANGE:
-        ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{u.arg[0]}".encode()).contents))
+        ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
         nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype), u.dtype)
         mesa.nir_push_loop(self.b)
         self.r[u] = nload(self.b, AddrSpace.REG, i, u.dtype)
@@ -190,7 +190,8 @@ class NIRRenderer(Renderer):
       elif u.op == Ops.END:
         r = u.src[1]
         next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
-        nstore(self.b, AddrSpace.REG, ranges.pop(), next_i, r.dtype)
+        nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]),
+            lambda: nstore(self.b, AddrSpace.REG, ranges.pop(), next_i, u.dtype), lambda: njump(self.b, mesa.nir_jump_break))
         mesa.nir_pop_loop(self.b, None)
       else:
         if (d:=self.def_rewrite.rewrite(u, ctx=self)) is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")
