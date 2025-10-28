@@ -77,7 +77,9 @@ tensor_spec = PatternMatcher([
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
 
+  # device or unique
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE))), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
