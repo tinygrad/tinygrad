@@ -61,19 +61,18 @@ def validate_index(idx:UOp, gate:UOp|None=None):
   if IGNORE_OOB or isinstance(idx.dtype, ImageDType) or (sz := idx.src[0].ptrdtype.size) == -1: return True
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
-  mask = idx.src[2]&gate if len(idx.src)==3 else gate
 
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op is Ops.BITCAST for x in idx.toposort()): return True
 
   if not z3_imported: raise ImportError("z3 >= 4.12.4 is required for bounds checking, try IGNORE_OOB=0 or \"pip install 'z3-solver>=4.12.4\"")
   solver = z3.Solver(ctx=z3.Context())
-  z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], mask)
+  z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], gate)
   solver.add(z3_mask)
   with cpu_profile("validate index with z3", "TINY"):
     if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
       print(f"idx={idx.src[1].render(simplify=False)}")
-      print(f"mask & gate={mask.render(simplify=False)}")
+      print(f"gate={gate.render(simplify=False)}")
       print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
       return False
   return True
