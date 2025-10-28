@@ -107,14 +107,20 @@ base_rewrite = PatternMatcher([
 
   # range
   (UPat(Ops.RANGE, name="r"), lambda ctx,r:
-   f"  br label %loop_entry_{range_str(r)}\nloop_entry_{range_str(r)}:\n"
-   f"  br label %loop_body_{range_str(r)}\nloop_body_{range_str(r)}:\n"
-   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_latch_{range_str(r)} ]"),
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r")), name="x"), lambda ctx,x,r:
-   f"  br label %loop_latch_{range_str(r)}\nloop_latch_{range_str(r)}:\n"
+   f"  br label %loop_entry_{range_str(r)}\n"
+   f"loop_entry_{range_str(r)}:\n"
+   f"  br label %loop_latch_{range_str(r)}\n"
+   f"loop_latch_{range_str(r)}:\n"
+   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
    f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
-   f"  {ctx[x]} = icmp ult {ldt(r.dtype)} {ctx[r]}phi, {ctx[r.src[0]]}\n"
-   f"  br i1 {ctx[x]}, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\nloop_exit_{range_str(r)}:"),
+   f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype)} {ctx[r]}, {ctx[r.src[0]]}\n"
+   f"  br i1 {ctx[r]}cmp, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\n"
+   f"loop_body_{range_str(r)}:"),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
+   f"  br label %loop_footer_{range_str(r)}\n"
+   f"loop_footer_{range_str(r)}:\n"
+   f"  br label %loop_latch_{range_str(r)}\n"
+   f"loop_exit_{range_str(r)}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
