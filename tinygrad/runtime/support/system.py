@@ -2,7 +2,7 @@ import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys,
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
 from tinygrad.runtime.autogen import libc, vfio, pci
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
+from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 
@@ -243,9 +243,7 @@ class LNXPCIIfaceBase:
 
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
     if len((cls:=type(self)).gpus) == 0:
-      cls.gpus = System.pci_scan_bus(vendor, devices)
-      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', '')).split(',') if x.strip()]
-      cls.gpus = [cls.gpus[x] for x in visible_devices] if visible_devices else cls.gpus
+      cls.gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices))
 
       # Acquire va range to avoid collisions.
       FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, 0)

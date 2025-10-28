@@ -53,10 +53,8 @@ class GraphRewriteDetails(TypedDict):
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
 def pystr(u:UOp, i:int) -> str:
-  if isinstance(trace.keys[i].ret, ProgramSpec):
-    try: return "\n".join(pyrender(u))
-    except Exception: pass
-  return str(u)
+  try: return pyrender(u)
+  except Exception: return str(u)
 
 def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
   assert isinstance(x, UOp)

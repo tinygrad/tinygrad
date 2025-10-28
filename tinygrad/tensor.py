@@ -229,7 +229,7 @@ class Tensor(MathTrait):
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # verify Tensors match the spec
-    if SPEC: type_verify(list(big_sink.toposort()), tensor_spec)
+    if SPEC: type_verify(big_sink, tensor_spec)
 
     if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
       _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")

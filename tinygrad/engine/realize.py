@@ -26,7 +26,7 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: print('\n'.join(pyrender(ast)))
+  if DEBUG >= 5: print(pyrender(ast))
 
   # linearize
   if renderer is None: renderer = Device.default.renderer
@@ -38,7 +38,7 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   except RuntimeError as e:
     print("***** LINEARIZE FAILURE *****")
     print(e)
-    print('\n'.join(pyrender(ast)))
+    print(pyrender(ast))
     raise
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
