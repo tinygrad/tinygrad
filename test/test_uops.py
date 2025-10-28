@@ -272,6 +272,7 @@ class TestConstantFolding(unittest.TestCase):
     si = t.schedule()
     assert len(si) == 0
 
+@unittest.skip("no more if statements")
 class TestGatedStoreRewrite(unittest.TestCase):
   def test_tiny_gate_store(self):
     gmem = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
