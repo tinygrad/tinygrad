@@ -130,14 +130,14 @@ shared_codegen_spec = PatternMatcher([
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 
   # Index
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx"))), validate_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="buf").or_after(), UPat.var("idx"))), validate_index),
 ])
 
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
   # INDEX with a gate as third src
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="buf").or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),

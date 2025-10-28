@@ -1,6 +1,6 @@
 from typing import Callable
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu, graph_rewrite
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.dtype import ImageDType, dtypes, Invalid
 from tinygrad.helpers import IGNORE_OOB, Context, cpu_profile
 
 try:
@@ -25,15 +25,19 @@ try:
   # ctx is (solver, load_number_dict)
   # each uop gets rewritten to NOOP(arg=(solver, z3_object)), the arg has the solver first due to UOpMetaClass caching. z3 objects from different
   # contexts can have the same hash but error on comparison
+  def add_valid(ctx, cond, x):
+    ctx[0].add(cond.arg[1])
+    return x
   z3_renderer = PatternMatcher([
+    (UPat(Ops.NOOP, name="cond").where(UPat(Ops.NOOP, name="x"), UPat(Ops.CONST, arg=Invalid)), add_valid),
     (UPat(Ops.SPECIAL, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(x.arg, 0, x.src[0].arg[1]-1, ctx[0])))),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(x.arg[0], x.arg[1], x.arg[2], ctx[0])))),
     (UPat(Ops.RANGE, name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],create_bounded(f"ridx{x.arg}", 0, x.src[0].arg[1]-1, ctx[0])))),
     # loaded bools become a z3 int with min max of 0-1
     (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), name="x"), lambda x,ctx:
       UOp(Ops.NOOP, arg=(ctx[0],create_bounded(f"load{ctx[1].setdefault(x, len(ctx[1]))}", x.dtype.min, x.dtype.max, ctx[0]))).cast(x.dtype)),
-    (UPat(Ops.CONST, dtype=dtypes.ints+(dtypes.bool,dtypes.index), name="x"),
-      lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0],(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx)))),
+    (UPat(Ops.CONST, dtype=dtypes.ints+(dtypes.bool,dtypes.index), name="x"), lambda x,ctx:
+      UOp(Ops.NOOP, arg=(ctx[0],(z3.BoolVal if dtypes.is_bool(x.dtype) else z3.IntVal)(x.arg, ctx=ctx[0].ctx))) if x.arg is not Invalid else None),
     # z3 can cast from bool to int automatically
     (UPat(Ops.CAST, dtype=dtypes.ints+(dtypes.index,), src=UPat(Ops.NOOP), name="x"), lambda x: x.src[0]),
     (UPat(Ops.CAST, dtype=dtypes.bool, src=UPat(Ops.NOOP), name="x"), lambda x,ctx: UOp(Ops.NOOP, arg=(ctx[0], x.src[0].arg[1]!=0))),
@@ -55,25 +59,26 @@ try:
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
 
-def validate_index(idx:UOp, gate:UOp|None=None):
-  if gate is None: idx, gate = idx.get_idx(), idx.get_valid()
+def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
+  if idx.op is Ops.CONST and idx.arg is Invalid: return True
+  if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
-  if IGNORE_OOB or isinstance(idx.dtype, ImageDType) or (sz := idx.src[0].ptrdtype.size) == -1: return True
+  if IGNORE_OOB or isinstance(buf.dtype, ImageDType) or (sz := buf.ptrdtype.size) == -1: return True
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
-  if 0<=idx.src[1].vmin and idx.src[1].vmax<sz: return True
-  mask = idx.src[2]&gate if len(idx.src)==3 else gate
+  if 0<=idx.vmin and idx.vmax<sz: return True
 
   # WEBGPU has a BITCAST in the index. TODO: fix
   if any(x.op is Ops.BITCAST for x in idx.toposort()): return True
 
   if not z3_imported: raise ImportError("z3 >= 4.12.4 is required for bounds checking, try IGNORE_OOB=0 or \"pip install 'z3-solver>=4.12.4\"")
   solver = z3.Solver(ctx=z3.Context())
-  z3_idx, z3_mask = uops_to_z3(solver, idx.src[1], mask)
+  z3_idx, z3_mask = uops_to_z3(solver, idx, gate)
   solver.add(z3_mask)
   with cpu_profile("validate index with z3", "TINY"):
-    if solver.check((z3_idx<0)|(sz<=z3_idx)) == z3.sat:
-      print(f"idx={idx.src[1].render(simplify=False)}")
-      print(f"mask & gate={mask.render(simplify=False)}")
-      print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
-      return False
-  return True
+    match solver.check((z3_idx<0)|(sz<=z3_idx)):
+      case z3.unsat: return True
+      case z3.sat: print(f"# OUT OF BOUNDS ACCESS: at {solver.model()} INDEX not in 0 - {sz}\nconstraints = {solver}")
+      case z3.unknown: print(f"# UNKNOWN RESULT FROM Z3: {solver.reason_unknown()}\nconstraints = {solver}")
+  print(f"idx={idx.render(simplify=False)}")
+  print(f"mask={gate.render(simplify=False)}")
+  return False
