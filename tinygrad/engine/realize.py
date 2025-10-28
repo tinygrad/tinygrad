@@ -177,12 +177,10 @@ class ExecItem:
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
 
-        def _units_to_str(x:float, units:dict, digits:int=3, colors:list[str]=['GREEN', 'green', 'yellow', 'yellow', 'RED']) -> str:
-          def align(x, sym, color, x_width=digits, sym_width=max(len(sym) for sym in units.keys())):
-            return colored(f"{x:{x_width}}{sym:{sym_width}}", color)
-          for i, (sym, val) in enumerate(units.items()):
-            if x//val > 0: return align(int(x//val), sym, colors[i])
-          return align(0, list(units.keys())[-1], colors[-1])
+        def _units_to_str(x:float, units:dict, colors:list[str]=['GREEN', 'green', 'yellow', 'yellow', 'RED']) -> str:
+          def align(x, sym, color, sym_width=max(map(len, units.keys()))): return colored(f"{x:3}{sym:{sym_width}}", color)
+          return next((align(int(x//val), sym, colors[i]) for i, (sym, val) in enumerate(units.items()) if x//val>0),
+                      align(0, list(units.keys())[-1], colors[-1]))
 
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
