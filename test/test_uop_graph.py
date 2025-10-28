@@ -474,8 +474,7 @@ class TestUOpGraph(unittest.TestCase):
     c8 = c7.index(c6).load()
     c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
     c10 = c0.index(((c1*UOp.const(dtypes.index, 250))+c2)).store(c9).end(c1, c2)
-    ast = c10.sink()
-    uops = to_uops_list([ast])
+    uops = to_uops_list([c10])
     for u in uops:
       self.assertNotEqual(u.dtype, dtypes.long)
 
