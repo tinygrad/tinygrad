@@ -560,5 +560,12 @@ class TestUOpRender(unittest.TestCase):
     u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(), "(0, 1, 2)")
 
+class TestZeroRange(unittest.TestCase):
+  def test_reduce_variable(self):
+    for i in range(3,-1,-1):
+      v = UOp.variable("i", 0, 5).bind(i)
+      out = Tensor.ones(10, dtype=dtypes.int).contiguous().shrink(((0,v),)).sum()
+      self.assertEqual(out.item(), i)
+
 if __name__ == '__main__':
   unittest.main(verbosity=2)
