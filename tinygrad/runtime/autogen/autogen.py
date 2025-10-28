@@ -3,10 +3,10 @@ from tinygrad.helpers import fetch, flatten, unwrap
 
 def fst(c): return next(c.get_children())
 def last(c): return list(c.get_children())[-1]
-def pread(f, count, offset):
+def readext(f, start, end):
   with open(f, "r") as f:
-    f.seek(offset)
-    return f.read(count)
+    f.seek(start)
+    return f.read(end-start)
 
 def until(pred, f, x):
   while not pred(x): x = f(x)
@@ -61,8 +61,10 @@ class Autogen:
               it = iter(toks[1:])
               args = [t.spelling for t in itertools.takewhile(lambda t:t.spelling!=')', it) if t.kind == ToK.IDENTIFIER]
               if len(body:=list(it)) == 0: continue
-              macros += [f"{c.spelling} = lambda {','.join(args)}: {pread(f, toks[-1].extent.end.offset - (begin:=body[0].location.offset), begin)}"]
-            else: macros += [f"{c.spelling} = {pread(f, toks[-1].extent.end.offset - (begin:=toks[1].location.offset), begin)}"]
+              macros += [f"{c.spelling} = lambda {','.join(args)}: {readext(f, body[0].location.offset, toks[-1].extent.end.offset)}"]
+            else: macros += [f"{c.spelling} = {readext(f, toks[1].location.offset, toks[-1].extent.end.offset)}"]
+          case CK.VAR_DECL if c.linkage == LK.INTERNAL:
+            macros += [f"{c.spelling} = {self.tname(c.type)}({readext(f, (defn:=last(c)).location.offset, defn.extent.end.offset)})"]
     main, macros = '\n'.join(self.lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), self.rules, m))]
     while True:
       try:

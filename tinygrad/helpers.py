@@ -475,6 +475,8 @@ def CEnum(typ: type):
     @classmethod
     def get(cls, val, default="unknown"): return cls._val_to_name_.get(val.value if isinstance(val, cls) else val, default)
     @classmethod
+    def items(cls): return cls._val_to_name_.items()
+    @classmethod
     def define(cls, name, val):
       cls._val_to_name_[val] = name
       return val
