@@ -39,6 +39,8 @@ shared_spec = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
+  (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"),
+    lambda s,x: s.dtype == x.dtype and x.dtype in (dtypes.index, dtypes.int32) and isinstance(s.arg, str)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
 ])
 
@@ -131,6 +133,9 @@ shared_codegen_spec = PatternMatcher([
 
   # Index
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="buf").or_after(), UPat.var("idx"))), validate_index),
+
+  # BARRIER
+  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
 ])
 
 # ***** UOp spec in linearized programs *****
@@ -162,9 +167,6 @@ program_spec = PatternMatcher([
   # VECTORIZE/GEP
   (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
-
-  # BARRIER
-  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
 ])+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in kernel graph *****
