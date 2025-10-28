@@ -95,21 +95,6 @@ const drawGraph = (data) => {
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
   }).attr("marker-end", "url(#arrowhead)");
-  addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e) => {
-    // get a point near the end
-    const [p1, p2] = g.edge(e).points.slice(-2);
-    const dx = p2.x-p1.x;
-    const dy = p2.y-p1.y;
-    // normalize to the unit vector
-    const len = Math.sqrt(dx*dx + dy*dy);
-    const ux = dx / len;
-    const uy = dy / len;
-    // avoid overlap with the arrowhead
-    const offset = 17;
-    const x = p2.x - ux * offset;
-    const y = p2.y - uy * offset;
-    return `translate(${x}, ${y})`
-  }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
 }
 
 // ** UOp graph
@@ -130,6 +115,21 @@ function renderDag(graph, additions, recenter) {
     displaySelection("#graph");
     updateProgress({ start:false });
     drawGraph(e.data);
+    addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
+      // get a point near the end
+      const [p1, p2] = e.value.points.slice(-2);
+      const dx = p2.x-p1.x;
+      const dy = p2.y-p1.y;
+      // normalize to the unit vector
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      // avoid overlap with the arrowhead
+      const offset = 17;
+      const x = p2.x - ux * offset;
+      const y = p2.y - uy * offset;
+      return `translate(${x}, ${y})`
+    }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 }

@@ -384,8 +384,8 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
   return buf
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
-  if r.tag is not None: return None
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=())
+  if r.tag != (): return None
+  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
 
@@ -443,13 +443,14 @@ pm_remove_tags = PatternMatcher([
   (UPat(GroupOp.All, name="x"), remove_metadata_tags),
 ])
 
+pm_add_range_tags = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(()))
+])
+
 @dataclass(frozen=True)
 class Kernel:
   ast: UOp
   metadata: tuple[Metadata, ...] = ()
-  def __repr__(self):
-    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
-    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   if len(x.ranges): return None
@@ -532,7 +533,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
