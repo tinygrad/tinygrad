@@ -223,6 +223,7 @@ def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads
     if "model.layers" in k:
       if "q_proj" in k and permute_layers: v = permute(v, n_heads)
       elif "k_proj" in k and permute_layers: v = permute(v, n_kv_heads)
+    # todo: remove
     if k not in keymap:
       if DEBUG >= 1: print(f"WARNING: {k} not in {keymap.keys()}")
       continue
@@ -233,8 +234,9 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
   def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
     """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
-    mxfp4_data = Tensor.cat(scales.unsqueeze(-1), blocks, dim=-1).flatten()  # interleave and flatten to 1D
-    return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, 39).reshape(*scales.shape[:2], -1)
+    MXFP4_ID = 39
+    mxfp4_data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()  # interleave and flatten to 1D
+    return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, MXFP4_ID).reshape(*scales.shape[:2], -1)
 
   # dequantize only the ffn_gate_up_proj and ffn_down_proj
   for l in range(num_blocks):
@@ -242,6 +244,7 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
       blocks = f'blk.{l}.ffn_{d}_proj_blocks'
       scales = f'blk.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
+      ic(proj, fix(proj))
       weights[f'layers.{l}.ffn_{d}_proj'] = proj
   return weights
 
