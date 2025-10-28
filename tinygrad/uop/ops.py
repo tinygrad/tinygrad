@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -42,6 +42,13 @@ def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_inf
 
 def range_str(u:UOp) -> str: return '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
 
+def consumer_map_from_toposort(lst:Iterable[UOp]):
+  ret: dict[UOp, dict[UOp, None]] = {}
+  for u in lst:
+    ret[u] = {}
+    for s in u.src: ret[s][u] = None
+  return ret
+
 # used for UOp and UPat
 def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
   def dfs(x:Any, cache:dict):
@@ -65,8 +72,8 @@ class UOpMetaClass(type):
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
     if SPEC > 1:
+      from tinygrad.uop.spec import full_spec, test_pyrender
       if SPEC > 2: test_pyrender(created)
-      from tinygrad.uop.spec import full_spec
       with Context(IGNORE_OOB=1): ret = full_spec.rewrite(created)
       if cast(bool|None, ret) is not True: raise RuntimeError(f"SPEC ISSUE {ret}: {created}")
     return created
@@ -145,12 +152,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return ret
 
   # returns map of UOps to their consumers in the graph rooted by self
-  def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]:
-    ret: dict[UOp, dict[UOp, None]] = {}
-    for u in self.toposort():
-      ret[u] = {}
-      for s in u.src: ret[s][u] = None
-    return ret
+  def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())
 
   def reverse_toposort(self, consumer_map) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
@@ -1297,15 +1299,14 @@ pm_pyrender = pm_pyrender_extra+PatternMatcher([
 ])
 
 def pyrender(ast:UOp) -> str:
-  cmap = ast.get_consumer_map()
-  uops = list(ast.toposort())
-  ret: dict[str, str] = {}
-  r: dict[UOp, str] = {}
+  lst = list(ast.toposort())
 
+  cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
   always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE, Ops.END}
+
   to_render: set[UOp] = {ast}
-  for u in uops:
+  for u in lst:
     if u.op in {Ops.SINK}:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
@@ -1316,7 +1317,9 @@ def pyrender(ast:UOp) -> str:
     to_render.add(u)
 
   kernels: dict[UOp, tuple[str, str]] = {}
-  for i,u in enumerate(uops):
+  r: dict[UOp, str] = {}
+  ret: dict[str, str] = {}
+  for i,u in enumerate(lst):
     if u.op is Ops.KERNEL:
       if u.arg.ast not in kernels:
         kernels[u.arg.ast] = (f"k{len(kernels)}", f"def k{len(kernels)}():\n  " + pyrender(u.arg.ast).replace('\n', '\n  ') + "\n  return ast\n\n")
@@ -1326,27 +1329,9 @@ def pyrender(ast:UOp) -> str:
     #if u.tag is not None: ren += f".rtag({u.tag})"
     if u not in to_render: r[u] = ren
     else:
-      r[u] = f"c{i}" if u is not uops[-1] else "ast"
+      r[u] = f"c{i}" if u is not lst[-1] else "ast"
       ret[r[u]] = ren
   return ''.join([v[1] for v in kernels.values()]) + '\n'.join([f"{k} = {v}" for k,v in ret.items()])
-
-def eval_pyrender(code:str) -> UOp:
-  from tinygrad.dtype import AddrSpace
-  from tinygrad.codegen.opt import Opt, OptOps
-  from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
-  lcls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel,
-                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
-  exec(code, None, lcls)
-  return lcls['ast']
-
-def test_pyrender(test_ast:UOp, check_parents=True):
-  code = pyrender(test_ast)
-  ast:UOp = eval_pyrender(code)
-  if ast is not test_ast:
-    if check_parents:
-      for u in test_ast.toposort(): test_pyrender(u, check_parents=False)
-    raise RuntimeError(f"PYRENDER ISSUE:\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}\nCODE:\n{code}")
-  return code
 
 # *** what was symbolic.py ***
 
