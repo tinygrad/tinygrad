@@ -122,11 +122,10 @@ program_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
 
   # LOAD (idx, alt_value) / STORE(if gated) / LOAD(idx) / STORE(idx, val)
-  (UPat(Ops.LOAD,  src=(UPat().index(UPat(), UPat(dtype=dtypes.bool, name="gate"), name="idx").or_casted(), UPat())), validate_index),
-  (UPat(Ops.STORE, src=(
-    UPat().after(UPat(Ops.RANGE, src=(UPat.var("gate"),), allow_any_len=True)).index(UPat(), name="idx").or_casted(), UPat())), validate_index),
-  (UPat(Ops.LOAD,  src=(UPat().index(UPat(), name="idx").or_casted(), )), validate_index),
-  (UPat(Ops.STORE, src=(UPat().index(UPat(), name="idx").or_casted(), UPat())), validate_index),
+  (UPat().index(UPat(), UPat(dtype=dtypes.bool, name="gate"), name="idx").or_casted().load(UPat()), validate_index),
+  (UPat().after(UPat(Ops.RANGE, src=(UPat.var("gate"),), allow_any_len=True)).index(UPat(), name="idx").or_casted().store(UPat()), validate_index),
+  (UPat().index(UPat(), name="idx").or_casted().load(), validate_index),
+  (UPat().index(UPat(), name="idx").or_casted().store(UPat()), validate_index),
 
   # RANGE/SPECIAL define loops, END closes them
   (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
@@ -162,8 +161,8 @@ kernel_spec = PatternMatcher([
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
 
   # LOAD(idx) / STORE(idx, val) -- NOTE: we do this here to not run validate_index since z3 doesn't support Invalid
-  (UPat(Ops.LOAD,  src=(UPat(Ops.INDEX).or_casted(), )), lambda: True),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
+  (UPat(Ops.INDEX).or_casted().load(), lambda: True),
+  (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
   # UNROLL/CONTRACT is used here for WMMA
   (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
