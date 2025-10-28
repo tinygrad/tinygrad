@@ -557,4 +557,6 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   (UPat((Ops.SINK, Ops.GROUP), name="root"),
     lambda root: UOp(root.op, root.dtype, tuple(flatten(x.src if x.op in REMOVE_FROM_SINK_LIKE else (x,) for x in root.src)), root.arg)
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
+  # remove END with empty NOOP
+  (UPat(Ops.END, src=(UPat(Ops.NOOP, src=(), name="noop"),), allow_any_len=True), lambda noop:noop),
 ])
