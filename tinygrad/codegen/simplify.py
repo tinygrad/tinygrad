@@ -20,7 +20,7 @@ def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDI
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
-  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.combinations(u.ended_ranges, 2)):
+  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
     # check same type
     if r0.arg[-1] == r1.arg[-1]:
       # check if the ranges to merge are in the same reduces
