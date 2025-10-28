@@ -235,8 +235,8 @@ full_spec = PatternMatcher([
 # ***** uop helpers *****
 
 def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
-  if SPEC > 1 and isinstance(ast, UOp): test_pyrender(ast)
   lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
+  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
 
   for i,u in enumerate(lst):
     with Context(TRACK_MATCH_STATS=0): ret = check_spec.rewrite(u)
@@ -253,11 +253,11 @@ def eval_pyrender(code:str) -> UOp:
   exec(code, None, lcls)
   return lcls['ast']
 
-def test_pyrender(test_ast:UOp, check_parents=True):
+def test_pyrender(test_ast:UOp, assert_parents=True):
   code = pyrender(test_ast)
   ast:UOp = eval_pyrender(code)
   if ast is not test_ast:
-    if check_parents:
-      for u in test_ast.toposort(): test_pyrender(u, check_parents=False)
+    if assert_parents:
+      for u in test_ast.toposort(): test_pyrender(u, assert_parents=False)
     raise RuntimeError(f"PYRENDER ISSUE:\nSTR MATCH: {str(test_ast) == str(ast)}\nUOP:\n{test_ast}\nPRODUCED:\n{ast}\nCODE:\n{code}")
   return code
