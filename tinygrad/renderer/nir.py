@@ -186,10 +186,11 @@ class NIRRenderer(Renderer):
         nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype), u.dtype)
         mesa.nir_push_loop(self.b)
         self.r[u] = nload(self.b, AddrSpace.REG, i, u.dtype)
+        nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
       elif u.op == Ops.END:
         r = u.src[1]
-        nif(self.b, nalu(self.b, "ilt", x:=nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype)), self.r[r.src[0]]),
-            functools.partial(nstore, self.b, AddrSpace.REG, ranges.pop(), x, r.dtype), lambda: njump(self.b, mesa.nir_jump_break))
+        next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
+        nstore(self.b, AddrSpace.REG, ranges.pop(), next_i, r.dtype)
         mesa.nir_pop_loop(self.b, None)
       else:
         if (d:=self.def_rewrite.rewrite(u, ctx=self)) is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")
