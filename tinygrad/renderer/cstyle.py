@@ -1,8 +1,8 @@
 from typing import Literal, Callable, cast
 import os, math, sys
 from collections import defaultdict, Counter
-from tinygrad.codegen.opt import tc, axis_letters
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
+from tinygrad.codegen.opt import tc
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
 from tinygrad.renderer import Renderer
