@@ -59,9 +59,8 @@ try:
   z3_imported = True
 except (ImportError, AttributeError): z3_imported = False
 
-def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
+def validate_index(buf:UOp, idx:UOp, gate:UOp=UOp.const(dtypes.bool, True)):
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
-  if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
   if IGNORE_OOB or isinstance(buf.dtype, ImageDType) or (sz := buf.ptrdtype.size) == -1: return True
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
