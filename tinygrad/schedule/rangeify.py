@@ -384,8 +384,8 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
   return buf
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
-  if r.tag is not None: return None
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=())
+  if r.tag != (): return None
+  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
 
@@ -441,6 +441,10 @@ def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
 pm_remove_tags = PatternMatcher([
   # remove all the tags
   (UPat(GroupOp.All, name="x"), remove_metadata_tags),
+])
+
+pm_add_range_tags = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(()))
 ])
 
 @dataclass(frozen=True)
@@ -532,7 +536,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
