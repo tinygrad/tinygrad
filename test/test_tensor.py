@@ -945,5 +945,12 @@ class TestTensorUnique(unittest.TestCase):
     Tensor.realize(a,b)
     self.assertIsNot(a.uop.buffer, b.uop.buffer)
 
+  def test_times_2_not_unique(self):
+    a = Tensor.zeros(10, 10).contiguous()
+    b = a * 2
+    c = a * 2
+    Tensor.realize(b,c)
+    self.assertIs(b.uop.buffer, c.uop.buffer)
+
 if __name__ == '__main__':
   unittest.main()
