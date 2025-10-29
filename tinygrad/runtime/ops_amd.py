@@ -34,7 +34,7 @@ class ProfileSQTTEvent(ProfileEvent): device:str; se:int; props:dict; blob:bytes
 class PMCSample: name:str; block:str; inst:int; se:int; sa:int; wgp:int; off:int; size:int; cntid:int # noqa: E702
 
 @dataclass(frozen=True)
-class ProfilePMCEvent(ProfileEvent): device:str; # noqa: E702
+class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes; # noqa: E702
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
@@ -77,6 +77,7 @@ class AMDComputeQueue(HWQueue):
   def set_grbm_se(self, se): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
   def set_grbm_inst(self, n):
     self.wreg(self.gc.regGRBM_GFX_INDEX, **{f'{f}_broadcast_writes': 1 for f in ['se', 'sh' if self.dev.target[0] == 9 else 'sa']}, instance_index=n)
+  def set_grbm_se_sh_wgp(self, se, sa, wgp): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, sa_index=sa, instance_index=wgp << 2)
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg=None, reg_done=0, op=WAIT_REG_MEM_FUNCTION_GEQ):
     wrm_info_dw = self.pm4.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | self.pm4.WAIT_REG_MEM_OPERATION(int(mem is None and reg_done > 0)) \
@@ -146,7 +147,7 @@ class AMDComputeQueue(HWQueue):
 
     block2pid, out_off = collections.defaultdict(lambda: itertools.count()), 0
     for name,block,idx in counters:
-      inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, 1) # TODO: correct wgp_cnt
+      inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, 4) # TODO: correct wgp_cnt
       perf_id, out_off = next(block2pid[block]), out_off + (rec_size:=prod((inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
 
       for inst in range(inst_cnt):
@@ -165,18 +166,19 @@ class AMDComputeQueue(HWQueue):
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1, perfmon_sample_enable=1) # read counters
 
-    offset = itertools.count(step=4)
+    offset = itertools.count(step=8)
     for s in sched:
       for inst in range(s.inst):
         for se_idx in range(s.se):
           for sa_idx in range(s.sa):
             for wgp_idx in range(s.wgp):
-              self.set_grbm_inst(inst)
+              if inst > 1: self.set_grbm_inst(inst)
+              else: self.set_grbm_se_sh_wgp(se_idx, sa_idx, wgp_idx)
 
               # Copy counter to memory (src_sel = perf, dst_sel = tc_l2)
-              lo, hi = getattr(self.gc, f'reg{s.block}_PERFCOUNTER{s.cntid}_LO'), getattr(self.gc, f'reg{s.block}_PERFCOUNTER{s.cntid}_HI')
-              self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, lo.addr[0], 0, *data64_le(buf.va_addr+next(offset)))
-              self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, hi.addr[0], 0, *data64_le(buf.va_addr+next(offset)))
+              lo, hi = getattr(self.gc, f'reg{s.block}_PERFCOUNTER{s.cntid}_LO'), None #getattr(self.gc, f'reg{s.block}_PERFCOUNTER{s.cntid}_HI') if s.size == 8 else None
+              self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
+              if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
 
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
@@ -586,7 +588,8 @@ class AMDProgram(HCQProgram):
     res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
     cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
                                                         .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
-    self.dev.synchronize()
+    self.dev.allocator._copyout(pmc_buf:=memoryview(bytearray(self.dev.pmc_buffer.size)), self.dev.pmc_buffer)
+    Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.name, self.dev.pmc_sched, bytes(pmc_buf))]
     return res
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
@@ -902,7 +905,7 @@ class AMDDevice(HCQCompiled):
     if self.pmc_enabled:
       if self.target[0] not in {11}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
 
-      PMC_COUNTERS = getenv("PMC_COUNTERS", "GL2C_HIT,GL2C_MISS").split(",")
+      PMC_COUNTERS = getenv("PMC_COUNTERS", "SQ_WAVES,GL2C_HIT,GL2C_MISS").split(",")
       self.pmc_counters, self.pmc_sched = import_pmc(self.target), []
 
       cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([self.pmc_counters[k] for k in PMC_COUNTERS], self.pmc_sched).submit(self)
