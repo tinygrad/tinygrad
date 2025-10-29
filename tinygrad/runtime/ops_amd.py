@@ -137,8 +137,14 @@ class AMDComputeQueue(HWQueue):
 
   ### PMC ###
 
-  def pmc_start(self, counters, out_sched):
-    out_sched.clear()
+  def pmc_reset_counters(self):
+    self.set_grbm_broadcast()
+    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
+    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1)
+    return self
+
+  def pmc_start(self, counters):
+    self.dev.pmc_sched:list[PMCSample] = []
 
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0) # reset counters
@@ -147,20 +153,13 @@ class AMDComputeQueue(HWQueue):
 
     block2pid, out_off = collections.defaultdict(lambda: itertools.count()), 0
     for name,block,idx in counters:
-      inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, 4) # TODO: correct wgp_cnt
+      inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, self.dev.iface.props['cu_per_simd_array'] // 2)
       reg, out_off = f'reg{block}_PERFCOUNTER{next(block2pid[block])}', out_off + (rec_size:=prod((inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
+      self.wreg(getattr(self.gc, f'{reg}_SELECT'), idx)
+      self.dev.pmc_sched.append(PMCSample(name, block, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, reg))
 
-      for inst in range(inst_cnt):
-        if inst_cnt > 1: self.set_grbm_inst(inst)
-        else: self.set_grbm_broadcast()
-        self.wreg(getattr(self.gc, f'{reg}_SELECT'), idx)
-      out_sched.append(PMCSample(name, block, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, reg))
-
-    self.set_grbm_broadcast()
     self.wreg(self.gc.regCOMPUTE_PERFCOUNT_ENABLE, 1)
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1) # start counters
-    return self
+    return self.pmc_reset_counters()
 
   def pmc_read(self, buf, sched):
     self.set_grbm_broadcast()
@@ -169,7 +168,7 @@ class AMDComputeQueue(HWQueue):
     offset = itertools.count(step=8)
     for s in sched:
       for inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
-        if inst > 1: self.set_grbm_inst(inst)
+        if s.inst > 1: self.set_grbm_inst(inst)
         else: self.set_grbm_se_sh_wgp(se_idx, sa_idx, wgp_idx)
 
         # Copy counter to memory (src_sel = perf, dst_sel = tc_l2)
@@ -177,10 +176,7 @@ class AMDComputeQueue(HWQueue):
         self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
         if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
 
-    self.set_grbm_broadcast()
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1) # start counters
-    return self
+    return self.pmc_reset_counters()
 
   ### SQTT ###
 
@@ -645,7 +641,8 @@ class KFDIface:
 
     self.gpu_id = int(FileIOInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/gpu_id").read())
     self.props = {(p:=l.split())[0]: int(p[1]) for l in FileIOInterface(f"{kfd_topo_path}/{KFDIface.gpus[device_id]}/properties").read().splitlines()}
-    ip_base = f"/sys/class/drm/renderD{self.props['drm_render_minor']}/device/ip_discovery/die/0"
+    self.dev_sysfs_path = f"/sys/class/drm/renderD{self.props['drm_render_minor']}/device"
+    ip_base = f"{self.dev_sysfs_path}/ip_discovery/die/0"
     id2ip = {am.GC_HWID: am.GC_HWIP, am.SDMA0_HWID: am.SDMA0_HWIP, am.NBIF_HWID: am.NBIF_HWIP}
     ip_hw = [(id2ip[int(hwid)], int(hwid)) for hwid in FileIOInterface(ip_base).listdir() if hwid.isnumeric() and int(hwid) in id2ip]
     self.ip_versions = {ip:tuple(int(FileIOInterface(f'{ip_base}/{hw}/0/{part}').read()) for part in ['major','minor','revision']) for ip,hw in ip_hw}
@@ -753,6 +750,8 @@ class KFDIface:
 
     raise RuntimeError("\n".join(report))
 
+  def is_in_profile_mode(self): return FileIOInterface(f'{self.dev_sysfs_path}/power_dpm_force_performance_level').read() == 'profile_standard\n'
+
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
@@ -762,14 +761,16 @@ class PCIIface(PCIIfaceBase):
     self._setup_adev(self.pci_dev)
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
+  def is_in_profile_mode(self): return False
+
   def _setup_adev(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.dev_impl:AMDev = AMDev(pci_dev, dma_regions)
     self.ip_versions = self.dev_impl.ip_ver
 
     gfxver = int(f"{self.dev_impl.ip_ver[am.GC_HWIP][0]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][1]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][2]:02d}")
     array_count = self.dev_impl.gc_info.gc_num_sa_per_se * self.dev_impl.gc_info.gc_num_se
-    simd_count = 2 * array_count * (self.dev_impl.gc_info.gc_num_wgp0_per_sa + self.dev_impl.gc_info.gc_num_wgp1_per_sa)
-    self.props = {'simd_count': 2 * simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
+    self.props = {'cu_per_simd_array': (cu_per_sa:=2 * (self.dev_impl.gc_info.gc_num_wgp0_per_sa + self.dev_impl.gc_info.gc_num_wgp1_per_sa)),
+      'simd_count': 2 * cu_per_sa * array_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
       'max_slots_scratch_cu': self.dev_impl.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.dev_impl.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.dev_impl.gc_info.gc_num_sa_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size}
 
@@ -893,14 +894,15 @@ class AMDDevice(HCQCompiled):
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
-    self.pmc_enabled = PMC > 0
+    self.pmc_enabled = PROFILE and PMC > 0
     if self.pmc_enabled:
       if self.target[0] not in {11}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
+      if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: AMD_IFACE=KFD and `amd-smi set -l stable_std`")
 
-      PMC_COUNTERS = getenv("PMC_COUNTERS", "SQ_WAVES,GL2C_HIT,GL2C_MISS").split(",")
-      self.pmc_counters, self.pmc_sched = import_pmc(self.target), []
+      PMC_COUNTERS = getenv("PMC_COUNTERS", "GL2C_MISS,SQ_INSTS_WAVE32").split(",")
+      self.pmc_counters = import_pmc(self.target)
 
-      cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([self.pmc_counters[k] for k in PMC_COUNTERS], self.pmc_sched).submit(self)
+      cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([self.pmc_counters[k] for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
