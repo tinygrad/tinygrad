@@ -341,7 +341,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, *srcs:UOp|None, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
-  def __getitem__(self, *idx): return self.index(*idx)
+  def __getitem__(self, idx): return self.index(*idx)
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
@@ -742,6 +742,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     with Context(TRACK_MATCH_STATS=0, SPEC=0):
       ret = graph_rewrite(self.simplify() if simplify else self, renderer if pm is None else pm)
     return ret.arg if ret.op is Ops.NOOP else str(ret)
+
+  def pyrender(self): return pyrender(self)
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -1260,7 +1262,7 @@ def render_marg(ctx,x:UOp):
   return f"({','.join(pieces)})" if len(pieces) != 1 else f"({pieces[0]},)"
 
 sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.UNIQUE, Ops.SQRT, Ops.INDEX, Ops.REDUCE, Ops.AFTER, Ops.THREEFRY,
-         Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.ASSIGN, Ops.DETACH}
+         Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.ASSIGN, Ops.DETACH, Ops.BUFFERIZE}
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"), UPat(Ops.UNIQUE, name="u")), name="x"),
    lambda x,d,u: f"UOp.const({x.dtype}, {x.arg}, device={repr(d.arg)}, unique={u.arg})"),
@@ -1282,7 +1284,8 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(), UPat()), name="x"), lambda ctx,x:
    f"{ctx[x.src[0]]}.index({ctx[x.src[1]]}, dtype={x.dtype})" if x.src[0].dtype != x.dtype else None),
   # TODO: fix forced_reshape
-  (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})" if x.src[0].shape == x.shape else None),
+  (UPat(Ops.RESHAPE, name="x"), lambda ctx,x:
+   f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})" if x.src[0]._shape is not None and x.src[0].shape == x.shape else None),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
   (UPat(set(syms.keys())-{Ops.SUB, Ops.CMPNE}, src=(UPat(Ops.CONST, name="y"), UPat(name="z")), name="x"),
@@ -1307,7 +1310,7 @@ def pyrender(ast:UOp) -> str:
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
   always_rendered = {Ops.DEFINE_GLOBAL, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.VECTORIZE,
-                     Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE, Ops.END, Ops.ASSIGN}
+                     Ops.BUFFER, Ops.COPY, Ops.KERNEL, Ops.WHERE, Ops.END, Ops.ASSIGN, Ops.BUFFERIZE}
 
   to_render: set[UOp] = {ast}
   for u in lst:
