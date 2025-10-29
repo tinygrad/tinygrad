@@ -59,4 +59,7 @@ def __getattr__(nm):
     case "comgr": return load("comgr", "ctypes.CDLL(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so')",
                               ["/opt/rocm/include/amd_comgr/amd_comgr.h"], ["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"],
                               prelude=["import os"])
+    case "hsa": return load("hsa", "ctypes.CDLL(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so')",
+                            [f"/opt/rocm/include/hsa/{s}.h" for s in ["hsa","hsa_ext_amd","amd_hsa_signal","amd_hsa_queue","amd_hsa_kernel_code",
+                              "hsa_ext_finalize","hsa_ext_image","hsa_ven_amd_aqlprofile"]], ["-I/opt/rocm/include"], prelude=["import os"])
     case _: raise AttributeError(f"no such autogen: {nm}")

@@ -56,24 +56,6 @@ generate_amd() {
   python3 -c "import tinygrad.runtime.autogen.amd_gpu"
 }
 
-generate_hsa() {
-  clang2py \
-    /opt/rocm/include/hsa/hsa.h \
-    /opt/rocm/include/hsa/hsa_ext_amd.h \
-    /opt/rocm/include/hsa/amd_hsa_signal.h \
-    /opt/rocm/include/hsa/amd_hsa_queue.h \
-    /opt/rocm/include/hsa/amd_hsa_kernel_code.h \
-    /opt/rocm/include/hsa/hsa_ext_finalize.h /opt/rocm/include/hsa/hsa_ext_image.h \
-    /opt/rocm/include/hsa/hsa_ven_amd_aqlprofile.h \
-    --clang-args="-I/opt/rocm/include" \
-    -o $BASE/hsa.py -l /opt/rocm/lib/libhsa-runtime64.so
-
-  fixup $BASE/hsa.py
-  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/hsa.py
-  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libhsa-runtime64.so')\ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libhsa-runtime64.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('hsa-runtime64'))\g" $BASE/hsa.py
-  python3 -c "import tinygrad.runtime.autogen.hsa"
-}
-
 generate_kgsl() {
   clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
   fixup $BASE/kgsl.py
@@ -285,14 +267,13 @@ generate_mesa() {
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
-if [ "$1" == "hsa" ]; then generate_hsa
-elif [ "$1" == "amd" ]; then generate_amd
+if [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_hsa; generate_amd; generate_am; generate_mesa
+elif [ "$1" == "all" ]; then generate_amd; generate_am; generate_mesa
 else echo "usage: $0 <type>"
 fi

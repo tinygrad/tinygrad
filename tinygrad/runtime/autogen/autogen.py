@@ -45,9 +45,9 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False):
 
     if t.kind in tmap: return tmap[t.kind]
     if t.spelling in types: return types[t.spelling]
+    if ((f:=t).kind in (fks:=(TK.FUNCTIONPROTO, TK.FUNCTIONNOPROTO))) or (t.kind == TK.POINTER and (f:=t.get_pointee()).kind in fks):
+      return f"ctypes.CFUNCTYPE({tname(f.get_result())}{(', '+', '.join(map(tname, f.argument_types()))) if f.kind==TK.FUNCTIONPROTO else ''})"
     match t.kind:
-      case TK.POINTER | TK.FUNCTIONPROTO if (f:=t).kind == TK.FUNCTIONPROTO or (f:=t.get_pointee()).kind == TK.FUNCTIONPROTO:
-        return f"ctypes.CFUNCTYPE({tname(f.get_result())}{((', '+', '.join(tname(a) for a in ats)) if (ats:=f.argument_types()) else '')})"
       case TK.POINTER: return "ctypes.c_void_p" if t.get_pointee().kind == TK.VOID else f"ctypes.POINTER({tname(t.get_pointee())})"
       case TK.ELABORATED: return tname(t.get_named_type(), suggested_name)
       case TK.TYPEDEF if t.spelling == t.get_canonical().spelling: return tname(t.get_canonical())
