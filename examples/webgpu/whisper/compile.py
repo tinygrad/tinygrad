@@ -212,7 +212,13 @@ if __name__ == '__main__':
   def update_max_required_tensor_size(tensors):
     global max_size_per_tensor_in_bytes
     max_size_per_tensor_in_bytes = max([max_size_per_tensor_in_bytes] + [v.nbytes() for v in tensors.values()])
-    return tensors
+    out_tensors = {}
+    for k,v in tensors.items():
+      if 'cache' in k:
+        out_tensors[k] = v.shrink(tuple((0, 1) for _ in v.shape))
+      else:
+        out_tensors[k] = v
+    return out_tensors
 
   dirname = Path(__file__).parent
   # NOTE(irwin): force export as f32 as it's a little easier to validate
