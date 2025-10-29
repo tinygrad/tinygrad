@@ -59,8 +59,8 @@ dll = _dll()
       case TK.ELABORATED: return tname(t.get_named_type(), suggested_name)
       case TK.TYPEDEF if t.spelling == t.get_canonical().spelling: return tname(t.get_canonical())
       case TK.TYPEDEF:
-        types[t.spelling] = tname(t.get_canonical()) if t.spelling.startswith("__") else t.spelling
-        lines.append(f"{t.spelling} = {tname(t.get_canonical())}")
+        types[t.spelling] = tname(t.get_canonical()) if t.spelling.startswith("__") else t.spelling.replace('::', '_')
+        lines.append(f"{t.spelling.replace('::', '_')} = {tname(t.get_canonical())}")
         return types[t.spelling]
       case TK.RECORD:
         if (decl:=t.get_declaration()).is_anonymous():
