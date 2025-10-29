@@ -230,8 +230,9 @@ full_spec = PatternMatcher([
   # in progress MSTACK may lose device
   (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
 
-  # temp VECTORIZEs during rewrite have the wrong dtype
+  # temp VECTORIZE/INDEX during rewrite have the wrong dtype
   (UPat(Ops.VECTORIZE), lambda: True),
+  (UPat(Ops.INDEX), lambda: True),
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
