@@ -196,19 +196,19 @@ const ncu_layout = (counters) => {
     "L2 Hit Rate (%)": {"unit":"%", "keys":[
       "lts__t_sector_hit_rate.pct",
     ]},
-    "L1 Cache <- L2 Cache (bytes)": {"unit":"B", "keys":[
+    "L1 Cache <- L2 Cache (bytes)": {"unit":"bytes", "keys":[
       "l1tex__m_xbar2l1tex_read_bytes.sum",
     ]},
-    "L1 Cache -> L2 Cache (bytes)": {"unit":"B", "keys":[
+    "L1 Cache -> L2 Cache (bytes)": {"unit":"bytes", "keys":[
       "l1tex__m_l1tex2xbar_write_bytes.sum",
     ]},
-    "L1 -> Shared (bytes)": {"unit":"B", "keys":[
+    "L1 -> Shared (bytes)": {"unit":"bytes", "keys":[
       ["sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum", 32],
     ]},
-    "L2 Cache <- Device Memory (bytes)": {"unit":"B", "keys":[
+    "L2 Cache <- Device Memory (bytes)": {"unit":"bytes", "keys":[
       "dram__bytes_read.sum",
     ]},
-    "L2 Cache -> Device Memory (bytes)": {"unit":"B", "keys":[
+    "L2 Cache -> Device Memory (bytes)": {"unit":"bytes", "keys":[
       "dram__bytes_write.sum",
     ]},
   };
