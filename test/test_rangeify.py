@@ -130,9 +130,9 @@ class TestPcontig(unittest.TestCase):
     print(f"mse: {mse}")
     self.assertLessEqual(mse, 1e-6)
 
-  def test_flash_attention(self):
-    with Context(PCONTIG=2, DEBUG=2):
-      ret = fa().realize()
+  def test_flash_attention(self, opts=None):
+    with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
+      ret = fa().realize() if opts is None else fa().contiguous(arg=opts).realize()
       print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
     with Context(DEBUG=2):
       cmp = fa().realize()
@@ -142,6 +142,15 @@ class TestPcontig(unittest.TestCase):
     print(f"mse: {mse}")
     self.assertLessEqual(mse, 1e-6)
 
+  def test_flash_attention_opt(self):
+    opts = ()
+    # columns in top matrix
+    opts += (Opt(OptOps.UPCAST, 0, 4),)
+    # columns in bottom matrix
+    opts += (Opt(OptOps.UPCAST, 3, 4),)
+    # rows in all the matrix
+    opts += (Opt(OptOps.UPCAST, 4, 4),)
+    self.test_flash_attention(opts)
 
 # *** non CI rangeify tests below this line ***
 
