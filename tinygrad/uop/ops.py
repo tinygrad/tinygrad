@@ -346,7 +346,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
   def broadcast(self, count:int):
-    assert self.dtype.count == 1
+    assert self.dtype.vcount == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType):

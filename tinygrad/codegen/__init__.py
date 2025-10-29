@@ -25,9 +25,6 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
   # first we optimize
   if optimize:
-    # TODO: fix expander and remove this
-    sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
-
     # collapse loads reduce (indexing by a tensor)
     sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
 
