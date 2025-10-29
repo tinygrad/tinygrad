@@ -137,15 +137,14 @@ class AMDComputeQueue(HWQueue):
 
   ### PMC ###
 
-  def pmc_reset_counters(self):
+  def pmc_reset_counters(self, en=True):
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1)
+    if en: self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1)
     return self
 
   def pmc_start(self, counters):
-    self.set_grbm_broadcast()
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0) # reset counters
+    self.pmc_reset_counters(en=False)
     self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1)
     self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL2, force_en=1, vmid_en=0xffff)
 
@@ -158,7 +157,7 @@ class AMDComputeQueue(HWQueue):
       self.dev.pmc_sched.append(PMCSample(name, block, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, reg))
 
     self.wreg(self.gc.regCOMPUTE_PERFCOUNT_ENABLE, 1)
-    return self.pmc_reset_counters()
+    return self.pmc_reset_counters(en=True)
 
   def pmc_read(self, buf, sched):
     self.set_grbm_broadcast()
@@ -175,7 +174,7 @@ class AMDComputeQueue(HWQueue):
         self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
         if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
 
-    return self.pmc_reset_counters()
+    return self.pmc_reset_counters(en=True)
 
   ### SQTT ###
 
