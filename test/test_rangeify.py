@@ -7,6 +7,35 @@ from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
+@unittest.skipUnless(Device.DEFAULT == "METAL" and not CI, "only for METAL TC")
+class TestBigDoubleMatmul(unittest.TestCase):
+  def setUp(self):
+    N = 1024
+    with Context(DEBUG=0):
+      self.a, self.b, self.c = [Tensor.randn(N, N).contiguous().realize() for _ in range(3)]
+    with Context(DEBUG=2):
+      self.ref = (self.a @ self.b @ self.c).realize()
+
+  def _test(self, opts):
+    with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
+      out = (self.a @ self.b @ self.c).contiguous(arg=opts).realize()
+
+    with Context(DEBUG=0):
+      err = (out-self.ref).square()
+      self.assertLess(err.max().item(), 1e-4)
+      self.assertLess(err.mean().item(), 1e-6)
+
+  def test_demote_tc_both(self):
+    outs = ()
+    outs += (Opt(OptOps.DEMOTE, 2, 8),)
+    outs += (Opt(OptOps.TC, 0, (0, 0, 1, 1)),)
+    outs += (Opt(OptOps.TC, 0, (0, 0, 1, 0)),)
+    outs += (Opt(OptOps.UPCAST, 0, 4),)
+    outs += (Opt(OptOps.UPCAST, 1, 4),)
+    outs += (Opt(OptOps.UNROLL, 0, 4),)
+    outs += (Opt(OptOps.UNROLL, 1, 4),)
+    self._test(outs)
+
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer, CUDARenderer)), "broken in LVP and PTX")
 class TestDoubleMatmul(unittest.TestCase):
   def setUp(self):
@@ -62,10 +91,9 @@ class TestDoubleMatmul(unittest.TestCase):
   def test_demote_tc_bottom(self):
     self._test((Opt(OptOps.DEMOTE, 2, 8), Opt(OptOps.TC, 0, (0, 0, 1, 1))))
 
-  @unittest.skip("broken")
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only for METAL TC")
   def test_demote_tc_both(self):
-    self._test((Opt(OptOps.DEMOTE, 2, 8), Opt(OptOps.TC, 0, (0, 0, 1, 0)), Opt(OptOps.TC, 0, (0, 0, 1, 1))))
+    self._test((Opt(OptOps.DEMOTE, 2, 8), Opt(OptOps.TC, 0, (0, 0, 1, 1)), Opt(OptOps.TC, 0, (0, 0, 1, 0))))
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
