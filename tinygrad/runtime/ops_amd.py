@@ -4,7 +4,7 @@ import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, co
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
-from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator
+from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored
@@ -16,7 +16,7 @@ from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_ip_offsets
-from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, PCIDevice, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 SQTT = getenv("SQTT", 0)
@@ -575,9 +575,7 @@ class KFDIface:
     if KFDIface.kfd is None:
       KFDIface.kfd = FileIOInterface("/dev/kfd", os.O_RDWR)
       gpus = [g for g in FileIOInterface(kfd_topo_path).listdir() if self._is_usable_gpu(FileIOInterface(f"{kfd_topo_path}/{g}/gpu_id"))]
-      gpus = sorted(gpus, key=lambda x: int(x.split('/')[-1]))
-      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('HIP_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-      KFDIface.gpus = [gpus[x] for x in visible_devices] if visible_devices else gpus
+      KFDIface.gpus = hcq_filter_visible_devices(sorted(gpus, key=lambda x: int(x.split('/')[-1])))
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
@@ -697,11 +695,11 @@ class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
     super().__init__(dev, dev_id, vendor=0x1002, devices=[0x744c, 0x7480, 0x7550, 0x7590], bars=[0, 2, 5], vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size)
-    self._setup_adev(self.pci_dev.pcibus, self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I'))
+    self._setup_adev(self.pci_dev)
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
-  def _setup_adev(self, name, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
-    self.dev_impl:AMDev = AMDev(name, vram, doorbell, mmio, dma_regions)
+  def _setup_adev(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
+    self.dev_impl:AMDev = AMDev(pci_dev, dma_regions)
     self.ip_versions = self.dev_impl.ip_ver
 
     gfxver = int(f"{self.dev_impl.ip_ver[am.GC_HWIP][0]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][1]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][2]:02d}")
@@ -740,9 +738,8 @@ class PCIIface(PCIIfaceBase):
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     self.dev, self.pci_dev = dev, USBPCIDevice(f"usb:{dev_id}", bars=[0, 2, 5])
-    self._setup_adev(self.pci_dev.pcibus, self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I'),
-                     dma_regions=[(0x200000, self.pci_dev.dma_view(0xf000, 0x80000))])
-    self.pci_dev.usb._pci_cacheable += [self.pci_dev.bars[2]] # doorbell region is cacheable
+    self._setup_adev(self.pci_dev, dma_regions=[(0x200000, self.pci_dev.dma_view(0xf000, 0x80000))])
+    self.pci_dev.usb._pci_cacheable += [(self.pci_dev.bar_info[2].addr, self.pci_dev.bar_info[2].size)] # doorbell region is cacheable
 
     # special regions
     self.copy_bufs = [self._dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)]

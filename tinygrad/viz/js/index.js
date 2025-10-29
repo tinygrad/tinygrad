@@ -70,11 +70,10 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
-  nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
-    const x = (d.width-d.padding*2)/2;
-    const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
-    return `translate(-${x}, -${y})`;
-  }).selectAll("text").data(d => {
+  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
+  const hasLabelDims = data.nodes[0]?.value.labelWidth != null;
+  if (hasLabelDims) labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
+  labels.selectAll("text").data(d => {
     const ret = [[]];
     for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
       const lines = st.split("\n");
@@ -84,6 +83,11 @@ const drawGraph = (data) => {
     return [ret];
   }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
     .attr("fill", d => darkenHex(d.color, 25)).text(d => d.st).attr("xml:space", "preserve");
+  // recenter after drawing texts if needed
+  if (!hasLabelDims) labels.attr("transform", (_,i,els) => {
+    const b = els[i].getBBox();
+    return `translate(${-b.x-b.width/2}, ${-b.y-b.height/2})`
+  });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
@@ -95,21 +99,6 @@ const drawGraph = (data) => {
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
   }).attr("marker-end", "url(#arrowhead)");
-  addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e) => {
-    // get a point near the end
-    const [p1, p2] = g.edge(e).points.slice(-2);
-    const dx = p2.x-p1.x;
-    const dy = p2.y-p1.y;
-    // normalize to the unit vector
-    const len = Math.sqrt(dx*dx + dy*dy);
-    const ux = dx / len;
-    const uy = dy / len;
-    // avoid overlap with the arrowhead
-    const offset = 17;
-    const x = p2.x - ux * offset;
-    const y = p2.y - uy * offset;
-    return `translate(${x}, ${y})`
-  }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
 }
 
 // ** UOp graph
@@ -130,6 +119,21 @@ function renderDag(graph, additions, recenter) {
     displaySelection("#graph");
     updateProgress({ start:false });
     drawGraph(e.data);
+    addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
+      // get a point near the end
+      const [p1, p2] = e.value.points.slice(-2);
+      const dx = p2.x-p1.x;
+      const dy = p2.y-p1.y;
+      // normalize to the unit vector
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      // avoid overlap with the arrowhead
+      const offset = 17;
+      const x = p2.x - ux * offset;
+      const y = p2.y - uy * offset;
+      return `translate(${x}, ${y})`
+    }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 }
@@ -581,12 +585,13 @@ const evtSources = [];
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
+  const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
   // update element styles if needed
   const { ctx, step } = select(state.currentCtx, state.currentStep);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
   if (ctx?.id !== prevCtx?.id) {
-    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentRewrite:0, currentStep:0, expandSteps:false });
+    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentStep:deselect(prevStep).step || 0, currentRewrite:prevRewrite, expandSteps:true });
     toggleCls(prevCtx, ctx, "active");
   }
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
@@ -732,8 +737,8 @@ async function main() {
   if (ret.length === 0) return;
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
-  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }),
-                           codeBlock(ret[currentRewrite].uop, "python", { wrap:false }));
+  const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
+  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -756,7 +761,7 @@ async function main() {
         diffCode.className = "wrap";
       }
     }
-  }
+  } else codeElement.classList.add("full-height");
 }
 
 // **** collapse/expand

@@ -14,6 +14,8 @@ class InvalidTypeMetaClass(type):
 
 class InvalidType(metaclass=InvalidTypeMetaClass):
   def __eq__(self, other): return self is other
+  def __lt__(self, other): return self is not other
+  def __gt__(self, other): return self is not other
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
   def __reduce__(self): return (InvalidType, ())  # Return the global Invalid instance
@@ -47,7 +49,7 @@ class DType(metaclass=DTypeMetaClass):
   @staticmethod
   def new(priority:int, itemsize:int, name:str, fmt:FmtStr|None): return DType(priority, itemsize, name, fmt, 1, None)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count != 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   @property
   def base(self): return self

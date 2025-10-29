@@ -45,10 +45,6 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   return buf.index(idx.valid(new_valid) if new_valid is not None else idx)
 
-def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
-  if store_gate not in [gate.src[0] for gate in val.toposort() if gate.op is Ops.IF]: return None
-  # remove the gate from the index
-  return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val, *store.src[2:])
 
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
@@ -57,9 +53,6 @@ load_store_indexing = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x", dtypes.long), UPat.var("c", dtypes.bool))), lambda buf,x,c: simplify_valid_load(buf, x, c)),
   # drop true gate
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x)),
-  # delete_redundant_gates (after expand)
-  (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
-                                  UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
 ])
 
 # ***** load/store grouping *****
@@ -148,7 +141,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
     must_divide = False
-  elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+  elif buf.dtype.base not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
     pass
   elif buf.ptrdtype.addrspace == AddrSpace.REG:
     pass
@@ -238,15 +231,30 @@ def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
   return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))))
 
+def no_vectorized_index_broadcast(buf:UOp, cast:UOp, bcast:UOp, idx:UOp):
+  cnt = cast.dtype.count
+  precnt = bcast.dtype.vcount
+  input_gep = bcast.arg if bcast.op is Ops.GEP else ([0]*precnt)
+  gep_arg = tuple(flatten([range(precnt) for _ in range(cnt)]))
+  sum_arg = tuple(flatten([[i+y for y in input_gep] for i in range(cnt)]))
+  return buf.broadcast(cnt*precnt).index(idx.gep(gep_arg)*cnt+UOp.const(dtypes.index.vec(cnt*precnt), sum_arg))
+
+devectorize_buf_and_index = PatternMatcher([
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").broadcast(name="bcast").index(UPat.var("idx")),
+   no_vectorized_index_broadcast),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").gep(name="bcast").index(UPat.var("idx")),
+   no_vectorized_index_broadcast),
+])
+
 devectorize = PatternMatcher([
   # CAST after AFTER
   (UPat(Ops.CAST, name="c").f(Ops.AFTER, allow_any_len=True, name="a"), lambda c,a: c.src[0].after(*a.src[1:]).cast(c.dtype)),
   # no ALU on vectorized dtypes
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
-  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
-])
+])+devectorize_buf_and_index
 
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE
