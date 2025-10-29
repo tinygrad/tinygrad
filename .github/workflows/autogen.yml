@@ -37,13 +37,10 @@ jobs:
       run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
     - name: Verify AMD autogen
       run: |
-        cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
         cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
         cp tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
-        ./autogen_stubs.sh hsa
         ./autogen_stubs.sh amd
         ./autogen_stubs.sh sqtt
-        diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
     - name: Verify mesa autogen
@@ -86,8 +83,10 @@ jobs:
     - name: Verify AMD autogen
       run: |
         mv tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
-        python3 -c "from tinygrad.runtime.autogen import comgr"
+        mv tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
+        python3 -c "from tinygrad.runtime.autogen import comgr, hsa"
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
+        diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
     - name: Verify Linux autogen
       run: |
         mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
