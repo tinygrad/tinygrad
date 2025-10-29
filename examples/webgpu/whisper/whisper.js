@@ -390,9 +390,6 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         console.error("Context prompt length exceeds 224");
         return;
     }
-    // var v = new Int32Array(51864);
-    // v.fill(0);
-    // v[0] = TOK_NO_TIMESTAMPS;
 
     /** @type {Decoder_State} */
     let decoder_state = {
@@ -497,7 +494,13 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
     let previous_context = [];
     let temperature = initial_temperature;
     // for (let seek = 50 * MEL_SPEC_CHUNK_LENGTH; seek < 51*MEL_SPEC_CHUNK_LENGTH;) {
-    for (let seek = 0; seek < log_specs_full.length;) {
+    let seek_ranges = [];
+    for (let seek = 0; seek < log_specs_full.length; seek += MEL_SPEC_CHUNK_LENGTH) {
+        seek_ranges.push(seek);
+    }
+
+    for (let seek_index = 0; seek_index < seek_ranges.length;) {
+        let seek = seek_ranges[seek_index];
         console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
         let log_spec = log_specs_full.slice(seek, seek + MEL_SPEC_CHUNK_LENGTH);
         if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
@@ -533,7 +536,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText });
             pendingText = '';
 
-            seek += MEL_SPEC_CHUNK_LENGTH;
+            ++seek_index;
         }
     }
     onEvent("inferenceDone");
