@@ -37,10 +37,6 @@ propagate_invalid = PatternMatcher([
   *((invalid_pat.alu(op, UPat(dtype=dtypes.index)), lambda i: UOp.const(dtypes.bool, True)) for op in GroupOp.Comparison),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
-  # order of gate&!cond matters!, and-clauses are only simplified left to right and we need to gate to be used to fold cond
-  (UPat.var("gate").where(invalid_gate, UPat.var("y")), lambda gate,cond,x,y,i: ((gate&cond.logical_not()).logical_not()).where(gate.where(x,y), i)),
-  # unswap the branches for the rule above
-  (UPat.var("gate").where(UPat.var("y"), invalid_gate).named("where"), lambda gate,cond,x,y,i: gate.logical_not().where(cond.where(x,i), y))
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
