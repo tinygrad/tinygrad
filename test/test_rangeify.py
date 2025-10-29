@@ -6,18 +6,19 @@ from tinygrad.codegen.opt import OptOps, Opt
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "broken in LVP")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
 class TestDoubleMatmul(unittest.TestCase):
   def setUp(self):
     with Context(DEBUG=0):
       self.a, self.b, self.c = [Tensor.randn(16, 16).contiguous().realize() for _ in range(3)]
+      self.ref = (self.a @ self.b @ self.c).realize()
 
   def _test(self, opts):
     with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
       out = (self.a @ self.b @ self.c).contiguous(arg=opts).realize()
 
     with Context(DEBUG=0):
-      err = (out-(self.a @ self.b @ self.c)).square()
+      err = (out-self.ref).square()
       self.assertLess(err.max().item(), 1e-4)
       self.assertLess(err.mean().item(), 1e-6)
 

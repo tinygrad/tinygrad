@@ -83,10 +83,12 @@ class Scheduler:
 
   def colors(self) -> list[str]:
     output_rngs = self._output_rngs()
+    globalizible_rngs = self._globalizable_rngs()
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
       elif r not in output_rngs and x == AxisType.LOOP: ret.append("BLACK")
+      elif r not in globalizible_rngs and x == AxisType.LOOP: ret.append("white")
       else: ret.append(axis_colors[x])
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
