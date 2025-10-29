@@ -1,5 +1,5 @@
 from typing import cast
-from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL, SPEC
+from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
@@ -7,11 +7,10 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import panic
 
 # import all pattern matchers here
-from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
-from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander, pm_group_for_reduce
+from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render
 from tinygrad.codegen.opt.postrange import apply_opts
@@ -26,11 +25,6 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
   # first we optimize
   if optimize:
-    if QUANTIZE and ren.device in {"CPU", "DSP"}: sink = graph_rewrite(sink, pm_quant, name="quantize")
-
-    # TODO: fix expander and remove this
-    sink = graph_rewrite(sink, pm_add_buffers_local, name="add locals early")
-
     # collapse loads reduce (indexing by a tensor)
     sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
 
@@ -50,7 +44,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = apply_opts(sink, ren)
 
   # ** expander (expand_rewrite) **
-  sink = graph_rewrite(sink, sym+migrate_indexing+pm_move_where_on_load, name="postopt symbolic")
+  sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
 
   # expand
   sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")

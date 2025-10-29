@@ -307,9 +307,10 @@ class TestUOpGraph(unittest.TestCase):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(dtypes.float, float(i)) for i in range(vec_size)]
       vec = UOp(Ops.VECTORIZE, dtypes.float.vec(vec_size), tuple(consts))
-      uops = to_uops_list([UOp(Ops.GEP, dtypes.float, (vec,), (i,)) for i in range(vec_size)])
-      for uop, const in zip(uops, consts):
-        self.assertEqual(uop, const)
+      with Context(SPEC=0):
+        uops = to_uops_list([UOp(Ops.GEP, dtypes.float, (vec,), (i,)) for i in range(vec_size)])
+        for uop, const in zip(uops, consts):
+          self.assertEqual(uop, const)
 
   @unittest.skip("no longer testable standalone")
   def test_wmma_vectorize_fold(self):
@@ -505,10 +506,10 @@ class TestUOpGraph(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), src=(), arg=0)
       v = Variable("v", 0, 20)
-      st0 = UOp(Ops.STORE, dtypes.void, src=(glbl0.index(v, v<16), UOp.const(dtypes.int, 0)))
+      st0 = UOp(Ops.STORE, dtypes.void, src=(glbl0.index(v.valid(v<16)), UOp.const(dtypes.int, 0)))
       to_uops_list([st0])
 
-      st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v), v, v<20))
+      st1 = UOp(Ops.STORE, dtypes.void, (glbl0.index(v.valid(v<20)), v))
       with self.assertRaises(RuntimeError): to_uops_list([st1])
 
   @unittest.skip("if not allowed in graph")
@@ -541,7 +542,7 @@ class TestUOpGraph(unittest.TestCase):
       ridx = UOp.range(20, 0)
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
       i = (ridx.cast(dtypes.float)*0.68).trunc().cast(dtypes.int)
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, ((0<=i)&(i<16))),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i.valid((0<=i)&(i<16))),))
       to_uops_list([ld0])
       glblfloat = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(20), (), 0)
       ldfloat = UOp(Ops.LOAD, dtypes.float, (glblfloat.index(ridx),))
@@ -552,7 +553,7 @@ class TestUOpGraph(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(1), (), 0)
       ridx = UOp.range(20, 0)
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(ridx, ridx.cast(dtypes.bool).logical_not()),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(ridx.valid(ridx.cast(dtypes.bool).logical_not())),))
       to_uops_list([ld0])
 
   @unittest.skip("Bool load is not supported yet")
@@ -574,23 +575,23 @@ class TestUOpGraph(unittest.TestCase):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
       gidx0 = UOp.range(42, 0, AxisType.GLOBAL)
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, (5<gidx0)&(gidx0<16)),))
-      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<16),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0.valid((5<gidx0)&(gidx0<16))),))
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0.valid(gidx0<16)),))
       to_uops_list([ld0, ld1])
 
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<17),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0.valid(gidx0<17)),))
       with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
   def test_in_out_of_bounds_access_symbolic_mask(self):
     with Context(IGNORE_OOB=0):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
       i = Variable("i", 1, 80)
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<10),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i.valid(i<10)),))
       to_uops_list([ld0])
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<15),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i.valid(i<15)),))
       to_uops_list([ld0])
 
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i, i<20),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(i.valid(i<20)),))
       with self.assertRaises(RuntimeError): to_uops_list([ld0])
 
   def test_in_out_of_bounds_access_index_load(self):
@@ -598,11 +599,11 @@ class TestUOpGraph(unittest.TestCase):
       glbl0 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(16), (), 0)
       glbl1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(64), (), 0)
       gidx0 = UOp.range(42, 0, AxisType.GLOBAL)
-      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0, gidx0<8),)).cast(dtypes.index)
-      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<32)),))
+      ld0 = UOp(Ops.LOAD, dtypes.int, (glbl0.index(gidx0.valid(gidx0<8)),)).cast(dtypes.index)
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index((ld0*2).valid((ld0>=0)&(ld0<32))),))
       to_uops_list([ld1])
 
-      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(ld0*2, (ld0>=0)&(ld0<64)),))
+      ld1 = UOp(Ops.LOAD, dtypes.int, (glbl1.index((ld0*2).valid((ld0>=0)&(ld0<64))),))
       with self.assertRaises(RuntimeError): to_uops_list([ld1])
 
   def test_bounds_with_loaded_bool(self):
@@ -620,7 +621,7 @@ class TestUOpGraph(unittest.TestCase):
     glbl2 = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), (), 2)
     idx = UOp.const(dtypes.int, 0)
     ld0 = UOp(Ops.LOAD, dtypes.int, (glbl1.index(UOp.invalid()),))
-    ld1 = UOp(Ops.LOAD, dtypes.int, (glbl2.index(idx, UOp.const(dtypes.bool, True)),))
+    ld1 = UOp(Ops.LOAD, dtypes.int, (glbl2.index(idx.valid(UOp.const(dtypes.bool, True))),))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(idx), ld1+ld0))])
     ld0 = uops[-1].src[-1]
     # the gate and invalid value are deleted from ld1
@@ -633,7 +634,7 @@ class TestUOpGraph(unittest.TestCase):
     st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx), UOp.load(glbl0.index(lidx), dtype=dtypes.int)))
     barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
     ld0 = UOp(Ops.LOAD, dtypes.int, (smem.after(barrier).index(UOp.invalid()),))
-    ld1 = UOp(Ops.LOAD, dtypes.int, (smem.after(barrier).index(lidx+2, UOp.const(dtypes.bool, True)),))
+    ld1 = UOp(Ops.LOAD, dtypes.int, (smem.after(barrier).index((lidx+2).valid(UOp.const(dtypes.bool, True))),))
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(lidx), ld1+ld0))])
 
     ld0 = uops[-1].src[-1]
@@ -646,7 +647,7 @@ class TestUOpGraph(unittest.TestCase):
     idx1 = UOp.const(dtypes.int, 0)
     val = UOp.const(dtypes.int, 42)
     st0 = glbl.index(UOp.invalid()).store(val)
-    st1 = glbl.index(idx0, UOp.const(dtypes.bool, True)).store(val)
+    st1 = glbl.index(idx0.valid(UOp.const(dtypes.bool, True))).store(val)
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops), 5)

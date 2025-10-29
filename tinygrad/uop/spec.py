@@ -39,6 +39,7 @@ shared_spec = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
+  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
 ])
 
 # ***** UOp spec in the Tensor graph *****
@@ -105,9 +106,9 @@ tensor_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 ])+shared_spec
 
-# ***** UOp spec in linearized programs *****
+# ***** UOp spec in codegen shared between kernel and program *****
 
-program_spec = PatternMatcher([
+shared_codegen_spec = PatternMatcher([
   # DEFINEs
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
@@ -117,42 +118,59 @@ program_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
   (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
-  # INDEX is used in new style load/store
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines).or_after(), UPat())), lambda: True),
-
-  # LOAD (idx, alt_value) / STORE(if gated) / LOAD(idx) / STORE(idx, val)
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool, name="gate"), name="idx").or_casted().load(UPat()), validate_index),
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool, name="gate"), name="idx").or_casted().store(UPat()), validate_index),
-  (UPat().index(UPat(), name="idx").or_casted().load(), validate_index),
-  (UPat().index(UPat(), name="idx").or_casted().store(UPat()), validate_index),
-
   # RANGE/SPECIAL define loops, END closes them
-  (UPat(Ops.SPECIAL, src=(UPat.var("x"),), name="s"), lambda s,x: s.dtype == x.dtype == dtypes.int32 and isinstance(s.arg, str)),
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
-
-  # make sure all index dtypes have been lowered
-  (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
-  (UPat(Ops.CONST, arg=Invalid), lambda: False),
-  (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.src)),
 
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 
-  # if has a <gate, index_for_dedup>
-  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
-  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+  # UNROLL/CONTRACT is used here for WMMA
+  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # VECTORIZE/GEP
   (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # BARRIER
-  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
+  # LOAD(idx) / STORE(idx, val) / LOAD with alt value only exists in program_spec
+  (UPat().index(UPat()).or_casted().load(), lambda: True),
+  (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
   # all CUSTOM + PRECAST
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
-])+shared_spec
+
+  # INDEX
+  (UPat(GroupOp.Defines, name="buf").or_after().index(UPat.var("idx")), validate_index),
+
+  # SPECIAL
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
+
+  # BARRIER
+  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
+])
+
+# ***** UOp spec in linearized programs *****
+
+program_spec = PatternMatcher([
+  # INDEX with a gate as third src
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="buf").or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
+
+  # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
+  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),
+
+  # END closes ranges
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
+
+  # make sure all index dtypes have been lowered
+  (UPat(GroupOp.All, dtype=dtypes.index), lambda: False),
+  (UPat(Ops.CONST, arg=Invalid), lambda: False),
+  (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
+    type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
+
+  # if has a <gate, index_for_dedup>
+  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
+  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
+])+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in kernel graph *****
 
@@ -160,24 +178,15 @@ kernel_spec = PatternMatcher([
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
 
-  # LOAD(idx) / STORE(idx, val) -- NOTE: we do this here to not run validate_index since z3 doesn't support Invalid
-  (UPat(Ops.INDEX).or_casted().load(), lambda: True),
-  (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
-
-  # UNROLL/CONTRACT is used here for WMMA
-  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
-  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
-
   # END can end multiple axes here
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
 
-  # bufferize (must be on ranges)
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.op in {Ops.RANGE, Ops.CONST} for y in x.src[1:])),
-  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+  # bufferize can be on anything
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
 
-  # intermediate index
-  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
-])+program_spec+shared_spec
+  # reduce must be on ranges
+  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+])+shared_codegen_spec+shared_spec
 
 # *** this spec should match all UOps ever created ***
 
@@ -220,6 +229,10 @@ full_spec = PatternMatcher([
 
   # in progress MSTACK may lose device
   (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
+
+  # temp VECTORIZE/INDEX during rewrite have the wrong dtype
+  (UPat(Ops.VECTORIZE), lambda: True),
+  (UPat(Ops.INDEX), lambda: True),
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
