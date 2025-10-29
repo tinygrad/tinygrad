@@ -41,21 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_amd() {
-  # clang2py broken when pass -x c++ to prev headers
-  clang2py -k cdefstum \
-    extra/hip_gpu_driver/sdma_registers.h \
-    extra/hip_gpu_driver/nvd.h \
-    extra/hip_gpu_driver/gc_11_0_0_offset.h \
-    extra/hip_gpu_driver/sienna_cichlid_ip_offset.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/amd_gpu.py
-
-  fixup $BASE/amd_gpu.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/amd_gpu.py
-  python3 -c "import tinygrad.runtime.autogen.amd_gpu"
-}
-
 generate_kgsl() {
   clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
   fixup $BASE/kgsl.py
@@ -267,13 +252,12 @@ generate_mesa() {
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
-if [ "$1" == "amd" ]; then generate_amd
-elif [ "$1" == "am" ]; then generate_am
+if [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_amd; generate_am; generate_mesa
+elif [ "$1" == "all" ]; then generate_am; generate_mesa
 else echo "usage: $0 <type>"
 fi

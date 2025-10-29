@@ -60,4 +60,6 @@ def __getattr__(nm):
     case "hsa": return load("hsa", ["os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so'", "find_library('hsa-runtime64')"],
                             [f"/opt/rocm/include/hsa/{s}.h" for s in ["hsa","hsa_ext_amd","amd_hsa_signal","amd_hsa_queue","amd_hsa_kernel_code",
                               "hsa_ext_finalize","hsa_ext_image","hsa_ven_amd_aqlprofile"]], ["-I/opt/rocm/include"])
+    case "amd_gpu": return load("amd_gpu", [], [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers","nvd","gc_11_0_0_offset",
+                                 "sienna_cichlid_ip_offset"]], ["-I/opt/rocm/include", "-x", "c++"])
     case _: raise AttributeError(f"no such autogen: {nm}")
