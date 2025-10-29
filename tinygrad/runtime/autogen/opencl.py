@@ -98,6 +98,7 @@ _anonunion0._fields_ = [
   ('buffer', cl_mem),
   ('mem_object', cl_mem),
 ]
+struct__cl_image_desc._anonymous_ = ['_0']
 struct__cl_image_desc._fields_ = [
   ('image_type', cl_mem_object_type),
   ('image_width', size_t),

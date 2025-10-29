@@ -5530,6 +5530,7 @@ _anonunion16._fields_ = [
   ('hmacBundle', CC_HMAC_CRYPTOBUNDLE),
   ('decryptBundle', CC_AES_CRYPTOBUNDLE),
 ]
+struct_CC_KMB._anonymous_ = ['_0']
 struct_CC_KMB._fields_ = [
   ('encryptBundle', CC_AES_CRYPTOBUNDLE),
   ('_0', _anonunion16),

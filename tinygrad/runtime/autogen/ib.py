@@ -365,6 +365,7 @@ _anonunion0._fields_ = [
   ('imm_data', ctypes.c_uint),
   ('invalidated_rkey', uint32_t),
 ]
+struct_ibv_wc._anonymous_ = ['_0']
 struct_ibv_wc._fields_ = [
   ('wr_id', uint64_t),
   ('status', enum_ibv_wc_status),
@@ -470,8 +471,7 @@ _anonunion2._fields_ = [
   ('bind_mw', _anonunion2_bind_mw),
   ('tso', _anonunion2_tso),
 ]
-'_0'
-'_1'
+struct_ibv_send_wr._anonymous_ = ['_0', '_1']
 struct_ibv_send_wr._fields_ = [
   ('wr_id', uint64_t),
   ('next', ctypes.POINTER(struct_ibv_send_wr)),
@@ -1544,6 +1544,7 @@ _anonunion7._fields_ = [
   ('handle', struct_ibv_flow_spec_action_handle),
   ('flow_count', struct_ibv_flow_spec_counter_action),
 ]
+struct_ibv_flow_spec._anonymous_ = ['_0']
 struct_ibv_flow_spec._fields_ = [
   ('_0', _anonunion7),
 ]
@@ -1596,8 +1597,7 @@ _anonunion9._fields_ = [
   ('next_ptr_data_u64', ctypes.c_ulonglong),
 ]
 __u16 = ctypes.c_ushort
-'_0'
-'_1'
+struct_ib_uverbs_flow_action_esp_encap._anonymous_ = ['_0', '_1']
 struct_ib_uverbs_flow_action_esp_encap._fields_ = [
   ('_0', _anonunion8),
   ('_1', _anonunion9),
@@ -2999,10 +2999,12 @@ _anonstruct14._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion13._anonymous_ = ['_0']
 _anonunion13._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct14),
 ]
+struct_ib_uverbs_flow_spec_eth._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_eth._fields_ = [
   ('_0', _anonunion13),
   ('val', struct_ib_uverbs_flow_eth_filter),
@@ -3025,10 +3027,12 @@ _anonstruct16._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion15._anonymous_ = ['_0']
 _anonunion15._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct16),
 ]
+struct_ib_uverbs_flow_spec_ipv4._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_ipv4._fields_ = [
   ('_0', _anonunion15),
   ('val', struct_ib_uverbs_flow_ipv4_filter),
@@ -3047,10 +3051,12 @@ _anonstruct18._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion17._anonymous_ = ['_0']
 _anonunion17._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct18),
 ]
+struct_ib_uverbs_flow_spec_tcp_udp._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_tcp_udp._fields_ = [
   ('_0', _anonunion17),
   ('val', struct_ib_uverbs_flow_tcp_udp_filter),
@@ -3074,10 +3080,12 @@ _anonstruct20._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion19._anonymous_ = ['_0']
 _anonunion19._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct20),
 ]
+struct_ib_uverbs_flow_spec_ipv6._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_ipv6._fields_ = [
   ('_0', _anonunion19),
   ('val', struct_ib_uverbs_flow_ipv6_filter),
@@ -3091,10 +3099,12 @@ _anonstruct22._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion21._anonymous_ = ['_0']
 _anonunion21._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct22),
 ]
+struct_ib_uverbs_flow_spec_action_tag._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_tag._fields_ = [
   ('_0', _anonunion21),
   ('tag_id', ctypes.c_uint),
@@ -3108,10 +3118,12 @@ _anonstruct24._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion23._anonymous_ = ['_0']
 _anonunion23._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct24),
 ]
+struct_ib_uverbs_flow_spec_action_drop._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_drop._fields_ = [
   ('_0', _anonunion23),
 ]
@@ -3123,10 +3135,12 @@ _anonstruct26._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion25._anonymous_ = ['_0']
 _anonunion25._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct26),
 ]
+struct_ib_uverbs_flow_spec_action_handle._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_handle._fields_ = [
   ('_0', _anonunion25),
   ('handle', ctypes.c_uint),
@@ -3140,10 +3154,12 @@ _anonstruct28._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion27._anonymous_ = ['_0']
 _anonunion27._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct28),
 ]
+struct_ib_uverbs_flow_spec_action_count._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_count._fields_ = [
   ('_0', _anonunion27),
   ('handle', ctypes.c_uint),
@@ -3161,10 +3177,12 @@ _anonstruct30._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion29._anonymous_ = ['_0']
 _anonunion29._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct30),
 ]
+struct_ib_uverbs_flow_spec_tunnel._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_tunnel._fields_ = [
   ('_0', _anonunion29),
   ('val', struct_ib_uverbs_flow_tunnel_filter),
@@ -3183,10 +3201,12 @@ _anonstruct32._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion31._anonymous_ = ['_0']
 _anonunion31._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct32),
 ]
+struct_ib_uverbs_flow_spec_esp._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_esp._fields_ = [
   ('_0', _anonunion31),
   ('val', struct_ib_uverbs_flow_spec_esp_filter),
@@ -3206,10 +3226,12 @@ _anonstruct34._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion33._anonymous_ = ['_0']
 _anonunion33._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct34),
 ]
+struct_ib_uverbs_flow_spec_gre._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_gre._fields_ = [
   ('_0', _anonunion33),
   ('val', struct_ib_uverbs_flow_gre_filter),
@@ -3227,10 +3249,12 @@ _anonstruct36._fields_ = [
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
+_anonunion35._anonymous_ = ['_0']
 _anonunion35._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
   ('_0', _anonstruct36),
 ]
+struct_ib_uverbs_flow_spec_mpls._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_mpls._fields_ = [
   ('_0', _anonunion35),
   ('val', struct_ib_uverbs_flow_mpls_filter),

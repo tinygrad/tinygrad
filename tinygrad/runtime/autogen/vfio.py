@@ -142,6 +142,7 @@ _anonunion5._fields_ = [
   ('group_id', ctypes.c_uint),
   ('devid', ctypes.c_uint),
 ]
+struct_vfio_pci_dependent_device._anonymous_ = ['_0']
 struct_vfio_pci_dependent_device._fields_ = [
   ('_0', _anonunion5),
   ('segment', ctypes.c_ushort),
@@ -169,6 +170,7 @@ _anonunion6._fields_ = [
   ('region_index', ctypes.c_uint),
   ('dmabuf_id', ctypes.c_uint),
 ]
+struct_vfio_device_gfx_plane_info._anonymous_ = ['_0']
 struct_vfio_device_gfx_plane_info._fields_ = [
   ('argsz', ctypes.c_uint),
   ('flags', ctypes.c_uint),
@@ -370,6 +372,7 @@ class _anonunion7(ctypes.Union): pass
 _anonunion7._fields_ = [
   ('err', struct_vfio_eeh_pe_err),
 ]
+struct_vfio_eeh_pe_op._anonymous_ = ['_0']
 struct_vfio_eeh_pe_op._fields_ = [
   ('argsz', ctypes.c_uint),
   ('flags', ctypes.c_uint),

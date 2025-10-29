@@ -44,7 +44,8 @@ def __getattr__(nm):
     case "ib": return load("ib", "ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)", ["/usr/include/infiniband/verbs.h",
   "/usr/include/infiniband/verbs_api.h","/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"])
     case "llvm": return load("llvm","ctypes.CDLL(LLVM_PATH)",lambda:[sys("llvm-config-14 --includedir")+"/llvm-c/**/*.h"],
-                             lambda: sys("llvm-config-14 --cflags"), recsym=True, prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
+                             lambda:sys("llvm-config-14 --cflags").split(), recsym=True,
+                             prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
     case "pci": return load("pci", None, ["/usr/include/linux/pci_regs.h"])
     case "vfio": return load("vfio", None, ["/usr/include/linux/vfio.h"])
     # could add rule: WGPU_COMMA -> ','
