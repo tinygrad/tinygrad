@@ -260,32 +260,33 @@ const ncu_layout = (counters) => {
   // *** links
   const edges = [];
   const addEdge = (v, w, f, opts) => edges.push({v, w, value:{points:f(l[v], l[w]).map(p => ({x:p[0], y:p[1]})), ...opts}});
+  const center = (x) => x.y+x.height/2;
 
   // TODO: this part needs cleanup and has many copy paste
   const s = 6; // space between edge and edge text
-  addEdge("kernel", "isa_global", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("Kernel <-> Global") });
-  addEdge("isa_global", "kernel", (v, w) => [[v.x, v.y+v.height/2], [w.x+w.width, v.y+v.height/2]]);
+  addEdge("kernel", "isa_global", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("Kernel <-> Global") });
+  addEdge("isa_global", "kernel", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]]);
 
-  addEdge("kernel", "isa_local", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("Kernel <-> Local") });
-  addEdge("isa_local", "kernel", (v, w) => [[v.x, v.y+v.height/2], [w.x+w.width, v.y+v.height/2]]);
+  addEdge("kernel", "isa_local", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("Kernel <-> Local") });
+  addEdge("isa_local", "kernel", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]]);
 
-  addEdge("kernel", "isa_shared", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("Kernel <-> Shared") });
-  addEdge("isa_shared", "kernel", (v, w) => [[v.x, v.y+v.height/2], [w.x+w.width, v.y+v.height/2]]);
+  addEdge("kernel", "isa_shared", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("Kernel <-> Shared") });
+  addEdge("isa_shared", "kernel", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]]);
 
-  addEdge("l1", "isa_global", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("Global <- L1 Cache") });
-  addEdge("isa_global", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("Global -> L1 Cache") });
+  addEdge("l1", "isa_global", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Global <- L1 Cache") });
+  addEdge("isa_global", "l1", (v, w) => [[v.x+v.width, center(v)], [w.x, center(v)]], { offsetY:s, name:fmt("Global -> L1 Cache") });
 
-  addEdge("l1", "isa_local", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("Local <- L1 Cache") });
-  addEdge("isa_local", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("Local -> L1 Cache") });
+  addEdge("l1", "isa_local", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Local <- L1 Cache") });
+  addEdge("isa_local", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, center(v)]], { offsetY:s, name:fmt("Local -> L1 Cache") });
 
-  addEdge("l1", "isa_shared", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("Shared <- Shared Memory") });
-  addEdge("isa_shared", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("Shared -> Shared Memory") });
+  addEdge("l1", "isa_shared", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Shared <- Shared Memory") });
+  addEdge("isa_shared", "l1", (v, w) => [[v.x+v.width, center(v)], [w.x, center(v)]], { offsetY:s, name:fmt("Shared -> Shared Memory") });
 
-  addEdge("l2", "l1", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("L1 Cache <- L2 Cache (bytes)") });
-  addEdge("l1", "l2", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
+  addEdge("l2", "l1", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("L1 Cache <- L2 Cache (bytes)") });
+  addEdge("l1", "l2", (v, w) => [[v.x+v.width, center(v)], [w.x, center(v)]], { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
 
-  addEdge("l2", "device_mem", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("L2 Cache <- Device Memory (bytes)") });
-  addEdge("device_mem", "l2", (v, w) => [[v.x, v.y+v.height/2+10], [w.x+w.width, v.y+v.height/2+10]], { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
+  addEdge("l2", "device_mem", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("L2 Cache <- Device Memory (bytes)") });
+  addEdge("device_mem", "l2", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]], { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
 
   addEdge("l1", "shared", (v, w) => [[w.x+w.width/2, v.y+v.height], [v.x+v.width/2, w.y]], { offsetX:s, name:fmt("L1 -> Shared (bytes)") });
 
@@ -840,6 +841,7 @@ async function main() {
       }
     }
     return setState({ currentCtx:-1 });
+    // return setState({ "currentCtx": 3, "currentStep": 14, "currentRewrite": 0, "expandSteps": true });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
