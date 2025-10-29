@@ -45,10 +45,6 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   return buf.index(idx.valid(new_valid) if new_valid is not None else idx)
 
-def delete_redundant_gates(store:UOp, buf:UOp, idx:UOp, val:UOp, store_gate:UOp, cast:UOp|None=None) -> UOp|None:
-  if store_gate not in [gate.src[0] for gate in val.toposort() if gate.op is Ops.IF]: return None
-  # remove the gate from the index
-  return UOp.store(buf.index(idx).cast(cast.dtype) if cast is not None else buf.index(idx), val, *store.src[2:])
 
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
@@ -57,9 +53,6 @@ load_store_indexing = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x", dtypes.long), UPat.var("c", dtypes.bool))), lambda buf,x,c: simplify_valid_load(buf, x, c)),
   # drop true gate
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x)),
-  # delete_redundant_gates (after expand)
-  (UPat(Ops.STORE, src=(UPat.any(stidx:=UPat.var("buf").index(UPat.var("idx"), UPat.var("store_gate")), stidx.cast().named("cast")),
-                                  UPat.var("val")), name="store", allow_any_len=True), delete_redundant_gates),
 ])
 
 # ***** load/store grouping *****
