@@ -268,16 +268,12 @@ const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61,
  */
 
 /**
- * @param {Decode_Sequence[]} decode_sequences
- * @param {Decoder_State} decoder_state
- * @returns {Decoder_Result[]}
- */
-
-/**
  * @param {Decode_Sequence} decode_sequence
+ * @param {Decoder_State} decoder_state
+ * @returns {Promise<Decoder_Result>}
  */
-async function decodeOne(nets, decode_sequence, decoder_state, temperature, audio_features) {
-    const { max_context_length, last_eos_logprob, context_prompt_length } = decode_sequence;
+async function decodeOne(nets, decode_sequence, decoder_state, audio_features) {
+    const { max_context_length } = decode_sequence;
     let { context } = decode_sequence;
     let result = {
         keep_going: false,
@@ -287,9 +283,6 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
         last_eos_logprob: undefined
     }
     if (context.length >= max_context_length) return result;
-
-    let last_token_index = context.length - 1;
-    let one_before_last_token_index = context.length - 2;
 
     let last_common_index = rebuild_cache_tail_index(context, decoder_state.contexts[0]);
     if (last_common_index < context.length - 1) {
@@ -304,6 +297,25 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
 
     let context_input = [context.at(-1)];
     let decoder_output = await decoder_helper(nets, context_input, audio_features, context.length - 1, decoder_state);
+    result.decoder_output = decoder_output;
+    return result;
+}
+
+/**
+ * @param {Decode_Sequence} decode_sequence
+ * @param {Decoder_Result} decodeOne_result
+ * @param {float} temperature
+ * @returns {Promise<Decoder_Result>}
+ */
+async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
+    const { context, context_prompt_length, max_context_length, last_eos_logprob } = decode_sequence;
+
+    let result = decodeOne_result;
+    let decoder_output = decodeOne_result.decoder_output;
+
+    let last_token_index = context.length - 1;
+    let one_before_last_token_index = context.length - 2;
+
     let nextLogprobs;
     let nextTokens;
     let max;
@@ -355,7 +367,9 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
     return result;
 }
 
+/** @param {float} temperature */
 async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updatedCallback) {
+    reuse_cache = 0;
     let context = [];
     if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
         let prefix = [TOK_STARTOFPREV];
@@ -425,7 +439,8 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
 
             if (cancelToken.cancelled) return;
 
-            let decode_result = await decodeOne(nets, sequences[idx], decoder_state, temperature, audio_features);
+            let decode_result = await decodeOne(nets, sequences[idx], decoder_state, audio_features);
+            decode_result = await decodeOne2(sequences[idx], decode_result, temperature);
             let keep_going = decode_result.keep_going;
             sequences[idx].context = decode_result.context;
             sequences[idx].avg_logprob = decode_result.avg_logprob;

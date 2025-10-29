@@ -151,7 +151,9 @@ function onTranscriptionEvent(event, data) {
 }
 
 currentCancel = { cancelled: false };
-await transcribeAudio(nets, async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, async () => {});
+// let temperature = 0.1;
+let temperature = 0.0;
+await transcribeAudio(nets, async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, async () => {}, temperature);
 console.log("we're supposed to be done here");
 
 delete globalThis.mel;
