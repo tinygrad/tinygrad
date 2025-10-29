@@ -242,69 +242,51 @@ const ncu_layout = (counters) => {
 
   // *** units
   const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
-  const SPACE = 80, width = 140, H = 440;
+  const width = 140, H = 440;
   const l = {kernel:{width:width*0.4, height:H, x:0, y:0, color:colors.LOGICAL, label:"Kernel"}}; // baseline
 
-  // memory hierachy
-  l.isa_global  = {width, height:H*.1,    x:l.kernel.x+l.kernel.width+SPACE,         y:0,                    color:colors.LOGICAL,  label:"Global"}
-  l.isa_local   = {width, height:H*.1,    x:l.isa_global.x,                          y:H*.1+SPACE,           color:colors.LOGICAL,  label:"Local"}
-  l.isa_shared  = {width, height:H*.1,    x:l.isa_global.x,                          y:H*.7+SPACE,           color:colors.LOGICAL,  label:"Shared"}
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({ rankdir:"LR" }).setDefaultEdgeLabel(() => ({}))
 
-  l.l1          = {width, height:H*.7,    x:l.isa_global.x+l.isa_global.width+SPACE, y:0,                    color:colors.PHYSICAL, label:"L1/TEX Cache\nHit Rate: "+fmt("L1 Hit Rate (%)")}
-  l.shared      = {width, height:H*.1,    x:l.l1.x,                                  y:l.isa_shared.y,       color:colors.PHYSICAL, label:"Shared Memory"}
+  g.setNode("kernel", {width:width*0.4, height:H, color: colors.LOGICAL,  label:"Kernel"});
+  g.setNode("isa_global", {width, height:H*0.1, color:colors.LOGICAL,  label:"Global"});
+  g.setNode("isa_local",  {width, height:H*0.1, color:colors.LOGICAL,  label:"Local"});
+  g.setNode("isa_shared", {width, height:H*0.1, color:colors.LOGICAL,  label:"Shared"});
+  g.setNode("l1",         {width, height:H*0.7, color:colors.PHYSICAL, label:"L1/TEX Cache\nHit Rate: "+fmt("L1 Hit Rate (%)")});
+  g.setNode("shared",     {width, height:H*0.1, color:colors.PHYSICAL, label:"Shared Memory"});
+  g.setNode("l2",         {width, height:H*0.9, color:colors.PHYSICAL, label:"L2 Cache\nHit Rate: "+fmt("L2 Hit Rate (%)")});
+  g.setNode("device_mem", {width, height:H*0.1, color:colors.PHYSICAL, label:"Device Memory"});
 
-  l.l2          = {width, height:H*.9,    x:l.l1.x+l.l1.width+SPACE,                 y:0,                    color:colors.PHYSICAL, label:"L2 Cache\nHit Rate: "+fmt("L2 Hit Rate (%)")}
+  g.setEdge("kernel", "isa_global", {typ:"dbl", val:fmt("Kernel <-> Global")});
+  g.setEdge("kernel", "isa_shared", {typ:"dbl", val:fmt("Kernel <-> Shared")});
+  g.setEdge("kernel", "isa_local", {typ:"dbl", val:fmt("Kernel <-> Local")});
+  g.setEdge("isa_global", "l1", {val:[fmt("Global <- L1 Cache"), fmt("Global -> L1 Cache")]});
+  g.setEdge("isa_local", "l1", {val:[fmt("Local <- L1 Cache"), fmt("Local -> L1 Cache")]});
+  g.setEdge("isa_shared", "shared", {val:[fmt("Shared <- Shared Memory"), fmt("Shared -> Shared Memory")]});
+  g.setEdge("l1", "l2", {val:[fmt("L1 Cache <- L2 Cache (bytes)"), fmt("L1 Cache -> L2 Cache (bytes)")]});
+  g.setEdge("l2", "device_mem", {val:[fmt("L2 Cache <- Device Memory (bytes)"), fmt("L2 Cache -> Device Memory (bytes)")]});
+  g.setEdge("shared", "l2", {above:"l1", val:fmt("L1 -> Shared (bytes)")});
 
-  l.device_mem  = {width, height:H*.1,    x:l.l2.x+l.l2.width+SPACE,                 y:l.l2.height/2,        color:colors.PHYSICAL, label:"Device Memory"}
+  dagre.layout(g);
+  const layout = dagre.graphlib.json.write(g);
 
-  // *** links
   const edges = [];
-  const addEdge = (v, w, f, opts) => edges.push({v, w, value:{points:f(l[v], l[w]).map(p => ({x:p[0], y:p[1]})), ...opts}});
-  const center = (x) => x.y+x.height/2;
-
-  // TODO: this part needs cleanup and has many copy paste
-  const s = 6; // space between edge and edge text
-
-  // these are all the edge types, can unify more
-  const e1 = (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]]
-  const e2 = (v, w) => [[v.x, center(w)],         [w.x+w.width, center(w)]]
-  const e3 = (v, w) => [[v.x, center(v)],         [w.x+w.width, center(v)]]
-  const e4 = (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]]
-
-  addEdge("kernel", "isa_global", e1, { offsetY:-s, name:fmt("Kernel <-> Global") });
-  addEdge("isa_global", "kernel", e3);
-
-  addEdge("kernel", "isa_local", e1, { offsetY:-s, name:fmt("Kernel <-> Local") });
-  addEdge("isa_local", "kernel", e3);
-
-  addEdge("kernel", "isa_shared", e1, { offsetY:-s, name:fmt("Kernel <-> Shared") });
-  addEdge("isa_shared", "kernel", e3);
-
-  addEdge("l1", "isa_global", e2, { offsetY:-s, name:fmt("Global <- L1 Cache") });
-  addEdge("isa_global", "l1", e4, { offsetY:s, name:fmt("Global -> L1 Cache") });
-
-  addEdge("l1", "isa_local", e2, { offsetY:-s, name:fmt("Local <- L1 Cache") });
-  addEdge("isa_local", "l1", e4, { offsetY:s, name:fmt("Local -> L1 Cache") });
-
-  addEdge("l1", "isa_shared", e2, { offsetY:-s, name:fmt("Shared <- Shared Memory") });
-  addEdge("isa_shared", "l1", e4, { offsetY:s, name:fmt("Shared -> Shared Memory") });
-
-  addEdge("l2", "l1", e2, { offsetY:-s, name:fmt("L1 Cache <- L2 Cache (bytes)") });
-  addEdge("l1", "l2", e4, { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
-
-  addEdge("l2", "device_mem", e1, { offsetY:-s, name:fmt("L2 Cache <- Device Memory (bytes)") });
-  addEdge("device_mem", "l2", e4, { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
-
-  addEdge("l1", "shared", (v, w) => [[w.x+w.width/2, v.y+v.height], [v.x+v.width/2, w.y]], { offsetX:s, name:fmt("L1 -> Shared (bytes)") });
-
-  const nodes = Object.entries(l).map(([v, value]) => ({ v, value }))
-  // reposition to center before painting
-  for (let i=0; i<nodes.length; i++) {
-    nodes[i].value.x += nodes[i].value.width/2;
-    nodes[i].value.y += nodes[i].value.height/2;
+  for (let e of layout.edges) {
+    let edge = e.value;
+    let points = edge.points;
+    if (edge.above != null) {
+      const nw = g.node(edge.above);
+      const nv = g.node(e.v);
+      const x = points[0].x-(nv.width/2);
+      points = [{x, y:nv.y-nv.height/2}, {x, y:nw.y+nw.height/2}];
+      edges.push({ v:e.v, w:e.w, value:{val:edge.val, points} });
+    } else if (edge.typ === "dbl") {
+      edges.push(e);
+    } else {
+      edges.push({ v:e.v, w:e.w, value:{val:edge.val[0], points}});
+    }
   }
-
-  return { nodes, edges };
+  return { nodes:layout.nodes, edges };
 }
 const MEMORY_LAYOUTS = {"CUDA":ncu_layout}
 
@@ -312,14 +294,14 @@ function renderCacheGraph(data) {
   const layout = MEMORY_LAYOUTS[data.device];
   displaySelection("#graph");
   const graph = layout(JSON.parse(data.src));
-  drawGraph(graph, { labelAuto:true, skipEdgeTags:true });
+  drawGraph(graph);
   d3.select("#edge-labels").html("");
   d3.select("#edge-labels").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true).attr("transform", e => {
     const [p1, p2] = e.value.points;
     const x = (p1.x + p2.x) / 2 + (e.value.offsetX || 0);
     const y = (p1.y + p2.y) / 2 + (e.value.offsetY || 0);
     return `translate(${x},${y})`;
-  }).append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.name);
+  }).append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.val);
   if (data.prg != null) {
     const cb = codeBlock(data.prg, "cpp", { wrap:false });
     cb.classList.add("full-height");
