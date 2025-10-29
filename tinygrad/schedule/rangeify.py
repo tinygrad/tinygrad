@@ -334,11 +334,17 @@ def bufferize_to_store(x:UOp, allow_locals=True):
 
   if allow_locals:
     # handle locals
+    assert len(x.src) == 2
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0]).end(*UOp.sink(*rngs).ranges)
+    do_store = buf.reshape(shape).broadcast(x.src[1].dtype.count).index(*rngs, dtype=sdtype).store(x.src[0]).end(*UOp.sink(*rngs).ranges)
     return buf.after(do_store.barrier()).reshape(shape)
+
+    #buf = UOp(Ops.DEFINE_LOCAL, x.dtype.scalar().ptr(size=size*x.dtype.count, addrspace=x.arg.addrspace), arg=tag)
+    #do_store = buf.cast(sdtype).broadcast(x.src[1].dtype.count).index(*rngs, dtype=sdtype).store(x.src[0]).end(*UOp.sink(*rngs).ranges)
+    #return buf.after(do_store.barrier()).cast(sdtype)
+
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
