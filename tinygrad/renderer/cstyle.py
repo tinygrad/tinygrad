@@ -71,19 +71,20 @@ extra_pm = PatternMatcher([
   (UPat(Ops.WHERE, name="alu"), no_vectorized_alu),
 ])
 
-def create_non_native_float_pats(dts:tuple[DType]|DType, casting:bool=True):
-  patterns = [
+def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
+  patterns = PatternMatcher([
     (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
      lambda b,x,y: UOp(Ops.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(x.dtype)),
     (UPat(GroupOp.ALU, dtype=dts, name="x"),
      lambda x: UOp(x.op, dtypes.float, tuple(vv.cast(dtypes.float) for vv in x.src), x.arg).cast(x.dtype)),
     (UPat(GroupOp.ALU, dtypes.bool, name="alu", src=(UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
-     lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg))]
+     lambda alu,x,y: UOp(alu.op, dtypes.bool, (x.cast(dtypes.float), y.cast(dtypes.float)), alu.arg))])
   if casting:
     # add float intermediate casting
-    patterns += [(UPat(Ops.CAST, dts, (UPat.var("x"),), name="y"), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=dtypes.float else None),
-      (UPat(Ops.CAST, name="x", src=(UPat.var("y", dts),)), lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None)]
-  return PatternMatcher(patterns)
+    patterns += PatternMatcher([
+      (UPat(Ops.CAST, dts, (UPat.var("x"),), name="y"), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=dtypes.float else None),
+      (UPat(Ops.CAST, name="x", src=(UPat.var("y", dts),)), lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None)])
+  return patterns
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
