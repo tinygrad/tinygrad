@@ -41,22 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_hip() {
-  clang2py /opt/rocm/include/hip/hip_ext.h /opt/rocm/include/hip/hiprtc.h \
-  /opt/rocm/include/hip/hip_runtime_api.h /opt/rocm/include/hip/driver_types.h \
-  --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/hip.py -l /opt/rocm/lib/libamdhip64.so
-  echo "hipDeviceProp_t = hipDeviceProp_tR0600" >> $BASE/hip.py
-  echo "hipGetDeviceProperties = hipGetDevicePropertiesR0600" >> $BASE/hip.py
-  fixup $BASE/hip.py
-  # we can trust HIP is always at /opt/rocm/lib
-  #sed -i "s\import ctypes\import ctypes, ctypes.util\g" $BASE/hip.py
-  #sed -i "s\ctypes.CDLL('/opt/rocm/lib/libhiprtc.so')\ctypes.CDLL(ctypes.util.find_library('hiprtc'))\g" $BASE/hip.py
-  #sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamdhip64.so')\ctypes.CDLL(ctypes.util.find_library('amdhip64'))\g" $BASE/hip.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/hip.py
-  sed -i "s\'/opt/rocm/\os.getenv('ROCM_PATH', '/opt/rocm/')+'/\g" $BASE/hip.py
-  python3 -c "import tinygrad.runtime.autogen.hip"
-}
-
 generate_comgr() {
   clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
   --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
@@ -311,8 +295,7 @@ generate_mesa() {
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
-if [ "$1" == "hip" ]; then generate_hip
-elif [ "$1" == "comgr" ]; then generate_comgr
+if [ "$1" == "comgr" ]; then generate_comgr
 elif [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
@@ -321,6 +304,6 @@ elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_hip; generate_comgr; generate_hsa; generate_amd; generate_am; generate_mesa
+elif [ "$1" == "all" ]; then generate_comgr; generate_hsa; generate_amd; generate_am; generate_mesa
 else echo "usage: $0 <type>"
 fi
