@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import flatten, get_single_element, prod
+from tinygrad.helpers import flatten, get_single_element, prod, unwrap
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -119,8 +119,12 @@ string_rewrite = PatternMatcher([
      if x.dtype.count > 1 else f"ld.{mem_type(buf)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];"),
   # simple
   (UPat(Ops.DEFINE_REG, src=()), lambda ctx: []),
-  (UPat(Ops.RANGE, name="r"), lambda ctx, r: [f"mov.u32 {ctx.r[r]}, 0;", "LOOP_" + f"{ctx.r[r][1:]}:"]),
+  (UPat(Ops.RANGE, name="r"), lambda ctx, r: [
+    f"mov.u32 {ctx.r[r]}, -1;",
+    f"bra END_{ctx.r[r][1:]};",
+    "LOOP_" + f"{ctx.r[r][1:]}:"]),
   (UPat(Ops.END, name="x", src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda ctx, x, r: [
+    "END_" + f"{ctx.r[r][1:]}:",
     ctx.code_for_op[Ops.ADD](ctx.r[r], ctx.r[r], "1", dtypes.int, ctx.types[dtypes.int]),
     ctx.code_for_op[Ops.CMPLT](ctx.r[x], ctx.r[r], ctx.r[r.src[0]], dtypes.int, ctx.types[dtypes.int]),
     f"@{ctx.r[x]} bra LOOP_{ctx.r[r][1:]};"]),
@@ -177,7 +181,7 @@ class PTXRenderer(Renderer):
 
     def ssa(prefix:str, u:UOp|None=None, dtype:str|None=None) -> str:
       nonlocal c, r
-      prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype.base]}_"
+      prefix += f"_{dtype if dtype is not None else self.types[unwrap(u).dtype.base]}_"
       c[prefix] += 1
       return f"%{prefix}{c[prefix]-1}"
 

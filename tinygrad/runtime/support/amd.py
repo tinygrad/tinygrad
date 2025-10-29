@@ -3,6 +3,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
 
+AMDGPU_URL = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd"
+ROCM_URL = "https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects"
+
 @dataclass
 class AMDReg:
   name:str; offset:int; segment:int; fields:dict[str, tuple[int, int]]; bases:dict[int, tuple[int, ...]] # noqa: E702
@@ -41,11 +44,9 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
 
   return [version, version[:2], version[:2]+(0,), version[:1]+(0, 0)]
 
-def header_download(file, name=None, subdir="defines", url=None) -> str:
-  url = url or "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd"
-  return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
+def header_download(file, name=None, subdir="defines", url=AMDGPU_URL) -> str: return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
 
-def import_header(path:str, url=None):
+def import_header(path:str, url=AMDGPU_URL):
   t = re.sub(r'//.*|/\*.*?\*/','', header_download(path, subdir="defines", url=url), flags=re.S)
   # TODO: refactor when clang2py is replaced
   return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t) + \
@@ -59,8 +60,7 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
 
 def import_soc(ip):
   # rocm soc headers have more profiling enums than upstream linux
-  url = "https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects"
-  return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", url=url))
+  return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", ROCM_URL))
 
 def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"include/{('sienna_cichlid' if ip[0] > 9 else 'vega20')}_ip_offset.h"))
 
