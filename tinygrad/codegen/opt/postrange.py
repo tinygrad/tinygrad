@@ -5,7 +5,7 @@ from typing import cast, Final
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, axis_letters, axis_colors
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
-from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -64,8 +64,8 @@ class Scheduler:
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
   def _globalizable_rngs(self) -> list[UOp]:
-    assert len(self.ast.src)==1, "only single END supported"
-    return list(end.src[1:]) if len(self.ast.src)==1 and (end:=self.ast.src[0]).op is Ops.END else []
+    assert len(self.ast.src)==1 or not any(u.op is Ops.END for u in self.ast.src), "only single END supported"
+    return list(end.ranges) if len(self.ast.src)==1 and (end:=self.ast.src[0]).op is Ops.END else []
 
   def convert_loop_to_global(self):
     if not self.ren.has_local: return None
