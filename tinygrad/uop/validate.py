@@ -47,7 +47,7 @@ try:
   ])
 
   def uops_to_z3(solver, *uops: UOp) -> list[z3.ExprRef]:
-    lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.dtype in dtypes.ints+(dtypes.bool, dtypes.index,dtypes.void)))[:-1]  # exclude sink
+    lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.dtype in dtypes.ints+(dtypes.bool, dtypes.index) or x.op is Ops.SINK))[:-1]
     z3map: dict[UOp, z3.ExprRef] = {}
     for i,u in enumerate(lst):
       new_u, constraint = cast(tuple[z3.ArithRef, z3.BoolRef|None], z3_renderer.rewrite(u, ctx=(solver, z3map)))
