@@ -14,6 +14,7 @@ _anonstruct1._fields_ = [
   ('cmd_op', ctypes.c_uint),
   ('__pad1', ctypes.c_uint),
 ]
+_anonunion0._anonymous_ = ['_0']
 _anonunion0._fields_ = [
   ('off', ctypes.c_ulonglong),
   ('addr2', ctypes.c_ulonglong),
@@ -25,6 +26,7 @@ _anonstruct3._fields_ = [
   ('level', ctypes.c_uint),
   ('optname', ctypes.c_uint),
 ]
+_anonunion2._anonymous_ = ['_0']
 _anonunion2._fields_ = [
   ('addr', ctypes.c_ulonglong),
   ('splice_off_in', ctypes.c_ulonglong),
@@ -68,6 +70,7 @@ _anonstruct7._fields_ = [
   ('addr_len', ctypes.c_ushort),
   ('__pad3', (ctypes.c_ushort * 1)),
 ]
+_anonunion6._anonymous_ = ['_0']
 _anonunion6._fields_ = [
   ('splice_fd_in', ctypes.c_int),
   ('file_index', ctypes.c_uint),
@@ -81,17 +84,13 @@ _anonstruct9._fields_ = [
   ('addr3', ctypes.c_ulonglong),
   ('__pad2', (ctypes.c_ulonglong * 1)),
 ]
+_anonunion8._anonymous_ = ['_0']
 _anonunion8._fields_ = [
   ('_0', _anonstruct9),
   ('optval', ctypes.c_ulonglong),
   ('cmd', (ctypes.c_ubyte * 0)),
 ]
-'_0'
-'_1'
-'_2'
-'_3'
-'_4'
-'_5'
+struct_io_uring_sqe._anonymous_ = ['_0', '_1', '_2', '_3', '_4', '_5']
 struct_io_uring_sqe._fields_ = [
   ('opcode', ctypes.c_ubyte),
   ('flags', ctypes.c_ubyte),
@@ -194,6 +193,7 @@ _anonstruct11._fields_ = [
   ('cmd_op', ctypes.c_uint),
   ('__pad1', ctypes.c_uint),
 ]
+_anonunion10._anonymous_ = ['_0']
 _anonunion10._fields_ = [
   ('off', ctypes.c_ulonglong),
   ('addr2', ctypes.c_ulonglong),
@@ -205,6 +205,7 @@ _anonstruct13._fields_ = [
   ('level', ctypes.c_uint),
   ('optname', ctypes.c_uint),
 ]
+_anonunion12._anonymous_ = ['_0']
 _anonunion12._fields_ = [
   ('addr', ctypes.c_ulonglong),
   ('splice_off_in', ctypes.c_ulonglong),
@@ -246,6 +247,7 @@ _anonstruct17._fields_ = [
   ('addr_len', ctypes.c_ushort),
   ('__pad3', (ctypes.c_ushort * 1)),
 ]
+_anonunion16._anonymous_ = ['_0']
 _anonunion16._fields_ = [
   ('splice_fd_in', ctypes.c_int),
   ('file_index', ctypes.c_uint),
@@ -258,6 +260,7 @@ _anonstruct19._fields_ = [
   ('addr3', ctypes.c_ulonglong),
   ('__pad2', (ctypes.c_ulonglong * 1)),
 ]
+_anonunion18._anonymous_ = ['_0']
 _anonunion18._fields_ = [
   ('_0', _anonstruct19),
   ('optval', ctypes.c_ulonglong),
@@ -460,6 +463,7 @@ _anonunion25._fields_ = [
   ('sqe_op', ctypes.c_ubyte),
   ('sqe_flags', ctypes.c_ubyte),
 ]
+struct_io_uring_restriction._anonymous_ = ['_0']
 struct_io_uring_restriction._fields_ = [
   ('opcode', ctypes.c_ushort),
   ('_0', _anonunion25),
@@ -489,12 +493,12 @@ _anonstruct28._fields_ = [
   ('__empty_bufs', _anonstruct28___empty_bufs),
   ('bufs', (struct_io_uring_buf * 0)),
 ]
-'_0'
-'_1'
+_anonunion26._anonymous_ = ['_0', '_1']
 _anonunion26._fields_ = [
   ('_0', _anonstruct27),
   ('_1', _anonstruct28),
 ]
+struct_io_uring_buf_ring._anonymous_ = ['_0']
 struct_io_uring_buf_ring._fields_ = [
   ('_0', _anonunion26),
 ]

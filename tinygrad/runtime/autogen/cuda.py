@@ -186,6 +186,7 @@ _anonunion0._fields_ = [
   ('value', cuuint32_t),
   ('value64', cuuint64_t),
 ]
+struct_CUstreamMemOpWaitValueParams_st._anonymous_ = ['_0']
 struct_CUstreamMemOpWaitValueParams_st._fields_ = [
   ('operation', CUstreamBatchMemOpType),
   ('address', CUdeviceptr),
@@ -199,6 +200,7 @@ _anonunion1._fields_ = [
   ('value', cuuint32_t),
   ('value64', cuuint64_t),
 ]
+struct_CUstreamMemOpWriteValueParams_st._anonymous_ = ['_0']
 struct_CUstreamMemOpWriteValueParams_st._fields_ = [
   ('operation', CUstreamBatchMemOpType),
   ('address', CUdeviceptr),

@@ -205,6 +205,7 @@ _anonunion0._fields_ = [
   ('hw_exception_data', struct_kfd_hsa_hw_exception_data),
   ('signal_event_data', struct_kfd_hsa_signal_event_data),
 ]
+struct_kfd_event_data._anonymous_ = ['_0']
 struct_kfd_event_data._fields_ = [
   ('_0', _anonunion0),
   ('kfd_event_data_ext', ctypes.c_ulonglong),
@@ -649,6 +650,7 @@ _anonunion1._fields_ = [
   ('queue_snapshot', struct_kfd_ioctl_dbg_trap_queue_snapshot_args),
   ('device_snapshot', struct_kfd_ioctl_dbg_trap_device_snapshot_args),
 ]
+struct_kfd_ioctl_dbg_trap_args._anonymous_ = ['_0']
 struct_kfd_ioctl_dbg_trap_args._fields_ = [
   ('pid', ctypes.c_uint),
   ('op', ctypes.c_uint),

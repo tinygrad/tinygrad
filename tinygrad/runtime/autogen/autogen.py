@@ -63,7 +63,7 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False):
         aa, acnt = [], itertools.count().__next__
         ll=["  ("+((aa.append(fn:=f"'_{acnt()}'") or fn)+f", {tname(f.type)}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
-        lines.extend((aa if acnt() != 1 else [])+[f"{nm}._fields_ = [",*ll,"]"] if ll else [f"{nm}._fields_ = []"])
+        lines.extend(([f"{nm}._anonymous_ = [{', '.join(aa)}]"] if aa else [])+[f"{nm}._fields_ = [",*ll,"]"] if ll else [f"{nm}._fields_ = []"])
         return nm
       case TK.ENUM:
         if (decl:=t.get_declaration()).is_anonymous(): types[t.spelling] = suggested_name or f"_anonenum{anoncnt()}"
