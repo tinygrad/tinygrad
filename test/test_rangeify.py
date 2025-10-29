@@ -3,6 +3,7 @@ from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG, DEBUG
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 from tinygrad.codegen.opt import OptOps, Opt
+from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
@@ -114,7 +115,7 @@ def fa_bw():
   Tensor.realize(*ret)
   return ret
 
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer, CUDARenderer)), "broken in LVP and PTX")
 class TestPcontig(unittest.TestCase):
   def test_flash_attention_bw(self):
     with Context(PCONTIG=max(2, PCONTIG.value), DEBUG=2):

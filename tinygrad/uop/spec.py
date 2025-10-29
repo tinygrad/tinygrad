@@ -233,6 +233,7 @@ full_spec = PatternMatcher([
   # temp VECTORIZE/INDEX during rewrite have the wrong dtype
   (UPat(Ops.VECTORIZE), lambda: True),
   (UPat(Ops.INDEX), lambda: True),
+  (UPat(Ops.APPENDINDEX), lambda: True),
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
