@@ -769,6 +769,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
     self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
+  def test_symbolic_range_doesnt_collapse(self):
+    r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.index), 0)
+    self.helper_test_variable(r0, 0, 0, "r0")
+
   def test_const_reciprocal(self):
     a = Variable("a", 1, 10, dtypes.float)
     # TODO: bounds for reciprocal
