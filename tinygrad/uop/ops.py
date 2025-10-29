@@ -346,7 +346,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
   def broadcast(self, count:int):
-    assert self.dtype.count == 1
+    assert self.dtype.vcount == 1
     if count == 1: return self
     return UOp(Ops.VECTORIZE, self.dtype.vec(count), (self,)*count)
   def cast(self, dtype:DType):
@@ -1330,7 +1330,7 @@ def pyrender(ast:UOp) -> str:
       r[u.arg.ast] = kernels[u.arg.ast][0]
     ren = cast(str, pm_pyrender.rewrite(u, ctx=r))
     assert isinstance(ren, str)
-    if u.tag is not None: ren += f".rtag({u.tag})"
+    if u.tag is not None: ren += f".rtag({repr(u.tag)})"
     if u not in to_render: r[u] = ren
     else:
       r[u] = f"c{i}" if u is not lst[-1] else "ast"

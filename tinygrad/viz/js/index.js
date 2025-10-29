@@ -585,12 +585,13 @@ const evtSources = [];
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
+  const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
   // update element styles if needed
   const { ctx, step } = select(state.currentCtx, state.currentStep);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
   if (ctx?.id !== prevCtx?.id) {
-    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentRewrite:0, currentStep:0, expandSteps:false });
+    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentStep:deselect(prevStep).step || 0, currentRewrite:prevRewrite, expandSteps:true });
     toggleCls(prevCtx, ctx, "active");
   }
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {

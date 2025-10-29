@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import flatten, get_single_element, prod
+from tinygrad.helpers import flatten, get_single_element, prod, unwrap
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -181,7 +181,7 @@ class PTXRenderer(Renderer):
 
     def ssa(prefix:str, u:UOp|None=None, dtype:str|None=None) -> str:
       nonlocal c, r
-      prefix += f"_{dtype if dtype is not None else self.types[cast(UOp, u).dtype.base]}_"
+      prefix += f"_{dtype if dtype is not None else self.types[unwrap(u).dtype.base]}_"
       c[prefix] += 1
       return f"%{prefix}{c[prefix]-1}"
 
