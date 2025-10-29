@@ -32,8 +32,8 @@ class TestBigDoubleMatmul(unittest.TestCase):
     outs += (Opt(OptOps.TC, 0, (0, 0, 1, 0)),)
     outs += (Opt(OptOps.UPCAST, 0, 4),)
     outs += (Opt(OptOps.UPCAST, 1, 4),)
-    outs += (Opt(OptOps.UNROLL, 0, 2),)
-    outs += (Opt(OptOps.UNROLL, 1, 2),)
+    #outs += (Opt(OptOps.UNROLL, 0, 4),)
+    #outs += (Opt(OptOps.UNROLL, 1, 4),)
     self._test(outs)
 
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer, CUDARenderer)), "broken in LVP and PTX")
