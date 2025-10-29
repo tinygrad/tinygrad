@@ -146,7 +146,7 @@ class AMDComputeQueue(HWQueue):
   def pmc_start(self, counters):
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0) # reset counters
-    self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1) # TODO: need graphics?
+    self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1)
     self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL2, force_en=1, vmid_en=0xffff)
 
     out_off = 0
@@ -899,7 +899,7 @@ class AMDDevice(HCQCompiled):
       if self.target[0] not in {11}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
       if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: AMD_IFACE=KFD and `amd-smi set -l stable_std`")
 
-      PMC_COUNTERS = getenv("PMC_COUNTERS", "GL2C_MISS,SQ_INSTS_WAVE32").split(",")
+      PMC_COUNTERS = getenv("PMC_COUNTERS", "GL2C_HIT,GL2C_MISS,SQC_LDS_IDX_ACTIVE,SQC_LDS_BANK_CONFLICT").split(",")
       self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
 
