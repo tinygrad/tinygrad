@@ -55,7 +55,17 @@ class TestDoubleMatmul(unittest.TestCase):
   def test_demote(self): self._test((Opt(OptOps.DEMOTE, 2, 8),))
 
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only for METAL TC")
-  def test_demote_tc(self): self._test((Opt(OptOps.DEMOTE, 2, 8), (Opt(OptOps.TC, 0, (0, 0, 1)))))
+  def test_demote_tc_top(self):
+    self._test((Opt(OptOps.DEMOTE, 2, 8), Opt(OptOps.TC, 0, (0, 0, 1, 0))))
+
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "only for METAL TC")
+  def test_demote_tc_bottom(self):
+    self._test((Opt(OptOps.DEMOTE, 2, 8), Opt(OptOps.TC, 0, (0, 0, 1, 1))))
+
+  @unittest.skip("broken")
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "only for METAL TC")
+  def test_demote_tc_both(self):
+    self._test((Opt(OptOps.DEMOTE, 2, 8), Opt(OptOps.TC, 0, (0, 0, 1, 0)), Opt(OptOps.TC, 0, (0, 0, 1, 1))))
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
