@@ -1,4 +1,3 @@
-from typing import cast
 from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
@@ -573,5 +572,5 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     assert s.tag is not None
     for a in s.tag:
       if a is None: continue
-      becomes_map[uop_list[cast(int, a)]] = s.replace(tag=None)
+      becomes_map[uop_list[int(a)]] = s.replace(tag=None)
   return becomes_map
