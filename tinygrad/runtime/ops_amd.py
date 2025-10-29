@@ -907,7 +907,7 @@ class AMDDevice(HCQCompiled):
         if k not in self.pmc_counters: raise RuntimeError(f"PMC counter {k} is not supported. Available: {','.join(self.pmc_counters.keys())}")
 
       cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([self.pmc_counters[k] for k in PMC_COUNTERS]).submit(self)
-      self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
+      self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and SQTT > 0
