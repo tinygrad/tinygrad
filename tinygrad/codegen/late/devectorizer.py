@@ -240,15 +240,18 @@ def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
 
 def no_vectorized_index_broadcast(buf:UOp, cast:UOp, bcast:UOp, idx:UOp):
   cnt = cast.dtype.count
-  precnt = len(bcast.src)
+  precnt = bcast.dtype.vcount
+  input_gep = bcast.arg if bcast.op is Ops.GEP else ([0]*precnt)
   gep_arg = tuple(flatten([range(precnt) for _ in range(cnt)]))
-  sum_arg = tuple(flatten([[i]*precnt for i in range(cnt)]))
+  sum_arg = tuple(flatten([[i+y for y in input_gep] for i in range(cnt)]))
   return buf.broadcast(cnt*precnt).index(idx.gep(gep_arg)*cnt+UOp.const(dtypes.index.vec(cnt*precnt), sum_arg))
 
 devectorize_buf_and_index = PatternMatcher([
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").broadcast(name="bcast").index(UPat.var("idx")),
+   no_vectorized_index_broadcast),
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").gep(name="bcast").index(UPat.var("idx")),
    no_vectorized_index_broadcast),
 ])
 
