@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, nn, Device
-from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG
+from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG, DEBUG
 from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
 from tinygrad.codegen.opt import OptOps, Opt
 from tinygrad.renderer.ptx import PTXRenderer
@@ -14,7 +14,7 @@ class TestDoubleMatmul(unittest.TestCase):
       self.cmp = (self.a @ self.b @ self.c).realize()
 
   def _test(self, opts):
-    with Context(PCONTIG=2, DEBUG=2):
+    with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
       out = (self.a @ self.b @ self.c).contiguous(arg=opts).realize()
 
     with Context(DEBUG=0):
