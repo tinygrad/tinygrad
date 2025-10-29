@@ -29,7 +29,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     if QUANTIZE and ren.device in {"CPU", "DSP"}: sink = graph_rewrite(sink, pm_quant, name="quantize")
 
     # TODO: fix expander and remove this
-    sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, name="add locals early")
+    #sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, name="add locals early")
 
     # collapse loads reduce (indexing by a tensor)
     sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
