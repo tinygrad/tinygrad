@@ -299,7 +299,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-class Flat():
+class Flat:
   def __init__(self, x): self.x = x
 
 def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
