@@ -368,6 +368,7 @@ async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
 }
 
 /** @param {float} temperature */
+/** @returns {Promise<Decode_Sequence|undefined>} */
 async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updatedCallback) {
     reuse_cache = 0;
     let context = [];
@@ -464,7 +465,8 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
     let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
 
-    return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, context_prompt_length];
+    return sequences[idx];
+    // return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, context_prompt_length];
 }
 
 async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAndInitializeModels, initial_temperature = 0) {
@@ -499,45 +501,60 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         seek_ranges.push(seek);
     }
 
+    const batch_size = 2;
     for (let seek_index = 0; seek_index < seek_ranges.length;) {
-        let seek = seek_ranges[seek_index];
-        console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
-        let log_spec = log_specs_full.slice(seek, seek + MEL_SPEC_CHUNK_LENGTH);
-        if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
-            let pad_length = seek + MEL_SPEC_CHUNK_LENGTH - log_specs_full.length;
-            // TODO(irwin): possible double-pad, log_specs were already padded to multiple of MEL_SPEC_CHUNK_LENGTH
-            // so this only triggers on custom seeks
-            console.log(`must pad to ${pad_length}`);
-            let padded = new Float32Array(MEL_SPEC_CHUNK_LENGTH);
-            padded.set(log_specs_full.slice(seek));
-            log_spec = padded;
+        let audio_features_batch = [];
+        for (let i = 0; i < batch_size && seek_index + i < seek_ranges.length; ++i) {
+            let seek = seek_ranges[seek_index + i];
+
+            console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
+            let log_spec = log_specs_full.slice(seek, seek + MEL_SPEC_CHUNK_LENGTH);
+            if (seek + MEL_SPEC_CHUNK_LENGTH > log_specs_full.length) {
+                let pad_length = seek + MEL_SPEC_CHUNK_LENGTH - log_specs_full.length;
+                // TODO(irwin): possible double-pad, log_specs were already padded to multiple of MEL_SPEC_CHUNK_LENGTH
+                // so this only triggers on custom seeks
+                console.log(`must pad to ${pad_length}`);
+                let padded = new Float32Array(MEL_SPEC_CHUNK_LENGTH);
+                padded.set(log_specs_full.slice(seek));
+                log_spec = padded;
+            }
+            const [audio_features] = await nets.encoder(log_spec);
+            audio_features_batch.push(audio_features);
         }
-        const [audio_features] = await nets.encoder(log_spec);
-        // const audio_features = audio_features_full.slice(576000 * (seek / MEL_SPEC_CHUNK_LENGTH), 576000 * ((seek / MEL_SPEC_CHUNK_LENGTH) + 1));
+
         function updateCallback(pd) {
             pendingText = pd;
             onEvent("chunkUpdate", { pendingText });
         }
-        let [avg_logprob, segment_cumlogprob, context, offset] = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
-        if (cancelToken.cancelled) {
-            console.log("Transcription cancelled");
-            onEvent("cancel");
-            return;
-        } else {
-            if ((avg_logprob < -1) && temperature < 1) {
-                temperature += 0.2;
-                console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length - offset}`);
-                continue;
+
+        for (let i = 0; i < batch_size && seek_index + i < seek_ranges.length;) {
+            let seek = seek_ranges[seek_index + i];
+            let audio_features = audio_features_batch[i];
+            let sequence = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
+            if (cancelToken.cancelled) {
+                console.log("Transcription cancelled");
+                onEvent("cancel");
+                return;
             } else {
-                temperature = initial_temperature;
+                let {avg_logprob, segment_cumlogprob, context, context_prompt_length: offset} = sequence;
+                const FALLBACK_DISABLED = true;
+                if (!FALLBACK_DISABLED && (avg_logprob < -1) && temperature < 1) {
+                    temperature += 0.2;
+                    console.log(`decoding failed, raising temperature to ${temperature}, due to one of: avg_logprob: ${avg_logprob}, segment_cumlogprob: ${segment_cumlogprob}, tokens decoded: ${context.length - offset}`);
+                    continue;
+                } else {
+                    temperature = initial_temperature;
+                }
+                previous_context = context.slice();
+
+                onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText });
+                pendingText = '';
+
+                ++i;
             }
-            previous_context = context.slice();
-
-            onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText });
-            pendingText = '';
-
-            ++seek_index;
         }
+
+        seek_index += batch_size;
     }
     onEvent("inferenceDone");
 
