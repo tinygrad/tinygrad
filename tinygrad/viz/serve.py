@@ -251,7 +251,8 @@ def get_stdout(f:Callable) -> str:
   with redirect_stdout(buf:=io.StringIO()): f()
   return buf.getvalue()
 
-def get_render(i:int, fmt:str) -> dict|None:
+def get_render(i:int, j:int, fmt:str) -> dict|None:
+  if fmt == "counters": return ctxs[i]["steps"][j]["data"]
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}
   if fmt == "src": return {"src":prg.src, "lang":"cpp"}
@@ -267,7 +268,7 @@ def get_render(i:int, fmt:str) -> dict|None:
 
 # ** HTTP server
 
-def get_int(query:dict[str, list[str]], k:str) -> int: return int(query[k][0])
+def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -282,7 +283,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/render": ret, content_type = json.dumps(get_render(get_int(query, "ctx"), query["fmt"][0])).encode(), "application/json"
+      if url.path == "/render":
+        render_src = get_render(get_int(query, "ctx"), get_int(query, "step"), query["fmt"][0])
+        ret, content_type = json.dumps(render_src).encode(), "application/json"
       else:
         try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
         except KeyError: status_code = 404
@@ -332,6 +335,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--custom', type=str, help='Path to custom trace file', default=None)
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -344,6 +348,9 @@ if __name__ == "__main__":
 
   ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
+  if args.custom is not None:
+    from extra.perf.counters import load_custom
+    load_custom(args.custom, ctxs)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
