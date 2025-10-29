@@ -264,29 +264,36 @@ const ncu_layout = (counters) => {
 
   // TODO: this part needs cleanup and has many copy paste
   const s = 6; // space between edge and edge text
-  addEdge("kernel", "isa_global", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("Kernel <-> Global") });
-  addEdge("isa_global", "kernel", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]]);
 
-  addEdge("kernel", "isa_local", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("Kernel <-> Local") });
-  addEdge("isa_local", "kernel", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]]);
+  // these are all the edge types, can unify more
+  const e1 = (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]]
+  const e2 = (v, w) => [[v.x, center(w)],         [w.x+w.width, center(w)]]
+  const e3 = (v, w) => [[v.x, center(v)],         [w.x+w.width, center(v)]]
+  const e4 = (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]]
 
-  addEdge("kernel", "isa_shared", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("Kernel <-> Shared") });
-  addEdge("isa_shared", "kernel", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]]);
+  addEdge("kernel", "isa_global", e1, { offsetY:-s, name:fmt("Kernel <-> Global") });
+  addEdge("isa_global", "kernel", e3);
 
-  addEdge("l1", "isa_global", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Global <- L1 Cache") });
-  addEdge("isa_global", "l1", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("Global -> L1 Cache") });
+  addEdge("kernel", "isa_local", e1, { offsetY:-s, name:fmt("Kernel <-> Local") });
+  addEdge("isa_local", "kernel", e3);
 
-  addEdge("l1", "isa_local", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Local <- L1 Cache") });
-  addEdge("isa_local", "l1", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("Local -> L1 Cache") });
+  addEdge("kernel", "isa_shared", e1, { offsetY:-s, name:fmt("Kernel <-> Shared") });
+  addEdge("isa_shared", "kernel", e3);
 
-  addEdge("l1", "isa_shared", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Shared <- Shared Memory") });
-  addEdge("isa_shared", "l1", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("Shared -> Shared Memory") });
+  addEdge("l1", "isa_global", e2, { offsetY:-s, name:fmt("Global <- L1 Cache") });
+  addEdge("isa_global", "l1", e4, { offsetY:s, name:fmt("Global -> L1 Cache") });
 
-  addEdge("l2", "l1", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("L1 Cache <- L2 Cache (bytes)") });
-  addEdge("l1", "l2", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
+  addEdge("l1", "isa_local", e2, { offsetY:-s, name:fmt("Local <- L1 Cache") });
+  addEdge("isa_local", "l1", e4, { offsetY:s, name:fmt("Local -> L1 Cache") });
 
-  addEdge("l2", "device_mem", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("L2 Cache <- Device Memory (bytes)") });
-  addEdge("device_mem", "l2", (v, w) => [[v.x, center(v)+10], [w.x+w.width, center(v)+10]], { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
+  addEdge("l1", "isa_shared", e2, { offsetY:-s, name:fmt("Shared <- Shared Memory") });
+  addEdge("isa_shared", "l1", e4, { offsetY:s, name:fmt("Shared -> Shared Memory") });
+
+  addEdge("l2", "l1", e2, { offsetY:-s, name:fmt("L1 Cache <- L2 Cache (bytes)") });
+  addEdge("l1", "l2", e4, { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
+
+  addEdge("l2", "device_mem", e1, { offsetY:-s, name:fmt("L2 Cache <- Device Memory (bytes)") });
+  addEdge("device_mem", "l2", e4, { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
 
   addEdge("l1", "shared", (v, w) => [[w.x+w.width/2, v.y+v.height], [v.x+v.width/2, w.y]], { offsetX:s, name:fmt("L1 -> Shared (bytes)") });
 
