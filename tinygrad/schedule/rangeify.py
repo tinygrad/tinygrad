@@ -299,11 +299,8 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-class Flat:
-  def __init__(self, x): self.x = x
-
 def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
-  assert isinstance(x.tag, Flat), "bufferize must be flat"
+  #assert isinstance(x.tag, Flat), "bufferize must be flat"
   size = prod(x.shape)
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
@@ -314,7 +311,7 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag.x).end(*rngs)
+    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs)
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
@@ -327,7 +324,7 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    do_store = buf.index(idx, dtype=sdtype).store(x.src[0], tag=x.tag.x).end(*rngs)
+    do_store = buf.index(idx, dtype=sdtype).store(x.src[0], tag=x.tag).end(*rngs)
     return buf.after(do_store)
 
   if allow_locals:
@@ -338,10 +335,10 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
     do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
-# collapse any BUFFERIZE to single input BUFFERIZE. tag it FLAT
+# collapse any BUFFERIZE to single input BUFFERIZE. move the tag to a reshape
 def flatten_bufferize(x:UOp):
-  if isinstance(x.tag, Flat): return None
-  ret = x.replace(tag=Flat(x.tag), src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
+  if x.tag is None and len(x.src) == 2: return None
+  ret = x.replace(tag=None, src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
   rngs = x.src[1:]
   ret = ret.forced_reshape(x.shape)
   if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
