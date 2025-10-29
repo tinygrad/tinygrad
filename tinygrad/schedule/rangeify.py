@@ -299,12 +299,10 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp, allow_locals=True):
-  rngs = x.src[1:]
-  real_rngs = UOp.sink(*rngs).ranges
-  shape = x.shape
-  size = prod(shape)
-  assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {shape}"
+def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
+  assert x.tag == "FLAT", "bufferize must be flat"
+  size = prod(x.shape)
+  assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
@@ -312,7 +310,7 @@ def bufferize_to_store(x:UOp, allow_locals=True):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*real_rngs)
+    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*idx.ranges)
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
@@ -320,37 +318,35 @@ def bufferize_to_store(x:UOp, allow_locals=True):
       mops.append((walk.op, walk.marg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
-    return ret.forced_reshape(shape).replace(tag=x.tag)
+    return ret
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], tag=x.tag).end(*real_rngs)
-    ret = buf.after(do_store).forced_reshape(shape)
+    do_store = buf.index(idx, dtype=sdtype).store(x.src[0], tag=x.tag).end(*idx.ranges)
+    return buf.after(do_store)
     # TODO: is this right? what if it's offset
     #if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
     #  sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
     #  ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
-    return ret.replace(tag=x.tag)
 
   if allow_locals:
     # handle locals
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0]).end(*real_rngs)
-    return buf.after(do_store.barrier()).reshape(shape)
+    do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*idx.ranges)
+    return buf.after(do_store.barrier())
 
 pm_flatten_bufferize = PatternMatcher([
-  # collapse any BUFFERIZE to single input BUFFERIZE
-  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(), UPat()), allow_any_len=True, name="x"),
-    lambda x: x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:])))) \
-      .forced_reshape(x.shape).replace(tag=x.tag)),
+  # collapse any BUFFERIZE to single input BUFFERIZE. tag it FLAT
+  (UPat(Ops.BUFFERIZE, name="x"),
+    lambda x: x.replace(tag="FLAT", src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:])))) \
+      .forced_reshape(x.shape).replace(tag=x.tag) if x.tag != "FLAT" else None),
 ])
 
 pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
-  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat()), name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), lambda x, idx: bufferize_to_store(x, idx, allow_locals=False)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
@@ -358,7 +354,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
 ])
 
 pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat()), name="x"), bufferize_to_store),
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), bufferize_to_store),
 ])
 
 # *****************
@@ -443,7 +439,7 @@ rangeify_codegen = PatternMatcher([
 ])
 
 def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
-  if x.tag is None or x.tag == (): return None
+  if x.tag is None or x.tag == () or not isinstance(x.tag, tuple): return None
   ctx.parent_tags += list(x.tag)
   return x.replace(tag=None)
 
