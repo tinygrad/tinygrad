@@ -274,19 +274,19 @@ const ncu_layout = (counters) => {
   addEdge("isa_shared", "kernel", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]]);
 
   addEdge("l1", "isa_global", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Global <- L1 Cache") });
-  addEdge("isa_global", "l1", (v, w) => [[v.x+v.width, center(v)], [w.x, center(v)]], { offsetY:s, name:fmt("Global -> L1 Cache") });
+  addEdge("isa_global", "l1", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("Global -> L1 Cache") });
 
   addEdge("l1", "isa_local", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Local <- L1 Cache") });
-  addEdge("isa_local", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, center(v)]], { offsetY:s, name:fmt("Local -> L1 Cache") });
+  addEdge("isa_local", "l1", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("Local -> L1 Cache") });
 
   addEdge("l1", "isa_shared", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("Shared <- Shared Memory") });
-  addEdge("isa_shared", "l1", (v, w) => [[v.x+v.width, center(v)], [w.x, center(v)]], { offsetY:s, name:fmt("Shared -> Shared Memory") });
+  addEdge("isa_shared", "l1", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("Shared -> Shared Memory") });
 
   addEdge("l2", "l1", (v, w) => [[v.x, center(w)], [w.x+w.width, center(w)]], { offsetY:-s, name:fmt("L1 Cache <- L2 Cache (bytes)") });
-  addEdge("l1", "l2", (v, w) => [[v.x+v.width, center(v)], [w.x, center(v)]], { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
+  addEdge("l1", "l2", (v, w) => [[v.x+v.width, center(v)+10], [w.x, center(v)+10]], { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
 
   addEdge("l2", "device_mem", (v, w) => [[v.x+v.width, center(w)], [w.x, center(w)]], { offsetY:-s, name:fmt("L2 Cache <- Device Memory (bytes)") });
-  addEdge("device_mem", "l2", (v, w) => [[v.x, center(v)], [w.x+w.width, center(v)]], { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
+  addEdge("device_mem", "l2", (v, w) => [[v.x, center(v)+10], [w.x+w.width, center(v)+10]], { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
 
   addEdge("l1", "shared", (v, w) => [[w.x+w.width/2, v.y+v.height], [v.x+v.width/2, w.y]], { offsetX:s, name:fmt("L1 -> Shared (bytes)") });
 
@@ -840,8 +840,8 @@ async function main() {
         if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:-1 });
-    // return setState({ "currentCtx": 3, "currentStep": 14, "currentRewrite": 0, "expandSteps": true });
+    // return setState({ currentCtx:-1 });
+    return setState({ "currentCtx": 3, "currentStep": 14, "currentRewrite": 0, "expandSteps": true });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
