@@ -144,14 +144,13 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def pmc_start(self, counters):
-    self.dev.pmc_sched:list[PMCSample] = []
-
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0) # reset counters
     self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1) # TODO: need graphics?
     self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL2, force_en=1, vmid_en=0xffff)
 
-    block2pid, out_off = collections.defaultdict(lambda: itertools.count()), 0
+    out_off = 0
+    block2pid:dict[str, itertools.count] = collections.defaultdict(lambda: itertools.count())
     for name,block,idx in counters:
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, self.dev.iface.props['cu_per_simd_array'] // 2)
       reg, out_off = f'reg{block}_PERFCOUNTER{next(block2pid[block])}', out_off + (rec_size:=prod((inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
@@ -901,6 +900,7 @@ class AMDDevice(HCQCompiled):
       if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: AMD_IFACE=KFD and `amd-smi set -l stable_std`")
 
       PMC_COUNTERS = getenv("PMC_COUNTERS", "GL2C_MISS,SQ_INSTS_WAVE32").split(",")
+      self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
 
       cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([self.pmc_counters[k] for k in PMC_COUNTERS]).submit(self)
