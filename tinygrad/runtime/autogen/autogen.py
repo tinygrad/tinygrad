@@ -58,7 +58,7 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False):
       case TK.RECORD:
         if (decl:=t.get_declaration()).is_anonymous():
           types[t.spelling] = nm = suggested_name or (f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{anoncnt()}")
-        else: types[t.spelling] = nm = t.spelling.replace(' ', '_')
+        else: types[t.spelling] = nm = t.spelling.replace(' ', '_').replace('::', '_')
         lines.append(f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass")
         aa, acnt = [], itertools.count().__next__
         ll=["  ("+((aa.append(fn:=f"'_{acnt()}'") or fn)+f", {tname(f.type)}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
@@ -67,9 +67,10 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False):
         return nm
       case TK.ENUM:
         if (decl:=t.get_declaration()).is_anonymous(): types[t.spelling] = suggested_name or f"_anonenum{anoncnt()}"
-        else: types[t.spelling] = t.spelling.replace(' ', '_')
+        else: types[t.spelling] = t.spelling.replace(' ', '_').replace('::', '_')
         lines.append(f"{types[t.spelling]} = CEnum({tname(decl.enum_type)})\n" +
-          "\n".join(f"{e.spelling} = {types[t.spelling]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()) + "\n")
+          "\n".join(f"{e.spelling} = {types[t.spelling]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()
+                    if e.kind == CK.ENUM_CONSTANT_DECL) + "\n")
         return types[t.spelling]
       case TK.CONSTANTARRAY: return f"({tname(t.get_array_element_type())} * {t.get_array_size()})"
       case TK.INCOMPLETEARRAY: return f"({tname(t.get_array_element_type())} * {0})"
