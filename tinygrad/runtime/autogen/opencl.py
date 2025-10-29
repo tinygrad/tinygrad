@@ -1,7 +1,13 @@
 # mypy: ignore-errors
-import ctypes, ctypes.util
+import ctypes
+from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-dll = ctypes.CDLL(ctypes.util.find_library('OpenCL'))
+
+def _dll():
+  try: return ctypes.CDLL(find_library('OpenCL'))
+  except: pass
+  return None
+dll = _dll()
 
 class struct__cl_platform_id(ctypes.Structure): pass
 struct__cl_platform_id._fields_ = []
