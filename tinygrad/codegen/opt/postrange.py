@@ -65,7 +65,7 @@ class Scheduler:
 
   def _globalizable_rngs(self) -> list[UOp]:
     assert len(self.ast.src)==1 or not any(u.op is Ops.END for u in self.ast.src), "only single END supported"
-    return list(end.ranges) if len(self.ast.src)==1 and (end:=self.ast.src[0]).op is Ops.END else []
+    return list(end.src[0].ranges) if len(self.ast.src)==1 and (end:=self.ast.src[0]).op is Ops.END else []
 
   def convert_loop_to_global(self):
     if not self.ren.has_local: return None
