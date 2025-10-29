@@ -93,10 +93,12 @@ const drawGraph = (data) => {
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
-    const edge = g.edge(e);
-    const points = edge.points.slice(1, edge.points.length-1);
-    points.unshift(intersectRect(g.node(e.v), points[0]));
-    points.push(intersectRect(g.node(e.w), points[points.length-1]));
+    let points = g.edge(e).points;
+    if (points.length > 2) {
+      points = points.slice(1, points.length-1);
+      points.unshift(intersectRect(g.node(e.v), points[0]));
+      points.push(intersectRect(g.node(e.w), points[points.length-1]))
+    }
     return line(points);
   }).attr("marker-end", "url(#arrowhead)");
 }
@@ -136,6 +138,186 @@ function renderDag(graph, additions, recenter) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
+}
+
+// ** Cache metrics graph
+
+// per device layout specs
+
+const ncu_layout = (counters) => {
+  // *** metrics are based on the raw counters
+  // TODO: move this to an xml file?
+  const formulas = {
+    "Kernel <-> Global": {"unit":"inst", "keys":[
+      "sass__inst_executed_global_loads",
+      "sass__inst_executed_global_stores",
+      "smsp__inst_executed_op_generic_atom_dot_alu.sum",
+      "smsp__inst_executed_op_generic_atom_dot_cas.sum",
+      "smsp__inst_executed_op_global_red.sum",
+    ]},
+    "Kernel <-> Local": {"unit":"inst", "keys":[
+      "sass__inst_executed_local_loads",
+      "sass__inst_executed_local_stores",
+    ]},
+    "Kernel <-> Shared": {"unit":"inst", "keys":[
+      "sass__inst_executed_shared_loads",
+      "sass__inst_executed_shared_stores",
+      "smsp__inst_executed_op_shared_atom.sum",
+      "smsp__inst_executed_op_ldsm.sum",
+    ]},
+    "Global <- L1 Cache": {"unit":"req", "keys":[
+      "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
+      "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
+      ["sm__sass_l1tex_t_requests_pipe_lsu_mem_global_op_ldgsts.sum", -1],
+    ]},
+    "Global -> L1 Cache": {"unit":"req", "keys":[
+      "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum",
+      "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
+      "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum",
+    ]},
+    "Local <- L1 Cache": {"unit":"req", "keys":[
+      "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum",
+    ]},
+    "Local -> L1 Cache": {"unit":"req", "keys":[
+      "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
+    ]},
+    "Shared <- Shared Memory": {"unit":"inst", "keys":[
+      "sass__inst_executed_shared_loads",
+      "smsp__inst_executed_op_shared_atom.sum",
+      "smsp__inst_executed_op_ldsm.sum",
+    ]},
+    "Shared -> Shared Memory": {"unit":"inst", "keys":[
+      "sass__inst_executed_shared_stores",
+      "smsp__inst_executed_op_shared_atom.sum",
+    ]},
+    "L1 Hit Rate (%)": {"unit":"%", "keys":[
+      "l1tex__t_sector_hit_rate.pct",
+    ]},
+    "L2 Hit Rate (%)": {"unit":"%", "keys":[
+      "lts__t_sector_hit_rate.pct",
+    ]},
+    "L1 Cache <- L2 Cache (bytes)": {"unit":"B", "keys":[
+      "l1tex__m_xbar2l1tex_read_bytes.sum",
+    ]},
+    "L1 Cache -> L2 Cache (bytes)": {"unit":"B", "keys":[
+      "l1tex__m_l1tex2xbar_write_bytes.sum",
+    ]},
+    "L1 -> Shared (bytes)": {"unit":"B", "keys":[
+      ["sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum", 32],
+    ]},
+    "L2 Cache <- Device Memory (bytes)": {"unit":"B", "keys":[
+      "dram__bytes_read.sum",
+    ]},
+    "L2 Cache -> Device Memory (bytes)": {"unit":"B", "keys":[
+      "dram__bytes_write.sum",
+    ]},
+  };
+
+  function findk(obj, key) {
+    let found = null;
+    for (const k of Object.keys(obj)) {
+      if (k.startsWith(key)) { found = k; break; }
+    }
+    return obj[found];
+  }
+  function calc(formula) {
+    let num = 0;
+    for (let k of formulas[formula].keys) {
+      let key, w;
+      if (Array.isArray(k)) {
+        [key, w] = k;
+      } else {
+        key = k; w = 1;
+      }
+      const v = findk(counters, key);
+      if (v == null) {
+        console.warn("no values for", key);
+        continue;
+      }
+      num += v * w;
+    }
+    return num;
+  }
+  const fmt = (formula) => formatUnit(calc(formula), " "+formulas[formula].unit);
+
+  // *** units
+  const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
+  const SPACE = 80, width = 140, H = 440;
+  const l = {kernel:{width:width*0.4, height:H, x:0, y:0, color:colors.LOGICAL, label:"Kernel"}}; // baseline
+
+  // memory hierachy
+  l.isa_global  = {width, height:H*.1,    x:l.kernel.x+l.kernel.width+SPACE,         y:0,                    color:colors.LOGICAL,  label:"Global"}
+  l.isa_local   = {width, height:H*.1,    x:l.isa_global.x,                          y:H*.1+SPACE,           color:colors.LOGICAL,  label:"Local"}
+  l.isa_shared  = {width, height:H*.1,    x:l.isa_global.x,                          y:H*.7+SPACE,           color:colors.LOGICAL,  label:"Shared"}
+
+  l.l1          = {width, height:H*.7,    x:l.isa_global.x+l.isa_global.width+SPACE, y:0,                    color:colors.PHYSICAL, label:"L1/TEX Cache\nHit Rate: "+fmt("L1 Hit Rate (%)")}
+  l.shared      = {width, height:H*.1,    x:l.l1.x,                                  y:l.isa_shared.y,       color:colors.PHYSICAL, label:"Shared Memory"}
+
+  l.l2          = {width, height:H*.9,    x:l.l1.x+l.l1.width+SPACE,                 y:0,                    color:colors.PHYSICAL, label:"L2 Cache\nHit Rate: "+fmt("L2 Hit Rate (%)")}
+
+  l.device_mem  = {width, height:H*.1,    x:l.l2.x+l.l2.width+SPACE,                 y:l.l2.height/2,        color:colors.PHYSICAL, label:"Device Memory"}
+
+  // *** links
+  const edges = [];
+  const addEdge = (v, w, f, opts) => edges.push({v, w, value:{points:f(l[v], l[w]).map(p => ({x:p[0], y:p[1]})), ...opts}});
+
+  // TODO: this part needs cleanup and has many copy paste
+  const s = 6; // space between edge and edge text
+  addEdge("kernel", "isa_global", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("Kernel <-> Global") });
+  addEdge("isa_global", "kernel", (v, w) => [[v.x, v.y+v.height/2], [w.x+w.width, v.y+v.height/2]]);
+
+  addEdge("kernel", "isa_local", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("Kernel <-> Local") });
+  addEdge("isa_local", "kernel", (v, w) => [[v.x, v.y+v.height/2], [w.x+w.width, v.y+v.height/2]]);
+
+  addEdge("kernel", "isa_shared", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("Kernel <-> Shared") });
+  addEdge("isa_shared", "kernel", (v, w) => [[v.x, v.y+v.height/2], [w.x+w.width, v.y+v.height/2]]);
+
+  addEdge("l1", "isa_global", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("Global <- L1 Cache") });
+  addEdge("isa_global", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("Global -> L1 Cache") });
+
+  addEdge("l1", "isa_local", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("Local <- L1 Cache") });
+  addEdge("isa_local", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("Local -> L1 Cache") });
+
+  addEdge("l1", "isa_shared", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("Shared <- Shared Memory") });
+  addEdge("isa_shared", "l1", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("Shared -> Shared Memory") });
+
+  addEdge("l2", "l1", (v, w) => [[v.x, w.y+w.height/2], [w.x+w.width, w.y+w.height/2]], { offsetY:-s, name:fmt("L1 Cache <- L2 Cache (bytes)") });
+  addEdge("l1", "l2", (v, w) => [[v.x+v.width, v.y+v.height/2+10], [w.x, v.y+v.height/2+10]], { offsetY:s, name:fmt("L1 Cache -> L2 Cache (bytes)") });
+
+  addEdge("l2", "device_mem", (v, w) => [[v.x+v.width, w.y+w.height/2], [w.x, w.y+w.height/2]], { offsetY:-s, name:fmt("L2 Cache <- Device Memory (bytes)") });
+  addEdge("device_mem", "l2", (v, w) => [[v.x, v.y+v.height/2+10], [w.x+w.width, v.y+v.height/2+10]], { offsetY:s, name:fmt("L2 Cache -> Device Memory (bytes)") });
+
+  addEdge("l1", "shared", (v, w) => [[w.x+w.width/2, v.y+v.height], [v.x+v.width/2, w.y]], { offsetX:s, name:fmt("L1 -> Shared (bytes)") });
+
+  const nodes = Object.entries(l).map(([v, value]) => ({ v, value }))
+  // reposition to center before painting
+  for (let i=0; i<nodes.length; i++) {
+    nodes[i].value.x += nodes[i].value.width/2;
+    nodes[i].value.y += nodes[i].value.height/2;
+  }
+
+  return { nodes, edges };
+}
+const MEMORY_LAYOUTS = {"CUDA":ncu_layout}
+
+function renderCacheGraph(data) {
+  const layout = MEMORY_LAYOUTS[data.device];
+  displaySelection("#graph");
+  const graph = layout(JSON.parse(data.src));
+  drawGraph(graph, { labelAuto:true, skipEdgeTags:true });
+  d3.select("#edge-labels").html("");
+  d3.select("#edge-labels").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true).attr("transform", e => {
+    const [p1, p2] = e.value.points;
+    const x = (p1.x + p2.x) / 2 + (e.value.offsetX || 0);
+    const y = (p1.y + p2.y) / 2 + (e.value.offsetY || 0);
+    return `translate(${x},${y})`;
+  }).append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.name);
+  if (data.prg != null) {
+    const cb = codeBlock(data.prg, "cpp", { wrap:false });
+    cb.classList.add("full-height");
+    metadata.replaceChildren(cb);
+  }
+  document.getElementById("zoom-to-fit-btn").click();
 }
 
 // ** profiler graph
@@ -680,6 +862,7 @@ async function main() {
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
+    if (ckey.includes("counters")) return renderCacheGraph(ret);
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();

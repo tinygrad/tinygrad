@@ -1,6 +1,15 @@
 # load csv export output from ncu
 import csv, json
 
+# temp for ncu csv export numeric data
+def try_number(prev:str) -> int|float|str:
+  x = prev.split(" ")[0]
+  x = x.replace(",", "")
+  try: return int(x)
+  except ValueError:
+    try: return int(f) if (f:=float(x)).is_integer() else f
+    except ValueError: return prev
+
 def load_custom(fp:str, ctxs:list[dict]):
   counters:list[dict] = []
   with open(fp) as f:
