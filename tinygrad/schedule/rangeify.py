@@ -311,7 +311,7 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    do_store = assign_target.store(assign_src, tag=x.tag).end(*rngs)
+    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs)
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
@@ -324,7 +324,7 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    do_store = buf.index(idx).store(x.src[0], tag=x.tag).end(*rngs)
+    do_store = buf.index(idx, dtype=sdtype).store(x.src[0], tag=x.tag).end(*rngs)
     return buf.after(do_store)
 
   if allow_locals:
@@ -332,7 +332,7 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-    do_store = buf.index(idx).store(x.src[0]).end(*rngs)
+    do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
 # collapse any BUFFERIZE to single input BUFFERIZE. move the tag to a reshape
@@ -560,13 +560,3 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       if a is None: continue
       becomes_map[uop_list[cast(int, a)]] = s.replace(tag=None)
   return becomes_map
-
-# add loads
-
-pm_add_loads = PatternMatcher([
-  # add loads to non ptr index
-  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
-    idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)),
-  # remove loads from stores
-  (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), allow_any_len=True, name="s"), lambda s: s.replace(src=(s.src[0].src[0],)+s.src[1:])),
-])

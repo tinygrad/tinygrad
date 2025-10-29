@@ -13,10 +13,10 @@ from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, p
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
-  ReduceContext, correct_load_store, pm_render
+  ReduceContext, correct_load_store, pm_render, pm_add_loads
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_add_loads
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
@@ -65,8 +65,10 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
 
+  # **** optimizations are done, now we lower to actual code ****
+
   # add loads
-  sink = graph_rewrite(sink, pm_add_loads, name="add loads")
+  sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
 
   # devectorize (TODO: does this need opts?)
   if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
