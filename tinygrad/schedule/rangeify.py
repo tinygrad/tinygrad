@@ -333,7 +333,7 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-    do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
+    do_store = buf.broadcast(x.src[1].dtype.count).index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
 # collapse any BUFFERIZE to single input BUFFERIZE. move the tag to a reshape
