@@ -132,7 +132,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # LOAD(idx) / STORE(idx, val)
+  # LOAD(idx) / STORE(idx, val) / LOAD with alt value only exists in program_spec
   (UPat().index(UPat()).or_casted().load(), lambda: True),
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
