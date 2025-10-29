@@ -11,14 +11,13 @@ class TestDoubleMatmul(unittest.TestCase):
   def setUp(self):
     with Context(DEBUG=0):
       self.a, self.b, self.c = [Tensor.randn(16, 16).contiguous().realize() for _ in range(3)]
-      self.cmp = (self.a @ self.b @ self.c).realize()
 
   def _test(self, opts):
     with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
       out = (self.a @ self.b @ self.c).contiguous(arg=opts).realize()
 
     with Context(DEBUG=0):
-      err = (out-self.cmp).square()
+      err = (out-(self.a @ self.b @ self.c)).square()
       self.assertLess(err.max().item(), 1e-4)
       self.assertLess(err.mean().item(), 1e-6)
 
@@ -26,8 +25,8 @@ class TestDoubleMatmul(unittest.TestCase):
   def test_upcast_0(self): self._test((Opt(OptOps.UPCAST, 0, 4),))
   def test_upcast_1(self): self._test((Opt(OptOps.UPCAST, 1, 4),))
   def test_upcast_2(self): self._test((Opt(OptOps.UPCAST, 2, 4),))
-  @unittest.skip("doesn't work")
   def test_upcast_01(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)))
+  def test_upcast_01_mismatch(self): self._test((Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 4)))
   def test_upcast_02(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 2, 4)))
   def test_upcast_12(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4)))
 
