@@ -44,7 +44,10 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = apply_opts(sink, ren)
 
   # ** expander (expand_rewrite) **
-  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_flatten_bufferize, name="postopt symbolic")
+  sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
+
+  # flatten bufferize for expander
+  sink = graph_rewrite(sink, pm_flatten_bufferize, name="flatten bufferize")
 
   # expand
   sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
