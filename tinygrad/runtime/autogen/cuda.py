@@ -1,7 +1,13 @@
 # mypy: ignore-errors
-import ctypes, ctypes.util
+import ctypes
+from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-dll = ctypes.CDLL(ctypes.util.find_library('cuda'))
+
+def _dll():
+  try: return ctypes.CDLL(find_library('cuda'))
+  except: pass
+  return None
+dll = _dll()
 
 cuuint32_t = ctypes.c_uint
 cuuint64_t = ctypes.c_ulong

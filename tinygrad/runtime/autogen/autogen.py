@@ -90,7 +90,7 @@ dll = _dll()
       if str(c.location.file) != str(f) and (not recsym or c.kind not in (CK.FUNCTION_DECL,)): continue
       try:
         match c.kind:
-          case CK.FUNCTION_DECL if c.linkage == LK.EXTERNAL and dll is not None:
+          case CK.FUNCTION_DECL if c.linkage == LK.EXTERNAL and dll:
             lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype, {c.spelling}.argtypes = "
               f"{tname(c.result_type)}, [{', '.join(tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
           case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: tname(c.type)

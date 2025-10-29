@@ -1,7 +1,13 @@
 # mypy: ignore-errors
-import ctypes, ctypes.util
+import ctypes
+from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-dll = ctypes.CDLL(ctypes.util.find_library('nvrtc'))
+
+def _dll():
+  try: return ctypes.CDLL(find_library('nvrtc'))
+  except: pass
+  return None
+dll = _dll()
 
 nvrtcResult = CEnum(ctypes.c_uint)
 NVRTC_SUCCESS = nvrtcResult.define('NVRTC_SUCCESS', 0)
