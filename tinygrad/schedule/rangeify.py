@@ -5,7 +5,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
-from tinygrad.helpers import PCONTIG, partition
+from tinygrad.helpers import PCONTIG, partition, get_single_element
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -301,6 +301,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 
 def bufferize_to_store(x:UOp, allow_locals=True):
   rngs = x.src[1:]
+  real_rngs = UOp.sink(*rngs).ranges
   shape = x.shape
   size = prod(shape)
   assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {shape}"
@@ -311,7 +312,7 @@ def bufferize_to_store(x:UOp, allow_locals=True):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*[x for x in rngs if x.op is Ops.RANGE])
+    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*real_rngs)
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
@@ -324,12 +325,12 @@ def bufferize_to_store(x:UOp, allow_locals=True):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], tag=x.tag).end(*[x for x in rngs if x.op is Ops.RANGE])
+    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], tag=x.tag).end(*real_rngs)
     ret = buf.after(do_store).forced_reshape(shape)
     # TODO: is this right? what if it's offset
-    if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
-      sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
-      ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
+    #if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
+    #  sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
+    #  ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
     return ret.replace(tag=x.tag)
 
   if allow_locals:
@@ -337,19 +338,27 @@ def bufferize_to_store(x:UOp, allow_locals=True):
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0]).end(*[x for x in rngs if x.op is Ops.RANGE])
+    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0]).end(*real_rngs)
     return buf.after(do_store.barrier()).reshape(shape)
 
-pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
+pm_flatten_bufferize = PatternMatcher([
+  # collapse any BUFFERIZE to single input BUFFERIZE
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(), UPat()), allow_any_len=True, name="x"),
+    lambda x: x.replace(src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:])))) \
+      .forced_reshape(x.shape).replace(tag=x.tag)),
+])
+
+pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat()), name="x"), lambda x: bufferize_to_store(x, allow_locals=False)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
 ])
 
-pm_add_buffers_local = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
+pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat()), name="x"), bufferize_to_store),
 ])
 
 # *****************
