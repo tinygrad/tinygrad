@@ -5,7 +5,7 @@ from tinygrad.runtime.autogen import cuda as orig_cuda
 from test.mockgpu.helpers import _try_dlopen_gpuocelot
 from tinygrad.helpers import mv_address
 
-for attr in dir(orig_cuda._mod):
+for attr in dir(orig_cuda):
   if not attr.startswith('__'):
     globals()[attr] = getattr(orig_cuda, attr)
 
