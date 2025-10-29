@@ -143,6 +143,13 @@ class TestPcontig(unittest.TestCase):
     print(f"mse: {mse}")
     self.assertLessEqual(mse, 1e-6)
 
+  def test_flash_attention_tc(self):
+    opts = ()
+    # rows in all the matrix
+    opts += (Opt(OptOps.DEMOTE, 4, 8),)
+    #opts += (Opt(OptOps.TC, 0, (0, 0, 1)),)
+    self.test_flash_attention(opts)
+
   def test_flash_attention_opt(self):
     opts = ()
     # columns in top matrix

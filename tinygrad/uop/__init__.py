@@ -59,6 +59,7 @@ class Ops(FastEnum):
 
   # INDEX is a BinaryOp similar to ADD, but it operates on pointers
   INDEX = auto()
+  APPENDINDEX = auto()
 
   # BinaryOps
   ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); IDIV = auto(); MAX = auto(); MOD = auto() # noqa: E702
