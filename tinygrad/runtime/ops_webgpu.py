@@ -148,7 +148,7 @@ class WebGPUProgram:
     if wait:
       query_set = webgpu.wgpuDeviceCreateQuerySet(self.dev, webgpu.WGPUQuerySetDescriptor(type=webgpu.WGPUQueryType_Timestamp, count=2))
       query_buf = webgpu.wgpuDeviceCreateBuffer(self.dev,
-        webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve | webgpu.WGPUBufferUsage_CopySrc))
+        webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve.value | webgpu.WGPUBufferUsage_CopySrc.value))
       comp_pass_desc.timestampWrites = ctypes.pointer(webgpu.WGPUComputePassTimestampWrites(
         querySet=query_set, beginningOfPassWriteIndex=0, endOfPassWriteIndex=1))
 
