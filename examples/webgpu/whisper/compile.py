@@ -184,7 +184,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 # IMPORTANT(irwin): unfortunately this doesn't switch all computations to half precision yet
 FLOAT16 = False
 MODEL_NAME = "tiny.en"
-DECODER_BATCH_SIZE = 32
+DECODER_BATCH_SIZE = 64
 
 if __name__ == '__main__':
   def tofull(sd):

@@ -205,23 +205,36 @@ function handle_timestamp_tokens(nextTokens, context, token_count, last_token_in
 }
 
 function batch_repeat_helper(array, bs) {
-    let result = [];
-    for (let i = 0; i < bs; ++i) {
-        result = result.concat(array);
+    let result = array.slice();
+    for (let i = 0; i < bs-array.length; ++i) {
+        result.push(array.at(-1));
     }
     return result;
 }
 
-let reuse_cache = 0;
-async function decoder_helper(nets, context_input, audio_features, context_last_token_index_absolute, decoder_state) {
-    context_input = batch_repeat_helper(context_input, nets.model_metadata.decoder_batch_size);
-    let [decoder_output] = await nets.decoder(context_input, audio_features, [context_last_token_index_absolute], [0], [reuse_cache]);
-    reuse_cache = 1;
+async function decoder_helper(nets, context_inputs, audio_features, context_last_token_index_absolute, decoder_state) {
+    context_inputs = batch_repeat_helper(context_inputs, nets.model_metadata.decoder_batch_size);
+    let [decoder_output] = await nets.decoder(context_inputs, audio_features, [context_last_token_index_absolute], [0], [1]);
     for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
-        decoder_state.contexts[i] = [...decoder_state.contexts[i].slice(0, context_last_token_index_absolute), context_input[i]];
+        decoder_state.contexts[i] = [...decoder_state.contexts[i].slice(0, context_last_token_index_absolute), context_inputs[i]];
     }
-    let o = 0;
-    return decoder_output.slice(o*51864, (o+1)*51864);
+
+    return decoder_output;
+}
+
+async function decoder_upload_audio_features(nets, audio_features_batch, decoder_state) {
+    let context_input = [TOK_BEGIN_TRANSCRIPTION];
+    context_input = batch_repeat_helper(context_input, nets.model_metadata.decoder_batch_size);
+
+    for (let i = 0; i < audio_features_batch.length; ++i) {
+        let decoder_output_discarded = await nets.decoder(context_input, audio_features_batch[i], [0], [i], [0]);
+    }
+
+    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
+        decoder_state.contexts[i] = [context_input[i]];
+    }
+    // let o = 0;
+    // return decoder_output.slice(o*51864, (o+1)*51864);
 }
 
 function rebuild_cache_tail_index(c1, c2) {
@@ -268,37 +281,52 @@ const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61,
  */
 
 /**
- * @param {Decode_Sequence} decode_sequence
+ * @param {Decode_Sequence[]} decode_sequences
  * @param {Decoder_State} decoder_state
- * @returns {Promise<Decoder_Result>}
+ * @param {Float32Array[]} audio_features_batch
+ * @returns {Promise<Decoder_Result[]>}
  */
-async function decodeOne(nets, decode_sequence, decoder_state, audio_features) {
-    const { max_context_length } = decode_sequence;
-    let { context } = decode_sequence;
-    let result = {
-        keep_going: false,
-        context, // TODO(irwin): decide if we want to return the same context or a new copy  @ContextCopyOrReference
-        avg_logprob: undefined,
-        segment_cumlogprob: decode_sequence.segment_cumlogprob,
-        last_eos_logprob: undefined
-    }
-    if (context.length >= max_context_length) return result;
+async function decodeOne(nets, decode_sequences, decoder_state, audio_features_batch) {
+    let audio_features = audio_features_batch[0];
+    // const { max_context_length } = decode_sequence;
 
-    let last_common_index = rebuild_cache_tail_index(context, decoder_state.contexts[0]);
-    if (last_common_index < context.length - 1) {
-        // NOTE(irwin): rebuild self attention kv cache
-        // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
-        const context_length_to_cache = context.length - 1;
-        for (let build_cache_index = 0; build_cache_index < context_length_to_cache; ++build_cache_index) {
-            let context_input = context.slice(build_cache_index, build_cache_index + 1);
-            let decoder_output_discarded = await decoder_helper(nets, context_input, audio_features, build_cache_index, decoder_state);
+    let results = [];
+    let context_inputs = [];
+    for (let i = 0; i < decode_sequences.length; ++i) {
+        context_inputs.push(decode_sequences[i].context.at(-1));
+
+        let result = {
+            keep_going: false,
+            context: decode_sequences[i].context, // TODO(irwin): decide if we want to return the same context or a new copy  @ContextCopyOrReference
+            avg_logprob: undefined,
+            segment_cumlogprob: decode_sequences[i].segment_cumlogprob,
+            last_eos_logprob: undefined
         }
+        results.push(result);
     }
+    const max_context_length = Math.max.apply(null, decode_sequences.map(x => x.context.length));
+    // if (context.length >= max_context_length) return result;
 
-    let context_input = [context.at(-1)];
-    let decoder_output = await decoder_helper(nets, context_input, audio_features, context.length - 1, decoder_state);
-    result.decoder_output = decoder_output;
-    return result;
+    // let last_common_index = rebuild_cache_tail_index(context, decoder_state.contexts[0]);
+    // if (last_common_index < context.length - 1) {
+    //     // NOTE(irwin): rebuild self attention kv cache
+    //     // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
+    //     const context_length_to_cache = context.length - 1;
+    //     for (let build_cache_index = 0; build_cache_index < context_length_to_cache; ++build_cache_index) {
+    //         let context_input = context.slice(build_cache_index, build_cache_index + 1);
+    //         let decoder_output_discarded = await decoder_helper(nets, context_input, audio_features, build_cache_index, decoder_state);
+    //     }
+    // }
+
+    let decoder_output = await decoder_helper(nets, context_inputs, audio_features, max_context_length - 1, decoder_state);
+
+    for (let i = 0; i < results.length; ++i) {
+        results[i].decoder_output = decoder_output.slice(i*51864, (i+1)*51864);
+    }
+    // let o = 0;
+    // return decoder_output.slice(o*51864, (o+1)*51864);
+    // result.decoder_output = decoder_output;
+    return results;
 }
 
 /**
@@ -368,9 +396,9 @@ async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
 }
 
 /** @param {float} temperature */
-/** @returns {Promise<Decode_Sequence|undefined>} */
-async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updatedCallback) {
-    reuse_cache = 0;
+/** @returns {Promise<Decode_Sequence[]|undefined>} */
+async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updatedCallback) {
+    // reuse_cache = 0;
     let context = [];
     if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
         let prefix = [TOK_STARTOFPREV];
@@ -417,8 +445,9 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         eos_logprobs: undefined
     };
 
-    const BEST_OF = 5;
-    const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
+    // const BEST_OF = 5;
+    // const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
+    const SEQUENCE_COUNT = audio_features_batch.length;
     for (let i = 0; i < SEQUENCE_COUNT; ++i) {
         /** @type {Decode_Sequence} */
         let sequence = Object.create(default_sequence);
@@ -431,14 +460,18 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         sequences.push(sequence);
     }
 
-    for (let idx = 0; idx < sequences.length; ++idx) {
-        for (let i = 0; i < MAX_TOKENS_TO_DECODE; ++i) {
-            if (sequences[idx].context.at(-1) === TOK_EOS) break;
+    await decoder_upload_audio_features(nets, audio_features_batch, decoder_state);
 
+    for (let i = 0; i < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS); ++i) {
+        if (cancelToken.cancelled) return;
+
+        let decode_results = await decodeOne(nets, sequences, decoder_state, audio_features_batch);
+        for (let idx = 0; idx < sequences.length; ++idx) {
             if (cancelToken.cancelled) return;
+            if (sequences[idx].context.at(-1) === TOK_EOS) continue;
+            let seek = seeks_batch[idx];
 
-            let decode_result = await decodeOne(nets, sequences[idx], decoder_state, audio_features);
-            decode_result = await decodeOne2(sequences[idx], decode_result, temperature);
+            let decode_result = await decodeOne2(sequences[idx], decode_results[idx], temperature);
             let keep_going = decode_result.keep_going;
             sequences[idx].context = decode_result.context;
             sequences[idx].avg_logprob = decode_result.avg_logprob;
@@ -451,7 +484,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
             updatedCallback(pendingText);
             // console.log(pendingText);
 
-            if (!keep_going) break;
+            // if (!keep_going) break;
         }
     }
 
@@ -465,8 +498,8 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
     let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
 
-    return sequences[idx];
-    // return [sequences[idx].avg_logprob, sequences[idx].segment_cumlogprob, sequences[idx].context, context_prompt_length];
+    // return sequences[idx];
+    return sequences;
 }
 
 async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAndInitializeModels, initial_temperature = 0) {
@@ -501,10 +534,10 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         seek_ranges.push(seek);
     }
 
-    const batch_size = 2;
+    const batch_size = nets.model_metadata.decoder_batch_size;
     for (let seek_index = 0; seek_index < seek_ranges.length;) {
         let audio_features_batch = [];
-        for (let i = 0; i < batch_size && seek_index + i < seek_ranges.length; ++i) {
+        for (let i = 0; (i < batch_size) && (seek_index + i < seek_ranges.length); ++i) {
             let seek = seek_ranges[seek_index + i];
 
             console.log("seek to " + (seek / MEL_SPEC_CHUNK_LENGTH * 30.0).toFixed(2));
@@ -527,15 +560,21 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             onEvent("chunkUpdate", { pendingText });
         }
 
-        for (let i = 0; i < batch_size && seek_index + i < seek_ranges.length;) {
+        let seeks_batch = [];
+        for (let i = 0; (i < batch_size) && (seek_index + i < seek_ranges.length); ++i) {
             let seek = seek_ranges[seek_index + i];
-            let audio_features = audio_features_batch[i];
-            let sequence = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features, seek, cancelToken, updateCallback);
+            seeks_batch.push(seek);
+        }
+
+        let sequences = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updateCallback);
+
+        for (let i = 0; i < batch_size && seek_index + i < seek_ranges.length;) {
             if (cancelToken.cancelled) {
                 console.log("Transcription cancelled");
                 onEvent("cancel");
                 return;
             } else {
+                let sequence = sequences[i];
                 let {avg_logprob, segment_cumlogprob, context, context_prompt_length: offset} = sequence;
                 const FALLBACK_DISABLED = true;
                 if (!FALLBACK_DISABLED && (avg_logprob < -1) && temperature < 1) {
