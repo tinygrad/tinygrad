@@ -27,9 +27,8 @@ class AMDIP:
 
   def __getattr__(self, name:str):
     if name in self.regs: return self.regs[name]
-
-    # NOTE: gfx10 gc registers always start with mm, no reg prefix
-    return self.regs[name.replace('reg', 'mm')]
+    if (name10:=name.replace('reg', 'mm')) in self.regs: return self.regs[name10]
+    raise AttributeError(f"{self.name.upper()} has no register {name}")
 
 def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
   # override versions

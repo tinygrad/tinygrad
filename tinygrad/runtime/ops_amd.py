@@ -31,7 +31,7 @@ AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << 
 class ProfileSQTTEvent(ProfileEvent): device:str; se:int; props:dict; blob:bytes; itrace:bool # noqa: E702
 
 @dataclass(frozen=True)
-class PMCSample: name:str; block:str; inst:int; se:int; sa:int; wgp:int; off:int; size:int; cntid:int # noqa: E702
+class PMCSample: name:str; block:str; inst:int; se:int; sa:int; wgp:int; off:int; size:int; reg:str # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes; # noqa: E702
@@ -148,13 +148,13 @@ class AMDComputeQueue(HWQueue):
     block2pid, out_off = collections.defaultdict(lambda: itertools.count()), 0
     for name,block,idx in counters:
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, 4) # TODO: correct wgp_cnt
-      perf_id, out_off = next(block2pid[block]), out_off + (rec_size:=prod((inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
+      reg, out_off = f'reg{block}_PERFCOUNTER{next(block2pid[block])}', out_off + (rec_size:=prod((inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
 
       for inst in range(inst_cnt):
         if inst_cnt > 1: self.set_grbm_inst(inst)
         else: self.set_grbm_broadcast()
-        self.wreg(getattr(self.gc, f'reg{block}_PERFCOUNTER{perf_id}_SELECT'), idx)
-      out_sched.append(PMCSample(name, block, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, perf_id))
+        self.wreg(getattr(self.gc, f'{reg}_SELECT'), idx)
+      out_sched.append(PMCSample(name, block, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, reg))
 
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCOMPUTE_PERFCOUNT_ENABLE, 1)
@@ -168,26 +168,18 @@ class AMDComputeQueue(HWQueue):
 
     offset = itertools.count(step=8)
     for s in sched:
-      for inst in range(s.inst):
-        for se_idx in range(s.se):
-          for sa_idx in range(s.sa):
-            for wgp_idx in range(s.wgp):
-              if inst > 1: self.set_grbm_inst(inst)
-              else: self.set_grbm_se_sh_wgp(se_idx, sa_idx, wgp_idx)
+      for inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+        if inst > 1: self.set_grbm_inst(inst)
+        else: self.set_grbm_se_sh_wgp(se_idx, sa_idx, wgp_idx)
 
-              # Copy counter to memory (src_sel = perf, dst_sel = tc_l2)
-              lo, hi = getattr(self.gc, f'reg{s.block}_PERFCOUNTER{s.cntid}_LO'), None #getattr(self.gc, f'reg{s.block}_PERFCOUNTER{s.cntid}_HI') if s.size == 8 else None
-              self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
-              if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
+        # Copy counter to memory (src_sel = perf, dst_sel = tc_l2)
+        lo, hi = getattr(self.gc, f'{s.reg}_LO'), getattr(self.gc, f'{s.reg}_HI', None)
+        self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
+        if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, 2 << 8 | 4, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
 
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1) # start counters
-    return self
-
-  def pmc_stop(self):
-    self.set_grbm_broadcast()
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=2) # stop counters
     return self
 
   ### SQTT ###
