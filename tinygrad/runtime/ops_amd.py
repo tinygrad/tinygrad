@@ -163,8 +163,9 @@ class AMDComputeQueue(HWQueue):
     self.set_grbm_broadcast()
     self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1, perfmon_sample_enable=1) # read counters
 
-    offset = itertools.count(step=8)
     for s in sched:
+      offset = itertools.count(s.off, step=8)
+
       for inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
         if s.inst > 1: self.set_grbm_inst(inst)
         else: self.set_grbm_se_sh_wgp(se_idx, sa_idx, wgp_idx)
@@ -898,9 +899,12 @@ class AMDDevice(HCQCompiled):
       if self.target[0] not in {11}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
       if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: AMD_IFACE=KFD and `amd-smi set -l stable_std`")
 
-      PMC_COUNTERS = getenv("PMC_COUNTERS", "GL2C_HIT,GL2C_MISS,SQC_LDS_IDX_ACTIVE,SQC_LDS_BANK_CONFLICT").split(",")
       self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
+
+      # validate counters
+      for k in (PMC_COUNTERS:=getenv("PMC_COUNTERS", "GL2C_HIT,GL2C_MISS,SQC_LDS_IDX_ACTIVE,SQC_LDS_BANK_CONFLICT").split(",")):
+        if k not in self.pmc_counters: raise RuntimeError(f"PMC counter {k} is not supported. Available: {','.join(self.pmc_counters.keys())}")
 
       cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([self.pmc_counters[k] for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(cpu_access=True, nolru=True, uncached=True))
