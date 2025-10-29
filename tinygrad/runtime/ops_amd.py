@@ -34,7 +34,7 @@ class ProfileSQTTEvent(ProfileEvent): device:str; se:int; props:dict; blob:bytes
 class PMCSample: name:str; block:str; inst:int; se:int; sa:int; wgp:int; off:int; size:int; reg:str # noqa: E702
 
 @dataclass(frozen=True)
-class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes; # noqa: E702
+class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes # noqa: E702
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
