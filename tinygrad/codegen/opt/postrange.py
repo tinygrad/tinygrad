@@ -63,8 +63,15 @@ class Scheduler:
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
-  def _globalizable_rngs(self) -> list[UOp]:
+  def _output_rngs(self) -> list[UOp]:
     return flatten([list(UOp.sink(*s.src[1:]).ranges) for s in self.ast.src if s.op is Ops.END])
+  def _globalizable_rngs(self) -> list[UOp]:
+    ret = self._output_rngs()
+    # exclude any output ranges from global that don't appear in all BUFFERIZE
+    for x in self.ast.toposort():
+      if x.op is Ops.BUFFERIZE:
+        ret = [r for r in ret if r in x.ranges]
+    return ret
 
   def convert_loop_to_global(self):
     if not self.ren.has_local: return None
@@ -75,7 +82,7 @@ class Scheduler:
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
   def colors(self) -> list[str]:
-    output_rngs = self._globalizable_rngs()
+    output_rngs = self._output_rngs()
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
