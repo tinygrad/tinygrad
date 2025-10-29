@@ -56,4 +56,7 @@ def __getattr__(nm):
     case "hip": return load("hip","ctypes.CDLL(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so')",["/opt/rocm/include/hip/hip_ext.h",
                             "/opt/rocm/include/hip/hiprtc.h","/opt/rocm/include/hip/hip_runtime_api.h","/opt/rocm/include/hip/driver_types.h"],
                             ["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"], prelude=["import os"])
+    case "comgr": return load("comgr", "ctypes.CDLL(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so')",
+                              ["/opt/rocm/include/amd_comgr/amd_comgr.h"], ["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"],
+                              prelude=["import os"])
     case _: raise AttributeError(f"no such autogen: {nm}")

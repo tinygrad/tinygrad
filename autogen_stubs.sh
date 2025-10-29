@@ -41,16 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_comgr() {
-  clang2py /opt/rocm/include/amd_comgr/amd_comgr.h \
-  --clang-args="-D__HIP_PLATFORM_AMD__ -I/opt/rocm/include -x c++" -o $BASE/comgr.py -l /opt/rocm/lib/libamd_comgr.so
-  fixup $BASE/comgr.py
-  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/comgr.py
-  patch_dlopen $BASE/comgr.py amd_comgr "'/opt/rocm/lib/libamd_comgr.so'" "os.getenv('ROCM_PATH', '')+'/lib/libamd_comgr.so'" "'/usr/local/lib/libamd_comgr.dylib'" "'/opt/homebrew/lib/libamd_comgr.dylib'"
-  sed -i "s\ctypes.CDLL('/opt/rocm/lib/libamd_comgr.so')\_try_dlopen_amd_comgr()\g" $BASE/comgr.py
-  python3 -c "import tinygrad.runtime.autogen.comgr"
-}
-
 generate_amd() {
   # clang2py broken when pass -x c++ to prev headers
   clang2py -k cdefstum \
@@ -295,8 +285,7 @@ generate_mesa() {
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
-if [ "$1" == "comgr" ]; then generate_comgr
-elif [ "$1" == "hsa" ]; then generate_hsa
+if [ "$1" == "hsa" ]; then generate_hsa
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
 elif [ "$1" == "sqtt" ]; then generate_sqtt
@@ -304,6 +293,6 @@ elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_comgr; generate_hsa; generate_amd; generate_am; generate_mesa
+elif [ "$1" == "all" ]; then generate_hsa; generate_amd; generate_am; generate_mesa
 else echo "usage: $0 <type>"
 fi
