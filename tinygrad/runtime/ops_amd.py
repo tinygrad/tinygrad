@@ -750,7 +750,7 @@ class KFDIface:
 
     raise RuntimeError("\n".join(report))
 
-  def is_in_profile_mode(self): return FileIOInterface(f'{self.dev_sysfs_path}/power_dpm_force_performance_level').read() == 'profile_standard\n'
+  def is_in_profile_mode(self): return FileIOInterface(f'{self.dev_sysfs_path}/power_dpm_force_performance_level').read()[:16] == 'profile_standard'
 
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
