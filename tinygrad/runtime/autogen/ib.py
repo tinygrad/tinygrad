@@ -1,7 +1,12 @@
 # mypy: ignore-errors
-import ctypes, ctypes.util
+import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-dll = ctypes.CDLL(ctypes.util.find_library('ibverbs'), use_errno=True)
+
+def _dll():
+  try: return ctypes.CDLL(ibverbs, use_errno=True)
+  except: pass
+  return None
+dll = _dll()
 
 class union_ibv_gid(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte
@@ -487,36 +492,36 @@ struct_ibv_send_wr._fields_ = [
 struct_ibv_context_ops._fields_ = [
   ('_compat_query_device', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr))),
   ('_compat_query_port', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr))),
-  ('_compat_alloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_dealloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_reg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_rereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_dereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_alloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_dealloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_reg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_rereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_dereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
   ('alloc_mw', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_pd), enum_ibv_mw_type)),
   ('bind_mw', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_mw_bind))),
   ('dealloc_mw', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_mw))),
-  ('_compat_create_cq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_create_cq', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
   ('poll_cq', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.c_int, ctypes.POINTER(struct_ibv_wc))),
   ('req_notify_cq', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_cq), ctypes.c_int)),
-  ('_compat_cq_event', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_resize_cq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_destroy_cq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_create_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_modify_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_query_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_destroy_srq', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_cq_event', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_resize_cq', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_destroy_cq', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_create_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_modify_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_query_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_destroy_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
   ('post_srq_recv', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr)))),
-  ('_compat_create_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_query_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_modify_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_destroy_qp', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_create_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_query_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_modify_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_destroy_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
   ('post_send', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_send_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_send_wr)))),
   ('post_recv', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr)))),
-  ('_compat_create_ah', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_destroy_ah', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_attach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_detach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p)),
-  ('_compat_async_event', ctypes.CFUNCTYPE(ctypes.c_void_p)),
+  ('_compat_create_ah', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_destroy_ah', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_attach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_detach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
+  ('_compat_async_event', ctypes.CFUNCTYPE(ctypes.c_void_p, )),
 ]
 struct_ibv_context._fields_ = [
   ('device', ctypes.POINTER(struct_ibv_device)),
@@ -1723,9 +1728,9 @@ struct_verbs_context._fields_ = [
   ('priv', ctypes.POINTER(struct_verbs_ex_private)),
   ('query_device_ex', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_query_device_ex_input), ctypes.POINTER(struct_ibv_device_attr_ex), size_t)),
   ('ibv_destroy_flow', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_flow))),
-  ('ABI_placeholder2', ctypes.CFUNCTYPE(None)),
+  ('ABI_placeholder2', ctypes.CFUNCTYPE(None, )),
   ('ibv_create_flow', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_flow), ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_flow_attr))),
-  ('ABI_placeholder1', ctypes.CFUNCTYPE(None)),
+  ('ABI_placeholder1', ctypes.CFUNCTYPE(None, )),
   ('open_qp', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_open_attr))),
   ('create_qp_ex', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_init_attr_ex))),
   ('get_srq_num', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(uint32_t))),
@@ -3465,6 +3470,7 @@ IBV_DEVICE_PCI_WRITE_END_PADDING = (1 << 36)
 ibv_query_port = lambda context,port_num,port_attr: ___ibv_query_port(context, port_num, port_attr)
 ibv_reg_mr = lambda pd,addr,length,access: __ibv_reg_mr(pd, addr, length, access, __builtin_constant_p( ((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0))
 ibv_reg_mr_iova = lambda pd,addr,length,iova,access: __ibv_reg_mr_iova(pd, addr, length, iova, access, __builtin_constant_p( ((access) & IBV_ACCESS_OPTIONAL_RANGE) == 0))
+ETHERNET_LL_SIZE = 6
 IB_ROCE_UDP_ENCAP_VALID_PORT_MIN = (0xC000)
 IB_ROCE_UDP_ENCAP_VALID_PORT_MAX = (0xFFFF)
 IB_GRH_FLOWLABEL_MASK = (0x000FFFFF)

@@ -22,7 +22,7 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[x
          (r'(struct|union|enum)\s*([a-zA-Z_][a-zA-Z0-9_]*\b)', r'\1_\2'),
          (r'\((unsigned )?(char)\)', ''), (r'^.*[?;].*$', ''), (r'^.*\d+:\d+.*$', ''), (r'^.*\w##\w.*$', '')]
 
-def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False):
+def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, use_errno=False):
   files, args = files() if callable(files) else files, args() if callable(args) else args
   if tarball:
     # dangerous for arbitrary urls!
@@ -32,8 +32,15 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False):
       files, args = [str(f).format(base) for f in files], [a.format(base) for a in args]
   files = flatten(glob.glob(p, recursive=True) if isinstance(p, str) and '*' in p else [p] for p in files)
 
-  idx, lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', ctypes.util' if 'ctypes.util' in (dll or '') else ''),
-    "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *prelude, *([f"dll = {dll}\n"] if dll else [])]
+  idx, lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', os' if any('os' in s for s in dll) else ''),
+                                *(["from ctypes.util import find_library"] if any('find_library' in s for s in dll) else []),
+                                "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *prelude]
+  if dll: lines += [f"""
+def _dll():
+  {'\n  '.join(f'try: return ctypes.CDLL({d}{', use_errno=True' if use_errno else ''})\n  except: pass' for d in dll)}
+  return None
+dll = _dll()
+"""]
   macros:list[str] = []
 
   types, anoncnt = {}, itertools.count().__next__

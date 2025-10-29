@@ -2,7 +2,12 @@
 import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support.webgpu import WEBGPU_PATH
-dll = ctypes.CDLL(WEBGPU_PATH)
+
+def _dll():
+  try: return ctypes.CDLL(WEBGPU_PATH)
+  except: pass
+  return None
+dll = _dll()
 
 WGPUFlags = ctypes.c_ulong
 WGPUBool = ctypes.c_uint
@@ -2081,7 +2086,7 @@ WGPUWaitStatus = enum_WGPUWaitStatus
 WGPUMapMode = ctypes.c_ulong
 WGPUDeviceLostCallback = ctypes.CFUNCTYPE(None, enum_WGPUDeviceLostReason, struct_WGPUStringView, ctypes.c_void_p)
 WGPULoggingCallback = ctypes.CFUNCTYPE(None, enum_WGPULoggingType, struct_WGPUStringView, ctypes.c_void_p)
-WGPUProc = ctypes.CFUNCTYPE(None)
+WGPUProc = ctypes.CFUNCTYPE(None, )
 WGPUBufferMapCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUMapAsyncStatus, struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
 WGPUCompilationInfoCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUCompilationInfoRequestStatus, ctypes.POINTER(const_struct_WGPUCompilationInfo), ctypes.c_void_p, ctypes.c_void_p)
 WGPUCreateComputePipelineAsyncCallback2 = ctypes.CFUNCTYPE(None, enum_WGPUCreatePipelineAsyncStatus, ctypes.POINTER(struct_WGPUComputePipelineImpl), struct_WGPUStringView, ctypes.c_void_p, ctypes.c_void_p)
@@ -2301,7 +2306,7 @@ const_struct_WGPUInstanceDescriptor._fields_ = [
 WGPUProcCreateInstance = ctypes.CFUNCTYPE(ctypes.POINTER(struct_WGPUInstanceImpl), ctypes.POINTER(const_struct_WGPUInstanceDescriptor))
 WGPUProcDrmFormatCapabilitiesFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUDrmFormatCapabilities)
 WGPUProcGetInstanceFeatures = ctypes.CFUNCTYPE(enum_WGPUStatus, ctypes.POINTER(struct_WGPUInstanceFeatures))
-WGPUProcGetProcAddress = ctypes.CFUNCTYPE(ctypes.CFUNCTYPE(None), struct_WGPUStringView)
+WGPUProcGetProcAddress = ctypes.CFUNCTYPE(ctypes.CFUNCTYPE(None, ), struct_WGPUStringView)
 WGPUProcSharedBufferMemoryEndAccessStateFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUSharedBufferMemoryEndAccessState)
 WGPUProcSharedTextureMemoryEndAccessStateFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUSharedTextureMemoryEndAccessState)
 WGPUProcSupportedFeaturesFreeMembers = ctypes.CFUNCTYPE(None, struct_WGPUSupportedFeatures)
