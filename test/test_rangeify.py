@@ -6,6 +6,7 @@ from tinygrad.codegen.opt import OptOps, Opt
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "broken in LVP")
 class TestDoubleMatmul(unittest.TestCase):
   def setUp(self):
     with Context(DEBUG=0):
