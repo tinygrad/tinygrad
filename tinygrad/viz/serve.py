@@ -251,10 +251,10 @@ def get_stdout(f:Callable) -> str:
   with redirect_stdout(buf:=io.StringIO()): f()
   return buf.getvalue()
 
-def get_render(i:int, fmt:str) -> bytes|None:
+def get_render(i:int, fmt:str) -> dict|None:
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
-  if fmt == "uops": return json.dumps({"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}).encode()
-  if fmt == "src": return json.dumps({"src":prg.src, "lang":"cpp"}).encode()
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}
+  if fmt == "src": return {"src":prg.src, "lang":"cpp"}
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   disasm_str = get_stdout(lambda: compiler.disassemble(lib))
   from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
@@ -263,7 +263,7 @@ def get_render(i:int, fmt:str) -> bytes|None:
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
     ret = get_llvm_mca(disasm_str, mtriple, mcpu)
   else: ret = {"src":disasm_str, "lang":"x86asm"}
-  return json.dumps(ret).encode()
+  return ret
 
 # ** HTTP server
 
@@ -282,7 +282,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/render": ret, content_type = get_render(get_int(query, "ctx"), query["fmt"][0]), "application/json"
+      if url.path == "/render": ret, content_type = json.dumps(get_render(get_int(query, "ctx"), query["fmt"][0])).encode(), "application/json"
       else:
         try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
         except KeyError: status_code = 404
