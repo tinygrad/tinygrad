@@ -192,7 +192,7 @@ class Scheduler:
       ])
       self.ast = graph_rewrite(self.ast.src[0].end(rr).sink(), pm_demote, ctx=[rr], bottom_up=True, name="demote")
     elif opt.op is OptOps.TC:
-      check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
+      #check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
       check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
       check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")

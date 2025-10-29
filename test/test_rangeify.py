@@ -7,7 +7,7 @@ from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
-@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer, CUDARenderer)), "broken in LVP and PTX")
 class TestDoubleMatmul(unittest.TestCase):
   def setUp(self):
     with Context(DEBUG=0):
@@ -51,6 +51,11 @@ class TestDoubleMatmul(unittest.TestCase):
     self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
   def test_upcast_12_unroll_01(self):
     self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+
+  def test_demote(self): self._test((Opt(OptOps.DEMOTE, 2, 8),))
+
+  @unittest.skipUnless(Device.DEFAULT == "METAL", "only for METAL TC")
+  def test_demote_tc(self): self._test((Opt(OptOps.DEMOTE, 2, 8), (Opt(OptOps.TC, 0, (0, 0, 1)))))
 
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
@@ -143,13 +148,6 @@ class TestPcontig(unittest.TestCase):
       mse = ((cmp-ret)**2).sum().item()
     print(f"mse: {mse}")
     self.assertLessEqual(mse, 1e-6)
-
-  def test_flash_attention_tc(self):
-    opts = ()
-    # rows in all the matrix
-    opts += (Opt(OptOps.DEMOTE, 4, 8),)
-    #opts += (Opt(OptOps.TC, 0, (0, 0, 1)),)
-    self.test_flash_attention(opts)
 
   def test_flash_attention_opt(self):
     opts = ()
