@@ -83,7 +83,7 @@ elif getenv("BIG") > 1:
   BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
 elif getenv("BIG") > 0:
   # bigger
-  BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
+  BS, HEADS, SEQLEN, EMB = 4, 32, 128, 128
 else:
   BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
 
