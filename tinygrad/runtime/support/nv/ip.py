@@ -266,10 +266,10 @@ class NV_FLCN_COT(NV_IP):
     self.init_fmc_image()
 
   def init_fmc_image(self):
-    self.fmc_booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_image_data")
-    self.fmc_booter_hash = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_hash_data")).cast('I')
-    self.fmc_booter_sig = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_sig_data")).cast('I')
-    self.fmc_booter_pkey = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_pkey_data") + b'\x00\x00\x00').cast('I')
+    self.fmc_booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "BINDATA_LABEL_UCODE_IMAGE_data")
+    self.fmc_booter_hash = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "BINDATA_LABEL_UCODE_HASH_data")).cast('I')
+    self.fmc_booter_sig = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "BINDATA_LABEL_UCODE_SIG_data")).cast('I')
+    self.fmc_booter_pkey = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "BINDATA_LABEL_UCODE_PKEY_data") + b'\x00\x00\x00').cast('I')
     _, self.fmc_booter_sysmem = System.alloc_sysmem(len(self.fmc_booter_image), contiguous=True, data=self.fmc_booter_image)
 
   def init_hw(self):
@@ -359,7 +359,8 @@ class NV_GSP(NV_IP):
         id8=int.from_bytes(bytes("RMARGS", 'utf-8'), 'big'), pa=self.rm_args_sysmem)
 
   def init_gsp_image(self):
-    fw = fetch("https://github.com/NVIDIA/linux-firmware/raw/refs/heads/nvidia-staging/nvidia/ga102/gsp/gsp-570.144.bin", subdir="fw").read_bytes()
+    fw = fetch("https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/nvidia-firmware-580_580.95.05-0ubuntu1_amd64.deb",
+               subdir="fw", rng=(868, 74622307), untar_file="lib/firmware/nvidia/580.95.05/gsp_ga10x.bin").read_bytes()
 
     _, sections, _ = elf_loader(fw)
     self.gsp_image = next((sh.content for sh in sections if sh.name == ".fwimage"))
@@ -384,8 +385,8 @@ class NV_GSP(NV_IP):
     _, self.gsp_signature_sysmem = System.alloc_sysmem(len(signature), contiguous=True, data=signature)
 
   def init_boot_binary_image(self):
-    self.booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_image_prod_data")
-    self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_desc_prod_data"))
+    self.booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "BINDATA_LABEL_UCODE_IMAGE_PROD_data")
+    self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "BINDATA_LABEL_UCODE_DESC_PROD_data"))
     _, self.booter_sysmem = System.alloc_sysmem(len(self.booter_image), contiguous=True, data=self.booter_image)
 
   def init_wpr_meta(self):
