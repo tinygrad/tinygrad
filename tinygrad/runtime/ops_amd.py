@@ -574,10 +574,11 @@ class AMDProgram(HCQProgram):
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
-    cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
-                                                        .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
-    self.dev.allocator._copyout(pmc_buf:=memoryview(bytearray(self.dev.pmc_buffer.size)), self.dev.pmc_buffer)
-    Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.name, self.dev.pmc_sched, bytes(pmc_buf))]
+    if self.dev.pmc_enabled:
+      cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
+                                                          .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+      self.dev.allocator._copyout(pmc_buf:=memoryview(bytearray(self.dev.pmc_buffer.size)), self.dev.pmc_buffer)
+      Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.name, self.dev.pmc_sched, bytes(pmc_buf))]
     return res
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
