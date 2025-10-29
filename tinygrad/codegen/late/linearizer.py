@@ -1,47 +1,21 @@
 import heapq
-from typing import cast
 from collections import defaultdict
-from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
-from tinygrad.helpers import panic
-
-# only needed if device doesn't support gated stores
-pm_linearize_cleanups = PatternMatcher([
-  # if statements are not allowed in the graph
-  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError("if not allowed in graph"))),
-  # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
-  (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))).or_casted(), UPat()),
-        allow_any_len=True), lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate, u.src[0])), u, UOp(Ops.ENDIF, src=(mif,))]))
-])
-
-# requires lst be toposorted. like graph rewrite, but for lines
-def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
-  newlst = []
-  replaced: dict[UOp, UOp] = {}
-  for u in lst:
-    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
-    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
-    replaced[u] = ret[0]
-    newlst.extend(ret[1])
-  return newlst
 
 def linearize(u:UOp) -> list[UOp]:
+  # this is a toposort with priority
   lst = list(u.toposort())
-  in_this_block = set(lst)
-  local_children: defaultdict[UOp, list[UOp]] = defaultdict(list)
+  consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
   priorities:dict[UOp, int] = {}
 
-  # get local children and assign priorities
+  # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    in_degree[u] = 0
-    for s in u.src:
-      if s in in_this_block:
-        local_children[s].append(u)
-        in_degree[u] += 1
+    for s in u.src: consumers[s].append(u)
+    in_degree[u] = len(u.src)
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x] for x in local_children[u]]
+    priority = [0] + [priorities[x] for x in consumers[u]]
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
@@ -59,12 +33,11 @@ def linearize(u:UOp) -> list[UOp]:
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in local_children[u]:
+    for v in consumers[u]:
       in_degree[v] -= 1
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
-
   assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
-  return line_rewrite(newlst, pm_linearize_cleanups)
+  return newlst
 
 class CFGContext:
   def __init__(self, sink:UOp):
@@ -88,25 +61,21 @@ class CFGContext:
     siblings: dict[UOp, list[UOp]] = {}
     for k,vv in nesting.items(): siblings.setdefault(vv, []).append(k)
     for k,v in siblings.items():
-      # range/if that have dependencies on other siblings need to run after them
+      # ranges that have dependencies on other siblings need to be scheduled after them
       order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
-      for x,y in zipped:
-        # TODO: is this check correct?
-        if y.src[1] not in x.backward_slice_with_self:
-          self.edges[y.src[1]] = x
+      for x,y in zipped: self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
 ])
 
+def do_split_ends(e:UOp):
+  ret = e.src[0]
+  for r in list(UOp.sink(*e.src[1:]).ranges)[::-1]: ret = ret.end(r)
+  return ret
+
 pm_split_ends = PatternMatcher([
   # split the ends
-  (UPat(Ops.END, name="e"), lambda e: e.src[0].end(e.src[-1]).end(*e.src[1:-1]) if len(e.src) > 2 else None),
-])
-
-# NOTE: this can be done whenever
-pm_add_ends = PatternMatcher([
-  # put the end on the store
-  (UPat(Ops.STORE, name="s"), lambda s: s.replace(src=s.src[:2]).end(*[x for x in s.src[2:] if x.op is Ops.RANGE])),
+  (UPat(Ops.END, name="e"), do_split_ends),
 ])

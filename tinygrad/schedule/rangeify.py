@@ -311,7 +311,7 @@ def bufferize_to_store(x:UOp, allow_locals=True):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    do_store = assign_target.replace(dtype=sdtype).store(assign_src, *rngs).replace(tag=x.tag)
+    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*[x for x in rngs if x.op is Ops.RANGE])
     ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
@@ -324,7 +324,7 @@ def bufferize_to_store(x:UOp, allow_locals=True):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs).replace(tag=x.tag)
+    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], tag=x.tag).end(*[x for x in rngs if x.op is Ops.RANGE])
     ret = buf.after(do_store).forced_reshape(shape)
     # TODO: is this right? what if it's offset
     if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
@@ -337,7 +337,7 @@ def bufferize_to_store(x:UOp, allow_locals=True):
     tag = x.arg.device
     if tag is None: tag = UOp.unique().arg # TODO: hack
     buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs)
+    do_store = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0]).end(*[x for x in rngs if x.op is Ops.RANGE])
     return buf.after(do_store.barrier()).reshape(shape)
 
 pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
@@ -384,8 +384,8 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
   return buf
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
-  if r.tag is not None: return None
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=())
+  if r.tag != (): return None
+  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
 
@@ -443,13 +443,14 @@ pm_remove_tags = PatternMatcher([
   (UPat(GroupOp.All, name="x"), remove_metadata_tags),
 ])
 
+pm_add_range_tags = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(()))
+])
+
 @dataclass(frozen=True)
 class Kernel:
   ast: UOp
   metadata: tuple[Metadata, ...] = ()
-  def __repr__(self):
-    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
-    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   if len(x.ranges): return None
@@ -477,7 +478,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   return kernel
 
 split_kernels = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), split_store),
+  (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
 def tag_uop(ctx:list[UOp], x:UOp):
@@ -532,7 +533,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign

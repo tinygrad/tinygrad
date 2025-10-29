@@ -109,7 +109,7 @@ def cat_after_store(cat:UOp, data:UOp, sto:UOp):
   for s in cat.src:
     ret.append(s.store(data.gep(tuple(range(offset, offset+s.dtype.count))), *sto.src[2:]))
     offset += s.dtype.count
-  return UOp(Ops.NOOP, src=tuple(ret))
+  return UOp.group(*ret)
 
 def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   # NOTE: we need to invert the gep here, but it may be an expanding gep
@@ -148,7 +148,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   if ctx is not None and ctx.device == "DSP":
     lengths = [128,64,32,16,8,4]
     must_divide = False
-  elif buf.dtype.base != dtypes.float and buf.dtype.base != dtypes.half and not isinstance(buf.dtype, ImageDType):
+  elif buf.dtype.base not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
     pass
   elif buf.ptrdtype.addrspace == AddrSpace.REG:
     pass
@@ -179,7 +179,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 
   # if it wasn't split, we return None. otherwise we CAT them
   if len(ret) <= 1: return None
-  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp(Ops.NOOP, src=tuple(ret))
+  return UOp(Ops.CAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -288,7 +288,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   # if we have a range
   if len(reduce_range) != 0:
     topo = inp.toposort()
-    ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.STORE])
+    ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))
@@ -298,7 +298,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret, *reduce_range)).index(UOp.const(dtypes.int, 0)).load()
+  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0)).load()
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN

@@ -3,7 +3,7 @@ from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import Profiling, Timing, getenv
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen import full_rewrite_to_sink
-from tinygrad.codegen.late.control_flow import linearize
+from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.uop.spec import type_verify, program_spec
 
 if __name__ == "__main__":

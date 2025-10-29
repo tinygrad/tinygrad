@@ -13,6 +13,7 @@ testing_minimal = [
   "pytest",
   "pytest-xdist",
   "pytest-timeout",
+  "pytest-split",
   "hypothesis",
   "z3-solver",
 ]
