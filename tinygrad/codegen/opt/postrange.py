@@ -64,7 +64,8 @@ class Scheduler:
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
   def _globalizable_rngs(self) -> list[UOp]:
-    return flatten([list(UOp.sink(*s.src[1:]).ranges) for s in self.ast.src if s.op is Ops.END])
+    assert len(self.ast.src)==1, "only single END supported"
+    return list(end.src[1:]) if len(self.ast.src)==1 and (end:=self.ast.src[0]).op is Ops.END else []
 
   def convert_loop_to_global(self):
     if not self.ren.has_local: return None
