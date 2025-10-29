@@ -64,7 +64,7 @@ class Scheduler:
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
   def _output_rngs(self) -> list[UOp]:
-    return flatten([list(UOp.sink(*s.src[1:]).ranges) for s in self.ast.src if s.op is Ops.END])
+    return list(end.src[0].ranges) if len(sink:=self.ast.src)==1 and (end:=sink.src[0]).op is Ops.END else []
   def _globalizable_rngs(self) -> list[UOp]:
     ret = self._output_rngs()
     # exclude any output ranges from global that don't appear in all BUFFERIZE
