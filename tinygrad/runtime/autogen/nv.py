@@ -470,7 +470,7 @@ NvU8 = ctypes.c_ubyte
 msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
 msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p)
 msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint)
-msgqFcnBarrier = ctypes.CFUNCTYPE(None)
+msgqFcnBarrier = ctypes.CFUNCTYPE(None, )
 msgqMetadata._fields_ = [
   ('pOurTxHdr', ctypes.POINTER(msgqTxHeader)),
   ('pTheirTxHdr', ctypes.POINTER(msgqTxHeader)),

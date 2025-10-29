@@ -1,7 +1,13 @@
 # mypy: ignore-errors
-import ctypes, ctypes.util
+import ctypes
+from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-dll = ctypes.CDLL(ctypes.util.find_library('nvJitLink'))
+
+def _dll():
+  try: return ctypes.CDLL(find_library('nvJitLink'))
+  except: pass
+  return None
+dll = _dll()
 
 nvJitLinkResult = CEnum(ctypes.c_uint)
 NVJITLINK_SUCCESS = nvJitLinkResult.define('NVJITLINK_SUCCESS', 0)
