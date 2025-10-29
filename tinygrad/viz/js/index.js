@@ -212,7 +212,29 @@ const ncu_layout = (counters) => {
       "dram__bytes_write.sum",
     ]},
   };
+  const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
+  const units = [
+    ["kernel", 40, 100, colors.LOGICAL, "Kernel"],
+    ["instr_global", 100, 10, colors.LOGICAL, "Global"],
+    ["instr_local", 100, 10, colors.LOGICAL, "Local"],
+    ["instr_shared", 100, 10, colors.LOGICAL, "Shared"],
+    ["l1", 100, 70, colors.PHYSICAL, "L1 Hit Rate (%)"],
+    ["shared", 100, 10, colors.PHYSICAL, "Shared Memory"],
+    ["l2", 100, 90, colors.PHYSICAL, "L2 Hit Rate (%)"],
+    ["dram", 100, 10, colors.PHYSICAL, "Device Memory"],
+  ];
+  const links = [
+    ["kernel", "instr_global", [{k:"Kernel <-> Global", dbl:true}]],
+    ["kernel", "instr_local",  [{k:"Kernel <-> Local",  dbl:true}]],
+    ["kernel", "instr_shared", [{k:"Kernel <-> Shared", dbl:true}]],
+    ["instr_global", "l1", [{k:"Global <- L1 Cache"}, {k:"Global -> L1 Cache"}]],
+    ["instr_local", "l1", [{k:"Local <- L1 Cache"}, {k:"Local -> L1 Cache"}]],
+    ["instr_shared", "shared", [{k:"Shared <- Shared Memory"}, {k:"Shared -> Shared Memory"}]],
+    ["l1", "l2", [{k:"L1 Cache <- L2 Cache (bytes)"}, {k:"L1 Cache -> L2 Cache (bytes)"}]],
+    ["l2", "dram", [{k:"L2 Cache <- Device Memory (bytes)"}, {k:"L2 Cache -> Device Memory (bytes)"}]],
+  ];
 
+  // this is trash code to deal with ncu's format specifically
   function findk(obj, key) {
     let found = null;
     for (const k of Object.keys(obj)) {
@@ -240,53 +262,22 @@ const ncu_layout = (counters) => {
   }
   const fmt = (formula) => formatUnit(calc(formula), " "+formulas[formula].unit);
 
-  // *** units
-  const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
-  const width = 140, H = 440;
-  const l = {kernel:{width:width*0.4, height:H, x:0, y:0, color:colors.LOGICAL, label:"Kernel"}}; // baseline
-
+  // graph layout
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir:"LR" }).setDefaultEdgeLabel(() => ({}))
-
-  g.setNode("kernel", {width:width*0.4, height:H, color: colors.LOGICAL,  label:"Kernel"});
-  g.setNode("isa_global", {width, height:H*0.1, color:colors.LOGICAL,  label:"Global"});
-  g.setNode("isa_local",  {width, height:H*0.1, color:colors.LOGICAL,  label:"Local"});
-  g.setNode("isa_shared", {width, height:H*0.1, color:colors.LOGICAL,  label:"Shared"});
-  g.setNode("l1",         {width, height:H*0.7, color:colors.PHYSICAL, label:"L1/TEX Cache\nHit Rate: "+fmt("L1 Hit Rate (%)")});
-  g.setNode("shared",     {width, height:H*0.1, color:colors.PHYSICAL, label:"Shared Memory"});
-  g.setNode("l2",         {width, height:H*0.9, color:colors.PHYSICAL, label:"L2 Cache\nHit Rate: "+fmt("L2 Hit Rate (%)")});
-  g.setNode("device_mem", {width, height:H*0.1, color:colors.PHYSICAL, label:"Device Memory"});
-
-  g.setEdge("kernel", "isa_global", {typ:"dbl", val:fmt("Kernel <-> Global")});
-  g.setEdge("kernel", "isa_shared", {typ:"dbl", val:fmt("Kernel <-> Shared")});
-  g.setEdge("kernel", "isa_local", {typ:"dbl", val:fmt("Kernel <-> Local")});
-  g.setEdge("isa_global", "l1", {val:[fmt("Global <- L1 Cache"), fmt("Global -> L1 Cache")]});
-  g.setEdge("isa_local", "l1", {val:[fmt("Local <- L1 Cache"), fmt("Local -> L1 Cache")]});
-  g.setEdge("isa_shared", "shared", {val:[fmt("Shared <- Shared Memory"), fmt("Shared -> Shared Memory")]});
-  g.setEdge("l1", "l2", {val:[fmt("L1 Cache <- L2 Cache (bytes)"), fmt("L1 Cache -> L2 Cache (bytes)")]});
-  g.setEdge("l2", "device_mem", {val:[fmt("L2 Cache <- Device Memory (bytes)"), fmt("L2 Cache -> Device Memory (bytes)")]});
-  g.setEdge("shared", "l2", {above:"l1", val:fmt("L1 -> Shared (bytes)")});
-
-  dagre.layout(g);
-  const layout = dagre.graphlib.json.write(g);
-
-  const edges = [];
-  for (let e of layout.edges) {
-    let edge = e.value;
-    let points = edge.points;
-    if (edge.above != null) {
-      const nw = g.node(edge.above);
-      const nv = g.node(e.v);
-      const x = points[0].x-(nv.width/2);
-      points = [{x, y:nv.y-nv.height/2}, {x, y:nw.y+nw.height/2}];
-      edges.push({ v:e.v, w:e.w, value:{val:edge.val, points} });
-    } else if (edge.typ === "dbl") {
-      edges.push(e);
-    } else {
-      edges.push({ v:e.v, w:e.w, value:{val:edge.val[0], points}});
-    }
+  g.setGraph({ rankdir:"LR" }).setDefaultEdgeLabel(() => ({}));
+  const baseWidth = 140, baseHeight = 440;
+  for (const unit of units) {
+    let [key, width, height, color, label] = unit;
+    if (formulas[label] != null) label += "\n"+fmt(label)
+    g.setNode(key, { width:baseWidth*(width/100), height:baseHeight*(height/100), color, label });
   }
-  return { nodes:layout.nodes, edges };
+  for (const link of links) {
+    const [v, w, metrics] = link;
+    g.setEdge(v, w, metrics)
+  }
+  dagre.layout(g);
+  let { nodes, edges } = dagre.graphlib.json.write(g);
+  return { nodes, edges };
 }
 const MEMORY_LAYOUTS = {"CUDA":ncu_layout}
 
