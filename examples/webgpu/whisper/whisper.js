@@ -204,17 +204,24 @@ function handle_timestamp_tokens(nextTokens, context, token_count, last_token_in
     return nextTokens;
 }
 
-function batch_double_helper(array) {
-    // return [...array, ...array];
-    return array;
+function batch_repeat_helper(array, bs) {
+    let result = [];
+    for (let i = 0; i < bs; ++i) {
+        result = result.concat(array);
+    }
+    return result;
 }
 
+let reuse_cache = 0;
 async function decoder_helper(nets, context_input, audio_features, context_last_token_index_absolute, decoder_state) {
-    context_input = batch_double_helper(context_input);
-    let [decoder_output] = await nets.decoder(context_input, audio_features, [context_last_token_index_absolute]);
-    // TODO(irwin): this looks horribly wrong for actual batched work
-    decoder_state.context = [...decoder_state.context.slice(0, context_last_token_index_absolute * MODEL_BATCH_SIZE_HARDCODED), ...context_input];
-    return decoder_output;
+    context_input = batch_repeat_helper(context_input, nets.model_metadata.decoder_batch_size);
+    let [decoder_output] = await nets.decoder(context_input, audio_features, [context_last_token_index_absolute], [0], [reuse_cache]);
+    reuse_cache = 1;
+    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
+        decoder_state.contexts[i] = [...decoder_state.contexts[i].slice(0, context_last_token_index_absolute), context_input[i]];
+    }
+    let o = 0;
+    return decoder_output.slice(o*51864, (o+1)*51864);
 }
 
 function rebuild_cache_tail_index(c1, c2) {
@@ -245,6 +252,28 @@ const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61,
  */
 
 /**
+ * @typedef Decoder_State
+ * @type {object}
+ * @property {integer[][]} contexts
+ */
+
+/**
+ * @typedef Decoder_Result
+ * @type {object}
+ * @property {boolean} keep_going
+ * @property {integer[]} context
+ * @property {number} avg_logprob
+ * @property {number} segment_cumlogprob
+ * @property {number} last_eos_logprob
+ */
+
+/**
+ * @param {Decode_Sequence[]} decode_sequences
+ * @param {Decoder_State} decoder_state
+ * @returns {Decoder_Result[]}
+ */
+
+/**
  * @param {Decode_Sequence} decode_sequence
  */
 async function decodeOne(nets, decode_sequence, decoder_state, temperature, audio_features) {
@@ -262,7 +291,7 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
     let last_token_index = context.length - 1;
     let one_before_last_token_index = context.length - 2;
 
-    let last_common_index = rebuild_cache_tail_index(context, decoder_state.context);
+    let last_common_index = rebuild_cache_tail_index(context, decoder_state.contexts[0]);
     if (last_common_index < context.length - 1) {
         // NOTE(irwin): rebuild self attention kv cache
         // TODO(irwin): for batch==1 we can rebuild only the tail of the kv cache that should only differ by 1-2 tokens or so
@@ -274,12 +303,7 @@ async function decodeOne(nets, decode_sequence, decoder_state, temperature, audi
     }
 
     let context_input = [context.at(-1)];
-    // context_input = batch_double_helper(context_input);
-
-    // let [decoder_output] = await nets.decoder(context_input, (audio_features), [i-1]);
     let decoder_output = await decoder_helper(nets, context_input, audio_features, context.length - 1, decoder_state);
-    decoder_output = decoder_output.slice(0, decoder_output.length / MODEL_BATCH_SIZE_HARDCODED);
-    // decoder_state.context = context;
     let nextLogprobs;
     let nextTokens;
     let max;
@@ -356,9 +380,14 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     // v.fill(0);
     // v[0] = TOK_NO_TIMESTAMPS;
 
+    /** @type {Decoder_State} */
     let decoder_state = {
-        context: []
+        contexts: []
     };
+
+    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
+        decoder_state.contexts.push([]);
+    }
 
     const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
 
@@ -414,8 +443,8 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     }
 
     for (let seq of sequences) {
-        console.log(seq.logprobs);
-        console.log(seq.eos_logprobs);
+        // console.log(seq.logprobs);
+        // console.log(seq.eos_logprobs);
         let cumlogprob = seq.logprobs.reduce((a, b) => a + b);
         console.log(cumlogprob);
         console.log(cumlogprob / seq.logprobs.length);
@@ -538,7 +567,7 @@ export {
     getProgressDlForPart,
 
     handle_timestamp_tokens,
-    batch_double_helper,
+    batch_repeat_helper as batch_double_helper,
     decoder_helper,
     rebuild_cache_tail_index,
     decodeOne,

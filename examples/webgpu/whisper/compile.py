@@ -17,6 +17,12 @@ from examples.whisper import MODEL_URLS, get_encoding
 from examples.whisper import RATE, SAMPLES_PER_SEGMENT, N_FFT, HOP_LENGTH, N_MELS
 import math
 
+def cache_slice_helper_(c, t, off, bs):
+  c.assign(c.shrink(((0, off), None, None)).cat(t, c.shrink(((off+1, bs), None, None))).contiguous())
+
+def cache_slice_helper(c, t, off, bs):
+  return c.shrink(((0, off), None, None)).cat(t, c.shrink(((off+1, bs), None, None)))
+
 class MultiHeadAttention:
   def __init__(self, n_state, n_head, kv_caching: Literal['cross', 'self']=None, max_self_attn_cache_len=None):
     self.n_head = n_head
@@ -28,18 +34,30 @@ class MultiHeadAttention:
     self.kv_caching = kv_caching
     self.max_self_attn_cache_len = max_self_attn_cache_len
 
-  def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None):
+  def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None, off=None, cache=None):
     if self.kv_caching == 'cross':
-      k, v = self.key(xa), self.value(xa)
-      # if xa is not None:
-      #   k, v = self.key(xa), self.value(xa)
-      #   if not hasattr(self, 'cache_k'):
-      #     self.cache_k, self.cache_v = k, v
-      #   else:
-      #     self.cache_k.assign(k).realize()
-      #     self.cache_v.assign(v).realize()
-      # else:
-      #   k, v = self.cache_k, self.cache_v
+      if xa is not None:
+        if not hasattr(self, 'cache_k'):
+          self.cache_k = Tensor.zeros(x.shape[0], 1500, 384)
+          self.cache_v = Tensor.zeros(x.shape[0], 1500, 384)
+        new_cache_k = cache_slice_helper(self.cache_k, self.key(xa), off, x.shape[0])
+        new_cache_v = cache_slice_helper(self.cache_v, self.value(xa), off, x.shape[0])
+
+        # m = (Tensor(cache) > 0).expand(x.shape[0], 1, 1)
+        # self.cache_k.assign(m.where(new_cache_k, self.cache_k).contiguous())
+        # self.cache_v.assign(m.where(new_cache_v, self.cache_v).contiguous())
+        # self.cache_k.assign(self.cache_k.shrink(((0, x.shape[0]*cache), None, None)).cat(new_cache_k.shrink(((0, x.shape[0]*(1-cache)), None, None))).contiguous())
+        # self.cache_v.assign(self.cache_v.shrink(((0, x.shape[0]*cache), None, None)).cat(new_cache_v.shrink(((0, x.shape[0]*(1-cache)), None, None))).contiguous())
+        # self.cache_k.assign(self.cache_k.cat(new_cache_k).shrink(((x.shape[0]*cache, x.shape[0]*(cache+1)), None, None)).contiguous())
+        # self.cache_v.assign(self.cache_v.cat(new_cache_v).shrink(((x.shape[0]*cache, x.shape[0]*(cache+1)), None, None)).contiguous())
+        # self.cache_k.assign(self.cache_k[None].cat(new_cache_k[None])[cache].contiguous())
+        # self.cache_v.assign(self.cache_v[None].cat(new_cache_v[None])[cache].contiguous())
+        self.cache_k.assign(self.cache_k.shrink(((0, cache*x.shape[0]), None, None)).cat(new_cache_k).shrink(((0, x.shape[0]), None, None)).contiguous())
+        self.cache_v.assign(self.cache_v.shrink(((0, cache*x.shape[0]), None, None)).cat(new_cache_v).shrink(((0, x.shape[0]), None, None)).contiguous())
+
+        k, v = self.cache_k, self.cache_v
+      else:
+        k, v = self.cache_k, self.cache_v
     else:
       k, v = self.key(x), self.value(x)
       if self.kv_caching == 'self':
@@ -75,9 +93,9 @@ class ResidualAttentionBlock:
     self.mlp = [nn.Linear(n_state, n_state*4), Tensor.gelu, nn.Linear(n_state*4, n_state)]
     self.mlp_ln = nn.LayerNorm(n_state)
 
-  def __call__(self, x, xa=None, mask=None, len: Union[Variable, int]=None):
+  def __call__(self, x, xa=None, mask=None, len: Union[Variable, int]=None, off=None, cache=None):
     x = x + self.attn(self.attn_ln(x), mask=mask, len=len)
-    if self.cross_attn: x = x + self.cross_attn(self.cross_attn_ln(x), xa)
+    if self.cross_attn: x = x + self.cross_attn(self.cross_attn_ln(x), xa, off=off, cache=cache)
     x = x + self.mlp_ln(x).sequential(self.mlp)
     return x.realize()
 
@@ -122,13 +140,15 @@ class TextDecoder:
       for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=pos)
       return self.output_tok(x)
   else:
-    def forward(self, x:Tensor, encoded_audio:Tensor, ctx):
+    def forward(self, x:Tensor, encoded_audio:Tensor, ctx, off, cache):
       # seqlen = x.shape[-1]
       bs, seqlen = x.shape[0], 1
-      encoded_audio = encoded_audio.repeat(bs, 1, 1)
+      # encoded_audio = encoded_audio.repeat(bs, 1, 1)
+      # encoded_audio = encoded_audio.reshape(-1, 1500, 384)
+      # self.encoded_audio.assign(self.encoded_audio.shrink(((0, off), None, None)).cat(encoded_audio, self.encoded_audio.shrink(((off+1, bs), None, None))).contiguous())
       x = self.token_embedding(x)
       x += self.positional_embedding.shrink(((ctx, ctx+seqlen), None, None))
-      for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=ctx)
+      for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=ctx, off=off, cache=cache)
       # NOTE(irwin): wrong output size w/o contiguous. TODO: check on latest tinygrad
       # logits = self.output_tok(x)[:, ctx-1].contiguous()
       # logits = self.output_tok(x)[:, ctx].contiguous()
@@ -164,7 +184,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 # IMPORTANT(irwin): unfortunately this doesn't switch all computations to half precision yet
 FLOAT16 = False
 MODEL_NAME = "tiny.en"
-DECODER_BATCH_SIZE = 1
+DECODER_BATCH_SIZE = 32
 
 if __name__ == '__main__':
   def tofull(sd):
@@ -261,6 +281,8 @@ if __name__ == '__main__':
       x,
       Tensor.rand(1, 1500, embedding_dims),
       Variable("ctx", 0, model.decoder.max_tokens_to_sample*2-1).bind(1),
+      Variable("off", 0, DECODER_BATCH_SIZE-1).bind(0),
+      Variable("update_cache", 0, 1).bind(0),
       model_name="decoder"
     )
     # print(out_sizes)
