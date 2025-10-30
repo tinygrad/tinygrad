@@ -41,19 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_qcom() {
-  clang2py -k cdefstum \
-    extra/dsp/include/ion.h \
-    extra/dsp/include/msm_ion.h \
-    extra/dsp/include/adsprpc_shared.h \
-    extra/dsp/include/remote_default.h \
-    extra/dsp/include/apps_std.h \
-    -o $BASE/qcom_dsp.py
-
-  fixup $BASE/qcom_dsp.py
-  python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
-}
-
 generate_sqtt() {
   clang2py -k cdefstum \
     extra/sqtt/sqtt.h \
@@ -160,7 +147,6 @@ generate_mesa() {
 }
 
 if [ "$1" == "sqtt" ]; then generate_sqtt
-elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "mesa" ]; then generate_mesa
 elif [ "$1" == "all" ]; then generate_mesa
 else echo "usage: $0 <type>"

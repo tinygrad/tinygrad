@@ -64,4 +64,6 @@ def __getattr__(nm):
                                  "sienna_cichlid_ip_offset"]], ["-I/opt/rocm/include", "-x", "c++"])
     case "kgsl": return load("kgsl", [], [root/"extra/qcom_gpu_driver/msm_kgsl.h"])
     case "adreno": return load("adreno", [], [root/"extra/qcom_gpu_driver/a6xx.xml.h"])
+    case "qcom_dsp":
+      return load("qcom_dsp", [], [root/f"extra/dsp/include/{s}.h" for s in ["ion","msm_ion","adsprpc_shared","remote_default","apps_std"]])
     case _: raise AttributeError(f"no such autogen: {nm}")
