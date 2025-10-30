@@ -1,11 +1,8 @@
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, graph_rewrite, AxisType, PatternMatcher, UPat, axis_colors
+from tinygrad.uop.ops import UOp, KernelInfo
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv, colored, prod, unwrap
-from tinygrad.codegen.opt import Opt, OptOps
-
-def to_colored(full_shape, axis_types): return '_'.join([colored(str(s), axis_colors[at]) for s,at in zip(full_shape, axis_types)])
+from tinygrad.helpers import getenv
 
 N = 4096
 run_count = 5
@@ -17,13 +14,19 @@ BK = 8
 TN = 4
 TM = 4
 
-def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
+def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   BLOCK_SIZE = 128 if kernel5 else 256
 
+  # ---------------------------
+  # launch/config constants
+  # ---------------------------
   nbWaves = BLOCK_SIZE // 32
   WN = 128 if kernel5 else 64
   WM = BN * BM // nbWaves // WN
 
+  # Sanity checks (fail fast if shapes/tiles misalign)
+  assert BN % WN == 0, "BN must be a multiple of WN"
+  assert BM % WM == 0, "BM must be a multiple of WM"
   nbWaveX = BN // WN
   nbWaveY = BM // WM
 
@@ -45,18 +48,28 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
   SUBWN = WN // nbIterWaveN
   SUBWM = WM // nbIterWaveM
 
-  # Thread mapping to read BKxBN block from A
+  # ---------------------------
+  # per-thread read mapping
+  # ---------------------------
+  # A: read BK x BN tiles; B: read BN x BK tiles
   rAIdx = threadIdx_x % BK
   rAIdy = threadIdx_x // BK
-  # Thread mapping to read BNxBK block from B
   rBIdx = threadIdx_x % BN
   rBIdy = threadIdx_x // BN
 
   strideReadB = BLOCK_SIZE // BN
   strideReadA = BLOCK_SIZE // BK
+  assert BLOCK_SIZE % BN == 0, "BLOCK_SIZE must be divisible by BN"
+  assert BLOCK_SIZE % BK == 0, "BLOCK_SIZE must be divisible by BK"
+
   nbReadsB = BN * BK // BLOCK_SIZE
   nbReadsA = BM * BK // BLOCK_SIZE
+  assert (BN * BK) % BLOCK_SIZE == 0
+  assert (BM * BK) % BLOCK_SIZE == 0
 
+  # ---------------------------
+  # block indices & placeholders
+  # ---------------------------
   blockIdx_x = UOp.special(N//BN, "gidx0")
   blockIdx_y = UOp.special(N//BM, "gidx1")
 
@@ -70,7 +83,7 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
 
   A_col = UOp.placeholder(dtypes.float, (nbIterWaveM, TM), slot=0, addrspace=AddrSpace.REG)
   B_row = UOp.placeholder(dtypes.float, (nbIterWaveN, TN), slot=1, addrspace=AddrSpace.REG)
-  c_regs = UOp.placeholder(dtypes.float, (TM * nbIterWaveM * TN * nbIterWaveN,), slot=2, addrspace=AddrSpace.REG)
+  c_regs = UOp.placeholder(dtypes.float, (nbIterWaveM, TM, nbIterWaveN, TN), slot=2, addrspace=AddrSpace.REG)
 
   i = UOp.range(c_regs.dtype.size, 16)
   c_regs = c_regs[i].set(0.0, end=i)
@@ -78,7 +91,9 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
   kId_range = UOp.range(N//BK, 0)
   kId = kId_range*BK
 
-  # load from globals into locals
+  # ---------------------------
+  # GLOBAL -> LOCAL (As, Bs)
+  # ---------------------------
   i = UOp.range(nbReadsB, 1)
   index_x = BN * blockIdx_x + rBIdx
   index_y = rBIdy + i * strideReadB + kId
@@ -89,40 +104,50 @@ def hand_spec_kernel3(kernel4=getenv("K4", 0), kernel5=getenv("K5", 0)):
   index_y = BM * blockIdx_y + rAIdy + i * strideReadA
   As_store = As[index_x % BK, index_y % BM].store(a[index_y, index_x]).end(i)
 
+  # TODO: can we automate barrier?
   barrier = UOp.barrier(As_store, Bs_store)
+  Bs = Bs.after(barrier)
+  As = As.after(barrier)
 
+  # open inner k range
   k = UOp.range(BK, 3)
 
-  # load from locals into registers
+  # ---------------------------
+  # LOCAL -> REG (per-wave tiles)
+  # ---------------------------
   iterWave = UOp.range(nbIterWaveN, 4)
   i = UOp.range(TN, 5)
   index = waveIdx * WN + iterWave * SUBWN + TN * idxInWave + i
-  B_row_store = B_row[iterWave, i].store(Bs.after(barrier)[k, index]).end(iterWave, i)
+  B_row = B_row[iterWave, i].set(Bs[k, index], end=(iterWave, i))
 
   iterWave = UOp.range(nbIterWaveM, 6)
   i = UOp.range(TM, 7)
   index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i
-  A_col_store = A_col[iterWave, i].store(As.after(barrier)[k, index]).end(iterWave, i)
+  A_col = A_col[iterWave, i].set(As[k, index], end=(iterWave, i))
 
-  # do the GEMM math
+  # ---------------------------
+  # FMA: c_regs += A_col * B_row
+  # ---------------------------
   iterWaveM = UOp.range(nbIterWaveM, 8)
   yt = UOp.range(TM, 9)
   iterWaveN = UOp.range(nbIterWaveN, 10)
   xt = UOp.range(TN, 12)
-  x = iterWaveN * TN + xt
-  y = iterWaveM * TM + yt
+  c_idx = c_regs.after(k, kId_range)[iterWaveM, yt, iterWaveN, xt]
+  sink = c_idx.store(c_idx + A_col[iterWaveM, yt] * B_row[iterWaveN, xt]).end(iterWaveM, iterWaveN, yt, xt)
 
-  gemm = c_regs[y * TN * nbIterWaveN + x] + A_col.after(A_col_store)[y] * B_row.after(B_row_store)[x]
-  sink = c_regs[y * TN * nbIterWaveN + x].store(gemm).end(iterWaveM, iterWaveN, yt, xt, k).barrier().end(kId_range)
+  # Close k, sync, and close K tiles
+  sink = sink.end(k).barrier().end(kId_range)
 
-  # store c_regs into c
+  # ---------------------------
+  # REG -> GLOBAL (epilogue)
+  # ---------------------------
   iterWaveM = UOp.range(nbIterWaveM, 1000)
   yt = UOp.range(TM, 1001)
   iterWaveN = UOp.range(nbIterWaveN, 1002)
   xt = UOp.range(TN, 1003)
   xOut = blockIdx_x * BN + waveIdx * WN + iterWaveN * SUBWN + TN * idxInWave
   yOut = blockIdx_y * BM + waveIdy * WM + iterWaveM * SUBWM + TM * idyInWave
-  sink = c[yOut + yt, xOut + xt].store(c_regs.after(sink)[TN * nbIterWaveN * (iterWaveM * TM + yt) + (iterWaveN * TN + xt)])
+  sink = c[yOut + yt, xOut + xt].store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
   sink = sink.end(iterWaveM, iterWaveN, yt, xt)
 
   return sink.sink(arg=KernelInfo(name="tinygemm", opts_to_apply=()))
