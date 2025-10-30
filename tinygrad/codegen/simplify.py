@@ -1,3 +1,4 @@
+import itertools
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.helpers import partition, dedup
@@ -18,9 +19,8 @@ pm_flatten_range = PatternMatcher([
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
-  i = 0
-  while i < len(u.ended_ranges)-1:
-    r0, r1 = u.ended_ranges[i], u.ended_ranges[i+1]
+  # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
+  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
     # check same type
     if r0.arg[-1] == r1.arg[-1]:
       # check if the ranges to merge are in the same reduces
@@ -35,7 +35,6 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
         if count_divmod(nidx) <= count_divmod(u):
           u = nidx
           continue
-    i += 1
   return u
 
 pm_simplify_ranges = PatternMatcher([
@@ -56,7 +55,7 @@ def do_substitute(ctx, x: UOp):
   return ret
 
 def dont_sub_ranges_for_image(ctx, x:UOp):
-  if isinstance(x.src[0].dtype, ImageDType):
+  if isinstance(x.src[0].src[0].dtype, ImageDType):
     for s in x.src[0].ranges: ctx[s] = None
 
 pm_split_ranges = PatternMatcher([
@@ -130,7 +129,7 @@ def reduce_load_collapse(red:UOp): return reduce_collapse(red, pm=pm_reduce_load
 # remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([(UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),])
 # remove REDUCE on load, comes from indexing a tensor with another tensor
-def no_load(u:UOp) -> bool: return not any(x.op is Ops.LOAD for x in u.backward_slice_with_self)
+def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward_slice_with_self)
 pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse

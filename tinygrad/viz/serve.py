@@ -155,7 +155,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
         info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
-               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{[str(m) for m in ei.arg['metadata']]}"
+               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{[str(m) for m in (ei.arg['metadata'] or ())]}"
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
@@ -288,7 +288,7 @@ class Handler(BaseHTTPRequestHandler):
         ret, content_type = json.dumps(render_src).encode(), "application/json"
       else:
         try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
-        except KeyError: status_code = 404
+        except (KeyError, IndexError): status_code = 404
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
