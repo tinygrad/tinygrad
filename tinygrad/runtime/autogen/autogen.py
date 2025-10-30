@@ -1,26 +1,26 @@
 import ctypes.util, glob, importlib.metadata, itertools, re, functools, tarfile
 from tinygrad.helpers import fetch, flatten, unwrap
 from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, TypeKind as TK
-from clang.cindex import PrintingPolicy as PP, PrintingPolicyProperty as PPP
+from clang.cindex import PrintingPolicy as PP, PrintingPolicyProperty as PPP, SourceRange
 
 assert importlib.metadata.version('clang')[:2] == "20"
 if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
 
 def fst(c): return next(c.get_children())
 def last(c): return list(c.get_children())[-1]
-def readext(f, start, end):
+def readext(f, fst, snd=None):
   with open(f, "r") as f:
-    f.seek(start)
-    return f.read(end-start)
+    f.seek(start:=(fst.start.offset if isinstance(fst, SourceRange) else fst))
+    return f.read((fst.end.offset if isinstance(fst, SourceRange) else snd)-start)
 
 def until(pred, f, x):
   while not pred(x): x = f(x)
   return x
 
-base_rules = [(r'\s*\\\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b', r'\1'), (r'\b0+(?=\d)', ''),
-         (r'\s*&&\s*', r' and '), (r'\s*\|\|\s*', r' or '), (r'\s*!\s*', ' not '),
-         (r'(struct|union|enum)\s*([a-zA-Z_][a-zA-Z0-9_]*\b)', r'\1_\2'),
-         (r'\((unsigned )?(char)\)', ''), (r'^.*[?;].*$', ''), (r'^.*\d+:\d+.*$', ''), (r'^.*\w##\w.*$', '')]
+base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b', r'\1'),
+              (r'\b0+(?=\d)', ''), (r'\s*&&\s*', r' and '), (r'\s*\|\|\s*', r' or '), (r'\s*!\s*', ' not '),
+              (r'(struct|union|enum)\s*([a-zA-Z_][a-zA-Z0-9_]*\b)', r'\1_\2'),
+              (r'\((unsigned )?(char)\)', ''), (r'^.*[?;].*$', ''), (r'^.*\d+:\d+.*$', ''), (r'^.*\w##\w.*$', '')]
 
 def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, use_errno=False):
   files, args = files() if callable(files) else files, args() if callable(args) else args
@@ -35,15 +35,12 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
   idx, lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', os' if any('os' in s for s in dll) else ''),
                                 *(["from ctypes.util import find_library"] if any('find_library' in s for s in dll) else []),
                                 "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *prelude]
-  if dll: lines += [f"""
-def _dll():
-  {'\n  '.join(f'try: return ctypes.CDLL({d}{', use_errno=True' if use_errno else ''})\n  except: pass' for d in dll)}
-  return None
-dll = _dll()
-"""]
-  macros:list[str] = []
+  if dll: lines += flatten(["def dll():",[[f"  try: return ctypes.CDLL({d}{', use_errno=True' if use_errno else ''})",'  except: pass'] for d in dll],
+                            "  return None", "dll = dll()"])
+  macros = []
+  types:dict[str,str] = {}
 
-  types, anoncnt = {}, itertools.count().__next__
+  anoncnt = itertools.count().__next__
   def tname(t, suggested_name=None) -> str:
     nonlocal lines, types, anoncnt
     tmap = {TK.VOID:"None", TK.CHAR_U:"ctypes.c_ubyte", TK.UCHAR:"ctypes.c_ubyte", TK.CHAR_S:"ctypes.c_char", TK.SCHAR:"ctypes.c_char",
@@ -102,7 +99,10 @@ dll = _dll()
               macros += [f"{c.spelling} = lambda {','.join(_args)}: {readext(f, body[0].location.offset, toks[-1].extent.end.offset)}"]
             else: macros += [f"{c.spelling} = {readext(f, toks[1].location.offset, toks[-1].extent.end.offset)}"]
           case CK.VAR_DECL if c.linkage == LK.INTERNAL:
-            macros += [f"{c.spelling} = {tname(c.type)}({readext(f, (defn:=last(c)).location.offset, defn.extent.end.offset)})"]
+            if (c.type.kind == TK.CONSTANTARRAY and c.type.get_array_element_type().kind in (TK.INT,TK.UINT) and
+                (init:=last(c)).kind == CK.INIT_LIST_EXPR and all(re.match(r"\[.*\].*=", readext(f, c.extent)) for c in init.get_children())):
+              macros += [f"{c.spelling} = {{{','.join(f'{readext(f, next(it:=c.get_children()).extent)}:{readext(f, next(it).extent)}' for c in init.get_children())}}}"]
+            else: macros += [f"{c.spelling} = {tname(c.type)}({readext(f, last(c).extent)})"]
       except Exception as e: raise Exception(f"parsing failed at {c.location.file}:{c.location.line}") from e
   main, macros = '\n'.join(lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:

@@ -7,7 +7,7 @@ nv_src = "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8
 
 def load(name, *args, **kwargs):
   if not (f:=(here / f"{name}.py")).exists(): f.write_text(importlib.import_module(f"{__name__}.autogen").gen(*args, **kwargs))
-  return importlib.import_module(f"{__name__}.{name}")
+  return importlib.import_module(f"{__name__}.{name.replace('/', '.')}")
 
 def __getattr__(nm):
   match nm:
@@ -62,4 +62,3 @@ def __getattr__(nm):
     case "amd_gpu": return load("amd_gpu", [], [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers","nvd","gc_11_0_0_offset",
                                  "sienna_cichlid_ip_offset"]], ["-I/opt/rocm/include", "-x", "c++"])
     case _: raise AttributeError(f"no such autogen: {nm}")
-
