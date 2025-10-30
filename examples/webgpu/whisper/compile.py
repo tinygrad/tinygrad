@@ -147,7 +147,7 @@ class TextDecoder:
       # encoded_audio = encoded_audio.reshape(-1, 1500, 384)
       # self.encoded_audio.assign(self.encoded_audio.shrink(((0, off), None, None)).cat(encoded_audio, self.encoded_audio.shrink(((off+1, bs), None, None))).contiguous())
       x = self.token_embedding(x)
-      x += self.positional_embedding.shrink(((ctx, ctx+seqlen), None, None))
+      x += self.positional_embedding.shrink(((ctx, ctx+seqlen), None))
       for block in self.blocks: x = block(x, xa=encoded_audio, mask=self.mask, len=ctx, off=off, cache=cache)
       # NOTE(irwin): wrong output size w/o contiguous. TODO: check on latest tinygrad
       # logits = self.output_tok(x)[:, ctx-1].contiguous()
