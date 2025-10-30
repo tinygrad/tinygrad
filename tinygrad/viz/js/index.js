@@ -147,23 +147,23 @@ function renderDag(graph, additions, recenter) {
 const ncu_layout = (counters) => {
   // *** metrics are based on the raw counters
   // TODO: move this to an xml file?
-  const formulas = {
+  const metrics = {
     "Kernel <-> Global": {"unit":"inst", "keys":[
-      "sass__inst_executed_global_loads",
-      "sass__inst_executed_global_stores",
-      "smsp__inst_executed_op_generic_atom_dot_alu.sum",
-      "smsp__inst_executed_op_generic_atom_dot_cas.sum",
-      "smsp__inst_executed_op_global_red.sum",
+      "sass__inst_executed_global_loads [inst]",
+      "sass__inst_executed_global_stores [inst]",
+      "smsp__inst_executed_op_generic_atom_dot_alu.sum [inst]",
+      "smsp__inst_executed_op_generic_atom_dot_cas.sum [inst]",
+      "smsp__inst_executed_op_global_red.sum [inst]",
     ]},
     "Kernel <-> Local": {"unit":"inst", "keys":[
-      "sass__inst_executed_local_loads",
-      "sass__inst_executed_local_stores",
+      "sass__inst_executed_local_loads [inst]",
+      "sass__inst_executed_local_stores [inst]",
     ]},
     "Kernel <-> Shared": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_loads",
-      "sass__inst_executed_shared_stores",
-      "smsp__inst_executed_op_shared_atom.sum",
-      "smsp__inst_executed_op_ldsm.sum",
+      "sass__inst_executed_shared_loads [inst]",
+      "sass__inst_executed_shared_stores [inst]",
+      "smsp__inst_executed_op_shared_atom.sum [inst]",
+      "smsp__inst_executed_op_ldsm.sum [inst]",
     ]},
     "Global <- L1 Cache": {"unit":"req", "keys":[
       "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
@@ -182,34 +182,34 @@ const ncu_layout = (counters) => {
       "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
     ]},
     "Shared <- Shared Memory": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_loads",
-      "smsp__inst_executed_op_shared_atom.sum",
-      "smsp__inst_executed_op_ldsm.sum",
+      "sass__inst_executed_shared_loads [inst]",
+      "smsp__inst_executed_op_shared_atom.sum [inst]",
+      "smsp__inst_executed_op_ldsm.sum [inst]",
     ]},
     "Shared -> Shared Memory": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_stores",
-      "smsp__inst_executed_op_shared_atom.sum",
+      "sass__inst_executed_shared_stores [inst]",
+      "smsp__inst_executed_op_shared_atom.sum [inst]",
     ]},
     "L1 Hit Rate (%)": {"unit":"%", "keys":[
-      "l1tex__t_sector_hit_rate.pct",
+      "l1tex__t_sector_hit_rate.pct [%]",
     ]},
     "L2 Hit Rate (%)": {"unit":"%", "keys":[
-      "lts__t_sector_hit_rate.pct",
+      "lts__t_sector_hit_rate.pct [%]",
     ]},
     "L1 Cache <- L2 Cache (bytes)": {"unit":"bytes", "keys":[
-      "l1tex__m_xbar2l1tex_read_bytes.sum",
+      "l1tex__m_xbar2l1tex_read_bytes.sum [Kbyte]",
     ]},
     "L1 Cache -> L2 Cache (bytes)": {"unit":"bytes", "keys":[
-      "l1tex__m_l1tex2xbar_write_bytes.sum",
+      "l1tex__m_l1tex2xbar_write_bytes.sum [Kbyte]",
     ]},
     "L1 -> Shared (bytes)": {"unit":"bytes", "keys":[
-      ["sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum", 32],
+      ["sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum [sector]", 32],
     ]},
     "L2 Cache <- Device Memory (bytes)": {"unit":"bytes", "keys":[
-      "dram__bytes_read.sum",
+      "dram__bytes_read.sum [Kbyte]",
     ]},
     "L2 Cache -> Device Memory (bytes)": {"unit":"bytes", "keys":[
-      "dram__bytes_write.sum",
+      "dram__bytes_write.sum [byte]",
     ]},
   };
   const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
@@ -235,33 +235,15 @@ const ncu_layout = (counters) => {
     ["l2", "dram", {k:"L2 Cache <- Device Memory (bytes)", rev:"L2 Cache -> Device Memory (bytes)"}],
   ];
 
-  // this is trash code to deal with ncu's format specifically
-  function findk(obj, key) {
-    let found = null;
-    for (const k of Object.keys(obj)) {
-      if (k.startsWith(key)) { found = k; break; }
-    }
-    return obj[found];
-  }
-  function calc(formula) {
+  function calc(metric) {
     let num = 0;
-    for (let k of formulas[formula].keys) {
-      let key, w;
-      if (Array.isArray(k)) {
-        [key, w] = k;
-      } else {
-        key = k; w = 1;
-      }
-      const v = findk(counters, key);
-      if (v == null) {
-        console.warn("no values for", key);
-        continue;
-      }
-      num += v * w;
+    for (let k of metrics[metric].keys) {
+      const [key, w] = Array.isArray(k) ? k : [k, 1]
+      num += counters[key]*w;
     }
     return num;
   }
-  const fmt = (formula) => formatUnit(calc(formula), " "+formulas[formula].unit);
+  const fmt = (metric) => formatUnit(calc(metric), " "+metrics[metric].unit);
 
   // graph layout
   const g = new dagre.graphlib.Graph({ multigraph:true });
@@ -269,7 +251,7 @@ const ncu_layout = (counters) => {
   const baseWidth = 140, baseHeight = 440;
   for (const unit of units) {
     let [key, width, height, color, label] = unit;
-    if (formulas[label] != null) label += "\n"+fmt(label)
+    if (metrics[label] != null) label += "\n"+fmt(label)
     g.setNode(key, { width:baseWidth*(width/100), height:baseHeight*(height/100), color, label });
   }
   for (const [v, w, opts] of links) !opts.vert && g.setEdge(v, w, opts);
