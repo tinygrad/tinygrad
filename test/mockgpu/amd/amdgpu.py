@@ -14,6 +14,9 @@ regSQ_THREAD_TRACE_BUF0_BASE = 0x39e8 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_BUF0_SIZE = 0x39e9 + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_WPTR = 0x39ef + amd_gpu.GC_BASE__INST0_SEG1
 regSQ_THREAD_TRACE_STATUS = 0x39f4 + amd_gpu.GC_BASE__INST0_SEG1
+regCP_PERFMON_CNTL = 0x3808 + amd_gpu.GC_BASE__INST0_SEG1
+regCPG_PERFCOUNTER1_LO = 0x3000 + amd_gpu.GC_BASE__INST0_SEG1
+regGUS_PERFCOUNTER_HI = 0x3643 + amd_gpu.GC_BASE__INST0_SEG1
 
 class SQTT_EVENTS:
   THREAD_TRACE_FINISH = 0x00000037
@@ -130,7 +133,7 @@ class PM4Executor(AMDQueue):
     _src_addr_hi = self._next_dword()
     dst_addr_lo = self._next_dword()
     dst_addr_hi = self._next_dword()
-    assert copy_data_flags == 0x100204, hex(copy_data_flags) # better fail than silently do the wrong thing
+    assert copy_data_flags in {0x100204, 0x000204}, hex(copy_data_flags) # better fail than silently do the wrong thing
     to_mv(dst_addr_hi<<32|dst_addr_lo, 4).cast('I')[0] = self.gpu.regs[src_addr_lo]
 
   def _exec_wait_reg_mem(self, n):
@@ -280,6 +283,9 @@ class AMDGPURegisters:
     self.regs: dict[tuple[int, int], int] = {}
   def __getitem__(self, addr:int) -> int:
     if addr == regGRBM_GFX_INDEX: return self.grbm_index
+    if regCPG_PERFCOUNTER1_LO < addr < regGUS_PERFCOUNTER_HI:
+      assert self.regs[(regCP_PERFMON_CNTL, 0)] == 0x401, "read mode should be enabled"
+      return addr << 16 | self.grbm_index
     return self.regs[(addr, getbits(self.grbm_index, 16, 23))]
   def __setitem__(self, addr:int, val:int):
     if addr == regGRBM_GFX_INDEX: self.grbm_index = val
