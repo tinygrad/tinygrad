@@ -156,6 +156,7 @@ kernel_spec = PatternMatcher([
   # RESHAPE (but only RESHAPE) is allowed here
   (UPat(Ops.RESHAPE, name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
   (UPat(Ops.AFTER, src=(UPat(Ops.RESHAPE),), allow_any_len=True), lambda: True),
+  (UPat(Ops.VCONST, dtype=dtypes.index), lambda: True),
 
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
