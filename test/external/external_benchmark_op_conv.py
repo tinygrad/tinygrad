@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 from tinygrad import dtypes, Device
 from tinygrad.uop.ops import UOp, AxisType, Ops
 from tinygrad.codegen import full_rewrite
@@ -249,11 +250,11 @@ print(ps.applied_opts)
 # (Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.NOLOCALS, axis=None, arg=None))
 cr = CompiledRunner(ps, precompiled=lib)
 
-globals = sorted(dedup([u for u in ast.toposort() if u.op is Ops.DEFINE_GLOBAL]), key=lambda u: u.arg)
-print(len(globals))
-print([g.dtype for g in globals])
+gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.DEFINE_GLOBAL]), key=lambda u: u.arg)
+print(len(gs))
+print([g.dtype for g in gs])
 
-bufs = [Buffer(ps.device, g.size, g.dtype if isinstance(g.dtype, ImageDType) else g.dtype._base).ensure_allocated() for g in globals]
+bufs = [Buffer(ps.device, g.size, g.dtype if isinstance(g.dtype, ImageDType) else g.dtype._base).ensure_allocated() for g in gs]
 
 t = cr(bufs, wait=True)
 print(f"{t*1e6:.2f} us")
