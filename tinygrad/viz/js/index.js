@@ -1,8 +1,9 @@
 // ** graph helpers
 
-const displayGraph = (cls) => {
-  for (const e of document.getElementsByClassName("view")) e.style.display = e.classList.contains(cls) ? "flex" : "none";
+const displaySelection = (sel) => {
+  for (const e of document.getElementsByClassName("view")) e.style.display = e.matches(sel) ? "flex" : "none";
 }
+const metadata = document.querySelector(".metadata");
 
 const darkenHex = (h, p = 0) =>
   `#${(
@@ -69,11 +70,10 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
-  nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label").attr("transform", d => {
-    const x = (d.width-d.padding*2)/2;
-    const y = (d.height-d.padding*2)/2+STROKE_WIDTH;
-    return `translate(-${x}, -${y})`;
-  }).selectAll("text").data(d => {
+  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
+  const hasLabelDims = data.nodes[0]?.value.labelWidth != null;
+  if (hasLabelDims) labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
+  labels.selectAll("text").data(d => {
     const ret = [[]];
     for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
       const lines = st.split("\n");
@@ -83,6 +83,11 @@ const drawGraph = (data) => {
     return [ret];
   }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
     .attr("fill", d => darkenHex(d.color, 25)).text(d => d.st).attr("xml:space", "preserve");
+  // recenter after drawing texts if needed
+  if (!hasLabelDims) labels.attr("transform", (_,i,els) => {
+    const b = els[i].getBBox();
+    return `translate(${-b.x-b.width/2}, ${-b.y-b.height/2})`
+  });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
@@ -94,21 +99,6 @@ const drawGraph = (data) => {
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
   }).attr("marker-end", "url(#arrowhead)");
-  addTags(d3.select("#edge-labels").selectAll("g").data(edges).join("g").attr("transform", (e) => {
-    // get a point near the end
-    const [p1, p2] = g.edge(e).points.slice(-2);
-    const dx = p2.x-p1.x;
-    const dy = p2.y-p1.y;
-    // normalize to the unit vector
-    const len = Math.sqrt(dx*dx + dy*dy);
-    const ux = dx / len;
-    const uy = dy / len;
-    // avoid overlap with the arrowhead
-    const offset = 17;
-    const x = p2.x - ux * offset;
-    const y = p2.y - uy * offset;
-    return `translate(${x}, ${y})`
-  }).attr("class", e => g.edge(e).label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => g.edge(e).label.text));
 }
 
 // ** UOp graph
@@ -126,9 +116,24 @@ function renderDag(graph, additions, recenter) {
   worker = new Worker(workerUrl);
   worker.postMessage({graph, additions});
   worker.onmessage = (e) => {
-    displayGraph("graph");
+    displaySelection("#graph");
     updateProgress({ start:false });
     drawGraph(e.data);
+    addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
+      // get a point near the end
+      const [p1, p2] = e.value.points.slice(-2);
+      const dx = p2.x-p1.x;
+      const dy = p2.y-p1.y;
+      // normalize to the unit vector
+      const len = Math.sqrt(dx*dx + dy*dy);
+      const ux = dx / len;
+      const uy = dy / len;
+      // avoid overlap with the arrowhead
+      const offset = 17;
+      const x = p2.x - ux * offset;
+      const y = p2.y - uy * offset;
+      return `translate(${x}, ${y})`
+    }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
 }
@@ -181,15 +186,15 @@ var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, 
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return document.querySelector(".metadata").replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+  return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
 }
 
 async function renderProfiler() {
-  displayGraph("profiler");
-  d3.select(".metadata").node().replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+  displaySelection("#profiler");
+  metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
   // layout once!
   if (data != null) return updateProgress({ start:false });
-  const profiler = d3.select(".profiler").html("");
+  const profiler = d3.select("#profiler").html("");
   const buf = await (await fetch("/get_profile")).arrayBuffer();
   const view = new DataView(buf);
   let offset = 0;
@@ -308,8 +313,8 @@ async function renderProfiler() {
           const { repr, num, mode, shape } = users[u];
           const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
           const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
-          const metadata = shape?.tooltipText?.split("\n").at(-1);
-          if (metadata != null) p.append("span").text(" "+metadata);
+          const shapeTxt = shape?.tooltipText?.split("\n").at(-1);
+          if (shapeTxt != null) p.append("span").text(" "+shapeTxt);
           if (shape != null) {
             p.style("cursor", "pointer").on("click", () => focusShape(shape))
             const args = shapeMetadata.get(shape.key).querySelector(".args");
@@ -450,7 +455,7 @@ async function renderProfiler() {
   }
 
   function resize() {
-    const profiler = document.querySelector(".profiler");
+    const profiler = document.querySelector("#profiler");
     const sideRect = rect("#device-list");
     const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
@@ -580,12 +585,13 @@ const evtSources = [];
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
+  const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
   // update element styles if needed
   const { ctx, step } = select(state.currentCtx, state.currentStep);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
   if (ctx?.id !== prevCtx?.id) {
-    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentRewrite:0, currentStep:0, expandSteps:false });
+    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentStep:deselect(prevStep).step || 0, currentRewrite:prevRewrite, expandSteps:true });
     toggleCls(prevCtx, ctx, "active");
   }
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
@@ -675,11 +681,9 @@ async function main() {
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    displayGraph("render");
-    const root = document.createElement("div");
-    root.className = "raw-text";
-    const metadata = document.querySelector(".metadata");
+    displaySelection("#custom");
     metadata.innerHTML = "";
+    const root = d3.create("div").classed("raw-text", true).node();
     // detailed assembly view
     if (ret.cols != null) {
       const asm = root.appendChild(document.createElement("table"));
@@ -710,7 +714,7 @@ async function main() {
         return [s.label.trim(), div.node()];
       })).node());
     } else root.appendChild(codeBlock(ret.src, ret.lang));
-    return document.querySelector(".render").replaceChildren(root);
+    return document.querySelector("#custom").replaceChildren(root);
   }
   // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
@@ -733,9 +737,8 @@ async function main() {
   if (ret.length === 0) return;
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
-  const metadata = document.querySelector(".metadata");
-  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }),
-                           codeBlock(ret[currentRewrite].uop, "python", { wrap:false }));
+  const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
+  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -758,7 +761,7 @@ async function main() {
         diffCode.className = "wrap";
       }
     }
-  }
+  } else codeElement.classList.add("full-height");
 }
 
 // **** collapse/expand

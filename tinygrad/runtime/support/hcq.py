@@ -57,6 +57,9 @@ if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockFileIOInterf
 
 # **************** for HCQ Compatible Devices ****************
 
+def hcq_filter_visible_devices(dev):
+  return [dev[x] for x in ids] if (ids:=[int(x) for x in (getenv('HCQ_VISIBLE_DEVICES', '')).split(',') if x.strip()]) else dev
+
 SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')

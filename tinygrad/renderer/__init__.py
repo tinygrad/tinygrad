@@ -81,8 +81,12 @@ class ProgramSpec:
       for u in self.uops:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
-        if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
+        if u.op is Ops.STORE and (u.src[0].op is Ops.INDEX or (u.src[0].op is Ops.CAST and u.src[0].src[0].op is Ops.INDEX)):
+          idx = u.src[0] if u.src[0].op is Ops.INDEX else u.src[0].src[0]
+          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: self.outs.append(buf.arg)
+        if u.op is Ops.LOAD and (u.src[0].op is Ops.INDEX or (u.src[0].op is Ops.CAST and u.src[0].src[0].op is Ops.INDEX)):
+          idx = u.src[0] if u.src[0].op is Ops.INDEX else u.src[0].src[0]
+          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: self.ins.append(buf.arg)
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0] == 'i': self.local_size = None
@@ -101,8 +105,10 @@ class ProgramSpec:
   def function_name(self) -> str: return to_function_name(self.name)
 
   @property
-  def applied_opts(self) -> tuple[Opt, ...]|None: return self.uops[-1].arg.applied_opts if \
-    self.uops is not None and self.uops[-1].op is Ops.SINK and self.uops[-1].arg is not None else None
+  def applied_opts(self) -> tuple[Opt, ...]|None:
+    if self.uops is None: return None
+    assert self.uops[-1].op is Ops.SINK, self.uops[-1].op
+    return self.uops[-1].arg.applied_opts
 
   def launch_dims(self, var_vals:dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
