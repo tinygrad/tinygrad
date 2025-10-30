@@ -915,10 +915,8 @@ class AMDDevice(HCQCompiled):
     self.sqtt_enabled = PROFILE and SQTT > 0
     if self.sqtt_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
-      if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
-        raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
-                           f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
-                           "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
+      if not self.iface.is_in_profile_mode(): raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", -1 if SQTT >= 2 else (1 << 1)) # se bitmask: -1 enable all, 0 disable all
