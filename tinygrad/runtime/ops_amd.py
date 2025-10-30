@@ -139,8 +139,8 @@ class AMDComputeQueue(HWQueue):
 
   def pmc_reset_counters(self, en=True):
     self.set_grbm_broadcast()
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
-    if en: self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1)
+    self.wreg(self.gc.regCP_PERFMON_CNTL if self.dev.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=0)
+    if en: self.wreg(self.gc.regCP_PERFMON_CNTL if self.dev.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1)
     return self
 
   def pmc_start(self, counters):
@@ -162,7 +162,7 @@ class AMDComputeQueue(HWQueue):
 
   def pmc_read(self, buf, sched):
     self.set_grbm_broadcast()
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1, perfmon_sample_enable=1) # read counters
+    self.wreg(self.gc.regCP_PERFMON_CNTL if self.dev.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1, perfmon_sample_enable=1)
 
     for s in sched:
       offset = itertools.count(s.off, step=8)
@@ -897,7 +897,7 @@ class AMDDevice(HCQCompiled):
 
     self.pmc_enabled = PROFILE and PMC > 0
     if self.pmc_enabled:
-      if self.target[0] not in {11}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
+      if self.target[0] not in {11, 12}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
       if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
       self.pmc_sched:list[PMCSample] = []
