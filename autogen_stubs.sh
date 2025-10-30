@@ -41,14 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_adreno() {
-  clang2py extra/qcom_gpu_driver/a6xx.xml.h -o $BASE/adreno.py -k cestum
-  sed -nE 's/#define ([A-Za-z0-9_]+)__SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1__SHIFT) \& \1__MASK/p' extra/qcom_gpu_driver/a6xx.xml.h >> $BASE/adreno.py
-  fixup $BASE/adreno.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/adreno.py
-  python3 -c "import tinygrad.runtime.autogen.adreno"
-}
-
 generate_qcom() {
   clang2py -k cdefstum \
     extra/dsp/include/ion.h \
@@ -169,7 +161,6 @@ generate_mesa() {
 
 if [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
-elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "mesa" ]; then generate_mesa
 elif [ "$1" == "all" ]; then generate_mesa
 else echo "usage: $0 <type>"

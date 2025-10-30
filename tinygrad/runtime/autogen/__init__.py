@@ -63,4 +63,5 @@ def __getattr__(nm):
     case "amd_gpu": return load("amd_gpu", [], [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers","nvd","gc_11_0_0_offset",
                                  "sienna_cichlid_ip_offset"]], ["-I/opt/rocm/include", "-x", "c++"])
     case "kgsl": return load("kgsl", [], [root/"extra/qcom_gpu_driver/msm_kgsl.h"])
+    case "adreno": return load("adreno", [], [root/"extra/qcom_gpu_driver/a6xx.xml.h"])
     case _: raise AttributeError(f"no such autogen: {nm}")
