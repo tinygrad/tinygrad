@@ -1,4 +1,5 @@
 from typing import cast
+import itertools
 from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
@@ -58,7 +59,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
