@@ -115,7 +115,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
 
   # allow AFTER on buffers, GROUP anywhere
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines|{Ops.AFTER}),), allow_any_len=True), lambda: True),
   (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
   # RANGE/SPECIAL define loops, END closes them
@@ -141,7 +141,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 
   # INDEX
-  (UPat(GroupOp.Defines, name="buf").or_after().index(UPat.var("idx")), validate_index),
+  (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
@@ -154,7 +154,7 @@ shared_codegen_spec = PatternMatcher([
 
 program_spec = PatternMatcher([
   # INDEX with a gate as third src
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="buf").or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
 
   # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
   (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),

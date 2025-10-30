@@ -341,7 +341,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
-  def __getitem__(self, *idx): return self.index(*idx)
+  def __getitem__(self, idx): return self.index(*argfix(idx))
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self._shape)

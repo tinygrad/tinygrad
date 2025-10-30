@@ -8,7 +8,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
 from tinygrad.uop.spec import shared_spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.engine.realize import CompiledRunner, get_program, get_runner
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
@@ -39,7 +39,7 @@ def _test_single_value(vals, op, dts):
   output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
-  loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0), ptr=True)]) for i, dtype in enumerate(dts))
+  loads = (buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0)) for i, dtype in enumerate(dts))
   alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0), ptr=True), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
@@ -56,7 +56,7 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
+  out = buf_store[UOp.const(dtypes.int32, 0)].store(alu)
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -564,6 +564,28 @@ class TestZeroRange(unittest.TestCase):
       v = UOp.variable("i", 0, 5).bind(i)
       out = Tensor.ones(10, dtype=dtypes.int).contiguous().shrink(((0,v),)).sum()
       self.assertEqual(out.item(), i)
+
+class TestUOpPrograms(unittest.TestCase):
+  def test_matmul(self):
+    A, B, C = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=i) for i in range(3)]
+    i = UOp.range(10, 0)
+    j = UOp.range(10, 1)
+    C = C.after(C[i*10+j].store(UOp.const(dtypes.float, 0.0)))
+    k = UOp.range(10, 2)
+    store = C[i*10+j].store(C.after(k)[i*10+j] + (A[i*10+k] * B[k*10+j]))
+    prog = store.end(i,j,k).sink()
+
+    runner = get_runner(Device.DEFAULT, prog)
+    print(runner.p.src)
+
+    a = Tensor.rand(10,10)
+    b = Tensor.rand(10,10)
+    c = Tensor.empty(10,10)
+    ref = a@b
+    Tensor.realize(a, b, c, ref)
+
+    runner([a.uop.buffer, b.uop.buffer, c.uop.buffer.ensure_allocated()], wait=True)
+    self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
