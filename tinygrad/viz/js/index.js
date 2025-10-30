@@ -50,7 +50,7 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const drawGraph = (data) => {
+const drawGraph = (data, opts) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
@@ -92,13 +92,15 @@ const drawGraph = (data) => {
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
-  d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
+  // by default we shift the points toward the node centers
+  // simplePaths do not change the points
+  d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", !opts?.simplePaths ? (e) => {
     const edge = g.edge(e);
     const points = edge.points.slice(1, edge.points.length-1);
     points.unshift(intersectRect(g.node(e.v), points[0]));
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
-  }).attr("marker-end", "url(#arrowhead)");
+  } : (e) => line(g.edge(e).points)).attr("marker-end", "url(#arrowhead)");
 }
 
 // ** UOp graph
@@ -222,14 +224,14 @@ const ncu_layout = (counters) => {
     ["dram", 100, 10, colors.PHYSICAL, "Device Memory"],
   ];
   const links = [
-    ["kernel", "instr_global", [{k:"Kernel <-> Global", dbl:true}]],
-    ["kernel", "instr_local",  [{k:"Kernel <-> Local",  dbl:true}]],
-    ["kernel", "instr_shared", [{k:"Kernel <-> Shared", dbl:true}]],
-    ["instr_global", "l1", [{k:"Global <- L1 Cache"}, {k:"Global -> L1 Cache"}]],
-    ["instr_local", "l1", [{k:"Local <- L1 Cache"}, {k:"Local -> L1 Cache"}]],
-    ["instr_shared", "shared", [{k:"Shared <- Shared Memory"}, {k:"Shared -> Shared Memory"}]],
-    ["l1", "l2", [{k:"L1 Cache <- L2 Cache (bytes)"}, {k:"L1 Cache -> L2 Cache (bytes)"}]],
-    ["l2", "dram", [{k:"L2 Cache <- Device Memory (bytes)"}, {k:"L2 Cache -> Device Memory (bytes)"}]],
+    ["kernel", "instr_global", {k:"Kernel <-> Global", dbl:true}],
+    ["kernel", "instr_local",  {k:"Kernel <-> Local",  dbl:true}],
+    ["kernel", "instr_shared", {k:"Kernel <-> Shared", dbl:true}],
+    ["instr_global", "l1", {k:"Global <- L1 Cache", rev:"Global -> L1 Cache"}],
+    ["instr_local", "l1", {k:"Local <- L1 Cache", rev:"Local -> L1 Cache"}],
+    ["instr_shared", "shared", {k:"Shared <- Shared Memory", rev:"Shared -> Shared Memory"}],
+    ["l1", "l2", {k:"L1 Cache <- L2 Cache (bytes)", rev:"L1 Cache -> L2 Cache (bytes)"}],
+    ["l2", "dram", {k:"L2 Cache <- Device Memory (bytes)", rev:"L2 Cache -> Device Memory (bytes)"}],
   ];
 
   // this is trash code to deal with ncu's format specifically
@@ -261,7 +263,7 @@ const ncu_layout = (counters) => {
   const fmt = (formula) => formatUnit(calc(formula), " "+formulas[formula].unit);
 
   // graph layout
-  const g = new dagre.graphlib.Graph();
+  const g = new dagre.graphlib.Graph({ multigraph:true });
   g.setGraph({ rankdir:"LR", edgesep:10 }).setDefaultEdgeLabel(() => ({}));
   const baseWidth = 140, baseHeight = 440;
   for (const unit of units) {
@@ -269,19 +271,18 @@ const ncu_layout = (counters) => {
     if (formulas[label] != null) label += "\n"+fmt(label)
     g.setNode(key, { width:baseWidth*(width/100), height:baseHeight*(height/100), color, label });
   }
-  for (const [v, w, paths] of links) g.setEdge(v, w, { paths });
+  for (const [v, w, opts] of links) g.setEdge(v, w, opts);
   dagre.layout(g);
-  const sep = Math.floor(g.graph().edgesep/2);
+  const sep = g.graph().edgesep;
   for (const e of g.edges()) {
-    const { paths, points:basePoints } = g.edge(e);
+    const p = g.edge(e);
     g.removeEdge(e);
-    let offset = 0;
-    // console.log(basePoints.map(p => `(${p.x}, ${p.y})`).join(" - "))
-    for (let i=0; i<paths.length; i++) {
-      const p = paths[i];
-      g.setEdge(e.v, e.w, { points:basePoints });
-      if (p.dbl) g.setEdge(e.w, e.v, { points:basePoints });
-    }
+    // pick y side of the smallest
+    const baseY = g.node(e.v).height < g.node(e.w).height ? p.points[0].y : p.points[1].y;
+    const points = p.points.map((p) => ({ x:p.x, y:baseY }));
+    g.setEdge(e.v, e.w, { points }, 0);
+    if (p.dbl) g.setEdge(e.w, e.v, { points:[...points].reverse() });
+    if (p.rev != null) g.setEdge(e.w, e.v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse() }, 2);
   }
   return dagre.graphlib.json.write(g);
 }
@@ -291,7 +292,7 @@ function renderCacheGraph(data) {
   const layout = MEMORY_LAYOUTS[data.device];
   displaySelection("#graph");
   const graph = layout(JSON.parse(data.src));
-  drawGraph(graph);
+  drawGraph(graph, { simplePaths:true });
   d3.select("#edge-labels").html("");
   d3.select("#edge-labels").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true).attr("transform", e => {
     const [p1, p2] = e.value.points;
