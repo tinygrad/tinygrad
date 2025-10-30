@@ -115,7 +115,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
 
   # allow AFTER on buffers, GROUP anywhere
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines|{Ops.AFTER}),), allow_any_len=True), lambda: True),
   (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
   # RANGE/SPECIAL define loops, END closes them
@@ -133,6 +133,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # LOAD(idx) / STORE(idx, val) / LOAD with alt value only exists in program_spec
+  # TODO: move LOAD to the program_spec
   (UPat().index(UPat()).or_casted().load(), lambda: True),
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
@@ -140,20 +141,41 @@ shared_codegen_spec = PatternMatcher([
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
 
   # INDEX
-  (UPat(GroupOp.Defines, name="buf").or_after().index(UPat.var("idx")), validate_index),
+  (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 
-  # BARRIER
-  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
+  # BARRIER (on any length)
+  (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 ])
+
+# ***** UOp spec in kernel graph *****
+
+kernel_spec = PatternMatcher([
+  # RESHAPE (but only RESHAPE) is allowed here
+  (UPat(Ops.RESHAPE, name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat(Ops.AFTER, src=(UPat(Ops.RESHAPE),), allow_any_len=True), lambda: True),
+  (UPat(Ops.VCONST, dtype=dtypes.index), lambda: True),
+
+  # index is allowed here
+  (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
+
+  # END can end multiple axes here
+  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
+
+  # bufferize can be on anything
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
+
+  # reduce must be on ranges
+  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+])+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
   # INDEX with a gate as third src
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines, name="buf").or_after(), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
 
   # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
   (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),
@@ -170,22 +192,6 @@ program_spec = PatternMatcher([
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
-])+shared_codegen_spec+shared_spec
-
-# ***** UOp spec in kernel graph *****
-
-kernel_spec = PatternMatcher([
-  # index is allowed here
-  (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
-
-  # END can end multiple axes here
-  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
-
-  # bufferize can be on anything
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
-
-  # reduce must be on ranges
-  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
 ])+shared_codegen_spec+shared_spec
 
 # *** this spec should match all UOps ever created ***

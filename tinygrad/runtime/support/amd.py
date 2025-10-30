@@ -64,7 +64,8 @@ def import_soc(ip):
 def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"include/{('sienna_cichlid' if ip[0] > 9 else 'vega20')}_ip_offset.h"))
 
 def import_pmc(ip) -> dict[str, tuple[str, str, int]]:
-  m = re.search(r'<gfx11>(.*?)</gfx11>', header_download("rocprofiler/src/core/counters/basic/gfx_metrics.xml", url=ROCM_URL), re.S)
+  ver = min(ip[0], 11) # 12 is same as 11
+  m = re.search(rf'<gfx{ver}>(.*?)</gfx{ver}>', header_download("rocprofiler/src/core/counters/basic/gfx_metrics.xml", url=ROCM_URL), re.S)
   return {n:(n,b,int(e)) for n,b,e in re.findall(r'<metric name="([A-Za-z0-9_]+)" block="([A-Za-z0-9_]+)" event="([0-9]+)"', m.group(1))} if m else {}
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
