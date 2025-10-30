@@ -26,15 +26,16 @@ def my_matrix_mul(A:UOp, B:UOp, C:UOp) -> UOp:
   k = UOp.range(10, 2) #"k")
   # TODO: remove loads and ptrs in general pre rendering
   #store = C[i, j].store(C[i, j].load() + (A[i, k].load() * B[k, j].load()))
+  # TODO: make reshape work
   store = C[i*10+j].store(C.after(k)[i*10+j].load() + (A[i*10+k].load() * B[k*10+j].load()))
   return store.end(i,j,k).sink()
 
 #a = UOp.new_buffer("CPU", 10*10, dtypes.float).reshape((10,10))
 #b = UOp.new_buffer("CPU", 10*10, dtypes.float).reshape((10,10))
 #c = UOp.new_buffer("CPU", 10*10, dtypes.float).reshape((10,10))
-a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=0)
-b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=1)
-c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=2)
+a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=0) #.reshape((10,10))
+b = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=1) #.reshape((10,10))
+c = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=2) #.reshape((10,10))
 out = my_matrix_mul(a, b, c)
 print(out.pyrender())
 
