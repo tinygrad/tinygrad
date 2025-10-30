@@ -298,11 +298,6 @@ function renderCacheGraph(data) {
     else y -= box.height/2+1;
     return `translate(${x}, ${y})`;
   });
-  if (data.prg != null) {
-    const cb = codeBlock(data.prg, "cpp", { wrap:false });
-    cb.classList.add("full-height");
-    metadata.replaceChildren(cb);
-  }
   document.getElementById("zoom-to-fit-btn").click();
 }
 
