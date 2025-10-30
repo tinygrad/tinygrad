@@ -3,6 +3,7 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -90,7 +91,8 @@ class CompiledRunner(Runner):
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
+    if var_vals is None: var_vals = {}
     has_local = Device[self.p.device].renderer.has_local
     global_size, local_size = self.p.launch_dims(var_vals)
     if has_local and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
@@ -164,7 +166,7 @@ class ExecItem:
   fixedvars: dict[str, int] = field(default_factory=dict)
   def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
-    bufs = [cast(Buffer, x) for x in self.bufs] if jit else [cast(Buffer, x).ensure_allocated() for x in self.bufs]
+    bufs = [unwrap(x) for x in self.bufs] if jit else [unwrap(x).ensure_allocated() for x in self.bufs]
     if PROFILE:
       payload = {"metadata":self.metadata, "var_vals":var_vals, "bufs":[b.trace_num for b in bufs], "name":self.prg.display_name}
       payload["outputs"], payload["inputs"] = (self.prg.p.outs, self.prg.p.ins) if isinstance(self.prg, CompiledRunner) else ([0], [1])

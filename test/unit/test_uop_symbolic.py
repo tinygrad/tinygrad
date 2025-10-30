@@ -769,6 +769,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
     self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
+  def test_symbolic_range_doesnt_collapse(self):
+    r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.index), 0)
+    self.helper_test_variable(r0, 0, 0, "r0")
+
   def test_const_reciprocal(self):
     a = Variable("a", 1, 10, dtypes.float)
     # TODO: bounds for reciprocal
@@ -1015,10 +1019,7 @@ class TestSymbolicRealWorld(unittest.TestCase):
     #print(idx.render())
     # NOTE: this used to have 13,151,129,600 in the output which is out of int32 range.
     self.assertIn(idx.render(),
-      ("((((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352))+lidx3)+2207744)",
-       '((lidx3+((((((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49))+(gidx0*3211264))+(gidx1*784))+(gidx2*8))+(lidx4*100352)))+2207744)',
-       '((lidx3+((lidx4*100352)+((gidx2*8)+((gidx1*784)+((gidx0*3211264)+((((lidx5+1)//16)*802816)+(((lidx5+1)%16)*49)))))))+2207744)',
-      ))
+      ("(lidx3+((lidx5+1)//16*802816+(lidx5+1)%16*49+gidx0*3211264+gidx1*784+gidx2*8+lidx4*100352)+2207744)",))
 
 class TestBounds(unittest.TestCase):
   def test_unrolled_arange(self):

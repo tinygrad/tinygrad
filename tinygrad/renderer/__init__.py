@@ -1,13 +1,12 @@
 from __future__ import annotations
-from typing import Callable, cast, TYPE_CHECKING
+from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, PtrDType
-if TYPE_CHECKING:
-  from tinygrad.codegen.opt.tc import TensorCore
-  from tinygrad.codegen.opt import Opt
+from tinygrad.codegen.opt.tc import TensorCore
+from tinygrad.codegen.opt import Opt
 
 @dataclass(frozen=True)
 class Estimates:
@@ -30,7 +29,7 @@ class Estimates:
     if ignore_indexing:
       def range_gate(x): return x.op is not Ops.RANGE
       for u in uops:
-        if u.op in {Ops.LOAD, Ops.STORE} and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
+        if u.op in {Ops.LOAD, Ops.STORE}:
           # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
           dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
           # TODO: is this correct? this all needs to be cleaned up
@@ -81,16 +80,15 @@ class ProgramSpec:
       for u in self.uops:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is Ops.STORE and (u.src[0].op is Ops.INDEX or (u.src[0].op is Ops.CAST and u.src[0].src[0].op is Ops.INDEX)):
-          idx = u.src[0] if u.src[0].op is Ops.INDEX else u.src[0].src[0]
-          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: self.outs.append(buf.arg)
-        if u.op is Ops.LOAD and (u.src[0].op is Ops.INDEX or (u.src[0].op is Ops.CAST and u.src[0].src[0].op is Ops.INDEX)):
-          idx = u.src[0] if u.src[0].op is Ops.INDEX else u.src[0].src[0]
-          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: self.ins.append(buf.arg)
+        if u.op in (Ops.STORE, Ops.LOAD):
+          if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+            if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: (self.outs if u.op is Ops.STORE else self.ins).append(buf.arg)
+          # TODO: can else happen?
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0] == 'i': self.local_size = None
           special_size = self.local_size if u.arg[0] == 'l' else self.global_size
+          # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
           if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
