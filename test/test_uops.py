@@ -2,13 +2,13 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv, Timing
+from tinygrad.helpers import CI, DEBUG, getenv, Timing, Context
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu # noqa F401
+from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu, AxisType
 from tinygrad.uop.spec import shared_spec
 from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.engine.realize import CompiledRunner, get_program, get_runner, ExecItem
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
@@ -39,9 +39,9 @@ def _test_single_value(vals, op, dts):
   output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   buf_loads = [uop(uops, Ops.DEFINE_GLOBAL, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
-  loads = (uop(uops, Ops.LOAD, dtype, [buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0))]) for i, dtype in enumerate(dts))
+  loads = (buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0)) for i, dtype in enumerate(dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
+  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0), ptr=True), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
   prg = _uops_to_prg([out])
@@ -56,7 +56,7 @@ def _test_single_value_const(vals, op, dts):
   buf_store = uop(uops, Ops.DEFINE_GLOBAL, output_dtype.ptr(), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
-  out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), alu))
+  out = buf_store[UOp.const(dtypes.int32, 0)].store(alu)
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   prg = _uops_to_prg([out])
   prg.exec([buf])
@@ -338,7 +338,7 @@ class TestLocalAccess(unittest.TestCase):
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0)),))
+    sres = uop(uops, Ops.LOAD, dtypes.float32, (smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0), ptr=True),))
     self.assertEqual(_test_uops_result(dtypes.float32, uops, sres), 42)
 
   # NOTE: webgpu specific, since only webgpu performs bitpacking
@@ -348,7 +348,7 @@ class TestLocalAccess(unittest.TestCase):
     smem = uop(uops, Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 'smem')
     st = uop(uops, Ops.STORE, dtypes.void, (smem.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), uop(uops, Ops.CONST, dtypes.uint8, (), 42)))
     barr = uop(uops, Ops.BARRIER, dtypes.void, (st,))
-    sres = uop(uops, Ops.LOAD, dtypes.uint8, (smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0)),))
+    sres = smem.after(barr).index(uop(uops, Ops.CONST, dtypes.int32, (), 0))
     self.assertEqual(_test_uops_result(dtypes.uint8, uops, sres), 42)
 
   # NOTE: webgpu specific, since only webgpu performs bitpacking
@@ -382,7 +382,7 @@ class TestAssembly(unittest.TestCase):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
     c1 = UOp(Ops.CONST, dtypes.int, (), 2)
     c2 = UOp(Ops.CONST, dtypes.int, (), 3)
-    l1 = UOp(Ops.LOAD, dtypes.int, (g1.index(c1),))
+    l1 = g1.index(c1)
     a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
     uops = to_uops_list([a1,a2], ren=Device[Device.DEFAULT].renderer)
@@ -395,7 +395,7 @@ class TestAssembly(unittest.TestCase):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), (), 0)
       c = UOp(Ops.CONST, dt, (), 2)
-      l = UOp(Ops.LOAD, dt, (g.index(c),))
+      l = g.index(c)
       a = UOp(Ops.IDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
@@ -406,7 +406,7 @@ class TestAssembly(unittest.TestCase):
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
     c = UOp(Ops.CONST, dtypes.uint, (), 3)
-    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
+    l = g.index(c)
     a = UOp(Ops.IDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
@@ -458,8 +458,7 @@ class TestAssembly(unittest.TestCase):
   def test_use_cmpeq(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
     c = UOp(Ops.CONST, dtypes.uint, (), 7)
-    l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    comp = l.ne(c).ne(True)
+    comp = g.index(c).ne(c).ne(True)
     uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
@@ -565,6 +564,74 @@ class TestZeroRange(unittest.TestCase):
       v = UOp.variable("i", 0, 5).bind(i)
       out = Tensor.ones(10, dtype=dtypes.int).contiguous().shrink(((0,v),)).sum()
       self.assertEqual(out.item(), i)
+
+class TestUOpPrograms(unittest.TestCase):
+  def _run(self, prog:UOp, *tensors:Tensor):
+    ExecItem(get_runner(Device.DEFAULT, prog), [t.uop.buffer for t in tensors]).run(wait=True)
+
+  def test_simple(self):
+    out = Tensor.empty(10,10,dtype=dtypes.int)
+
+    ptr = UOp.placeholder(out.dtype, out.shape, slot=0)
+    i, j = UOp.range(10, axis_id=0), UOp.range(10, axis_id=1)
+    prog = ptr[i,j].set(42).end(i,j)
+    self._run(prog.sink(), out)
+
+    with Context(DEBUG=0): self.assertTrue((out == 42).all().item())
+
+  def test_matmul(self):
+    a = Tensor.randn(10,10)
+    b = Tensor.randn(10,10)
+    c = Tensor.empty(10,10)
+    ref = (a@b)
+    with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
+
+    # C[i,j] = sum_k A[i,k] * B[k,j]
+    # Shapes: A[M,K], B[K,N], C[M,N]
+    M = N = K = 10
+    DT = dtypes.float32
+
+    # Placeholders (bind slots explicitly)
+    A = UOp.placeholder(DT, (M, K), slot=0)
+    B = UOp.placeholder(DT, (K, N), slot=1)
+    C = UOp.placeholder(DT, (M, N), slot=2)
+
+    # Axes: i,j are spatial; k is a reduction axis over the shared dim K
+    i = UOp.range(M, axis_id=0)                             # rows of A/C
+    j = UOp.range(N, axis_id=1)                             # cols of B/C
+    k = UOp.range(K, axis_id=2, axis_type=AxisType.REDUCE)  # reduction over K
+
+    # Zero-init: write a scalar 0 to each (i,j).
+    C = C[i, j].set(0.0)
+
+    # Accumulate: C_after(k) enforces the dependency along the reduction axis
+    C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j])
+
+    # Finalize the loop nest / schedule in (i, j, k) order
+    prog = C.end(i, j, k)
+
+    # run program
+    # TODO: make this work with opts_to_apply
+    self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
+
+    with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
+
+  def test_matmul_relu(self):
+    a, b, c = Tensor.randn(10,10), Tensor.randn(10,10), Tensor.empty(10,10)
+    ref = (a@b).relu()
+    with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
+
+    A, B, C = a.uop.placeholder_like(0), b.uop.placeholder_like(1), c.uop.placeholder_like(2)
+    i, j, k = UOp.range(10, 0), UOp.range(10, 1), UOp.range(10, 2, axis_type=AxisType.REDUCE)
+
+    C = C[i, j].set(0.0)
+    C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)
+    C = C[i, j].set(C[i, j].maximum(0.0))
+
+    prog = C.end(i, j)
+
+    self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
+    with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

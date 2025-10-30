@@ -13,6 +13,7 @@ class TinyFSDevice(Compiled):
 
     self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self.sock.connect((TINYFS_ENDPOINT.rsplit(":", 1)[0], int(TINYFS_ENDPOINT.rsplit(":", 1)[1])))
+    self.sock.settimeout(10)
     self.sfile = self.sock.makefile("rwb")
 
     # fetch node info
@@ -112,9 +113,9 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
 
         writer.write(f"CHUNK_OUT {size}\r\n".encode())
         writer.write(src.hash_buf[i*16:(i+1)*16])
-        await writer.drain()
+        await asyncio.wait_for(writer.drain(), timeout=10)
 
-        chunk = await reader.readexactly(size)
+        chunk = await asyncio.wait_for(reader.readexactly(size), timeout=10)
 
         view = dest[ptr:ptr+len(chunk)]
         view[:] = chunk
