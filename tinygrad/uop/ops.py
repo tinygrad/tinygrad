@@ -578,6 +578,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: s = s.src[0]
     return s
 
+  def buf_target(self) -> UOp:
+    # the buffer that's being loaded from or store to
+    match self.op:
+      case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return self
+      case Ops.AFTER | Ops.INDEX | Ops.STORE | Ops.LOAD: return self.src[0].buf_target()
+      case Ops.VECTORIZE:
+        assert all_same(self.src)
+        return self.src[0].buf_target()
+      case _: raise RuntimeError(f"buf_target called on non load/index/store {self.op}")
+
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
@@ -750,10 +760,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(prod(shape)), arg=slot)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
+  def placeholder_like(self, slot:int):
+    assert all_int(self.shape), "no placeholder-like on symbolic shape"
+    return UOp.placeholder(self.dtype, self.shape, slot)
 
-  # set is store+after
-  def set(self:UOp, val:UOp|ConstType):
-    return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val))
+  # set is store+end+after
+  def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]=()) -> UOp:
+    return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val).end(*argfix(end)))
 
 @dataclass(frozen=True)
 class KernelInfo:
