@@ -1,13 +1,12 @@
 from __future__ import annotations
-from typing import Callable, cast, TYPE_CHECKING
+from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, PtrDType
-if TYPE_CHECKING:
-  from tinygrad.codegen.opt.tc import TensorCore
-  from tinygrad.codegen.opt import Opt
+from tinygrad.codegen.opt.tc import TensorCore
+from tinygrad.codegen.opt import Opt
 
 @dataclass(frozen=True)
 class Estimates:
@@ -89,6 +88,7 @@ class ProgramSpec:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0] == 'i': self.local_size = None
           special_size = self.local_size if u.arg[0] == 'l' else self.global_size
+          # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
           if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
