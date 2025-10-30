@@ -146,8 +146,8 @@ shared_codegen_spec = PatternMatcher([
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 
-  # BARRIER
-  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
+  # BARRIER (on any length)
+  (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 ])
 
 # ***** UOp spec in kernel graph *****

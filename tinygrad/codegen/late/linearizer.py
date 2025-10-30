@@ -75,7 +75,7 @@ pm_add_control_flow = PatternMatcher([
 
 def do_split_ends(e:UOp):
   ret = e.src[0]
-  for r in list(UOp.sink(*e.src[1:]).ranges)[::-1]: ret = ret.end(r)
+  for r in sorted(UOp.sink(*e.src[1:]).ranges, key=lambda x: x.arg, reverse=True): ret = ret.end(r)
   return ret
 
 pm_split_ends = PatternMatcher([
