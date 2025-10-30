@@ -85,6 +85,8 @@ class AMDDriver(VirtDriver):
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
         functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id))),
+      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/power_dpm_force_performance_level',
+               functools.partial(TextFileDesc, text='profile_standard\n')),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0',
                functools.partial(DirFileDesc, child_names=[str(am.GC_HWID), str(am.SDMA0_HWID), str(am.NBIF_HWID)])),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.GC_HWID}', functools.partial(DirFileDesc, child_names=['0'])),

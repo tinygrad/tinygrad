@@ -328,8 +328,7 @@ if __name__ == "__main__":
   elif HL == 1: hprg = hl_spec_kernel3()
   else: hprg = hand_spec_kernel3()
   if HL == 3:
-    with Context(BLOCK_REORDER=0):
-      prg = get_program(hprg, Device.default.renderer)
+    prg = get_program(hprg, Device.default.renderer)
   else:
     prg = get_program(hprg, Device.default.renderer)
   print(prg.src)

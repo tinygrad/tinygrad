@@ -7,7 +7,7 @@ from tinygrad.codegen import full_rewrite
 from tinygrad.helpers import Context
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.symbolic import sym, commutative
-from tinygrad.uop.spec import uops_to_z3
+from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
   sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.DEFINE_VAR, Ops.RANGE, Ops.SPECIAL)}
@@ -768,6 +768,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(denominator, -19, -1, "((a*-2)+1)")
     self.helper_test_variable(numerator, 3, 390, "(a*((a*4)+-1))")
     self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
+
+  def test_symbolic_range_doesnt_collapse(self):
+    r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.index), 0)
+    self.helper_test_variable(r0, 0, 0, "r0")
 
   def test_const_reciprocal(self):
     a = Variable("a", 1, 10, dtypes.float)

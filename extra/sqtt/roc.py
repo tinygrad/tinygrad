@@ -1,9 +1,9 @@
-import ctypes, pathlib, argparse, pickle, re, functools, dataclasses
+import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
 from extra.sqtt.rocprof import rocprof
 from extra.sqtt.disasm import comgr_get_address_table
 from tinygrad.helpers import temp, DEBUG
 from tinygrad.device import ProfileEvent, ProfileProgramEvent
-from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
 
 @dataclasses.dataclass
 class InstInfo:
@@ -27,14 +27,18 @@ class _ROCParseCtx:
         self.disasms[prog.base + addr] = info
         self.addr2prg[prog.base + addr] = prog
 
-  def next_sqtt(self): return next(self.sqtt_evs, None)
+  def next_sqtt(self):
+    x = next(self.sqtt_evs, None)
+    self.active_se = x.se if x is not None else None
+    return x
+
   def find_program(self, addr): return self.addr2prg[addr]
 
   def on_occupancy_ev(self, ev):
-    if DEBUG >= 4: print("OCC", ev.time, ev.cu, ev.simd, ev.wave_id, ev.start)
+    if DEBUG >= 4: print("OCC", ev.time, self.active_se, ev.cu, ev.simd, ev.wave_id, ev.start)
 
   def on_wave_ev(self, ev):
-    if DEBUG >= 4: print("WAVE", ev.wave_id, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
+    if DEBUG >= 4: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
     asm = {}
     for j in range(ev.instructions_size):
@@ -52,9 +56,11 @@ if __name__ == "__main__":
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
   sqtt_events:list[ProfileSQTTEvent] = []
+  pmc_events:list[ProfilePMCEvent] = []
   prog_events:list[ProfileProgramEvent] = []
   for e in profile:
     if isinstance(e, ProfileSQTTEvent): sqtt_events.append(e)
+    if isinstance(e, ProfilePMCEvent): pmc_events.append(e)
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD"): prog_events.append(e)
 
   ROCParseCtx = _ROCParseCtx(sqtt_events, prog_events)
@@ -93,4 +99,14 @@ if __name__ == "__main__":
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  print(ROCParseCtx.wave_events.keys())
+  print('SQTT:', ROCParseCtx.wave_events.keys())
+
+  for ev in pmc_events:
+    print(f"PMC Event: dev={ev.device} kern={ev.kern}")
+    ptr = 0
+    for s in ev.sched:
+      view = memoryview(ev.blob).cast('Q')
+      print(f"\t{s.name}")
+      for inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+        print(f"\t\tInst {inst} SE {se_idx} SA {sa_idx} WGP {wgp_idx}: {view[ptr]}")
+        ptr += 1

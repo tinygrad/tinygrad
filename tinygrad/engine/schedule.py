@@ -22,18 +22,18 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   in_degree: dict[UOp, int] = {}
   var_vals: dict[str, int] = {}
   for u in sched_sink.toposort():
-    if u.op is not Ops.ASSIGN: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
+    if u.op is not Ops.AFTER: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
     k = u.src[1]
     in_degree.setdefault(k, 0)
     for s in k.src:
-      if s.op is Ops.ASSIGN:
+      if s.op is Ops.AFTER:
         children[s.src[1]].append(k)
         in_degree[k] += 1
       elif s.op in {Ops.MSELECT, Ops.MSTACK}:
         for ss in s.src:
           if ss.op is Ops.MSELECT: ss = ss.src[0]
           if ss.op is not Ops.BUFFER:
-            assert ss.op is Ops.ASSIGN, f"ss.op is not ASSIGN, it's {ss.op}"
+            assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
             children[ss.src[1]].append(k)
             in_degree[k] += 1
       elif s.op is Ops.BUFFER:
@@ -43,7 +43,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
         var_vals[var.expr] = val
       else:
-        raise RuntimeError(f"input to kernel must be ASSIGN or BUFFER, not {s.op}")
+        raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
   # linearize KERNEL UOps into ScheduleItems in BFS order
 

@@ -19,8 +19,8 @@ from tinygrad.helpers import fetch, getenv
 
 # QUANT=1 python3 examples/test_onnx_imagenet.py
 #   https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx
-# DONT_REALIZE_EXPAND=1 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
-# VIZ=1 DONT_REALIZE_EXPAND=1 python3 examples/benchmark_onnx.py /tmp/model.quant.onnx
+# python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
+# VIZ=1 python3 examples/benchmark_onnx.py /tmp/model.quant.onnx
 
 def imagenet_dataloader(cnt=0):
   input_mean = Tensor([0.485, 0.456, 0.406]).reshape(1, -1, 1, 1)

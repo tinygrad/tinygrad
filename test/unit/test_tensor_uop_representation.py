@@ -4,8 +4,6 @@ from tinygrad.uop.ops import UPat, Ops, UOp
 
 # NOTE: unlike before base for a realized tensor is always a BUFFER
 realized_pattern = UPat(Ops.BUFFER)
-# after realization, base tensor uops become RESHAPE(BUFFER)
-buffer_view_pattern = UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),))
 def is_pattern_uop(u:UOp, pat:UPat): assert pat.match(u, {}), f"{u}\nis not\n{pat}"
 def is_pattern(ten:Tensor, pat:UPat): is_pattern_uop(ten.uop, pat)
 
@@ -56,14 +54,6 @@ class TestTensorUopRepresentation(unittest.TestCase):
     print(c.uop)
     is_pattern(c, UPat(Ops.ADD))
     for s in c.uop.src: is_pattern_uop(s.base, realized_pattern)
-
-  def test_empty_buf(self):
-    a = Tensor.empty(3, 3)
-    is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.BUFFER),)))
-    vi = UOp.variable("i", 1, 3).bind(1)
-    a = Tensor.empty(3, vi)
-    is_pattern(a, UPat(Ops.RESHAPE, src=(UPat(Ops.SHRINK, src=(UPat(Ops.BUFFER),))),))
-    self.assertEqual(a.uop.base.buffer.size, 9)
 
 if __name__ == '__main__':
   unittest.main()
