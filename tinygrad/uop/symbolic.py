@@ -452,7 +452,7 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
 def simplify_valid(valid:UOp) -> UOp|None:
-  if valid.op_in_backward_slice_with_self(Ops.LOAD): return None  # this should only be for indexing, skip if there's a LOAD
+  if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
   ret:list[UOp] = []
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
