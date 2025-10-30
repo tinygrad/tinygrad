@@ -93,12 +93,10 @@ const drawGraph = (data) => {
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
-    let points = g.edge(e).points;
-    if (points.length > 2) {
-      points = points.slice(1, points.length-1);
-      points.unshift(intersectRect(g.node(e.v), points[0]));
-      points.push(intersectRect(g.node(e.w), points[points.length-1]))
-    }
+    const edge = g.edge(e);
+    const points = edge.points.slice(1, edge.points.length-1);
+    points.unshift(intersectRect(g.node(e.v), points[0]));
+    points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
   }).attr("marker-end", "url(#arrowhead)");
 }
@@ -264,20 +262,28 @@ const ncu_layout = (counters) => {
 
   // graph layout
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir:"LR" }).setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir:"LR", edgesep:10 }).setDefaultEdgeLabel(() => ({}));
   const baseWidth = 140, baseHeight = 440;
   for (const unit of units) {
     let [key, width, height, color, label] = unit;
     if (formulas[label] != null) label += "\n"+fmt(label)
     g.setNode(key, { width:baseWidth*(width/100), height:baseHeight*(height/100), color, label });
   }
-  for (const link of links) {
-    const [v, w, metrics] = link;
-    g.setEdge(v, w, metrics)
-  }
+  for (const [v, w, paths] of links) g.setEdge(v, w, { paths });
   dagre.layout(g);
-  let { nodes, edges } = dagre.graphlib.json.write(g);
-  return { nodes, edges };
+  const sep = Math.floor(g.graph().edgesep/2);
+  for (const e of g.edges()) {
+    const { paths, points:basePoints } = g.edge(e);
+    g.removeEdge(e);
+    let offset = 0;
+    // console.log(basePoints.map(p => `(${p.x}, ${p.y})`).join(" - "))
+    for (let i=0; i<paths.length; i++) {
+      const p = paths[i];
+      g.setEdge(e.v, e.w, { points:basePoints });
+      if (p.dbl) g.setEdge(e.w, e.v, { points:basePoints });
+    }
+  }
+  return dagre.graphlib.json.write(g);
 }
 const MEMORY_LAYOUTS = {"CUDA":ncu_layout}
 
