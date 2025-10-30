@@ -64,7 +64,10 @@ class CFGContext:
       # ranges that have dependencies on other siblings need to be scheduled after them
       order = sorted(v, key=lambda x: len([u for u in v if u in deps[x]]))
       zipped = zip(order, order[1:]) if k.op is Ops.SINK else zip([k.src[1]] + order, order)
-      for x,y in zipped: self.edges[y.src[1]] = x
+      for x,y in zipped:
+        # TODO: this can happen! it causes infinite loop in shufflenet
+        assert y.src[1] not in x.backward_slice_with_self
+        self.edges[y.src[1]] = x
 
 pm_add_control_flow = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=x.src+(y,)) if (y:=ctx.edges.get(x)) is not None else None),
