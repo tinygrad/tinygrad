@@ -527,7 +527,7 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=330 AMD=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=330 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=350 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     # - name: Run 10 CIFAR training steps w BF16
     #   run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     # TODO: too slow

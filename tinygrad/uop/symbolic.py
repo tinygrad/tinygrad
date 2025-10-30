@@ -413,7 +413,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
     bounds[expr][int(is_upper)] = c
 
   # don't simplify any other gates, can lead to OOB, we substitute them back later
-  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
+  uop = uop.substitute((load_subs:={u: UOp(Ops.NOOP, dtype=u.dtype, arg=u) for u in uop.toposort() if u.op is Ops.INDEX}))
 
   # simplify uop given that valid is True
   all_candidates = []
@@ -452,7 +452,7 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
 def simplify_valid(valid:UOp) -> UOp|None:
-  if valid.op_in_backward_slice_with_self(Ops.LOAD): return None  # this should only be for indexing, skip if there's a LOAD
+  if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
   ret:list[UOp] = []
   something_changed = False
   valids = list(valid.split_uop(Ops.AND))
@@ -479,21 +479,20 @@ def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   return UOp.const(dtypes.bool, True).prod(*[c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses]).where(x, i)
 pm_drop_and_clauses = PatternMatcher([(UPat.var("cond").where(UPat.var("x", dtype=dtypes.index), invalid_pat), drop_and_clauses)])
 
-def where_on_load(l, c1, buf, x):
+def where_on_load(c1, buf, x):
   c2 = x.get_valid()
   duplicate_clauses = [c for c in c1.split_uop(Ops.AND) if c in c2.split_uop(Ops.AND)]
   # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
   # also no data dependent loads!
   moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
-    and all(u in x.backward_slice_with_self for u in c.backward_slice_with_self if u.op is Ops.LOAD)]
+    and all(u in x.backward_slice_with_self for u in c.backward_slice_with_self if u.op is Ops.INDEX)]
   if not (removed:=moved_clauses+duplicate_clauses): return None
   # aditionally we can drop the clause on the where if it already exists in the load
   remaining_clause = UOp.const(dtypes.bool, True).prod(*[c for c in c1.split_uop(Ops.AND) if c not in removed])
-  return remaining_clause.where(UOp.load(buf.index(x.get_idx().valid(functools.reduce(operator.and_, moved_clauses, c2)), *l.src[1:])), 0)
+  return remaining_clause.where(buf.index(x.get_idx().valid(functools.reduce(operator.and_, moved_clauses, c2))), 0)
 pm_move_where_on_load = PatternMatcher([
-  (UPat.var("c1").where(UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l"), 0), where_on_load),
-  (UPat.var("c1").where(0, UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("x")),), name="l")),
-    lambda l,c1,buf,x: where_on_load(l,c1.logical_not(),buf,x)),
+  (UPat.var("c1").where(UPat.var("buf").index(UPat.var("x")), 0), where_on_load),
+  (UPat.var("c1").where(0, UPat.var("buf").index(UPat.var("x"))), lambda c1,buf,x: where_on_load(c1.logical_not(),buf,x)),
 ])
 
 pm_simplify_valid = PatternMatcher([
@@ -503,7 +502,7 @@ pm_simplify_valid = PatternMatcher([
 ])
 
 # this is symbolic 2.0
-REMOVE_FROM_SINK_LIKE = {Ops.UNROLL, Ops.NOOP}
+REMOVE_FROM_SINK_LIKE = {Ops.UNROLL, Ops.NOOP, Ops.VECTORIZE, Ops.SINK}
 sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),

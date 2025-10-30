@@ -2,7 +2,7 @@ from typing import Any, cast
 import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid
+from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic_flat, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
@@ -12,7 +12,7 @@ from tinygrad.renderer import Renderer
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   idx = uop_given_valid(valid, start_idx)
-  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid))
+  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid), ptr=True)
 
   # wait for it to be image indexed before running simplification
   if start_idx.dtype.count != 2: return None
@@ -43,7 +43,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
-  return buf.index(idx.valid(new_valid) if new_valid is not None else idx)
+  return buf.index(idx.valid(new_valid) if new_valid is not None else idx, ptr=True)
 
 
 load_store_indexing = PatternMatcher([
@@ -52,7 +52,7 @@ load_store_indexing = PatternMatcher([
   # simplify away long after index has been lowered
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x", dtypes.long), UPat.var("c", dtypes.bool))), lambda buf,x,c: simplify_valid_load(buf, x, c)),
   # drop true gate
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x, ptr=True)),
 ])
 
 # ***** load/store grouping *****
@@ -60,7 +60,7 @@ load_store_indexing = PatternMatcher([
 def expand_index(buf:UOp, vec:UOp):
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
-  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i)) for i in range(vec.dtype.count)]),
+  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)]),
                        symbolic_flat+load_store_indexing, name=f"index_buf_{buf.arg}")
   # extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
@@ -163,7 +163,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     # with 1 at the end of the lengths list, this will always hit
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
-      lidx = buf.index((offset + global_offset).valid(mask))
+      lidx = buf.index((offset + global_offset).valid(mask), ptr=True)
       if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))+ls.src[2:]))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
@@ -229,7 +229,7 @@ def no_vectorized_buf(buf:UOp):
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp):
   cnt = cast.dtype.count
   assert idx.dtype.count == 1, f"idx dtype must be 1 {idx.dtype}"
-  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))))
+  return buf.broadcast(cnt).index(idx.broadcast(cnt)*cnt+UOp.const(dtypes.index.vec(cnt), tuple(range(cnt))), ptr=True)
 
 def no_vectorized_index_broadcast(buf:UOp, cast:UOp, bcast:UOp, idx:UOp):
   cnt = cast.dtype.count
@@ -237,7 +237,7 @@ def no_vectorized_index_broadcast(buf:UOp, cast:UOp, bcast:UOp, idx:UOp):
   input_gep = bcast.arg if bcast.op is Ops.GEP else ([0]*precnt)
   gep_arg = tuple(flatten([range(precnt) for _ in range(cnt)]))
   sum_arg = tuple(flatten([[i+y for y in input_gep] for i in range(cnt)]))
-  return buf.broadcast(cnt*precnt).index(idx.gep(gep_arg)*cnt+UOp.const(dtypes.index.vec(cnt*precnt), sum_arg))
+  return buf.broadcast(cnt*precnt).index(idx.gep(gep_arg)*cnt+UOp.const(dtypes.index.vec(cnt*precnt), sum_arg), ptr=True)
 
 devectorize_buf_and_index = PatternMatcher([
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
@@ -302,11 +302,11 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=(ctx.acc_num,))
     acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
                acc.index(UOp.const(dtypes.int, 0)).store(identity)
-    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0)).load()] + lst  # put acc as the first element
+    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0))] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0)).load()
+  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0))
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN
@@ -315,3 +315,14 @@ pm_reduce = PatternMatcher([
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
 ])+sym
+
+# add loads
+
+pm_add_loads = PatternMatcher([
+  # add loads to non ptr index
+  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
+    idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)),
+  # remove loads from stores
+  (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), allow_any_len=True, name="s"), lambda s: s.replace(src=(s.src[0].src[0],)+s.src[1:])),
+])
+

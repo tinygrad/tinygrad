@@ -34,7 +34,7 @@ def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   a = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 0)
   b = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(), (), 1)
   idx = UOp.const(dtypes.int, 0)
-  ld = UOp(Ops.LOAD, dtype, (b.index(idx),))
+  ld = b.index(idx)
   alu = ld.alu(alu_op, *alu_src_uops)
   store = UOp.store(a.index(idx), alu)
   sink = UOp(Ops.SINK, dtypes.void, (store,))

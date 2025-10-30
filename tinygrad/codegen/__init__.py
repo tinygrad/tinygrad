@@ -1,4 +1,5 @@
 from typing import cast
+import itertools
 from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
@@ -12,16 +13,24 @@ from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, p
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
-  ReduceContext, correct_load_store, pm_render
+  ReduceContext, correct_load_store, pm_render, pm_add_loads
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
+
+pm_preprocess = PatternMatcher([
+  (UPat(Ops.RESHAPE, name="r").after(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:]).reshape(r.shape)),
+  (UPat(Ops.RESHAPE, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
+])
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
   if SPEC: type_verify(sink, kernel_spec)
+
+  # preprocess
+  sink = graph_rewrite(sink, pm_preprocess+pm_mops, name="early movement ops")
 
   # first we optimize
   if optimize:
@@ -50,7 +59,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, name="add local buffers")
+  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
@@ -58,6 +67,11 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+
+  # **** optimizations are done, now we lower to actual code ****
+
+  # add loads
+  sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
 
   # devectorize (TODO: does this need opts?)
   if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing

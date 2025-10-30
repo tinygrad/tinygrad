@@ -2163,8 +2163,8 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk_contiguous(self):
-    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
-    a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
+    with open(temp('dt_arange_4_permute_contig'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
+    a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute_contig')}")
     b = a.reshape(2, 2).permute(1, 0).contiguous().to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
