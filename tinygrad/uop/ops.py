@@ -760,10 +760,13 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ret = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(prod(shape)), arg=slot)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
+  def placeholder_like(self, slot:int):
+    assert all_int(self.shape), "no placeholder-like on symbolic shape"
+    return UOp.placeholder(self.dtype, self.shape, slot)
 
-  # set is store+after
-  def set(self:UOp, val:UOp|ConstType):
-    return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val))
+  # set is store+end+after
+  def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]=()) -> UOp:
+    return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val).end(*argfix(end)))
 
 @dataclass(frozen=True)
 class KernelInfo:
