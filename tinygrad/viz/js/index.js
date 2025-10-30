@@ -144,7 +144,7 @@ function renderDag(graph, additions, recenter) {
 
 // per device layout specs
 
-const ncu_layout = (counters) => {
+const ncu_layout = () => {
   // *** metrics are based on the raw counters
   // TODO: move this to an xml file?
   const metrics = {
@@ -234,7 +234,16 @@ const ncu_layout = (counters) => {
     ["l1", "l2", {k:"L1 Cache <- L2 Cache (bytes)", rev:"L1 Cache -> L2 Cache (bytes)"}],
     ["l2", "dram", {k:"L2 Cache <- Device Memory (bytes)", rev:"L2 Cache -> Device Memory (bytes)"}],
   ];
+  return { units, links, metrics };
+}
 
+const MEMORY_LAYOUTS = {"CUDA":ncu_layout}
+
+function renderCacheGraph(data) {
+  const layout = MEMORY_LAYOUTS[data.device];
+  displaySelection("#graph");
+  const { units, links, metrics } = layout();
+  const counters = JSON.parse(data.src);
   function calc(metric) {
     let num = 0;
     for (let k of metrics[metric].keys) {
@@ -279,16 +288,9 @@ const ncu_layout = (counters) => {
       if (p.rev != null) addEdge(w, v, p.rev, points.map(p => ({x:p.x, y:p.y+sep})).reverse(), "bottom");
     }
   }
-  return dagre.graphlib.json.write(g);
-}
-const MEMORY_LAYOUTS = {"CUDA":ncu_layout}
-
-function renderCacheGraph(data) {
-  const layout = MEMORY_LAYOUTS[data.device];
-  displaySelection("#graph");
-  const graph = layout(JSON.parse(data.src));
+  const graph = dagre.graphlib.json.write(g);
   drawGraph(graph, { simplePaths:true });
-  const edgeLabels = d3.select("#edge-labels").html("").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true);
+  const edgeLabels = d3.select("#edge-labels").html("").selectAll("g.edge").data(graph.edges).join("g").classed("edge-text", true);
   edgeLabels.append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", e => e.value.color).text(e => e.value.label);
   edgeLabels.attr("transform", (e, i, nodes) => {
     const box = nodes[i].getBBox();
