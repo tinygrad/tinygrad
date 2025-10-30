@@ -742,6 +742,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ctx: dict[UOp, str] = {}
     pm = renderer if pm is None else pm
     for u in (s:=self.simplify() if simplify else self).toposort():
+      # if there is any node in the toposort we can't render, we just render the whole thing using UOp pretty printer
       if (u_str:=pm.rewrite(u, ctx=ctx)) is None: return str(s)
       ctx[u] = cast(str, u_str)
     return ctx[s]
