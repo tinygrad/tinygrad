@@ -16,6 +16,7 @@ BK = 8
 TN = 4
 TM = 4
 
+
 def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   # ---------------------------
   # launch/config constants
@@ -65,14 +66,14 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   # ---------------------------
   # block indices & placeholders
   # ---------------------------
-  blockIdx_x = UOp.special(N//BN, "gidx0")
-  blockIdx_y = UOp.special(N//BM, "gidx1")
+  blockIdx_x = UOp.special(N // BN, "gidx0")
+  blockIdx_y = UOp.special(N // BM, "gidx1")
 
   a = UOp.placeholder(dtypes.float, (N, N), slot=1)
   b = UOp.placeholder(dtypes.float, (N, N), slot=2)
   c = UOp.placeholder(dtypes.float, (N, N), slot=0)
 
-  BM_As_stride = (BM+4) if kernel5 else BM
+  BM_As_stride = (BM + 4) if kernel5 else BM
   As = UOp.placeholder(dtypes.float, (BK, BM_As_stride), slot=0, addrspace=AddrSpace.LOCAL)
   Bs = UOp.placeholder(dtypes.float, (BK, BN), slot=1, addrspace=AddrSpace.LOCAL)
 
@@ -83,8 +84,8 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   i = UOp.range(c_regs.dtype.size, 16)
   c_regs = c_regs[i].set(0.0, end=i)
 
-  kId_range = UOp.range(N//BK, 0)
-  kId = kId_range*BK
+  kId_range = UOp.range(N // BK, 0)
+  kId = kId_range * BK
 
   # ---------------------------
   # GLOBAL -> LOCAL (As, Bs)
@@ -155,6 +156,7 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
 
   return sink.sink(arg=KernelInfo(opts_to_apply=()))
 
+
 if __name__ == "__main__":
   with Context(DEBUG=0):
     a = Tensor.randn(N, N)
@@ -170,12 +172,13 @@ if __name__ == "__main__":
   with Context(DEBUG=2):
     for _ in range(run_count):
       ets.append(ei.run(wait=True))
-  print(f"REAL TFLOPS {N*N*N*2/min(ets)*1e-12:.2f}")
+  print(f"REAL TFLOPS {N * N * N * 2 / min(ets) * 1e-12:.2f}")
 
   GlobalCounters.reset()
   with Context(DEBUG=2):
-    tc = (a@b).realize()
+    tc = (a @ b).realize()
   with Context(DEBUG=0):
-    err = (hc-tc).square().mean().item()
+    err = (hc - tc).square().mean().item()
   print(f"mean squared error {err}")
-  if err > 1e-06: raise RuntimeError("matmul is wrong!")
+  if err > 1e-06:
+    raise RuntimeError("matmul is wrong!")
