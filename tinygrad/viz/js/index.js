@@ -230,6 +230,7 @@ const ncu_layout = (counters) => {
     ["instr_global", "l1", {k:"Global <- L1 Cache", rev:"Global -> L1 Cache"}],
     ["instr_local", "l1", {k:"Local <- L1 Cache", rev:"Local -> L1 Cache"}],
     ["instr_shared", "shared", {k:"Shared <- Shared Memory", rev:"Shared -> Shared Memory"}],
+    ["l1", "shared", {k:"L1 -> Shared (bytes)", vert:true}],
     ["l1", "l2", {k:"L1 Cache <- L2 Cache (bytes)", rev:"L1 Cache -> L2 Cache (bytes)"}],
     ["l2", "dram", {k:"L2 Cache <- Device Memory (bytes)", rev:"L2 Cache -> Device Memory (bytes)"}],
   ];
@@ -271,18 +272,25 @@ const ncu_layout = (counters) => {
     if (formulas[label] != null) label += "\n"+fmt(label)
     g.setNode(key, { width:baseWidth*(width/100), height:baseHeight*(height/100), color, label });
   }
-  for (const [v, w, opts] of links) g.setEdge(v, w, opts);
+  for (const [v, w, opts] of links) !opts.vert && g.setEdge(v, w, opts);
   dagre.layout(g);
   const sep = g.graph().edgesep;
-  for (const e of g.edges()) {
-    const p = g.edge(e);
-    g.removeEdge(e);
+  for (const [v, w, opts] of links) {
+    const p = g.edge(v, w);
+    if (p == null) {
+      const nv = g.node(v);
+      const nw = g.node(w);
+      const points = [{x:nv.x, y:nv.y+nv.height/2}, {x:nv.x, y:nw.y-nw.height/2}];
+      g.setEdge(w, v, { points, label:fmt(opts.k), labelPos:"right" });
+      continue;
+    }
+    g.removeEdge(v, w);
     // pick y side of the smallest
-    const baseY = g.node(e.v).height < g.node(e.w).height ? p.points[0].y : p.points[1].y;
+    const baseY = g.node(v).height < g.node(w).height ? p.points[0].y : p.points[1].y;
     const points = p.points.map((p) => ({ x:p.x, y:baseY }));
-    g.setEdge(e.v, e.w, { points, name:fmt(p.k), offsetY:-5 }, 0);
-    if (p.dbl) g.setEdge(e.w, e.v, { points:[...points].reverse() });
-    if (p.rev != null) g.setEdge(e.w, e.v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse(), name:fmt(p.rev), offsetY:5 }, 2);
+    g.setEdge(v, w, { points, label:fmt(p.k), labelPos:"top" }, 0);
+    if (p.dbl) g.setEdge(w, v, { points:[...points].reverse() });
+    if (p.rev != null) g.setEdge(w, v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse(), label:fmt(p.rev), labelPos:"bottom" }, 2);
   }
   return dagre.graphlib.json.write(g);
 }
@@ -293,13 +301,17 @@ function renderCacheGraph(data) {
   displaySelection("#graph");
   const graph = layout(JSON.parse(data.src));
   drawGraph(graph, { simplePaths:true });
-  d3.select("#edge-labels").html("");
-  d3.select("#edge-labels").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true).attr("transform", e => {
+  const edgeLabels = d3.select("#edge-labels").html("").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true);
+  edgeLabels.append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.label);
+  edgeLabels.attr("transform", (e, i, nodes) => {
+    const box = nodes[i].getBBox();
     const p1 = e.value.points[0], p2 = e.value.points.at(-1);
-    const x = (p1.x + p2.x) / 2 + (e.value.offsetX || 0);
-    const y = (p1.y + p2.y) / 2 + (e.value.offsetY || 0);
-    return `translate(${x},${y})`;
-  }).append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.name);
+    let x = (p1.x+p2.x)/2, y = (p1.y+p2.y)/2;
+    if (e.value.labelPos === "bottom") y += box.height/2+1;
+    else if (e.value.labelPos === "right") x += box.width/2+1;
+    else y -= box.height/2+1;
+    return `translate(${x}, ${y})`;
+  });
   if (data.prg != null) {
     const cb = codeBlock(data.prg, "cpp", { wrap:false });
     cb.classList.add("full-height");
