@@ -100,7 +100,7 @@ const drawGraph = (data, opts) => {
     points.unshift(intersectRect(g.node(e.v), points[0]));
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
-  } : (e) => line(g.edge(e).points)).attr("marker-end", "url(#arrowhead)");
+  } : (e) => line(g.edge(e).points)).attr("marker-end", "url(#arrowhead)").style("stroke", e => g.edge(e).color);
 }
 
 // ** UOp graph
@@ -275,22 +275,24 @@ const ncu_layout = (counters) => {
   for (const [v, w, opts] of links) !opts.vert && g.setEdge(v, w, opts);
   dagre.layout(g);
   const sep = g.graph().edgesep;
+  const linkColors = {ACTIVE:"#c7cae6", };
   for (const [v, w, opts] of links) {
     const p = g.edge(v, w);
+    const value = calc(opts.k);
+    const label = value > 0 ? fmt(opts.k) : null;
+    const color = value > 0 ? linkColors.ACTIVE : null;
     if (p == null) {
-      const nv = g.node(v);
-      const nw = g.node(w);
-      const points = [{x:nv.x, y:nv.y+nv.height/2}, {x:nv.x, y:nw.y-nw.height/2}];
-      g.setEdge(w, v, { points, label:fmt(opts.k), labelPos:"right" });
-      continue;
+      const nv = g.node(v), nw = g.node(w);
+      g.setEdge(w, v, { points:[{x:nv.x, y:nv.y+nv.height/2}, {x:nv.x, y:nw.y-nw.height/2}], label, labelPos:"right", color });
+    } else {
+      g.removeEdge(v, w);
+      // pick y side of the smallest
+      const baseY = g.node(v).height < g.node(w).height ? p.points[0].y : p.points[1].y;
+      const points = p.points.map((p) => ({ x:p.x, y:baseY }));
+      g.setEdge(v, w, { points, labelPos:"top", label, color, }, 0);
+      if (p.dbl) g.setEdge(w, v, { points:[...points].reverse(), color }, 1);
+      if (p.rev != null) g.setEdge(w, v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse(), labelPos:"bottom", label, color }, 2);
     }
-    g.removeEdge(v, w);
-    // pick y side of the smallest
-    const baseY = g.node(v).height < g.node(w).height ? p.points[0].y : p.points[1].y;
-    const points = p.points.map((p) => ({ x:p.x, y:baseY }));
-    g.setEdge(v, w, { points, label:fmt(p.k), labelPos:"top" }, 0);
-    if (p.dbl) g.setEdge(w, v, { points:[...points].reverse() });
-    if (p.rev != null) g.setEdge(w, v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse(), label:fmt(p.rev), labelPos:"bottom" }, 2);
   }
   return dagre.graphlib.json.write(g);
 }
@@ -302,7 +304,7 @@ function renderCacheGraph(data) {
   const graph = layout(JSON.parse(data.src));
   drawGraph(graph, { simplePaths:true });
   const edgeLabels = d3.select("#edge-labels").html("").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true);
-  edgeLabels.append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.label);
+  edgeLabels.append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", e => e.value.color).text(e => e.value.label);
   edgeLabels.attr("transform", (e, i, nodes) => {
     const box = nodes[i].getBBox();
     const p1 = e.value.points[0], p2 = e.value.points.at(-1);
