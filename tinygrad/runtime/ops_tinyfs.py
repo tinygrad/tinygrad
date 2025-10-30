@@ -108,19 +108,18 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
   async def _copyout_async(self, dest:memoryview, src:TinyFSBuffer):
     async def _worker(i, loc):
       async with self.dev.connection(loc) as (reader, writer):
-        async with asyncio.timeout(10):
-          ptr = i * Tensor.CHUNK_SIZE
-          size = min(len(dest[ptr:ptr+Tensor.CHUNK_SIZE]), Tensor.CHUNK_SIZE)
+        ptr = i * Tensor.CHUNK_SIZE
+        size = min(len(dest[ptr:ptr+Tensor.CHUNK_SIZE]), Tensor.CHUNK_SIZE)
 
-          writer.write(f"CHUNK_OUT {size}\r\n".encode())
-          writer.write(src.hash_buf[i*16:(i+1)*16])
-          await writer.drain()
+        writer.write(f"CHUNK_OUT {size}\r\n".encode())
+        writer.write(src.hash_buf[i*16:(i+1)*16])
+        await asyncio.wait_for(writer.drain(), timeout=10)
 
-          chunk = await reader.readexactly(size)
+        chunk = await asyncio.wait_for(reader.readexactly(size), timeout=10)
 
-          view = dest[ptr:ptr+len(chunk)]
-          view[:] = chunk
-          del view
+        view = dest[ptr:ptr+len(chunk)]
+        view[:] = chunk
+        del view
 
     workers = [asyncio.create_task(_worker(i, loc)) for i, loc in enumerate(src.copyout_queue)]
     await asyncio.gather(*workers)
