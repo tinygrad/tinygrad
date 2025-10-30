@@ -576,20 +576,31 @@ class TestUOpPrograms(unittest.TestCase):
     ref = a@b
     with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
 
-    # create placeholders for the buffers
-    A, B, C = [UOp.placeholder(dtypes.float, (10, 10), i) for i in range(3)]
+    # C[i,j] = sum_k A[i,k] * B[k,j]
+    # Shapes: A[M,K], B[K,N], C[M,N]
+    M = N = K = 10
+    DT = dtypes.float32
 
-    # outer loops
-    for i,j in [(UOp.range(10, 0), UOp.range(10, 1))]:
-      # init the C matrix to 0
-      C = C[i,j].set(UOp.const(dtypes.float, 0.0))
+    # Axes: i,j are spatial; k is a reduction axis over the shared dim K
+    i = UOp.range(M, axis_id=0)                             # rows of A/C
+    j = UOp.range(N, axis_id=1)                             # cols of B/C
+    k = UOp.range(K, axis_id=2, axis_type=AxisType.REDUCE)  # reduction over K
 
-      # do the reduction in-place in the C array
-      for k in [UOp.range(10, 2, AxisType.REDUCE)]:
-        C = C[i,j].set(C.after(k)[i,j] + A[i,k] * B[k,j])
-        prog = C.end(i,j,k)
+    # Placeholders (bind slots explicitly for readability)
+    A = UOp.placeholder(DT, (M, K), slot=0)
+    B = UOp.placeholder(DT, (K, N), slot=1)
+    C = UOp.placeholder(DT, (M, N), slot=2)
 
-    # end program
+    # Zero-init: write a scalar 0 to each (i,j). Hoist the const so it's not recreated.
+    C = C[i, j].set(0.0)
+
+    # Accumulate: C_after(k) enforces the dependency along the reduction axis
+    C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j])
+
+    # Finalize the loop nest / schedule in (i, j, k) order
+    prog = C.end(i, j, k)
+
+    # run program
     self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
 
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)

@@ -390,10 +390,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
-  def range(end:sint, *arg, dtype=dtypes.index, src=(), **kwargs):
-    if len(arg) == 0: raise RuntimeError("range needs an arg")
-    if len(arg) == 1: arg = arg+(AxisType.LOOP,)
-    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=arg, **kwargs)
+  def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.index, src=(), **kwargs):
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def r(self, op:Ops, axis:tuple[int, ...]):
@@ -748,13 +746,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # *** uop high level syntactic sugar ***
 
   @staticmethod
-  def placeholder(dtype:DType, shape:tuple[int, ...], i:int):
-    ret = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(prod(shape)), arg=i)
+  def placeholder(dtype:DType, shape:tuple[int, ...], slot:int):
+    ret = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(prod(shape)), arg=slot)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
 
   # set is store+after
-  def set(self:UOp, val:UOp): return self.src[0].after(self.store(val))
+  def set(self:UOp, val:UOp|ConstType):
+    return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val))
 
 @dataclass(frozen=True)
 class KernelInfo:
