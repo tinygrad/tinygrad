@@ -144,10 +144,10 @@ function renderDag(graph, additions, recenter) {
 
 // per device layout specs
 
-const ncu_layout = () => {
+const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
+const ncu_counters = {
   // *** metrics are based on the raw counters
-  // TODO: move this to an xml file?
-  const metrics = {
+  metrics: {
     "Kernel <-> Global": {"unit":"inst", "keys":[
       "sass__inst_executed_global_loads [inst]",
       "sass__inst_executed_global_stores [inst]",
@@ -211,9 +211,8 @@ const ncu_layout = () => {
     "L2 Cache -> Device Memory (bytes)": {"unit":"bytes", "keys":[
       "dram__bytes_write.sum [byte]",
     ]},
-  };
-  const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
-  const units = [
+  },
+  units: [
     ["kernel", 40, 100, colors.LOGICAL, "Kernel"],
     ["instr_global", 100, 10, colors.LOGICAL, "Global"],
     ["instr_local", 100, 10, colors.LOGICAL, "Local"],
@@ -222,8 +221,8 @@ const ncu_layout = () => {
     ["shared", 100, 10, colors.PHYSICAL, "Shared Memory"],
     ["l2", 100, 90, colors.PHYSICAL, "L2 Hit Rate (%)"],
     ["dram", 100, 10, colors.PHYSICAL, "Device Memory"],
-  ];
-  const links = [
+  ],
+  links: [
     ["kernel", "instr_global", {k:"Kernel <-> Global", dbl:true}],
     ["kernel", "instr_local",  {k:"Kernel <-> Local",  dbl:true}],
     ["kernel", "instr_shared", {k:"Kernel <-> Shared", dbl:true}],
@@ -233,16 +232,14 @@ const ncu_layout = () => {
     ["l1", "shared", {k:"L1 -> Shared (bytes)", vert:true}],
     ["l1", "l2", {k:"L1 Cache <- L2 Cache (bytes)", rev:"L1 Cache -> L2 Cache (bytes)"}],
     ["l2", "dram", {k:"L2 Cache <- Device Memory (bytes)", rev:"L2 Cache -> Device Memory (bytes)"}],
-  ];
-  return { units, links, metrics };
+  ],
 }
 
-const MEMORY_LAYOUTS = {"CUDA":ncu_layout}
+const MEMORY_METRICS = {"CUDA":ncu_counters}
 
 function renderCacheGraph(data) {
-  const layout = MEMORY_LAYOUTS[data.device];
+  const { units, links, metrics }  = MEMORY_METRICS[data.device];
   displaySelection("#graph");
-  const { units, links, metrics } = layout();
   const counters = JSON.parse(data.src);
   function calc(metric) {
     let num = 0;
