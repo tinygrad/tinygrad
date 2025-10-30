@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.uop.mathtraits import MathTrait
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
 from tinygrad.helpers import strip_parens, colored
@@ -341,7 +341,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def detach(self): return UOp(Ops.DETACH, self.dtype, (self,))
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
-  def __getitem__(self, *idx): return self.index(*idx)
+  def __getitem__(self, idx): return self.index(*argfix(idx))
   def const_like(self, b:ConstLike):
     # constants can optionally have a DEVICE source
     return UOp.const(self.dtype, b, device=self._device, shape=self._shape)
@@ -390,10 +390,8 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
-  def range(end:sint, *arg, dtype=dtypes.index, src=(), **kwargs):
-    if len(arg) == 0: raise RuntimeError("range needs an arg")
-    if len(arg) == 1: arg = arg+(AxisType.LOOP,)
-    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=arg, **kwargs)
+  def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.index, src=(), **kwargs):
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def r(self, op:Ops, axis:tuple[int, ...]):
@@ -580,6 +578,16 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     while len(s.src) and s.op not in {Ops.BUFFER, Ops.BUFFERIZE, Ops.MSTACK}: s = s.src[0]
     return s
 
+  def buf_target(self) -> UOp:
+    # the buffer that's being loaded from or store to
+    match self.op:
+      case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return self
+      case Ops.AFTER | Ops.INDEX | Ops.STORE | Ops.LOAD: return self.src[0].buf_target()
+      case Ops.VECTORIZE:
+        assert all_same(self.src)
+        return self.src[0].buf_target()
+      case _: raise RuntimeError(f"buf_target called on non load/index/store {self.op}")
+
   @property
   def buffer(self) -> Buffer|MultiBuffer:
     from tinygrad.device import Buffer, MultiBuffer
@@ -749,6 +757,22 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def pyrender(self): return pyrender(self)
 
+  # *** uop high level syntactic sugar ***
+
+  @staticmethod
+  def placeholder(dtype:DType, shape:tuple[int, ...], slot:int, addrspace=AddrSpace.GLOBAL):
+    lookup = {AddrSpace.GLOBAL: Ops.DEFINE_GLOBAL, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
+    ret = UOp(lookup[addrspace], dtype.ptr(prod(shape), addrspace), arg=slot)
+    if len(shape) > 1: ret = ret.reshape(shape)
+    return ret
+  def placeholder_like(self, slot:int):
+    assert all_int(self.shape), "no placeholder-like on symbolic shape"
+    return UOp.placeholder(self.dtype, self.shape, slot)
+
+  # set is store+end+after
+  def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]=()) -> UOp:
+    return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val).end(*argfix(end)))
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
@@ -877,6 +901,7 @@ class UPat(MathTrait):
   def broadcast(self, **kwargs): return UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs)
   def contiguous(self, *args, **kwargs): return UPat(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.dtype, (self,)+src, **kwargs)
+  def end(self, *src:UPat, **kwargs): return UPat(Ops.END, self.dtype, (self,)+src, **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):

@@ -1,5 +1,4 @@
 import functools
-from typing import cast
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage
@@ -33,7 +32,7 @@ class NullGraph(MultiGraphRunner):
 class NullDevice(Compiled):
   def __init__(self, device:str):
     renderer:functools.partial|type[Renderer]
-    match cast(str, EMULATE.value):
+    match str(EMULATE.value):
       case "AMD": renderer = functools.partial(AMDLLVMRenderer, "gfx1100")
       case "AMD_RDNA4": renderer = functools.partial(AMDLLVMRenderer, "gfx1201")
       case "": renderer = NullRenderer

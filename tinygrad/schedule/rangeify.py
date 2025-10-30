@@ -1,11 +1,11 @@
-from typing import cast
 from dataclasses import dataclass, field
+import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
-from tinygrad.helpers import PCONTIG, partition, get_single_element
+from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
@@ -299,7 +299,7 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
+def bufferize_to_store(ctx:itertools.count|None, x:UOp, idx:UOp, allow_locals=True):
   #assert isinstance(x.tag, Flat), "bufferize must be flat"
   size = prod(x.shape)
   rngs = sorted(idx.ranges, key=lambda x: x.arg)
@@ -329,9 +329,7 @@ def bufferize_to_store(x:UOp, idx:UOp, allow_locals=True):
 
   if allow_locals:
     # handle locals
-    tag = x.arg.device
-    if tag is None: tag = UOp.unique().arg # TODO: hack
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=next(unwrap(ctx)))
     do_store = buf.broadcast(x.src[1].dtype.count).index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 
@@ -348,7 +346,7 @@ def flatten_bufferize(x:UOp):
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
 
 pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), lambda x, idx: bufferize_to_store(x, idx, allow_locals=False)),
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), lambda x, idx: bufferize_to_store(None, x, idx, allow_locals=False)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
@@ -574,5 +572,5 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     assert s.tag is not None
     for a in s.tag:
       if a is None: continue
-      becomes_map[uop_list[cast(int, a)]] = s.replace(tag=None)
+      becomes_map[uop_list[int(a)]] = s.replace(tag=None)
   return becomes_map
