@@ -275,23 +275,26 @@ const ncu_layout = (counters) => {
   for (const [v, w, opts] of links) !opts.vert && g.setEdge(v, w, opts);
   dagre.layout(g);
   const sep = g.graph().edgesep;
-  const linkColors = {ACTIVE:"#c7cae6", };
+  const linkColors = {ACTIVE:"#98a0c2"};
+
+  const addEdge = (v, w, k, points, labelPos) => {
+    const value = k == null ? 0 : calc(k);
+    g.setEdge(v, w, { points, labelPos, label:value > 0 ? fmt(k) : null, color:value > 0 ? linkColors.ACTIVE : null });
+  }
+
   for (const [v, w, opts] of links) {
     const p = g.edge(v, w);
-    const value = calc(opts.k);
-    const label = value > 0 ? fmt(opts.k) : null;
-    const color = value > 0 ? linkColors.ACTIVE : null;
     if (p == null) {
       const nv = g.node(v), nw = g.node(w);
-      g.setEdge(w, v, { points:[{x:nv.x, y:nv.y+nv.height/2}, {x:nv.x, y:nw.y-nw.height/2}], label, labelPos:"right", color });
+      addEdge(w, v, opts.k, [{x:nv.x, y:nv.y+nv.height/2}, {x:nv.x, y:nw.y-nw.height/2}], "right");
     } else {
       g.removeEdge(v, w);
       // pick y side of the smallest
       const baseY = g.node(v).height < g.node(w).height ? p.points[0].y : p.points[1].y;
       const points = p.points.map((p) => ({ x:p.x, y:baseY }));
-      g.setEdge(v, w, { points, labelPos:"top", label, color, }, 0);
-      if (p.dbl) g.setEdge(w, v, { points:[...points].reverse(), color }, 1);
-      if (p.rev != null) g.setEdge(w, v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse(), labelPos:"bottom", label, color }, 2);
+      addEdge(v, w, opts.k, points, "top");
+      if (p.dbl) addEdge(w, v, opts.k, [...points].reverse());
+      if (p.rev != null) addEdge(w, v, p.rev, points.map(p => ({x:p.x, y:p.y+sep})).reverse(), "bottom");
     }
   }
   return dagre.graphlib.json.write(g);
