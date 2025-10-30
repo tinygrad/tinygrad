@@ -151,7 +151,8 @@ class AMDComputeQueue(HWQueue):
     out_off = 0
     block2pid:dict[str, itertools.count] = collections.defaultdict(lambda: itertools.count())
     for name,block,idx in counters:
-      inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, self.dev.iface.props['cu_per_simd_array'] // 2)
+      inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1),
+                                           "SQ": (1, self.dev.se_cnt, 2, self.dev.iface.props['cu_per_simd_array'] // 2)}[block]
       reg, out_off = f'reg{block}_PERFCOUNTER{next(block2pid[block])}', out_off + (rec_size:=prod((inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
       self.wreg(getattr(self.gc, f'{reg}_SELECT'), idx)
       self.dev.pmc_sched.append(PMCSample(name, block, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, reg))
