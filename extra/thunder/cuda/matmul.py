@@ -18,7 +18,7 @@ if __name__ == "__main__":
 
   prg = device.runtime(kernel_name, lib)
   if getenv("MATMUL2"):
-    prg.smem = 16384
+    prg.smem = 16384 * 2
   else:
     prg.smem = 10000
 
@@ -30,13 +30,15 @@ if __name__ == "__main__":
 
   WARP_THREADS = 32
   if getenv("MATMUL2"):
-    NUM_WORKERS = 4
+    SUPER_N = 2
+    SUPER_M = 2
+    NUM_WORKERS = SUPER_N * SUPER_M
     BLOCK_SIZE = 32
+    gsz = (N // (BLOCK_SIZE * SUPER_M), N // (BLOCK_SIZE * SUPER_N), 1)
   else:
     NUM_WORKERS = 1
     BLOCK_SIZE = 32
-
-  gsz = (N // (BLOCK_SIZE), N // (BLOCK_SIZE), 1)
+    gsz = (N // (BLOCK_SIZE), N // (BLOCK_SIZE), 1)
 
   for _ in range(5):
     et = prg(c.uop.buffer.ensure_allocated()._buf, a.uop.buffer._buf, b.uop.buffer._buf,
