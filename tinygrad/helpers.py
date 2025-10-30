@@ -47,9 +47,9 @@ def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def strip_parens(fst:str) -> str:
   if not fst or fst[0] != '(' or fst[-1] != ')': return fst
   depth = 0
-  for i, c in enumerate(fst):
+  for c in fst[0:-1]:
     depth += (c == '(') - (c == ')')
-    if depth == 0 and i < len(fst) - 1: return fst
+    if depth == 0: return fst
   return fst[1:-1]
 def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
