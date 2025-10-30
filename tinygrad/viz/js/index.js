@@ -264,7 +264,7 @@ const ncu_layout = (counters) => {
 
   // graph layout
   const g = new dagre.graphlib.Graph({ multigraph:true });
-  g.setGraph({ rankdir:"LR", edgesep:10 }).setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir:"LR", edgesep:10, ranksep:100 }).setDefaultEdgeLabel(() => ({}));
   const baseWidth = 140, baseHeight = 440;
   for (const unit of units) {
     let [key, width, height, color, label] = unit;
@@ -280,9 +280,9 @@ const ncu_layout = (counters) => {
     // pick y side of the smallest
     const baseY = g.node(e.v).height < g.node(e.w).height ? p.points[0].y : p.points[1].y;
     const points = p.points.map((p) => ({ x:p.x, y:baseY }));
-    g.setEdge(e.v, e.w, { points }, 0);
+    g.setEdge(e.v, e.w, { points, name:fmt(p.k), offsetY:-5 }, 0);
     if (p.dbl) g.setEdge(e.w, e.v, { points:[...points].reverse() });
-    if (p.rev != null) g.setEdge(e.w, e.v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse() }, 2);
+    if (p.rev != null) g.setEdge(e.w, e.v, { points:points.map(p => ({x:p.x, y:p.y+sep})).reverse(), name:fmt(p.rev), offsetY:5 }, 2);
   }
   return dagre.graphlib.json.write(g);
 }
@@ -295,11 +295,11 @@ function renderCacheGraph(data) {
   drawGraph(graph, { simplePaths:true });
   d3.select("#edge-labels").html("");
   d3.select("#edge-labels").selectAll("g.edge2").data(graph.edges).join("g").classed("edge-text", true).attr("transform", e => {
-    const [p1, p2] = e.value.points;
+    const p1 = e.value.points[0], p2 = e.value.points.at(-1);
     const x = (p1.x + p2.x) / 2 + (e.value.offsetX || 0);
     const y = (p1.y + p2.y) / 2 + (e.value.offsetY || 0);
     return `translate(${x},${y})`;
-  }).append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.val);
+  }).append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", "#4a4b57").text(e => e.value.name);
   if (data.prg != null) {
     const cb = codeBlock(data.prg, "cpp", { wrap:false });
     cb.classList.add("full-height");
