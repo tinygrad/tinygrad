@@ -27,9 +27,8 @@ class AMDIP:
 
   def __getattr__(self, name:str):
     if name in self.regs: return self.regs[name]
-
-    # NOTE: gfx10 gc registers always start with mm, no reg prefix
-    return self.regs[name.replace('reg', 'mm')]
+    if (name10:=name.replace('reg', 'mm')) in self.regs: return self.regs[name10]
+    raise AttributeError(f"{self.name.upper()} has no register {name}")
 
 def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
   # override versions
@@ -63,6 +62,10 @@ def import_soc(ip):
   return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", ROCM_URL))
 
 def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"include/{('sienna_cichlid' if ip[0] > 9 else 'vega20')}_ip_offset.h"))
+
+def import_pmc(ip) -> dict[str, tuple[str, str, int]]:
+  m = re.search(r'<gfx11>(.*?)</gfx11>', header_download("rocprofiler/src/core/counters/basic/gfx_metrics.xml", url=ROCM_URL), re.S)
+  return {n:(n,b,int(e)) for n,b,e in re.findall(r'<metric name="([A-Za-z0-9_]+)" block="([A-Za-z0-9_]+)" event="([0-9]+)"', m.group(1))} if m else {}
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]

@@ -63,8 +63,15 @@ class Scheduler:
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
-  def _globalizable_rngs(self) -> list[UOp]:
+  def _output_rngs(self) -> list[UOp]:
     return flatten([list(UOp.sink(*s.src[1:]).ranges) for s in self.ast.src if s.op is Ops.END])
+  def _globalizable_rngs(self) -> list[UOp]:
+    ret = self._output_rngs()
+    # exclude any output ranges from global that don't appear in all BUFFERIZE
+    for x in self.ast.toposort():
+      if x.op is Ops.BUFFERIZE:
+        ret = [r for r in ret if r in x.ranges]
+    return ret
 
   def convert_loop_to_global(self):
     if not self.ren.has_local: return None
@@ -75,11 +82,13 @@ class Scheduler:
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
   def colors(self) -> list[str]:
-    output_rngs = self._globalizable_rngs()
+    output_rngs = self._output_rngs()
+    globalizible_rngs = self._globalizable_rngs()
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
       elif r not in output_rngs and x == AxisType.LOOP: ret.append("BLACK")
+      elif r not in globalizible_rngs and x == AxisType.LOOP: ret.append("white")
       else: ret.append(axis_colors[x])
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
@@ -334,6 +343,6 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.AFTER and u.src[0].op is Ops.DEFINE_LOCAL for u in ast.backward_slice):
+    if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
