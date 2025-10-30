@@ -92,8 +92,7 @@ const drawGraph = (data, opts) => {
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
-  // by default we shift the points toward the node centers
-  // simplePaths do not change the points
+  // by default we shift the points toward center of each port
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", !opts?.simplePaths ? (e) => {
     const edge = g.edge(e);
     const points = edge.points.slice(1, edge.points.length-1);
@@ -142,11 +141,17 @@ function renderDag(graph, additions, recenter) {
 
 // ** Cache metrics graph
 
-// per device layout specs
+// each backend should define: metrics, units and links
+// metrics define a unit and a formula using raw counters
+// units define a relative width (1-100), height (1-100), key, label and color
+// links connect two units. The visual representation of a link can optionally:
+// - specify a metric, if the value is 0 the line is grayed out
+// - vertically aligned (default is horizantal v->w)
+// - have a "reverse" metric from w->v, if it's a read+write link.
+// - have a double arrow
 
 const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
 const ncu_counters = {
-  // *** metrics are based on the raw counters
   metrics: {
     "Kernel <-> Global": {"unit":"inst", "keys":[
       "sass__inst_executed_global_loads [inst]",
@@ -236,7 +241,6 @@ const ncu_counters = {
 }
 
 const MEMORY_METRICS = {"CUDA":ncu_counters}
-
 function renderCacheGraph(data) {
   const { units, links, metrics }  = MEMORY_METRICS[data.device];
   displaySelection("#graph");
@@ -250,8 +254,7 @@ function renderCacheGraph(data) {
     return num;
   }
   const fmt = (metric) => formatUnit(calc(metric), " "+metrics[metric].unit);
-
-  // graph layout
+  // graph layout (represent the data flow as a dag)
   const g = new dagre.graphlib.Graph({ multigraph:true });
   g.setGraph({ rankdir:"LR", edgesep:10, ranksep:100 }).setDefaultEdgeLabel(() => ({}));
   const baseWidth = 140, baseHeight = 440;
@@ -262,14 +265,13 @@ function renderCacheGraph(data) {
   }
   for (const [v, w, opts] of links) !opts.vert && g.setEdge(v, w, opts);
   dagre.layout(g);
+  // post process custom edges
   const sep = g.graph().edgesep;
   const linkColors = {ACTIVE:"#98a0c2"};
-
   const addEdge = (v, w, k, points, labelPos) => {
     const value = k == null ? 0 : calc(k);
     g.setEdge(v, w, { points, labelPos, label:value > 0 ? fmt(k) : null, color:value > 0 ? linkColors.ACTIVE : null });
   }
-
   for (const [v, w, opts] of links) {
     const p = g.edge(v, w);
     if (p == null) {
@@ -285,14 +287,15 @@ function renderCacheGraph(data) {
       if (p.rev != null) addEdge(w, v, p.rev, points.map(p => ({x:p.x, y:p.y+sep})).reverse(), "bottom");
     }
   }
+  // draw the svg
   const graph = dagre.graphlib.json.write(g);
   drawGraph(graph, { simplePaths:true });
   const edgeLabels = d3.select("#edge-labels").html("").selectAll("g.edge").data(graph.edges).join("g").classed("edge-text", true);
   edgeLabels.append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", e => e.value.color).text(e => e.value.label);
   edgeLabels.attr("transform", (e, i, nodes) => {
-    const box = nodes[i].getBBox();
     const p1 = e.value.points[0], p2 = e.value.points.at(-1);
     let x = (p1.x+p2.x)/2, y = (p1.y+p2.y)/2;
+    const box = nodes[i].getBBox();
     if (e.value.labelPos === "bottom") y += box.height/2+1;
     else if (e.value.labelPos === "right") x += box.width/2+1;
     else y -= box.height/2+1;
