@@ -41,15 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_kgsl() {
-  clang2py extra/qcom_gpu_driver/msm_kgsl.h -o $BASE/kgsl.py -k cdefstum
-  fixup $BASE/kgsl.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/kgsl.py
-  sed -nE 's/#define ([A-Za-z0-9_]+)_SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1_SHIFT) \& \1_MASK/p' extra/qcom_gpu_driver/msm_kgsl.h >> $BASE/kgsl.py
-  sed -i "s\fcntl.ioctl(__fd, (__idir<<30)\__fd.ioctl((__idir<<30)\g" $BASE/kgsl.py
-  python3 -c "import tinygrad.runtime.autogen.kgsl"
-}
-
 generate_adreno() {
   clang2py extra/qcom_gpu_driver/a6xx.xml.h -o $BASE/adreno.py -k cestum
   sed -nE 's/#define ([A-Za-z0-9_]+)__SHIFT\s*[^\S\r\n]*[0-9]*$/def \1(val): return (val << \1__SHIFT) \& \1__MASK/p' extra/qcom_gpu_driver/a6xx.xml.h >> $BASE/adreno.py
@@ -178,7 +169,6 @@ generate_mesa() {
 
 if [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
-elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "mesa" ]; then generate_mesa
 elif [ "$1" == "all" ]; then generate_mesa

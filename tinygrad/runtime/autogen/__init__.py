@@ -62,4 +62,5 @@ def __getattr__(nm):
                               "hsa_ext_finalize","hsa_ext_image","hsa_ven_amd_aqlprofile"]], ["-I/opt/rocm/include"])
     case "amd_gpu": return load("amd_gpu", [], [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers","nvd","gc_11_0_0_offset",
                                  "sienna_cichlid_ip_offset"]], ["-I/opt/rocm/include", "-x", "c++"])
+    case "kgsl": return load("kgsl", [], [root/"extra/qcom_gpu_driver/msm_kgsl.h"])
     case _: raise AttributeError(f"no such autogen: {nm}")
