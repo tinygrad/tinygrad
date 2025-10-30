@@ -98,8 +98,10 @@ if __name__ == "__main__":
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
-  rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  print('SQTT:', ROCParseCtx.wave_events.keys())
+  try:
+    rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
+    print('SQTT:', ROCParseCtx.wave_events.keys())
+  except Exception as e: print("Error in sqtt decoder:", e)
 
   for ev in pmc_events:
     print(f"PMC Event: dev={ev.device} kern={ev.kern}")
