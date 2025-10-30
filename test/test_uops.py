@@ -569,6 +569,16 @@ class TestUOpPrograms(unittest.TestCase):
   def _run(self, prog:UOp, *tensors:Tensor):
     ExecItem(get_runner(Device.DEFAULT, prog), [t.uop.buffer for t in tensors]).run(wait=True)
 
+  def test_simple(self):
+    out = Tensor.empty(10,10,dtype=dtypes.int)
+
+    ptr = UOp.placeholder(out.dtype, out.shape, slot=0)
+    i, j = UOp.range(10, axis_id=0), UOp.range(10, axis_id=1)
+    prog = ptr[i,j].set(42).end(i,j)
+    self._run(prog.sink(), out)
+
+    self.assertTrue((out == 42).all().item())
+
   def test_matmul(self):
     a = Tensor.rand(10,10)
     b = Tensor.rand(10,10)
@@ -581,15 +591,15 @@ class TestUOpPrograms(unittest.TestCase):
     M = N = K = 10
     DT = dtypes.float32
 
-    # Axes: i,j are spatial; k is a reduction axis over the shared dim K
-    i = UOp.range(M, axis_id=0)                             # rows of A/C
-    j = UOp.range(N, axis_id=1)                             # cols of B/C
-    k = UOp.range(K, axis_id=2, axis_type=AxisType.REDUCE)  # reduction over K
-
     # Placeholders (bind slots explicitly)
     A = UOp.placeholder(DT, (M, K), slot=0)
     B = UOp.placeholder(DT, (K, N), slot=1)
     C = UOp.placeholder(DT, (M, N), slot=2)
+
+    # Axes: i,j are spatial; k is a reduction axis over the shared dim K
+    i = UOp.range(M, axis_id=0)                             # rows of A/C
+    j = UOp.range(N, axis_id=1)                             # cols of B/C
+    k = UOp.range(K, axis_id=2, axis_type=AxisType.REDUCE)  # reduction over K
 
     # Zero-init: write a scalar 0 to each (i,j).
     C = C[i, j].set(0.0)
@@ -601,6 +611,7 @@ class TestUOpPrograms(unittest.TestCase):
     prog = C.end(i, j, k)
 
     # run program
+    # TODO: make this work with opts_to_apply
     self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
 
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
