@@ -897,7 +897,7 @@ class AMDDevice(HCQCompiled):
     self.pmc_enabled = PROFILE and PMC > 0
     if self.pmc_enabled:
       if self.target[0] not in {11}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
-      if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: AMD_IFACE=KFD and `amd-smi set -l stable_std`")
+      if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
       self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
