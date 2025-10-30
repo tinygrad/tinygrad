@@ -7,19 +7,22 @@ from tinygrad.helpers import getenv
 N = 4096
 run_count = 5
 
+# block for locals
 BN = 128
 BM = 128
 BK = 8
 
+# t for registers
 TN = 4
 TM = 4
 
 def hand_spec_kernel3(kernel5=getenv("K5", 0)):
-  BLOCK_SIZE = 128 if kernel5 else 256
-
   # ---------------------------
   # launch/config constants
   # ---------------------------
+
+  BLOCK_SIZE = 128 if kernel5 else 256
+
   nbWaves = BLOCK_SIZE // 32
   WN = 128 if kernel5 else 64
   WM = BN * BM // nbWaves // WN
@@ -29,6 +32,17 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   assert BM % WM == 0, "BM must be a multiple of WM"
   nbWaveX = BN // WN
   nbWaveY = BM // WM
+
+  assert BLOCK_SIZE % BN == 0, "BLOCK_SIZE must be divisible by BN"
+  assert BLOCK_SIZE % BK == 0, "BLOCK_SIZE must be divisible by BK"
+
+  assert (BN * BK) % BLOCK_SIZE == 0
+  assert (BM * BK) % BLOCK_SIZE == 0
+
+  # ---------------------------
+  # per-thread read mapping
+  # ---------------------------
+  # A: read BK x BN tiles; B: read BN x BK tiles
 
   threadIdx_x = UOp.special(BLOCK_SIZE, "lidx0")
   waveIndex = threadIdx_x // 32
@@ -47,25 +61,6 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
 
   SUBWN = WN // nbIterWaveN
   SUBWM = WM // nbIterWaveM
-
-  # ---------------------------
-  # per-thread read mapping
-  # ---------------------------
-  # A: read BK x BN tiles; B: read BN x BK tiles
-  rAIdx = threadIdx_x % BK
-  rAIdy = threadIdx_x // BK
-  rBIdx = threadIdx_x % BN
-  rBIdy = threadIdx_x // BN
-
-  strideReadB = BLOCK_SIZE // BN
-  strideReadA = BLOCK_SIZE // BK
-  assert BLOCK_SIZE % BN == 0, "BLOCK_SIZE must be divisible by BN"
-  assert BLOCK_SIZE % BK == 0, "BLOCK_SIZE must be divisible by BK"
-
-  nbReadsB = BN * BK // BLOCK_SIZE
-  nbReadsA = BM * BK // BLOCK_SIZE
-  assert (BN * BK) % BLOCK_SIZE == 0
-  assert (BM * BK) % BLOCK_SIZE == 0
 
   # ---------------------------
   # block indices & placeholders
@@ -94,12 +89,20 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   # ---------------------------
   # GLOBAL -> LOCAL (As, Bs)
   # ---------------------------
+  nbReadsB = BN * BK // BLOCK_SIZE
   i = UOp.range(nbReadsB, 1)
+  rBIdx = threadIdx_x % BN
+  rBIdy = threadIdx_x // BN
+  strideReadB = BLOCK_SIZE // BN
   index_x = BN * blockIdx_x + rBIdx
   index_y = rBIdy + i * strideReadB + kId
   Bs_store = Bs[index_y % BK, index_x % BN].store(b[index_y, index_x]).end(i)
 
+  nbReadsA = BM * BK // BLOCK_SIZE
   i = UOp.range(nbReadsA, 2)
+  rAIdx = threadIdx_x % BK
+  rAIdy = threadIdx_x // BK
+  strideReadA = BLOCK_SIZE // BK
   index_x = rAIdx + kId
   index_y = BM * blockIdx_y + rAIdy + i * strideReadA
   As_store = As[index_x % BK, index_y % BM].store(a[index_y, index_x]).end(i)
