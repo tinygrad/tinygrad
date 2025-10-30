@@ -2,7 +2,7 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv, Timing
+from tinygrad.helpers import CI, DEBUG, getenv, Timing, Context
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu, AxisType
@@ -566,12 +566,15 @@ class TestZeroRange(unittest.TestCase):
       self.assertEqual(out.item(), i)
 
 class TestUOpPrograms(unittest.TestCase):
+  def _run(self, prog:UOp, *tensors:Tensor):
+    ExecItem(get_runner(Device.DEFAULT, prog), [t.uop.buffer for t in tensors]).run(wait=True)
+
   def test_matmul(self):
     a = Tensor.rand(10,10)
     b = Tensor.rand(10,10)
     c = Tensor.empty(10,10)
     ref = a@b
-    Tensor.realize(a, b, c, ref)
+    with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
 
     A, B, C = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=i) for i in range(3)]
     i = UOp.range(10, 0)
@@ -580,11 +583,9 @@ class TestUOpPrograms(unittest.TestCase):
     k = UOp.range(10, 2, AxisType.REDUCE) # <-- this tells the GPU it can't be a global dim
     store = C[i*10+j].store(C.after(k)[i*10+j] + (A[i*10+k] * B[k*10+j]))
     prog = store.end(i,j,k).sink(arg=KernelInfo(opts_to_apply=()))
+    self._run(prog, a, b, c)
 
-    runner = get_runner(Device.DEFAULT, prog)
-    print(runner.p.src)
-    ExecItem(runner, [a.uop.buffer, b.uop.buffer, c.uop.buffer]).run(wait=True)
-    self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
+    with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)
