@@ -7,7 +7,7 @@ nv_src = "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8
 
 def load(name, *args, **kwargs):
   if not (f:=(here / f"{name}.py")).exists(): f.write_text(importlib.import_module(f"{__name__}.autogen").gen(*args, **kwargs))
-  return importlib.import_module(f"{__name__}.{name}")
+  return importlib.import_module(f"{__name__}.{name.replace('/', '.')}")
 
 def __getattr__(nm):
   match nm:

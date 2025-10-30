@@ -71,82 +71,6 @@ generate_qcom() {
   python3 -c "import tinygrad.runtime.autogen.qcom_dsp"
 }
 
-generate_am() {
-  AMKERN_COMMIT_HASH=ceb12c04e2b5b53ec0779362831f5ee40c4921e4
-  AMKERN_SRC=/tmp/ROCK-Kernel-Driver-$AMKERN_COMMIT_HASH
-  if [ ! -d "$AMKERN_SRC" ]; then
-    git clone https://github.com/ROCm/ROCK-Kernel-Driver $AMKERN_SRC --depth 1
-  fi
-  AMKERN_AMD=$AMKERN_SRC/drivers/gpu/drm/amd/
-  AMKERN_INC=$AMKERN_AMD/include/
-
-  clang2py -k cdefstum \
-    extra/amdpci/headers/v11_structs.h \
-    extra/amdpci/headers/v12_structs.h \
-    extra/amdpci/headers/amdgpu_vm.h \
-    extra/amdpci/headers/discovery.h \
-    extra/amdpci/headers/amdgpu_ucode.h \
-    extra/amdpci/headers/psp_gfx_if.h \
-    extra/amdpci/headers/amdgpu_psp.h \
-    extra/amdpci/headers/amdgpu_irq.h \
-    extra/amdpci/headers/amdgpu_doorbell.h \
-    $AMKERN_INC/soc15_ih_clientid.h \
-    --clang-args="-include stdint.h" \
-    -o $BASE/am/am.py
-  fixup $BASE/am/am.py
-  sed -i "s\(int64_t)\ \g" $BASE/am/am.py
-  sed -i "s\AMDGPU_PTE_MTYPE_VG10(2)\AMDGPU_PTE_MTYPE_VG10(0, 2)\g" $BASE/am/am.py # incorrect parsing (TODO: remove when clang2py is gone).
-
-  clang2py -k cdefstum \
-    $AMKERN_AMD/amdkfd/kfd_pm4_headers_ai.h \
-    $AMKERN_AMD/amdgpu/soc15d.h \
-    -o $BASE/am/pm4_soc15.py
-  fixup $BASE/am/pm4_soc15.py
-
-  clang2py -k cdefstum \
-    $AMKERN_AMD/amdkfd/kfd_pm4_headers_ai.h \
-    $AMKERN_AMD/amdgpu/nvd.h \
-    -o $BASE/am/pm4_nv.py
-  fixup $BASE/am/pm4_nv.py
-
-  clang2py -k cdefstum \
-    extra/hip_gpu_driver/sdma_registers.h \
-    $AMKERN_AMD/amdgpu/vega10_sdma_pkt_open.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/am/sdma_4_0_0.py
-  fixup $BASE/am/sdma_4_0_0.py
-
-  clang2py -k cdefstum \
-    extra/hip_gpu_driver/sdma_registers.h \
-    $AMKERN_AMD/amdgpu/navi10_sdma_pkt_open.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/am/sdma_5_0_0.py
-  fixup $BASE/am/sdma_5_0_0.py
-
-  clang2py -k cdefstum \
-    extra/hip_gpu_driver/sdma_registers.h \
-    $AMKERN_AMD/amdgpu/sdma_v6_0_0_pkt_open.h \
-    --clang-args="-I/opt/rocm/include -x c++" \
-    -o $BASE/am/sdma_6_0_0.py
-  fixup $BASE/am/sdma_6_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v13_0_0_ppsmc.h \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu13_driver_if_v13_0_0.h \
-    extra/amdpci/headers/amdgpu_smu.h \
-    -o $BASE/am/smu_v13_0_0.py
-  fixup $BASE/am/smu_v13_0_0.py
-
-  clang2py -k cdefstum \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_0_pmfw.h \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu_v14_0_2_ppsmc.h \
-    $AMKERN_AMD/pm/swsmu/inc/pmfw_if/smu14_driver_if_v14_0.h \
-    extra/amdpci/headers/amdgpu_smu.h \
-    --clang-args="-include stdint.h" \
-    -o $BASE/am/smu_v14_0_2.py
-  fixup $BASE/am/smu_v14_0_2.py
-}
-
 generate_sqtt() {
   clang2py -k cdefstum \
     extra/sqtt/sqtt.h \
@@ -252,12 +176,11 @@ generate_mesa() {
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
-if [ "$1" == "am" ]; then generate_am
-elif [ "$1" == "sqtt" ]; then generate_sqtt
+if [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_am; generate_mesa
+elif [ "$1" == "all" ]; then generate_mesa
 else echo "usage: $0 <type>"
 fi
