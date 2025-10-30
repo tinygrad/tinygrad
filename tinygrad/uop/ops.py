@@ -745,6 +745,17 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
 
   def pyrender(self): return pyrender(self)
 
+  # *** uop high level syntactic sugar ***
+
+  @staticmethod
+  def placeholder(dtype:DType, shape:tuple[int, ...], i:int):
+    ret = UOp(Ops.DEFINE_GLOBAL, dtype.ptr(prod(shape)), arg=i)
+    if len(shape) > 1: ret = ret.reshape(shape)
+    return ret
+
+  # set is store+after
+  def set(self:UOp, val:UOp): return self.src[0].after(self.store(val))
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
@@ -873,6 +884,7 @@ class UPat(MathTrait):
   def broadcast(self, **kwargs): return UPat(Ops.VECTORIZE, self.dtype, src=self, **kwargs)
   def contiguous(self, *args, **kwargs): return UPat(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def after(self, *src:UPat, **kwargs): return UPat(Ops.AFTER, self.dtype, (self,)+src, **kwargs)
+  def end(self, *src:UPat, **kwargs): return UPat(Ops.END, self.dtype, (self,)+src, **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.dtype, cast(ConstType, b))
   def alu(self, op:Ops, *src:UPat):

@@ -576,14 +576,21 @@ class TestUOpPrograms(unittest.TestCase):
     ref = a@b
     with Context(DEBUG=0): Tensor.realize(a, b, c, ref)
 
-    A, B, C = [UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(100), arg=i) for i in range(3)]
-    i = UOp.range(10, 0)
-    j = UOp.range(10, 1)
-    C = C.after(C[i*10+j].store(UOp.const(dtypes.float, 0.0)))
-    k = UOp.range(10, 2, AxisType.REDUCE) # <-- this tells the GPU it can't be a global dim
-    store = C[i*10+j].store(C.after(k)[i*10+j] + (A[i*10+k] * B[k*10+j]))
-    prog = store.end(i,j,k).sink(arg=KernelInfo(opts_to_apply=()))
-    self._run(prog, a, b, c)
+    # create placeholders for the buffers
+    A, B, C = [UOp.placeholder(dtypes.float, (10, 10), i) for i in range(3)]
+
+    # outer loops
+    for i,j in [(UOp.range(10, 0), UOp.range(10, 1))]:
+      # init the C matrix to 0
+      C = C[i,j].set(UOp.const(dtypes.float, 0.0))
+
+      # do the reduction in-place in the C array
+      for k in [UOp.range(10, 2, AxisType.REDUCE)]:
+        C = C[i,j].set(C.after(k)[i,j] + A[i,k] * B[k,j])
+        prog = C.end(i,j,k)
+
+    # end program
+    self._run(prog.sink(arg=KernelInfo(opts_to_apply=())), a, b, c)
 
     with Context(DEBUG=0): self.assertLessEqual((c-ref).square().mean().item(), 1e-6)
 

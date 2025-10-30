@@ -150,6 +150,26 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
 ])
 
+# ***** UOp spec in kernel graph *****
+
+kernel_spec = PatternMatcher([
+  # RESHAPE (but only RESHAPE) is allowed here
+  (UPat(Ops.RESHAPE, name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat(Ops.AFTER, src=(UPat(Ops.RESHAPE),), allow_any_len=True), lambda: True),
+
+  # index is allowed here
+  (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
+
+  # END can end multiple axes here
+  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
+
+  # bufferize can be on anything
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
+
+  # reduce must be on ranges
+  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+])+shared_codegen_spec+shared_spec
+
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
@@ -171,22 +191,6 @@ program_spec = PatternMatcher([
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
-])+shared_codegen_spec+shared_spec
-
-# ***** UOp spec in kernel graph *****
-
-kernel_spec = PatternMatcher([
-  # index is allowed here
-  (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
-
-  # END can end multiple axes here
-  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
-
-  # bufferize can be on anything
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
-
-  # reduce must be on ranges
-  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
 ])+shared_codegen_spec+shared_spec
 
 # *** this spec should match all UOps ever created ***
