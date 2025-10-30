@@ -55,7 +55,7 @@ def do_substitute(ctx, x: UOp):
   return ret
 
 def dont_sub_ranges_for_image(ctx, x:UOp):
-  if isinstance(x.src[0].dtype, ImageDType):
+  if isinstance(x.src[0].src[0].dtype, ImageDType):
     for s in x.src[0].ranges: ctx[s] = None
 
 pm_split_ranges = PatternMatcher([
