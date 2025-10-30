@@ -345,7 +345,7 @@ def flatten_bufferize(x:UOp):
     sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
     ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
   return ret.rtag(x.tag)
-pm_flatten_bufferize = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
+pm_flatten_bufferize = pm_mops+PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
 
 pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), lambda x, idx: bufferize_to_store(x, idx, allow_locals=False)),

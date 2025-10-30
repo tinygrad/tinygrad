@@ -16,10 +16,10 @@ def linearize(u:UOp) -> list[UOp]:
     in_degree[u] = len(u.src)
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
     priority = [0] + [priorities[x] for x in consumers[u]]
-    if u.op is Ops.LOAD: priority.append(-1000)
+    if u.op is Ops.LOAD: priority.append(-5000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
-    # if u.op is Ops.RANGE: priority = [2000]
+    if u.op is Ops.RANGE: priority = [2000]
     if u.op is Ops.END: priority = [-1000]
     # move defines and consts to the top
     if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)

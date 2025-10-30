@@ -16,6 +16,15 @@ remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(
 axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
+def do_demote(ctx, x:UOp, last=False):
+  if x.tag is not None: return None
+  mr = ctx[0]
+  nr = mr.replace(arg=ctx[0].arg[0:-2]+(mr.arg[-2]+1, mr.arg[-1]))
+  ctx[0] = nr
+  if last: buf = x.replace(src=x.src+(mr,), tag=1).substitute({mr:nr})
+  else: buf = x.replace(src=(x.src[0], mr)+x.src[1:], tag=1).substitute({mr:nr})
+  return UOp(Ops.APPENDINDEX, dtypes.void, (buf,mr))
+
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
@@ -174,14 +183,35 @@ class Scheduler:
         check(not self.dont_use_locals, "can't use locals")
         check(rng.arg[-1] == AxisType.REDUCE, "group is for reduce")
       ret = self.shift_to(rng, amt, opt_to_at[opt.op], top=opt.op in {OptOps.GROUPTOP, OptOps.THREAD})
+    elif opt.op is OptOps.DEMOTE:
+      _, rr = self.shift_to(rng, cast(int, opt.arg), AxisType.LOOP)
+
+      # do the demotion
+      LAST = True
+      if LAST:
+        pm_demote = PatternMatcher([
+          (UPat(Ops.END, src=(UPat(Ops.END, name="e1"),), allow_any_len=True, name="e2"), lambda e1,e2: e1.replace(src=e1.src+e2.src[1:])),
+          (UPat(Ops.BUFFERIZE, name="x"), lambda ctx, x: do_demote(ctx, x, True)),
+          (UPat(Ops.INDEX, src=(UPat(Ops.APPENDINDEX, name="x"),), name="y", allow_any_len=True),
+            lambda x,y: y.replace(src=(x.src[0],)+y.src[1:]+x.src[1:])),
+        ])
+      else:
+        pm_demote = PatternMatcher([
+          (UPat(Ops.END, src=(UPat(Ops.END, name="e1"),), allow_any_len=True, name="e2"), lambda e1,e2: e1.replace(src=e1.src+e2.src[1:])),
+          (UPat(Ops.BUFFERIZE, name="x"), do_demote),
+          (UPat(Ops.INDEX, src=(UPat(Ops.APPENDINDEX, name="x"),), name="y", allow_any_len=True),
+            lambda x,y: y.replace(src=(x.src[0],)+x.src[1:]+y.src[1:])),
+        ])
+      self.ast = graph_rewrite(self.ast.src[0].end(rr).sink(), pm_demote, ctx=[rr], bottom_up=True, name="demote")
     elif opt.op is OptOps.TC:
-      check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
+      #check(len(self.applied_opts) == 0, "tensor core opts must be first") # TODO: remove the need for this by having warps
       check(opt.axis is not None, "tensor core opts must have an axis")
-      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) == 3, "tensor core opts must have valid arg")
-      check(-1 <= (tc_select:=cast(tuple, opt.arg)[0]) < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")
-      check(0 <= (tc_opt:=cast(tuple, opt.arg)[1]) <= 2, "tensor core opts must have valid tc_opt")
-      check(0 < (use_tensor_cores:=cast(tuple, opt.arg)[2]) <= 2, "use_tensor_cores value is not valid")
-      try: ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt)
+      check(opt.arg is not None and isinstance(opt.arg, tuple) and len(opt.arg) >= 3, "tensor core opts must have valid arg")
+      assert isinstance(opt.arg, tuple)
+      check(-1 <= (tc_select:=opt.arg[0]) < len(self.ren.tensor_cores), "tensor core opts must have valid tc_select")
+      check(0 <= (tc_opt:=opt.arg[1]) <= 2, "tensor core opts must have valid tc_opt")
+      check(0 < (use_tensor_cores:=opt.arg[2]) <= 2, "use_tensor_cores value is not valid")
+      try: ret = self._apply_tc_opt(use_tensor_cores, cast(int, opt.axis), tc_select, tc_opt, opt.arg[3] if len(opt.arg) > 3 else 0)
       except ValueError as e: raise KernelOptError(str(e))
       check(ret is not None, "no tensor core available")
     elif opt.op is OptOps.PADTO:
@@ -216,10 +246,10 @@ class Scheduler:
     if append_opt: self.applied_opts.append(opt)
     return ret
 
-  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
+  def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int, reduce_choice:int) -> None|list[UOp]:
     reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
     if not len(reduceops): raise KernelOptError("no reduce ops for TensorCore")
-    reduceop = reduceops[0]
+    reduceop = reduceops[reduce_choice]
     if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
       if mul.op is not Ops.MUL: return None
@@ -235,8 +265,8 @@ class Scheduler:
           in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: -x.arg[0])
           red_ranges = sorted(reduceop.src[1:], key=lambda x: -x.arg[0])
           if DEBUG >= 3:
-            print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
-                              f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
+            print(f"TC({axis}, {reduce_choice}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
+                                               f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")
           if not len(in0_ranges) or not len(in1_ranges) or not len(red_ranges): continue
 
           # pick ranges
@@ -259,21 +289,27 @@ class Scheduler:
                 axes[i] = self.rngs[idx]
           except KernelOptError: continue
 
+          upcast_ranges = []
+          reduce_ranges = []
+
           # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-          warp = UOp.range(tc.threads, -1, AxisType.WARP)
+          warp_num = 0
           ne: list[UOp] = []
           for opt in tc.opts:
             if opt[0] == "l":
-              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp%2)
-              warp //= 2
+              warp = UOp.range(2, -1, warp_num, AxisType.WARP)
+              axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.LOCAL, input_new_rng=warp)
+              warp_num += 1
             elif opt[0] == "u":
               axes[int(opt[1])], new_range = self.shift_to(axes[int(opt[1])], 2, AxisType.UPCAST)
+              upcast_ranges.append(new_range)
             else: raise RuntimeError(f"unsupported opt {opt[0]} in tensor cores")
             ne.append(new_range)
 
           for _, amt in tc.get_reduce_axes():
             axes[2], new_range = self.shift_to(axes[2], amt, AxisType.UNROLL)
             ne.append(new_range)
+            reduce_ranges.append(new_range)
 
           if use_tensor_cores != 2:
             # fix the srcs
@@ -291,6 +327,12 @@ class Scheduler:
             # axes to range number (was done in lowerer)
             tc_upcast_axes = tuple([tuple([(self.rngs[a].arg[0], sz) for a,sz in v]) for v in tc_upcast_axes])
             tc_reduce_axes = tuple([self.rngs[a].arg[0] for a in tc_reduce_axes])
+            print(tc_reduce_axes, tc_upcast_axes)
+
+            # DIRECT: get range number from ranges
+            tc_upcast_axes = (((upcast_ranges[0].arg[0], 2),), ((upcast_ranges[0].arg[0], 2),), ((upcast_ranges[0].arg[0], 2),))
+            tc_reduce_axes = tuple([x.arg[0] for x in reduce_ranges])
+            #print(tc_reduce_axes, tc_upcast_axes)
 
             # construct the op
             # TODO: remove tc_upcast_axes from the arg
