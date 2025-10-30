@@ -1,6 +1,6 @@
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp, KernelInfo
-from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
+from tinygrad.engine.realize import ExecItem, get_runner
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import getenv
 
@@ -153,32 +153,29 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   sink = c[yOut + yt, xOut + xt].store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
   sink = sink.end(iterWaveM, iterWaveN, yt, xt)
 
-  return sink.sink(arg=KernelInfo(name="tinygemm", opts_to_apply=()))
+  return sink.sink(arg=KernelInfo(opts_to_apply=()))
 
 if __name__ == "__main__":
-  HL = getenv("HL")
-  hprg = hand_spec_kernel3()
-  prg = get_program(hprg, Device.default.renderer)
-  print(prg.src)
-  if getenv("SRC"): exit(0)
-  hrunner = CompiledRunner(prg)
+  with Context(DEBUG=0):
+    a = Tensor.randn(N, N)
+    b = Tensor.randn(N, N)
+    hc = Tensor.empty(N, N)
+    Tensor.realize(a, b, hc)
 
-  a = Tensor.randn(N, N).realize()
-  b = Tensor.randn(N, N).realize()
-  hc = Tensor.zeros(N, N).contiguous().realize()
+  sink = hand_spec_kernel3()
+  ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in [hc, a, b]])
 
   GlobalCounters.reset()
-  with Context(DEBUG=2):
-    for _ in range(run_count): tc = (a@b).realize()
-
-  GlobalCounters.reset()
-  buffers = [hc.uop.buffer, a.uop.buffer, b.uop.buffer]
-  ei = ExecItem(hrunner, buffers)
   ets = []
   with Context(DEBUG=2):
     for _ in range(run_count):
       ets.append(ei.run(wait=True))
-  err = (hc-tc).square().mean().item()
-  print(f"hrunner {err}")
-  print(f"TFLOPS {N*N*N*2/min(ets)*1e-12:.2f}")
+  print(f"REAL TFLOPS {N*N*N*2/min(ets)*1e-12:.2f}")
+
+  GlobalCounters.reset()
+  with Context(DEBUG=2):
+    tc = (a@b).realize()
+  with Context(DEBUG=0):
+    err = (hc-tc).square().mean().item()
+  print(f"mean squared error {err}")
   if err > 1e-06: raise RuntimeError("matmul is wrong!")
