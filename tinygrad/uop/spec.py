@@ -133,6 +133,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # LOAD(idx) / STORE(idx, val) / LOAD with alt value only exists in program_spec
+  # TODO: move LOAD to the program_spec
   (UPat().index(UPat()).or_casted().load(), lambda: True),
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 

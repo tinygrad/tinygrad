@@ -435,9 +435,9 @@ rangeify_codegen = PatternMatcher([
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
-  (UPat.any(UPat(Ops.DEFINE_GLOBAL, name="dg"), UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg"))
-   .f(Ops.INDEX, name="idx", allow_any_len=True),
-    lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
+  #(UPat.any(UPat(Ops.DEFINE_GLOBAL, name="dg"), UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg"))
+  # .f(Ops.INDEX, name="idx", allow_any_len=True),
+  #  lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
 
   # fix broadcast dtype
   (UPat(Ops.AFTER, name="a").broadcast(name="b"), lambda a,b: a.broadcast(len(b.src))),
