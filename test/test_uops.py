@@ -586,12 +586,12 @@ class TestUOpPrograms(unittest.TestCase):
     j = UOp.range(N, axis_id=1)                             # cols of B/C
     k = UOp.range(K, axis_id=2, axis_type=AxisType.REDUCE)  # reduction over K
 
-    # Placeholders (bind slots explicitly for readability)
+    # Placeholders (bind slots explicitly)
     A = UOp.placeholder(DT, (M, K), slot=0)
     B = UOp.placeholder(DT, (K, N), slot=1)
     C = UOp.placeholder(DT, (M, N), slot=2)
 
-    # Zero-init: write a scalar 0 to each (i,j). Hoist the const so it's not recreated.
+    # Zero-init: write a scalar 0 to each (i,j).
     C = C[i, j].set(0.0)
 
     # Accumulate: C_after(k) enforces the dependency along the reduction axis
