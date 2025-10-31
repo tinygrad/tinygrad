@@ -59,29 +59,35 @@ __launch_bounds__(NUM_WORKERS *WARP_THREADS, 1) __global__
   warp::zero(C_accum);
   int num_tiles = (g_N + BLOCK_K - 1) / BLOCK_K;
 
-  for (int task_id = warpid; task_id < LOAD_TASKS; task_id += NUM_WORKERS) {
-    if (task_id < SUPER_M) {
-      warp::load_async(As[task_id][0], g_A, {0, 0, block_row + task_id, 0});
-    } else {
-      int n_index = task_id - SUPER_M;
-      warp::load_async(Bs[n_index][0], g_B, {0, 0, 0, block_col + n_index});
+  for (int load_tile = 0; load_tile < (PIPE_STAGES - 1); load_tile++) {
+    if (load_tile < num_tiles) {
+      int load_smem_idx = load_tile % PIPE_STAGES;
+      for (int task_id = warpid; task_id < LOAD_TASKS; task_id += NUM_WORKERS) {
+        if (task_id < SUPER_M) {
+          warp::load_async(As[task_id][load_smem_idx], g_A, {0, 0, block_row + task_id, load_tile});
+        } else {
+          int n_index = task_id - SUPER_M;
+          warp::load_async(Bs[n_index][load_smem_idx], g_B, {0, 0, load_tile, block_col + n_index});
+        }
+      }
     }
   }
 
   for (int tile = 0; tile < num_tiles; tile++) {
-    int next_tile = tile + 1;
-    int smem_idx = tile % PIPE_STAGES;
-    int next_smem_idx = next_tile % PIPE_STAGES;
+    int compute_smem_idx = tile % PIPE_STAGES;
 
-    if (next_tile < num_tiles) {
+    int load_tile = tile + PIPE_STAGES - 1;
+    int load_smem_idx = load_tile % PIPE_STAGES;
+
+    if (load_tile < num_tiles) {
       for (int task_id = warpid; task_id < LOAD_TASKS; task_id += NUM_WORKERS) {
         if (task_id < SUPER_M) {
-          warp::load_async(As[task_id][next_smem_idx], g_A,
-                           {0, 0, block_row + task_id, next_tile});
+          warp::load_async(As[task_id][load_smem_idx], g_A,
+                           {0, 0, block_row + task_id, load_tile});
         } else {
           int n_index = task_id - SUPER_M;
-          warp::load_async(Bs[n_index][next_smem_idx], g_B,
-                           {0, 0, next_tile, block_col + n_index});
+          warp::load_async(Bs[n_index][load_smem_idx], g_B,
+                           {0, 0, load_tile, block_col + n_index});
         }
       }
       load_async_wait<1>();
@@ -89,8 +95,8 @@ __launch_bounds__(NUM_WORKERS *WARP_THREADS, 1) __global__
       load_async_wait();
     __syncthreads();
 
-    warp::load(A_reg, As[warp_m][smem_idx]);
-    warp::load(B_reg_col, Bs[warp_n][smem_idx]);
+    warp::load(A_reg, As[warp_m][compute_smem_idx]);
+    warp::load(B_reg_col, Bs[warp_n][compute_smem_idx]);
 
     warp::mma_AB(C_accum, A_reg, B_reg_col, C_accum);
     __syncthreads();
