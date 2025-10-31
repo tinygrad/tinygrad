@@ -6,7 +6,7 @@ struct TinyGPUView: View {
 	var body: some View {
 #if os(macOS)
 		VStack(alignment: .center) {
-			Text("TinyGPU Intsaller")
+			Text("TinyGPU Installer")
 				.padding()
 				.font(.title)
 			Text(self.viewModel.dextLoadingState)
