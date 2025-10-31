@@ -4,6 +4,10 @@ from tinygrad import Tensor, UOp
 from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.schedule.rangeify import Kernel
 
+def custom_arange_kernel(C:UOp):
+  i = UOp.range(C.size, 0)
+  return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.size}"))
+
 def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp):
   i = UOp.range(C.size, 0)
   return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.size}")).simplify()
@@ -43,6 +47,12 @@ class TestCustomKernel(unittest.TestCase):
 
     assert all(x == 6 for x in c.flatten().tolist()), "all 6"
     assert all(x == 9 for x in d.flatten().tolist()), "all 9"
+
+  def test_arange(self):
+    ref = Tensor.arange(100)
+    tst = Tensor.empty_like(ref)
+    tst = _kernel([tst], custom_arange_kernel)[0]
+    self.assertTrue((ref == tst).all().item())
 
 if __name__ == '__main__':
   unittest.main()
