@@ -161,7 +161,7 @@ class TextDecoder:
       return logits
 
   def output_tok(self, x):
-    return (self.ln(x) @ self.token_embedding.weight.T).realize()
+    return (self.ln(x) @ self.token_embedding.weight.T)
 
 class Whisper:
   def __init__(self, dims, batch_size=1):
