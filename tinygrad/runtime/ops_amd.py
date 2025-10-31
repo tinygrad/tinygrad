@@ -74,10 +74,11 @@ class AMDComputeQueue(HWQueue):
 
   def set_grbm_broadcast(self):
     self.wreg(self.gc.regGRBM_GFX_INDEX, **{f'{f}_broadcast_writes': 1 for f in ['se', 'sh' if self.dev.target[0] == 9 else 'sa', 'instance']})
-  def set_grbm_se(self, se): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, instance_broadcast_writes=1)
   def set_grbm_inst(self, n):
     self.wreg(self.gc.regGRBM_GFX_INDEX, **{f'{f}_broadcast_writes': 1 for f in ['se', 'sh' if self.dev.target[0] == 9 else 'sa']}, instance_index=n)
-  def set_grbm_se_sh_wgp(self, se, sa, wgp): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, sa_index=sa, instance_index=wgp << 2)
+  def set_grbm_se_sh(self, se, sh):
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, **{f'{"sh" if self.dev.target[0] == 9 else "sa"}_index':sh}, instance_broadcast_writes=1)
+  def set_grbm_se_sh_wgp(self, se, sh, wgp): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, sa_index=sh, instance_index=wgp << 2)
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg=None, reg_done=0, op=WAIT_REG_MEM_FUNCTION_GEQ):
     wrm_info_dw = self.pm4.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | self.pm4.WAIT_REG_MEM_OPERATION(int(mem is None and reg_done > 0)) \
@@ -217,7 +218,7 @@ class AMDComputeQueue(HWQueue):
         if (se_mask >> se) & 0b1: mask |= (__SQTTINST:=1<<10) | (__SQTT_INST_PC:=1<<11) | (__SQTT_ISSUE:=1<<13)
 
         with self.pred_exec(xcc_mask=1<<(se // (ses_per_xcc:=(self.dev.se_cnt // self.dev.xccs)))):
-          self.set_grbm_se(se % ses_per_xcc)
+          self.set_grbm_se_sh(se % ses_per_xcc, 0)
           self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
           self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK2, inst_mask=0xffffffff)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BASE, addr=lo32(buf0s[se].va_addr >> 12))
@@ -229,7 +230,7 @@ class AMDComputeQueue(HWQueue):
       self.spi_config(tracing=True)
       # One buffer for one SE, mesa does it with a single buffer and ac_sqtt_get_data_offset, but this is simpler and should work just as well
       for se in range(len(buf0s)):
-        self.set_grbm_se(se)
+        self.set_grbm_se_sh(se, 0)
 
         buf0_lo, buf0_hi = data64_le(buf0s[se].va_addr >> 12)
         if self.dev.target >= (12,0,0):
@@ -280,7 +281,7 @@ class AMDComputeQueue(HWQueue):
 
     # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
     for se in range(ses):
-      self.set_grbm_se(se)
+      self.set_grbm_se_sh(se, 0)
 
       status_reg = self.gc.regSQ_THREAD_TRACE_STATUS.addr[0] - (self.pm4.PACKET3_SET_UCONFIG_REG_START if self.dev.target[0] == 9 else 0)
       if self.dev.target >= (10, 0, 0):
