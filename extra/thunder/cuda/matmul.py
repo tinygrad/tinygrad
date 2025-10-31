@@ -34,7 +34,7 @@ if __name__ == "__main__":
     SUPER_M = 2
     NUM_WORKERS = SUPER_N * SUPER_M
     BLOCK_SIZE = 32
-    gsz = (N // (BLOCK_SIZE * SUPER_M), N // (BLOCK_SIZE * SUPER_N), 1)
+    gsz = (N // (BLOCK_SIZE * SUPER_N), N // (BLOCK_SIZE * SUPER_M), 1)
   else:
     NUM_WORKERS = 1
     BLOCK_SIZE = 32

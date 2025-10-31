@@ -6,6 +6,7 @@ constexpr int g_N = 8192;
 constexpr int SUPER_N = 2;
 constexpr int SUPER_M = 2;
 constexpr int NUM_WORKERS = SUPER_N * SUPER_M;
+constexpr int LOAD_TASKS = SUPER_N + SUPER_M;
 
 constexpr int WORKER_M = 32;
 constexpr int WORKER_N = 32;
@@ -28,17 +29,19 @@ using gl_tile_A = gl<bf16, 1, 1, g_N, g_N, shared_tile_A>;
 using gl_tile_B = gl<bf16, 1, 1, g_N, g_N, shared_tile_B>;
 using gl_tile_C = gl<bf16, 1, 1, g_N, g_N, shared_tile_C>;
 
-__launch_bounds__(NUM_WORKERS*WARP_THREADS, 1)
-__global__ void kernel(bf16 *c_ptr, bf16 *a_ptr, bf16 *b_ptr) {
+__launch_bounds__(NUM_WORKERS *WARP_THREADS, 1) __global__
+    void kernel(bf16 *c_ptr, bf16 *a_ptr, bf16 *b_ptr) {
   gl_tile_C g_C{c_ptr, nullptr, nullptr, nullptr, nullptr};
   gl_tile_A g_A{a_ptr, nullptr, nullptr, nullptr, nullptr};
   gl_tile_B g_B{b_ptr, nullptr, nullptr, nullptr, nullptr};
 
   extern __shared__ alignment_dummy __shm[];
-  shared_allocator al((int*)&__shm[0]);
+  shared_allocator al((int *)&__shm[0]);
 
-  shared_tile_A (&As)[SUPER_M][PIPE_STAGES] = al.allocate<shared_tile_A, SUPER_M, PIPE_STAGES>();
-  shared_tile_B (&Bs)[SUPER_N][PIPE_STAGES] = al.allocate<shared_tile_B, SUPER_N, PIPE_STAGES>();
+  shared_tile_A(&As)[SUPER_M][PIPE_STAGES] =
+      al.allocate<shared_tile_A, SUPER_M, PIPE_STAGES>();
+  shared_tile_B(&Bs)[SUPER_N][PIPE_STAGES] =
+      al.allocate<shared_tile_B, SUPER_N, PIPE_STAGES>();
 
   reg_tile_A A_reg;
   reg_tile_B_col B_reg_col;
@@ -56,10 +59,13 @@ __global__ void kernel(bf16 *c_ptr, bf16 *a_ptr, bf16 *b_ptr) {
   warp::zero(C_accum);
   int num_tiles = (g_N + BLOCK_K - 1) / BLOCK_K;
 
-  if (warpid < SUPER_M) {
-    warp::load_async(As[warp_m][0], g_A, {0, 0, block_row + warp_m, 0});
-  } else {
-    warp::load_async(Bs[warp_m][0], g_B, {0, 0, 0, block_col + warp_m});
+  for (int task_id = warpid; task_id < LOAD_TASKS; task_id += NUM_WORKERS) {
+    if (task_id < SUPER_M) {
+      warp::load_async(As[task_id][0], g_A, {0, 0, block_row + task_id, 0});
+    } else {
+      int n_index = task_id - SUPER_M;
+      warp::load_async(Bs[n_index][0], g_B, {0, 0, 0, block_col + n_index});
+    }
   }
 
   for (int tile = 0; tile < num_tiles; tile++) {
@@ -68,13 +74,19 @@ __global__ void kernel(bf16 *c_ptr, bf16 *a_ptr, bf16 *b_ptr) {
     int next_smem_idx = next_tile % PIPE_STAGES;
 
     if (next_tile < num_tiles) {
-      if (warpid < SUPER_M) {
-        warp::load_async(As[warp_m][next_smem_idx], g_A, {0, 0, block_row + warp_m, next_tile});
-      } else {
-        warp::load_async(Bs[warp_m][next_smem_idx], g_B, {0, 0, next_tile, block_col + warp_m});
+      for (int task_id = warpid; task_id < LOAD_TASKS; task_id += NUM_WORKERS) {
+        if (task_id < SUPER_M) {
+          warp::load_async(As[task_id][next_smem_idx], g_A,
+                           {0, 0, block_row + task_id, next_tile});
+        } else {
+          int n_index = task_id - SUPER_M;
+          warp::load_async(Bs[n_index][next_smem_idx], g_B,
+                           {0, 0, next_tile, block_col + n_index});
+        }
       }
       load_async_wait<1>();
-    } else load_async_wait();
+    } else
+      load_async_wait();
     __syncthreads();
 
     warp::load(A_reg, As[warp_m][smem_idx]);
