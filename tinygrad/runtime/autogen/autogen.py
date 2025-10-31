@@ -77,8 +77,9 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
           "\n".join(f"{e.spelling} = {types[t.spelling]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()
                     if e.kind == CK.ENUM_CONSTANT_DECL) + "\n")
         return types[t.spelling]
-      case TK.CONSTANTARRAY: return f"({tname(t.get_array_element_type())} * {t.get_array_size()})"
-      case TK.INCOMPLETEARRAY: return f"({tname(t.get_array_element_type())} * {0})"
+      case TK.CONSTANTARRAY:
+        return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * {t.get_array_size()})"
+      case TK.INCOMPLETEARRAY: return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * {0})"
       case _: raise NotImplementedError(f"unsupported type {t.kind}")
 
   for f in files:

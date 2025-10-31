@@ -544,8 +544,8 @@ rpc_alloc_root_v07_00 = struct_rpc_alloc_root_v07_00
 rpc_alloc_root_v = struct_rpc_alloc_root_v07_00
 class struct_rpc_alloc_memory_v13_01(ctypes.Structure): pass
 class struct_pte_desc(ctypes.Structure): pass
-class _anonunion13(ctypes.Union): pass
-_anonunion13._fields_ = [
+class struct_pte_desc_pte_pde(ctypes.Union): pass
+struct_pte_desc_pte_pde._fields_ = [
   ('pte', NvU64),
   ('pde', NvU64),
 ]
@@ -553,7 +553,7 @@ struct_pte_desc._fields_ = [
   ('idr', NvU32,2),
   ('reserved1', NvU32,14),
   ('length', NvU32,16),
-  ('pte_pde', (_anonunion13 * 0)),
+  ('pte_pde', (struct_pte_desc_pte_pde * 0)),
 ]
 struct_rpc_alloc_memory_v13_01._fields_ = [
   ('hClient', NvHandle),
@@ -4362,15 +4362,15 @@ struct_GspSystemInfo._fields_ = [
   ('hostPageSize', NvU64),
 ]
 GspSystemInfo = struct_GspSystemInfo
+class _anonstruct13(ctypes.Structure): pass
+_anonstruct13._fields_ = []
+FALCON_APPLICATION_INTERFACE_HEADER_V1 = _anonstruct13
 class _anonstruct14(ctypes.Structure): pass
 _anonstruct14._fields_ = []
-FALCON_APPLICATION_INTERFACE_HEADER_V1 = _anonstruct14
+FALCON_APPLICATION_INTERFACE_ENTRY_V1 = _anonstruct14
 class _anonstruct15(ctypes.Structure): pass
 _anonstruct15._fields_ = []
-FALCON_APPLICATION_INTERFACE_ENTRY_V1 = _anonstruct15
-class _anonstruct16(ctypes.Structure): pass
-_anonstruct16._fields_ = []
-FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3 = _anonstruct16
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3 = _anonstruct15
 class struct_BIT_HEADER_V1_00(ctypes.Structure): pass
 struct_BIT_HEADER_V1_00._fields_ = [
   ('Id', ctypes.c_ushort),
@@ -4435,15 +4435,15 @@ FALCON_UCODE_DESC_V3._fields_ = [
   ('SignatureVersions', ctypes.c_ushort),
   ('Reserved', ctypes.c_ushort),
 ]
+class _anonstruct16(ctypes.Structure): pass
+_anonstruct16._fields_ = []
+FWSECLIC_READ_VBIOS_DESC = _anonstruct16
 class _anonstruct17(ctypes.Structure): pass
 _anonstruct17._fields_ = []
-FWSECLIC_READ_VBIOS_DESC = _anonstruct17
+FWSECLIC_FRTS_REGION_DESC = _anonstruct17
 class _anonstruct18(ctypes.Structure): pass
 _anonstruct18._fields_ = []
-FWSECLIC_FRTS_REGION_DESC = _anonstruct18
-class _anonstruct19(ctypes.Structure): pass
-_anonstruct19._fields_ = []
-FWSECLIC_FRTS_CMD = _anonstruct19
+FWSECLIC_FRTS_CMD = _anonstruct18
 class struct__PCI_EXP_ROM_STANDARD(ctypes.Structure): pass
 struct__PCI_EXP_ROM_STANDARD._fields_ = []
 PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD
