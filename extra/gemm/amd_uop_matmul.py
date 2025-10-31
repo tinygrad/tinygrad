@@ -40,28 +40,25 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   assert (BN * BK) % BLOCK_SIZE == 0
   assert (BM * BK) % BLOCK_SIZE == 0
 
+  nbThreadXPerWave = 8
+  nbThreadYPerWave = 4
+  nbIterWaveN = WN // (nbThreadXPerWave * TN)
+  nbIterWaveM = WM // (nbThreadYPerWave * TM)
+  SUBWN = WN // nbIterWaveN
+  SUBWM = WM // nbIterWaveM
+
   # ---------------------------
   # per-thread read mapping
   # ---------------------------
   # A: read BK x BN tiles; B: read BN x BK tiles
 
   threadIdx_x = UOp.special(BLOCK_SIZE, "lidx0")
-  waveIndex = threadIdx_x // 32
-  waveIdx = waveIndex % nbWaveX
-  waveIdy = waveIndex // nbWaveX
-  indexInWave = threadIdx_x % 32
 
-  nbThreadXPerWave = 8
-  nbThreadYPerWave = 4
+  waveIdx = (threadIdx_x // 32) % nbWaveX
+  waveIdy = (threadIdx_x // 32) // nbWaveX
 
-  idxInWave = indexInWave % nbThreadXPerWave
-  idyInWave = indexInWave // nbThreadXPerWave
-
-  nbIterWaveN = WN // (nbThreadXPerWave * TN)
-  nbIterWaveM = WM // (nbThreadYPerWave * TM)
-
-  SUBWN = WN // nbIterWaveN
-  SUBWM = WM // nbIterWaveM
+  idxInWave = (threadIdx_x % 32) % nbThreadXPerWave
+  idyInWave = (threadIdx_x % 32) // nbThreadXPerWave
 
   # ---------------------------
   # block indices & placeholders
@@ -85,28 +82,21 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   c_regs = c_regs[i].set(0.0, end=i)
 
   kId_range = UOp.range(N // BK, 0)
-  kId = kId_range * BK
 
   # ---------------------------
   # GLOBAL -> LOCAL (As, Bs)
   # ---------------------------
-  nbReadsB = BN * BK // BLOCK_SIZE
-  i = UOp.range(nbReadsB, 1)
-  rBIdx = threadIdx_x % BN
-  rBIdy = threadIdx_x // BN
-  strideReadB = BLOCK_SIZE // BN
-  index_x = BN * blockIdx_x + rBIdx
-  index_y = rBIdy + i * strideReadB + kId
-  Bs_store = Bs[index_y % BK, index_x % BN].store(b[index_y, index_x]).end(i)
+  b = b.reshape((N // BK, BK, N // BN, BN))
+  i = UOp.range(BN * BK // BLOCK_SIZE, 1)
+  index_x = threadIdx_x % BN
+  index_y = (threadIdx_x // BN) + (BLOCK_SIZE // BN) * i
+  Bs_store = Bs[index_y, index_x % BN].store(b[kId_range, index_y, blockIdx_x, index_x]).end(i)
 
-  nbReadsA = BM * BK // BLOCK_SIZE
-  i = UOp.range(nbReadsA, 2)
-  rAIdx = threadIdx_x % BK
-  rAIdy = threadIdx_x // BK
-  strideReadA = BLOCK_SIZE // BK
-  index_x = rAIdx + kId
-  index_y = BM * blockIdx_y + rAIdy + i * strideReadA
-  As_store = As[index_x % BK, index_y % BM].store(a[index_y, index_x]).end(i)
+  a = a.reshape((N // BM, BM, N // BK, BK))
+  i = UOp.range(BM * BK // BLOCK_SIZE, 2)
+  index_x = threadIdx_x % BK
+  index_y = (threadIdx_x // BK) + (BLOCK_SIZE // BK) * i
+  As_store = As[index_x, index_y].store(a[blockIdx_y, index_y, kId_range, index_x]).end(i)
 
   # TODO: can we automate barrier?
   barrier = UOp.barrier(As_store, Bs_store)
@@ -119,15 +109,15 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   # ---------------------------
   # LOCAL -> REG (per-wave tiles)
   # ---------------------------
-  iterWave = UOp.range(nbIterWaveN, 4)
+  iterWaveN = UOp.range(nbIterWaveN, 4)
   i = UOp.range(TN, 5)
-  index = waveIdx * WN + iterWave * SUBWN + TN * idxInWave + i
-  B_row = B_row[iterWave, i].set(Bs[k, index], end=(iterWave, i))
+  index = waveIdx * WN + iterWaveN * SUBWN + idxInWave * TN + i
+  B_row = B_row[iterWaveN, i].set(Bs[k, index], end=(iterWaveN, i))
 
-  iterWave = UOp.range(nbIterWaveM, 6)
+  iterWaveM = UOp.range(nbIterWaveM, 6)
   i = UOp.range(TM, 7)
-  index = waveIdy * WM + iterWave * SUBWM + TM * idyInWave + i
-  A_col = A_col[iterWave, i].set(As[k, index], end=(iterWave, i))
+  index = waveIdy * WM + iterWaveM * SUBWM + idyInWave * TM + i
+  A_col = A_col[iterWaveM, i].set(As[k, index], end=(iterWaveM, i))
 
   # ---------------------------
   # FMA: c_regs += A_col * B_row
@@ -145,13 +135,13 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   # ---------------------------
   # REG -> GLOBAL (epilogue)
   # ---------------------------
+  c = c.reshape((N//BM, nbWaveY, nbIterWaveM, nbThreadYPerWave, TM, N//BN, nbWaveX, nbIterWaveN, nbThreadXPerWave, TN))
   iterWaveM = UOp.range(nbIterWaveM, 1000)
   yt = UOp.range(TM, 1001)
   iterWaveN = UOp.range(nbIterWaveN, 1002)
   xt = UOp.range(TN, 1003)
-  xOut = blockIdx_x * BN + waveIdx * WN + iterWaveN * SUBWN + TN * idxInWave
-  yOut = blockIdx_y * BM + waveIdy * WM + iterWaveM * SUBWM + TM * idyInWave
-  sink = c[yOut + yt, xOut + xt].store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
+  c_glbl_idx = c[blockIdx_y, waveIdy, iterWaveM, idyInWave, yt, blockIdx_x, waveIdx, iterWaveN, idxInWave, xt]
+  sink = c_glbl_idx.store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
   sink = sink.end(iterWaveM, iterWaveN, yt, xt)
 
   return sink.sink(arg=KernelInfo(opts_to_apply=()))
