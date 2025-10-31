@@ -6,7 +6,6 @@ ctx.font = `350 ${LINE_HEIGHT}px sans-serif`;
 
 onmessage = (e) => {
   const { graph, additions, opts } = e.data;
-  console.log(opts?.showRanges);
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
   if (additions.length !== 0) g.setNode("addition", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
@@ -23,6 +22,12 @@ onmessage = (e) => {
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
+  }
+  if (!opts.showRanges) {
+    for (const n of g.nodes()) {
+      const node = g.node(n);
+      if (node.label.startsWith("RANGE")) g.removeNode(n);
+    }
   }
   dagre.layout(g);
   postMessage(dagre.graphlib.json.write(g));
