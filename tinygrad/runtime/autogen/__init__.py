@@ -29,7 +29,8 @@ def __getattr__(nm):
   *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000","0080","2080","83de"]],
   "{}/kernel-open/common/inc/nvstatus.h","{}/src/nvidia/generated/g_allclasses.h"],
   ["-I{}/src/common/inc", "-I{}/kernel-open/nvidia-uvm","-I{}/kernel-open/common/inc","-I{}/src/common/sdk/nvidia/inc",
-   "-I{}/src/nvidia/arch/nvalloc/unix/include","-I{}/src/common/sdk/nvidia/inc/ctrl"], rules=[(r'MW\(([^:]+):(.+)\)',r'(\1, \2)')], tarball=nv_src)
+   "-I{}/src/nvidia/arch/nvalloc/unix/include","-I{}/src/common/sdk/nvidia/inc/ctrl"], rules=[(r'MW\(([^:]+):(.+)\)',r'(\1, \2)')], tarball=nv_src,
+  anon_names={"{}/kernel-open/common/inc/nvstatus.h:37":"nv_status_codes"})
     case "nv": return load("nv",[],[f"{{}}/src/nvidia/inc/kernel/gpu/{s}.h" for s in ["fsp/kern_fsp_cot_payload","gsp/gsp_init_args"]]+["{}/src/"+
   f"nvidia/arch/nvalloc/common/inc/{s}.h" for s in ["gsp/gspifpub","gsp/gsp_fw_wpr_meta","gsp/gsp_fw_sr_meta","rmRiscvUcode","fsp/fsp_nvdm_format"]]+
   [f"{{}}/src/nvidia/inc/kernel/vgpu/{s}.h" for s in ["rpc_headers","rpc_global_enums"]]+["{}/src/common/uproc/os/common/include/libos_init_args.h",

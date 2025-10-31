@@ -2017,6 +2017,389 @@ struct_NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS._fields_ = [
   ('numFreeBlocks', NvU32),
 ]
 NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS = struct_NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS
+class struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS._fields_ = [
+  ('hObject', NvHandle),
+  ('mapFlags', NvU32),
+  ('addrSpaceType', NvU32),
+]
+NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS = struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS
+class struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS(ctypes.Structure): pass
+class struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data(ctypes.Union): pass
+struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data._fields_ = [
+  ('hResult', NvHandle),
+  ('iResult', NvU64),
+]
+struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS._fields_ = [
+  ('hObject', NvHandle),
+  ('index', NvU32),
+  ('data', struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data),
+]
+NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS = struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS
+class struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS._fields_ = [
+  ('hObject', NvHandle),
+  ('hClient', NvHandle),
+  ('maskResult', RS_ACCESS_MASK),
+]
+NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS = struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS
+class struct_NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS._fields_ = [
+  ('sharePolicy', RS_SHARE_POLICY),
+]
+NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS = struct_NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS
+class struct_NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS._fields_ = [
+  ('hParent', NvHandle),
+  ('classId', NvU32),
+  ('hObject', NvHandle),
+]
+NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS = struct_NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS
+class struct_NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS._fields_ = [
+  ('hObject', NvHandle),
+  ('sharePolicy', RS_SHARE_POLICY),
+]
+NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS = struct_NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS
+class struct_NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS._fields_ = [
+  ('hObject1', NvHandle),
+  ('hObject2', NvHandle),
+  ('bDuplicates', NvBool),
+]
+NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS = struct_NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS
+class struct_NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS._fields_ = [
+  ('devDescriptor', NvU64),
+  ('channel', NvU32),
+]
+NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS = struct_NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS
+class struct_NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS._fields_ = [
+  ('state', NvU32),
+  ('count', NvU32),
+  ('missedCount', NvU32),
+  ('bCircularBuffer', NvBool),
+]
+NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS = struct_NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS
+class struct_NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS._fields_ = [
+  ('state', NvU32),
+  ('bCircularBuffer', NvBool),
+]
+NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS = struct_NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS
+class struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY(ctypes.Structure): pass
+struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY._fields_ = [
+  ('counter', NvU64),
+  ('line', NvU32),
+  ('filename', (NvU8 * 12)),
+  ('tag', NvU16),
+  ('cpuNum', NvU8),
+  ('irql', NvU8),
+  ('threadId', NvU64),
+  ('data0', NvU32),
+  ('data1', NvU32),
+  ('data2', NvU32),
+]
+NV0000_CTRL_DIAG_LOCK_METER_ENTRY = struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY
+class struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS._fields_ = [
+  ('entryCount', NvU32),
+  ('entries', (NV0000_CTRL_DIAG_LOCK_METER_ENTRY * 64)),
+]
+NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS = struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS
+class struct_RPC_METER_ENTRY(ctypes.Structure): pass
+struct_RPC_METER_ENTRY._fields_ = [
+  ('startTimeInNs', NvU64),
+  ('endTimeInNs', NvU64),
+  ('rpcDataTag', NvU64),
+  ('rpcExtraData', NvU64),
+]
+RPC_METER_ENTRY = struct_RPC_METER_ENTRY
+class struct_NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS._fields_ = [
+  ('rpcProfileCmd', NvU32),
+]
+NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS = struct_NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS
+class struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS._fields_ = [
+  ('firstEntryOffset', NvU32),
+  ('outputEntryCount', NvU32),
+  ('remainingEntryCount', NvU32),
+  ('elapsedTimeInNs', NvU64),
+  ('rpcProfilerBuffer', (RPC_METER_ENTRY * 100)),
+]
+NV0000_CTRL_DIAG_DUMP_RPC_PARAMS = struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS
+class struct_NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS._fields_ = [
+  ('event', NvU32),
+  ('action', NvU32),
+]
+NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS = struct_NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS
+class struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS._fields_ = [
+  ('event', NvU32),
+  ('status', NvU32),
+]
+NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS = struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS
+class struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS._fields_ = [
+  ('gpuIds', (NvU32 * 32)),
+]
+NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS
+class struct_NV0000_CTRL_GPU_GET_ID_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_ID_INFO_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('gpuFlags', NvU32),
+  ('deviceInstance', NvU32),
+  ('subDeviceInstance', NvU32),
+  ('szName', NvP64),
+  ('sliStatus', NvU32),
+  ('boardId', NvU32),
+  ('gpuInstance', NvU32),
+  ('numaId', NvS32),
+]
+NV0000_CTRL_GPU_GET_ID_INFO_PARAMS = struct_NV0000_CTRL_GPU_GET_ID_INFO_PARAMS
+class struct_NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('gpuFlags', NvU32),
+  ('deviceInstance', NvU32),
+  ('subDeviceInstance', NvU32),
+  ('sliStatus', NvU32),
+  ('boardId', NvU32),
+  ('gpuInstance', NvU32),
+  ('numaId', NvS32),
+]
+NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS = struct_NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS
+class struct_NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('status', NvU32),
+]
+NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS = struct_NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS
+class struct_NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS._fields_ = [
+  ('deviceIds', NvU32),
+]
+NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS
+class struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS._fields_ = [
+  ('gpuIds', (NvU32 * 32)),
+  ('excludedGpuIds', (NvU32 * 32)),
+]
+NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS
+class struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('domain', NvU32),
+  ('bus', NvU16),
+  ('slot', NvU16),
+]
+NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS = struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS
+class struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS._fields_ = [
+  ('gpuIds', (NvU32 * 32)),
+  ('failedId', NvU32),
+]
+NV0000_CTRL_GPU_ATTACH_IDS_PARAMS = struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS
+class struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS._fields_ = [
+  ('gpuIds', (NvU32 * 32)),
+]
+NV0000_CTRL_GPU_DETACH_IDS_PARAMS = struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS
+class struct_NV0000_CTRL_GPU_VIDEO_LINKS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_VIDEO_LINKS._fields_ = [
+  ('gpuId', NvU32),
+  ('connectedGpuIds', (NvU32 * 8)),
+]
+NV0000_CTRL_GPU_VIDEO_LINKS = struct_NV0000_CTRL_GPU_VIDEO_LINKS
+class struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS._fields_ = [
+  ('links', (NV0000_CTRL_GPU_VIDEO_LINKS * 32)),
+]
+NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS = struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS
+class struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('svmSize', NvU32),
+]
+NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS = struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS
+class struct_NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS._fields_ = [
+  ('gpuUuid', (NvU8 * 256)),
+  ('flags', NvU32),
+  ('gpuId', NvU32),
+  ('deviceInstance', NvU32),
+  ('subdeviceInstance', NvU32),
+]
+NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS = struct_NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS
+class struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('flags', NvU32),
+  ('gpuUuid', (NvU8 * 256)),
+  ('uuidStrLen', NvU32),
+]
+NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS = struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS
+class struct_NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('newState', NvU32),
+  ('flags', NvU32),
+]
+NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS = struct_NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS
+class struct_NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('drainState', NvU32),
+  ('flags', NvU32),
+]
+NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS = struct_NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS
+class struct_NV0000_CTRL_GPU_DISCOVER_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_DISCOVER_PARAMS._fields_ = [
+  ('domain', NvU32),
+  ('bus', NvU8),
+  ('slot', NvU8),
+  ('function', NvU8),
+]
+NV0000_CTRL_GPU_DISCOVER_PARAMS = struct_NV0000_CTRL_GPU_DISCOVER_PARAMS
+class struct_NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS._fields_ = [
+  ('enableMask', NvU32),
+]
+NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS = struct_NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS
+class struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('mask', NvU32),
+  ('bSkipHwNvlinkDisable', NvBool),
+]
+NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS = struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS(ctypes.Structure): pass
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data(ctypes.Union): pass
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet._fields_ = [
+  ('newValue', NvU32),
+  ('oldValue', NvU32),
+]
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx._fields_ = [
+  ('paramData', (NvU8 * 373)),
+  ('paramSize', NvU32),
+]
+class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty._fields_ = [
+  ('propertyId', NvU32),
+  ('propertyIn', (NvU32 * 6)),
+  ('propertyOut', (NvU32 * 5)),
+]
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data._fields_ = [
+  ('configSet', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet),
+  ('configEx', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx),
+  ('reservedProperty', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty),
+]
+struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS._fields_ = [
+  ('hContext', NvHandle),
+  ('opType', NvU32),
+  ('index', NvV32),
+  ('dataType', NvU32),
+  ('data', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data),
+]
+NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS = struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS
+class struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS._fields_ = [
+  ('hDevice', NvHandle),
+  ('hChannel', NvHandle),
+  ('numChannels', NvV32),
+  ('phClients', NvP64),
+  ('phDevices', NvP64),
+  ('phChannels', NvP64),
+  ('flags', NvV32),
+  ('timeout', NvV32),
+]
+NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS = struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS
+class struct_NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS._fields_ = [
+  ('image', NvU8),
+  ('totalSize', NvU64),
+  ('pData', NvP64),
+]
+NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS = struct_NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS
+class struct_NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS._fields_ = [
+  ('mode', NvU8),
+]
+NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS = struct_NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS
+class struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS._fields_ = [
+  ('mode', NvU8),
+  ('bwModeScope', NvU8),
+]
+NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS = struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS
+class struct_NV0000_CTRL_GPU_ACTIVE_DEVICE(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_ACTIVE_DEVICE._fields_ = [
+  ('gpuId', NvU32),
+  ('gpuInstanceId', NvU32),
+  ('computeInstanceId', NvU32),
+]
+NV0000_CTRL_GPU_ACTIVE_DEVICE = struct_NV0000_CTRL_GPU_ACTIVE_DEVICE
+class struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS._fields_ = [
+  ('numDevices', NvU32),
+  ('devices', (NV0000_CTRL_GPU_ACTIVE_DEVICE * 256)),
+]
+NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS
+class struct_NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+]
+NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS = struct_NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS
+class struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+]
+NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS = struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS
+class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('pid', NvU32),
+  ('newState', NvU32),
+]
+NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('pid', NvU32),
+  ('state', NvU32),
+]
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS
+class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('pid', NvU32),
+  ('subPid', NvU32),
+  ('gpuUtil', NvU32),
+  ('fbUtil', NvU32),
+  ('maxFbUsage', NvU64),
+  ('startTime', NvU64),
+  ('endTime', NvU64),
+]
+NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('pid', NvU32),
+  ('pidTbl', (NvU32 * 4000)),
+  ('pidCount', NvU32),
+]
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS
+class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS._fields_ = [
+  ('gpuId', NvU32),
+  ('pid', NvU32),
+]
+NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS
 class struct_NV0000_CTRL_GSYNC_GET_ATTACHED_IDS_PARAMS(ctypes.Structure): pass
 struct_NV0000_CTRL_GSYNC_GET_ATTACHED_IDS_PARAMS._fields_ = [
   ('gsyncIds', (NvU32 * 4)),
@@ -2029,45 +2412,6 @@ struct_NV0000_CTRL_GSYNC_GET_ID_INFO_PARAMS._fields_ = [
   ('gsyncInstance', NvU32),
 ]
 NV0000_CTRL_GSYNC_GET_ID_INFO_PARAMS = struct_NV0000_CTRL_GSYNC_GET_ID_INFO_PARAMS
-class struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS._fields_ = [
-  ('vgpuName', (NvU8 * 16)),
-  ('gpuPciId', NvU32),
-  ('gpuPciBdf', NvU32),
-  ('vgpuTypeId', NvU32),
-  ('vgpuId', NvU16),
-  ('gpuInstanceId', NvU32),
-  ('placementId', NvU32),
-]
-NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS = struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS
-class struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS._fields_ = [
-  ('gpuPciId', NvU32),
-  ('gpuPciBdf', NvU32),
-  ('numVgpuTypes', NvU32),
-  ('vgpuTypeIds', (NvU32 * 64)),
-  ('availableInstances', (NvU32 * 64)),
-]
-NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS = struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS
-class struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS._fields_ = [
-  ('vgpuName', (NvU8 * 16)),
-  ('vgpuId', NvU16),
-]
-NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS = struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS
-class struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS._fields_ = [
-  ('returnStatus', NvU32),
-  ('gpuId', NvU32),
-]
-NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS = struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS
-class struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS._fields_ = [
-  ('vgpuName', (NvU8 * 16)),
-  ('mode', NvU32),
-  ('sysfs_val', NvU32),
-]
-NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS = struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS
 class struct_NV0000_CTRL_NVD_GET_DUMP_SIZE_PARAMS(ctypes.Structure): pass
 struct_NV0000_CTRL_NVD_GET_DUMP_SIZE_PARAMS._fields_ = [
   ('component', NvU32),
@@ -2146,75 +2490,46 @@ struct_NV0000_CTRL_NVD_GET_DPC_ISR_TS_PARAMS._fields_ = [
   ('pTSBuffer', NvP64),
 ]
 NV0000_CTRL_NVD_GET_DPC_ISR_TS_PARAMS = struct_NV0000_CTRL_NVD_GET_DPC_ISR_TS_PARAMS
-class struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS._fields_ = [
-  ('hObject', NvHandle),
-  ('mapFlags', NvU32),
-  ('addrSpaceType', NvU32),
+class struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS._fields_ = [
+  ('subProcessID', NvU32),
+  ('subProcessName', (ctypes.c_char * 100)),
 ]
-NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS = struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS
-class struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS(ctypes.Structure): pass
-class struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data(ctypes.Union): pass
-struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data._fields_ = [
-  ('hResult', NvHandle),
-  ('iResult', NvU64),
+NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS = struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS
+class struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS._fields_ = [
+  ('bIsSubProcessDisabled', NvBool),
 ]
-struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS._fields_ = [
-  ('hObject', NvHandle),
-  ('index', NvU32),
-  ('data', struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_data),
+NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS = struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS
+class struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS._fields_ = [
+  ('bEnabled', NvBool),
 ]
-NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS = struct_NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS
-class struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS._fields_ = [
-  ('hObject', NvHandle),
-  ('hClient', NvHandle),
-  ('maskResult', RS_ACCESS_MASK),
+NV0000_SYNC_GPU_BOOST_INFO_PARAMS = struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS
+class struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG(ctypes.Structure): pass
+struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG._fields_ = [
+  ('gpuCount', NvU32),
+  ('gpuIds', (NvU32 * 32)),
+  ('boostGroupId', NvU32),
+  ('bBridgeless', NvBool),
 ]
-NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS = struct_NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS
-class struct_NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS._fields_ = [
-  ('sharePolicy', RS_SHARE_POLICY),
+NV0000_SYNC_GPU_BOOST_GROUP_CONFIG = struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG
+class struct_NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS(ctypes.Structure): pass
+struct_NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS._fields_ = [
+  ('boostConfig', NV0000_SYNC_GPU_BOOST_GROUP_CONFIG),
 ]
-NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS = struct_NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS
-class struct_NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS._fields_ = [
-  ('hParent', NvHandle),
-  ('classId', NvU32),
-  ('hObject', NvHandle),
+NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS
+class struct_NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS(ctypes.Structure): pass
+struct_NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS._fields_ = [
+  ('boostGroupId', NvU32),
 ]
-NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS = struct_NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS
-class struct_NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS._fields_ = [
-  ('hObject', NvHandle),
-  ('sharePolicy', RS_SHARE_POLICY),
+NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS
+class struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS._fields_ = [
+  ('groupCount', NvU32),
+  ('pBoostGroups', (NV0000_SYNC_GPU_BOOST_GROUP_CONFIG * 16)),
 ]
-NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS = struct_NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS
-class struct_NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS._fields_ = [
-  ('hObject1', NvHandle),
-  ('hObject2', NvHandle),
-  ('bDuplicates', NvBool),
-]
-NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS = struct_NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS
-class struct_NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS._fields_ = [
-  ('devDescriptor', NvU64),
-  ('channel', NvU32),
-]
-NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS = struct_NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS
-class struct_NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS._fields_ = [
-  ('event', NvU32),
-  ('action', NvU32),
-]
-NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS = struct_NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS
-class struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS._fields_ = [
-  ('event', NvU32),
-  ('status', NvU32),
-]
-NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS = struct_NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS
+NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS
 class struct_NV0000_CTRL_SYSTEM_GET_FEATURES_PARAMS(ctypes.Structure): pass
 struct_NV0000_CTRL_SYSTEM_GET_FEATURES_PARAMS._fields_ = [
   ('featuresMask', NvU32),
@@ -2648,46 +2963,6 @@ struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA_PARAMS._fields_ = [
   ('sampleData', NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_FRM_DATA_SAMPLE),
 ]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA_PARAMS
-class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('pid', NvU32),
-  ('newState', NvU32),
-]
-NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('pid', NvU32),
-  ('state', NvU32),
-]
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS
-class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('pid', NvU32),
-  ('subPid', NvU32),
-  ('gpuUtil', NvU32),
-  ('fbUtil', NvU32),
-  ('maxFbUsage', NvU64),
-  ('startTime', NvU64),
-  ('endTime', NvU64),
-]
-NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('pid', NvU32),
-  ('pidTbl', (NvU32 * 4000)),
-  ('pidCount', NvU32),
-]
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS
-class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('pid', NvU32),
-]
-NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS
 class struct_NV0000_CTRL_OS_UNIX_FLUSH_USER_CACHE_PARAMS(ctypes.Structure): pass
 struct_NV0000_CTRL_OS_UNIX_FLUSH_USER_CACHE_PARAMS._fields_ = [
   ('offset', NvU64),
@@ -2781,320 +3056,45 @@ struct_NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS._fields_ = [
   ('index', NvU16),
 ]
 NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS = struct_NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS
-class struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS._fields_ = [
-  ('gpuIds', (NvU32 * 32)),
-]
-NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS
-class struct_NV0000_CTRL_GPU_GET_ID_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_ID_INFO_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('gpuFlags', NvU32),
-  ('deviceInstance', NvU32),
-  ('subDeviceInstance', NvU32),
-  ('szName', NvP64),
-  ('sliStatus', NvU32),
-  ('boardId', NvU32),
-  ('gpuInstance', NvU32),
-  ('numaId', NvS32),
-]
-NV0000_CTRL_GPU_GET_ID_INFO_PARAMS = struct_NV0000_CTRL_GPU_GET_ID_INFO_PARAMS
-class struct_NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('gpuFlags', NvU32),
-  ('deviceInstance', NvU32),
-  ('subDeviceInstance', NvU32),
-  ('sliStatus', NvU32),
-  ('boardId', NvU32),
-  ('gpuInstance', NvU32),
-  ('numaId', NvS32),
-]
-NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS = struct_NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS
-class struct_NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('status', NvU32),
-]
-NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS = struct_NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS
-class struct_NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS._fields_ = [
-  ('deviceIds', NvU32),
-]
-NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS
-class struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS._fields_ = [
-  ('gpuIds', (NvU32 * 32)),
-  ('excludedGpuIds', (NvU32 * 32)),
-]
-NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS
-class struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('domain', NvU32),
-  ('bus', NvU16),
-  ('slot', NvU16),
-]
-NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS = struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS
-class struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS._fields_ = [
-  ('gpuIds', (NvU32 * 32)),
-  ('failedId', NvU32),
-]
-NV0000_CTRL_GPU_ATTACH_IDS_PARAMS = struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS
-class struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS._fields_ = [
-  ('gpuIds', (NvU32 * 32)),
-]
-NV0000_CTRL_GPU_DETACH_IDS_PARAMS = struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS
-class struct_NV0000_CTRL_GPU_VIDEO_LINKS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_VIDEO_LINKS._fields_ = [
-  ('gpuId', NvU32),
-  ('connectedGpuIds', (NvU32 * 8)),
-]
-NV0000_CTRL_GPU_VIDEO_LINKS = struct_NV0000_CTRL_GPU_VIDEO_LINKS
-class struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS._fields_ = [
-  ('links', (NV0000_CTRL_GPU_VIDEO_LINKS * 32)),
-]
-NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS = struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS
-class struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('svmSize', NvU32),
-]
-NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS = struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS
-class struct_NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS._fields_ = [
-  ('gpuUuid', (NvU8 * 256)),
-  ('flags', NvU32),
-  ('gpuId', NvU32),
-  ('deviceInstance', NvU32),
-  ('subdeviceInstance', NvU32),
-]
-NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS = struct_NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS
-class struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('flags', NvU32),
-  ('gpuUuid', (NvU8 * 256)),
-  ('uuidStrLen', NvU32),
-]
-NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS = struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS
-class struct_NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('newState', NvU32),
-  ('flags', NvU32),
-]
-NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS = struct_NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS
-class struct_NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('drainState', NvU32),
-  ('flags', NvU32),
-]
-NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS = struct_NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS
-class struct_NV0000_CTRL_GPU_DISCOVER_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_DISCOVER_PARAMS._fields_ = [
-  ('domain', NvU32),
-  ('bus', NvU8),
-  ('slot', NvU8),
-  ('function', NvU8),
-]
-NV0000_CTRL_GPU_DISCOVER_PARAMS = struct_NV0000_CTRL_GPU_DISCOVER_PARAMS
-class struct_NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS._fields_ = [
-  ('enableMask', NvU32),
-]
-NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS = struct_NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS
-class struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS._fields_ = [
-  ('gpuId', NvU32),
-  ('mask', NvU32),
-  ('bSkipHwNvlinkDisable', NvBool),
-]
-NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS = struct_NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS
-class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS(ctypes.Structure): pass
-class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data(ctypes.Union): pass
-class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet._fields_ = [
-  ('newValue', NvU32),
-  ('oldValue', NvU32),
-]
-class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx._fields_ = [
-  ('paramData', (NvU8 * 373)),
-  ('paramSize', NvU32),
-]
-class struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty._fields_ = [
-  ('propertyId', NvU32),
-  ('propertyIn', (NvU32 * 6)),
-  ('propertyOut', (NvU32 * 5)),
-]
-struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data._fields_ = [
-  ('configSet', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configSet),
-  ('configEx', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_configEx),
-  ('reservedProperty', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data_reservedProperty),
-]
-struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS._fields_ = [
-  ('hContext', NvHandle),
-  ('opType', NvU32),
-  ('index', NvV32),
-  ('dataType', NvU32),
-  ('data', struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_data),
-]
-NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS = struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS
-class struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS._fields_ = [
-  ('hDevice', NvHandle),
-  ('hChannel', NvHandle),
-  ('numChannels', NvV32),
-  ('phClients', NvP64),
-  ('phDevices', NvP64),
-  ('phChannels', NvP64),
-  ('flags', NvV32),
-  ('timeout', NvV32),
-]
-NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS = struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS
-class struct_NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS._fields_ = [
-  ('image', NvU8),
-  ('totalSize', NvU64),
-  ('pData', NvP64),
-]
-NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS = struct_NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS
-class struct_NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS._fields_ = [
-  ('mode', NvU8),
-]
-NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS = struct_NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS
-class struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS._fields_ = [
-  ('mode', NvU8),
-  ('bwModeScope', NvU8),
-]
-NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS = struct_NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS
-class struct_NV0000_CTRL_GPU_ACTIVE_DEVICE(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_ACTIVE_DEVICE._fields_ = [
-  ('gpuId', NvU32),
+class struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS._fields_ = [
+  ('vgpuName', (NvU8 * 16)),
+  ('gpuPciId', NvU32),
+  ('gpuPciBdf', NvU32),
+  ('vgpuTypeId', NvU32),
+  ('vgpuId', NvU16),
   ('gpuInstanceId', NvU32),
-  ('computeInstanceId', NvU32),
+  ('placementId', NvU32),
 ]
-NV0000_CTRL_GPU_ACTIVE_DEVICE = struct_NV0000_CTRL_GPU_ACTIVE_DEVICE
-class struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS._fields_ = [
-  ('numDevices', NvU32),
-  ('devices', (NV0000_CTRL_GPU_ACTIVE_DEVICE * 256)),
+NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS = struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS
+class struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS._fields_ = [
+  ('gpuPciId', NvU32),
+  ('gpuPciBdf', NvU32),
+  ('numVgpuTypes', NvU32),
+  ('vgpuTypeIds', (NvU32 * 64)),
+  ('availableInstances', (NvU32 * 64)),
 ]
-NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS
-class struct_NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS._fields_ = [
+NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS = struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS
+class struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS._fields_ = [
+  ('vgpuName', (NvU8 * 16)),
+  ('vgpuId', NvU16),
+]
+NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS = struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS
+class struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS._fields_ = [
+  ('returnStatus', NvU32),
   ('gpuId', NvU32),
 ]
-NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS = struct_NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS
-class struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS._fields_ = [
-  ('gpuId', NvU32),
+NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS = struct_NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS
+class struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS(ctypes.Structure): pass
+struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS._fields_ = [
+  ('vgpuName', (NvU8 * 16)),
+  ('mode', NvU32),
+  ('sysfs_val', NvU32),
 ]
-NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS = struct_NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS
-class struct_NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS._fields_ = [
-  ('state', NvU32),
-  ('count', NvU32),
-  ('missedCount', NvU32),
-  ('bCircularBuffer', NvBool),
-]
-NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS = struct_NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS
-class struct_NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS._fields_ = [
-  ('state', NvU32),
-  ('bCircularBuffer', NvBool),
-]
-NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS = struct_NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS
-class struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY(ctypes.Structure): pass
-struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY._fields_ = [
-  ('counter', NvU64),
-  ('line', NvU32),
-  ('filename', (NvU8 * 12)),
-  ('tag', NvU16),
-  ('cpuNum', NvU8),
-  ('irql', NvU8),
-  ('threadId', NvU64),
-  ('data0', NvU32),
-  ('data1', NvU32),
-  ('data2', NvU32),
-]
-NV0000_CTRL_DIAG_LOCK_METER_ENTRY = struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY
-class struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS._fields_ = [
-  ('entryCount', NvU32),
-  ('entries', (NV0000_CTRL_DIAG_LOCK_METER_ENTRY * 64)),
-]
-NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS = struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS
-class struct_RPC_METER_ENTRY(ctypes.Structure): pass
-struct_RPC_METER_ENTRY._fields_ = [
-  ('startTimeInNs', NvU64),
-  ('endTimeInNs', NvU64),
-  ('rpcDataTag', NvU64),
-  ('rpcExtraData', NvU64),
-]
-RPC_METER_ENTRY = struct_RPC_METER_ENTRY
-class struct_NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS._fields_ = [
-  ('rpcProfileCmd', NvU32),
-]
-NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS = struct_NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS
-class struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS._fields_ = [
-  ('firstEntryOffset', NvU32),
-  ('outputEntryCount', NvU32),
-  ('remainingEntryCount', NvU32),
-  ('elapsedTimeInNs', NvU64),
-  ('rpcProfilerBuffer', (RPC_METER_ENTRY * 100)),
-]
-NV0000_CTRL_DIAG_DUMP_RPC_PARAMS = struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS
-class struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS._fields_ = [
-  ('subProcessID', NvU32),
-  ('subProcessName', (ctypes.c_char * 100)),
-]
-NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS = struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS
-class struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS(ctypes.Structure): pass
-struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS._fields_ = [
-  ('bIsSubProcessDisabled', NvBool),
-]
-NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS = struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS
-class struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS._fields_ = [
-  ('bEnabled', NvBool),
-]
-NV0000_SYNC_GPU_BOOST_INFO_PARAMS = struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS
-class struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG(ctypes.Structure): pass
-struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG._fields_ = [
-  ('gpuCount', NvU32),
-  ('gpuIds', (NvU32 * 32)),
-  ('boostGroupId', NvU32),
-  ('bBridgeless', NvBool),
-]
-NV0000_SYNC_GPU_BOOST_GROUP_CONFIG = struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG
-class struct_NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS(ctypes.Structure): pass
-struct_NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS._fields_ = [
-  ('boostConfig', NV0000_SYNC_GPU_BOOST_GROUP_CONFIG),
-]
-NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS
-class struct_NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS(ctypes.Structure): pass
-struct_NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS._fields_ = [
-  ('boostGroupId', NvU32),
-]
-NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS
-class struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS._fields_ = [
-  ('groupCount', NvU32),
-  ('pBoostGroups', (NV0000_SYNC_GPU_BOOST_GROUP_CONFIG * 16)),
-]
-NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS
+NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS = struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS
 class struct_NV0080_CTRL_BIF_RESET_PARAMS(ctypes.Structure): pass
 struct_NV0080_CTRL_BIF_RESET_PARAMS._fields_ = [
   ('flags', NvU32),
@@ -3118,38 +3118,19 @@ struct_NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK_PARAMS._fields_ = [
   ('pciePowerControlIdentifiedKeyLocation', NvU32),
 ]
 NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK_PARAMS = struct_NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK_PARAMS
-class struct_NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS._fields_ = [
-  ('bActivate', NvBool),
-]
-NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS = struct_NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS
-class struct_NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS._fields_ = [
-  ('bCudaLimit', NvBool),
-]
-NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS = struct_NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS
-class struct_NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS._fields_ = [
-  ('cmd', NvU32),
-]
-NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS = struct_NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS
-class struct_NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS._fields_ = [
-  ('subDeviceInstance', NvU32),
-  ('width', NvU16),
-  ('height', NvU16),
-  ('depth', NvU16),
-  ('pitch', NvU16),
-  ('baseAddress', NvU64),
-  ('size', NvU64),
-]
-NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS = struct_NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS
-class struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS._fields_ = [
-  ('capsTbl', (NvU8 * 9)),
+class struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS._fields_ = [
+  ('capsTblSize', NvU32),
+  ('capsTbl', NvP64),
   ('instanceId', NvU32),
 ]
-NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS
+NV0080_CTRL_BSP_GET_CAPS_PARAMS = struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS
+class struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2(ctypes.Structure): pass
+struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2._fields_ = [
+  ('capsTbl', (NvU8 * 8)),
+  ('instanceId', NvU32),
+]
+NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2 = struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2
 class struct_NV0080_CTRL_DMA_PTE_INFO_PTE_BLOCK(ctypes.Structure): pass
 struct_NV0080_CTRL_DMA_PTE_INFO_PTE_BLOCK._fields_ = [
   ('pageSize', NvU64),
@@ -3321,18 +3302,122 @@ struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS._fields_ = [
   ('subDeviceId', NvU32),
 ]
 NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS = struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS
-class struct_NV0080_CTRL_MSENC_GET_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_MSENC_GET_CAPS_PARAMS._fields_ = [
+class struct_NV0080_CTRL_FB_GET_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FB_GET_CAPS_PARAMS._fields_ = [
   ('capsTblSize', NvU32),
   ('capsTbl', NvP64),
 ]
-NV0080_CTRL_MSENC_GET_CAPS_PARAMS = struct_NV0080_CTRL_MSENC_GET_CAPS_PARAMS
-class struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS._fields_ = [
-  ('capsTbl', (NvU8 * 4)),
-  ('instanceId', NvU32),
+NV0080_CTRL_FB_GET_CAPS_PARAMS = struct_NV0080_CTRL_FB_GET_CAPS_PARAMS
+class struct_NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS._fields_ = [
+  ('Size', NvU64),
+  ('Address', NvU64),
+  ('AddressSpace', NvU32),
+  ('MaxCompbitLine', NvU32),
+  ('comptagsPerCacheLine', NvU32),
+  ('cacheLineSize', NvU32),
+  ('cacheLineSizePerSlice', NvU32),
+  ('cacheLineFetchAlignment', NvU32),
+  ('backingStoreBase', NvU64),
+  ('gobsPerComptagPerSlice', NvU32),
+  ('backingStoreCbcBase', NvU32),
+  ('comptaglineAllocationPolicy', NvU32),
+  ('privRegionStartOffset', NvU64),
+  ('cbcCoveragePerSlice', NvU32),
 ]
-NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS
+NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS = struct_NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS
+class struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS._fields_ = [
+  ('capsTbl', (NvU8 * 3)),
+]
+NV0080_CTRL_FB_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS
+class struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS._fields_ = [
+  ('value', NvU32),
+]
+NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS = struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS
+enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY = CEnum(ctypes.c_uint)
+NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_DEFAULT = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_DEFAULT', 0)
+NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_NONCONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_NONCONTIGUOUS', 1)
+NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_CONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_CONTIGUOUS', 2)
+NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_ALLOW_NONCONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_ALLOW_NONCONTIGUOUS', 3)
+
+NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY
+class struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS._fields_ = [
+  ('capsTblSize', NvU32),
+  ('capsTbl', NvP64),
+]
+NV0080_CTRL_FIFO_GET_CAPS_PARAMS = struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS
+class struct_NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS._fields_ = [
+  ('engineId', NvU32),
+  ('alignment', NvU32),
+  ('size', NvU32),
+]
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS = struct_NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS
+class struct_NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM._fields_ = [
+  ('hChannel1', NvHandle),
+  ('hChannel2', NvHandle),
+]
+NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM = struct_NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM
+class struct_NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM._fields_ = [
+  ('hChannel', NvHandle),
+  ('tsDivisor', NvU32),
+]
+NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM = struct_NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM
+class struct_NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS._fields_ = [
+  ('hRunlist', NvHandle),
+  ('engineID', NvU32),
+]
+NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS = struct_NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS
+class struct_NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS._fields_ = [
+  ('numChannels', NvU32),
+  ('pChannelHandleList', NvP64),
+  ('pChannelList', NvP64),
+]
+NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS = struct_NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS
+class struct_NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS._fields_ = [
+  ('engineID', NvU32),
+  ('gpEntries', NvU32),
+  ('pbEntries', NvU32),
+]
+NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS = struct_NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS
+class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS._fields_ = [
+  ('hChannel', NvHandle),
+  ('property', NvU32),
+  ('value', NvU64),
+]
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS = struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS
+class struct_NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS._fields_ = [
+  ('engineID', NvU32),
+]
+NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS = struct_NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS
+class struct_NV0080_CTRL_FIFO_START_RUNLIST_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_START_RUNLIST_PARAMS._fields_ = [
+  ('engineID', NvU32),
+]
+NV0080_CTRL_FIFO_START_RUNLIST_PARAMS = struct_NV0080_CTRL_FIFO_START_RUNLIST_PARAMS
+class struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS._fields_ = [
+  ('capsTbl', (NvU8 * 2)),
+]
+NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS
+class struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS._fields_ = [
+  ('numChannels', NvU32),
+  ('hChannels', (NvHandle * 4096)),
+  ('flags', NvU32),
+  ('timeout', NvU32),
+]
+NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS = struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS
 class struct_NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS(ctypes.Structure): pass
 struct_NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS._fields_ = [
   ('numClasses', NvU32),
@@ -3453,169 +3538,12 @@ struct_NV0080_CTRL_GPU_GET_VGPU_HETEROGENEOUS_MODE_PARAMS._fields_ = [
   ('bHeterogeneousMode', NvBool),
 ]
 NV0080_CTRL_GPU_GET_VGPU_HETEROGENEOUS_MODE_PARAMS = struct_NV0080_CTRL_GPU_GET_VGPU_HETEROGENEOUS_MODE_PARAMS
-class struct_NV0080_CTRL_HOST_GET_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_HOST_GET_CAPS_PARAMS._fields_ = [
-  ('capsTblSize', NvU32),
-  ('capsTbl', NvP64),
-]
-NV0080_CTRL_HOST_GET_CAPS_PARAMS = struct_NV0080_CTRL_HOST_GET_CAPS_PARAMS
-class struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS._fields_ = [
-  ('capsTbl', (NvU8 * 3)),
-]
-NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS
-class struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS._fields_ = [
-  ('capsTblSize', NvU32),
-  ('capsTbl', NvP64),
-]
-NV0080_CTRL_FIFO_GET_CAPS_PARAMS = struct_NV0080_CTRL_FIFO_GET_CAPS_PARAMS
-class struct_NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS._fields_ = [
-  ('engineId', NvU32),
-  ('alignment', NvU32),
-  ('size', NvU32),
-]
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS = struct_NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS
-class struct_NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM._fields_ = [
-  ('hChannel1', NvHandle),
-  ('hChannel2', NvHandle),
-]
-NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM = struct_NV0080_CTRL_FIFO_RUNLIST_GROUP_CHANNELS_PARAM
-class struct_NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM._fields_ = [
-  ('hChannel', NvHandle),
-  ('tsDivisor', NvU32),
-]
-NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM = struct_NV0080_CTRL_FIFO_RUNLIST_DIVIDE_TIMESLICE_PARAM
-class struct_NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS._fields_ = [
-  ('hRunlist', NvHandle),
-  ('engineID', NvU32),
-]
-NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS = struct_NV0080_CTRL_FIFO_PREEMPT_RUNLIST_PARAMS
-class struct_NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS._fields_ = [
-  ('numChannels', NvU32),
-  ('pChannelHandleList', NvP64),
-  ('pChannelList', NvP64),
-]
-NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS = struct_NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS
-class struct_NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS._fields_ = [
-  ('engineID', NvU32),
-  ('gpEntries', NvU32),
-  ('pbEntries', NvU32),
-]
-NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS = struct_NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS
-class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS._fields_ = [
-  ('hChannel', NvHandle),
-  ('property', NvU32),
-  ('value', NvU64),
-]
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS = struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS
-class struct_NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS._fields_ = [
-  ('engineID', NvU32),
-]
-NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS = struct_NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS
-class struct_NV0080_CTRL_FIFO_START_RUNLIST_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_START_RUNLIST_PARAMS._fields_ = [
-  ('engineID', NvU32),
-]
-NV0080_CTRL_FIFO_START_RUNLIST_PARAMS = struct_NV0080_CTRL_FIFO_START_RUNLIST_PARAMS
-class struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS._fields_ = [
-  ('capsTbl', (NvU8 * 2)),
-]
-NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS
-class struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS._fields_ = [
-  ('numChannels', NvU32),
-  ('hChannels', (NvHandle * 4096)),
-  ('flags', NvU32),
-  ('timeout', NvU32),
-]
-NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS = struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS
-class struct_NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS(ctypes.Structure): pass
-class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS(ctypes.Structure): pass
-enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint)
-NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE', 0)
-NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC', 1)
-NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC', 2)
-
-NV0080_CTRL_GR_TPC_PARTITION_MODE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE
 class struct_NV0080_CTRL_GR_ROUTE_INFO(ctypes.Structure): pass
 struct_NV0080_CTRL_GR_ROUTE_INFO._fields_ = [
   ('flags', NvU32),
   ('route', NvU64),
 ]
 NV0080_CTRL_GR_ROUTE_INFO = struct_NV0080_CTRL_GR_ROUTE_INFO
-struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS._fields_ = [
-  ('hChannelGroup', NvHandle),
-  ('mode', NV0080_CTRL_GR_TPC_PARTITION_MODE),
-  ('bEnableAllTpcs', NvBool),
-  ('grRouteInfo', NV0080_CTRL_GR_ROUTE_INFO),
-]
-NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS
-struct_NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS._fields_ = [
-  ('params', NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS),
-]
-NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS = struct_NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS
-class struct_NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS._fields_ = [
-  ('params', NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS),
-]
-NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS = struct_NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS
-class struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS._fields_ = [
-  ('numClients', NvU32),
-  ('clientHandles', (NvHandle * 200)),
-]
-NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS = struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS
-class struct_NV0080_CTRL_FB_GET_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FB_GET_CAPS_PARAMS._fields_ = [
-  ('capsTblSize', NvU32),
-  ('capsTbl', NvP64),
-]
-NV0080_CTRL_FB_GET_CAPS_PARAMS = struct_NV0080_CTRL_FB_GET_CAPS_PARAMS
-class struct_NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS._fields_ = [
-  ('Size', NvU64),
-  ('Address', NvU64),
-  ('AddressSpace', NvU32),
-  ('MaxCompbitLine', NvU32),
-  ('comptagsPerCacheLine', NvU32),
-  ('cacheLineSize', NvU32),
-  ('cacheLineSizePerSlice', NvU32),
-  ('cacheLineFetchAlignment', NvU32),
-  ('backingStoreBase', NvU64),
-  ('gobsPerComptagPerSlice', NvU32),
-  ('backingStoreCbcBase', NvU32),
-  ('comptaglineAllocationPolicy', NvU32),
-  ('privRegionStartOffset', NvU64),
-  ('cbcCoveragePerSlice', NvU32),
-]
-NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS = struct_NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS
-class struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS._fields_ = [
-  ('capsTbl', (NvU8 * 3)),
-]
-NV0080_CTRL_FB_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS
-class struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS._fields_ = [
-  ('value', NvU32),
-]
-NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS = struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS
-enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY = CEnum(ctypes.c_uint)
-NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_DEFAULT = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_DEFAULT', 0)
-NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_NONCONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_NONCONTIGUOUS', 1)
-NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_CONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_CONTIGUOUS', 2)
-NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_ALLOW_NONCONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_ALLOW_NONCONTIGUOUS', 3)
-
-NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY
 class struct_NV0080_CTRL_GR_GET_CAPS_PARAMS(ctypes.Structure): pass
 struct_NV0080_CTRL_GR_GET_CAPS_PARAMS._fields_ = [
   ('capsTblSize', NvU32),
@@ -3634,6 +3562,20 @@ struct_NV0080_CTRL_GR_GET_INFO_PARAMS._fields_ = [
   ('grInfoList', NvP64),
 ]
 NV0080_CTRL_GR_GET_INFO_PARAMS = struct_NV0080_CTRL_GR_GET_INFO_PARAMS
+enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint)
+NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE', 0)
+NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC', 1)
+NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC', 2)
+
+NV0080_CTRL_GR_TPC_PARTITION_MODE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE
+class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS._fields_ = [
+  ('hChannelGroup', NvHandle),
+  ('mode', NV0080_CTRL_GR_TPC_PARTITION_MODE),
+  ('bEnableAllTpcs', NvBool),
+  ('grRouteInfo', NV0080_CTRL_GR_ROUTE_INFO),
+]
+NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS
 NV0080_CTRL_GR_GET_TPC_PARTITION_MODE_PARAMS = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS
 NV0080_CTRL_GR_SET_TPC_PARTITION_MODE_PARAMS = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS
 class struct_NV0080_CTRL_GR_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
@@ -3650,1453 +3592,159 @@ struct_NV0080_CTRL_GR_GET_INFO_V2_PARAMS._fields_ = [
   ('grRouteInfo', NV0080_CTRL_GR_ROUTE_INFO),
 ]
 NV0080_CTRL_GR_GET_INFO_V2_PARAMS = struct_NV0080_CTRL_GR_GET_INFO_V2_PARAMS
-class struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS._fields_ = [
+class struct_NV0080_CTRL_HOST_GET_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_HOST_GET_CAPS_PARAMS._fields_ = [
   ('capsTblSize', NvU32),
   ('capsTbl', NvP64),
+]
+NV0080_CTRL_HOST_GET_CAPS_PARAMS = struct_NV0080_CTRL_HOST_GET_CAPS_PARAMS
+class struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS._fields_ = [
+  ('capsTbl', (NvU8 * 3)),
+]
+NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS
+class struct_NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS._fields_ = [
+  ('params', NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS),
+]
+NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS = struct_NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS
+class struct_NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS._fields_ = [
+  ('params', NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS),
+]
+NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS = struct_NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS
+class struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS._fields_ = [
+  ('numClients', NvU32),
+  ('clientHandles', (NvHandle * 200)),
+]
+NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS = struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS
+class struct_NV0080_CTRL_MSENC_GET_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_MSENC_GET_CAPS_PARAMS._fields_ = [
+  ('capsTblSize', NvU32),
+  ('capsTbl', NvP64),
+]
+NV0080_CTRL_MSENC_GET_CAPS_PARAMS = struct_NV0080_CTRL_MSENC_GET_CAPS_PARAMS
+class struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS._fields_ = [
+  ('capsTbl', (NvU8 * 4)),
   ('instanceId', NvU32),
 ]
-NV0080_CTRL_BSP_GET_CAPS_PARAMS = struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS
-class struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2(ctypes.Structure): pass
-struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2._fields_ = [
-  ('capsTbl', (NvU8 * 8)),
+NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS
+class struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS._fields_ = [
+  ('capsTbl', (NvU8 * 9)),
   ('instanceId', NvU32),
 ]
-NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2 = struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2
-class struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS._fields_ = [
-  ('gspFeatures', NvU32),
-  ('bValid', NvBool),
-  ('bDefaultGspRmGpu', NvBool),
-  ('firmwareVersion', (NvU8 * 64)),
+NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS
+class struct_NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS._fields_ = [
+  ('bActivate', NvBool),
 ]
-NV2080_CTRL_GSP_GET_FEATURES_PARAMS = struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS
-class struct_NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT(ctypes.Structure): pass
-struct_NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT._fields_ = [
-  ('allocatedSize', NvU64),
-  ('usableSize', NvU64),
-  ('memTrackOverhead', NvU64),
-  ('allocationCount', NvU32),
+NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS = struct_NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS
+class struct_NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS._fields_ = [
+  ('bCudaLimit', NvBool),
 ]
-NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT = struct_NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT
-class struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS._fields_ = [
-  ('gfid', NvU32),
-  ('managedSize', NvU64),
-  ('largestFreeChunkSize', NvU64),
-  ('current', NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT),
-  ('peak', NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT),
-]
-NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS = struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS
-class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS._fields_ = [
-  ('allocatedSize', NvU64),
-  ('peakAllocatedSize', NvU64),
-  ('managedSize', NvU64),
-  ('allocationCount', NvU32),
-  ('peakAllocationCount', NvU32),
-  ('largestFreeChunkSize', NvU64),
-]
-NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS
-class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS(ctypes.Structure): pass
-struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS._fields_ = [
-  ('allocations', NvU32),
-  ('peakAllocations', NvU32),
-  ('objectSize', NvU64),
-]
-NV2080_CTRL_GSP_LIBOS_POOL_STATS = struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS
-class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS._fields_ = [
-  ('poolStats', (NV2080_CTRL_GSP_LIBOS_POOL_STATS * 64)),
-  ('totalHeapSize', NvU64),
-  ('poolCount', NvU8),
-]
-NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS = struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS
-class struct_NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS._fields_ = [
-  ('flcnID', NvU32),
-  ('heapSize', NvU32),
-  ('heapFree', NvU32),
-]
-NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS = struct_NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS
-class struct_NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS._fields_ = [
-  ('engine', NvU32),
-  ('engineArch', NvU32),
-]
-NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS = struct_NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS
-class struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER(ctypes.Structure): pass
-struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER._fields_ = [
-  ('mask', (NvU8 * 36)),
-]
-NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER = struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER
-class struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS._fields_ = [
-  ('engine', NvU32),
-  ('pageSize', NvU32),
-  ('offset', NvUPtr),
-  ('size', NvU32),
-  ('queueFeatureId', NvU8),
-]
-NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS
-class struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS._fields_ = [
-  ('engine', NvU32),
-  ('eventFilter', NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER),
-  ('queueId', NvU8),
-]
-NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS
-NV2080_CTRL_FLCN_USTREAMER_CONTROL_GET_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS
-NV2080_CTRL_FLCN_USTREAMER_CONTROL_SET_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS
-class struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS._fields_ = [
-  ('hUserClient', NvHandle),
-  ('hChannel', NvHandle),
-  ('alignment', NvU64),
-  ('size', NvU64),
-  ('bufferHandle', NvP64),
-  ('pageCount', NvU64),
-  ('physAddr', NvU64),
-  ('aperture', NvU32),
-  ('kind', NvU32),
-  ('pageSize', NvU32),
-  ('bIsContigous', NvBool),
-  ('bDeviceDescendant', NvBool),
-  ('uuid', (NvU8 * 16)),
-]
-NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS
-class struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS._fields_ = [
-  ('hChannel', NvHandle),
-  ('totalBufferSize', NvU64),
-]
-NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS = struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS
-class struct_NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS._fields_ = [
-  ('hChannel', NvHandle),
-  ('virtAddress', NvU64),
-  ('bufferPtr', NvP64),
-  ('bufferSize', NvU32),
-]
-NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS = struct_NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS
-class struct_NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS._fields_ = [
-  ('errorCount', NvU32),
-]
-NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS = struct_NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS
-class struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS._fields_ = [
-  ('whichBuffer', NvU32),
-  ('outputRecordSize', NvU32),
-  ('recordBuffer', (NvU8 * 8192)),
-]
-NV2080_CTRL_RC_GET_ERROR_V2_PARAMS = struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS
-class struct_NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS._fields_ = [
-  ('watchdogStatusFlags', NvU32),
-]
-NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS = struct_NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS
-class struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS._fields_ = [
-  ('rcEnable', NvU32),
-]
-NV2080_CTRL_CMD_RC_RECOVERY_PARAMS = struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS
-NV2080_CTRL_SET_RC_RECOVERY_PARAMS = struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS
-NV2080_CTRL_GET_RC_RECOVERY_PARAMS = struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS
-class struct_NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS._fields_ = [
+NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS = struct_NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS
+class struct_NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS._fields_ = [
   ('cmd', NvU32),
-  ('status', NvS32),
 ]
-NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS = struct_NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS
-class struct_NV2080_CTRL_CMD_RC_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_RC_INFO_PARAMS._fields_ = [
-  ('rcMode', NvU32),
-  ('rcBreak', NvU32),
-]
-NV2080_CTRL_CMD_RC_INFO_PARAMS = struct_NV2080_CTRL_CMD_RC_INFO_PARAMS
-NV2080_CTRL_SET_RC_INFO_PARAMS = struct_NV2080_CTRL_CMD_RC_INFO_PARAMS
-NV2080_CTRL_GET_RC_INFO_PARAMS = struct_NV2080_CTRL_CMD_RC_INFO_PARAMS
-class struct_NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('engine', NvU32),
-  ('hVASpace', NvHandle),
-]
-NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS = struct_NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS
-NV2080_CTRL_DMA_INFO = struct_NVXXXX_CTRL_XXX_INFO
-class struct_NV2080_CTRL_DMA_GET_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_DMA_GET_INFO_PARAMS._fields_ = [
-  ('dmaInfoTblSize', NvU32),
-  ('dmaInfoTbl', (NV2080_CTRL_DMA_INFO * 256)),
-]
-NV2080_CTRL_DMA_GET_INFO_PARAMS = struct_NV2080_CTRL_DMA_GET_INFO_PARAMS
-class struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO._fields_ = [
-  ('srcAddr', NvU32),
-  ('dstAddr', NvU32),
-  ('relComptagIndex', NvU16),
-]
-NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO = struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS._fields_ = [
-  ('capsTbl', NvU32),
-  ('lowestNvlinkVersion', NvU8),
-  ('highestNvlinkVersion', NvU8),
-  ('lowestNciVersion', NvU8),
-  ('highestNciVersion', NvU8),
-  ('discoveredLinkMask', NvU32),
-  ('enabledLinkMask', NvU32),
-  ('discoveredLinks', NvU64),
-  ('enabledLinks', NvU64),
-]
-NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS
-class struct_NV2080_CTRL_NVLINK_DEVICE_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_DEVICE_INFO._fields_ = [
-  ('deviceIdFlags', NvU32),
-  ('domain', NvU32),
-  ('bus', NvU16),
-  ('device', NvU16),
-  ('function', NvU16),
-  ('pciDeviceId', NvU32),
-  ('deviceType', NvU64),
-  ('deviceUUID', (NvU8 * 16)),
-  ('fabricRecoveryStatusMask', NvU32),
-]
-NV2080_CTRL_NVLINK_DEVICE_INFO = struct_NV2080_CTRL_NVLINK_DEVICE_INFO
-class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO._fields_ = [
-  ('capsTbl', NvU32),
-  ('phyType', NvU8),
-  ('subLinkWidth', NvU8),
-  ('linkState', NvU32),
-  ('rxSublinkStatus', NvU8),
-  ('txSublinkStatus', NvU8),
-  ('bLaneReversal', NvBool),
-  ('nvlinkVersion', NvU8),
-  ('nciVersion', NvU8),
-  ('phyVersion', NvU8),
-  ('nvlinkLinkClockKHz', NvU32),
-  ('nvlinkCommonClockSpeedKHz', NvU32),
-  ('nvlinkRefClkSpeedKHz', NvU32),
-  ('nvlinkCommonClockSpeedMhz', NvU32),
-  ('nvlinkLineRateMbps', NvU32),
-  ('nvlinkLinkClockMhz', NvU32),
-  ('nvlinkRefClkType', NvU8),
-  ('nvlinkLinkDataRateKiBps', NvU32),
-  ('nvlinkRefClkSpeedMhz', NvU32),
-  ('connected', NvBool),
-  ('loopProperty', NvU8),
-  ('remoteDeviceLinkNumber', NvU8),
-  ('localDeviceLinkNumber', NvU8),
-  ('remoteLinkSid', NvU64),
-  ('localLinkSid', NvU64),
-  ('laneRxdetStatusMask', NvU32),
-  ('nvlinkMinL1Threshold', NvU32),
-  ('nvlinkMaxL1Threshold', NvU32),
-  ('nvlinkL1ThresholdUnits', NvU32),
-  ('remoteDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
-  ('localDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
-]
-NV2080_CTRL_NVLINK_LINK_STATUS_INFO = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO
-enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT = CEnum(ctypes.c_uint)
-NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT.define('NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US', 0)
-NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT.define('NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US', 1)
-
-NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS._fields_ = [
-  ('enabledLinkMask', NvU32),
-  ('bSublinkStateInst', NvBool),
-  ('linkInfo', (NV2080_CTRL_NVLINK_LINK_STATUS_INFO * 64)),
-]
-NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS
-class struct_NV2080_CTRL_NVLINK_ERR_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_ERR_INFO._fields_ = [
-  ('TLErrlog', NvU32),
-  ('TLIntrEn', NvU32),
-  ('TLCTxErrStatus0', NvU32),
-  ('TLCTxErrStatus1', NvU32),
-  ('TLCTxSysErrStatus0', NvU32),
-  ('TLCRxErrStatus0', NvU32),
-  ('TLCRxErrStatus1', NvU32),
-  ('TLCRxSysErrStatus0', NvU32),
-  ('TLCTxErrLogEn0', NvU32),
-  ('TLCTxErrLogEn1', NvU32),
-  ('TLCTxSysErrLogEn0', NvU32),
-  ('TLCRxErrLogEn0', NvU32),
-  ('TLCRxErrLogEn1', NvU32),
-  ('TLCRxSysErrLogEn0', NvU32),
-  ('MIFTxErrStatus0', NvU32),
-  ('MIFRxErrStatus0', NvU32),
-  ('NVLIPTLnkErrStatus0', NvU32),
-  ('NVLIPTLnkErrLogEn0', NvU32),
-  ('NVLIPTLnkCtrlLinkStateRequest', NvU32),
-  ('DLSpeedStatusTx', NvU32),
-  ('DLSpeedStatusRx', NvU32),
-  ('NVLDLRxSlsmErrCntl', NvU32),
-  ('NVLDLTopLinkState', NvU32),
-  ('NVLDLTopIntr', NvU32),
-  ('DLStatMN00', NvU32),
-  ('DLStatUC01', NvU32),
-  ('MinionNvlinkLinkIntr', NvU32),
-  ('bExcessErrorDL', NvBool),
-]
-NV2080_CTRL_NVLINK_ERR_INFO = struct_NV2080_CTRL_NVLINK_ERR_INFO
-class struct_NV2080_CTRL_NVLINK_COMMON_ERR_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_COMMON_ERR_INFO._fields_ = [
-  ('NVLIPTErrStatus0', NvU32),
-  ('NVLIPTErrLogEn0', NvU32),
-]
-NV2080_CTRL_NVLINK_COMMON_ERR_INFO = struct_NV2080_CTRL_NVLINK_COMMON_ERR_INFO
-class struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('linkErrInfo', (NV2080_CTRL_NVLINK_ERR_INFO * 64)),
-  ('ioctrlMask', NvU32),
-  ('commonErrInfo', (NV2080_CTRL_NVLINK_COMMON_ERR_INFO * 3)),
-  ('ErrInfoFlags', NvU8),
-]
-NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES._fields_ = [
-  ('bTx0TlCounterOverflow', NvBool),
-  ('bTx1TlCounterOverflow', NvBool),
-  ('bRx0TlCounterOverflow', NvBool),
-  ('bRx1TlCounterOverflow', NvBool),
-  ('value', (NvU64 * 32)),
-]
-NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES
-class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS._fields_ = [
-  ('counterMask', NvU32),
-  ('linkMask', NvU64),
-  ('counters', (NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES * 64)),
-]
-NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS
-class struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS._fields_ = [
-  ('counterMask', NvU32),
-  ('linkMask', NvU64),
-]
-NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS
-class struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES._fields_ = [
-  ('overFlow', NvBool),
-  ('value', NvU64),
-]
-NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES = struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES
-class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS._fields_ = [
-  ('linkMask', NvU64),
-  ('counterMask', (NvU64 * 2)),
-  ('counter', ((NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES * 28) * 64)),
-]
-NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS
-class struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS._fields_ = [
-  ('linkMask', NvU64),
-  ('counterMask', (NvU64 * 2)),
-]
-NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS
-class struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('bFatalError', NvBool),
-]
-NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS
-enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE = CEnum(ctypes.c_uint)
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR', 1)
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR', 2)
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR', 3)
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_LINK_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_LINK_ERR', 4)
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_MAX = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_MAX', 5)
-
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE
-class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG._fields_ = [
-  ('errType', NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE),
-  ('errSettings', NvU64),
-]
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG = struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG
-class struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS._fields_ = [
-  ('linkMask', NvU64),
-  ('errCfg', (NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG * 64)),
-]
-NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS
-class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO._fields_ = [
-  ('txErrInfo', NvU32),
-  ('packetErrInfo', NvU32),
-  ('authErrInfo', NvU32),
-  ('linkStatus', NvU32),
-  ('errInjectStatus', NvU32),
-]
-NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO = struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO
-class struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS._fields_ = [
-  ('linkMask', NvU64),
-  ('errInfo', (NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO * 64)),
-]
-NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS
-class struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('numRecoveries', (NvU32 * 64)),
-]
-NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('remoteType', NvU32),
-]
-NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('supportedCounts', NvU64),
-  ('fatalErrorCounts', (NvU8 * 63)),
-]
-NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS
-class struct_NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE._fields_ = [
-  ('errorsPerMinute', NvU32),
-  ('timestamp', NvU32),
-]
-NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE = struct_NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE
-class struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('numDailyMaxNonfatalErrorRates', NvU32),
-  ('dailyMaxNonfatalErrorRates', (NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE * 5)),
-  ('numMonthlyMaxNonfatalErrorRates', NvU32),
-  ('monthlyMaxNonfatalErrorRates', (NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE * 5)),
-]
-NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS._fields_ = [
-  ('bEnabled', NvBool),
-]
-NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS
-class struct_NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS._fields_ = [
-  ('linkId', NvU8),
-  ('params', NvU32),
-]
-NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('powerState', NvU32),
-]
-NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('powerState', NvU32),
-]
-NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS
-enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE = CEnum(ctypes.c_uint)
-TLC_RX_LNK = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE.define('TLC_RX_LNK', 0)
-TLC_TX_SYS = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE.define('TLC_TX_SYS', 1)
-
-NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE
-enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE = CEnum(ctypes.c_uint)
-TX_SYS_TX_RSP_STATUS_HW_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_HW_ERR', 0)
-TX_SYS_TX_RSP_STATUS_UR_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_UR_ERR', 1)
-TX_SYS_TX_RSP_STATUS_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_PRIV_ERR', 2)
-
-NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE
-enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE = CEnum(ctypes.c_uint)
-RX_LNK_RX_RSP_STATUS_HW_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_HW_ERR', 0)
-RX_LNK_RX_RSP_STATUS_UR_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_UR_ERR', 1)
-RX_LNK_RX_RSP_STATUS_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_PRIV_ERR', 2)
-
-NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE
-class union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE(ctypes.Union): pass
-union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE._fields_ = [
-  ('txSysErrorType', NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE),
-  ('rxLnkErrorType', NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE),
-]
-NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE = union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE
-class struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('device', NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE),
-  ('bBroadcast', NvBool),
-  ('errorType', NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE),
-]
-NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS
-class struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('numLanes', NvU8),
-  ('figureOfMeritValues', (NvU16 * 4)),
-]
-NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS._fields_ = [
-  ('peerMask', NvU32),
-  ('bEnable', NvBool),
-]
-NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS
-class struct_NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS._fields_ = [
-  ('linkId', NvU8),
-  ('lane', NvU8),
-  ('addr', NvU16),
-  ('phyConfigData', NvU32),
-]
-NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS = struct_NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS
-class struct_NV2080_CTRL_NVLINK_LANE_ERROR(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_LANE_ERROR._fields_ = [
-  ('bValid', NvBool),
-  ('eccErrorValue', NvU32),
-  ('overflowed', NvBool),
-]
-NV2080_CTRL_NVLINK_LANE_ERROR = struct_NV2080_CTRL_NVLINK_LANE_ERROR
-class struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR._fields_ = [
-  ('errorLane', (NV2080_CTRL_NVLINK_LANE_ERROR * 4)),
-  ('eccDecFailed', NvU32),
-  ('eccDecFailedOverflowed', NvBool),
-]
-NV2080_CTRL_NVLINK_LINK_ECC_ERROR = struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR
-class struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('errorLink', (NV2080_CTRL_NVLINK_LINK_ECC_ERROR * 64)),
-]
-NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS
-class struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES._fields_ = [
-  ('value', (NvU64 * 4)),
-]
-NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES = struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES
-class struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS._fields_ = [
-  ('counterMask', NvU16),
-  ('linkMask', NvU64),
-  ('counters', (NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES * 64)),
-]
-NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS
-class struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS._fields_ = [
-  ('bLockPowerMode', NvBool),
-]
-NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('counterValidMask', NvU32),
-  ('counterValues', (NvU32 * 16)),
-]
-NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('loopbackMode', NvU8),
-]
-NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO._fields_ = [
-  ('bValid', NvBool),
-  ('passCount', NvU16),
-  ('failCount', NvU16),
-]
-NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO = struct_NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO
-class struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('refreshCount', (NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO * 32)),
-]
-NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS
-class struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-]
-NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS._fields_ = [
-  ('bGet', NvBool),
-  ('addr', NvU64),
-]
-NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS
-class struct_NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS._fields_ = [
-  ('discoveredLinks', NvU64),
-  ('connectedLinksMask', NvU32),
-  ('bridgeSensableLinks', NvU64),
-  ('bridgedLinks', NvU32),
-  ('initDisabledLinksMask', NvU32),
-  ('vbiosDisabledLinkMask', NvU64),
-  ('initializedLinks', NvU32),
-  ('bEnableTrainingAtLoad', NvBool),
-  ('bEnableSafeModeAtLoad', NvBool),
-]
-NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS
-class struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS._fields_ = [
-  ('initDisabledLinksMask', NvU32),
-  ('bSkipHwNvlinkDisable', NvBool),
-]
-NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS = struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS
-enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND = CEnum(ctypes.c_uint)
-NVLINK_EOM_CONTROL_START_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_START_EOM', 0)
-NVLINK_EOM_CONTROL_END_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_END_EOM', 1)
-NVLINK_EOM_CONTROL_CONFIG_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_CONFIG_EOM', 2)
-NVLINK_EOM_CONTROL_FULL_EOM_SEQUENCE = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_FULL_EOM_SEQUENCE', 3)
-
-NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND
-class struct_NV2080_CTRL_NVLINK_EOM_MEASUREMENT(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_EOM_MEASUREMENT._fields_ = [
-  ('upper', NvU8),
-  ('middle', NvU8),
-  ('lower', NvU8),
-  ('composite', NvU8),
-]
-NV2080_CTRL_NVLINK_EOM_MEASUREMENT = struct_NV2080_CTRL_NVLINK_EOM_MEASUREMENT
-class struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS._fields_ = [
-  ('cmd', NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND),
-  ('linkId', NvU32),
-  ('params', NvU32),
-  ('measurements', (NV2080_CTRL_NVLINK_EOM_MEASUREMENT * 4)),
-]
-NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS = struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS._fields_ = [
-  ('data', (NvU8 * 5120)),
-  ('dataSize', NvU32),
-]
-NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS._fields_ = [
-  ('l1Threshold', NvU32),
-  ('l1ExitThreshold', NvU32),
-]
-NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS = struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS._fields_ = [
-  ('l1Threshold', NvU32),
-  ('l1ExitThreshold', NvU32),
-]
-NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS = struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS
-class struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS._fields_ = [
-  ('buffer', (NvU8 * 5120)),
-  ('dataSize', NvU32),
-]
-NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS = struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS
-class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS._fields_ = [
-  ('linkId', NvU32),
-  ('bIsGpuDegraded', NvBool),
-]
-NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS = struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS
-class struct_NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS._fields_ = [
-  ('bIsEnoughNvLink', NvBool),
-  ('numBridge', NvU32),
-  ('bridgePresenceMask', NvU32),
-]
-NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS = struct_NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS
-class struct_NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS._fields_ = [
-  ('linkId', NvU32),
-]
-NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS = struct_NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS
-class struct_NV2080_CTRL_NVLINK_PORT_EVENT(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PORT_EVENT._fields_ = [
-  ('portEventType', NvU32),
-  ('gpuId', NvU32),
-  ('linkId', NvU32),
-  ('time', NvU64),
-]
-NV2080_CTRL_NVLINK_PORT_EVENT = struct_NV2080_CTRL_NVLINK_PORT_EVENT
-class struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS._fields_ = [
-  ('portEventIndex', NvU64),
-  ('nextPortEventIndex', NvU64),
-  ('portEventCount', NvU32),
-  ('bOverflow', NvBool),
-  ('portEvent', (NV2080_CTRL_NVLINK_PORT_EVENT * 64)),
-]
-NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS
-class struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS._fields_ = [
-  ('linkId', NvU32),
-]
-NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS = struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS
-class struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS._fields_ = [
-  ('bReducedNvlinkConfig', NvBool),
-]
-NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS = struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_DATA(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_DATA._fields_ = [
-  ('data', (NvU8 * 496)),
-]
-NV2080_CTRL_NVLINK_PRM_DATA = struct_NV2080_CTRL_NVLINK_PRM_DATA
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('plane_ind', NvU8),
-  ('admin_status', NvU8),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('swid', NvU8),
-  ('e', NvU8),
-  ('fd', NvU8),
-  ('ps_e', NvU8),
-  ('ls_e', NvU8),
-  ('ee_ps', NvU8),
-  ('ee_ls', NvU8),
-  ('ee', NvU8),
-  ('ase', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('lane_mask', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('local_tx_precoding_admin', NvU8),
-  ('local_rx_precoding_admin', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('test_mode', NvBool),
-  ('plane_ind', NvU8),
-  ('port_type', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('fec_override_admin_10g_40g', NvU8),
-  ('fec_override_admin_25g', NvU8),
-  ('fec_override_admin_50g', NvU8),
-  ('fec_override_admin_100g', NvU8),
-  ('fec_override_admin_56g', NvU8),
-  ('rs_fec_correction_bypass_admin', NvU8),
-  ('fec_override_admin_200g_4x', NvU16),
-  ('fec_override_admin_400g_8x', NvU16),
-  ('fec_override_admin_50g_1x', NvU16),
-  ('fec_override_admin_100g_2x', NvU16),
-  ('fec_override_admin_400g_4x', NvU16),
-  ('fec_override_admin_800g_8x', NvU16),
-  ('fec_override_admin_100g_1x', NvU16),
-  ('fec_override_admin_200g_2x', NvU16),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('l1_req_en', NvBool),
-  ('l1_fw_req_en', NvBool),
-  ('l1_cap_adv', NvBool),
-  ('l1_fw_cap_adv', NvBool),
-  ('hp_queues_bitmap', NvU32),
-  ('l1_hw_active_time', NvU16),
-  ('l1_hw_inactive_time', NvU16),
-  ('qem', (NvU8 * 8)),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('access_reg_group', NvU8),
-  ('feature_group', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('slot_index', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('slot_index', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('slot_index', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('slot_index', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('itre', NvBool),
-  ('i_e', NvU8),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('protocol', NvU8),
-  ('admin_mtu', NvU16),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('width', NvU8),
-  ('plane_ind', NvU8),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('m_lane_m', NvBool),
-  ('rxtx', NvBool),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('trap_id', NvU16),
-  ('action', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('port_type', NvU8),
-  ('plane_ind', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('page_select', NvU8),
-  ('module_info_ext', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('le', NvBool),
-  ('port_type', NvU8),
-  ('lane', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('sw', NvBool),
-  ('dm_ig', NvBool),
-  ('p', NvBool),
-  ('e', NvBool),
-  ('modulation', NvU8),
-  ('prbs_mode_admin', NvU8),
-  ('prbs_fec_admin', NvBool),
-  ('lane_rate_admin', NvU16),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('grp', NvU8),
-  ('port_type', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('swid', NvU8),
-  ('prio_tc', NvU8),
-  ('grp_profile', NvU8),
-  ('plane_ind', NvU8),
-  ('counters_cap', NvBool),
-  ('lp_gl', NvBool),
-  ('clr', NvBool),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('port_type', NvU8),
-  ('phy_test_mode_admin', NvU8),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('swid', NvU8),
-  ('plane_ind', NvU8),
-  ('phy_status_admin', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('plane_ind', NvU8),
-  ('port_type', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('hist_type', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('c_db', NvBool),
-  ('port_type', NvU8),
-  ('lane_speed', NvU8),
-  ('lane', NvU8),
-  ('tx_policy', NvBool),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('lp_msb', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('le', NvBool),
-  ('port_type', NvU8),
-  ('lane', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-  ('sw', NvBool),
-  ('dm_ig', NvBool),
-  ('p', NvBool),
-  ('s', NvBool),
-  ('e', NvBool),
-  ('modulation', NvU8),
-  ('prbs_mode_admin', NvU8),
-  ('lane_rate_oper', NvU16),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('proto_mask', NvU8),
-  ('transmit_allowed', NvBool),
-  ('plane_ind', NvU8),
-  ('port_type', NvU8),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('tx_ready_e', NvU8),
-  ('ee_tx_ready', NvBool),
-  ('an_disable_admin', NvBool),
-  ('ext_eth_proto_admin', NvU32),
-  ('eth_proto_admin', NvU32),
-  ('ib_proto_admin', NvU16),
-  ('ib_link_width_admin', NvU16),
-  ('xdr_2x_slow_admin', NvBool),
-  ('force_lt_frames_admin', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('port_type', NvU8),
-  ('lane', NvU8),
-  ('lp_msb', NvU8),
-  ('pnat', NvU8),
-  ('local_port', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('admin_status', NvU8),
-  ('module', NvU8),
-  ('slot_index', NvU8),
-  ('rst', NvBool),
-  ('e', NvU8),
-  ('ee', NvBool),
-  ('ase', NvBool),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('plane_ind', NvU8),
-  ('port_type', NvU8),
-  ('op_mod', NvBool),
-  ('apply_im', NvBool),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('lb_en', NvU16),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS._fields_ = [
-  ('counterMask', (NvU64 * 2)),
-]
-NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('segment_type', NvU16),
-  ('seq_num', NvU8),
-  ('vhca_id_valid', NvBool),
-  ('inline_dump', NvBool),
-  ('vhca_id', NvU16),
-  ('index1', NvU32),
-  ('index2', NvU32),
-  ('num_of_obj2', NvU16),
-  ('num_of_obj1', NvU16),
-  ('device_opaque', NvU64),
-  ('mkey', NvU32),
-  ('address', NvU64),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('trace_owner', NvBool),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('trace_mode', NvU8),
-  ('log_trace_buffer_size', NvU8),
-  ('trace_mkey', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('modify_field_select', NvU16),
-  ('arm_event', NvBool),
-  ('trace_status', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('enable_all', NvU8),
-  ('log_delay', NvU8),
-  ('source_id_bitmask', (NvU32 * 8)),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('log_level', NvU8),
-  ('log_bit_mask', NvU32),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('warning_inactive_time', NvU8),
-  ('warning_active_time', NvU8),
-  ('critical_inactive_time', NvU8),
-  ('critical_active_time', NvU8),
-  ('cc', NvBool),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('cnt_64bit', NvU8),
-  ('stop_at_ff', NvBool),
-  ('counter_rst', NvBool),
-  ('counter_en', NvBool),
-  ('force_count_mask', NvU8),
-  ('cnt_type', (NvU8 * 8)),
-  ('cnt_val', (NvU8 * 8)),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS
-class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS._fields_ = [
-  ('bWrite', NvBool),
-  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
-  ('ib_port', NvU16),
-  ('lp_msb', NvU8),
-  ('local_port', NvU8),
-  ('split_num', NvU8),
-]
-NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS._fields_ = [
-  ('ibGuid', (NvU8 * 16)),
-  ('rackGuid', (NvU8 * 16)),
-  ('chassisPhysicalSlotNumber', NvU8),
-  ('computeSlotIndex', NvU8),
-  ('nodeIndex', NvU8),
-  ('peerType', NvU8),
-  ('moduleId', NvU8),
-]
-NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS
-class struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD._fields_ = [
-  ('pllIndex', NvU8),
-  ('address', NvU16),
-]
-NV2080_CTRL_NVLINK_UPHY_CLN_CMD = struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD
-class struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('uphyCmd', (NV2080_CTRL_NVLINK_UPHY_CLN_CMD * 18)),
-  ('data', (NvU32 * 18)),
-]
-NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS = struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS._fields_ = [
-  ('rbmModesList', (NvU8 * 23)),
-  ('rbmTotalModes', NvU8),
-]
-NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS._fields_ = [
-  ('rbmMode', NvU8),
-]
-NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS._fields_ = [
-  ('rbmMode', NvU8),
-]
-NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS._fields_ = [
-  ('localDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
-]
-NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS
-enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY = CEnum(ctypes.c_uint)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_NONFATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_NONFATAL', 0)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_APP_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_APP_FATAL', 1)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_FATAL', 2)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_DEGRADATION = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_DEGRADATION', 3)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_WATCHDOG_TIMEOUT = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_WATCHDOG_TIMEOUT', 4)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MVB_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MVB_NON_FATAL', 5)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MSE = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MSE', 6)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_NON_FATAL', 7)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_FATAL', 8)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_PRIV_ERR', 9)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_NON_FATAL', 10)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_FATAL', 11)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TREX_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TREX_NON_FATAL', 12)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_NON_FATAL', 13)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_FATAL', 14)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_NON_FATAL', 15)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_FATAL', 16)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_NON_FATAL', 17)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_FATAL', 18)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_NON_FATAL', 19)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_FATAL', 20)
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MAX = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MAX', 21)
-
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY
-class struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('severity', NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY),
-]
-NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS
-enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE = CEnum(ctypes.c_uint)
-NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DISABLED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DISABLED', 0)
-NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_TRIGGER_ONCE = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_TRIGGER_ONCE', 1)
-NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_EXITED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_EXITED', 2)
-NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_ENTERED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_ENTERED', 3)
-NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DUTY_CYCLE = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DUTY_CYCLE', 4)
-
-NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE
-class struct_NV2080_CTRL_NVLINK_L1_FORCE_CONFIG(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_L1_FORCE_CONFIG._fields_ = [
-  ('mode', NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE),
-  ('toggleActiveTime', NvU8),
-  ('toggleInactiveTime', NvU8),
-  ('bTrigger', NvBool),
-]
-NV2080_CTRL_NVLINK_L1_FORCE_CONFIG = struct_NV2080_CTRL_NVLINK_L1_FORCE_CONFIG
-class struct_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('config', NV2080_CTRL_NVLINK_L1_FORCE_CONFIG),
-]
-NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS = struct_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS
-class struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS._fields_ = [
-  ('linkMask', NvU32),
-  ('config', (NV2080_CTRL_NVLINK_L1_FORCE_CONFIG * 32)),
-]
-NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS
-class struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO._fields_ = [
-  ('hMemory', NvHandle),
-  ('offset', NvU64),
+NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS = struct_NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS
+class struct_NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS(ctypes.Structure): pass
+struct_NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS._fields_ = [
+  ('subDeviceInstance', NvU32),
+  ('width', NvU16),
+  ('height', NvU16),
+  ('depth', NvU16),
+  ('pitch', NvU16),
+  ('baseAddress', NvU64),
   ('size', NvU64),
 ]
-NV2080_CTRL_DMABUF_MEM_HANDLE_INFO = struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO
-class struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS._fields_ = [
-  ('fd', NvS32),
-  ('totalObjects', NvU32),
-  ('numObjects', NvU32),
-  ('index', NvU32),
-  ('totalSize', NvU64),
-  ('mappingType', NvU8),
-  ('handles', (NV2080_CTRL_DMABUF_MEM_HANDLE_INFO * 128)),
+NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS = struct_NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS
+NV2080_CTRL_BIOS_INFO = struct_NVXXXX_CTRL_XXX_INFO
+class struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS._fields_ = [
+  ('biosInfoListSize', NvU32),
+  ('biosInfoList', NvP64),
 ]
-NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS = struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS._fields_ = [
-  ('dbdf', NvU32),
-  ('gfid', NvU32),
-  ('vgpuType', NvU32),
-  ('vmPid', NvU32),
-  ('swizzId', NvU32),
-  ('numChannels', NvU32),
-  ('numPluginChannels', NvU32),
-  ('chidOffset', (NvU32 * 84)),
-  ('bDisableDefaultSmcExecPartRestore', NvBool),
-  ('numGuestFbSegments', NvU32),
-  ('guestFbPhysAddrList', (NvU64 * 384)),
-  ('guestFbLengthList', (NvU64 * 384)),
-  ('pluginHeapMemoryPhysAddr', NvU64),
-  ('pluginHeapMemoryLength', NvU64),
-  ('ctrlBuffOffset', NvU64),
-  ('initTaskLogBuffOffset', NvU64),
-  ('initTaskLogBuffSize', NvU64),
-  ('vgpuTaskLogBuffOffset', NvU64),
-  ('vgpuTaskLogBuffSize', NvU64),
-  ('kernelLogBuffOffset', NvU64),
-  ('kernelLogBuffSize', NvU64),
-  ('migRmHeapMemoryPhysAddr', NvU64),
-  ('migRmHeapMemoryLength', NvU64),
-  ('bDeviceProfilingEnabled', NvBool),
+NV2080_CTRL_BIOS_GET_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS
+class struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS._fields_ = [
+  ('biosInfoListSize', NvU32),
+  ('biosInfoList', (NV2080_CTRL_BIOS_INFO * 15)),
 ]
-NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS._fields_ = [
-  ('gfid', NvU32),
+NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS
+class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING(ctypes.Structure): pass
+class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value(ctypes.Union): pass
+struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value._fields_ = [
+  ('ascii', (NvU8 * 256)),
+  ('unicode', (NvU16 * 256)),
+  ('hash', NvU16),
 ]
-NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS(ctypes.Structure): pass
-class struct_NVA081_CTRL_VGPU_INFO(ctypes.Structure): pass
-struct_NVA081_CTRL_VGPU_INFO._fields_ = [
-  ('vgpuType', NvU32),
-  ('vgpuName', (NvU8 * 32)),
-  ('vgpuClass', (NvU8 * 32)),
-  ('vgpuSignature', (NvU8 * 128)),
-  ('license', (NvU8 * 128)),
-  ('maxInstance', NvU32),
-  ('numHeads', NvU32),
-  ('maxResolutionX', NvU32),
-  ('maxResolutionY', NvU32),
-  ('maxPixels', NvU32),
-  ('frlConfig', NvU32),
-  ('cudaEnabled', NvU32),
-  ('eccSupported', NvU32),
-  ('gpuInstanceSize', NvU32),
-  ('multiVgpuSupported', NvU32),
-  ('vdevId', NvU64),
-  ('pdevId', NvU64),
-  ('profileSize', NvU64),
-  ('fbLength', NvU64),
-  ('gspHeapSize', NvU64),
-  ('fbReservation', NvU64),
-  ('mappableVideoSize', NvU64),
-  ('encoderCapacity', NvU32),
-  ('bar1Length', NvU64),
-  ('frlEnable', NvU32),
-  ('adapterName', (NvU8 * 64)),
-  ('adapterName_Unicode', (NvU16 * 64)),
-  ('shortGpuNameString', (NvU8 * 64)),
-  ('licensedProductName', (NvU8 * 128)),
-  ('vgpuExtraParams', (NvU32 * 1024)),
-  ('ftraceEnable', NvU32),
-  ('gpuDirectSupported', NvU32),
-  ('nvlinkP2PSupported', NvU32),
-  ('multiVgpuExclusive', NvU32),
-  ('exclusiveType', NvU32),
-  ('exclusiveSize', NvU32),
-  ('gpuInstanceProfileId', NvU32),
-  ('placementSize', NvU32),
-  ('homogeneousPlacementCount', NvU32),
-  ('homogeneousPlacementIds', (NvU32 * 32)),
-  ('heterogeneousPlacementCount', NvU32),
-  ('heterogeneousPlacementIds', (NvU32 * 32)),
+struct_NV2080_CTRL_BIOS_NBSI_REG_STRING._fields_ = [
+  ('size', NvU32),
+  ('type', NvU32),
+  ('value', struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value),
 ]
-NVA081_CTRL_VGPU_INFO = struct_NVA081_CTRL_VGPU_INFO
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS._fields_ = [
-  ('discardVgpuTypes', NvBool),
-  ('vgpuInfoCount', NvU32),
-  ('vgpuInfo', (NVA081_CTRL_VGPU_INFO * 64)),
+NV2080_CTRL_BIOS_NBSI_REG_STRING = struct_NV2080_CTRL_BIOS_NBSI_REG_STRING
+class struct_NV2080_CTRL_BIOS_GET_NBSI_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_BIOS_GET_NBSI_PARAMS._fields_ = [
+  ('module', NvU32),
+  ('path', NV2080_CTRL_BIOS_NBSI_REG_STRING),
+  ('valueName', NV2080_CTRL_BIOS_NBSI_REG_STRING),
+  ('retBuf', NvP64),
+  ('retSize', NvU32),
+  ('errorCode', NvU32),
 ]
-NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS
-class struct_NV2080_GUEST_VM_INFO(ctypes.Structure): pass
-enum_GUEST_VM_INFO_STATE = CEnum(ctypes.c_uint)
-GUEST_VM_INFO_STATE_UNINITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_UNINITIALIZED', 0)
-GUEST_VM_INFO_STATE_INITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_INITIALIZED', 1)
-
-GUEST_VM_INFO_STATE = enum_GUEST_VM_INFO_STATE
-struct_NV2080_GUEST_VM_INFO._fields_ = [
-  ('vmPid', NvU32),
-  ('guestOs', NvU32),
-  ('migrationProhibited', NvU32),
-  ('guestNegotiatedVgpuVersion', NvU32),
-  ('frameRateLimit', NvU32),
-  ('licensed', NvBool),
-  ('licenseState', NvU32),
-  ('licenseExpiryTimestamp', NvU32),
-  ('licenseExpiryStatus', NvU8),
-  ('guestDriverVersion', (NvU8 * 32)),
-  ('guestDriverBranch', (NvU8 * 32)),
-  ('guestVmInfoState', GUEST_VM_INFO_STATE),
+NV2080_CTRL_BIOS_GET_NBSI_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_PARAMS
+class struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS._fields_ = [
+  ('module', NvU32),
+  ('path', NV2080_CTRL_BIOS_NBSI_REG_STRING),
+  ('valueName', NV2080_CTRL_BIOS_NBSI_REG_STRING),
+  ('retBuf', (NvU8 * 256)),
+  ('retSize', NvU32),
+  ('errorCode', NvU32),
 ]
-NV2080_GUEST_VM_INFO = struct_NV2080_GUEST_VM_INFO
-class struct_NV2080_HOST_VGPU_DEVICE(ctypes.Structure): pass
-struct_NV2080_HOST_VGPU_DEVICE._fields_ = [
-  ('gfid', NvU32),
-  ('vgpuPciId', NvU64),
-  ('vgpuDeviceInstanceId', NvU32),
-  ('fbUsed', NvU64),
-  ('encoderCapacity', NvU32),
-  ('eccState', NvU32),
-  ('bDriverLoaded', NvBool),
+NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS
+class struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS._fields_ = [
+  ('globType', NvU16),
+  ('globIndex', NvU8),
+  ('globSource', NvU16),
+  ('retBufOffset', NvU32),
+  ('retBuf', NvP64),
+  ('retSize', NvU32),
+  ('totalObjSize', NvU32),
+  ('errorCode', NvU32),
 ]
-NV2080_HOST_VGPU_DEVICE = struct_NV2080_HOST_VGPU_DEVICE
-class struct_NV2080_VGPU_GUEST(ctypes.Structure): pass
-struct_NV2080_VGPU_GUEST._fields_ = [
-  ('guestVmInfo', NV2080_GUEST_VM_INFO),
-  ('vgpuDevice', NV2080_HOST_VGPU_DEVICE),
+NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS
+class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS._fields_ = [
+  ('BoardID', NvU32),
+  ('chipSKU', (ctypes.c_char * 9)),
+  ('chipSKUMod', (ctypes.c_char * 5)),
+  ('skuConfigVersion', NvU32),
+  ('project', (ctypes.c_char * 5)),
+  ('projectSKU', (ctypes.c_char * 5)),
+  ('CDP', (ctypes.c_char * 6)),
+  ('projectSKUMod', (ctypes.c_char * 2)),
+  ('businessCycle', NvU32),
 ]
-NV2080_VGPU_GUEST = struct_NV2080_VGPU_GUEST
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS._fields_ = [
-  ('numVgpu', NvU32),
-  ('vgpuGuest', (NV2080_VGPU_GUEST * 32)),
+NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
+class struct_NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS._fields_ = [
+  ('vbiosPostTime', NvU64),
 ]
-NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS._fields_ = [
-  ('gfid', NvU32),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS
-class struct_NV2080_VGPU_FB_USAGE(ctypes.Structure): pass
-struct_NV2080_VGPU_FB_USAGE._fields_ = [
-  ('gfid', NvU32),
-  ('fbUsed', NvU64),
-]
-NV2080_VGPU_FB_USAGE = struct_NV2080_VGPU_FB_USAGE
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS._fields_ = [
-  ('vgpuCount', NvU32),
-  ('vgpuFbUsage', (NV2080_VGPU_FB_USAGE * 32)),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS._fields_ = [
-  ('gfid', NvU32),
-  ('encoderCapacity', NvU32),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS._fields_ = [
-  ('gfid', NvU32),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS._fields_ = [
-  ('pgpuString', (NvU8 * 256)),
-  ('pgpuStringSize', NvU32),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS._fields_ = [
-  ('bIsMigrationSupported', NvBool),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS._fields_ = [
-  ('bSupportHeterogeneousTimeSlicedVgpuTypes', NvBool),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS._fields_ = [
-  ('gfid', NvU32),
+NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS = struct_NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS
+class struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS._fields_ = [
+  ('version', NvU32),
   ('flags', NvU32),
 ]
-NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS._fields_ = [
-  ('bFlrDisabled', NvBool),
-]
-NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS = struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS
-class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS._fields_ = [
-  ('bHeterogeneousMode', NvBool),
-]
-NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS
+NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS = struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS
 class struct_NV2080_CTRL_BUS_GET_PCI_INFO_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_BUS_GET_PCI_INFO_PARAMS._fields_ = [
   ('pciDeviceId', NvU32),
@@ -5341,345 +3989,1279 @@ struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS._fields_ = [
   ('atomicsCaps', NvU32),
 ]
 NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS = struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS
-class struct_NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS._fields_ = [
-  ('hshubNcisocMask', NvU32),
-  ('hshubNvlMask', NvU32),
+class struct_NV2080_CTRL_CE_GET_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_CAPS_PARAMS._fields_ = [
+  ('ceEngineType', NvU32),
+  ('capsTblSize', NvU32),
+  ('capsTbl', NvP64),
 ]
-NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS = struct_NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS
-class struct_NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS._fields_ = [
-  ('ecMode', NvU32),
-  ('status', NvU32),
+NV2080_CTRL_CE_GET_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_PARAMS
+class struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS._fields_ = [
+  ('ceEngineType', NvU32),
+  ('capsTbl', (NvU8 * 2)),
 ]
-NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS = struct_NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS
-class struct_NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS._fields_ = [
-  ('action', NvU32),
+NV2080_CTRL_CE_GET_CAPS_V2_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS
+class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS._fields_ = [
+  ('ceEngineType', NvU32),
+  ('pceMask', NvU32),
 ]
-NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS = struct_NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS
-class struct_NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS._fields_ = [
-  ('action', NvU32),
+NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS
+class struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS._fields_ = [
+  ('ceEngineType', NvU32),
+  ('pceLceMap', (NvU32 * 32)),
+  ('grceSharedLceMap', (NvU32 * 4)),
 ]
-NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS = struct_NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS
-class struct_NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS._fields_ = [
-  ('bEnter', NvBool),
+NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS = struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS
+class struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS._fields_ = [
+  ('pceLceMap', (NvU32 * 32)),
+  ('grceConfig', (NvU32 * 4)),
+  ('exposeCeMask', NvU32),
+  ('bUpdateNvlinkPceLce', NvBool),
 ]
-NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS = struct_NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS
-class struct_NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS._fields_ = [
-  ('hNotifierResource', NvHandle),
-  ('notifyDataSize', NvU32),
-  ('hNotifyDataMemory', NvHandle),
-  ('perfmonIdCount', NvU32),
-  ('snapshotBufferSize', NvU32),
-  ('hSnapshotMemory', NvHandle),
+NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS = struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS
+class struct_NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS._fields_ = [
+  ('stubbedCeMask', NvU32),
 ]
-NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS = struct_NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS
-class struct_NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS._fields_ = [
-  ('bVidmemPersistent', NvBool),
-]
-NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS = struct_NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS
-class struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS._fields_ = [
-  ('bUpdateTGP', NvBool),
-]
-NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS = struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS
-NV2080_CTRL_BIOS_INFO = struct_NVXXXX_CTRL_XXX_INFO
-class struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS._fields_ = [
-  ('biosInfoListSize', NvU32),
-  ('biosInfoList', NvP64),
-]
-NV2080_CTRL_BIOS_GET_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS
-class struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS._fields_ = [
-  ('biosInfoListSize', NvU32),
-  ('biosInfoList', (NV2080_CTRL_BIOS_INFO * 15)),
-]
-NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS
-class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING(ctypes.Structure): pass
-class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value(ctypes.Union): pass
-struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value._fields_ = [
-  ('ascii', (NvU8 * 256)),
-  ('unicode', (NvU16 * 256)),
-  ('hash', NvU16),
-]
-struct_NV2080_CTRL_BIOS_NBSI_REG_STRING._fields_ = [
+NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS = struct_NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS
+NV2080_CTRL_CE_GET_PHYSICAL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS
+class struct_NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS._fields_ = [
   ('size', NvU32),
-  ('type', NvU32),
-  ('value', struct_NV2080_CTRL_BIOS_NBSI_REG_STRING_value),
 ]
-NV2080_CTRL_BIOS_NBSI_REG_STRING = struct_NV2080_CTRL_BIOS_NBSI_REG_STRING
-class struct_NV2080_CTRL_BIOS_GET_NBSI_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_GET_NBSI_PARAMS._fields_ = [
-  ('module', NvU32),
-  ('path', NV2080_CTRL_BIOS_NBSI_REG_STRING),
-  ('valueName', NV2080_CTRL_BIOS_NBSI_REG_STRING),
-  ('retBuf', NvP64),
-  ('retSize', NvU32),
-  ('errorCode', NvU32),
+NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS = struct_NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS
+class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS._fields_ = [
+  ('hshubPceMasks', (NvU32 * 32)),
+  ('fbhubPceMask', NvU32),
 ]
-NV2080_CTRL_BIOS_GET_NBSI_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_PARAMS
-class struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS._fields_ = [
-  ('module', NvU32),
-  ('path', NV2080_CTRL_BIOS_NBSI_REG_STRING),
-  ('valueName', NV2080_CTRL_BIOS_NBSI_REG_STRING),
-  ('retBuf', (NvU8 * 256)),
-  ('retSize', NvU32),
-  ('errorCode', NvU32),
+NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS
+class struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS._fields_ = [
+  ('capsTbl', ((NvU8 * 2) * 64)),
+  ('present', NvU64),
 ]
-NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS
-class struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS._fields_ = [
-  ('globType', NvU16),
-  ('globIndex', NvU8),
-  ('globSource', NvU16),
-  ('retBufOffset', NvU32),
-  ('retBuf', NvP64),
-  ('retSize', NvU32),
-  ('totalObjSize', NvU32),
-  ('errorCode', NvU32),
+NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
+NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
+class struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS._fields_ = [
+  ('ceEngineType', NvU32),
+  ('shimInstance', NvU32),
+  ('shimLocalLceIdx', NvU32),
 ]
-NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS
-class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS._fields_ = [
-  ('BoardID', NvU32),
-  ('chipSKU', (ctypes.c_char * 9)),
-  ('chipSKUMod', (ctypes.c_char * 5)),
-  ('skuConfigVersion', NvU32),
-  ('project', (ctypes.c_char * 5)),
-  ('projectSKU', (ctypes.c_char * 5)),
-  ('CDP', (ctypes.c_char * 6)),
-  ('projectSKUMod', (ctypes.c_char * 2)),
-  ('businessCycle', NvU32),
+NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS = struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS
+class struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS._fields_ = [
+  ('pceLceMap', (NvU32 * 32)),
+  ('grceConfig', (NvU32 * 4)),
+  ('exposeCeMask', NvU32),
+  ('bUpdateNvlinkPceLce', NvBool),
+  ('shimInstance', NvU32),
 ]
-NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
-class struct_NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS._fields_ = [
-  ('vbiosPostTime', NvU64),
+NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS = struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS
+class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS._fields_ = [
+  ('connectingHubPceMasks', (NvU32 * 32)),
+  ('fbhubPceMask', NvU32),
+  ('shimInstance', NvU32),
 ]
-NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS = struct_NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS
-class struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS._fields_ = [
-  ('version', NvU32),
+NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS
+enum_NV2080_CTRL_CE_LCE_TYPE = CEnum(ctypes.c_uint)
+NV2080_CTRL_CE_LCE_TYPE_PCIE = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_PCIE', 1)
+NV2080_CTRL_CE_LCE_TYPE_DECOMP = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_DECOMP', 2)
+NV2080_CTRL_CE_LCE_TYPE_SCRUB = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_SCRUB', 3)
+NV2080_CTRL_CE_LCE_TYPE_NVLINK_PEER = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_NVLINK_PEER', 4)
+NV2080_CTRL_CE_LCE_TYPE_C2C = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_C2C', 5)
+NV2080_CTRL_CE_LCE_TYPE_PCIE_RD = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_PCIE_RD', 6)
+NV2080_CTRL_CE_LCE_TYPE_PCIE_WR = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_PCIE_WR', 7)
+NV2080_CTRL_CE_LCE_TYPE_C2C_H2D = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_C2C_H2D', 8)
+NV2080_CTRL_CE_LCE_TYPE_C2C_D2H = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_C2C_D2H', 9)
+
+NV2080_CTRL_CE_LCE_TYPE = enum_NV2080_CTRL_CE_LCE_TYPE
+class struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS._fields_ = [
+  ('lceType', NV2080_CTRL_CE_LCE_TYPE),
+  ('numPces', NvU32),
+  ('numLces', NvU32),
+  ('supportedPceMask', NvU32),
+  ('supportedLceMask', NvU32),
+  ('pcePerHshub', NvU32),
+]
+NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS = struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS
+class struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS._fields_ = [
+  ('decompLceMask', NvU64),
+  ('shimInstance', NvU32),
+]
+NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS
+class struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS._fields_ = [
+  ('lceIndex', NvU32),
+  ('bDecompEnabled', NvBool),
+]
+NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS = struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS
+class struct_NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS._fields_ = [
+  ('hClient', NvHandle),
+  ('hDevice', NvHandle),
+  ('engine', NvU32),
+  ('hVASpace', NvHandle),
+]
+NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS = struct_NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS
+NV2080_CTRL_DMA_INFO = struct_NVXXXX_CTRL_XXX_INFO
+class struct_NV2080_CTRL_DMA_GET_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_DMA_GET_INFO_PARAMS._fields_ = [
+  ('dmaInfoTblSize', NvU32),
+  ('dmaInfoTbl', (NV2080_CTRL_DMA_INFO * 256)),
+]
+NV2080_CTRL_DMA_GET_INFO_PARAMS = struct_NV2080_CTRL_DMA_GET_INFO_PARAMS
+class struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO._fields_ = [
+  ('srcAddr', NvU32),
+  ('dstAddr', NvU32),
+  ('relComptagIndex', NvU16),
+]
+NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO = struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO
+class struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO._fields_ = [
+  ('hMemory', NvHandle),
+  ('offset', NvU64),
+  ('size', NvU64),
+]
+NV2080_CTRL_DMABUF_MEM_HANDLE_INFO = struct_NV2080_CTRL_DMABUF_MEM_HANDLE_INFO
+class struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS._fields_ = [
+  ('fd', NvS32),
+  ('totalObjects', NvU32),
+  ('numObjects', NvU32),
+  ('index', NvU32),
+  ('totalSize', NvU64),
+  ('mappingType', NvU8),
+  ('handles', (NV2080_CTRL_DMABUF_MEM_HANDLE_INFO * 128)),
+]
+NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS = struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS
+class struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS._fields_ = [
+  ('sramParityUncorrectedUnique', NvU64),
+  ('sramSecDedUncorrectedUnique', NvU64),
+  ('sramCorrectedUnique', NvU64),
+  ('dramUncorrectedTotal', NvU64),
+  ('dramCorrectedTotal', NvU64),
+  ('lastClearedTimestamp', NvU32),
+  ('sramBucketL2', NvU64),
+  ('sramBucketSM', NvU64),
+  ('sramBucketPcie', NvU64),
+  ('sramBucketFirmware', NvU64),
+  ('sramBucketOther', NvU64),
+  ('sramErrorThresholdExceeded', NvBool),
+]
+NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS = struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS
+class struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS._fields_ = [
+  ('sramCorUni', NvU64),
+  ('sramUncParityUni', NvU64),
+  ('sramUncSecDedUni', NvU64),
+  ('dramCorTot', NvU64),
+  ('dramUncTot', NvU64),
+]
+NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS = struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS
+class struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS._fields_ = [
+  ('event', NvU32),
+  ('action', NvU32),
+  ('bNotifyState', NvBool),
+  ('info32', NvU32),
+  ('info16', NvU16),
+]
+NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS = struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS
+enum_NV2080_EVENT_HDACODEC_DSTATE = CEnum(ctypes.c_uint)
+NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D0 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D0', 0)
+NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D1 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D1', 1)
+NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D2 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D2', 2)
+NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_HOT = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_HOT', 3)
+NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_COLD = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_COLD', 4)
+NV2080_EVENT_HDACODEC_DEVICE_DSTATE_DSTATE_MAX = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_DSTATE_MAX', 5)
+
+NV2080_EVENT_HDACODEC_DSTATE = enum_NV2080_EVENT_HDACODEC_DSTATE
+class struct_NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS._fields_ = [
+  ('hMemory', NvHandle),
+]
+NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS = struct_NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS
+class struct_NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS._fields_ = [
+  ('hSemMemory', NvHandle),
+  ('semOffset', NvU32),
+]
+NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS = struct_NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS
+class struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS._fields_ = [
+  ('guestMSIAddr', NvU64),
+  ('guestMSIData', NvU32),
+  ('hSemMemory', NvHandle),
+  ('isReset', NvBool),
+  ('vgpuUuid', (NvU8 * 16)),
+  ('domainId', NvU64),
+]
+NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS = struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS
+class struct_NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS._fields_ = [
+  ('hSemMemory', NvHandle),
+  ('isSemaMemValidationEnabled', NvBool),
+]
+NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS = struct_NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS
+class struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS._fields_ = [
+  ('hEvent', NvHandle),
+]
+NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS = struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS
+enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD = CEnum(ctypes.c_uint)
+NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_FULL = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_FULL', 0)
+NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_SIMPLE = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_SIMPLE', 1)
+NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_CUSTOM = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_CUSTOM', 2)
+
+NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD
+class struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS._fields_ = [
+  ('hEventBuffer', NvHandle),
+  ('recordSize', NvU32),
+  ('levelOfDetail', NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD),
+  ('eventFilter', NvU32),
+  ('bAllUsers', NvBool),
+]
+NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS = struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS
+class struct_NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS._fields_ = [
+  ('hEventBuffer', NvHandle),
+  ('tracepointMask', NvU64),
+  ('gspLoggingBufferSize', NvU32),
+  ('gspLoggingBufferWatermark', NvU32),
+]
+NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS = struct_NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS
+NV2080_CTRL_FB_INFO = struct_NVXXXX_CTRL_XXX_INFO
+class struct_NV2080_CTRL_FB_GET_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_INFO_PARAMS._fields_ = [
+  ('fbInfoListSize', NvU32),
+  ('fbInfoList', NvP64),
+]
+NV2080_CTRL_FB_GET_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_INFO_PARAMS
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS._fields_ = [
+  ('fbInfoListSize', NvU32),
+  ('fbInfoList', (NV2080_CTRL_FB_INFO * 57)),
+]
+NV2080_CTRL_FB_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS
+class struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS._fields_ = [
+  ('cpuVirtAddress', NvP64),
+  ('gpuVirtAddress', NvU64),
+]
+NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS = struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS
+class struct_NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS._fields_ = [
+  ('flags', NvU32),
+  ('driveStrengthRiseCount', NvU32),
+  ('driveStrengthFallCount', NvU32),
+  ('driveStrengthTermCount', NvU32),
+  ('slewStrengthRiseCount', NvU32),
+  ('slewStrengthFallCount', NvU32),
+]
+NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS = struct_NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS
+class struct_NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS._fields_ = [
   ('flags', NvU32),
 ]
-NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS = struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS
-class struct_RM_GSP_SPDM_CMD_CC_INIT(ctypes.Structure): pass
-struct_RM_GSP_SPDM_CMD_CC_INIT._fields_ = [
-  ('cmdType', NvU8),
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS = struct_NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS
+class struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS._fields_ = [
+  ('addressArray', (NvU64 * 500)),
+  ('addressArraySize', NvU32),
+  ('addressAlign', NvU32),
+  ('memBlockSizeBytes', NvU64),
+  ('flags', NvU32),
 ]
-RM_GSP_SPDM_CMD_CC_INIT = struct_RM_GSP_SPDM_CMD_CC_INIT
-PRM_GSP_SPDM_CMD_CC_INIT = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT)
-class struct_RM_GSP_SPDM_CMD_CC_DEINIT(ctypes.Structure): pass
-struct_RM_GSP_SPDM_CMD_CC_DEINIT._fields_ = [
-  ('cmdType', NvU8),
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS = struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS
+class struct_NV2080_CTRL_FB_IS_KIND_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_IS_KIND_PARAMS._fields_ = [
+  ('operation', NvU32),
+  ('kind', NvU32),
+  ('result', NvBool),
 ]
-RM_GSP_SPDM_CMD_CC_DEINIT = struct_RM_GSP_SPDM_CMD_CC_DEINIT
-PRM_GSP_SPDM_CMD_CC_DEINIT = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_DEINIT)
-class struct_RM_GSP_SPDM_CMD_CC_CTRL(ctypes.Structure): pass
-struct_RM_GSP_SPDM_CMD_CC_CTRL._fields_ = [
-  ('cmdType', NvU8),
+NV2080_CTRL_FB_IS_KIND_PARAMS = struct_NV2080_CTRL_FB_IS_KIND_PARAMS
+class struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS._fields_ = [
+  ('powerState', NvU32),
+  ('writeMode', NvU32),
+  ('bypassMode', NvU32),
+  ('rcmState', NvU32),
 ]
-RM_GSP_SPDM_CMD_CC_CTRL = struct_RM_GSP_SPDM_CMD_CC_CTRL
-PRM_GSP_SPDM_CMD_CC_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_CTRL)
-class struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA(ctypes.Structure): pass
-struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA._fields_ = [
-  ('cmdType', NvU8),
-  ('rsvd0', (NvU32 * 2)),
-  ('rsvd1', NvU32),
-  ('rsvd2', (ctypes.c_char * 9)),
-  ('rsvd3', (ctypes.c_char * 5)),
-  ('rsvd4', (ctypes.c_char * 5)),
-  ('rsvd5', (ctypes.c_char * 5)),
-  ('rsvd6', (ctypes.c_char * 2)),
-  ('rsvd7', (ctypes.c_char * 16)),
-  ('rsvd8', (NvU32 * 2)),
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS
+NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = (ctypes.c_ubyte * 17)
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO._fields_ = [
+  ('base', NvU64),
+  ('limit', NvU64),
+  ('reserved', NvU64),
+  ('performance', NvU32),
+  ('supportCompressed', NvBool),
+  ('supportISO', NvBool),
+  ('bProtected', NvBool),
+  ('blackList', NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG),
 ]
-RM_GSP_SPDM_CMD_CC_INIT_RM_DATA = struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA
-PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA)
-class struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL(ctypes.Structure): pass
-struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL._fields_ = [
-  ('cmdType', NvU8),
+NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS._fields_ = [
+  ('numFBRegions', NvU32),
+  ('fbRegion', (NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO * 16)),
+]
+NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS
+class struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO._fields_ = [
+  ('pageAddressWithEccOn', NvU64),
+  ('pageAddressWithEccOff', NvU64),
+  ('rbcAddress', NvU32),
+  ('source', NvU32),
+  ('status', NvU32),
+  ('timestamp', NvU32),
+]
+NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO = struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO
+class struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS._fields_ = [
+  ('offlined', (NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO * 64)),
+  ('pageSize', NvU32),
+  ('validEntries', NvU32),
+  ('numPagesAdded', NvU32),
+]
+NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS = struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS
+class struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS._fields_ = [
+  ('offlined', (NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO * 64)),
+  ('validEntries', NvU32),
+  ('bRetirementPending', NvBool),
+  ('retirementPending', NvU8),
+]
+NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS
+enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE = CEnum(ctypes.c_uint)
+NV2080_CTRL_CMD_FB_ACR_QUERY_GET_CLIENT_REGION_STATUS = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_CLIENT_REGION_STATUS', 0)
+NV2080_CTRL_CMD_FB_ACR_QUERY_GET_REGION_PROPERTY = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_REGION_PROPERTY', 1)
+NV2080_CTRL_CMD_FB_ACR_QUERY_GET_FALCON_STATUS = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_FALCON_STATUS', 2)
+
+NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE
+enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE = CEnum(ctypes.c_uint)
+NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_NONE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_NONE', 0)
+NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_INVALID_CLIENT_REQUEST = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_INVALID_CLIENT_REQUEST', 1)
+
+NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE
+class struct_ACR_REQUEST_PARAMS(ctypes.Structure): pass
+struct_ACR_REQUEST_PARAMS._fields_ = [
+  ('clientId', NvU32),
+  ('reqReadMask', NvU32),
+  ('reqWriteMask', NvU32),
+  ('regionSize', NvU32),
+]
+ACR_REQUEST_PARAMS = struct_ACR_REQUEST_PARAMS
+class struct_ACR_REGION_ID_PROP(ctypes.Structure): pass
+struct_ACR_REGION_ID_PROP._fields_ = [
+  ('regionId', NvU32),
+  ('readMask', NvU32),
+  ('writeMask', NvU32),
+  ('regionSize', NvU32),
+  ('clientMask', NvU32),
+  ('physicalAddress', NvU64),
+]
+ACR_REGION_ID_PROP = struct_ACR_REGION_ID_PROP
+class struct_ACR_STATUS_PARAMS(ctypes.Structure): pass
+struct_ACR_STATUS_PARAMS._fields_ = [
+  ('allocStatus', NvU32),
+  ('regionId', NvU32),
+  ('physicalAddress', NvU64),
+]
+ACR_STATUS_PARAMS = struct_ACR_STATUS_PARAMS
+class struct_ACR_REGION_HANDLE(ctypes.Structure): pass
+struct_ACR_REGION_HANDLE._fields_ = [
+  ('hClient', NvHandle),
+  ('hParent', NvHandle),
+  ('hMemory', NvHandle),
+  ('hClass', NvU32),
+  ('hDevice', NvHandle),
+]
+ACR_REGION_HANDLE = struct_ACR_REGION_HANDLE
+class struct_ACR_FALCON_LS_STATUS(ctypes.Structure): pass
+struct_ACR_FALCON_LS_STATUS._fields_ = [
+  ('falconId', NvU16),
+  ('bIsInLs', NvBool),
+]
+ACR_FALCON_LS_STATUS = struct_ACR_FALCON_LS_STATUS
+class struct_NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS._fields_ = [
+  ('queryType', NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE),
+  ('errorCode', NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE),
+  ('acrRegionIdProp', ACR_REGION_ID_PROP),
+  ('clientReq', ACR_REQUEST_PARAMS),
+  ('clientReqStatus', ACR_STATUS_PARAMS),
+  ('handle', ACR_REGION_HANDLE),
+  ('falconStatus', ACR_FALCON_LS_STATUS),
+]
+NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS = struct_NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS
+class struct_NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS._fields_ = [
+  ('sourceMask', NvU32),
+]
+NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS
+class struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS._fields_ = [
+  ('pCompBitCopyObj', NvP64),
+  ('pSwizzleParams', NvP64),
+]
+NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS
+class struct_NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS._fields_ = [
+  ('fbpIndex', NvU8),
+  ('ltcMask', NvU32),
+  ('ltcCount', NvU32),
+  ('ltsMask', NvU32),
+  ('ltsCount', NvU32),
+]
+NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS = struct_NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS
+class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS._fields_ = [
+  ('CBCBaseAddress', NvU32),
+  ('backingStorePA', NvU64),
+  ('backingStoreVA', ctypes.POINTER(NvU8)),
+  ('backingStoreChunkPA', NvU64),
+  ('backingStoreChunkVA', ctypes.POINTER(NvU8)),
+  ('backingStoreChunkSize', NvU32),
+  ('cacheWriteBitMap', ctypes.POINTER(NvU8)),
+  ('backingStoreChunkOverfetch', NvBool),
+  ('PageSizeSrc', NvU32),
+  ('PageSizeDest', NvU32),
+]
+NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS
+class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS._fields_ = [
+  ('fcbits', ctypes.POINTER(NvU32)),
+  ('compbits', ctypes.POINTER(NvU32)),
+  ('dataPhysicalStart', NvU64),
+  ('surfaceOffset', NvU64),
+  ('comptagLine', NvU32),
+  ('upper64KBCompbitSel', NvBool),
+]
+NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS
+class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS._fields_ = [
+  ('fcbits', NvU32),
+  ('compbits', NvU32),
+  ('writeFc', NvBool),
+  ('dataPhysicalStart', NvU64),
+  ('surfaceOffset', NvU64),
+  ('comptagLine', NvU32),
+  ('upper64KBCompbitSel', NvBool),
+]
+NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS
+class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS._fields_ = [
+  ('SrcDataPhysicalStart', NvU64),
+  ('SrcComptagLine', NvU32),
+  ('page64KB', NvU32),
+  ('compbitBuffer', ctypes.POINTER(NvU32)),
+  ('upper64KBCompbitSel', NvBool),
+]
+NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS
+class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS._fields_ = [
+  ('DstDataPhysicalStart', NvU64),
+  ('DstComptagLine', NvU32),
+  ('page64KB', NvU32),
+  ('compbitBuffer', ctypes.POINTER(NvU32)),
+  ('upper64KBCompbitSel', NvBool),
+]
+NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS
+class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS._fields_ = [
+  ('bForceBar1', NvBool),
+]
+NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS
+class struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS._fields_ = [
+  ('pAmapConfParams', NvP64),
+  ('pCbcSwizzleParams', NvP64),
+]
+NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS
+enum_CTRL_CMD_FB_CBC_OP = CEnum(ctypes.c_uint)
+CTRL_CMD_FB_CBC_OP_CLEAN = enum_CTRL_CMD_FB_CBC_OP.define('CTRL_CMD_FB_CBC_OP_CLEAN', 0)
+CTRL_CMD_FB_CBC_OP_INVALIDATE = enum_CTRL_CMD_FB_CBC_OP.define('CTRL_CMD_FB_CBC_OP_INVALIDATE', 1)
+
+CTRL_CMD_FB_CBC_OP = enum_CTRL_CMD_FB_CBC_OP
+class struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS._fields_ = [
+  ('fbCBCOp', CTRL_CMD_FB_CBC_OP),
+]
+NV2080_CTRL_CMD_FB_CBC_OP_PARAMS = struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS
+class struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS._fields_ = [
+  ('pCompTags', (NvU32 * 127)),
+  ('numCompTags', NvU32),
+]
+NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS = struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS
+class struct_NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS._fields_ = [
+  ('attr', NvU32),
+  ('attr2', NvU32),
+  ('size', NvU32),
+  ('ctagOffset', NvU32),
+  ('hwResId', NvU32),
+  ('retCompTagLineMin', NvU32),
+  ('retCompTagLineMax', NvU32),
+]
+NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS = struct_NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS
+class struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS._fields_ = [
+  ('hwResId', NvU32),
+]
+NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS = struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS
+enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE = CEnum(ctypes.c_uint)
+NV2080_CTRL_CMD_FB_SET_VPR = enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE.define('NV2080_CTRL_CMD_FB_SET_VPR', 0)
+
+NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE = enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE
+enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE = CEnum(ctypes.c_uint)
+NV2080_CTRL_CMD_FB_VPR_ERROR_GENERIC = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE.define('NV2080_CTRL_CMD_FB_VPR_ERROR_GENERIC', 0)
+NV2080_CTRL_CMD_FB_VPR_ERROR_INVALID_CLIENT_REQUEST = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE.define('NV2080_CTRL_CMD_FB_VPR_ERROR_INVALID_CLIENT_REQUEST', 1)
+
+NV2080_CTRL_CMD_FB_VPR_ERROR_CODE = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE
+class struct_VPR_REQUEST_PARAMS(ctypes.Structure): pass
+struct_VPR_REQUEST_PARAMS._fields_ = [
+  ('startAddr', NvU32),
+  ('size', NvU32),
+]
+VPR_REQUEST_PARAMS = struct_VPR_REQUEST_PARAMS
+class struct_VPR_STATUS_PARAMS(ctypes.Structure): pass
+struct_VPR_STATUS_PARAMS._fields_ = [
+  ('status', NvU32),
+]
+VPR_STATUS_PARAMS = struct_VPR_STATUS_PARAMS
+class struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS._fields_ = [
+  ('requestType', NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE),
+  ('requestParams', VPR_REQUEST_PARAMS),
+  ('statusParams', VPR_STATUS_PARAMS),
+]
+NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS
+PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS)
+class struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS._fields_ = [
+  ('offlinedPages', (NvU32 * 64)),
+  ('pageSize', NvU32),
+  ('validEntries', NvU32),
+]
+NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS
+class struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS._fields_ = [
+  ('defaultPageSize', NvU32),
+  ('comptagsPerCacheLine', NvU32),
+  ('unpackedComptagLinesPerCacheLine', NvU32),
+  ('compCacheLineSizePerLTC', NvU32),
+  ('unpackedCompCacheLineSizePerLTC', NvU32),
+  ('slicesPerLTC', NvU32),
+  ('numActiveLTCs', NvU32),
+  ('familyName', NvU32),
+  ('chipName', NvU32),
+  ('bitsPerRAMEntry', NvU32),
+  ('ramBankWidth', NvU32),
+  ('bitsPerComptagLine', NvU32),
+  ('ramEntriesPerCompCacheLine', NvU32),
+  ('comptagLineSize', NvU32),
+]
+NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS
+class struct_NV2080_CTRL_FB_SET_RRD_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_SET_RRD_PARAMS._fields_ = [
+  ('rrd', NvU32),
+]
+NV2080_CTRL_FB_SET_RRD_PARAMS = struct_NV2080_CTRL_FB_SET_RRD_PARAMS
+class struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS._fields_ = [
+  ('limit', NvU8),
+]
+NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS = struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS
+NV2080_CTRL_FB_SET_READ_LIMIT_PARAMS = struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS
+NV2080_CTRL_FB_SET_WRITE_LIMIT_PARAMS = struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS
+class struct_NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS._fields_ = [
   ('bEnable', NvBool),
 ]
-RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL
-PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL)
-class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST(ctypes.Structure): pass
-class struct_CC_KMB(ctypes.Structure): pass
-class struct_CC_AES_CRYPTOBUNDLE(ctypes.Structure): pass
-struct_CC_AES_CRYPTOBUNDLE._fields_ = [
-  ('iv', (NvU32 * 3)),
-  ('key', (NvU32 * 8)),
-  ('ivMask', (NvU32 * 3)),
+NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS = struct_NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS
+class struct_NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS._fields_ = [
+  ('alignType', NvU32),
+  ('alignAttr', NvU32),
+  ('alignInputFlags', NvU32),
+  ('alignHead', NvU32),
+  ('alignSize', NvU64),
+  ('alignHeight', NvU32),
+  ('alignWidth', NvU32),
+  ('alignPitch', NvU32),
+  ('alignPad', NvU32),
+  ('alignMask', NvU32),
+  ('alignOutputFlags', (NvU32 * 4)),
+  ('alignBank', (NvU32 * 4)),
+  ('alignKind', NvU32),
+  ('alignAdjust', NvU32),
+  ('alignAttr2', NvU32),
 ]
-CC_AES_CRYPTOBUNDLE = struct_CC_AES_CRYPTOBUNDLE
-class _anonunion16(ctypes.Union): pass
-class struct_CC_HMAC_CRYPTOBUNDLE(ctypes.Structure): pass
-struct_CC_HMAC_CRYPTOBUNDLE._fields_ = [
-  ('nonce', (NvU32 * 8)),
-  ('key', (NvU32 * 8)),
+NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS = struct_NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS
+class struct_NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS._fields_ = [
+  ('cbcBaseAddress', NvU32),
+  ('compCacheLineSize', NvU32),
+  ('backingStoreStartPA', NvU64),
+  ('backingStoreAllocPA', NvU64),
+  ('backingStoreChunkOverfetch', NvU32),
 ]
-CC_HMAC_CRYPTOBUNDLE = struct_CC_HMAC_CRYPTOBUNDLE
-_anonunion16._fields_ = [
-  ('hmacBundle', CC_HMAC_CRYPTOBUNDLE),
-  ('decryptBundle', CC_AES_CRYPTOBUNDLE),
+NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS
+class struct_NV2080_CTRL_FB_REMAP_ENTRY(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_REMAP_ENTRY._fields_ = [
+  ('remapRegVal', NvU32),
+  ('timestamp', NvU32),
+  ('fbpa', NvU8),
+  ('sublocation', NvU8),
+  ('source', NvU8),
+  ('flags', NvU8),
 ]
-struct_CC_KMB._anonymous_ = ['_0']
-struct_CC_KMB._fields_ = [
-  ('encryptBundle', CC_AES_CRYPTOBUNDLE),
-  ('_0', _anonunion16),
-  ('bIsWorkLaunch', NvBool),
+NV2080_CTRL_FB_REMAP_ENTRY = struct_NV2080_CTRL_FB_REMAP_ENTRY
+class struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS._fields_ = [
+  ('entryCount', NvU32),
+  ('flags', NvU8),
+  ('entries', (NV2080_CTRL_FB_REMAP_ENTRY * 512)),
 ]
-CC_KMB = struct_CC_KMB
-struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST._fields_ = [
-  ('cmdType', NvU8),
-  ('isEnc', NvU8),
-  ('kmb', CC_KMB),
-  ('text', (NvU8 * 16)),
-  ('authTag', (NvU8 * 16)),
+NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS = struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS._fields_ = [
+  ('data', (NvU8 * 24)),
 ]
-RM_GSP_SPDM_CMD_FIPS_SELFTEST = struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST
-PRM_GSP_SPDM_CMD_FIPS_SELFTEST = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST)
-class union_RM_GSP_SPDM_CMD(ctypes.Union): pass
-union_RM_GSP_SPDM_CMD._fields_ = [
-  ('cmdType', NvU8),
-  ('ccInit', RM_GSP_SPDM_CMD_CC_INIT),
-  ('ccDeinit', RM_GSP_SPDM_CMD_CC_DEINIT),
-  ('ccCtrl', RM_GSP_SPDM_CMD_CC_CTRL),
-  ('rmDataInitCmd', RM_GSP_SPDM_CMD_CC_INIT_RM_DATA),
-  ('ccHeartbeatCtrl', RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL),
-  ('ccFipsTest', RM_GSP_SPDM_CMD_FIPS_SELFTEST),
+NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS._fields_ = [
+  ('swizzId', NvU32),
+  ('fbpEnMask', NvU64),
 ]
-RM_GSP_SPDM_CMD = union_RM_GSP_SPDM_CMD
-PRM_GSP_SPDM_CMD = ctypes.POINTER(union_RM_GSP_SPDM_CMD)
-class struct_RM_GSP_SPDM_MSG(ctypes.Structure): pass
-struct_RM_GSP_SPDM_MSG._fields_ = [
-  ('msgType', NvU8),
+NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('ltcEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('ltsEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('fbpaEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('fbpaSubpEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('fbpLogicalIndex', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('ropEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('swizzId', NvU32),
+  ('ltcEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('swizzId', NvU32),
+  ('ltsEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('swizzId', NvU32),
+  ('fbpaEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('swizzId', NvU32),
+  ('ropEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('swizzId', NvU32),
+  ('fbpaSubpEnMask', NvU64),
+]
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS
+class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS._fields_ = [
+  ('sysIdx', NvU32),
+  ('sysl2LtcEnMask', NvU32),
+]
+NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS
+class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS._fields_ = [
+  ('sysIdx', NvU32),
+  ('sysl2LtsEnMask', NvU64),
+]
+NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('pacEnMask', NvU32),
+]
+NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('logicalLtcEnMask', NvU64),
+]
+NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS._fields_ = [
+  ('fbpIndex', NvU32),
+  ('swizzId', NvU32),
+  ('logicalLtcEnMask', NvU64),
+]
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams(ctypes.Union): pass
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams._fields_ = [
+  ('inv', NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS),
+  ('fbp', NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS),
+  ('ltc', NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS),
+  ('lts', NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS),
+  ('fbpa', NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS),
+  ('rop', NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS),
+  ('dmLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS),
+  ('dmLts', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS),
+  ('dmFbpa', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS),
+  ('dmRop', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS),
+  ('dmFbpaSubp', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS),
+  ('fbpaSubp', NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS),
+  ('fbpLogicalMap', NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS),
+  ('sysl2Ltc', NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS),
+  ('pac', NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS),
+  ('logicalLtc', NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS),
+  ('dmLogicalLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS),
+  ('sysl2Lts', NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS),
+]
+struct_NV2080_CTRL_FB_FS_INFO_QUERY._fields_ = [
+  ('queryType', NvU16),
+  ('reserved', (NvU8 * 2)),
   ('status', NvU32),
-  ('rsvd1', NvU32),
-  ('rsvd2', NvU32),
-  ('rsvd3', NvU32),
-  ('rsvd4', NvU32),
-  ('rsvd5', NvU32),
+  ('queryParams', struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams),
 ]
-RM_GSP_SPDM_MSG = struct_RM_GSP_SPDM_MSG
-PRM_GSP_SPDM_MSG = ctypes.POINTER(struct_RM_GSP_SPDM_MSG)
-class struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS._fields_ = [
-  ('index', NvU8),
-  ('cmd', RM_GSP_SPDM_CMD),
-  ('msg', RM_GSP_SPDM_MSG),
+NV2080_CTRL_FB_FS_INFO_QUERY = struct_NV2080_CTRL_FB_FS_INFO_QUERY
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS._fields_ = [
+  ('numQueries', NvU16),
+  ('reserved', (NvU8 * 6)),
+  ('queries', (NV2080_CTRL_FB_FS_INFO_QUERY * 120)),
 ]
-NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS
-class struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS._fields_ = [
-  ('transcript', (NvU8 * 9216)),
-  ('transcriptSize', NvU32),
+NV2080_CTRL_FB_GET_FS_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS
+class struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS._fields_ = [
+  ('histogram', (NvU32 * 5)),
 ]
-NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS
-enum_NV2080_CTRL_GC6_FLAVOR_ID = CEnum(ctypes.c_uint)
-NV2080_CTRL_GC6_FLAVOR_ID_MSHYBRID = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_MSHYBRID', 0)
-NV2080_CTRL_GC6_FLAVOR_ID_OPTIMUS = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_OPTIMUS', 1)
-NV2080_CTRL_GC6_FLAVOR_ID_MAX = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_MAX', 4)
+NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS = struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS
+class struct_NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO._fields_ = [
+  ('pageNumber', NvU64),
+  ('source', NvU8),
+]
+NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO = struct_NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO
+class struct_NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS._fields_ = [
+  ('offlined', (NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO * 64)),
+  ('validEntries', NvU32),
+  ('baseIndex', NvU32),
+  ('bMore', NvBool),
+]
+NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS
+class struct_NV2080_CTRL_CMD_FB_ALLOCATION_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_ALLOCATION_INFO._fields_ = [
+  ('client', NvU32),
+  ('flags', NvU32),
+  ('beginAddr', NvU64),
+  ('size', NvU64),
+]
+NV2080_CTRL_CMD_FB_ALLOCATION_INFO = struct_NV2080_CTRL_CMD_FB_ALLOCATION_INFO
+class struct_NV2080_CTRL_CMD_FB_CLIENT_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_CLIENT_INFO._fields_ = [
+  ('handle', NvHandle),
+  ('pid', NvU32),
+  ('subProcessID', NvU32),
+  ('subProcessName', (ctypes.c_char * 100)),
+]
+NV2080_CTRL_CMD_FB_CLIENT_INFO = struct_NV2080_CTRL_CMD_FB_CLIENT_INFO
+class struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS._fields_ = [
+  ('allocCount', NvU64),
+  ('pAllocInfo', NvP64),
+  ('clientCount', NvU64),
+  ('pClientInfo', NvP64),
+]
+NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS
+class struct_NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS._fields_ = [
+  ('bOnline', NvBool),
+]
+NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS = struct_NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS
+class struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS._fields_ = [
+  ('numaNodeId', NvS32),
+  ('numaMemAddr', NvU64),
+  ('numaMemSize', NvU64),
+  ('numaOfflineAddressesCount', NvU32),
+  ('numaOfflineAddresses', (NvU64 * 64)),
+]
+NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS
+class struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS._fields_ = [
+  ('maxSubmittedSemaphoreValueOffset', NvU64),
+  ('monitoredFenceThresholdOffset', NvU64),
+  ('size', NvU64),
+  ('caps', NvU32),
+]
+NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS = struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS
+class struct_NV2080_CTRL_CMD_FB_STATS_ENTRY(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_STATS_ENTRY._fields_ = [
+  ('totalSize', NvU64),
+  ('rsvdSize', NvU64),
+  ('osSize', NvU64),
+  ('r1Size', NvU64),
+  ('r2Size', NvU64),
+  ('freeSize', NvU64),
+]
+NV2080_CTRL_CMD_FB_STATS_ENTRY = struct_NV2080_CTRL_CMD_FB_STATS_ENTRY
+class struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS._fields_ = [
+  ('gfid', NvU32),
+  ('invalidateAll', NvBool),
+]
+NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS = struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS
+class struct_NV2080_CTRL_CMD_FB_STATS_OWNER_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_STATS_OWNER_INFO._fields_ = [
+  ('allocSize', NvU64),
+  ('numBlocks', NvU32),
+  ('rsvdSize', NvU64),
+]
+NV2080_CTRL_CMD_FB_STATS_OWNER_INFO = struct_NV2080_CTRL_CMD_FB_STATS_OWNER_INFO
+class struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS._fields_ = [
+  ('version', NvU64),
+  ('fbSizeInfo', NV2080_CTRL_CMD_FB_STATS_ENTRY),
+  ('fbBlockInfo', (NV2080_CTRL_CMD_FB_STATS_OWNER_INFO * 200)),
+]
+NV2080_CTRL_CMD_FB_STATS_GET_PARAMS = struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS
+class struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS._fields_ = [
+  ('bStaticBar1Enabled', NvBool),
+  ('staticBar1StartOffset', NvU64),
+  ('staticBar1Size', NvU64),
+]
+NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS
+class struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS._fields_ = [
+  ('currentConfiguration', NvU32),
+]
+NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS = struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS
+class struct_NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS._fields_ = [
+  ('newConfiguration', NvU32),
+]
+NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS = struct_NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS
+class struct_NV2080_CTRL_FB_GET_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_GET_STATUS_PARAMS._fields_ = [
+  ('fbStatus', NvU32),
+]
+NV2080_CTRL_FB_GET_STATUS_PARAMS = struct_NV2080_CTRL_FB_GET_STATUS_PARAMS
+class struct_NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS._fields_ = [
+  ('isSupported', NvU32),
+]
+NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS = struct_NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS
+class struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS._fields_ = [
+  ('currentStatus', NvU32),
+]
+NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS = struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS
+class struct_NV2080_CTRL_CMD_SET_GPFIFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_SET_GPFIFO_PARAMS._fields_ = [
+  ('hChannel', NvHandle),
+  ('base', NvU64),
+  ('numEntries', NvU32),
+]
+NV2080_CTRL_CMD_SET_GPFIFO_PARAMS = struct_NV2080_CTRL_CMD_SET_GPFIFO_PARAMS
+class struct_NV2080_CTRL_FIFO_BIND_CHANNEL(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_BIND_CHANNEL._fields_ = [
+  ('hClient', NvHandle),
+  ('hChannel', NvHandle),
+]
+NV2080_CTRL_FIFO_BIND_CHANNEL = struct_NV2080_CTRL_FIFO_BIND_CHANNEL
+class struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS._fields_ = [
+  ('bindChannelCount', NvU32),
+  ('bindChannels', (NV2080_CTRL_FIFO_BIND_CHANNEL * 16)),
+]
+NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS = struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS
+class struct_NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS._fields_ = [
+  ('flags', NvU32),
+]
+NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS = struct_NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS
+class struct_NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS._fields_ = [
+  ('physChannelCount', NvU32),
+  ('physChannelCountInUse', NvU32),
+]
+NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS = struct_NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS
+NV2080_CTRL_FIFO_INFO = struct_NVXXXX_CTRL_XXX_INFO
+class struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS._fields_ = [
+  ('fifoInfoTblSize', NvU32),
+  ('fifoInfoTbl', (NV2080_CTRL_FIFO_INFO * 256)),
+  ('engineType', NvU32),
+]
+NV2080_CTRL_FIFO_GET_INFO_PARAMS = struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS
+class struct_NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS._fields_ = [
+  ('hChannel', NvHandle),
+]
+NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS = struct_NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS._fields_ = [
+  ('bDisable', NvBool),
+  ('numChannels', NvU32),
+  ('bOnlyDisableScheduling', NvBool),
+  ('bRewindGpPut', NvBool),
+  ('pRunlistPreemptEvent', NvP64),
+  ('hClientList', (NvHandle * 64)),
+  ('hChannelList', (NvHandle * 64)),
+]
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS
+class struct_NV2080_CTRL_FIFO_MEM_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_MEM_INFO._fields_ = [
+  ('aperture', NvU32),
+  ('base', NvU64),
+  ('size', NvU64),
+]
+NV2080_CTRL_FIFO_MEM_INFO = struct_NV2080_CTRL_FIFO_MEM_INFO
+class struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO._fields_ = [
+  ('inst', NV2080_CTRL_FIFO_MEM_INFO),
+  ('ramfc', NV2080_CTRL_FIFO_MEM_INFO),
+  ('methodBuf', (NV2080_CTRL_FIFO_MEM_INFO * 2)),
+  ('methodBufCount', NvU32),
+]
+NV2080_CTRL_FIFO_CHANNEL_MEM_INFO = struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO
+class struct_NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS._fields_ = [
+  ('hChannel', NvHandle),
+  ('chMemInfo', NV2080_CTRL_FIFO_CHANNEL_MEM_INFO),
+]
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS = struct_NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS
+class struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS._fields_ = [
+  ('aperture', NvU32),
+  ('attribute', NvU32),
+]
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS = struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS
+class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS(ctypes.Structure): pass
+class _anonstruct16(ctypes.Structure): pass
+NvS64 = ctypes.c_longlong
+_anonstruct16._fields_ = [
+  ('timestampNs', NvU64),
+  ('timeRunTotalNs', NvS64),
+  ('timeRunNs', NvU32),
+  ('swrlId', NvU32),
+  ('targetTimeSlice', NvU32),
+  ('cumulativePreemptionTime', NvU64),
+  ('counters', (NvU64 * 8)),
+]
+struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS._fields_ = [
+  ('engineId', NvU32),
+  ('count', NvU32),
+  ('entry', (_anonstruct16 * 200)),
+  ('schedPolicy', NvU32),
+  ('arrEnabled', NvU32),
+  ('arrAvgFactor', NvU32),
+  ('targetTimesliceNs', NvU32),
+]
+NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS
+class struct_NV2080_CTRL_FIFO_DEVICE_ENTRY(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_DEVICE_ENTRY._fields_ = [
+  ('engineData', (NvU32 * 16)),
+  ('pbdmaIds', (NvU32 * 2)),
+  ('pbdmaFaultIds', (NvU32 * 2)),
+  ('numPbdmas', NvU32),
+  ('engineName', (ctypes.c_char * 16)),
+]
+NV2080_CTRL_FIFO_DEVICE_ENTRY = struct_NV2080_CTRL_FIFO_DEVICE_ENTRY
+class struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS._fields_ = [
+  ('baseIndex', NvU32),
+  ('numEntries', NvU32),
+  ('bMore', NvBool),
+  ('entries', (NV2080_CTRL_FIFO_DEVICE_ENTRY * 32)),
+]
+NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS = struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS
+class struct_NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS._fields_ = [
+  ('engineType', NvU32),
+  ('vChid', NvU32),
+  ('faultType', NvU32),
+]
+NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS = struct_NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS
+class struct_NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS._fields_ = [
+  ('flags', NvU32),
+  ('schedPolicy', NvU32),
+]
+NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS = struct_NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS
+class struct_NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS._fields_ = [
+  ('hClient', NvHandle),
+  ('hChannel', NvHandle),
+  ('hUserdMemory', NvHandle),
+  ('gpFifoEntries', NvU32),
+  ('gpFifoOffset', NvU64),
+  ('userdOffset', NvU64),
+]
+NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS = struct_NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS
+class struct_NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS._fields_ = [
+  ('bDisable', NvBool),
+]
+NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS
+class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS._fields_ = [
+  ('base', NvU64),
+  ('size', NvU64),
+  ('addressSpace', NvU32),
+  ('cacheAttrib', NvU32),
+]
+NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS = struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS
+class struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS._fields_ = [
+  ('runlistId', NvU32),
+  ('bitMask', (NvU32 * 128)),
+]
+NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS._fields_ = [
+  ('numChannels', NvU32),
+  ('hClientList', (NvHandle * 64)),
+  ('hChannelList', (NvHandle * 64)),
+  ('bEnableAfterKeyRotation', NvBool),
+]
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS._fields_ = [
+  ('numChannels', NvU32),
+  ('hChannelList', (NvHandle * 64)),
+  ('bEnableAfterKeyRotation', NvBool),
+]
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS
+class struct_NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS._fields_ = [
+  ('engineId', NvU32),
+  ('schedPolicy', NvU32),
+  ('arrEnabled', NvU32),
+  ('targetTimesliceNs', NvU32),
+  ('arrAvgFactor', NvU32),
+]
+NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS
+class struct_NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS._fields_ = [
+  ('engineId', NvU32),
+  ('schedPolicy', NvU32),
+  ('enableArr', NvU32),
+  ('timesliceTargetNs', NvU32),
+  ('frequencyForARR', NvU32),
+  ('avgFactorForARR', NvU32),
+]
+NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS
+class struct_NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS._fields_ = [
+  ('engineId', NvU32),
+  ('supportedSchedulers', (NvU32 * 3)),
+  ('bIsArrModeSupported', NvBool),
+  ('maxTimesliceNs', NvU32),
+  ('minTimesliceNs', NvU32),
+  ('maxFrequencyForARR', NvU32),
+  ('minFrequencyForARR', NvU32),
+  ('maxAvgFactorForARR', NvU32),
+  ('minAvgFactorForARR', NvU32),
+]
+NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS
+class struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS._fields_ = [
+  ('hClient', NvHandle),
+  ('hChannelOrTsg', NvHandle),
+  ('tsgId', NvU32),
+  ('numChannels', NvU32),
+  ('channelUniqueID', (NvU32 * 128)),
+  ('vasUniqueID', (NvU32 * 128)),
+  ('veid', (NvU32 * 128)),
+]
+NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS = struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS
+class struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS._fields_ = [
+  ('hClients', (NvHandle * 128)),
+  ('hChannels', (NvHandle * 128)),
+  ('numChannels', NvU32),
+  ('channelUniqueIDs', (NvU32 * 128)),
+]
+NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS = struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS
+class struct_NV2080_CTRL_FLA_RANGE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLA_RANGE_PARAMS._fields_ = [
+  ('base', NvU64),
+  ('size', NvU64),
+  ('mode', NvU32),
+  ('hVASpace', NvHandle),
+]
+NV2080_CTRL_FLA_RANGE_PARAMS = struct_NV2080_CTRL_FLA_RANGE_PARAMS
+enum_NV2080_CTRL_FLA_ADDRSPACE = CEnum(ctypes.c_uint)
+NV2080_CTRL_FLA_ADDRSPACE_SYSMEM = enum_NV2080_CTRL_FLA_ADDRSPACE.define('NV2080_CTRL_FLA_ADDRSPACE_SYSMEM', 0)
+NV2080_CTRL_FLA_ADDRSPACE_FBMEM = enum_NV2080_CTRL_FLA_ADDRSPACE.define('NV2080_CTRL_FLA_ADDRSPACE_FBMEM', 1)
 
-NV2080_CTRL_GC6_FLAVOR_ID = enum_NV2080_CTRL_GC6_FLAVOR_ID
-class struct_NV2080_CTRL_GC6_ENTRY_PARAMS(ctypes.Structure): pass
-class struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params(ctypes.Structure): pass
-struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params._fields_ = [
-  ('bIsRTD3Transition', NvBool),
-  ('bIsRTD3CoreRailPowerCut', NvBool),
-  ('bSkipPstateSanity', NvBool),
-]
-struct_NV2080_CTRL_GC6_ENTRY_PARAMS._fields_ = [
-  ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
-  ('stepMask', NvU32),
-  ('params', struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params),
-]
-NV2080_CTRL_GC6_ENTRY_PARAMS = struct_NV2080_CTRL_GC6_ENTRY_PARAMS
-class struct_NV2080_CTRL_GC6_EXIT_PARAMS(ctypes.Structure): pass
-class struct_NV2080_CTRL_GC6_EXIT_PARAMS_params(ctypes.Structure): pass
-struct_NV2080_CTRL_GC6_EXIT_PARAMS_params._fields_ = [
-  ('bIsGpuSelfWake', NvBool),
-  ('bIsRTD3Transition', NvBool),
-  ('bIsRTD3HotTransition', NvBool),
-]
-struct_NV2080_CTRL_GC6_EXIT_PARAMS._fields_ = [
-  ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
-  ('params', struct_NV2080_CTRL_GC6_EXIT_PARAMS_params),
-]
-NV2080_CTRL_GC6_EXIT_PARAMS = struct_NV2080_CTRL_GC6_EXIT_PARAMS
-enum_NV2080_CTRL_GC6_STEP_ID = CEnum(ctypes.c_uint)
-NV2080_CTRL_GC6_STEP_ID_SR_ENTRY = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_SR_ENTRY', 0)
-NV2080_CTRL_GC6_STEP_ID_GPU_OFF = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_GPU_OFF', 1)
-NV2080_CTRL_GC6_STEP_ID_MAX = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_MAX', 2)
+NV2080_CTRL_FLA_ADDRSPACE = enum_NV2080_CTRL_FLA_ADDRSPACE
+enum_NV2080_CTRL_FLA_ACTION = CEnum(ctypes.c_uint)
+NV2080_CTRL_FLA_ACTION_BIND = enum_NV2080_CTRL_FLA_ACTION.define('NV2080_CTRL_FLA_ACTION_BIND', 0)
+NV2080_CTRL_FLA_ACTION_UNBIND = enum_NV2080_CTRL_FLA_ACTION.define('NV2080_CTRL_FLA_ACTION_UNBIND', 1)
 
-NV2080_CTRL_GC6_STEP_ID = enum_NV2080_CTRL_GC6_STEP_ID
-class struct_NV2080_CTRL_GC6_FLAVOR_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_GC6_FLAVOR_INFO._fields_ = [
-  ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
-  ('stepMask', NvU32),
+NV2080_CTRL_FLA_ACTION = enum_NV2080_CTRL_FLA_ACTION
+class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS._fields_ = [
+  ('imbPhysAddr', NvU64),
+  ('addrSpace', NV2080_CTRL_FLA_ADDRSPACE),
+  ('flaAction', NV2080_CTRL_FLA_ACTION),
 ]
-NV2080_CTRL_GC6_FLAVOR_INFO = struct_NV2080_CTRL_GC6_FLAVOR_INFO
-class struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS._fields_ = [
-  ('version', NvU32),
-  ('port', NvU32),
-  ('flags', NvU32),
-  ('inputCount', NvU32),
-  ('inputBuffer', (NvU8 * 256)),
-  ('outputCount', NvU32),
-  ('outputBuffer', (NvU8 * 256)),
+NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS = struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS
+class struct_NV2080_CTRL_FLA_GET_RANGE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLA_GET_RANGE_PARAMS._fields_ = [
+  ('base', NvU64),
+  ('size', NvU64),
 ]
-NV2080_CTRL_I2C_READ_BUFFER_PARAMS = struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS
-class struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS._fields_ = [
-  ('version', NvU32),
-  ('port', NvU32),
-  ('flags', NvU32),
-  ('inputCount', NvU32),
-  ('inputBuffer', (NvU8 * 256)),
-  ('encrClientID', NvU32),
+NV2080_CTRL_FLA_GET_RANGE_PARAMS = struct_NV2080_CTRL_FLA_GET_RANGE_PARAMS
+class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS._fields_ = [
+  ('totalSize', NvU64),
+  ('freeSize', NvU64),
 ]
-NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS = struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS
-class struct_NV2080_CTRL_I2C_RW_REG_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_I2C_RW_REG_PARAMS._fields_ = [
-  ('version', NvU32),
-  ('port', NvU32),
-  ('flags', NvU32),
-  ('addr', NvU32),
-  ('reg', NvU8),
-  ('bufsize', NvU8),
-  ('buffer', (NvU8 * 255)),
+NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS = struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS
+class struct_NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS._fields_ = [
+  ('flcnID', NvU32),
+  ('heapSize', NvU32),
+  ('heapFree', NvU32),
 ]
-NV2080_CTRL_I2C_RW_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
-NV2080_CTRL_I2C_READ_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
-NV2080_CTRL_I2C_WRITE_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
-class struct_NV2080_CTRL_I2C_ACCESS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_I2C_ACCESS_PARAMS._fields_ = [
-  ('token', NvU32),
-  ('cmd', NvU32),
-  ('port', NvU32),
-  ('flags', NvU32),
-  ('data', NvP64),
-  ('status', NvU32),
-  ('dataBuffSize', NvU32),
-  ('speed', NvU32),
-  ('encrClientID', NvU32),
+NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS = struct_NV2080_CTRL_FLCN_GET_DMEM_USAGE_PARAMS
+class struct_NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS._fields_ = [
+  ('engine', NvU32),
+  ('engineArch', NvU32),
 ]
-NV2080_CTRL_I2C_ACCESS_PARAMS = struct_NV2080_CTRL_I2C_ACCESS_PARAMS
-class struct_NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS._fields_ = [
-  ('head', NvU32),
-  ('authType', NvU32),
-  ('status', NvU32),
+NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS = struct_NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS
+class struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER(ctypes.Structure): pass
+struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER._fields_ = [
+  ('mask', (NvU8 * 36)),
 ]
-NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS = struct_NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS
+NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER = struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER
+class struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS._fields_ = [
+  ('engine', NvU32),
+  ('pageSize', NvU32),
+  ('offset', NvUPtr),
+  ('size', NvU32),
+  ('queueFeatureId', NvU8),
+]
+NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS
+class struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS._fields_ = [
+  ('engine', NvU32),
+  ('eventFilter', NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER),
+  ('queueId', NvU8),
+]
+NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS
+NV2080_CTRL_FLCN_USTREAMER_CONTROL_GET_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS
+NV2080_CTRL_FLCN_USTREAMER_CONTROL_SET_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS
+class struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS._fields_ = [
+  ('hUserClient', NvHandle),
+  ('hChannel', NvHandle),
+  ('alignment', NvU64),
+  ('size', NvU64),
+  ('bufferHandle', NvP64),
+  ('pageCount', NvU64),
+  ('physAddr', NvU64),
+  ('aperture', NvU32),
+  ('kind', NvU32),
+  ('pageSize', NvU32),
+  ('bIsContigous', NvBool),
+  ('bDeviceDescendant', NvBool),
+  ('uuid', (NvU8 * 16)),
+]
+NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS
+class struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS._fields_ = [
+  ('hChannel', NvHandle),
+  ('totalBufferSize', NvU64),
+]
+NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS = struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS._fields_ = [
+  ('gpioPin', NvU32),
+  ('bInput', NvBool),
+]
+NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS._fields_ = [
+  ('gpioPin', NvU32),
+  ('value', NvU32),
+]
+NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS._fields_ = [
+  ('gpioPin', NvU32),
+  ('value', NvU32),
+]
+NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS
+class struct_NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS._fields_ = [
+  ('function', NvU32),
+  ('pin', NvU32),
+]
+NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS
 NV2080_CTRL_GPU_INFO = struct_NVXXXX_CTRL_XXX_INFO
 class struct_NV2080_CTRL_GPU_GET_INFO_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_GPU_GET_INFO_PARAMS._fields_ = [
@@ -6629,624 +6211,6 @@ struct_NV2080_CTRL_GPU_GET_TPC_RECONFIG_MASK_PARAMS._fields_ = [
   ('tpcReconfigMask', NvU32),
 ]
 NV2080_CTRL_GPU_GET_TPC_RECONFIG_MASK_PARAMS = struct_NV2080_CTRL_GPU_GET_TPC_RECONFIG_MASK_PARAMS
-class struct_NV2080_CTRL_CMD_SET_GPFIFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_SET_GPFIFO_PARAMS._fields_ = [
-  ('hChannel', NvHandle),
-  ('base', NvU64),
-  ('numEntries', NvU32),
-]
-NV2080_CTRL_CMD_SET_GPFIFO_PARAMS = struct_NV2080_CTRL_CMD_SET_GPFIFO_PARAMS
-class struct_NV2080_CTRL_FIFO_BIND_CHANNEL(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_BIND_CHANNEL._fields_ = [
-  ('hClient', NvHandle),
-  ('hChannel', NvHandle),
-]
-NV2080_CTRL_FIFO_BIND_CHANNEL = struct_NV2080_CTRL_FIFO_BIND_CHANNEL
-class struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS._fields_ = [
-  ('bindChannelCount', NvU32),
-  ('bindChannels', (NV2080_CTRL_FIFO_BIND_CHANNEL * 16)),
-]
-NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS = struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS
-class struct_NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS._fields_ = [
-  ('flags', NvU32),
-]
-NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS = struct_NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS
-class struct_NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS._fields_ = [
-  ('physChannelCount', NvU32),
-  ('physChannelCountInUse', NvU32),
-]
-NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS = struct_NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS
-NV2080_CTRL_FIFO_INFO = struct_NVXXXX_CTRL_XXX_INFO
-class struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS._fields_ = [
-  ('fifoInfoTblSize', NvU32),
-  ('fifoInfoTbl', (NV2080_CTRL_FIFO_INFO * 256)),
-  ('engineType', NvU32),
-]
-NV2080_CTRL_FIFO_GET_INFO_PARAMS = struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS
-class struct_NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS._fields_ = [
-  ('hChannel', NvHandle),
-]
-NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS = struct_NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS
-class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS._fields_ = [
-  ('bDisable', NvBool),
-  ('numChannels', NvU32),
-  ('bOnlyDisableScheduling', NvBool),
-  ('bRewindGpPut', NvBool),
-  ('pRunlistPreemptEvent', NvP64),
-  ('hClientList', (NvHandle * 64)),
-  ('hChannelList', (NvHandle * 64)),
-]
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS
-class struct_NV2080_CTRL_FIFO_MEM_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_MEM_INFO._fields_ = [
-  ('aperture', NvU32),
-  ('base', NvU64),
-  ('size', NvU64),
-]
-NV2080_CTRL_FIFO_MEM_INFO = struct_NV2080_CTRL_FIFO_MEM_INFO
-class struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO._fields_ = [
-  ('inst', NV2080_CTRL_FIFO_MEM_INFO),
-  ('ramfc', NV2080_CTRL_FIFO_MEM_INFO),
-  ('methodBuf', (NV2080_CTRL_FIFO_MEM_INFO * 2)),
-  ('methodBufCount', NvU32),
-]
-NV2080_CTRL_FIFO_CHANNEL_MEM_INFO = struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO
-class struct_NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS._fields_ = [
-  ('hChannel', NvHandle),
-  ('chMemInfo', NV2080_CTRL_FIFO_CHANNEL_MEM_INFO),
-]
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS = struct_NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS
-class struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS._fields_ = [
-  ('aperture', NvU32),
-  ('attribute', NvU32),
-]
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS = struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS
-class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS(ctypes.Structure): pass
-class _anonstruct17(ctypes.Structure): pass
-NvS64 = ctypes.c_longlong
-_anonstruct17._fields_ = [
-  ('timestampNs', NvU64),
-  ('timeRunTotalNs', NvS64),
-  ('timeRunNs', NvU32),
-  ('swrlId', NvU32),
-  ('targetTimeSlice', NvU32),
-  ('cumulativePreemptionTime', NvU64),
-  ('counters', (NvU64 * 8)),
-]
-struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS._fields_ = [
-  ('engineId', NvU32),
-  ('count', NvU32),
-  ('entry', (_anonstruct17 * 200)),
-  ('schedPolicy', NvU32),
-  ('arrEnabled', NvU32),
-  ('arrAvgFactor', NvU32),
-  ('targetTimesliceNs', NvU32),
-]
-NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS
-class struct_NV2080_CTRL_FIFO_DEVICE_ENTRY(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_DEVICE_ENTRY._fields_ = [
-  ('engineData', (NvU32 * 16)),
-  ('pbdmaIds', (NvU32 * 2)),
-  ('pbdmaFaultIds', (NvU32 * 2)),
-  ('numPbdmas', NvU32),
-  ('engineName', (ctypes.c_char * 16)),
-]
-NV2080_CTRL_FIFO_DEVICE_ENTRY = struct_NV2080_CTRL_FIFO_DEVICE_ENTRY
-class struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS._fields_ = [
-  ('baseIndex', NvU32),
-  ('numEntries', NvU32),
-  ('bMore', NvBool),
-  ('entries', (NV2080_CTRL_FIFO_DEVICE_ENTRY * 32)),
-]
-NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS = struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS
-class struct_NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS._fields_ = [
-  ('engineType', NvU32),
-  ('vChid', NvU32),
-  ('faultType', NvU32),
-]
-NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS = struct_NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS
-class struct_NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS._fields_ = [
-  ('flags', NvU32),
-  ('schedPolicy', NvU32),
-]
-NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS = struct_NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS
-class struct_NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS._fields_ = [
-  ('hClient', NvHandle),
-  ('hChannel', NvHandle),
-  ('hUserdMemory', NvHandle),
-  ('gpFifoEntries', NvU32),
-  ('gpFifoOffset', NvU64),
-  ('userdOffset', NvU64),
-]
-NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS = struct_NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS
-class struct_NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS._fields_ = [
-  ('bDisable', NvBool),
-]
-NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS
-class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS._fields_ = [
-  ('base', NvU64),
-  ('size', NvU64),
-  ('addressSpace', NvU32),
-  ('cacheAttrib', NvU32),
-]
-NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS = struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS
-class struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS._fields_ = [
-  ('runlistId', NvU32),
-  ('bitMask', (NvU32 * 128)),
-]
-NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS
-class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS._fields_ = [
-  ('numChannels', NvU32),
-  ('hClientList', (NvHandle * 64)),
-  ('hChannelList', (NvHandle * 64)),
-  ('bEnableAfterKeyRotation', NvBool),
-]
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS
-class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS._fields_ = [
-  ('numChannels', NvU32),
-  ('hChannelList', (NvHandle * 64)),
-  ('bEnableAfterKeyRotation', NvBool),
-]
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS
-class struct_NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS._fields_ = [
-  ('engineId', NvU32),
-  ('schedPolicy', NvU32),
-  ('arrEnabled', NvU32),
-  ('targetTimesliceNs', NvU32),
-  ('arrAvgFactor', NvU32),
-]
-NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS
-class struct_NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS._fields_ = [
-  ('engineId', NvU32),
-  ('schedPolicy', NvU32),
-  ('enableArr', NvU32),
-  ('timesliceTargetNs', NvU32),
-  ('frequencyForARR', NvU32),
-  ('avgFactorForARR', NvU32),
-]
-NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS
-class struct_NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS._fields_ = [
-  ('engineId', NvU32),
-  ('supportedSchedulers', (NvU32 * 3)),
-  ('bIsArrModeSupported', NvBool),
-  ('maxTimesliceNs', NvU32),
-  ('minTimesliceNs', NvU32),
-  ('maxFrequencyForARR', NvU32),
-  ('minFrequencyForARR', NvU32),
-  ('maxAvgFactorForARR', NvU32),
-  ('minAvgFactorForARR', NvU32),
-]
-NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS
-class struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS._fields_ = [
-  ('hClient', NvHandle),
-  ('hChannelOrTsg', NvHandle),
-  ('tsgId', NvU32),
-  ('numChannels', NvU32),
-  ('channelUniqueID', (NvU32 * 128)),
-  ('vasUniqueID', (NvU32 * 128)),
-  ('veid', (NvU32 * 128)),
-]
-NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS = struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS
-class struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS._fields_ = [
-  ('hClients', (NvHandle * 128)),
-  ('hChannels', (NvHandle * 128)),
-  ('numChannels', NvU32),
-  ('channelUniqueIDs', (NvU32 * 128)),
-]
-NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS = struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS._fields_ = [
-  ('gpcCount', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS._fields_ = [
-  ('gpcId', NvU32),
-  ('chipletGpcMap', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS._fields_ = [
-  ('gpcId', NvU32),
-  ('tpcMask', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS._fields_ = [
-  ('gpcId', NvU32),
-  ('ppcMask', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS._fields_ = [
-  ('swizzId', NvU32),
-  ('gpcId', NvU32),
-  ('chipletGpcMap', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS._fields_ = [
-  ('gpcId', NvU32),
-  ('ropMask', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS._fields_ = [
-  ('chipletSyspipeMask', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS._fields_ = [
-  ('swizzId', NvU16),
-  ('physSyspipeIdCount', NvU16),
-  ('physSyspipeId', (NvU8 * 8)),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS._fields_ = [
-  ('swizzId', NvU32),
-  ('grIdx', NvU32),
-  ('gpcEnMask', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS._fields_ = [
-  ('syspipeId', NvU32),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS(ctypes.Structure): pass
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData(ctypes.Union): pass
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData._fields_ = [
-  ('gpcCountData', NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS),
-  ('chipletGpcMapData', NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS),
-  ('tpcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS),
-  ('ppcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS),
-  ('partitionGpcMapData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS),
-  ('syspipeMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS),
-  ('partitionChipletSyspipeData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS),
-  ('dmGpcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS),
-  ('partitionSyspipeIdData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS),
-  ('ropMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS),
-]
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS._fields_ = [
-  ('queryType', NvU16),
-  ('reserved', (NvU8 * 2)),
-  ('status', NvU32),
-  ('queryData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData),
-]
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS
-class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS._fields_ = [
-  ('numQueries', NvU16),
-  ('reserved', (NvU8 * 6)),
-  ('queries', (NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS * 96)),
-]
-NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS = struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS
-class struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS._fields_ = [
-  ('gpioPin', NvU32),
-  ('bInput', NvBool),
-]
-NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS
-class struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS._fields_ = [
-  ('gpioPin', NvU32),
-  ('value', NvU32),
-]
-NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS
-class struct_NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS._fields_ = [
-  ('gpioPin', NvU32),
-  ('value', NvU32),
-]
-NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS
-class struct_NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS._fields_ = [
-  ('function', NvU32),
-  ('pin', NvU32),
-]
-NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS = struct_NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS
-class struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS._fields_ = [
-  ('component', NvU32),
-  ('size', NvU32),
-]
-NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS = struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS
-class struct_NV2080_CTRL_NVD_GET_DUMP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVD_GET_DUMP_PARAMS._fields_ = [
-  ('pBuffer', NvP64),
-  ('component', NvU32),
-  ('size', NvU32),
-]
-NV2080_CTRL_NVD_GET_DUMP_PARAMS = struct_NV2080_CTRL_NVD_GET_DUMP_PARAMS
-class struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS(ctypes.Structure): pass
-struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS._fields_ = [
-  ('userMinOffset', NvS32),
-  ('userMaxOffset', NvS32),
-  ('factoryMinOffset', NvU32),
-  ('factoryMaxOffset', NvU32),
-  ('lastActiveClock', NvU32),
-  ('lastActiveVolt', NvU32),
-  ('lastActivePoint', NvU32),
-  ('kappa', NvU32),
-]
-NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS = struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS
-class struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG(ctypes.Structure): pass
-struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG._fields_ = [
-  ('pstateVer', NvU32),
-  ('gpcOverclock', NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS),
-  ('mclkOverclock', NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS),
-  ('bUserOverclocked', NvBool),
-  ('bFactoryOverclocked', NvBool),
-]
-NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG = struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG
-class struct_NV2080_NOCAT_JOURNAL_GPU_STATE(ctypes.Structure): pass
-struct_NV2080_NOCAT_JOURNAL_GPU_STATE._fields_ = [
-  ('bValid', NvBool),
-  ('strap', NvU32),
-  ('deviceId', NvU16),
-  ('vendorId', NvU16),
-  ('subsystemVendor', NvU16),
-  ('subsystemId', NvU16),
-  ('revision', NvU16),
-  ('type', NvU16),
-  ('vbiosVersion', NvU32),
-  ('bOptimus', NvBool),
-  ('bMsHybrid', NvBool),
-  ('bFullPower', NvBool),
-  ('vbiosOemVersion', NvU32),
-  ('memoryType', NvU16),
-  ('tag', (NvU8 * 65)),
-  ('vbiosProject', (NvU8 * 65)),
-  ('bInFullchipReset', NvBool),
-  ('bInSecBusReset', NvBool),
-  ('bInGc6Reset', NvBool),
-  ('overclockCfg', NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG),
-]
-NV2080_NOCAT_JOURNAL_GPU_STATE = struct_NV2080_NOCAT_JOURNAL_GPU_STATE
-class struct_NV2080_NOCAT_JOURNAL_ENTRY(ctypes.Structure): pass
-struct_NV2080_NOCAT_JOURNAL_ENTRY._fields_ = [
-  ('recType', NvU8),
-  ('bugcheck', NvU32),
-  ('tdrBucketId', NvU32),
-  ('source', (NvU8 * 65)),
-  ('subsystem', NvU32),
-  ('errorCode', NvU64),
-  ('diagBufferLen', NvU32),
-  ('diagBuffer', (NvU8 * 1024)),
-  ('faultingEngine', (NvU8 * 65)),
-  ('mmuFaultType', NvU32),
-  ('mmuErrorSrc', NvU32),
-  ('tdrReason', (NvU8 * 65)),
-]
-NV2080_NOCAT_JOURNAL_ENTRY = struct_NV2080_NOCAT_JOURNAL_ENTRY
-class struct_NV2080_NOCAT_JOURNAL_RECORD(ctypes.Structure): pass
-struct_NV2080_NOCAT_JOURNAL_RECORD._fields_ = [
-  ('GPUTag', NvU32),
-  ('loadAddress', NvU64),
-  ('timeStamp', NvU64),
-  ('stateMask', NvU64),
-  ('nocatGpuState', NV2080_NOCAT_JOURNAL_GPU_STATE),
-  ('nocatJournalEntry', NV2080_NOCAT_JOURNAL_ENTRY),
-]
-NV2080_NOCAT_JOURNAL_RECORD = struct_NV2080_NOCAT_JOURNAL_RECORD
-class struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS._fields_ = [
-  ('flags', NvU32),
-  ('nocatRecordCount', NvU32),
-  ('nocatOutstandingRecordCount', NvU32),
-  ('journalRecords', (NV2080_NOCAT_JOURNAL_RECORD * 10)),
-  ('activityCounters', (NvU32 * 32)),
-  ('reserved', (NvU8 * 65)),
-]
-NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS = struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS
-class struct_NV2080CtrlNocatJournalDataTdrReason(ctypes.Structure): pass
-struct_NV2080CtrlNocatJournalDataTdrReason._fields_ = [
-  ('flags', NvU32),
-  ('source', (NvU8 * 65)),
-  ('subsystem', NvU32),
-  ('errorCode', NvU64),
-  ('reasonCode', NvU32),
-]
-NV2080CtrlNocatJournalDataTdrReason = struct_NV2080CtrlNocatJournalDataTdrReason
-class struct_NV2080CtrlNocatJournalSetTag(ctypes.Structure): pass
-struct_NV2080CtrlNocatJournalSetTag._fields_ = [
-  ('flags', NvU32),
-  ('tag', (NvU8 * 65)),
-]
-NV2080CtrlNocatJournalSetTag = struct_NV2080CtrlNocatJournalSetTag
-class struct_NV2080CtrlNocatJournalRclog(ctypes.Structure): pass
-struct_NV2080CtrlNocatJournalRclog._fields_ = [
-  ('flags', NvU32),
-  ('rclogSize', NvU32),
-  ('rmGpuId', NvU32),
-  ('APIType', NvU32),
-  ('contextType', NvU32),
-  ('exceptType', NvU32),
-  ('processImageName', (NvU8 * 65)),
-]
-NV2080CtrlNocatJournalRclog = struct_NV2080CtrlNocatJournalRclog
-class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData(ctypes.Union): pass
-struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData._fields_ = [
-  ('tdrReason', NV2080CtrlNocatJournalDataTdrReason),
-  ('tagData', NV2080CtrlNocatJournalSetTag),
-  ('rclog', NV2080CtrlNocatJournalRclog),
-]
-struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS._fields_ = [
-  ('dataType', NvU32),
-  ('targetRecordType', NvU32),
-  ('nocatJournalData', struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData),
-]
-NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS = struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS
-class struct_NV2080CtrlNocatJournalInsertRecord(ctypes.Structure): pass
-struct_NV2080CtrlNocatJournalInsertRecord._fields_ = [
-  ('flags', NvU32),
-  ('timestamp', NvU64),
-  ('recType', NvU8),
-  ('bugcheck', NvU32),
-  ('source', (ctypes.c_char * 65)),
-  ('subsystem', NvU32),
-  ('errorCode', NvU64),
-  ('faultingEngine', (ctypes.c_char * 65)),
-  ('tdrReason', NvU32),
-  ('diagBufferLen', NvU32),
-  ('diagBuffer', (NvU8 * 1024)),
-]
-NV2080CtrlNocatJournalInsertRecord = struct_NV2080CtrlNocatJournalInsertRecord
-class struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS._fields_ = [
-  ('nocatJournalRecord', NV2080CtrlNocatJournalInsertRecord),
-]
-NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS = struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS
-class struct_NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS._fields_ = [
-  ('ctrlParamVal', NvU32),
-]
-NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS = struct_NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS
-class struct_NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS._fields_ = [
-  ('responseVal', NvU32),
-]
-NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS = struct_NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS
-class struct_NV2080_CTRL_CE_GET_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_CAPS_PARAMS._fields_ = [
-  ('ceEngineType', NvU32),
-  ('capsTblSize', NvU32),
-  ('capsTbl', NvP64),
-]
-NV2080_CTRL_CE_GET_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_PARAMS
-class struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS._fields_ = [
-  ('ceEngineType', NvU32),
-  ('capsTbl', (NvU8 * 2)),
-]
-NV2080_CTRL_CE_GET_CAPS_V2_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS
-class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS._fields_ = [
-  ('ceEngineType', NvU32),
-  ('pceMask', NvU32),
-]
-NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS
-class struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS._fields_ = [
-  ('ceEngineType', NvU32),
-  ('pceLceMap', (NvU32 * 32)),
-  ('grceSharedLceMap', (NvU32 * 4)),
-]
-NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS = struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS
-class struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS._fields_ = [
-  ('pceLceMap', (NvU32 * 32)),
-  ('grceConfig', (NvU32 * 4)),
-  ('exposeCeMask', NvU32),
-  ('bUpdateNvlinkPceLce', NvBool),
-]
-NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS = struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS
-class struct_NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS._fields_ = [
-  ('stubbedCeMask', NvU32),
-]
-NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS = struct_NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS
-NV2080_CTRL_CE_GET_PHYSICAL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS
-class struct_NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS._fields_ = [
-  ('size', NvU32),
-]
-NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS = struct_NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS
-class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS._fields_ = [
-  ('hshubPceMasks', (NvU32 * 32)),
-  ('fbhubPceMask', NvU32),
-]
-NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS
-class struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS._fields_ = [
-  ('capsTbl', ((NvU8 * 2) * 64)),
-  ('present', NvU64),
-]
-NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
-NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
-class struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS._fields_ = [
-  ('ceEngineType', NvU32),
-  ('shimInstance', NvU32),
-  ('shimLocalLceIdx', NvU32),
-]
-NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS = struct_NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS
-class struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS._fields_ = [
-  ('pceLceMap', (NvU32 * 32)),
-  ('grceConfig', (NvU32 * 4)),
-  ('exposeCeMask', NvU32),
-  ('bUpdateNvlinkPceLce', NvBool),
-  ('shimInstance', NvU32),
-]
-NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS = struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS
-class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS._fields_ = [
-  ('connectingHubPceMasks', (NvU32 * 32)),
-  ('fbhubPceMask', NvU32),
-  ('shimInstance', NvU32),
-]
-NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS
-enum_NV2080_CTRL_CE_LCE_TYPE = CEnum(ctypes.c_uint)
-NV2080_CTRL_CE_LCE_TYPE_PCIE = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_PCIE', 1)
-NV2080_CTRL_CE_LCE_TYPE_DECOMP = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_DECOMP', 2)
-NV2080_CTRL_CE_LCE_TYPE_SCRUB = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_SCRUB', 3)
-NV2080_CTRL_CE_LCE_TYPE_NVLINK_PEER = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_NVLINK_PEER', 4)
-NV2080_CTRL_CE_LCE_TYPE_C2C = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_C2C', 5)
-NV2080_CTRL_CE_LCE_TYPE_PCIE_RD = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_PCIE_RD', 6)
-NV2080_CTRL_CE_LCE_TYPE_PCIE_WR = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_PCIE_WR', 7)
-NV2080_CTRL_CE_LCE_TYPE_C2C_H2D = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_C2C_H2D', 8)
-NV2080_CTRL_CE_LCE_TYPE_C2C_D2H = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_C2C_D2H', 9)
-
-NV2080_CTRL_CE_LCE_TYPE = enum_NV2080_CTRL_CE_LCE_TYPE
-class struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS._fields_ = [
-  ('lceType', NV2080_CTRL_CE_LCE_TYPE),
-  ('numPces', NvU32),
-  ('numLces', NvU32),
-  ('supportedPceMask', NvU32),
-  ('supportedLceMask', NvU32),
-  ('pcePerHshub', NvU32),
-]
-NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS = struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS
-class struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS._fields_ = [
-  ('decompLceMask', NvU64),
-  ('shimInstance', NvU32),
-]
-NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS
-class struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS._fields_ = [
-  ('lceIndex', NvU32),
-  ('bDecompEnabled', NvBool),
-]
-NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS = struct_NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS
 class struct_NV2080_CTRL_GPUMON_SAMPLE(ctypes.Structure): pass
 struct_NV2080_CTRL_GPUMON_SAMPLE._fields_ = [
   ('timeStamp', NvU64),
@@ -7261,977 +6225,6 @@ struct_NV2080_CTRL_GPUMON_SAMPLES._fields_ = [
   ('pSamples', NvP64),
 ]
 NV2080_CTRL_GPUMON_SAMPLES = struct_NV2080_CTRL_GPUMON_SAMPLES
-NV2080_CTRL_FB_INFO = struct_NVXXXX_CTRL_XXX_INFO
-class struct_NV2080_CTRL_FB_GET_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_INFO_PARAMS._fields_ = [
-  ('fbInfoListSize', NvU32),
-  ('fbInfoList', NvP64),
-]
-NV2080_CTRL_FB_GET_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_INFO_PARAMS
-class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS._fields_ = [
-  ('fbInfoListSize', NvU32),
-  ('fbInfoList', (NV2080_CTRL_FB_INFO * 57)),
-]
-NV2080_CTRL_FB_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS
-class struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS._fields_ = [
-  ('cpuVirtAddress', NvP64),
-  ('gpuVirtAddress', NvU64),
-]
-NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS = struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS
-class struct_NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS._fields_ = [
-  ('flags', NvU32),
-  ('driveStrengthRiseCount', NvU32),
-  ('driveStrengthFallCount', NvU32),
-  ('driveStrengthTermCount', NvU32),
-  ('slewStrengthRiseCount', NvU32),
-  ('slewStrengthFallCount', NvU32),
-]
-NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS = struct_NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS
-class struct_NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS._fields_ = [
-  ('flags', NvU32),
-]
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS = struct_NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS
-class struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS._fields_ = [
-  ('addressArray', (NvU64 * 500)),
-  ('addressArraySize', NvU32),
-  ('addressAlign', NvU32),
-  ('memBlockSizeBytes', NvU64),
-  ('flags', NvU32),
-]
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS = struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS
-class struct_NV2080_CTRL_FB_IS_KIND_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_IS_KIND_PARAMS._fields_ = [
-  ('operation', NvU32),
-  ('kind', NvU32),
-  ('result', NvBool),
-]
-NV2080_CTRL_FB_IS_KIND_PARAMS = struct_NV2080_CTRL_FB_IS_KIND_PARAMS
-class struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS._fields_ = [
-  ('powerState', NvU32),
-  ('writeMode', NvU32),
-  ('bypassMode', NvU32),
-  ('rcmState', NvU32),
-]
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS
-NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = (ctypes.c_ubyte * 17)
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO._fields_ = [
-  ('base', NvU64),
-  ('limit', NvU64),
-  ('reserved', NvU64),
-  ('performance', NvU32),
-  ('supportCompressed', NvBool),
-  ('supportISO', NvBool),
-  ('bProtected', NvBool),
-  ('blackList', NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG),
-]
-NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS._fields_ = [
-  ('numFBRegions', NvU32),
-  ('fbRegion', (NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO * 16)),
-]
-NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS
-class struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO._fields_ = [
-  ('pageAddressWithEccOn', NvU64),
-  ('pageAddressWithEccOff', NvU64),
-  ('rbcAddress', NvU32),
-  ('source', NvU32),
-  ('status', NvU32),
-  ('timestamp', NvU32),
-]
-NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO = struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO
-class struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS._fields_ = [
-  ('offlined', (NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO * 64)),
-  ('pageSize', NvU32),
-  ('validEntries', NvU32),
-  ('numPagesAdded', NvU32),
-]
-NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS = struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS
-class struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS._fields_ = [
-  ('offlined', (NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO * 64)),
-  ('validEntries', NvU32),
-  ('bRetirementPending', NvBool),
-  ('retirementPending', NvU8),
-]
-NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS
-enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE = CEnum(ctypes.c_uint)
-NV2080_CTRL_CMD_FB_ACR_QUERY_GET_CLIENT_REGION_STATUS = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_CLIENT_REGION_STATUS', 0)
-NV2080_CTRL_CMD_FB_ACR_QUERY_GET_REGION_PROPERTY = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_REGION_PROPERTY', 1)
-NV2080_CTRL_CMD_FB_ACR_QUERY_GET_FALCON_STATUS = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_FALCON_STATUS', 2)
-
-NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE
-enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE = CEnum(ctypes.c_uint)
-NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_NONE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_NONE', 0)
-NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_INVALID_CLIENT_REQUEST = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_INVALID_CLIENT_REQUEST', 1)
-
-NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE
-class struct_ACR_REQUEST_PARAMS(ctypes.Structure): pass
-struct_ACR_REQUEST_PARAMS._fields_ = [
-  ('clientId', NvU32),
-  ('reqReadMask', NvU32),
-  ('reqWriteMask', NvU32),
-  ('regionSize', NvU32),
-]
-ACR_REQUEST_PARAMS = struct_ACR_REQUEST_PARAMS
-class struct_ACR_REGION_ID_PROP(ctypes.Structure): pass
-struct_ACR_REGION_ID_PROP._fields_ = [
-  ('regionId', NvU32),
-  ('readMask', NvU32),
-  ('writeMask', NvU32),
-  ('regionSize', NvU32),
-  ('clientMask', NvU32),
-  ('physicalAddress', NvU64),
-]
-ACR_REGION_ID_PROP = struct_ACR_REGION_ID_PROP
-class struct_ACR_STATUS_PARAMS(ctypes.Structure): pass
-struct_ACR_STATUS_PARAMS._fields_ = [
-  ('allocStatus', NvU32),
-  ('regionId', NvU32),
-  ('physicalAddress', NvU64),
-]
-ACR_STATUS_PARAMS = struct_ACR_STATUS_PARAMS
-class struct_ACR_REGION_HANDLE(ctypes.Structure): pass
-struct_ACR_REGION_HANDLE._fields_ = [
-  ('hClient', NvHandle),
-  ('hParent', NvHandle),
-  ('hMemory', NvHandle),
-  ('hClass', NvU32),
-  ('hDevice', NvHandle),
-]
-ACR_REGION_HANDLE = struct_ACR_REGION_HANDLE
-class struct_ACR_FALCON_LS_STATUS(ctypes.Structure): pass
-struct_ACR_FALCON_LS_STATUS._fields_ = [
-  ('falconId', NvU16),
-  ('bIsInLs', NvBool),
-]
-ACR_FALCON_LS_STATUS = struct_ACR_FALCON_LS_STATUS
-class struct_NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS._fields_ = [
-  ('queryType', NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE),
-  ('errorCode', NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE),
-  ('acrRegionIdProp', ACR_REGION_ID_PROP),
-  ('clientReq', ACR_REQUEST_PARAMS),
-  ('clientReqStatus', ACR_STATUS_PARAMS),
-  ('handle', ACR_REGION_HANDLE),
-  ('falconStatus', ACR_FALCON_LS_STATUS),
-]
-NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS = struct_NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS
-class struct_NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS._fields_ = [
-  ('sourceMask', NvU32),
-]
-NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS
-class struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS._fields_ = [
-  ('pCompBitCopyObj', NvP64),
-  ('pSwizzleParams', NvP64),
-]
-NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS
-class struct_NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS._fields_ = [
-  ('fbpIndex', NvU8),
-  ('ltcMask', NvU32),
-  ('ltcCount', NvU32),
-  ('ltsMask', NvU32),
-  ('ltsCount', NvU32),
-]
-NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS = struct_NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS
-class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS._fields_ = [
-  ('CBCBaseAddress', NvU32),
-  ('backingStorePA', NvU64),
-  ('backingStoreVA', ctypes.POINTER(NvU8)),
-  ('backingStoreChunkPA', NvU64),
-  ('backingStoreChunkVA', ctypes.POINTER(NvU8)),
-  ('backingStoreChunkSize', NvU32),
-  ('cacheWriteBitMap', ctypes.POINTER(NvU8)),
-  ('backingStoreChunkOverfetch', NvBool),
-  ('PageSizeSrc', NvU32),
-  ('PageSizeDest', NvU32),
-]
-NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS
-class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS._fields_ = [
-  ('fcbits', ctypes.POINTER(NvU32)),
-  ('compbits', ctypes.POINTER(NvU32)),
-  ('dataPhysicalStart', NvU64),
-  ('surfaceOffset', NvU64),
-  ('comptagLine', NvU32),
-  ('upper64KBCompbitSel', NvBool),
-]
-NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS
-class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS._fields_ = [
-  ('fcbits', NvU32),
-  ('compbits', NvU32),
-  ('writeFc', NvBool),
-  ('dataPhysicalStart', NvU64),
-  ('surfaceOffset', NvU64),
-  ('comptagLine', NvU32),
-  ('upper64KBCompbitSel', NvBool),
-]
-NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS_PARAMS
-class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS._fields_ = [
-  ('SrcDataPhysicalStart', NvU64),
-  ('SrcComptagLine', NvU32),
-  ('page64KB', NvU32),
-  ('compbitBuffer', ctypes.POINTER(NvU32)),
-  ('upper64KBCompbitSel', NvBool),
-]
-NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS
-class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS._fields_ = [
-  ('DstDataPhysicalStart', NvU64),
-  ('DstComptagLine', NvU32),
-  ('page64KB', NvU32),
-  ('compbitBuffer', ctypes.POINTER(NvU32)),
-  ('upper64KBCompbitSel', NvBool),
-]
-NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS
-class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS._fields_ = [
-  ('bForceBar1', NvBool),
-]
-NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1_PARAMS
-class struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS._fields_ = [
-  ('pAmapConfParams', NvP64),
-  ('pCbcSwizzleParams', NvP64),
-]
-NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS
-enum_CTRL_CMD_FB_CBC_OP = CEnum(ctypes.c_uint)
-CTRL_CMD_FB_CBC_OP_CLEAN = enum_CTRL_CMD_FB_CBC_OP.define('CTRL_CMD_FB_CBC_OP_CLEAN', 0)
-CTRL_CMD_FB_CBC_OP_INVALIDATE = enum_CTRL_CMD_FB_CBC_OP.define('CTRL_CMD_FB_CBC_OP_INVALIDATE', 1)
-
-CTRL_CMD_FB_CBC_OP = enum_CTRL_CMD_FB_CBC_OP
-class struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS._fields_ = [
-  ('fbCBCOp', CTRL_CMD_FB_CBC_OP),
-]
-NV2080_CTRL_CMD_FB_CBC_OP_PARAMS = struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS
-class struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS._fields_ = [
-  ('pCompTags', (NvU32 * 127)),
-  ('numCompTags', NvU32),
-]
-NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS = struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS
-class struct_NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS._fields_ = [
-  ('attr', NvU32),
-  ('attr2', NvU32),
-  ('size', NvU32),
-  ('ctagOffset', NvU32),
-  ('hwResId', NvU32),
-  ('retCompTagLineMin', NvU32),
-  ('retCompTagLineMax', NvU32),
-]
-NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS = struct_NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS
-class struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS._fields_ = [
-  ('hwResId', NvU32),
-]
-NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS = struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS
-enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE = CEnum(ctypes.c_uint)
-NV2080_CTRL_CMD_FB_SET_VPR = enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE.define('NV2080_CTRL_CMD_FB_SET_VPR', 0)
-
-NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE = enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE
-enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE = CEnum(ctypes.c_uint)
-NV2080_CTRL_CMD_FB_VPR_ERROR_GENERIC = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE.define('NV2080_CTRL_CMD_FB_VPR_ERROR_GENERIC', 0)
-NV2080_CTRL_CMD_FB_VPR_ERROR_INVALID_CLIENT_REQUEST = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE.define('NV2080_CTRL_CMD_FB_VPR_ERROR_INVALID_CLIENT_REQUEST', 1)
-
-NV2080_CTRL_CMD_FB_VPR_ERROR_CODE = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE
-class struct_VPR_REQUEST_PARAMS(ctypes.Structure): pass
-struct_VPR_REQUEST_PARAMS._fields_ = [
-  ('startAddr', NvU32),
-  ('size', NvU32),
-]
-VPR_REQUEST_PARAMS = struct_VPR_REQUEST_PARAMS
-class struct_VPR_STATUS_PARAMS(ctypes.Structure): pass
-struct_VPR_STATUS_PARAMS._fields_ = [
-  ('status', NvU32),
-]
-VPR_STATUS_PARAMS = struct_VPR_STATUS_PARAMS
-class struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS._fields_ = [
-  ('requestType', NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE),
-  ('requestParams', VPR_REQUEST_PARAMS),
-  ('statusParams', VPR_STATUS_PARAMS),
-]
-NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS
-PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS)
-class struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS._fields_ = [
-  ('offlinedPages', (NvU32 * 64)),
-  ('pageSize', NvU32),
-  ('validEntries', NvU32),
-]
-NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS
-class struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS._fields_ = [
-  ('defaultPageSize', NvU32),
-  ('comptagsPerCacheLine', NvU32),
-  ('unpackedComptagLinesPerCacheLine', NvU32),
-  ('compCacheLineSizePerLTC', NvU32),
-  ('unpackedCompCacheLineSizePerLTC', NvU32),
-  ('slicesPerLTC', NvU32),
-  ('numActiveLTCs', NvU32),
-  ('familyName', NvU32),
-  ('chipName', NvU32),
-  ('bitsPerRAMEntry', NvU32),
-  ('ramBankWidth', NvU32),
-  ('bitsPerComptagLine', NvU32),
-  ('ramEntriesPerCompCacheLine', NvU32),
-  ('comptagLineSize', NvU32),
-]
-NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS
-class struct_NV2080_CTRL_FB_SET_RRD_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_SET_RRD_PARAMS._fields_ = [
-  ('rrd', NvU32),
-]
-NV2080_CTRL_FB_SET_RRD_PARAMS = struct_NV2080_CTRL_FB_SET_RRD_PARAMS
-class struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS._fields_ = [
-  ('limit', NvU8),
-]
-NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS = struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS
-NV2080_CTRL_FB_SET_READ_LIMIT_PARAMS = struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS
-NV2080_CTRL_FB_SET_WRITE_LIMIT_PARAMS = struct_NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_PARAMS
-class struct_NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS._fields_ = [
-  ('bEnable', NvBool),
-]
-NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS = struct_NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS
-class struct_NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS._fields_ = [
-  ('alignType', NvU32),
-  ('alignAttr', NvU32),
-  ('alignInputFlags', NvU32),
-  ('alignHead', NvU32),
-  ('alignSize', NvU64),
-  ('alignHeight', NvU32),
-  ('alignWidth', NvU32),
-  ('alignPitch', NvU32),
-  ('alignPad', NvU32),
-  ('alignMask', NvU32),
-  ('alignOutputFlags', (NvU32 * 4)),
-  ('alignBank', (NvU32 * 4)),
-  ('alignKind', NvU32),
-  ('alignAdjust', NvU32),
-  ('alignAttr2', NvU32),
-]
-NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS = struct_NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS
-class struct_NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS._fields_ = [
-  ('cbcBaseAddress', NvU32),
-  ('compCacheLineSize', NvU32),
-  ('backingStoreStartPA', NvU64),
-  ('backingStoreAllocPA', NvU64),
-  ('backingStoreChunkOverfetch', NvU32),
-]
-NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS
-class struct_NV2080_CTRL_FB_REMAP_ENTRY(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_REMAP_ENTRY._fields_ = [
-  ('remapRegVal', NvU32),
-  ('timestamp', NvU32),
-  ('fbpa', NvU8),
-  ('sublocation', NvU8),
-  ('source', NvU8),
-  ('flags', NvU8),
-]
-NV2080_CTRL_FB_REMAP_ENTRY = struct_NV2080_CTRL_FB_REMAP_ENTRY
-class struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS._fields_ = [
-  ('entryCount', NvU32),
-  ('flags', NvU8),
-  ('entries', (NV2080_CTRL_FB_REMAP_ENTRY * 512)),
-]
-NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS = struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS._fields_ = [
-  ('data', (NvU8 * 24)),
-]
-NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS._fields_ = [
-  ('swizzId', NvU32),
-  ('fbpEnMask', NvU64),
-]
-NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('ltcEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('ltsEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('fbpaEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('fbpaSubpEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('fbpLogicalIndex', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('ropEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('ltcEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('ltsEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('fbpaEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('ropEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('fbpaSubpEnMask', NvU64),
-]
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS
-class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS._fields_ = [
-  ('sysIdx', NvU32),
-  ('sysl2LtcEnMask', NvU32),
-]
-NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS
-class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS._fields_ = [
-  ('sysIdx', NvU32),
-  ('sysl2LtsEnMask', NvU64),
-]
-NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('pacEnMask', NvU32),
-]
-NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('logicalLtcEnMask', NvU64),
-]
-NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('logicalLtcEnMask', NvU64),
-]
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY(ctypes.Structure): pass
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams(ctypes.Union): pass
-struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams._fields_ = [
-  ('inv', NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS),
-  ('fbp', NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS),
-  ('ltc', NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS),
-  ('lts', NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS),
-  ('fbpa', NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS),
-  ('rop', NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS),
-  ('dmLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS),
-  ('dmLts', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS),
-  ('dmFbpa', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS),
-  ('dmRop', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS),
-  ('dmFbpaSubp', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS),
-  ('fbpaSubp', NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS),
-  ('fbpLogicalMap', NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS),
-  ('sysl2Ltc', NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS),
-  ('pac', NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS),
-  ('logicalLtc', NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS),
-  ('dmLogicalLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS),
-  ('sysl2Lts', NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK_PARAMS),
-]
-struct_NV2080_CTRL_FB_FS_INFO_QUERY._fields_ = [
-  ('queryType', NvU16),
-  ('reserved', (NvU8 * 2)),
-  ('status', NvU32),
-  ('queryParams', struct_NV2080_CTRL_FB_FS_INFO_QUERY_queryParams),
-]
-NV2080_CTRL_FB_FS_INFO_QUERY = struct_NV2080_CTRL_FB_FS_INFO_QUERY
-class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS._fields_ = [
-  ('numQueries', NvU16),
-  ('reserved', (NvU8 * 6)),
-  ('queries', (NV2080_CTRL_FB_FS_INFO_QUERY * 120)),
-]
-NV2080_CTRL_FB_GET_FS_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS
-class struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS._fields_ = [
-  ('histogram', (NvU32 * 5)),
-]
-NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS = struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS
-class struct_NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO._fields_ = [
-  ('pageNumber', NvU64),
-  ('source', NvU8),
-]
-NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO = struct_NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO
-class struct_NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS._fields_ = [
-  ('offlined', (NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO * 64)),
-  ('validEntries', NvU32),
-  ('baseIndex', NvU32),
-  ('bMore', NvBool),
-]
-NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS
-class struct_NV2080_CTRL_CMD_FB_ALLOCATION_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_ALLOCATION_INFO._fields_ = [
-  ('client', NvU32),
-  ('flags', NvU32),
-  ('beginAddr', NvU64),
-  ('size', NvU64),
-]
-NV2080_CTRL_CMD_FB_ALLOCATION_INFO = struct_NV2080_CTRL_CMD_FB_ALLOCATION_INFO
-class struct_NV2080_CTRL_CMD_FB_CLIENT_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_CLIENT_INFO._fields_ = [
-  ('handle', NvHandle),
-  ('pid', NvU32),
-  ('subProcessID', NvU32),
-  ('subProcessName', (ctypes.c_char * 100)),
-]
-NV2080_CTRL_CMD_FB_CLIENT_INFO = struct_NV2080_CTRL_CMD_FB_CLIENT_INFO
-class struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS._fields_ = [
-  ('allocCount', NvU64),
-  ('pAllocInfo', NvP64),
-  ('clientCount', NvU64),
-  ('pClientInfo', NvP64),
-]
-NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS
-class struct_NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS._fields_ = [
-  ('bOnline', NvBool),
-]
-NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS = struct_NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS
-class struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS._fields_ = [
-  ('numaNodeId', NvS32),
-  ('numaMemAddr', NvU64),
-  ('numaMemSize', NvU64),
-  ('numaOfflineAddressesCount', NvU32),
-  ('numaOfflineAddresses', (NvU64 * 64)),
-]
-NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS
-class struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS._fields_ = [
-  ('maxSubmittedSemaphoreValueOffset', NvU64),
-  ('monitoredFenceThresholdOffset', NvU64),
-  ('size', NvU64),
-  ('caps', NvU32),
-]
-NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS = struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS
-class struct_NV2080_CTRL_CMD_FB_STATS_ENTRY(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_STATS_ENTRY._fields_ = [
-  ('totalSize', NvU64),
-  ('rsvdSize', NvU64),
-  ('osSize', NvU64),
-  ('r1Size', NvU64),
-  ('r2Size', NvU64),
-  ('freeSize', NvU64),
-]
-NV2080_CTRL_CMD_FB_STATS_ENTRY = struct_NV2080_CTRL_CMD_FB_STATS_ENTRY
-class struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS._fields_ = [
-  ('gfid', NvU32),
-  ('invalidateAll', NvBool),
-]
-NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS = struct_NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS
-class struct_NV2080_CTRL_CMD_FB_STATS_OWNER_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_STATS_OWNER_INFO._fields_ = [
-  ('allocSize', NvU64),
-  ('numBlocks', NvU32),
-  ('rsvdSize', NvU64),
-]
-NV2080_CTRL_CMD_FB_STATS_OWNER_INFO = struct_NV2080_CTRL_CMD_FB_STATS_OWNER_INFO
-class struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS._fields_ = [
-  ('version', NvU64),
-  ('fbSizeInfo', NV2080_CTRL_CMD_FB_STATS_ENTRY),
-  ('fbBlockInfo', (NV2080_CTRL_CMD_FB_STATS_OWNER_INFO * 200)),
-]
-NV2080_CTRL_CMD_FB_STATS_GET_PARAMS = struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS
-class struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS._fields_ = [
-  ('bStaticBar1Enabled', NvBool),
-  ('staticBar1StartOffset', NvU64),
-  ('staticBar1Size', NvU64),
-]
-NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS
-class struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS._fields_ = [
-  ('currentConfiguration', NvU32),
-]
-NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS = struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS
-class struct_NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS._fields_ = [
-  ('newConfiguration', NvU32),
-]
-NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS = struct_NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS
-class struct_NV2080_CTRL_FB_GET_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_GET_STATUS_PARAMS._fields_ = [
-  ('fbStatus', NvU32),
-]
-NV2080_CTRL_FB_GET_STATUS_PARAMS = struct_NV2080_CTRL_FB_GET_STATUS_PARAMS
-class struct_NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS._fields_ = [
-  ('isSupported', NvU32),
-]
-NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS = struct_NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS
-class struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS._fields_ = [
-  ('currentStatus', NvU32),
-]
-NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS = struct_NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS
-class struct_NV2080_CTRL_FLA_RANGE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLA_RANGE_PARAMS._fields_ = [
-  ('base', NvU64),
-  ('size', NvU64),
-  ('mode', NvU32),
-  ('hVASpace', NvHandle),
-]
-NV2080_CTRL_FLA_RANGE_PARAMS = struct_NV2080_CTRL_FLA_RANGE_PARAMS
-enum_NV2080_CTRL_FLA_ADDRSPACE = CEnum(ctypes.c_uint)
-NV2080_CTRL_FLA_ADDRSPACE_SYSMEM = enum_NV2080_CTRL_FLA_ADDRSPACE.define('NV2080_CTRL_FLA_ADDRSPACE_SYSMEM', 0)
-NV2080_CTRL_FLA_ADDRSPACE_FBMEM = enum_NV2080_CTRL_FLA_ADDRSPACE.define('NV2080_CTRL_FLA_ADDRSPACE_FBMEM', 1)
-
-NV2080_CTRL_FLA_ADDRSPACE = enum_NV2080_CTRL_FLA_ADDRSPACE
-enum_NV2080_CTRL_FLA_ACTION = CEnum(ctypes.c_uint)
-NV2080_CTRL_FLA_ACTION_BIND = enum_NV2080_CTRL_FLA_ACTION.define('NV2080_CTRL_FLA_ACTION_BIND', 0)
-NV2080_CTRL_FLA_ACTION_UNBIND = enum_NV2080_CTRL_FLA_ACTION.define('NV2080_CTRL_FLA_ACTION_UNBIND', 1)
-
-NV2080_CTRL_FLA_ACTION = enum_NV2080_CTRL_FLA_ACTION
-class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS._fields_ = [
-  ('imbPhysAddr', NvU64),
-  ('addrSpace', NV2080_CTRL_FLA_ADDRSPACE),
-  ('flaAction', NV2080_CTRL_FLA_ACTION),
-]
-NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS = struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS
-class struct_NV2080_CTRL_FLA_GET_RANGE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLA_GET_RANGE_PARAMS._fields_ = [
-  ('base', NvU64),
-  ('size', NvU64),
-]
-NV2080_CTRL_FLA_GET_RANGE_PARAMS = struct_NV2080_CTRL_FLA_GET_RANGE_PARAMS
-class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS._fields_ = [
-  ('totalSize', NvU64),
-  ('freeSize', NvU64),
-]
-NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS = struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS
-class struct_NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS._fields_ = [
-  ('architecture', NvU32),
-  ('implementation', NvU32),
-  ('revision', NvU32),
-  ('subRevision', NvU8),
-]
-NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS = struct_NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS
-class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS._fields_ = [
-  ('engines', NvU32),
-]
-NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS = struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS
-class struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS._fields_ = [
-  ('manufacturer', NvU32),
-]
-NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS = struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS
-class struct_NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS._fields_ = [
-  ('bOwnedByRm', NvBool),
-]
-NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS = struct_NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS
-class struct_NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY._fields_ = [
-  ('nv2080EngineType', NvU32),
-  ('notificationIntrVector', NvU32),
-]
-NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY = struct_NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY
-class struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS._fields_ = [
-  ('numEntries', NvU32),
-  ('entries', (NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY * 256)),
-]
-NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS = struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS
-class struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY._fields_ = [
-  ('nv2080IntrType', NvU32),
-  ('pmcIntrMask', NvU32),
-  ('intrVectorStall', NvU32),
-  ('intrVectorNonStall', NvU32),
-]
-NV2080_CTRL_MC_STATIC_INTR_ENTRY = struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY
-class struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS._fields_ = [
-  ('numEntries', NvU32),
-  ('entries', (NV2080_CTRL_MC_STATIC_INTR_ENTRY * 32)),
-]
-NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS = struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS
-class struct_NV2080_CTRL_PERF_BOOST_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_BOOST_PARAMS._fields_ = [
-  ('flags', NvU32),
-  ('duration', NvU32),
-]
-NV2080_CTRL_PERF_BOOST_PARAMS = struct_NV2080_CTRL_PERF_BOOST_PARAMS
-class struct_NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS._fields_ = [
-  ('bAcquire', NvBool),
-]
-NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS = struct_NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS
-class struct_NV2080_CTRL_PERF_POWERSTATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_POWERSTATE_PARAMS._fields_ = [
-  ('powerState', NvU32),
-]
-NV2080_CTRL_PERF_POWERSTATE_PARAMS = struct_NV2080_CTRL_PERF_POWERSTATE_PARAMS
-class struct_NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS._fields_ = [
-  ('powerStateInfo', NV2080_CTRL_PERF_POWERSTATE_PARAMS),
-]
-NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS = struct_NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS
-class struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS._fields_ = [
-  ('powerState', NvU32),
-]
-NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS = struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS
-enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint)
-NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', 0)
-NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342 = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342', 1)
-NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL', 2)
-NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS', 3)
-NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE', 4)
-NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS', 5)
-
-NV2080_CTRL_PERF_RATED_TDP_CLIENT = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT
-enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint)
-NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT', 0)
-NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED', 1)
-NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT', 2)
-NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK', 3)
-NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR', 4)
-
-NV2080_CTRL_PERF_RATED_TDP_ACTION = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION
-enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE = CEnum(ctypes.c_uint)
-NV2080_CTRL_PERF_VPSTATE_RATED_TDP = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_RATED_TDP', 0)
-NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST', 1)
-NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES', 2)
-
-NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE
-class struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST._fields_ = [
-  ('action', NV2080_CTRL_PERF_RATED_TDP_ACTION),
-  ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
-]
-NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST = struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST
-class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS(ctypes.Structure): pass
-class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm._fields_ = [
-  ('clientActiveMask', NvU32),
-  ('bRegkeyLimitRatedTdp', NvU8),
-]
-struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS._fields_ = [
-  ('rm', struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm),
-  ('output', NV2080_CTRL_PERF_RATED_TDP_ACTION),
-  ('outputVPstate', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
-  ('inputs', (NV2080_CTRL_PERF_RATED_TDP_ACTION * 5)),
-  ('vPstateTypes', (NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE * 5)),
-]
-NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS
-class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS._fields_ = [
-  ('client', NV2080_CTRL_PERF_RATED_TDP_CLIENT),
-  ('input', NV2080_CTRL_PERF_RATED_TDP_ACTION),
-  ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
-]
-NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
-NV2080_CTRL_PERF_RATED_TDP_GET_CONTROL_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
-NV2080_CTRL_PERF_RATED_TDP_SET_CONTROL_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
-class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE._fields_ = [
-  ('util', NvU32),
-  ('vgpuScale', NvU32),
-  ('procId', NvU32),
-  ('subProcessID', NvU32),
-  ('subProcessName', (ctypes.c_char * 100)),
-  ('pOsPidInfo', NvU64),
-]
-NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE
-class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE._fields_ = [
-  ('base', NV2080_CTRL_GPUMON_SAMPLE),
-  ('fb', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
-  ('gr', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
-  ('nvenc', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
-  ('nvdec', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
-  ('nvjpg', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
-  ('nvofa', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
-]
-NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE = struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE
-NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_PARAM = struct_NV2080_CTRL_GPUMON_SAMPLES
-class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS._fields_ = [
-  ('type', NvU8),
-  ('bufSize', NvU32),
-  ('count', NvU32),
-  ('tracker', NvU32),
-  ('samples', (NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE * 72)),
-]
-NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS = struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS
-class struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS._fields_ = [
-  ('prevPstate', NvU32),
-  ('action', NvU32),
-]
-NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS = struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS
-class struct_NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS._fields_ = [
-  ('bGpuIsIdle', NvBool),
-  ('bRestoreToMax', NvBool),
-  ('idleTimeUs', NvU64),
-  ('busyTimeUs', NvU64),
-]
-NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS = struct_NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS
-class struct_NV2080_CTRL_PERF_GET_CLK_INFO(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GET_CLK_INFO._fields_ = [
-  ('flags', NvU32),
-  ('domain', NvU32),
-  ('currentFreq', NvU32),
-  ('defaultFreq', NvU32),
-  ('minFreq', NvU32),
-  ('maxFreq', NvU32),
-]
-NV2080_CTRL_PERF_GET_CLK_INFO = struct_NV2080_CTRL_PERF_GET_CLK_INFO
-class struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS._fields_ = [
-  ('level', NvU32),
-  ('flags', NvU32),
-  ('perfGetClkInfoList', NvP64),
-  ('perfGetClkInfoListSize', NvU32),
-]
-NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS = struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS
-class struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS._fields_ = [
-  ('level', NvU32),
-  ('flags', NvU32),
-  ('perfGetClkInfoList', (NV2080_CTRL_PERF_GET_CLK_INFO * 32)),
-  ('perfGetClkInfoListSize', NvU32),
-]
-NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS = struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS
-enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint)
-NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVENC', 1)
-NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC', 2)
-NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG', 3)
-NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA', 4)
-
-NV2080_CTRL_CMD_PERF_VID_ENG = enum_NV2080_CTRL_CMD_PERF_VID_ENG
-class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS._fields_ = [
-  ('engineType', NV2080_CTRL_CMD_PERF_VID_ENG),
-  ('clkPercentBusy', NvU32),
-  ('samplingPeriodUs', NvU32),
-]
-NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS
-class struct_NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS._fields_ = [
-  ('powerStateInfo', NV2080_CTRL_PERF_POWERSTATE_PARAMS),
-]
-NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS = struct_NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS
-class struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS._fields_ = [
-  ('videoEvent', NvU32),
-]
-NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS = struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS
-NV2080_CTRL_PERF_PSTATES_ID = ctypes.c_uint
-class struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS._fields_ = [
-  ('currPstate', NvU32),
-]
-NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS = struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS
-class struct_NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS._fields_ = [
-  ('time_nsec', NvU64),
-  ('flags', NvU32),
-]
-NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS = struct_NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS
-class struct_NV2080_CTRL_TIMER_GET_TIME_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_TIMER_GET_TIME_PARAMS._fields_ = [
-  ('time_nsec', NvU64),
-]
-NV2080_CTRL_TIMER_GET_TIME_PARAMS = struct_NV2080_CTRL_TIMER_GET_TIME_PARAMS
-class struct_NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS._fields_ = [
-  ('tmr_offset', NvU32),
-]
-NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS = struct_NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS
-class struct_NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE(ctypes.Structure): pass
-struct_NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE._fields_ = [
-  ('cpuTime', NvU64),
-  ('gpuTime', NvU64),
-]
-NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE = struct_NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE
-class struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS._fields_ = [
-  ('cpuClkId', NvU8),
-  ('sampleCount', NvU8),
-  ('samples', (NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE * 16)),
-]
-NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS = struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS
-class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS._fields_ = [
-  ('bSetMaxFreq', NvBool),
-]
-NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS = struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS
 NV2080_CTRL_GR_INFO = struct_NVXXXX_CTRL_XXX_INFO
 class struct_NV2080_CTRL_GR_GET_INFO_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_GR_GET_INFO_PARAMS._fields_ = [
@@ -8308,13 +6301,13 @@ struct_NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS._fields_ = [
 ]
 NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS = struct_NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS
 class struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS(ctypes.Structure): pass
-class _anonstruct18(ctypes.Structure): pass
-_anonstruct18._fields_ = [
+class _anonstruct17(ctypes.Structure): pass
+_anonstruct17._fields_ = [
   ('gpcId', NvU32),
   ('tpcId', NvU32),
 ]
 struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS._fields_ = [
-  ('smId', (_anonstruct18 * 240)),
+  ('smId', (_anonstruct17 * 240)),
   ('smCount', NvU32),
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
 ]
@@ -8412,8 +6405,8 @@ struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS._fields_ = [
 ]
 NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS
 class struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS(ctypes.Structure): pass
-class _anonstruct19(ctypes.Structure): pass
-_anonstruct19._fields_ = [
+class _anonstruct18(ctypes.Structure): pass
+_anonstruct18._fields_ = [
   ('gpcId', NvU16),
   ('localTpcId', NvU16),
   ('localSmId', NvU16),
@@ -8422,7 +6415,7 @@ _anonstruct19._fields_ = [
   ('migratableTpcId', NvU16),
 ]
 struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS._fields_ = [
-  ('globalSmId', (_anonstruct19 * 512)),
+  ('globalSmId', (_anonstruct18 * 512)),
   ('numSm', NvU16),
   ('numTpc', NvU16),
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
@@ -8626,6 +6619,209 @@ struct_NV2080_CTRL_GR_GET_TPC_RECONFIG_MASK_PARAMS._fields_ = [
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
 ]
 NV2080_CTRL_GR_GET_TPC_RECONFIG_MASK_PARAMS = struct_NV2080_CTRL_GR_GET_TPC_RECONFIG_MASK_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS._fields_ = [
+  ('gpcCount', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS._fields_ = [
+  ('gpcId', NvU32),
+  ('chipletGpcMap', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS._fields_ = [
+  ('gpcId', NvU32),
+  ('tpcMask', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS._fields_ = [
+  ('gpcId', NvU32),
+  ('ppcMask', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS._fields_ = [
+  ('swizzId', NvU32),
+  ('gpcId', NvU32),
+  ('chipletGpcMap', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS._fields_ = [
+  ('gpcId', NvU32),
+  ('ropMask', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS._fields_ = [
+  ('chipletSyspipeMask', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS._fields_ = [
+  ('swizzId', NvU16),
+  ('physSyspipeIdCount', NvU16),
+  ('physSyspipeId', (NvU8 * 8)),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS._fields_ = [
+  ('swizzId', NvU32),
+  ('grIdx', NvU32),
+  ('gpcEnMask', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS._fields_ = [
+  ('syspipeId', NvU32),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData(ctypes.Union): pass
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData._fields_ = [
+  ('gpcCountData', NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS),
+  ('chipletGpcMapData', NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS),
+  ('tpcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS),
+  ('ppcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS),
+  ('partitionGpcMapData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS),
+  ('syspipeMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS),
+  ('partitionChipletSyspipeData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS),
+  ('dmGpcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS),
+  ('partitionSyspipeIdData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS),
+  ('ropMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS),
+]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS._fields_ = [
+  ('queryType', NvU16),
+  ('reserved', (NvU8 * 2)),
+  ('status', NvU32),
+  ('queryData', struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_queryData),
+]
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS
+class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS._fields_ = [
+  ('numQueries', NvU16),
+  ('reserved', (NvU8 * 6)),
+  ('queries', (NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS * 96)),
+]
+NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS = struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS
+class struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS._fields_ = [
+  ('gspFeatures', NvU32),
+  ('bValid', NvBool),
+  ('bDefaultGspRmGpu', NvBool),
+  ('firmwareVersion', (NvU8 * 64)),
+]
+NV2080_CTRL_GSP_GET_FEATURES_PARAMS = struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS
+class struct_NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT(ctypes.Structure): pass
+struct_NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT._fields_ = [
+  ('allocatedSize', NvU64),
+  ('usableSize', NvU64),
+  ('memTrackOverhead', NvU64),
+  ('allocationCount', NvU32),
+]
+NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT = struct_NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT
+class struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS._fields_ = [
+  ('gfid', NvU32),
+  ('managedSize', NvU64),
+  ('largestFreeChunkSize', NvU64),
+  ('current', NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT),
+  ('peak', NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT),
+]
+NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS = struct_NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS._fields_ = [
+  ('allocatedSize', NvU64),
+  ('peakAllocatedSize', NvU64),
+  ('managedSize', NvU64),
+  ('allocationCount', NvU32),
+  ('peakAllocationCount', NvU32),
+  ('largestFreeChunkSize', NvU64),
+]
+NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS
+class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS(ctypes.Structure): pass
+struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS._fields_ = [
+  ('allocations', NvU32),
+  ('peakAllocations', NvU32),
+  ('objectSize', NvU64),
+]
+NV2080_CTRL_GSP_LIBOS_POOL_STATS = struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS
+class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS._fields_ = [
+  ('poolStats', (NV2080_CTRL_GSP_LIBOS_POOL_STATS * 64)),
+  ('totalHeapSize', NvU64),
+  ('poolCount', NvU8),
+]
+NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS = struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS
+class struct_NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS._fields_ = [
+  ('hshubNcisocMask', NvU32),
+  ('hshubNvlMask', NvU32),
+]
+NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS = struct_NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS
+class struct_NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS._fields_ = [
+  ('ecMode', NvU32),
+  ('status', NvU32),
+]
+NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS = struct_NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS
+class struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS._fields_ = [
+  ('version', NvU32),
+  ('port', NvU32),
+  ('flags', NvU32),
+  ('inputCount', NvU32),
+  ('inputBuffer', (NvU8 * 256)),
+  ('outputCount', NvU32),
+  ('outputBuffer', (NvU8 * 256)),
+]
+NV2080_CTRL_I2C_READ_BUFFER_PARAMS = struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS
+class struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS._fields_ = [
+  ('version', NvU32),
+  ('port', NvU32),
+  ('flags', NvU32),
+  ('inputCount', NvU32),
+  ('inputBuffer', (NvU8 * 256)),
+  ('encrClientID', NvU32),
+]
+NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS = struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS
+class struct_NV2080_CTRL_I2C_RW_REG_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_I2C_RW_REG_PARAMS._fields_ = [
+  ('version', NvU32),
+  ('port', NvU32),
+  ('flags', NvU32),
+  ('addr', NvU32),
+  ('reg', NvU8),
+  ('bufsize', NvU8),
+  ('buffer', (NvU8 * 255)),
+]
+NV2080_CTRL_I2C_RW_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
+NV2080_CTRL_I2C_READ_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
+NV2080_CTRL_I2C_WRITE_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
+class struct_NV2080_CTRL_I2C_ACCESS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_I2C_ACCESS_PARAMS._fields_ = [
+  ('token', NvU32),
+  ('cmd', NvU32),
+  ('port', NvU32),
+  ('flags', NvU32),
+  ('data', NvP64),
+  ('status', NvU32),
+  ('dataBuffSize', NvU32),
+  ('speed', NvU32),
+  ('encrClientID', NvU32),
+]
+NV2080_CTRL_I2C_ACCESS_PARAMS = struct_NV2080_CTRL_I2C_ACCESS_PARAMS
+class struct_NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS._fields_ = [
+  ('head', NvU32),
+  ('authType', NvU32),
+  ('status', NvU32),
+]
+NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS = struct_NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS
 class struct_NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS._fields_ = [
   ('feHwSysCap', NvU32),
@@ -8682,8 +6878,8 @@ struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS._fields_ = [
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER(ctypes.Structure): pass
-class _anonstruct20(ctypes.Structure): pass
-_anonstruct20._fields_ = [
+class _anonstruct19(ctypes.Structure): pass
+_anonstruct19._fields_ = [
   ('gpcId', NvU16),
   ('localTpcId', NvU16),
   ('localSmId', NvU16),
@@ -8692,7 +6888,7 @@ _anonstruct20._fields_ = [
   ('migratableTpcId', NvU16),
 ]
 struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER._fields_ = [
-  ('globalSmId', (_anonstruct20 * 240)),
+  ('globalSmId', (_anonstruct19 * 240)),
   ('numSm', NvU16),
   ('numTpc', NvU16),
 ]
@@ -10285,110 +8481,1914 @@ struct_NV2080_CTRL_INTERNAL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS._fields_ 
   ('sysmemLinkMask', NvU32),
 ]
 NV2080_CTRL_INTERNAL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS
-class struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS._fields_ = [
-  ('event', NvU32),
+class struct_NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS._fields_ = [
+  ('ctrlParamVal', NvU32),
+]
+NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS = struct_NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS
+class struct_NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS._fields_ = [
+  ('responseVal', NvU32),
+]
+NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS = struct_NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS
+class struct_NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS._fields_ = [
+  ('architecture', NvU32),
+  ('implementation', NvU32),
+  ('revision', NvU32),
+  ('subRevision', NvU8),
+]
+NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS = struct_NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS
+class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS._fields_ = [
+  ('engines', NvU32),
+]
+NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS = struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS
+class struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS._fields_ = [
+  ('manufacturer', NvU32),
+]
+NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS = struct_NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS
+class struct_NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS._fields_ = [
+  ('bOwnedByRm', NvBool),
+]
+NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS = struct_NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS
+class struct_NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY._fields_ = [
+  ('nv2080EngineType', NvU32),
+  ('notificationIntrVector', NvU32),
+]
+NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY = struct_NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY
+class struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS._fields_ = [
+  ('numEntries', NvU32),
+  ('entries', (NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY * 256)),
+]
+NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS = struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS
+class struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY._fields_ = [
+  ('nv2080IntrType', NvU32),
+  ('pmcIntrMask', NvU32),
+  ('intrVectorStall', NvU32),
+  ('intrVectorNonStall', NvU32),
+]
+NV2080_CTRL_MC_STATIC_INTR_ENTRY = struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY
+class struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS._fields_ = [
+  ('numEntries', NvU32),
+  ('entries', (NV2080_CTRL_MC_STATIC_INTR_ENTRY * 32)),
+]
+NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS = struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS
+class struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS._fields_ = [
+  ('component', NvU32),
+  ('size', NvU32),
+]
+NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS = struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS
+class struct_NV2080_CTRL_NVD_GET_DUMP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVD_GET_DUMP_PARAMS._fields_ = [
+  ('pBuffer', NvP64),
+  ('component', NvU32),
+  ('size', NvU32),
+]
+NV2080_CTRL_NVD_GET_DUMP_PARAMS = struct_NV2080_CTRL_NVD_GET_DUMP_PARAMS
+class struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS(ctypes.Structure): pass
+struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS._fields_ = [
+  ('userMinOffset', NvS32),
+  ('userMaxOffset', NvS32),
+  ('factoryMinOffset', NvU32),
+  ('factoryMaxOffset', NvU32),
+  ('lastActiveClock', NvU32),
+  ('lastActiveVolt', NvU32),
+  ('lastActivePoint', NvU32),
+  ('kappa', NvU32),
+]
+NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS = struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS
+class struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG(ctypes.Structure): pass
+struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG._fields_ = [
+  ('pstateVer', NvU32),
+  ('gpcOverclock', NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS),
+  ('mclkOverclock', NV2080_NOCAT_JOURNAL_OVERCLOCK_DETAILS),
+  ('bUserOverclocked', NvBool),
+  ('bFactoryOverclocked', NvBool),
+]
+NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG = struct_NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG
+class struct_NV2080_NOCAT_JOURNAL_GPU_STATE(ctypes.Structure): pass
+struct_NV2080_NOCAT_JOURNAL_GPU_STATE._fields_ = [
+  ('bValid', NvBool),
+  ('strap', NvU32),
+  ('deviceId', NvU16),
+  ('vendorId', NvU16),
+  ('subsystemVendor', NvU16),
+  ('subsystemId', NvU16),
+  ('revision', NvU16),
+  ('type', NvU16),
+  ('vbiosVersion', NvU32),
+  ('bOptimus', NvBool),
+  ('bMsHybrid', NvBool),
+  ('bFullPower', NvBool),
+  ('vbiosOemVersion', NvU32),
+  ('memoryType', NvU16),
+  ('tag', (NvU8 * 65)),
+  ('vbiosProject', (NvU8 * 65)),
+  ('bInFullchipReset', NvBool),
+  ('bInSecBusReset', NvBool),
+  ('bInGc6Reset', NvBool),
+  ('overclockCfg', NV2080_NOCAT_JOURNAL_OVERCLOCK_CFG),
+]
+NV2080_NOCAT_JOURNAL_GPU_STATE = struct_NV2080_NOCAT_JOURNAL_GPU_STATE
+class struct_NV2080_NOCAT_JOURNAL_ENTRY(ctypes.Structure): pass
+struct_NV2080_NOCAT_JOURNAL_ENTRY._fields_ = [
+  ('recType', NvU8),
+  ('bugcheck', NvU32),
+  ('tdrBucketId', NvU32),
+  ('source', (NvU8 * 65)),
+  ('subsystem', NvU32),
+  ('errorCode', NvU64),
+  ('diagBufferLen', NvU32),
+  ('diagBuffer', (NvU8 * 1024)),
+  ('faultingEngine', (NvU8 * 65)),
+  ('mmuFaultType', NvU32),
+  ('mmuErrorSrc', NvU32),
+  ('tdrReason', (NvU8 * 65)),
+]
+NV2080_NOCAT_JOURNAL_ENTRY = struct_NV2080_NOCAT_JOURNAL_ENTRY
+class struct_NV2080_NOCAT_JOURNAL_RECORD(ctypes.Structure): pass
+struct_NV2080_NOCAT_JOURNAL_RECORD._fields_ = [
+  ('GPUTag', NvU32),
+  ('loadAddress', NvU64),
+  ('timeStamp', NvU64),
+  ('stateMask', NvU64),
+  ('nocatGpuState', NV2080_NOCAT_JOURNAL_GPU_STATE),
+  ('nocatJournalEntry', NV2080_NOCAT_JOURNAL_ENTRY),
+]
+NV2080_NOCAT_JOURNAL_RECORD = struct_NV2080_NOCAT_JOURNAL_RECORD
+class struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS._fields_ = [
+  ('flags', NvU32),
+  ('nocatRecordCount', NvU32),
+  ('nocatOutstandingRecordCount', NvU32),
+  ('journalRecords', (NV2080_NOCAT_JOURNAL_RECORD * 10)),
+  ('activityCounters', (NvU32 * 32)),
+  ('reserved', (NvU8 * 65)),
+]
+NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS = struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS
+class struct_NV2080CtrlNocatJournalDataTdrReason(ctypes.Structure): pass
+struct_NV2080CtrlNocatJournalDataTdrReason._fields_ = [
+  ('flags', NvU32),
+  ('source', (NvU8 * 65)),
+  ('subsystem', NvU32),
+  ('errorCode', NvU64),
+  ('reasonCode', NvU32),
+]
+NV2080CtrlNocatJournalDataTdrReason = struct_NV2080CtrlNocatJournalDataTdrReason
+class struct_NV2080CtrlNocatJournalSetTag(ctypes.Structure): pass
+struct_NV2080CtrlNocatJournalSetTag._fields_ = [
+  ('flags', NvU32),
+  ('tag', (NvU8 * 65)),
+]
+NV2080CtrlNocatJournalSetTag = struct_NV2080CtrlNocatJournalSetTag
+class struct_NV2080CtrlNocatJournalRclog(ctypes.Structure): pass
+struct_NV2080CtrlNocatJournalRclog._fields_ = [
+  ('flags', NvU32),
+  ('rclogSize', NvU32),
+  ('rmGpuId', NvU32),
+  ('APIType', NvU32),
+  ('contextType', NvU32),
+  ('exceptType', NvU32),
+  ('processImageName', (NvU8 * 65)),
+]
+NV2080CtrlNocatJournalRclog = struct_NV2080CtrlNocatJournalRclog
+class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData(ctypes.Union): pass
+struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData._fields_ = [
+  ('tdrReason', NV2080CtrlNocatJournalDataTdrReason),
+  ('tagData', NV2080CtrlNocatJournalSetTag),
+  ('rclog', NV2080CtrlNocatJournalRclog),
+]
+struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS._fields_ = [
+  ('dataType', NvU32),
+  ('targetRecordType', NvU32),
+  ('nocatJournalData', struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_nocatJournalData),
+]
+NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS = struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS
+class struct_NV2080CtrlNocatJournalInsertRecord(ctypes.Structure): pass
+struct_NV2080CtrlNocatJournalInsertRecord._fields_ = [
+  ('flags', NvU32),
+  ('timestamp', NvU64),
+  ('recType', NvU8),
+  ('bugcheck', NvU32),
+  ('source', (ctypes.c_char * 65)),
+  ('subsystem', NvU32),
+  ('errorCode', NvU64),
+  ('faultingEngine', (ctypes.c_char * 65)),
+  ('tdrReason', NvU32),
+  ('diagBufferLen', NvU32),
+  ('diagBuffer', (NvU8 * 1024)),
+]
+NV2080CtrlNocatJournalInsertRecord = struct_NV2080CtrlNocatJournalInsertRecord
+class struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS._fields_ = [
+  ('nocatJournalRecord', NV2080CtrlNocatJournalInsertRecord),
+]
+NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS = struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS._fields_ = [
+  ('capsTbl', NvU32),
+  ('lowestNvlinkVersion', NvU8),
+  ('highestNvlinkVersion', NvU8),
+  ('lowestNciVersion', NvU8),
+  ('highestNciVersion', NvU8),
+  ('discoveredLinkMask', NvU32),
+  ('enabledLinkMask', NvU32),
+  ('discoveredLinks', NvU64),
+  ('enabledLinks', NvU64),
+]
+NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO._fields_ = [
+  ('deviceIdFlags', NvU32),
+  ('domain', NvU32),
+  ('bus', NvU16),
+  ('device', NvU16),
+  ('function', NvU16),
+  ('pciDeviceId', NvU32),
+  ('deviceType', NvU64),
+  ('deviceUUID', (NvU8 * 16)),
+  ('fabricRecoveryStatusMask', NvU32),
+]
+NV2080_CTRL_NVLINK_DEVICE_INFO = struct_NV2080_CTRL_NVLINK_DEVICE_INFO
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO._fields_ = [
+  ('capsTbl', NvU32),
+  ('phyType', NvU8),
+  ('subLinkWidth', NvU8),
+  ('linkState', NvU32),
+  ('rxSublinkStatus', NvU8),
+  ('txSublinkStatus', NvU8),
+  ('bLaneReversal', NvBool),
+  ('nvlinkVersion', NvU8),
+  ('nciVersion', NvU8),
+  ('phyVersion', NvU8),
+  ('nvlinkLinkClockKHz', NvU32),
+  ('nvlinkCommonClockSpeedKHz', NvU32),
+  ('nvlinkRefClkSpeedKHz', NvU32),
+  ('nvlinkCommonClockSpeedMhz', NvU32),
+  ('nvlinkLineRateMbps', NvU32),
+  ('nvlinkLinkClockMhz', NvU32),
+  ('nvlinkRefClkType', NvU8),
+  ('nvlinkLinkDataRateKiBps', NvU32),
+  ('nvlinkRefClkSpeedMhz', NvU32),
+  ('connected', NvBool),
+  ('loopProperty', NvU8),
+  ('remoteDeviceLinkNumber', NvU8),
+  ('localDeviceLinkNumber', NvU8),
+  ('remoteLinkSid', NvU64),
+  ('localLinkSid', NvU64),
+  ('laneRxdetStatusMask', NvU32),
+  ('nvlinkMinL1Threshold', NvU32),
+  ('nvlinkMaxL1Threshold', NvU32),
+  ('nvlinkL1ThresholdUnits', NvU32),
+  ('remoteDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
+  ('localDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
+]
+NV2080_CTRL_NVLINK_LINK_STATUS_INFO = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO
+enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT = CEnum(ctypes.c_uint)
+NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT.define('NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US', 0)
+NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT.define('NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US', 1)
+
+NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS._fields_ = [
+  ('enabledLinkMask', NvU32),
+  ('bSublinkStateInst', NvBool),
+  ('linkInfo', (NV2080_CTRL_NVLINK_LINK_STATUS_INFO * 64)),
+]
+NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS
+class struct_NV2080_CTRL_NVLINK_ERR_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_ERR_INFO._fields_ = [
+  ('TLErrlog', NvU32),
+  ('TLIntrEn', NvU32),
+  ('TLCTxErrStatus0', NvU32),
+  ('TLCTxErrStatus1', NvU32),
+  ('TLCTxSysErrStatus0', NvU32),
+  ('TLCRxErrStatus0', NvU32),
+  ('TLCRxErrStatus1', NvU32),
+  ('TLCRxSysErrStatus0', NvU32),
+  ('TLCTxErrLogEn0', NvU32),
+  ('TLCTxErrLogEn1', NvU32),
+  ('TLCTxSysErrLogEn0', NvU32),
+  ('TLCRxErrLogEn0', NvU32),
+  ('TLCRxErrLogEn1', NvU32),
+  ('TLCRxSysErrLogEn0', NvU32),
+  ('MIFTxErrStatus0', NvU32),
+  ('MIFRxErrStatus0', NvU32),
+  ('NVLIPTLnkErrStatus0', NvU32),
+  ('NVLIPTLnkErrLogEn0', NvU32),
+  ('NVLIPTLnkCtrlLinkStateRequest', NvU32),
+  ('DLSpeedStatusTx', NvU32),
+  ('DLSpeedStatusRx', NvU32),
+  ('NVLDLRxSlsmErrCntl', NvU32),
+  ('NVLDLTopLinkState', NvU32),
+  ('NVLDLTopIntr', NvU32),
+  ('DLStatMN00', NvU32),
+  ('DLStatUC01', NvU32),
+  ('MinionNvlinkLinkIntr', NvU32),
+  ('bExcessErrorDL', NvBool),
+]
+NV2080_CTRL_NVLINK_ERR_INFO = struct_NV2080_CTRL_NVLINK_ERR_INFO
+class struct_NV2080_CTRL_NVLINK_COMMON_ERR_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_COMMON_ERR_INFO._fields_ = [
+  ('NVLIPTErrStatus0', NvU32),
+  ('NVLIPTErrLogEn0', NvU32),
+]
+NV2080_CTRL_NVLINK_COMMON_ERR_INFO = struct_NV2080_CTRL_NVLINK_COMMON_ERR_INFO
+class struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('linkErrInfo', (NV2080_CTRL_NVLINK_ERR_INFO * 64)),
+  ('ioctrlMask', NvU32),
+  ('commonErrInfo', (NV2080_CTRL_NVLINK_COMMON_ERR_INFO * 3)),
+  ('ErrInfoFlags', NvU8),
+]
+NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES._fields_ = [
+  ('bTx0TlCounterOverflow', NvBool),
+  ('bTx1TlCounterOverflow', NvBool),
+  ('bRx0TlCounterOverflow', NvBool),
+  ('bRx1TlCounterOverflow', NvBool),
+  ('value', (NvU64 * 32)),
+]
+NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES
+class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS._fields_ = [
+  ('counterMask', NvU32),
+  ('linkMask', NvU64),
+  ('counters', (NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES * 64)),
+]
+NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS._fields_ = [
+  ('counterMask', NvU32),
+  ('linkMask', NvU64),
+]
+NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES._fields_ = [
+  ('overFlow', NvBool),
+  ('value', NvU64),
+]
+NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES = struct_NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES
+class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS._fields_ = [
+  ('linkMask', NvU64),
+  ('counterMask', (NvU64 * 2)),
+  ('counter', ((NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES * 28) * 64)),
+]
+NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS
+class struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS._fields_ = [
+  ('linkMask', NvU64),
+  ('counterMask', (NvU64 * 2)),
+]
+NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS
+class struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('bFatalError', NvBool),
+]
+NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS
+enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE = CEnum(ctypes.c_uint)
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR', 1)
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR', 2)
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR', 3)
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_LINK_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_LINK_ERR', 4)
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_MAX = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_MAX', 5)
+
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE
+class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG._fields_ = [
+  ('errType', NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE),
+  ('errSettings', NvU64),
+]
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG = struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG
+class struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS._fields_ = [
+  ('linkMask', NvU64),
+  ('errCfg', (NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG * 64)),
+]
+NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS
+class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO._fields_ = [
+  ('txErrInfo', NvU32),
+  ('packetErrInfo', NvU32),
+  ('authErrInfo', NvU32),
+  ('linkStatus', NvU32),
+  ('errInjectStatus', NvU32),
+]
+NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO = struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO
+class struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS._fields_ = [
+  ('linkMask', NvU64),
+  ('errInfo', (NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO * 64)),
+]
+NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS
+class struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('numRecoveries', (NvU32 * 64)),
+]
+NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('remoteType', NvU32),
+]
+NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('supportedCounts', NvU64),
+  ('fatalErrorCounts', (NvU8 * 63)),
+]
+NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS
+class struct_NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE._fields_ = [
+  ('errorsPerMinute', NvU32),
+  ('timestamp', NvU32),
+]
+NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE = struct_NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE
+class struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('numDailyMaxNonfatalErrorRates', NvU32),
+  ('dailyMaxNonfatalErrorRates', (NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE * 5)),
+  ('numMonthlyMaxNonfatalErrorRates', NvU32),
+  ('monthlyMaxNonfatalErrorRates', (NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE * 5)),
+]
+NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS
+class struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS._fields_ = [
+  ('bEnabled', NvBool),
+]
+NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS
+class struct_NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS._fields_ = [
+  ('linkId', NvU8),
+  ('params', NvU32),
+]
+NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_SETUP_EOM_PARAMS
+class struct_NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('powerState', NvU32),
+]
+NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_POWER_STATE_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('powerState', NvU32),
+]
+NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS
+enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE = CEnum(ctypes.c_uint)
+TLC_RX_LNK = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE.define('TLC_RX_LNK', 0)
+TLC_TX_SYS = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE.define('TLC_TX_SYS', 1)
+
+NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE
+enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE = CEnum(ctypes.c_uint)
+TX_SYS_TX_RSP_STATUS_HW_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_HW_ERR', 0)
+TX_SYS_TX_RSP_STATUS_UR_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_UR_ERR', 1)
+TX_SYS_TX_RSP_STATUS_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_PRIV_ERR', 2)
+
+NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE
+enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE = CEnum(ctypes.c_uint)
+RX_LNK_RX_RSP_STATUS_HW_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_HW_ERR', 0)
+RX_LNK_RX_RSP_STATUS_UR_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_UR_ERR', 1)
+RX_LNK_RX_RSP_STATUS_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_PRIV_ERR', 2)
+
+NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE
+class union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE(ctypes.Union): pass
+union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE._fields_ = [
+  ('txSysErrorType', NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE),
+  ('rxLnkErrorType', NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE),
+]
+NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE = union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE
+class struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('device', NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE),
+  ('bBroadcast', NvBool),
+  ('errorType', NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE),
+]
+NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS
+class struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('numLanes', NvU8),
+  ('figureOfMeritValues', (NvU16 * 4)),
+]
+NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS
+class struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS._fields_ = [
+  ('peerMask', NvU32),
+  ('bEnable', NvBool),
+]
+NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS
+class struct_NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS._fields_ = [
+  ('linkId', NvU8),
+  ('lane', NvU8),
+  ('addr', NvU16),
+  ('phyConfigData', NvU32),
+]
+NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS = struct_NV2080_CTRL_NVLINK_READ_UPHY_PAD_LANE_REG_PARAMS
+class struct_NV2080_CTRL_NVLINK_LANE_ERROR(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_LANE_ERROR._fields_ = [
+  ('bValid', NvBool),
+  ('eccErrorValue', NvU32),
+  ('overflowed', NvBool),
+]
+NV2080_CTRL_NVLINK_LANE_ERROR = struct_NV2080_CTRL_NVLINK_LANE_ERROR
+class struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR._fields_ = [
+  ('errorLane', (NV2080_CTRL_NVLINK_LANE_ERROR * 4)),
+  ('eccDecFailed', NvU32),
+  ('eccDecFailedOverflowed', NvBool),
+]
+NV2080_CTRL_NVLINK_LINK_ECC_ERROR = struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR
+class struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('errorLink', (NV2080_CTRL_NVLINK_LINK_ECC_ERROR * 64)),
+]
+NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS
+class struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES._fields_ = [
+  ('value', (NvU64 * 4)),
+]
+NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES = struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES
+class struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS._fields_ = [
+  ('counterMask', NvU16),
+  ('linkMask', NvU64),
+  ('counters', (NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES * 64)),
+]
+NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS
+class struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS._fields_ = [
+  ('bLockPowerMode', NvBool),
+]
+NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('counterValidMask', NvU32),
+  ('counterValues', (NvU32 * 16)),
+]
+NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('loopbackMode', NvU8),
+]
+NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS
+class struct_NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO._fields_ = [
+  ('bValid', NvBool),
+  ('passCount', NvU16),
+  ('failCount', NvU16),
+]
+NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO = struct_NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO
+class struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('refreshCount', (NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO * 32)),
+]
+NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+]
+NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS._fields_ = [
+  ('bGet', NvBool),
+  ('addr', NvU64),
+]
+NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SET_NVSWITCH_FLA_ADDR_PARAMS
+class struct_NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS._fields_ = [
+  ('discoveredLinks', NvU64),
+  ('connectedLinksMask', NvU32),
+  ('bridgeSensableLinks', NvU64),
+  ('bridgedLinks', NvU32),
+  ('initDisabledLinksMask', NvU32),
+  ('vbiosDisabledLinkMask', NvU64),
+  ('initializedLinks', NvU32),
+  ('bEnableTrainingAtLoad', NvBool),
+  ('bEnableSafeModeAtLoad', NvBool),
+]
+NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_SYNC_LINK_MASKS_AND_VBIOS_INFO_PARAMS
+class struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS._fields_ = [
+  ('initDisabledLinksMask', NvU32),
+  ('bSkipHwNvlinkDisable', NvBool),
+]
+NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS = struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS
+enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND = CEnum(ctypes.c_uint)
+NVLINK_EOM_CONTROL_START_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_START_EOM', 0)
+NVLINK_EOM_CONTROL_END_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_END_EOM', 1)
+NVLINK_EOM_CONTROL_CONFIG_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_CONFIG_EOM', 2)
+NVLINK_EOM_CONTROL_FULL_EOM_SEQUENCE = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_FULL_EOM_SEQUENCE', 3)
+
+NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND
+class struct_NV2080_CTRL_NVLINK_EOM_MEASUREMENT(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_EOM_MEASUREMENT._fields_ = [
+  ('upper', NvU8),
+  ('middle', NvU8),
+  ('lower', NvU8),
+  ('composite', NvU8),
+]
+NV2080_CTRL_NVLINK_EOM_MEASUREMENT = struct_NV2080_CTRL_NVLINK_EOM_MEASUREMENT
+class struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS._fields_ = [
+  ('cmd', NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND),
+  ('linkId', NvU32),
+  ('params', NvU32),
+  ('measurements', (NV2080_CTRL_NVLINK_EOM_MEASUREMENT * 4)),
+]
+NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS = struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS._fields_ = [
+  ('data', (NvU8 * 5120)),
+  ('dataSize', NvU32),
+]
+NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS
+class struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS._fields_ = [
+  ('l1Threshold', NvU32),
+  ('l1ExitThreshold', NvU32),
+]
+NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS = struct_NV2080_CTRL_NVLINK_SET_L1_THRESHOLD_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS._fields_ = [
+  ('l1Threshold', NvU32),
+  ('l1ExitThreshold', NvU32),
+]
+NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS = struct_NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS
+class struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS._fields_ = [
+  ('buffer', (NvU8 * 5120)),
+  ('dataSize', NvU32),
+]
+NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS = struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS
+class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS._fields_ = [
+  ('linkId', NvU32),
+  ('bIsGpuDegraded', NvBool),
+]
+NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS = struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS
+class struct_NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS._fields_ = [
+  ('bIsEnoughNvLink', NvBool),
+  ('numBridge', NvU32),
+  ('bridgePresenceMask', NvU32),
+]
+NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS = struct_NV2080_CTRL_NVLINK_DIRECT_CONNECT_CHECK_PARAMS
+class struct_NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS._fields_ = [
+  ('linkId', NvU32),
+]
+NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS = struct_NV2080_CTRL_NVLINK_POST_FAULT_UP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PORT_EVENT(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PORT_EVENT._fields_ = [
+  ('portEventType', NvU32),
+  ('gpuId', NvU32),
+  ('linkId', NvU32),
+  ('time', NvU64),
+]
+NV2080_CTRL_NVLINK_PORT_EVENT = struct_NV2080_CTRL_NVLINK_PORT_EVENT
+class struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS._fields_ = [
+  ('portEventIndex', NvU64),
+  ('nextPortEventIndex', NvU64),
+  ('portEventCount', NvU32),
+  ('bOverflow', NvBool),
+  ('portEvent', (NV2080_CTRL_NVLINK_PORT_EVENT * 64)),
+]
+NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS
+class struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS._fields_ = [
+  ('linkId', NvU32),
+]
+NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS = struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS
+class struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS._fields_ = [
+  ('bReducedNvlinkConfig', NvBool),
+]
+NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS = struct_NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_DATA(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_DATA._fields_ = [
+  ('data', (NvU8 * 496)),
+]
+NV2080_CTRL_NVLINK_PRM_DATA = struct_NV2080_CTRL_NVLINK_PRM_DATA
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('plane_ind', NvU8),
+  ('admin_status', NvU8),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('swid', NvU8),
+  ('e', NvU8),
+  ('fd', NvU8),
+  ('ps_e', NvU8),
+  ('ls_e', NvU8),
+  ('ee_ps', NvU8),
+  ('ee_ls', NvU8),
+  ('ee', NvU8),
+  ('ase', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('lane_mask', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('local_tx_precoding_admin', NvU8),
+  ('local_rx_precoding_admin', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLTC_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('test_mode', NvBool),
+  ('plane_ind', NvU8),
+  ('port_type', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('fec_override_admin_10g_40g', NvU8),
+  ('fec_override_admin_25g', NvU8),
+  ('fec_override_admin_50g', NvU8),
+  ('fec_override_admin_100g', NvU8),
+  ('fec_override_admin_56g', NvU8),
+  ('rs_fec_correction_bypass_admin', NvU8),
+  ('fec_override_admin_200g_4x', NvU16),
+  ('fec_override_admin_400g_8x', NvU16),
+  ('fec_override_admin_50g_1x', NvU16),
+  ('fec_override_admin_100g_2x', NvU16),
+  ('fec_override_admin_400g_4x', NvU16),
+  ('fec_override_admin_800g_8x', NvU16),
+  ('fec_override_admin_100g_1x', NvU16),
+  ('fec_override_admin_200g_2x', NvU16),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('l1_req_en', NvBool),
+  ('l1_fw_req_en', NvBool),
+  ('l1_cap_adv', NvBool),
+  ('l1_fw_cap_adv', NvBool),
+  ('hp_queues_bitmap', NvU32),
+  ('l1_hw_active_time', NvU16),
+  ('l1_hw_inactive_time', NvU16),
+  ('qem', (NvU8 * 8)),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('access_reg_group', NvU8),
+  ('feature_group', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCAM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('slot_index', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTECR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('slot_index', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEWE_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('slot_index', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSDE_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('slot_index', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTCAP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('itre', NvBool),
+  ('i_e', NvU8),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('protocol', NvU8),
+  ('admin_mtu', NvU16),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMTU_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('width', NvU8),
+  ('plane_ind', NvU8),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('m_lane_m', NvBool),
+  ('rxtx', NvBool),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMLP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('trap_id', NvU16),
+  ('action', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_GHPKT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('port_type', NvU8),
+  ('plane_ind', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('page_select', NvU8),
+  ('module_info_ext', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PDDR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('le', NvBool),
+  ('port_type', NvU8),
+  ('lane', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('sw', NvBool),
+  ('dm_ig', NvBool),
+  ('p', NvBool),
+  ('e', NvBool),
+  ('modulation', NvU8),
+  ('prbs_mode_admin', NvU8),
+  ('prbs_fec_admin', NvBool),
+  ('lane_rate_admin', NvU16),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPTT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('grp', NvU8),
+  ('port_type', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('swid', NvU8),
+  ('prio_tc', NvU8),
+  ('grp_profile', NvU8),
+  ('plane_ind', NvU8),
+  ('counters_cap', NvBool),
+  ('lp_gl', NvBool),
+  ('clr', NvBool),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPCNT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MGIR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('port_type', NvU8),
+  ('phy_test_mode_admin', NvU8),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('swid', NvU8),
+  ('plane_ind', NvU8),
+  ('phy_status_admin', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPAOS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('plane_ind', NvU8),
+  ('port_type', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('hist_type', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPHCR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('c_db', NvBool),
+  ('port_type', NvU8),
+  ('lane_speed', NvU8),
+  ('lane', NvU8),
+  ('tx_policy', NvBool),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('lp_msb', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLTP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PGUID_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('le', NvBool),
+  ('port_type', NvU8),
+  ('lane', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+  ('sw', NvBool),
+  ('dm_ig', NvBool),
+  ('p', NvBool),
+  ('s', NvBool),
+  ('e', NvBool),
+  ('modulation', NvU8),
+  ('prbs_mode_admin', NvU8),
+  ('lane_rate_oper', NvU16),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPRT_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('proto_mask', NvU8),
+  ('transmit_allowed', NvBool),
+  ('plane_ind', NvU8),
+  ('port_type', NvU8),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('tx_ready_e', NvU8),
+  ('ee_tx_ready', NvBool),
+  ('an_disable_admin', NvBool),
+  ('ext_eth_proto_admin', NvU32),
+  ('eth_proto_admin', NvU32),
+  ('ib_proto_admin', NvU16),
+  ('ib_link_width_admin', NvU16),
+  ('xdr_2x_slow_admin', NvBool),
+  ('force_lt_frames_admin', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PTYS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('port_type', NvU8),
+  ('lane', NvU8),
+  ('lp_msb', NvU8),
+  ('pnat', NvU8),
+  ('local_port', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_SLRG_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('admin_status', NvU8),
+  ('module', NvU8),
+  ('slot_index', NvU8),
+  ('rst', NvBool),
+  ('e', NvU8),
+  ('ee', NvBool),
+  ('ase', NvBool),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PMAOS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('plane_ind', NvU8),
+  ('port_type', NvU8),
+  ('op_mod', NvBool),
+  ('apply_im', NvBool),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('lb_en', NvU16),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS._fields_ = [
+  ('counterMask', (NvU64 * 2)),
+]
+NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('segment_type', NvU16),
+  ('seq_num', NvU8),
+  ('vhca_id_valid', NvBool),
+  ('inline_dump', NvBool),
+  ('vhca_id', NvU16),
+  ('index1', NvU32),
+  ('index2', NvU32),
+  ('num_of_obj2', NvU16),
+  ('num_of_obj1', NvU16),
+  ('device_opaque', NvU64),
+  ('mkey', NvU32),
+  ('address', NvU64),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('trace_owner', NvBool),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CAP_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('trace_mode', NvU8),
+  ('log_trace_buffer_size', NvU8),
+  ('trace_mkey', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CONF_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('modify_field_select', NvU16),
+  ('arm_event', NvBool),
+  ('trace_status', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTRC_CTRL_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTEIM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('enable_all', NvU8),
+  ('log_delay', NvU8),
+  ('source_id_bitmask', (NvU32 * 8)),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('log_level', NvU8),
+  ('log_bit_mask', NvU32),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('warning_inactive_time', NvU8),
+  ('warning_active_time', NvU8),
+  ('critical_inactive_time', NvU8),
+  ('critical_active_time', NvU8),
+  ('cc', NvBool),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MPSCR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTSR_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLS_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('cnt_64bit', NvU8),
+  ('stop_at_ff', NvBool),
+  ('counter_rst', NvBool),
+  ('counter_en', NvBool),
+  ('force_count_mask', NvU8),
+  ('cnt_type', (NvU8 * 8)),
+  ('cnt_val', (NvU8 * 8)),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS
+class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS._fields_ = [
+  ('bWrite', NvBool),
+  ('prm', NV2080_CTRL_NVLINK_PRM_DATA),
+  ('ib_port', NvU16),
+  ('lp_msb', NvU8),
+  ('local_port', NvU8),
+  ('split_num', NvU8),
+]
+NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS._fields_ = [
+  ('ibGuid', (NvU8 * 16)),
+  ('rackGuid', (NvU8 * 16)),
+  ('chassisPhysicalSlotNumber', NvU8),
+  ('computeSlotIndex', NvU8),
+  ('nodeIndex', NvU8),
+  ('peerType', NvU8),
+  ('moduleId', NvU8),
+]
+NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS
+class struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD._fields_ = [
+  ('pllIndex', NvU8),
+  ('address', NvU16),
+]
+NV2080_CTRL_NVLINK_UPHY_CLN_CMD = struct_NV2080_CTRL_NVLINK_UPHY_CLN_CMD
+class struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('uphyCmd', (NV2080_CTRL_NVLINK_UPHY_CLN_CMD * 18)),
+  ('data', (NvU32 * 18)),
+]
+NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS = struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS._fields_ = [
+  ('rbmModesList', (NvU8 * 23)),
+  ('rbmTotalModes', NvU8),
+]
+NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS
+class struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS._fields_ = [
+  ('rbmMode', NvU8),
+]
+NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_SET_BW_MODE_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS._fields_ = [
+  ('rbmMode', NvU8),
+]
+NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_BW_MODE_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS._fields_ = [
+  ('localDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO),
+]
+NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS
+enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY = CEnum(ctypes.c_uint)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_NONFATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_NONFATAL', 0)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_APP_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_APP_FATAL', 1)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_FATAL', 2)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_DEGRADATION = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_DEGRADATION', 3)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_WATCHDOG_TIMEOUT = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_WATCHDOG_TIMEOUT', 4)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MVB_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MVB_NON_FATAL', 5)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MSE = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_SAW_MSE', 6)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_NON_FATAL', 7)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_FATAL', 8)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_RLW_PRIV_ERR', 9)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_NON_FATAL', 10)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TLW_FATAL', 11)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TREX_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_TREX_NON_FATAL', 12)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_NON_FATAL', 13)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_GIN_NETIR_FATAL', 14)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_NON_FATAL', 15)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_SAW_MVB_FATAL', 16)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_NON_FATAL', 17)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_RLW_FATAL', 18)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_NON_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_NON_FATAL', 19)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MSE_ECC_INJECT_TLW_FATAL', 20)
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MAX = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_MAX', 21)
+
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY
+class struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('severity', NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY),
+]
+NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS
+enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE = CEnum(ctypes.c_uint)
+NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DISABLED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DISABLED', 0)
+NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_TRIGGER_ONCE = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_TRIGGER_ONCE', 1)
+NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_EXITED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_EXITED', 2)
+NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_ENTERED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_ENTERED', 3)
+NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DUTY_CYCLE = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DUTY_CYCLE', 4)
+
+NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE
+class struct_NV2080_CTRL_NVLINK_L1_FORCE_CONFIG(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_L1_FORCE_CONFIG._fields_ = [
+  ('mode', NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE),
+  ('toggleActiveTime', NvU8),
+  ('toggleInactiveTime', NvU8),
+  ('bTrigger', NvBool),
+]
+NV2080_CTRL_NVLINK_L1_FORCE_CONFIG = struct_NV2080_CTRL_NVLINK_L1_FORCE_CONFIG
+class struct_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('config', NV2080_CTRL_NVLINK_L1_FORCE_CONFIG),
+]
+NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS = struct_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS
+class struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS._fields_ = [
+  ('linkMask', NvU32),
+  ('config', (NV2080_CTRL_NVLINK_L1_FORCE_CONFIG * 32)),
+]
+NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS
+class struct_NV2080_CTRL_PERF_BOOST_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_BOOST_PARAMS._fields_ = [
+  ('flags', NvU32),
+  ('duration', NvU32),
+]
+NV2080_CTRL_PERF_BOOST_PARAMS = struct_NV2080_CTRL_PERF_BOOST_PARAMS
+class struct_NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS._fields_ = [
+  ('bAcquire', NvBool),
+]
+NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS = struct_NV2080_CTRL_PERF_RESERVE_PERFMON_HW_PARAMS
+class struct_NV2080_CTRL_PERF_POWERSTATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_POWERSTATE_PARAMS._fields_ = [
+  ('powerState', NvU32),
+]
+NV2080_CTRL_PERF_POWERSTATE_PARAMS = struct_NV2080_CTRL_PERF_POWERSTATE_PARAMS
+class struct_NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS._fields_ = [
+  ('powerStateInfo', NV2080_CTRL_PERF_POWERSTATE_PARAMS),
+]
+NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS = struct_NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS
+class struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS._fields_ = [
+  ('powerState', NvU32),
+]
+NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS = struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS
+enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint)
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', 0)
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342 = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342', 1)
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL', 2)
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS', 3)
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE', 4)
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS', 5)
+
+NV2080_CTRL_PERF_RATED_TDP_CLIENT = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT
+enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint)
+NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT', 0)
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED', 1)
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT', 2)
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK', 3)
+NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR', 4)
+
+NV2080_CTRL_PERF_RATED_TDP_ACTION = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION
+enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE = CEnum(ctypes.c_uint)
+NV2080_CTRL_PERF_VPSTATE_RATED_TDP = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_RATED_TDP', 0)
+NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST', 1)
+NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES', 2)
+
+NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE
+class struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST._fields_ = [
+  ('action', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+  ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
+]
+NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST = struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm._fields_ = [
+  ('clientActiveMask', NvU32),
+  ('bRegkeyLimitRatedTdp', NvU8),
+]
+struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS._fields_ = [
+  ('rm', struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm),
+  ('output', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+  ('outputVPstate', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
+  ('inputs', (NV2080_CTRL_PERF_RATED_TDP_ACTION * 5)),
+  ('vPstateTypes', (NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE * 5)),
+]
+NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS
+class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS._fields_ = [
+  ('client', NV2080_CTRL_PERF_RATED_TDP_CLIENT),
+  ('input', NV2080_CTRL_PERF_RATED_TDP_ACTION),
+  ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE),
+]
+NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
+NV2080_CTRL_PERF_RATED_TDP_GET_CONTROL_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
+NV2080_CTRL_PERF_RATED_TDP_SET_CONTROL_PARAMS = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
+class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE._fields_ = [
+  ('util', NvU32),
+  ('vgpuScale', NvU32),
+  ('procId', NvU32),
+  ('subProcessID', NvU32),
+  ('subProcessName', (ctypes.c_char * 100)),
+  ('pOsPidInfo', NvU64),
+]
+NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE
+class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE._fields_ = [
+  ('base', NV2080_CTRL_GPUMON_SAMPLE),
+  ('fb', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
+  ('gr', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
+  ('nvenc', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
+  ('nvdec', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
+  ('nvjpg', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
+  ('nvofa', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE),
+]
+NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE = struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE
+NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_PARAM = struct_NV2080_CTRL_GPUMON_SAMPLES
+class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS._fields_ = [
+  ('type', NvU8),
+  ('bufSize', NvU32),
+  ('count', NvU32),
+  ('tracker', NvU32),
+  ('samples', (NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE * 72)),
+]
+NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS = struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS
+class struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS._fields_ = [
+  ('prevPstate', NvU32),
   ('action', NvU32),
-  ('bNotifyState', NvBool),
-  ('info32', NvU32),
-  ('info16', NvU16),
 ]
-NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS = struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS
-enum_NV2080_EVENT_HDACODEC_DSTATE = CEnum(ctypes.c_uint)
-NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D0 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D0', 0)
-NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D1 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D1', 1)
-NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D2 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D2', 2)
-NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_HOT = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_HOT', 3)
-NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_COLD = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D3_COLD', 4)
-NV2080_EVENT_HDACODEC_DEVICE_DSTATE_DSTATE_MAX = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_DSTATE_MAX', 5)
+NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS = struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS
+class struct_NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS._fields_ = [
+  ('bGpuIsIdle', NvBool),
+  ('bRestoreToMax', NvBool),
+  ('idleTimeUs', NvU64),
+  ('busyTimeUs', NvU64),
+]
+NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS = struct_NV2080_CTRL_PERF_AGGRESSIVE_PSTATE_NOTIFY_PARAMS
+class struct_NV2080_CTRL_PERF_GET_CLK_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GET_CLK_INFO._fields_ = [
+  ('flags', NvU32),
+  ('domain', NvU32),
+  ('currentFreq', NvU32),
+  ('defaultFreq', NvU32),
+  ('minFreq', NvU32),
+  ('maxFreq', NvU32),
+]
+NV2080_CTRL_PERF_GET_CLK_INFO = struct_NV2080_CTRL_PERF_GET_CLK_INFO
+class struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS._fields_ = [
+  ('level', NvU32),
+  ('flags', NvU32),
+  ('perfGetClkInfoList', NvP64),
+  ('perfGetClkInfoListSize', NvU32),
+]
+NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS = struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_PARAMS
+class struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS._fields_ = [
+  ('level', NvU32),
+  ('flags', NvU32),
+  ('perfGetClkInfoList', (NV2080_CTRL_PERF_GET_CLK_INFO * 32)),
+  ('perfGetClkInfoListSize', NvU32),
+]
+NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS = struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS
+enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint)
+NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVENC', 1)
+NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC', 2)
+NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG', 3)
+NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA', 4)
 
-NV2080_EVENT_HDACODEC_DSTATE = enum_NV2080_EVENT_HDACODEC_DSTATE
-class struct_NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS._fields_ = [
-  ('hMemory', NvHandle),
+NV2080_CTRL_CMD_PERF_VID_ENG = enum_NV2080_CTRL_CMD_PERF_VID_ENG
+class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS._fields_ = [
+  ('engineType', NV2080_CTRL_CMD_PERF_VID_ENG),
+  ('clkPercentBusy', NvU32),
+  ('samplingPeriodUs', NvU32),
 ]
-NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS = struct_NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS
-class struct_NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS._fields_ = [
-  ('hSemMemory', NvHandle),
-  ('semOffset', NvU32),
+NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS
+class struct_NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS._fields_ = [
+  ('powerStateInfo', NV2080_CTRL_PERF_POWERSTATE_PARAMS),
 ]
-NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS = struct_NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS
-class struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS._fields_ = [
-  ('guestMSIAddr', NvU64),
-  ('guestMSIData', NvU32),
-  ('hSemMemory', NvHandle),
-  ('isReset', NvBool),
-  ('vgpuUuid', (NvU8 * 16)),
-  ('domainId', NvU64),
+NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS = struct_NV2080_CTRL_PERF_GET_POWERSTATE_PARAMS
+class struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS._fields_ = [
+  ('videoEvent', NvU32),
 ]
-NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS = struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS
-class struct_NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS._fields_ = [
-  ('hSemMemory', NvHandle),
-  ('isSemaMemValidationEnabled', NvBool),
+NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS = struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS
+NV2080_CTRL_PERF_PSTATES_ID = ctypes.c_uint
+class struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS._fields_ = [
+  ('currPstate', NvU32),
 ]
-NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS = struct_NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS
-class struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS._fields_ = [
-  ('hEvent', NvHandle),
-]
-NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS = struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS
-enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD = CEnum(ctypes.c_uint)
-NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_FULL = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_FULL', 0)
-NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_SIMPLE = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_SIMPLE', 1)
-NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_CUSTOM = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_CUSTOM', 2)
-
-NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD
-class struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS._fields_ = [
-  ('hEventBuffer', NvHandle),
-  ('recordSize', NvU32),
-  ('levelOfDetail', NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD),
-  ('eventFilter', NvU32),
-  ('bAllUsers', NvBool),
-]
-NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS = struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS
-class struct_NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS._fields_ = [
-  ('hEventBuffer', NvHandle),
-  ('tracepointMask', NvU64),
-  ('gspLoggingBufferSize', NvU32),
-  ('gspLoggingBufferWatermark', NvU32),
-]
-NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS = struct_NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS
-class struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS._fields_ = [
-  ('sramParityUncorrectedUnique', NvU64),
-  ('sramSecDedUncorrectedUnique', NvU64),
-  ('sramCorrectedUnique', NvU64),
-  ('dramUncorrectedTotal', NvU64),
-  ('dramCorrectedTotal', NvU64),
-  ('lastClearedTimestamp', NvU32),
-  ('sramBucketL2', NvU64),
-  ('sramBucketSM', NvU64),
-  ('sramBucketPcie', NvU64),
-  ('sramBucketFirmware', NvU64),
-  ('sramBucketOther', NvU64),
-  ('sramErrorThresholdExceeded', NvBool),
-]
-NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS = struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS
-class struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS(ctypes.Structure): pass
-struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS._fields_ = [
-  ('sramCorUni', NvU64),
-  ('sramUncParityUni', NvU64),
-  ('sramUncSecDedUni', NvU64),
-  ('dramCorTot', NvU64),
-  ('dramUncTot', NvU64),
-]
-NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS = struct_NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS
+NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS = struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS
 class struct_NV2080_CTRL_PMGR_MODULE_INFO_PARAMS(ctypes.Structure): pass
 struct_NV2080_CTRL_PMGR_MODULE_INFO_PARAMS._fields_ = [
   ('moduleId', NvU32),
   ('nvswitchSupport', NvU8),
 ]
 NV2080_CTRL_PMGR_MODULE_INFO_PARAMS = struct_NV2080_CTRL_PMGR_MODULE_INFO_PARAMS
+enum_NV2080_CTRL_GC6_FLAVOR_ID = CEnum(ctypes.c_uint)
+NV2080_CTRL_GC6_FLAVOR_ID_MSHYBRID = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_MSHYBRID', 0)
+NV2080_CTRL_GC6_FLAVOR_ID_OPTIMUS = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_OPTIMUS', 1)
+NV2080_CTRL_GC6_FLAVOR_ID_MAX = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_MAX', 4)
+
+NV2080_CTRL_GC6_FLAVOR_ID = enum_NV2080_CTRL_GC6_FLAVOR_ID
+class struct_NV2080_CTRL_GC6_ENTRY_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params(ctypes.Structure): pass
+struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params._fields_ = [
+  ('bIsRTD3Transition', NvBool),
+  ('bIsRTD3CoreRailPowerCut', NvBool),
+  ('bSkipPstateSanity', NvBool),
+]
+struct_NV2080_CTRL_GC6_ENTRY_PARAMS._fields_ = [
+  ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
+  ('stepMask', NvU32),
+  ('params', struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params),
+]
+NV2080_CTRL_GC6_ENTRY_PARAMS = struct_NV2080_CTRL_GC6_ENTRY_PARAMS
+class struct_NV2080_CTRL_GC6_EXIT_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_GC6_EXIT_PARAMS_params(ctypes.Structure): pass
+struct_NV2080_CTRL_GC6_EXIT_PARAMS_params._fields_ = [
+  ('bIsGpuSelfWake', NvBool),
+  ('bIsRTD3Transition', NvBool),
+  ('bIsRTD3HotTransition', NvBool),
+]
+struct_NV2080_CTRL_GC6_EXIT_PARAMS._fields_ = [
+  ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
+  ('params', struct_NV2080_CTRL_GC6_EXIT_PARAMS_params),
+]
+NV2080_CTRL_GC6_EXIT_PARAMS = struct_NV2080_CTRL_GC6_EXIT_PARAMS
+enum_NV2080_CTRL_GC6_STEP_ID = CEnum(ctypes.c_uint)
+NV2080_CTRL_GC6_STEP_ID_SR_ENTRY = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_SR_ENTRY', 0)
+NV2080_CTRL_GC6_STEP_ID_GPU_OFF = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_GPU_OFF', 1)
+NV2080_CTRL_GC6_STEP_ID_MAX = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_MAX', 2)
+
+NV2080_CTRL_GC6_STEP_ID = enum_NV2080_CTRL_GC6_STEP_ID
+class struct_NV2080_CTRL_GC6_FLAVOR_INFO(ctypes.Structure): pass
+struct_NV2080_CTRL_GC6_FLAVOR_INFO._fields_ = [
+  ('flavorId', NV2080_CTRL_GC6_FLAVOR_ID),
+  ('stepMask', NvU32),
+]
+NV2080_CTRL_GC6_FLAVOR_INFO = struct_NV2080_CTRL_GC6_FLAVOR_INFO
+class struct_NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS._fields_ = [
+  ('hChannel', NvHandle),
+  ('virtAddress', NvU64),
+  ('bufferPtr', NvP64),
+  ('bufferSize', NvU32),
+]
+NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS = struct_NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS
+class struct_NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS._fields_ = [
+  ('errorCount', NvU32),
+]
+NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS = struct_NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS
+class struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS._fields_ = [
+  ('whichBuffer', NvU32),
+  ('outputRecordSize', NvU32),
+  ('recordBuffer', (NvU8 * 8192)),
+]
+NV2080_CTRL_RC_GET_ERROR_V2_PARAMS = struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS
+class struct_NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS._fields_ = [
+  ('watchdogStatusFlags', NvU32),
+]
+NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS = struct_NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS
+class struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS._fields_ = [
+  ('rcEnable', NvU32),
+]
+NV2080_CTRL_CMD_RC_RECOVERY_PARAMS = struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS
+NV2080_CTRL_SET_RC_RECOVERY_PARAMS = struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS
+NV2080_CTRL_GET_RC_RECOVERY_PARAMS = struct_NV2080_CTRL_CMD_RC_RECOVERY_PARAMS
+class struct_NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS._fields_ = [
+  ('cmd', NvU32),
+  ('status', NvS32),
+]
+NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS = struct_NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS
+class struct_NV2080_CTRL_CMD_RC_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_RC_INFO_PARAMS._fields_ = [
+  ('rcMode', NvU32),
+  ('rcBreak', NvU32),
+]
+NV2080_CTRL_CMD_RC_INFO_PARAMS = struct_NV2080_CTRL_CMD_RC_INFO_PARAMS
+NV2080_CTRL_SET_RC_INFO_PARAMS = struct_NV2080_CTRL_CMD_RC_INFO_PARAMS
+NV2080_CTRL_GET_RC_INFO_PARAMS = struct_NV2080_CTRL_CMD_RC_INFO_PARAMS
+class struct_RM_GSP_SPDM_CMD_CC_INIT(ctypes.Structure): pass
+struct_RM_GSP_SPDM_CMD_CC_INIT._fields_ = [
+  ('cmdType', NvU8),
+]
+RM_GSP_SPDM_CMD_CC_INIT = struct_RM_GSP_SPDM_CMD_CC_INIT
+PRM_GSP_SPDM_CMD_CC_INIT = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT)
+class struct_RM_GSP_SPDM_CMD_CC_DEINIT(ctypes.Structure): pass
+struct_RM_GSP_SPDM_CMD_CC_DEINIT._fields_ = [
+  ('cmdType', NvU8),
+]
+RM_GSP_SPDM_CMD_CC_DEINIT = struct_RM_GSP_SPDM_CMD_CC_DEINIT
+PRM_GSP_SPDM_CMD_CC_DEINIT = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_DEINIT)
+class struct_RM_GSP_SPDM_CMD_CC_CTRL(ctypes.Structure): pass
+struct_RM_GSP_SPDM_CMD_CC_CTRL._fields_ = [
+  ('cmdType', NvU8),
+]
+RM_GSP_SPDM_CMD_CC_CTRL = struct_RM_GSP_SPDM_CMD_CC_CTRL
+PRM_GSP_SPDM_CMD_CC_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_CTRL)
+class struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA(ctypes.Structure): pass
+struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA._fields_ = [
+  ('cmdType', NvU8),
+  ('rsvd0', (NvU32 * 2)),
+  ('rsvd1', NvU32),
+  ('rsvd2', (ctypes.c_char * 9)),
+  ('rsvd3', (ctypes.c_char * 5)),
+  ('rsvd4', (ctypes.c_char * 5)),
+  ('rsvd5', (ctypes.c_char * 5)),
+  ('rsvd6', (ctypes.c_char * 2)),
+  ('rsvd7', (ctypes.c_char * 16)),
+  ('rsvd8', (NvU32 * 2)),
+]
+RM_GSP_SPDM_CMD_CC_INIT_RM_DATA = struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA
+PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA)
+class struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL(ctypes.Structure): pass
+struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL._fields_ = [
+  ('cmdType', NvU8),
+  ('bEnable', NvBool),
+]
+RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL
+PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL)
+class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST(ctypes.Structure): pass
+class struct_CC_KMB(ctypes.Structure): pass
+class struct_CC_AES_CRYPTOBUNDLE(ctypes.Structure): pass
+struct_CC_AES_CRYPTOBUNDLE._fields_ = [
+  ('iv', (NvU32 * 3)),
+  ('key', (NvU32 * 8)),
+  ('ivMask', (NvU32 * 3)),
+]
+CC_AES_CRYPTOBUNDLE = struct_CC_AES_CRYPTOBUNDLE
+class _anonunion20(ctypes.Union): pass
+class struct_CC_HMAC_CRYPTOBUNDLE(ctypes.Structure): pass
+struct_CC_HMAC_CRYPTOBUNDLE._fields_ = [
+  ('nonce', (NvU32 * 8)),
+  ('key', (NvU32 * 8)),
+]
+CC_HMAC_CRYPTOBUNDLE = struct_CC_HMAC_CRYPTOBUNDLE
+_anonunion20._fields_ = [
+  ('hmacBundle', CC_HMAC_CRYPTOBUNDLE),
+  ('decryptBundle', CC_AES_CRYPTOBUNDLE),
+]
+struct_CC_KMB._anonymous_ = ['_0']
+struct_CC_KMB._fields_ = [
+  ('encryptBundle', CC_AES_CRYPTOBUNDLE),
+  ('_0', _anonunion20),
+  ('bIsWorkLaunch', NvBool),
+]
+CC_KMB = struct_CC_KMB
+struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST._fields_ = [
+  ('cmdType', NvU8),
+  ('isEnc', NvU8),
+  ('kmb', CC_KMB),
+  ('text', (NvU8 * 16)),
+  ('authTag', (NvU8 * 16)),
+]
+RM_GSP_SPDM_CMD_FIPS_SELFTEST = struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST
+PRM_GSP_SPDM_CMD_FIPS_SELFTEST = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST)
+class union_RM_GSP_SPDM_CMD(ctypes.Union): pass
+union_RM_GSP_SPDM_CMD._fields_ = [
+  ('cmdType', NvU8),
+  ('ccInit', RM_GSP_SPDM_CMD_CC_INIT),
+  ('ccDeinit', RM_GSP_SPDM_CMD_CC_DEINIT),
+  ('ccCtrl', RM_GSP_SPDM_CMD_CC_CTRL),
+  ('rmDataInitCmd', RM_GSP_SPDM_CMD_CC_INIT_RM_DATA),
+  ('ccHeartbeatCtrl', RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL),
+  ('ccFipsTest', RM_GSP_SPDM_CMD_FIPS_SELFTEST),
+]
+RM_GSP_SPDM_CMD = union_RM_GSP_SPDM_CMD
+PRM_GSP_SPDM_CMD = ctypes.POINTER(union_RM_GSP_SPDM_CMD)
+class struct_RM_GSP_SPDM_MSG(ctypes.Structure): pass
+struct_RM_GSP_SPDM_MSG._fields_ = [
+  ('msgType', NvU8),
+  ('status', NvU32),
+  ('rsvd1', NvU32),
+  ('rsvd2', NvU32),
+  ('rsvd3', NvU32),
+  ('rsvd4', NvU32),
+  ('rsvd5', NvU32),
+]
+RM_GSP_SPDM_MSG = struct_RM_GSP_SPDM_MSG
+PRM_GSP_SPDM_MSG = ctypes.POINTER(struct_RM_GSP_SPDM_MSG)
+class struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS._fields_ = [
+  ('index', NvU8),
+  ('cmd', RM_GSP_SPDM_CMD),
+  ('msg', RM_GSP_SPDM_MSG),
+]
+NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS
+class struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS._fields_ = [
+  ('transcript', (NvU8 * 9216)),
+  ('transcriptSize', NvU32),
+]
+NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS
+class struct_NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS._fields_ = [
+  ('time_nsec', NvU64),
+  ('flags', NvU32),
+]
+NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS = struct_NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS
+class struct_NV2080_CTRL_TIMER_GET_TIME_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_TIMER_GET_TIME_PARAMS._fields_ = [
+  ('time_nsec', NvU64),
+]
+NV2080_CTRL_TIMER_GET_TIME_PARAMS = struct_NV2080_CTRL_TIMER_GET_TIME_PARAMS
+class struct_NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS._fields_ = [
+  ('tmr_offset', NvU32),
+]
+NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS = struct_NV2080_CTRL_TIMER_GET_REGISTER_OFFSET_PARAMS
+class struct_NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE(ctypes.Structure): pass
+struct_NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE._fields_ = [
+  ('cpuTime', NvU64),
+  ('gpuTime', NvU64),
+]
+NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE = struct_NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE
+class struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS._fields_ = [
+  ('cpuClkId', NvU8),
+  ('sampleCount', NvU8),
+  ('samples', (NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE * 16)),
+]
+NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS = struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS
+class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS._fields_ = [
+  ('bSetMaxFreq', NvBool),
+]
+NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS = struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS
+class struct_NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS._fields_ = [
+  ('action', NvU32),
+]
+NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS = struct_NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS
+class struct_NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS._fields_ = [
+  ('action', NvU32),
+]
+NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS = struct_NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS
+class struct_NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS._fields_ = [
+  ('bEnter', NvBool),
+]
+NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS = struct_NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS
+class struct_NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS._fields_ = [
+  ('hNotifierResource', NvHandle),
+  ('notifyDataSize', NvU32),
+  ('hNotifyDataMemory', NvHandle),
+  ('perfmonIdCount', NvU32),
+  ('snapshotBufferSize', NvU32),
+  ('hSnapshotMemory', NvHandle),
+]
+NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS = struct_NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS
+class struct_NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS._fields_ = [
+  ('bVidmemPersistent', NvBool),
+]
+NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS = struct_NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS
+class struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS._fields_ = [
+  ('bUpdateTGP', NvBool),
+]
+NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS = struct_NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS._fields_ = [
+  ('dbdf', NvU32),
+  ('gfid', NvU32),
+  ('vgpuType', NvU32),
+  ('vmPid', NvU32),
+  ('swizzId', NvU32),
+  ('numChannels', NvU32),
+  ('numPluginChannels', NvU32),
+  ('chidOffset', (NvU32 * 84)),
+  ('bDisableDefaultSmcExecPartRestore', NvBool),
+  ('numGuestFbSegments', NvU32),
+  ('guestFbPhysAddrList', (NvU64 * 384)),
+  ('guestFbLengthList', (NvU64 * 384)),
+  ('pluginHeapMemoryPhysAddr', NvU64),
+  ('pluginHeapMemoryLength', NvU64),
+  ('ctrlBuffOffset', NvU64),
+  ('initTaskLogBuffOffset', NvU64),
+  ('initTaskLogBuffSize', NvU64),
+  ('vgpuTaskLogBuffOffset', NvU64),
+  ('vgpuTaskLogBuffSize', NvU64),
+  ('kernelLogBuffOffset', NvU64),
+  ('kernelLogBuffSize', NvU64),
+  ('migRmHeapMemoryPhysAddr', NvU64),
+  ('migRmHeapMemoryLength', NvU64),
+  ('bDeviceProfilingEnabled', NvBool),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS._fields_ = [
+  ('gfid', NvU32),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS(ctypes.Structure): pass
+class struct_NVA081_CTRL_VGPU_INFO(ctypes.Structure): pass
+struct_NVA081_CTRL_VGPU_INFO._fields_ = [
+  ('vgpuType', NvU32),
+  ('vgpuName', (NvU8 * 32)),
+  ('vgpuClass', (NvU8 * 32)),
+  ('vgpuSignature', (NvU8 * 128)),
+  ('license', (NvU8 * 128)),
+  ('maxInstance', NvU32),
+  ('numHeads', NvU32),
+  ('maxResolutionX', NvU32),
+  ('maxResolutionY', NvU32),
+  ('maxPixels', NvU32),
+  ('frlConfig', NvU32),
+  ('cudaEnabled', NvU32),
+  ('eccSupported', NvU32),
+  ('gpuInstanceSize', NvU32),
+  ('multiVgpuSupported', NvU32),
+  ('vdevId', NvU64),
+  ('pdevId', NvU64),
+  ('profileSize', NvU64),
+  ('fbLength', NvU64),
+  ('gspHeapSize', NvU64),
+  ('fbReservation', NvU64),
+  ('mappableVideoSize', NvU64),
+  ('encoderCapacity', NvU32),
+  ('bar1Length', NvU64),
+  ('frlEnable', NvU32),
+  ('adapterName', (NvU8 * 64)),
+  ('adapterName_Unicode', (NvU16 * 64)),
+  ('shortGpuNameString', (NvU8 * 64)),
+  ('licensedProductName', (NvU8 * 128)),
+  ('vgpuExtraParams', (NvU32 * 1024)),
+  ('ftraceEnable', NvU32),
+  ('gpuDirectSupported', NvU32),
+  ('nvlinkP2PSupported', NvU32),
+  ('multiVgpuExclusive', NvU32),
+  ('exclusiveType', NvU32),
+  ('exclusiveSize', NvU32),
+  ('gpuInstanceProfileId', NvU32),
+  ('placementSize', NvU32),
+  ('homogeneousPlacementCount', NvU32),
+  ('homogeneousPlacementIds', (NvU32 * 32)),
+  ('heterogeneousPlacementCount', NvU32),
+  ('heterogeneousPlacementIds', (NvU32 * 32)),
+]
+NVA081_CTRL_VGPU_INFO = struct_NVA081_CTRL_VGPU_INFO
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS._fields_ = [
+  ('discardVgpuTypes', NvBool),
+  ('vgpuInfoCount', NvU32),
+  ('vgpuInfo', (NVA081_CTRL_VGPU_INFO * 64)),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS
+class struct_NV2080_GUEST_VM_INFO(ctypes.Structure): pass
+enum_GUEST_VM_INFO_STATE = CEnum(ctypes.c_uint)
+GUEST_VM_INFO_STATE_UNINITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_UNINITIALIZED', 0)
+GUEST_VM_INFO_STATE_INITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_INITIALIZED', 1)
+
+GUEST_VM_INFO_STATE = enum_GUEST_VM_INFO_STATE
+struct_NV2080_GUEST_VM_INFO._fields_ = [
+  ('vmPid', NvU32),
+  ('guestOs', NvU32),
+  ('migrationProhibited', NvU32),
+  ('guestNegotiatedVgpuVersion', NvU32),
+  ('frameRateLimit', NvU32),
+  ('licensed', NvBool),
+  ('licenseState', NvU32),
+  ('licenseExpiryTimestamp', NvU32),
+  ('licenseExpiryStatus', NvU8),
+  ('guestDriverVersion', (NvU8 * 32)),
+  ('guestDriverBranch', (NvU8 * 32)),
+  ('guestVmInfoState', GUEST_VM_INFO_STATE),
+]
+NV2080_GUEST_VM_INFO = struct_NV2080_GUEST_VM_INFO
+class struct_NV2080_HOST_VGPU_DEVICE(ctypes.Structure): pass
+struct_NV2080_HOST_VGPU_DEVICE._fields_ = [
+  ('gfid', NvU32),
+  ('vgpuPciId', NvU64),
+  ('vgpuDeviceInstanceId', NvU32),
+  ('fbUsed', NvU64),
+  ('encoderCapacity', NvU32),
+  ('eccState', NvU32),
+  ('bDriverLoaded', NvBool),
+]
+NV2080_HOST_VGPU_DEVICE = struct_NV2080_HOST_VGPU_DEVICE
+class struct_NV2080_VGPU_GUEST(ctypes.Structure): pass
+struct_NV2080_VGPU_GUEST._fields_ = [
+  ('guestVmInfo', NV2080_GUEST_VM_INFO),
+  ('vgpuDevice', NV2080_HOST_VGPU_DEVICE),
+]
+NV2080_VGPU_GUEST = struct_NV2080_VGPU_GUEST
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS._fields_ = [
+  ('numVgpu', NvU32),
+  ('vgpuGuest', (NV2080_VGPU_GUEST * 32)),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS._fields_ = [
+  ('gfid', NvU32),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS
+class struct_NV2080_VGPU_FB_USAGE(ctypes.Structure): pass
+struct_NV2080_VGPU_FB_USAGE._fields_ = [
+  ('gfid', NvU32),
+  ('fbUsed', NvU64),
+]
+NV2080_VGPU_FB_USAGE = struct_NV2080_VGPU_FB_USAGE
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS._fields_ = [
+  ('vgpuCount', NvU32),
+  ('vgpuFbUsage', (NV2080_VGPU_FB_USAGE * 32)),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS._fields_ = [
+  ('gfid', NvU32),
+  ('encoderCapacity', NvU32),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS._fields_ = [
+  ('gfid', NvU32),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS._fields_ = [
+  ('pgpuString', (NvU8 * 256)),
+  ('pgpuStringSize', NvU32),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS._fields_ = [
+  ('bIsMigrationSupported', NvBool),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS._fields_ = [
+  ('bSupportHeterogeneousTimeSlicedVgpuTypes', NvBool),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS._fields_ = [
+  ('gfid', NvU32),
+  ('flags', NvU32),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS._fields_ = [
+  ('bFlrDisabled', NvBool),
+]
+NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS = struct_NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS
+class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS(ctypes.Structure): pass
+struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS._fields_ = [
+  ('bHeterogeneousMode', NvBool),
+]
+NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS
 class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS(ctypes.Structure): pass
 struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS._fields_ = [
   ('action', NvU32),
@@ -10621,149 +10621,149 @@ struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS._fields_ = [
   ('value', NvU32),
 ]
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS
-_anonenum21 = CEnum(ctypes.c_uint)
-NV_OK = _anonenum21.define('NV_OK', 0)
-NV_ERR_GENERIC = _anonenum21.define('NV_ERR_GENERIC', 65535)
-NV_ERR_BROKEN_FB = _anonenum21.define('NV_ERR_BROKEN_FB', 1)
-NV_ERR_BUFFER_TOO_SMALL = _anonenum21.define('NV_ERR_BUFFER_TOO_SMALL', 2)
-NV_ERR_BUSY_RETRY = _anonenum21.define('NV_ERR_BUSY_RETRY', 3)
-NV_ERR_CALLBACK_NOT_SCHEDULED = _anonenum21.define('NV_ERR_CALLBACK_NOT_SCHEDULED', 4)
-NV_ERR_CARD_NOT_PRESENT = _anonenum21.define('NV_ERR_CARD_NOT_PRESENT', 5)
-NV_ERR_CYCLE_DETECTED = _anonenum21.define('NV_ERR_CYCLE_DETECTED', 6)
-NV_ERR_DMA_IN_USE = _anonenum21.define('NV_ERR_DMA_IN_USE', 7)
-NV_ERR_DMA_MEM_NOT_LOCKED = _anonenum21.define('NV_ERR_DMA_MEM_NOT_LOCKED', 8)
-NV_ERR_DMA_MEM_NOT_UNLOCKED = _anonenum21.define('NV_ERR_DMA_MEM_NOT_UNLOCKED', 9)
-NV_ERR_DUAL_LINK_INUSE = _anonenum21.define('NV_ERR_DUAL_LINK_INUSE', 10)
-NV_ERR_ECC_ERROR = _anonenum21.define('NV_ERR_ECC_ERROR', 11)
-NV_ERR_FIFO_BAD_ACCESS = _anonenum21.define('NV_ERR_FIFO_BAD_ACCESS', 12)
-NV_ERR_FREQ_NOT_SUPPORTED = _anonenum21.define('NV_ERR_FREQ_NOT_SUPPORTED', 13)
-NV_ERR_GPU_DMA_NOT_INITIALIZED = _anonenum21.define('NV_ERR_GPU_DMA_NOT_INITIALIZED', 14)
-NV_ERR_GPU_IS_LOST = _anonenum21.define('NV_ERR_GPU_IS_LOST', 15)
-NV_ERR_GPU_IN_FULLCHIP_RESET = _anonenum21.define('NV_ERR_GPU_IN_FULLCHIP_RESET', 16)
-NV_ERR_GPU_NOT_FULL_POWER = _anonenum21.define('NV_ERR_GPU_NOT_FULL_POWER', 17)
-NV_ERR_GPU_UUID_NOT_FOUND = _anonenum21.define('NV_ERR_GPU_UUID_NOT_FOUND', 18)
-NV_ERR_HOT_SWITCH = _anonenum21.define('NV_ERR_HOT_SWITCH', 19)
-NV_ERR_I2C_ERROR = _anonenum21.define('NV_ERR_I2C_ERROR', 20)
-NV_ERR_I2C_SPEED_TOO_HIGH = _anonenum21.define('NV_ERR_I2C_SPEED_TOO_HIGH', 21)
-NV_ERR_ILLEGAL_ACTION = _anonenum21.define('NV_ERR_ILLEGAL_ACTION', 22)
-NV_ERR_IN_USE = _anonenum21.define('NV_ERR_IN_USE', 23)
-NV_ERR_INFLATE_COMPRESSED_DATA_FAILED = _anonenum21.define('NV_ERR_INFLATE_COMPRESSED_DATA_FAILED', 24)
-NV_ERR_INSERT_DUPLICATE_NAME = _anonenum21.define('NV_ERR_INSERT_DUPLICATE_NAME', 25)
-NV_ERR_INSUFFICIENT_RESOURCES = _anonenum21.define('NV_ERR_INSUFFICIENT_RESOURCES', 26)
-NV_ERR_INSUFFICIENT_PERMISSIONS = _anonenum21.define('NV_ERR_INSUFFICIENT_PERMISSIONS', 27)
-NV_ERR_INSUFFICIENT_POWER = _anonenum21.define('NV_ERR_INSUFFICIENT_POWER', 28)
-NV_ERR_INVALID_ACCESS_TYPE = _anonenum21.define('NV_ERR_INVALID_ACCESS_TYPE', 29)
-NV_ERR_INVALID_ADDRESS = _anonenum21.define('NV_ERR_INVALID_ADDRESS', 30)
-NV_ERR_INVALID_ARGUMENT = _anonenum21.define('NV_ERR_INVALID_ARGUMENT', 31)
-NV_ERR_INVALID_BASE = _anonenum21.define('NV_ERR_INVALID_BASE', 32)
-NV_ERR_INVALID_CHANNEL = _anonenum21.define('NV_ERR_INVALID_CHANNEL', 33)
-NV_ERR_INVALID_CLASS = _anonenum21.define('NV_ERR_INVALID_CLASS', 34)
-NV_ERR_INVALID_CLIENT = _anonenum21.define('NV_ERR_INVALID_CLIENT', 35)
-NV_ERR_INVALID_COMMAND = _anonenum21.define('NV_ERR_INVALID_COMMAND', 36)
-NV_ERR_INVALID_DATA = _anonenum21.define('NV_ERR_INVALID_DATA', 37)
-NV_ERR_INVALID_DEVICE = _anonenum21.define('NV_ERR_INVALID_DEVICE', 38)
-NV_ERR_INVALID_DMA_SPECIFIER = _anonenum21.define('NV_ERR_INVALID_DMA_SPECIFIER', 39)
-NV_ERR_INVALID_EVENT = _anonenum21.define('NV_ERR_INVALID_EVENT', 40)
-NV_ERR_INVALID_FLAGS = _anonenum21.define('NV_ERR_INVALID_FLAGS', 41)
-NV_ERR_INVALID_FUNCTION = _anonenum21.define('NV_ERR_INVALID_FUNCTION', 42)
-NV_ERR_INVALID_HEAP = _anonenum21.define('NV_ERR_INVALID_HEAP', 43)
-NV_ERR_INVALID_INDEX = _anonenum21.define('NV_ERR_INVALID_INDEX', 44)
-NV_ERR_INVALID_IRQ_LEVEL = _anonenum21.define('NV_ERR_INVALID_IRQ_LEVEL', 45)
-NV_ERR_INVALID_LIMIT = _anonenum21.define('NV_ERR_INVALID_LIMIT', 46)
-NV_ERR_INVALID_LOCK_STATE = _anonenum21.define('NV_ERR_INVALID_LOCK_STATE', 47)
-NV_ERR_INVALID_METHOD = _anonenum21.define('NV_ERR_INVALID_METHOD', 48)
-NV_ERR_INVALID_OBJECT = _anonenum21.define('NV_ERR_INVALID_OBJECT', 49)
-NV_ERR_INVALID_OBJECT_BUFFER = _anonenum21.define('NV_ERR_INVALID_OBJECT_BUFFER', 50)
-NV_ERR_INVALID_OBJECT_HANDLE = _anonenum21.define('NV_ERR_INVALID_OBJECT_HANDLE', 51)
-NV_ERR_INVALID_OBJECT_NEW = _anonenum21.define('NV_ERR_INVALID_OBJECT_NEW', 52)
-NV_ERR_INVALID_OBJECT_OLD = _anonenum21.define('NV_ERR_INVALID_OBJECT_OLD', 53)
-NV_ERR_INVALID_OBJECT_PARENT = _anonenum21.define('NV_ERR_INVALID_OBJECT_PARENT', 54)
-NV_ERR_INVALID_OFFSET = _anonenum21.define('NV_ERR_INVALID_OFFSET', 55)
-NV_ERR_INVALID_OPERATION = _anonenum21.define('NV_ERR_INVALID_OPERATION', 56)
-NV_ERR_INVALID_OWNER = _anonenum21.define('NV_ERR_INVALID_OWNER', 57)
-NV_ERR_INVALID_PARAM_STRUCT = _anonenum21.define('NV_ERR_INVALID_PARAM_STRUCT', 58)
-NV_ERR_INVALID_PARAMETER = _anonenum21.define('NV_ERR_INVALID_PARAMETER', 59)
-NV_ERR_INVALID_PATH = _anonenum21.define('NV_ERR_INVALID_PATH', 60)
-NV_ERR_INVALID_POINTER = _anonenum21.define('NV_ERR_INVALID_POINTER', 61)
-NV_ERR_INVALID_REGISTRY_KEY = _anonenum21.define('NV_ERR_INVALID_REGISTRY_KEY', 62)
-NV_ERR_INVALID_REQUEST = _anonenum21.define('NV_ERR_INVALID_REQUEST', 63)
-NV_ERR_INVALID_STATE = _anonenum21.define('NV_ERR_INVALID_STATE', 64)
-NV_ERR_INVALID_STRING_LENGTH = _anonenum21.define('NV_ERR_INVALID_STRING_LENGTH', 65)
-NV_ERR_INVALID_READ = _anonenum21.define('NV_ERR_INVALID_READ', 66)
-NV_ERR_INVALID_WRITE = _anonenum21.define('NV_ERR_INVALID_WRITE', 67)
-NV_ERR_INVALID_XLATE = _anonenum21.define('NV_ERR_INVALID_XLATE', 68)
-NV_ERR_IRQ_NOT_FIRING = _anonenum21.define('NV_ERR_IRQ_NOT_FIRING', 69)
-NV_ERR_IRQ_EDGE_TRIGGERED = _anonenum21.define('NV_ERR_IRQ_EDGE_TRIGGERED', 70)
-NV_ERR_MEMORY_TRAINING_FAILED = _anonenum21.define('NV_ERR_MEMORY_TRAINING_FAILED', 71)
-NV_ERR_MISMATCHED_SLAVE = _anonenum21.define('NV_ERR_MISMATCHED_SLAVE', 72)
-NV_ERR_MISMATCHED_TARGET = _anonenum21.define('NV_ERR_MISMATCHED_TARGET', 73)
-NV_ERR_MISSING_TABLE_ENTRY = _anonenum21.define('NV_ERR_MISSING_TABLE_ENTRY', 74)
-NV_ERR_MODULE_LOAD_FAILED = _anonenum21.define('NV_ERR_MODULE_LOAD_FAILED', 75)
-NV_ERR_MORE_DATA_AVAILABLE = _anonenum21.define('NV_ERR_MORE_DATA_AVAILABLE', 76)
-NV_ERR_MORE_PROCESSING_REQUIRED = _anonenum21.define('NV_ERR_MORE_PROCESSING_REQUIRED', 77)
-NV_ERR_MULTIPLE_MEMORY_TYPES = _anonenum21.define('NV_ERR_MULTIPLE_MEMORY_TYPES', 78)
-NV_ERR_NO_FREE_FIFOS = _anonenum21.define('NV_ERR_NO_FREE_FIFOS', 79)
-NV_ERR_NO_INTR_PENDING = _anonenum21.define('NV_ERR_NO_INTR_PENDING', 80)
-NV_ERR_NO_MEMORY = _anonenum21.define('NV_ERR_NO_MEMORY', 81)
-NV_ERR_NO_SUCH_DOMAIN = _anonenum21.define('NV_ERR_NO_SUCH_DOMAIN', 82)
-NV_ERR_NO_VALID_PATH = _anonenum21.define('NV_ERR_NO_VALID_PATH', 83)
-NV_ERR_NOT_COMPATIBLE = _anonenum21.define('NV_ERR_NOT_COMPATIBLE', 84)
-NV_ERR_NOT_READY = _anonenum21.define('NV_ERR_NOT_READY', 85)
-NV_ERR_NOT_SUPPORTED = _anonenum21.define('NV_ERR_NOT_SUPPORTED', 86)
-NV_ERR_OBJECT_NOT_FOUND = _anonenum21.define('NV_ERR_OBJECT_NOT_FOUND', 87)
-NV_ERR_OBJECT_TYPE_MISMATCH = _anonenum21.define('NV_ERR_OBJECT_TYPE_MISMATCH', 88)
-NV_ERR_OPERATING_SYSTEM = _anonenum21.define('NV_ERR_OPERATING_SYSTEM', 89)
-NV_ERR_OTHER_DEVICE_FOUND = _anonenum21.define('NV_ERR_OTHER_DEVICE_FOUND', 90)
-NV_ERR_OUT_OF_RANGE = _anonenum21.define('NV_ERR_OUT_OF_RANGE', 91)
-NV_ERR_OVERLAPPING_UVM_COMMIT = _anonenum21.define('NV_ERR_OVERLAPPING_UVM_COMMIT', 92)
-NV_ERR_PAGE_TABLE_NOT_AVAIL = _anonenum21.define('NV_ERR_PAGE_TABLE_NOT_AVAIL', 93)
-NV_ERR_PID_NOT_FOUND = _anonenum21.define('NV_ERR_PID_NOT_FOUND', 94)
-NV_ERR_PROTECTION_FAULT = _anonenum21.define('NV_ERR_PROTECTION_FAULT', 95)
-NV_ERR_RC_ERROR = _anonenum21.define('NV_ERR_RC_ERROR', 96)
-NV_ERR_REJECTED_VBIOS = _anonenum21.define('NV_ERR_REJECTED_VBIOS', 97)
-NV_ERR_RESET_REQUIRED = _anonenum21.define('NV_ERR_RESET_REQUIRED', 98)
-NV_ERR_STATE_IN_USE = _anonenum21.define('NV_ERR_STATE_IN_USE', 99)
-NV_ERR_SIGNAL_PENDING = _anonenum21.define('NV_ERR_SIGNAL_PENDING', 100)
-NV_ERR_TIMEOUT = _anonenum21.define('NV_ERR_TIMEOUT', 101)
-NV_ERR_TIMEOUT_RETRY = _anonenum21.define('NV_ERR_TIMEOUT_RETRY', 102)
-NV_ERR_TOO_MANY_PRIMARIES = _anonenum21.define('NV_ERR_TOO_MANY_PRIMARIES', 103)
-NV_ERR_UVM_ADDRESS_IN_USE = _anonenum21.define('NV_ERR_UVM_ADDRESS_IN_USE', 104)
-NV_ERR_MAX_SESSION_LIMIT_REACHED = _anonenum21.define('NV_ERR_MAX_SESSION_LIMIT_REACHED', 105)
-NV_ERR_LIB_RM_VERSION_MISMATCH = _anonenum21.define('NV_ERR_LIB_RM_VERSION_MISMATCH', 106)
-NV_ERR_PRIV_SEC_VIOLATION = _anonenum21.define('NV_ERR_PRIV_SEC_VIOLATION', 107)
-NV_ERR_GPU_IN_DEBUG_MODE = _anonenum21.define('NV_ERR_GPU_IN_DEBUG_MODE', 108)
-NV_ERR_FEATURE_NOT_ENABLED = _anonenum21.define('NV_ERR_FEATURE_NOT_ENABLED', 109)
-NV_ERR_RESOURCE_LOST = _anonenum21.define('NV_ERR_RESOURCE_LOST', 110)
-NV_ERR_PMU_NOT_READY = _anonenum21.define('NV_ERR_PMU_NOT_READY', 111)
-NV_ERR_FLCN_ERROR = _anonenum21.define('NV_ERR_FLCN_ERROR', 112)
-NV_ERR_FATAL_ERROR = _anonenum21.define('NV_ERR_FATAL_ERROR', 113)
-NV_ERR_MEMORY_ERROR = _anonenum21.define('NV_ERR_MEMORY_ERROR', 114)
-NV_ERR_INVALID_LICENSE = _anonenum21.define('NV_ERR_INVALID_LICENSE', 115)
-NV_ERR_NVLINK_INIT_ERROR = _anonenum21.define('NV_ERR_NVLINK_INIT_ERROR', 116)
-NV_ERR_NVLINK_MINION_ERROR = _anonenum21.define('NV_ERR_NVLINK_MINION_ERROR', 117)
-NV_ERR_NVLINK_CLOCK_ERROR = _anonenum21.define('NV_ERR_NVLINK_CLOCK_ERROR', 118)
-NV_ERR_NVLINK_TRAINING_ERROR = _anonenum21.define('NV_ERR_NVLINK_TRAINING_ERROR', 119)
-NV_ERR_NVLINK_CONFIGURATION_ERROR = _anonenum21.define('NV_ERR_NVLINK_CONFIGURATION_ERROR', 120)
-NV_ERR_RISCV_ERROR = _anonenum21.define('NV_ERR_RISCV_ERROR', 121)
-NV_ERR_FABRIC_MANAGER_NOT_PRESENT = _anonenum21.define('NV_ERR_FABRIC_MANAGER_NOT_PRESENT', 122)
-NV_ERR_ALREADY_SIGNALLED = _anonenum21.define('NV_ERR_ALREADY_SIGNALLED', 123)
-NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE = _anonenum21.define('NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE', 124)
-NV_ERR_KEY_ROTATION_IN_PROGRESS = _anonenum21.define('NV_ERR_KEY_ROTATION_IN_PROGRESS', 125)
-NV_ERR_TEST_ONLY_CODE_NOT_ENABLED = _anonenum21.define('NV_ERR_TEST_ONLY_CODE_NOT_ENABLED', 126)
-NV_ERR_SECURE_BOOT_FAILED = _anonenum21.define('NV_ERR_SECURE_BOOT_FAILED', 127)
-NV_ERR_INSUFFICIENT_ZBC_ENTRY = _anonenum21.define('NV_ERR_INSUFFICIENT_ZBC_ENTRY', 128)
-NV_ERR_NVLINK_FABRIC_NOT_READY = _anonenum21.define('NV_ERR_NVLINK_FABRIC_NOT_READY', 129)
-NV_ERR_NVLINK_FABRIC_FAILURE = _anonenum21.define('NV_ERR_NVLINK_FABRIC_FAILURE', 130)
-NV_ERR_GPU_MEMORY_ONLINING_FAILURE = _anonenum21.define('NV_ERR_GPU_MEMORY_ONLINING_FAILURE', 131)
-NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE = _anonenum21.define('NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE', 132)
-NV_WARN_HOT_SWITCH = _anonenum21.define('NV_WARN_HOT_SWITCH', 65537)
-NV_WARN_INCORRECT_PERFMON_DATA = _anonenum21.define('NV_WARN_INCORRECT_PERFMON_DATA', 65538)
-NV_WARN_MISMATCHED_SLAVE = _anonenum21.define('NV_WARN_MISMATCHED_SLAVE', 65539)
-NV_WARN_MISMATCHED_TARGET = _anonenum21.define('NV_WARN_MISMATCHED_TARGET', 65540)
-NV_WARN_MORE_PROCESSING_REQUIRED = _anonenum21.define('NV_WARN_MORE_PROCESSING_REQUIRED', 65541)
-NV_WARN_NOTHING_TO_DO = _anonenum21.define('NV_WARN_NOTHING_TO_DO', 65542)
-NV_WARN_NULL_OBJECT = _anonenum21.define('NV_WARN_NULL_OBJECT', 65543)
-NV_WARN_OUT_OF_RANGE = _anonenum21.define('NV_WARN_OUT_OF_RANGE', 65544)
+nv_status_codes = CEnum(ctypes.c_uint)
+NV_OK = nv_status_codes.define('NV_OK', 0)
+NV_ERR_GENERIC = nv_status_codes.define('NV_ERR_GENERIC', 65535)
+NV_ERR_BROKEN_FB = nv_status_codes.define('NV_ERR_BROKEN_FB', 1)
+NV_ERR_BUFFER_TOO_SMALL = nv_status_codes.define('NV_ERR_BUFFER_TOO_SMALL', 2)
+NV_ERR_BUSY_RETRY = nv_status_codes.define('NV_ERR_BUSY_RETRY', 3)
+NV_ERR_CALLBACK_NOT_SCHEDULED = nv_status_codes.define('NV_ERR_CALLBACK_NOT_SCHEDULED', 4)
+NV_ERR_CARD_NOT_PRESENT = nv_status_codes.define('NV_ERR_CARD_NOT_PRESENT', 5)
+NV_ERR_CYCLE_DETECTED = nv_status_codes.define('NV_ERR_CYCLE_DETECTED', 6)
+NV_ERR_DMA_IN_USE = nv_status_codes.define('NV_ERR_DMA_IN_USE', 7)
+NV_ERR_DMA_MEM_NOT_LOCKED = nv_status_codes.define('NV_ERR_DMA_MEM_NOT_LOCKED', 8)
+NV_ERR_DMA_MEM_NOT_UNLOCKED = nv_status_codes.define('NV_ERR_DMA_MEM_NOT_UNLOCKED', 9)
+NV_ERR_DUAL_LINK_INUSE = nv_status_codes.define('NV_ERR_DUAL_LINK_INUSE', 10)
+NV_ERR_ECC_ERROR = nv_status_codes.define('NV_ERR_ECC_ERROR', 11)
+NV_ERR_FIFO_BAD_ACCESS = nv_status_codes.define('NV_ERR_FIFO_BAD_ACCESS', 12)
+NV_ERR_FREQ_NOT_SUPPORTED = nv_status_codes.define('NV_ERR_FREQ_NOT_SUPPORTED', 13)
+NV_ERR_GPU_DMA_NOT_INITIALIZED = nv_status_codes.define('NV_ERR_GPU_DMA_NOT_INITIALIZED', 14)
+NV_ERR_GPU_IS_LOST = nv_status_codes.define('NV_ERR_GPU_IS_LOST', 15)
+NV_ERR_GPU_IN_FULLCHIP_RESET = nv_status_codes.define('NV_ERR_GPU_IN_FULLCHIP_RESET', 16)
+NV_ERR_GPU_NOT_FULL_POWER = nv_status_codes.define('NV_ERR_GPU_NOT_FULL_POWER', 17)
+NV_ERR_GPU_UUID_NOT_FOUND = nv_status_codes.define('NV_ERR_GPU_UUID_NOT_FOUND', 18)
+NV_ERR_HOT_SWITCH = nv_status_codes.define('NV_ERR_HOT_SWITCH', 19)
+NV_ERR_I2C_ERROR = nv_status_codes.define('NV_ERR_I2C_ERROR', 20)
+NV_ERR_I2C_SPEED_TOO_HIGH = nv_status_codes.define('NV_ERR_I2C_SPEED_TOO_HIGH', 21)
+NV_ERR_ILLEGAL_ACTION = nv_status_codes.define('NV_ERR_ILLEGAL_ACTION', 22)
+NV_ERR_IN_USE = nv_status_codes.define('NV_ERR_IN_USE', 23)
+NV_ERR_INFLATE_COMPRESSED_DATA_FAILED = nv_status_codes.define('NV_ERR_INFLATE_COMPRESSED_DATA_FAILED', 24)
+NV_ERR_INSERT_DUPLICATE_NAME = nv_status_codes.define('NV_ERR_INSERT_DUPLICATE_NAME', 25)
+NV_ERR_INSUFFICIENT_RESOURCES = nv_status_codes.define('NV_ERR_INSUFFICIENT_RESOURCES', 26)
+NV_ERR_INSUFFICIENT_PERMISSIONS = nv_status_codes.define('NV_ERR_INSUFFICIENT_PERMISSIONS', 27)
+NV_ERR_INSUFFICIENT_POWER = nv_status_codes.define('NV_ERR_INSUFFICIENT_POWER', 28)
+NV_ERR_INVALID_ACCESS_TYPE = nv_status_codes.define('NV_ERR_INVALID_ACCESS_TYPE', 29)
+NV_ERR_INVALID_ADDRESS = nv_status_codes.define('NV_ERR_INVALID_ADDRESS', 30)
+NV_ERR_INVALID_ARGUMENT = nv_status_codes.define('NV_ERR_INVALID_ARGUMENT', 31)
+NV_ERR_INVALID_BASE = nv_status_codes.define('NV_ERR_INVALID_BASE', 32)
+NV_ERR_INVALID_CHANNEL = nv_status_codes.define('NV_ERR_INVALID_CHANNEL', 33)
+NV_ERR_INVALID_CLASS = nv_status_codes.define('NV_ERR_INVALID_CLASS', 34)
+NV_ERR_INVALID_CLIENT = nv_status_codes.define('NV_ERR_INVALID_CLIENT', 35)
+NV_ERR_INVALID_COMMAND = nv_status_codes.define('NV_ERR_INVALID_COMMAND', 36)
+NV_ERR_INVALID_DATA = nv_status_codes.define('NV_ERR_INVALID_DATA', 37)
+NV_ERR_INVALID_DEVICE = nv_status_codes.define('NV_ERR_INVALID_DEVICE', 38)
+NV_ERR_INVALID_DMA_SPECIFIER = nv_status_codes.define('NV_ERR_INVALID_DMA_SPECIFIER', 39)
+NV_ERR_INVALID_EVENT = nv_status_codes.define('NV_ERR_INVALID_EVENT', 40)
+NV_ERR_INVALID_FLAGS = nv_status_codes.define('NV_ERR_INVALID_FLAGS', 41)
+NV_ERR_INVALID_FUNCTION = nv_status_codes.define('NV_ERR_INVALID_FUNCTION', 42)
+NV_ERR_INVALID_HEAP = nv_status_codes.define('NV_ERR_INVALID_HEAP', 43)
+NV_ERR_INVALID_INDEX = nv_status_codes.define('NV_ERR_INVALID_INDEX', 44)
+NV_ERR_INVALID_IRQ_LEVEL = nv_status_codes.define('NV_ERR_INVALID_IRQ_LEVEL', 45)
+NV_ERR_INVALID_LIMIT = nv_status_codes.define('NV_ERR_INVALID_LIMIT', 46)
+NV_ERR_INVALID_LOCK_STATE = nv_status_codes.define('NV_ERR_INVALID_LOCK_STATE', 47)
+NV_ERR_INVALID_METHOD = nv_status_codes.define('NV_ERR_INVALID_METHOD', 48)
+NV_ERR_INVALID_OBJECT = nv_status_codes.define('NV_ERR_INVALID_OBJECT', 49)
+NV_ERR_INVALID_OBJECT_BUFFER = nv_status_codes.define('NV_ERR_INVALID_OBJECT_BUFFER', 50)
+NV_ERR_INVALID_OBJECT_HANDLE = nv_status_codes.define('NV_ERR_INVALID_OBJECT_HANDLE', 51)
+NV_ERR_INVALID_OBJECT_NEW = nv_status_codes.define('NV_ERR_INVALID_OBJECT_NEW', 52)
+NV_ERR_INVALID_OBJECT_OLD = nv_status_codes.define('NV_ERR_INVALID_OBJECT_OLD', 53)
+NV_ERR_INVALID_OBJECT_PARENT = nv_status_codes.define('NV_ERR_INVALID_OBJECT_PARENT', 54)
+NV_ERR_INVALID_OFFSET = nv_status_codes.define('NV_ERR_INVALID_OFFSET', 55)
+NV_ERR_INVALID_OPERATION = nv_status_codes.define('NV_ERR_INVALID_OPERATION', 56)
+NV_ERR_INVALID_OWNER = nv_status_codes.define('NV_ERR_INVALID_OWNER', 57)
+NV_ERR_INVALID_PARAM_STRUCT = nv_status_codes.define('NV_ERR_INVALID_PARAM_STRUCT', 58)
+NV_ERR_INVALID_PARAMETER = nv_status_codes.define('NV_ERR_INVALID_PARAMETER', 59)
+NV_ERR_INVALID_PATH = nv_status_codes.define('NV_ERR_INVALID_PATH', 60)
+NV_ERR_INVALID_POINTER = nv_status_codes.define('NV_ERR_INVALID_POINTER', 61)
+NV_ERR_INVALID_REGISTRY_KEY = nv_status_codes.define('NV_ERR_INVALID_REGISTRY_KEY', 62)
+NV_ERR_INVALID_REQUEST = nv_status_codes.define('NV_ERR_INVALID_REQUEST', 63)
+NV_ERR_INVALID_STATE = nv_status_codes.define('NV_ERR_INVALID_STATE', 64)
+NV_ERR_INVALID_STRING_LENGTH = nv_status_codes.define('NV_ERR_INVALID_STRING_LENGTH', 65)
+NV_ERR_INVALID_READ = nv_status_codes.define('NV_ERR_INVALID_READ', 66)
+NV_ERR_INVALID_WRITE = nv_status_codes.define('NV_ERR_INVALID_WRITE', 67)
+NV_ERR_INVALID_XLATE = nv_status_codes.define('NV_ERR_INVALID_XLATE', 68)
+NV_ERR_IRQ_NOT_FIRING = nv_status_codes.define('NV_ERR_IRQ_NOT_FIRING', 69)
+NV_ERR_IRQ_EDGE_TRIGGERED = nv_status_codes.define('NV_ERR_IRQ_EDGE_TRIGGERED', 70)
+NV_ERR_MEMORY_TRAINING_FAILED = nv_status_codes.define('NV_ERR_MEMORY_TRAINING_FAILED', 71)
+NV_ERR_MISMATCHED_SLAVE = nv_status_codes.define('NV_ERR_MISMATCHED_SLAVE', 72)
+NV_ERR_MISMATCHED_TARGET = nv_status_codes.define('NV_ERR_MISMATCHED_TARGET', 73)
+NV_ERR_MISSING_TABLE_ENTRY = nv_status_codes.define('NV_ERR_MISSING_TABLE_ENTRY', 74)
+NV_ERR_MODULE_LOAD_FAILED = nv_status_codes.define('NV_ERR_MODULE_LOAD_FAILED', 75)
+NV_ERR_MORE_DATA_AVAILABLE = nv_status_codes.define('NV_ERR_MORE_DATA_AVAILABLE', 76)
+NV_ERR_MORE_PROCESSING_REQUIRED = nv_status_codes.define('NV_ERR_MORE_PROCESSING_REQUIRED', 77)
+NV_ERR_MULTIPLE_MEMORY_TYPES = nv_status_codes.define('NV_ERR_MULTIPLE_MEMORY_TYPES', 78)
+NV_ERR_NO_FREE_FIFOS = nv_status_codes.define('NV_ERR_NO_FREE_FIFOS', 79)
+NV_ERR_NO_INTR_PENDING = nv_status_codes.define('NV_ERR_NO_INTR_PENDING', 80)
+NV_ERR_NO_MEMORY = nv_status_codes.define('NV_ERR_NO_MEMORY', 81)
+NV_ERR_NO_SUCH_DOMAIN = nv_status_codes.define('NV_ERR_NO_SUCH_DOMAIN', 82)
+NV_ERR_NO_VALID_PATH = nv_status_codes.define('NV_ERR_NO_VALID_PATH', 83)
+NV_ERR_NOT_COMPATIBLE = nv_status_codes.define('NV_ERR_NOT_COMPATIBLE', 84)
+NV_ERR_NOT_READY = nv_status_codes.define('NV_ERR_NOT_READY', 85)
+NV_ERR_NOT_SUPPORTED = nv_status_codes.define('NV_ERR_NOT_SUPPORTED', 86)
+NV_ERR_OBJECT_NOT_FOUND = nv_status_codes.define('NV_ERR_OBJECT_NOT_FOUND', 87)
+NV_ERR_OBJECT_TYPE_MISMATCH = nv_status_codes.define('NV_ERR_OBJECT_TYPE_MISMATCH', 88)
+NV_ERR_OPERATING_SYSTEM = nv_status_codes.define('NV_ERR_OPERATING_SYSTEM', 89)
+NV_ERR_OTHER_DEVICE_FOUND = nv_status_codes.define('NV_ERR_OTHER_DEVICE_FOUND', 90)
+NV_ERR_OUT_OF_RANGE = nv_status_codes.define('NV_ERR_OUT_OF_RANGE', 91)
+NV_ERR_OVERLAPPING_UVM_COMMIT = nv_status_codes.define('NV_ERR_OVERLAPPING_UVM_COMMIT', 92)
+NV_ERR_PAGE_TABLE_NOT_AVAIL = nv_status_codes.define('NV_ERR_PAGE_TABLE_NOT_AVAIL', 93)
+NV_ERR_PID_NOT_FOUND = nv_status_codes.define('NV_ERR_PID_NOT_FOUND', 94)
+NV_ERR_PROTECTION_FAULT = nv_status_codes.define('NV_ERR_PROTECTION_FAULT', 95)
+NV_ERR_RC_ERROR = nv_status_codes.define('NV_ERR_RC_ERROR', 96)
+NV_ERR_REJECTED_VBIOS = nv_status_codes.define('NV_ERR_REJECTED_VBIOS', 97)
+NV_ERR_RESET_REQUIRED = nv_status_codes.define('NV_ERR_RESET_REQUIRED', 98)
+NV_ERR_STATE_IN_USE = nv_status_codes.define('NV_ERR_STATE_IN_USE', 99)
+NV_ERR_SIGNAL_PENDING = nv_status_codes.define('NV_ERR_SIGNAL_PENDING', 100)
+NV_ERR_TIMEOUT = nv_status_codes.define('NV_ERR_TIMEOUT', 101)
+NV_ERR_TIMEOUT_RETRY = nv_status_codes.define('NV_ERR_TIMEOUT_RETRY', 102)
+NV_ERR_TOO_MANY_PRIMARIES = nv_status_codes.define('NV_ERR_TOO_MANY_PRIMARIES', 103)
+NV_ERR_UVM_ADDRESS_IN_USE = nv_status_codes.define('NV_ERR_UVM_ADDRESS_IN_USE', 104)
+NV_ERR_MAX_SESSION_LIMIT_REACHED = nv_status_codes.define('NV_ERR_MAX_SESSION_LIMIT_REACHED', 105)
+NV_ERR_LIB_RM_VERSION_MISMATCH = nv_status_codes.define('NV_ERR_LIB_RM_VERSION_MISMATCH', 106)
+NV_ERR_PRIV_SEC_VIOLATION = nv_status_codes.define('NV_ERR_PRIV_SEC_VIOLATION', 107)
+NV_ERR_GPU_IN_DEBUG_MODE = nv_status_codes.define('NV_ERR_GPU_IN_DEBUG_MODE', 108)
+NV_ERR_FEATURE_NOT_ENABLED = nv_status_codes.define('NV_ERR_FEATURE_NOT_ENABLED', 109)
+NV_ERR_RESOURCE_LOST = nv_status_codes.define('NV_ERR_RESOURCE_LOST', 110)
+NV_ERR_PMU_NOT_READY = nv_status_codes.define('NV_ERR_PMU_NOT_READY', 111)
+NV_ERR_FLCN_ERROR = nv_status_codes.define('NV_ERR_FLCN_ERROR', 112)
+NV_ERR_FATAL_ERROR = nv_status_codes.define('NV_ERR_FATAL_ERROR', 113)
+NV_ERR_MEMORY_ERROR = nv_status_codes.define('NV_ERR_MEMORY_ERROR', 114)
+NV_ERR_INVALID_LICENSE = nv_status_codes.define('NV_ERR_INVALID_LICENSE', 115)
+NV_ERR_NVLINK_INIT_ERROR = nv_status_codes.define('NV_ERR_NVLINK_INIT_ERROR', 116)
+NV_ERR_NVLINK_MINION_ERROR = nv_status_codes.define('NV_ERR_NVLINK_MINION_ERROR', 117)
+NV_ERR_NVLINK_CLOCK_ERROR = nv_status_codes.define('NV_ERR_NVLINK_CLOCK_ERROR', 118)
+NV_ERR_NVLINK_TRAINING_ERROR = nv_status_codes.define('NV_ERR_NVLINK_TRAINING_ERROR', 119)
+NV_ERR_NVLINK_CONFIGURATION_ERROR = nv_status_codes.define('NV_ERR_NVLINK_CONFIGURATION_ERROR', 120)
+NV_ERR_RISCV_ERROR = nv_status_codes.define('NV_ERR_RISCV_ERROR', 121)
+NV_ERR_FABRIC_MANAGER_NOT_PRESENT = nv_status_codes.define('NV_ERR_FABRIC_MANAGER_NOT_PRESENT', 122)
+NV_ERR_ALREADY_SIGNALLED = nv_status_codes.define('NV_ERR_ALREADY_SIGNALLED', 123)
+NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE = nv_status_codes.define('NV_ERR_QUEUE_TASK_SLOT_NOT_AVAILABLE', 124)
+NV_ERR_KEY_ROTATION_IN_PROGRESS = nv_status_codes.define('NV_ERR_KEY_ROTATION_IN_PROGRESS', 125)
+NV_ERR_TEST_ONLY_CODE_NOT_ENABLED = nv_status_codes.define('NV_ERR_TEST_ONLY_CODE_NOT_ENABLED', 126)
+NV_ERR_SECURE_BOOT_FAILED = nv_status_codes.define('NV_ERR_SECURE_BOOT_FAILED', 127)
+NV_ERR_INSUFFICIENT_ZBC_ENTRY = nv_status_codes.define('NV_ERR_INSUFFICIENT_ZBC_ENTRY', 128)
+NV_ERR_NVLINK_FABRIC_NOT_READY = nv_status_codes.define('NV_ERR_NVLINK_FABRIC_NOT_READY', 129)
+NV_ERR_NVLINK_FABRIC_FAILURE = nv_status_codes.define('NV_ERR_NVLINK_FABRIC_FAILURE', 130)
+NV_ERR_GPU_MEMORY_ONLINING_FAILURE = nv_status_codes.define('NV_ERR_GPU_MEMORY_ONLINING_FAILURE', 131)
+NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE = nv_status_codes.define('NV_ERR_REDUCTION_MANAGER_NOT_AVAILABLE', 132)
+NV_WARN_HOT_SWITCH = nv_status_codes.define('NV_WARN_HOT_SWITCH', 65537)
+NV_WARN_INCORRECT_PERFMON_DATA = nv_status_codes.define('NV_WARN_INCORRECT_PERFMON_DATA', 65538)
+NV_WARN_MISMATCHED_SLAVE = nv_status_codes.define('NV_WARN_MISMATCHED_SLAVE', 65539)
+NV_WARN_MISMATCHED_TARGET = nv_status_codes.define('NV_WARN_MISMATCHED_TARGET', 65540)
+NV_WARN_MORE_PROCESSING_REQUIRED = nv_status_codes.define('NV_WARN_MORE_PROCESSING_REQUIRED', 65541)
+NV_WARN_NOTHING_TO_DO = nv_status_codes.define('NV_WARN_NOTHING_TO_DO', 65542)
+NV_WARN_NULL_OBJECT = nv_status_codes.define('NV_WARN_NULL_OBJECT', 65543)
+NV_WARN_OUT_OF_RANGE = nv_status_codes.define('NV_WARN_OUT_OF_RANGE', 65544)
 
 NVC6C0_QMDV02_03_OUTER_PUT = (30, 0)
 NVC6C0_QMDV02_03_OUTER_OVERFLOW = (31, 31)
@@ -15023,21 +15023,242 @@ NV90F1_CTRL_CMD_VASPACE_GET_HOST_RM_MANAGED_SIZE = (0x90f10107)
 NV90F1_CTRL_VASPACE_GET_HOST_RM_MANAGED_SIZE_PARAMS_MESSAGE_ID = (0x7)
 NV90F1_CTRL_CMD_VASPACE_GET_VAS_HEAP_INFO = (0x90f10108)
 NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS_MESSAGE_ID = (0x8)
+NV0000_CTRL_RESERVED = (0x00)
+NV0000_CTRL_SYSTEM = (0x01)
+NV0000_CTRL_GPU = (0x02)
+NV0000_CTRL_GSYNC = (0x03)
+NV0000_CTRL_DIAG = (0x04)
+NV0000_CTRL_EVENT = (0x05)
+NV0000_CTRL_NVD = (0x06)
+NV0000_CTRL_SWINSTR = (0x07)
+NV0000_CTRL_PROC = (0x09)
+NV0000_CTRL_SYNC_GPU_BOOST = (0x0A)
+NV0000_CTRL_GPUACCT = (0x0B)
+NV0000_CTRL_VGPU = (0x0C)
+NV0000_CTRL_CLIENT = (0x0D)
+NV0000_CTRL_OS_WINDOWS = (0x3F)
+NV0000_CTRL_OS_MACOS = (0x3E)
+NV0000_CTRL_OS_UNIX = (0x3D)
+NV0000_CTRL_CMD_NULL = (0x0)
+NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE = (0xd01)
+NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS_MESSAGE_ID = (0x1)
+NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_INVALID = 0x00000000
+NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_SYSMEM = 0x00000001
+NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_VIDMEM = 0x00000002
+NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_REGMEM = 0x00000003
+NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_FABRIC = 0x00000004
+NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO = (0xd02)
+NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_MESSAGE_ID = (0x2)
+NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO_INDEX_INVALID = 0x00000000
+NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO_INDEX_PARENT = 0x00000001
+NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO_INDEX_CLASSID = 0x00000002
+NV0000_CTRL_CMD_CLIENT_GET_ACCESS_RIGHTS = (0xd03)
+NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS_MESSAGE_ID = (0x3)
+NV0000_CTRL_CMD_CLIENT_SET_INHERITED_SHARE_POLICY = (0xd04)
+NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS_MESSAGE_ID = (0x4)
+NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE = (0xd05)
+NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS_MESSAGE_ID = (0x5)
+NV0000_CTRL_CMD_CLIENT_SHARE_OBJECT = (0xd06)
+NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS_MESSAGE_ID = (0x6)
+NV0000_CTRL_CMD_CLIENT_OBJECTS_ARE_DUPLICATES = (0xd07)
+NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS_MESSAGE_ID = (0x7)
+NV0000_CTRL_CMD_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL = (0xd08)
+NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS_MESSAGE_ID = (0x8)
+NV0000_CTRL_CMD_DIAG_GET_LOCK_METER_STATE = (0x480)
+NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS_MESSAGE_ID = (0x80)
+NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_DISABLED = (0x00000000)
+NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_ENABLED = (0x00000001)
+NV0000_CTRL_DIAG_LOCK_METER_MAX_TABLE_ENTRIES = (0x20000)
+NV0000_CTRL_CMD_DIAG_SET_LOCK_METER_STATE = (0x481)
+NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS_MESSAGE_ID = (0x81)
+NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_DISABLE = (0x00000000)
+NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_ENABLE = (0x00000001)
+NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_RESET = (0x00000002)
+NV0000_CTRL_DIAG_LOCK_METER_ENTRY_FILENAME_LENGTH = (0xc)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_SEMA = (0x00000001)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_SEMA_FORCED = (0x00000002)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_SEMA_COND = (0x00000003)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_RELEASE_SEMA = (0x00000004)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_API = (0x00000010)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_RELEASE_API = (0x00000011)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_GPUS = (0x00000020)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_RELEASE_GPUS = (0x00000021)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_DATA = (0x00000100)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_RMCTRL = (0x00001000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_GET = (0x00002000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_SET = (0x00002001)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_GETEX = (0x00002002)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_SETEX = (0x00002003)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_VIDHEAP = (0x00003000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_MAPMEM = (0x00003001)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_UNMAPMEM = (0x00003002)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_MAPMEM_DMA = (0x00003003)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_UNMAPMEM_DMA = (0x00003004)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ALLOC = (0x00004000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ALLOC_MEM = (0x00004001)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_DUP_OBJECT = (0x00004010)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CLIENT = (0x00005000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_DEVICE = (0x00005001)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_SUBDEVICE = (0x00005002)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_SUBDEVICE_DIAG = (0x00005003)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_DISP = (0x00005004)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_DISP_CMN = (0x00005005)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CHANNEL = (0x00005006)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CHANNEL_MPEG = (0x00005007)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CHANNEL_DISP = (0x00005008)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_MEMORY = (0x00005009)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_FBMEM = (0x0000500A)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_OBJECT = (0x0000500B)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_EVENT = (0x0000500C)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_IDLE_CHANNELS = (0x00006000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_BIND_CTXDMA = (0x00007000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ALLOC_CTXDMA = (0x00007001)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_ISR = (0x0000F000)
+NV0000_CTRL_DIAG_LOCK_METER_TAG_DPC = (0x0000F00F)
+NV0000_CTRL_CMD_DIAG_GET_LOCK_METER_ENTRIES = (0x485)
+NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_MAX = (0x40)
+NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS_MESSAGE_ID = (0x85)
+NV0000_CTRL_CMD_DIAG_PROFILE_RPC = (0x488)
+NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS_MESSAGE_ID = (0x88)
+NV0000_CTRL_PROFILE_RPC_CMD_DISABLE = (0x00000000)
+NV0000_CTRL_PROFILE_RPC_CMD_ENABLE = (0x00000001)
+NV0000_CTRL_PROFILE_RPC_CMD_RESET = (0x00000002)
+NV0000_CTRL_CMD_DIAG_DUMP_RPC = (0x489)
+NV0000_CTRL_DIAG_RPC_MAX_ENTRIES = (100)
+NV0000_CTRL_DIAG_DUMP_RPC_PARAMS_MESSAGE_ID = (0x89)
+NV0000_CTRL_CMD_EVENT_SET_NOTIFICATION = (0x501)
+NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS_MESSAGE_ID = (0x1)
+NV0000_CTRL_EVENT_SET_NOTIFICATION_ACTION_DISABLE = (0x00000000)
+NV0000_CTRL_EVENT_SET_NOTIFICATION_ACTION_SINGLE = (0x00000001)
+NV0000_CTRL_EVENT_SET_NOTIFICATION_ACTION_REPEAT = (0x00000002)
+NV0000_CTRL_CMD_GET_SYSTEM_EVENT_STATUS = (0x502)
+NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS_MESSAGE_ID = (0x2)
+NV0000_CTRL_CMD_GPU_GET_ATTACHED_IDS = (0x201)
+NV0000_CTRL_GPU_MAX_ATTACHED_GPUS = 32
+NV0000_CTRL_GPU_INVALID_ID = (0xffffffff)
+NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS_MESSAGE_ID = (0x1)
+NV0000_CTRL_CMD_GPU_GET_ID_INFO = (0x202)
+NV0000_CTRL_GPU_MAX_SZNAME = 128
+NV0000_CTRL_NO_NUMA_NODE = (-1)
+NV0000_CTRL_GPU_GET_ID_INFO_PARAMS_MESSAGE_ID = (0x2)
+NV0000_CTRL_SLI_STATUS_OK = (0x00000000)
+NV0000_CTRL_SLI_STATUS_OS_NOT_SUPPORTED = (0x00000002)
+NV0000_CTRL_SLI_STATUS_GPU_NOT_SUPPORTED = (0x00000040)
+NV0000_CTRL_SLI_STATUS_INVALID_GPU_COUNT = (0x00000001)
+NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2 = (0x205)
+NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS_MESSAGE_ID = (0x5)
+NV0000_CTRL_GPU_ID_INFO_IN_USE_FALSE = (0x00000000)
+NV0000_CTRL_GPU_ID_INFO_IN_USE_TRUE = (0x00000001)
+NV0000_CTRL_GPU_ID_INFO_LINKED_INTO_SLI_DEVICE_FALSE = (0x00000000)
+NV0000_CTRL_GPU_ID_INFO_LINKED_INTO_SLI_DEVICE_TRUE = (0x00000001)
+NV0000_CTRL_GPU_ID_INFO_MOBILE_FALSE = (0x00000000)
+NV0000_CTRL_GPU_ID_INFO_MOBILE_TRUE = (0x00000001)
+NV0000_CTRL_GPU_ID_INFO_BOOT_MASTER_FALSE = (0x00000000)
+NV0000_CTRL_GPU_ID_INFO_BOOT_MASTER_TRUE = (0x00000001)
+NV0000_CTRL_GPU_ID_INFO_SOC_FALSE = (0x00000000)
+NV0000_CTRL_GPU_ID_INFO_SOC_TRUE = (0x00000001)
+NV0000_CTRL_GPU_ID_INFO_ATS_ENABLED_FALSE = (0x00000000)
+NV0000_CTRL_GPU_ID_INFO_ATS_ENABLED_TRUE = (0x00000001)
+NV0000_CTRL_CMD_GPU_GET_INIT_STATUS = (0x203)
+NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS_MESSAGE_ID = (0x3)
+NV0000_CTRL_CMD_GPU_GET_DEVICE_IDS = (0x204)
+NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS_MESSAGE_ID = (0x4)
+NV0000_CTRL_CMD_GPU_GET_PROBED_IDS = (0x214)
+NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS_MESSAGE_ID = (0x14)
+NV0000_CTRL_CMD_GPU_GET_PCI_INFO = (0x21b)
+NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS_MESSAGE_ID = (0x1B)
+NV0000_CTRL_CMD_GPU_ATTACH_IDS = (0x215)
+NV0000_CTRL_GPU_ATTACH_ALL_PROBED_IDS = (0x0000ffff)
+NV0000_CTRL_GPU_ATTACH_IDS_PARAMS_MESSAGE_ID = (0x15)
+NV0000_CTRL_CMD_GPU_DETACH_IDS = (0x216)
+NV0000_CTRL_GPU_DETACH_ALL_ATTACHED_IDS = (0x0000ffff)
+NV0000_CTRL_GPU_DETACH_IDS_PARAMS_MESSAGE_ID = (0x16)
+NV0000_CTRL_CMD_GPU_GET_VIDEO_LINKS = (0x219)
+NV0000_CTRL_GPU_MAX_VIDEO_LINKS = 8
+NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS_MESSAGE_ID = (0x19)
+NV0000_CTRL_CMD_GPU_GET_SVM_SIZE = (0x240)
+NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS_MESSAGE_ID = (0x40)
+NV0000_CTRL_CMD_GPU_GET_UUID_INFO = (0x274)
+NV0000_GPU_MAX_GID_LENGTH = (0x00000100)
+NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS_MESSAGE_ID = (0x74)
+NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_FORMAT_ASCII = (0x00000000)
+NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_FORMAT_BINARY = (0x00000002)
+NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_TYPE_SHA1 = (0x00000000)
+NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_TYPE_SHA256 = (0x00000001)
+NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID = (0x275)
+NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS_MESSAGE_ID = (0x75)
+NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_FORMAT_ASCII = (0x00000000)
+NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_FORMAT_BINARY = (0x00000002)
+NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_TYPE_SHA1 = (0x00000000)
+NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_TYPE_SHA256 = (0x00000001)
+NV0000_CTRL_CMD_GPU_MODIFY_DRAIN_STATE = (0x278)
+NV0000_CTRL_GPU_DRAIN_STATE_DISABLED = (0x00000000)
+NV0000_CTRL_GPU_DRAIN_STATE_ENABLED = (0x00000001)
+NV0000_CTRL_GPU_DRAIN_STATE_FLAG_REMOVE_DEVICE = (0x00000001)
+NV0000_CTRL_GPU_DRAIN_STATE_FLAG_LINK_DISABLE = (0x00000002)
+NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS_MESSAGE_ID = (0x78)
+NV0000_CTRL_CMD_GPU_QUERY_DRAIN_STATE = (0x279)
+NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS_MESSAGE_ID = (0x79)
+NV0000_CTRL_CMD_GPU_DISCOVER = (0x27a)
+NV0000_CTRL_CMD_GPU_GET_MEMOP_ENABLE = (0x27b)
+NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS_MESSAGE_ID = (0x7B)
+NV0000_CTRL_GPU_FLAGS_MEMOP_ENABLE = (0x00000001)
+NV0000_CTRL_CMD_GPU_DISABLE_NVLINK_INIT = (0x281)
+NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS_MESSAGE_ID = (0x81)
+NV0000_CTRL_GPU_LEGACY_CONFIG_MAX_PARAM_DATA = 0x00000175
+NV0000_CTRL_GPU_LEGACY_CONFIG_MAX_PROPERTIES_IN = 6
+NV0000_CTRL_GPU_LEGACY_CONFIG_MAX_PROPERTIES_OUT = 5
+NV0000_CTRL_CMD_GPU_LEGACY_CONFIG = (0x282)
+NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_MESSAGE_ID = (0x82)
+NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_SET = (0x00000001)
+NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_GET_EX = (0x00000002)
+NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_SET_EX = (0x00000003)
+NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_RESERVED = (0x00000004)
+NV0000_CTRL_CMD_IDLE_CHANNELS = (0x283)
+NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS_MESSAGE_ID = (0x83)
+NV0000_CTRL_GPU_IMAGE_TYPE_GSP = (0x00000001)
+NV0000_CTRL_GPU_IMAGE_TYPE_GSP_LOG = (0x00000002)
+NV0000_CTRL_GPU_IMAGE_TYPE_BINDATA_IMAGE = (0x00000003)
+NV0000_CTRL_CMD_PUSH_UCODE_IMAGE = (0x285)
+NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS_MESSAGE_ID = (0x85)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_FULL = (0x00)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_OFF = (0x01)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_MIN = (0x02)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_HALF = (0x03)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_3QUARTER = (0x04)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_LINK_COUNT = (0x05)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_UNSET = (0x00)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_NODE = (0x01)
+NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_GPU = (0x02)
+NV0000_CTRL_CMD_GPU_SET_NVLINK_BW_MODE = (0x286)
+NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS_MESSAGE_ID = (0x86)
+NV0000_CTRL_CMD_GPU_GET_NVLINK_BW_MODE = (0x287)
+NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS_MESSAGE_ID = (0x87)
+NV0000_CTRL_CMD_GPU_GET_ACTIVE_DEVICE_IDS = (0x288)
+NV0000_CTRL_GPU_MAX_ACTIVE_DEVICES = 256
+NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS_MESSAGE_ID = (0x88)
+NV0000_CTRL_CMD_GPU_ASYNC_ATTACH_ID = (0x289)
+NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS_MESSAGE_ID = (0x89)
+NV0000_CTRL_CMD_GPU_WAIT_ATTACH_ID = (0x290)
+NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS_MESSAGE_ID = (0x90)
+NV0000_CTRL_CMD_GPUACCT_SET_ACCOUNTING_STATE = (0xb01)
+NV0000_CTRL_GPU_ACCOUNTING_STATE_ENABLED = (0x00000000)
+NV0000_CTRL_GPU_ACCOUNTING_STATE_DISABLED = (0x00000001)
+NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x1)
+NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_STATE = (0xb02)
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x2)
+NV0000_CTRL_CMD_GPUACCT_GET_PROC_ACCOUNTING_INFO = (0xb03)
+NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_MESSAGE_ID = (0x3)
+NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_PIDS = (0xb04)
+NV0000_GPUACCT_PID_MAX_COUNT = 4000
+NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_MESSAGE_ID = (0x4)
+NV0000_CTRL_CMD_GPUACCT_CLEAR_ACCOUNTING_DATA = (0xb05)
+NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_MESSAGE_ID = (0x5)
 NV0000_CTRL_CMD_GSYNC_GET_ATTACHED_IDS = (0x301)
 NV0000_CTRL_GSYNC_GET_ATTACHED_IDS_PARAMS_MESSAGE_ID = (0x1)
 NV0000_CTRL_GSYNC_INVALID_ID = (0xffffffff)
 NV0000_CTRL_CMD_GSYNC_GET_ID_INFO = (0x302)
 NV0000_CTRL_GSYNC_GET_ID_INFO_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_CMD_VGPU_CREATE_DEVICE = (0xc02)
-NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_CMD_VGPU_GET_INSTANCES = (0xc03)
-NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS_MESSAGE_ID = (0x3)
-NV0000_CTRL_CMD_VGPU_DELETE_DEVICE = (0xc04)
-NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS_MESSAGE_ID = (0x4)
-NV0000_CTRL_CMD_VGPU_VFIO_NOTIFY_RM_STATUS = (0xc05)
-NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS_MESSAGE_ID = (0x5)
-NV0000_CTRL_CMD_GPU_UPDATE_SYSFS_NODE = (0x206)
-NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS_MESSAGE_ID = (0x6)
 NV0000_CTRL_NVD_DUMP_COMPONENT_SYS = (0x400)
 NV0000_CTRL_NVD_DUMP_COMPONENT_NVLOG = (0x800)
 NV0000_CTRL_NVD_DUMP_COMPONENT_RESERVED = (0xB00)
@@ -15113,54 +15334,20 @@ NV0000_CTRL_CMD_NVD_RCERR_RPT_ANY_OWNER_ID = 0xFFFFFFFF
 NV0000_CTRL_CMD_NVD_GET_RCERR_RPT_PARAMS_MESSAGE_ID = (0x7)
 NV0000_CTRL_CMD_NVD_GET_DPC_ISR_TS = (0x608)
 NV0000_CTRL_NVD_GET_DPC_ISR_TS_PARAMS_MESSAGE_ID = (0x8)
-NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE = (0xd01)
-NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS_MESSAGE_ID = (0x1)
-NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_INVALID = 0x00000000
-NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_SYSMEM = 0x00000001
-NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_VIDMEM = 0x00000002
-NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_REGMEM = 0x00000003
-NV0000_CTRL_CMD_CLIENT_GET_ADDR_SPACE_TYPE_FABRIC = 0x00000004
-NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO = (0xd02)
-NV0000_CTRL_CLIENT_GET_HANDLE_INFO_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO_INDEX_INVALID = 0x00000000
-NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO_INDEX_PARENT = 0x00000001
-NV0000_CTRL_CMD_CLIENT_GET_HANDLE_INFO_INDEX_CLASSID = 0x00000002
-NV0000_CTRL_CMD_CLIENT_GET_ACCESS_RIGHTS = (0xd03)
-NV0000_CTRL_CLIENT_GET_ACCESS_RIGHTS_PARAMS_MESSAGE_ID = (0x3)
-NV0000_CTRL_CMD_CLIENT_SET_INHERITED_SHARE_POLICY = (0xd04)
-NV0000_CTRL_CLIENT_SET_INHERITED_SHARE_POLICY_PARAMS_MESSAGE_ID = (0x4)
-NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE = (0xd05)
-NV0000_CTRL_CMD_CLIENT_GET_CHILD_HANDLE_PARAMS_MESSAGE_ID = (0x5)
-NV0000_CTRL_CMD_CLIENT_SHARE_OBJECT = (0xd06)
-NV0000_CTRL_CLIENT_SHARE_OBJECT_PARAMS_MESSAGE_ID = (0x6)
-NV0000_CTRL_CMD_CLIENT_OBJECTS_ARE_DUPLICATES = (0xd07)
-NV0000_CTRL_CLIENT_OBJECTS_ARE_DUPLICATES_PARAMS_MESSAGE_ID = (0x7)
-NV0000_CTRL_CMD_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL = (0xd08)
-NV0000_CTRL_CLIENT_SUBSCRIBE_TO_IMEX_CHANNEL_PARAMS_MESSAGE_ID = (0x8)
-NV0000_CTRL_CMD_EVENT_SET_NOTIFICATION = (0x501)
-NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS_MESSAGE_ID = (0x1)
-NV0000_CTRL_EVENT_SET_NOTIFICATION_ACTION_DISABLE = (0x00000000)
-NV0000_CTRL_EVENT_SET_NOTIFICATION_ACTION_SINGLE = (0x00000001)
-NV0000_CTRL_EVENT_SET_NOTIFICATION_ACTION_REPEAT = (0x00000002)
-NV0000_CTRL_CMD_GET_SYSTEM_EVENT_STATUS = (0x502)
-NV0000_CTRL_GET_SYSTEM_EVENT_STATUS_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_RESERVED = (0x00)
-NV0000_CTRL_SYSTEM = (0x01)
-NV0000_CTRL_GPU = (0x02)
-NV0000_CTRL_GSYNC = (0x03)
-NV0000_CTRL_DIAG = (0x04)
-NV0000_CTRL_EVENT = (0x05)
-NV0000_CTRL_NVD = (0x06)
-NV0000_CTRL_SWINSTR = (0x07)
-NV0000_CTRL_PROC = (0x09)
-NV0000_CTRL_SYNC_GPU_BOOST = (0x0A)
-NV0000_CTRL_GPUACCT = (0x0B)
-NV0000_CTRL_VGPU = (0x0C)
-NV0000_CTRL_CLIENT = (0x0D)
-NV0000_CTRL_OS_WINDOWS = (0x3F)
-NV0000_CTRL_OS_MACOS = (0x3E)
-NV0000_CTRL_OS_UNIX = (0x3D)
-NV0000_CTRL_CMD_NULL = (0x0)
+NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS_MESSAGE_ID = (0x1)
+NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS_MESSAGE_ID = (0x2)
+NV0000_CTRL_CMD_SET_SUB_PROCESS_ID = (0x901)
+NV0000_CTRL_CMD_DISABLE_SUB_PROCESS_USERD_ISOLATION = (0x902)
+NV0000_SYNC_GPU_BOOST_MAX_GROUPS = (0x10)
+NV0000_SYNC_GPU_BOOST_INVALID_GROUP_ID = 0xFFFFFFFF
+NV0000_CTRL_CMD_SYNC_GPU_BOOST_INFO = (0xa01)
+NV0000_SYNC_GPU_BOOST_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV0000_CTRL_CMD_SYNC_GPU_BOOST_GROUP_CREATE = (0xa02)
+NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS_MESSAGE_ID = (0x2)
+NV0000_CTRL_CMD_SYNC_GPU_BOOST_GROUP_DESTROY = (0xa03)
+NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS_MESSAGE_ID = (0x3)
+NV0000_CTRL_CMD_SYNC_GPU_BOOST_GROUP_INFO = (0xa04)
+NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS_MESSAGE_ID = (0x4)
 NV0000_CTRL_CMD_SYSTEM_GET_FEATURES = (0x1f0)
 NV0000_CTRL_SYSTEM_GET_FEATURES_PARAMS_MESSAGE_ID = (0xF0)
 NV0000_CTRL_SYSTEM_GET_FEATURES_SLI_FALSE = (0x00000000)
@@ -15879,19 +16066,6 @@ NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_FRM_DATA_SAMPLE_SIZE = 64
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_FRM_DATA_PARAMS_MESSAGE_ID = (0x44)
 NV0000_CTRL_CMD_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA = (0x145)
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_SET_FRM_DATA_PARAMS_MESSAGE_ID = (0x45)
-NV0000_CTRL_CMD_GPUACCT_SET_ACCOUNTING_STATE = (0xb01)
-NV0000_CTRL_GPU_ACCOUNTING_STATE_ENABLED = (0x00000000)
-NV0000_CTRL_GPU_ACCOUNTING_STATE_DISABLED = (0x00000001)
-NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x1)
-NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_STATE = (0xb02)
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_CMD_GPUACCT_GET_PROC_ACCOUNTING_INFO = (0xb03)
-NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_MESSAGE_ID = (0x3)
-NV0000_CTRL_CMD_GPUACCT_GET_ACCOUNTING_PIDS = (0xb04)
-NV0000_GPUACCT_PID_MAX_COUNT = 4000
-NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_MESSAGE_ID = (0x4)
-NV0000_CTRL_CMD_GPUACCT_CLEAR_ACCOUNTING_DATA = (0xb05)
-NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_MESSAGE_ID = (0x5)
 NV0000_CTRL_CMD_OS_UNIX_FLUSH_USER_CACHE = (0x3d02)
 NV0000_CTRL_OS_UNIX_FLUSH_USER_CACHE_PARAMS_MESSAGE_ID = (0x2)
 NV0000_CTRL_OS_UNIX_FLAGS_USER_CACHE_FLUSH = (0x00000001)
@@ -15923,190 +16097,37 @@ NV0000_CTRL_CMD_OS_UNIX_IMPORT_OBJECT_TYPE_SYSMEM = 2
 NV0000_CTRL_CMD_OS_UNIX_IMPORT_OBJECT_TYPE_FABRIC = 3
 NV0000_CTRL_CMD_OS_UNIX_IMPORT_OBJECT_TYPE_FABRIC_MC = 4
 NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS_MESSAGE_ID = (0xC)
-NV0000_CTRL_CMD_GPU_GET_ATTACHED_IDS = (0x201)
-NV0000_CTRL_GPU_MAX_ATTACHED_GPUS = 32
-NV0000_CTRL_GPU_INVALID_ID = (0xffffffff)
-NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS_MESSAGE_ID = (0x1)
-NV0000_CTRL_CMD_GPU_GET_ID_INFO = (0x202)
-NV0000_CTRL_GPU_MAX_SZNAME = 128
-NV0000_CTRL_NO_NUMA_NODE = (-1)
-NV0000_CTRL_GPU_GET_ID_INFO_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_SLI_STATUS_OK = (0x00000000)
-NV0000_CTRL_SLI_STATUS_OS_NOT_SUPPORTED = (0x00000002)
-NV0000_CTRL_SLI_STATUS_GPU_NOT_SUPPORTED = (0x00000040)
-NV0000_CTRL_SLI_STATUS_INVALID_GPU_COUNT = (0x00000001)
-NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2 = (0x205)
-NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS_MESSAGE_ID = (0x5)
-NV0000_CTRL_GPU_ID_INFO_IN_USE_FALSE = (0x00000000)
-NV0000_CTRL_GPU_ID_INFO_IN_USE_TRUE = (0x00000001)
-NV0000_CTRL_GPU_ID_INFO_LINKED_INTO_SLI_DEVICE_FALSE = (0x00000000)
-NV0000_CTRL_GPU_ID_INFO_LINKED_INTO_SLI_DEVICE_TRUE = (0x00000001)
-NV0000_CTRL_GPU_ID_INFO_MOBILE_FALSE = (0x00000000)
-NV0000_CTRL_GPU_ID_INFO_MOBILE_TRUE = (0x00000001)
-NV0000_CTRL_GPU_ID_INFO_BOOT_MASTER_FALSE = (0x00000000)
-NV0000_CTRL_GPU_ID_INFO_BOOT_MASTER_TRUE = (0x00000001)
-NV0000_CTRL_GPU_ID_INFO_SOC_FALSE = (0x00000000)
-NV0000_CTRL_GPU_ID_INFO_SOC_TRUE = (0x00000001)
-NV0000_CTRL_GPU_ID_INFO_ATS_ENABLED_FALSE = (0x00000000)
-NV0000_CTRL_GPU_ID_INFO_ATS_ENABLED_TRUE = (0x00000001)
-NV0000_CTRL_CMD_GPU_GET_INIT_STATUS = (0x203)
-NV0000_CTRL_GPU_GET_INIT_STATUS_PARAMS_MESSAGE_ID = (0x3)
-NV0000_CTRL_CMD_GPU_GET_DEVICE_IDS = (0x204)
-NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS_MESSAGE_ID = (0x4)
-NV0000_CTRL_CMD_GPU_GET_PROBED_IDS = (0x214)
-NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS_MESSAGE_ID = (0x14)
-NV0000_CTRL_CMD_GPU_GET_PCI_INFO = (0x21b)
-NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS_MESSAGE_ID = (0x1B)
-NV0000_CTRL_CMD_GPU_ATTACH_IDS = (0x215)
-NV0000_CTRL_GPU_ATTACH_ALL_PROBED_IDS = (0x0000ffff)
-NV0000_CTRL_GPU_ATTACH_IDS_PARAMS_MESSAGE_ID = (0x15)
-NV0000_CTRL_CMD_GPU_DETACH_IDS = (0x216)
-NV0000_CTRL_GPU_DETACH_ALL_ATTACHED_IDS = (0x0000ffff)
-NV0000_CTRL_GPU_DETACH_IDS_PARAMS_MESSAGE_ID = (0x16)
-NV0000_CTRL_CMD_GPU_GET_VIDEO_LINKS = (0x219)
-NV0000_CTRL_GPU_MAX_VIDEO_LINKS = 8
-NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS_MESSAGE_ID = (0x19)
-NV0000_CTRL_CMD_GPU_GET_SVM_SIZE = (0x240)
-NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS_MESSAGE_ID = (0x40)
-NV0000_CTRL_CMD_GPU_GET_UUID_INFO = (0x274)
-NV0000_GPU_MAX_GID_LENGTH = (0x00000100)
-NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS_MESSAGE_ID = (0x74)
-NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_FORMAT_ASCII = (0x00000000)
-NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_FORMAT_BINARY = (0x00000002)
-NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_TYPE_SHA1 = (0x00000000)
-NV0000_CTRL_CMD_GPU_GET_UUID_INFO_FLAGS_TYPE_SHA256 = (0x00000001)
-NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID = (0x275)
-NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS_MESSAGE_ID = (0x75)
-NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_FORMAT_ASCII = (0x00000000)
-NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_FORMAT_BINARY = (0x00000002)
-NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_TYPE_SHA1 = (0x00000000)
-NV0000_CTRL_CMD_GPU_GET_UUID_FROM_GPU_ID_FLAGS_TYPE_SHA256 = (0x00000001)
-NV0000_CTRL_CMD_GPU_MODIFY_DRAIN_STATE = (0x278)
-NV0000_CTRL_GPU_DRAIN_STATE_DISABLED = (0x00000000)
-NV0000_CTRL_GPU_DRAIN_STATE_ENABLED = (0x00000001)
-NV0000_CTRL_GPU_DRAIN_STATE_FLAG_REMOVE_DEVICE = (0x00000001)
-NV0000_CTRL_GPU_DRAIN_STATE_FLAG_LINK_DISABLE = (0x00000002)
-NV0000_CTRL_GPU_MODIFY_DRAIN_STATE_PARAMS_MESSAGE_ID = (0x78)
-NV0000_CTRL_CMD_GPU_QUERY_DRAIN_STATE = (0x279)
-NV0000_CTRL_GPU_QUERY_DRAIN_STATE_PARAMS_MESSAGE_ID = (0x79)
-NV0000_CTRL_CMD_GPU_DISCOVER = (0x27a)
-NV0000_CTRL_CMD_GPU_GET_MEMOP_ENABLE = (0x27b)
-NV0000_CTRL_GPU_GET_MEMOP_ENABLE_PARAMS_MESSAGE_ID = (0x7B)
-NV0000_CTRL_GPU_FLAGS_MEMOP_ENABLE = (0x00000001)
-NV0000_CTRL_CMD_GPU_DISABLE_NVLINK_INIT = (0x281)
-NV0000_CTRL_GPU_DISABLE_NVLINK_INIT_PARAMS_MESSAGE_ID = (0x81)
-NV0000_CTRL_GPU_LEGACY_CONFIG_MAX_PARAM_DATA = 0x00000175
-NV0000_CTRL_GPU_LEGACY_CONFIG_MAX_PROPERTIES_IN = 6
-NV0000_CTRL_GPU_LEGACY_CONFIG_MAX_PROPERTIES_OUT = 5
-NV0000_CTRL_CMD_GPU_LEGACY_CONFIG = (0x282)
-NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS_MESSAGE_ID = (0x82)
-NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_SET = (0x00000001)
-NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_GET_EX = (0x00000002)
-NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_SET_EX = (0x00000003)
-NV0000_CTRL_GPU_LEGACY_CONFIG_OP_TYPE_RESERVED = (0x00000004)
-NV0000_CTRL_CMD_IDLE_CHANNELS = (0x283)
-NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS_MESSAGE_ID = (0x83)
-NV0000_CTRL_GPU_IMAGE_TYPE_GSP = (0x00000001)
-NV0000_CTRL_GPU_IMAGE_TYPE_GSP_LOG = (0x00000002)
-NV0000_CTRL_GPU_IMAGE_TYPE_BINDATA_IMAGE = (0x00000003)
-NV0000_CTRL_CMD_PUSH_UCODE_IMAGE = (0x285)
-NV0000_CTRL_GPU_PUSH_UCODE_IMAGE_PARAMS_MESSAGE_ID = (0x85)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_FULL = (0x00)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_OFF = (0x01)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_MIN = (0x02)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_HALF = (0x03)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_3QUARTER = (0x04)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_LINK_COUNT = (0x05)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_UNSET = (0x00)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_NODE = (0x01)
-NV0000_CTRL_CMD_GPU_NVLINK_BW_MODE_SCOPE_PER_GPU = (0x02)
-NV0000_CTRL_CMD_GPU_SET_NVLINK_BW_MODE = (0x286)
-NV0000_CTRL_GPU_SET_NVLINK_BW_MODE_PARAMS_MESSAGE_ID = (0x86)
-NV0000_CTRL_CMD_GPU_GET_NVLINK_BW_MODE = (0x287)
-NV0000_CTRL_GPU_GET_NVLINK_BW_MODE_PARAMS_MESSAGE_ID = (0x87)
-NV0000_CTRL_CMD_GPU_GET_ACTIVE_DEVICE_IDS = (0x288)
-NV0000_CTRL_GPU_MAX_ACTIVE_DEVICES = 256
-NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS_MESSAGE_ID = (0x88)
-NV0000_CTRL_CMD_GPU_ASYNC_ATTACH_ID = (0x289)
-NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS_MESSAGE_ID = (0x89)
-NV0000_CTRL_CMD_GPU_WAIT_ATTACH_ID = (0x290)
-NV0000_CTRL_GPU_WAIT_ATTACH_ID_PARAMS_MESSAGE_ID = (0x90)
-NV0000_CTRL_CMD_DIAG_GET_LOCK_METER_STATE = (0x480)
-NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_PARAMS_MESSAGE_ID = (0x80)
-NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_DISABLED = (0x00000000)
-NV0000_CTRL_DIAG_GET_LOCK_METER_STATE_ENABLED = (0x00000001)
-NV0000_CTRL_DIAG_LOCK_METER_MAX_TABLE_ENTRIES = (0x20000)
-NV0000_CTRL_CMD_DIAG_SET_LOCK_METER_STATE = (0x481)
-NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_PARAMS_MESSAGE_ID = (0x81)
-NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_DISABLE = (0x00000000)
-NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_ENABLE = (0x00000001)
-NV0000_CTRL_DIAG_SET_LOCK_METER_STATE_RESET = (0x00000002)
-NV0000_CTRL_DIAG_LOCK_METER_ENTRY_FILENAME_LENGTH = (0xc)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_SEMA = (0x00000001)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_SEMA_FORCED = (0x00000002)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_SEMA_COND = (0x00000003)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_RELEASE_SEMA = (0x00000004)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_API = (0x00000010)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_RELEASE_API = (0x00000011)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ACQUIRE_GPUS = (0x00000020)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_RELEASE_GPUS = (0x00000021)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_DATA = (0x00000100)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_RMCTRL = (0x00001000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_GET = (0x00002000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_SET = (0x00002001)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_GETEX = (0x00002002)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_CFG_SETEX = (0x00002003)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_VIDHEAP = (0x00003000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_MAPMEM = (0x00003001)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_UNMAPMEM = (0x00003002)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_MAPMEM_DMA = (0x00003003)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_UNMAPMEM_DMA = (0x00003004)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ALLOC = (0x00004000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ALLOC_MEM = (0x00004001)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_DUP_OBJECT = (0x00004010)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CLIENT = (0x00005000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_DEVICE = (0x00005001)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_SUBDEVICE = (0x00005002)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_SUBDEVICE_DIAG = (0x00005003)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_DISP = (0x00005004)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_DISP_CMN = (0x00005005)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CHANNEL = (0x00005006)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CHANNEL_MPEG = (0x00005007)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_CHANNEL_DISP = (0x00005008)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_MEMORY = (0x00005009)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_FBMEM = (0x0000500A)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_OBJECT = (0x0000500B)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_FREE_EVENT = (0x0000500C)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_IDLE_CHANNELS = (0x00006000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_BIND_CTXDMA = (0x00007000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ALLOC_CTXDMA = (0x00007001)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_ISR = (0x0000F000)
-NV0000_CTRL_DIAG_LOCK_METER_TAG_DPC = (0x0000F00F)
-NV0000_CTRL_CMD_DIAG_GET_LOCK_METER_ENTRIES = (0x485)
-NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_MAX = (0x40)
-NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS_MESSAGE_ID = (0x85)
-NV0000_CTRL_CMD_DIAG_PROFILE_RPC = (0x488)
-NV0000_CTRL_DIAG_PROFILE_RPC_PARAMS_MESSAGE_ID = (0x88)
-NV0000_CTRL_PROFILE_RPC_CMD_DISABLE = (0x00000000)
-NV0000_CTRL_PROFILE_RPC_CMD_ENABLE = (0x00000001)
-NV0000_CTRL_PROFILE_RPC_CMD_RESET = (0x00000002)
-NV0000_CTRL_CMD_DIAG_DUMP_RPC = (0x489)
-NV0000_CTRL_DIAG_RPC_MAX_ENTRIES = (100)
-NV0000_CTRL_DIAG_DUMP_RPC_PARAMS_MESSAGE_ID = (0x89)
-NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS_MESSAGE_ID = (0x1)
-NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_CMD_SET_SUB_PROCESS_ID = (0x901)
-NV0000_CTRL_CMD_DISABLE_SUB_PROCESS_USERD_ISOLATION = (0x902)
-NV0000_SYNC_GPU_BOOST_MAX_GROUPS = (0x10)
-NV0000_SYNC_GPU_BOOST_INVALID_GROUP_ID = 0xFFFFFFFF
-NV0000_CTRL_CMD_SYNC_GPU_BOOST_INFO = (0xa01)
-NV0000_SYNC_GPU_BOOST_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV0000_CTRL_CMD_SYNC_GPU_BOOST_GROUP_CREATE = (0xa02)
-NV0000_SYNC_GPU_BOOST_GROUP_CREATE_PARAMS_MESSAGE_ID = (0x2)
-NV0000_CTRL_CMD_SYNC_GPU_BOOST_GROUP_DESTROY = (0xa03)
-NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS_MESSAGE_ID = (0x3)
-NV0000_CTRL_CMD_SYNC_GPU_BOOST_GROUP_INFO = (0xa04)
-NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS_MESSAGE_ID = (0x4)
+NV0000_CTRL_CMD_VGPU_CREATE_DEVICE = (0xc02)
+NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS_MESSAGE_ID = (0x2)
+NV0000_CTRL_CMD_VGPU_GET_INSTANCES = (0xc03)
+NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS_MESSAGE_ID = (0x3)
+NV0000_CTRL_CMD_VGPU_DELETE_DEVICE = (0xc04)
+NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS_MESSAGE_ID = (0x4)
+NV0000_CTRL_CMD_VGPU_VFIO_NOTIFY_RM_STATUS = (0xc05)
+NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS_MESSAGE_ID = (0x5)
+NV0000_CTRL_CMD_GPU_UPDATE_SYSFS_NODE = (0x206)
+NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS_MESSAGE_ID = (0x6)
+NV0080_CTRL_RESERVED = (0x00)
+NV0080_CTRL_BIF = (0x01)
+NV0080_CTRL_GPU = (0x02)
+NV0080_CTRL_CLK = (0x10)
+NV0080_CTRL_GR = (0x11)
+NV0080_CTRL_CIPHER = (0x12)
+NV0080_CTRL_FB = (0x13)
+NV0080_CTRL_HOST = (0x14)
+NV0080_CTRL_VIDEO = (0x15)
+NV0080_CTRL_FIFO = (0x17)
+NV0080_CTRL_DMA = (0x18)
+NV0080_CTRL_PERF = (0x19)
+NV0080_CTRL_PERF_LEGACY_NON_PRIVILEGED = (0x99)
+NV0080_CTRL_MSENC = (0x1B)
+NV0080_CTRL_BSP = (0x1C)
+NV0080_CTRL_RC = (0x1D)
+NV0080_CTRL_OS_UNIX = (0x1E)
+NV0080_CTRL_NVJPG = (0x1F)
+NV0080_CTRL_INTERNAL = (0x20)
+NV0080_CTRL_NVLINK = (0x21)
+NV0080_CTRL_CMD_NULL = (0x800000)
 NV0080_CTRL_CMD_BIF_RESET = (0x800102)
 NV0080_CTRL_BIF_RESET_PARAMS_MESSAGE_ID = (0x2)
 NV0080_CTRL_BIF_RESET_FLAGS_TYPE_SW_RESET = 0x1
@@ -16127,19 +16148,11 @@ NV0080_CTRL_CMD_BIF_ASPM_CYA_UPDATE = (0x800105)
 NV0080_CTRL_BIF_ASPM_CYA_UPDATE_PARAMS_MESSAGE_ID = (0x5)
 NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK = (0x800106)
 NV0080_CTRL_CMD_BIF_GET_PCIE_POWER_CONTROL_MASK_PARAMS_MESSAGE_ID = (0x6)
-NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS_MESSAGE_ID = (0x7)
-NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS_MESSAGE_ID = (0x9)
-NV0080_CTRL_CMD_PERF_CUDA_LIMIT_SET_CONTROL = (0x801909)
-NV0080_CTRL_CMD_OS_UNIX_VT_SWITCH = (0x801e01)
-NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS_MESSAGE_ID = (0x1)
-NV0080_CTRL_OS_UNIX_VT_SWITCH_CMD_SAVE_VT_STATE = (0x00000001)
-NV0080_CTRL_OS_UNIX_VT_SWITCH_CMD_RESTORE_VT_STATE = (0x00000002)
-NV0080_CTRL_OS_UNIX_VT_SWITCH_CMD_CONSOLE_RESTORED = (0x00000003)
-NV0080_CTRL_CMD_OS_UNIX_VT_GET_FB_INFO = (0x801e02)
-NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS_MESSAGE_ID = (0x2)
-NV0080_CTRL_NVJPG_CAPS_TBL_SIZE = 9
-NV0080_CTRL_CMD_NVJPG_GET_CAPS_V2 = (0x801f02)
-NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x2)
+NV0080_CTRL_CMD_BSP_GET_CAPS = (0x801c01)
+NV0080_CTRL_BSP_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
+NV0080_CTRL_BSP_CAPS_TBL_SIZE = 8
+NV0080_CTRL_CMD_BSP_GET_CAPS_V2 = (0x801c02)
+NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2_MESSAGE_ID = (0x2)
 NV0080_CTRL_DMA_PTE_INFO_PARAMS_FLAGS_VALID_FALSE = (0x00000000)
 NV0080_CTRL_DMA_PTE_INFO_PARAMS_FLAGS_VALID_TRUE = (0x00000001)
 NV0080_CTRL_DMA_PTE_INFO_PARAMS_FLAGS_ENCRYPTED_FALSE = (0x00000000)
@@ -16251,11 +16264,83 @@ NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_FLAGS_EXTEND_VASPACE_FALSE = (0x00000000)
 NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_FLAGS_EXTEND_VASPACE_TRUE = (0x00000001)
 NV0080_CTRL_CMD_DMA_UNSET_PAGE_DIRECTORY = (0x801814)
 NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_MESSAGE_ID = (0x14)
-NV0080_CTRL_CMD_MSENC_GET_CAPS = (0x801b01)
-NV0080_CTRL_MSENC_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
-NV0080_CTRL_MSENC_CAPS_TBL_SIZE = 4
-NV0080_CTRL_CMD_MSENC_GET_CAPS_V2 = (0x801b02)
-NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x2)
+NV0080_CTRL_CMD_FB_GET_CAPS = (0x801301)
+NV0080_CTRL_FB_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
+NV0080_CTRL_FB_CAPS_TBL_SIZE = 3
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO = (0x801306)
+NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS_MESSAGE_ID = (0x6)
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_ADDRESS_SPACE_UNKNOWN = 0
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_ADDRESS_SPACE_SYSMEM = 1
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_ADDRESS_SPACE_FBMEM = 2
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_LEGACY = 0
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_1TO1 = 1
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_1TO4 = 2
+NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_RAWMODE = 3
+NV0080_CTRL_CMD_FB_GET_CAPS_V2 = (0x801307)
+NV0080_CTRL_FB_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x7)
+NV0080_CTRL_CMD_FB_SET_DEFAULT_VIDMEM_PHYSICALITY = (0x801308)
+NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS_MESSAGE_ID = (0x8)
+NV0080_CTRL_CMD_FIFO_GET_CAPS = (0x801701)
+NV0080_CTRL_FIFO_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
+NV0080_CTRL_FIFO_CAPS_TBL_SIZE = 2
+NV0080_CTRL_CMD_FIFO_GET_ENGINE_CONTEXT_PROPERTIES = (0x801707)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS = (0x00000000)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_VLD = (0x00000001)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_VIDEO = (0x00000002)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_MPEG = (0x00000003)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_CAPTURE = (0x00000004)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_DISPLAY = (0x00000005)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_ENCRYPTION = (0x00000006)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_POSTPROCESS = (0x00000007)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_ZCULL = (0x00000008)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PM = (0x00000009)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_COMPUTE_PREEMPT = (0x0000000a)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PREEMPT = (0x0000000b)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_SPILL = (0x0000000c)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PAGEPOOL = (0x0000000d)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_BETACB = (0x0000000e)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_RTV = (0x0000000f)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PATCH = (0x00000010)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_BUNDLE_CB = (0x00000011)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PAGEPOOL_GLOBAL = (0x00000012)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_ATTRIBUTE_CB = (0x00000013)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_RTV_CB_GLOBAL = (0x00000014)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_GFXP_POOL = (0x00000015)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_GFXP_CTRL_BLK = (0x00000016)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_FECS_EVENT = (0x00000017)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PRIV_ACCESS_MAP = (0x00000018)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_SETUP = (0x00000019)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_COUNT = (0x0000001a)
+NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS_MESSAGE_ID = (0x7)
+NV0080_CTRL_CMD_FIFO_RUNLIST_GROUP_CHANNELS = (0x801709)
+NV0080_CTRL_FIFO_RUNLIST_GROUP_MAX_CHANNELS = (8)
+NV0080_CTRL_CMD_FIFO_RUNLIST_DIVIDE_TIMESLICE = (0x80170b)
+NV0080_CTRL_FIFO_RUNLIST_MAX_TIMESLICE_DIVISOR = (12)
+NV0080_CTRL_CMD_FIFO_PREEMPT_RUNLIST = (0x80170c)
+NV0080_CTRL_CMD_FIFO_GET_CHANNELLIST = (0x80170d)
+NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS_MESSAGE_ID = (0xD)
+NV0080_CTRL_CMD_FIFO_GET_LATENCY_BUFFER_SIZE = (0x80170e)
+NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0xE)
+NV0080_CTRL_FIFO_GET_CHANNELLIST_INVALID_CHANNEL = (0xffffffff)
+NV0080_CTRL_CMD_FIFO_SET_CHANNEL_PROPERTIES = (0x80170f)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_MESSAGE_ID = (0xF)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_ENGINETIMESLICEINMICROSECONDS = (0x00000000)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PBDMATIMESLICEINMICROSECONDS = (0x00000001)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_ENGINETIMESLICEDISABLE = (0x00000002)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PBDMATIMESLICEDISABLE = (0x00000003)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_INVALIDATE_PDB_TARGET = (0x00000004)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_RESETENGINECONTEXT = (0x00000005)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_NOOP = (0x00000007)
+NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_RESETENGINECONTEXT_NOPREEMPT = (0x00000008)
+NV0080_CTRL_CMD_FIFO_STOP_RUNLIST = (0x801711)
+NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS_MESSAGE_ID = (0x11)
+NV0080_CTRL_CMD_FIFO_START_RUNLIST = (0x801712)
+NV0080_CTRL_FIFO_START_RUNLIST_PARAMS_MESSAGE_ID = (0x12)
+NV0080_CTRL_CMD_FIFO_GET_CAPS_V2 = (0x801713)
+NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x13)
+NV0080_CTRL_CMD_FIFO_IDLE_CHANNELS = (0x801714)
+NV0080_CTRL_CMD_FIFO_IDLE_CHANNELS_MAX_CHANNELS = 4096
+NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS_MESSAGE_ID = (0x14)
 NV0080_CTRL_CMD_GPU_GET_CLASSLIST = (0x800201)
 NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS_MESSAGE_ID = (0x1)
 NV0080_CTRL_CMD_GPU_GET_NUM_SUBDEVICES = (0x800280)
@@ -16334,98 +16419,6 @@ NV0080_CTRL_CMD_GPU_SET_VGPU_HETEROGENEOUS_MODE = (0x800297)
 NV0080_CTRL_GPU_SET_VGPU_HETEROGENEOUS_MODE_PARAMS_MESSAGE_ID = (0x97)
 NV0080_CTRL_CMD_GPU_GET_VGPU_HETEROGENEOUS_MODE = (0x800298)
 NV0080_CTRL_GPU_GET_VGPU_HETEROGENEOUS_MODE_PARAMS_MESSAGE_ID = (0x98)
-NV0080_CTRL_CMD_HOST_GET_CAPS = (0x801401)
-NV0080_CTRL_HOST_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
-NV0080_CTRL_HOST_CAPS_TBL_SIZE = 3
-NV0080_CTRL_CMD_HOST_GET_CAPS_V2 = (0x801402)
-NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x2)
-NV0080_CTRL_CMD_FIFO_GET_CAPS = (0x801701)
-NV0080_CTRL_FIFO_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
-NV0080_CTRL_FIFO_CAPS_TBL_SIZE = 2
-NV0080_CTRL_CMD_FIFO_GET_ENGINE_CONTEXT_PROPERTIES = (0x801707)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS = (0x00000000)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_VLD = (0x00000001)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_VIDEO = (0x00000002)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_MPEG = (0x00000003)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_CAPTURE = (0x00000004)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_DISPLAY = (0x00000005)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_ENCRYPTION = (0x00000006)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_POSTPROCESS = (0x00000007)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_ZCULL = (0x00000008)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PM = (0x00000009)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_COMPUTE_PREEMPT = (0x0000000a)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PREEMPT = (0x0000000b)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_SPILL = (0x0000000c)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PAGEPOOL = (0x0000000d)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_BETACB = (0x0000000e)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_RTV = (0x0000000f)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PATCH = (0x00000010)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_BUNDLE_CB = (0x00000011)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PAGEPOOL_GLOBAL = (0x00000012)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_ATTRIBUTE_CB = (0x00000013)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_RTV_CB_GLOBAL = (0x00000014)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_GFXP_POOL = (0x00000015)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_GFXP_CTRL_BLK = (0x00000016)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_FECS_EVENT = (0x00000017)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_PRIV_ACCESS_MAP = (0x00000018)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_GRAPHICS_SETUP = (0x00000019)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_COUNT = (0x0000001a)
-NV0080_CTRL_FIFO_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS_MESSAGE_ID = (0x7)
-NV0080_CTRL_CMD_FIFO_RUNLIST_GROUP_CHANNELS = (0x801709)
-NV0080_CTRL_FIFO_RUNLIST_GROUP_MAX_CHANNELS = (8)
-NV0080_CTRL_CMD_FIFO_RUNLIST_DIVIDE_TIMESLICE = (0x80170b)
-NV0080_CTRL_FIFO_RUNLIST_MAX_TIMESLICE_DIVISOR = (12)
-NV0080_CTRL_CMD_FIFO_PREEMPT_RUNLIST = (0x80170c)
-NV0080_CTRL_CMD_FIFO_GET_CHANNELLIST = (0x80170d)
-NV0080_CTRL_FIFO_GET_CHANNELLIST_PARAMS_MESSAGE_ID = (0xD)
-NV0080_CTRL_CMD_FIFO_GET_LATENCY_BUFFER_SIZE = (0x80170e)
-NV0080_CTRL_FIFO_GET_LATENCY_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0xE)
-NV0080_CTRL_FIFO_GET_CHANNELLIST_INVALID_CHANNEL = (0xffffffff)
-NV0080_CTRL_CMD_FIFO_SET_CHANNEL_PROPERTIES = (0x80170f)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_MESSAGE_ID = (0xF)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_ENGINETIMESLICEINMICROSECONDS = (0x00000000)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PBDMATIMESLICEINMICROSECONDS = (0x00000001)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_ENGINETIMESLICEDISABLE = (0x00000002)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PBDMATIMESLICEDISABLE = (0x00000003)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_INVALIDATE_PDB_TARGET = (0x00000004)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_RESETENGINECONTEXT = (0x00000005)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_NOOP = (0x00000007)
-NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_RESETENGINECONTEXT_NOPREEMPT = (0x00000008)
-NV0080_CTRL_CMD_FIFO_STOP_RUNLIST = (0x801711)
-NV0080_CTRL_FIFO_STOP_RUNLIST_PARAMS_MESSAGE_ID = (0x11)
-NV0080_CTRL_CMD_FIFO_START_RUNLIST = (0x801712)
-NV0080_CTRL_FIFO_START_RUNLIST_PARAMS_MESSAGE_ID = (0x12)
-NV0080_CTRL_CMD_FIFO_GET_CAPS_V2 = (0x801713)
-NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x13)
-NV0080_CTRL_CMD_FIFO_IDLE_CHANNELS = (0x801714)
-NV0080_CTRL_CMD_FIFO_IDLE_CHANNELS_MAX_CHANNELS = 4096
-NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS_MESSAGE_ID = (0x14)
-NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE = (0x802002)
-NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS_MESSAGE_ID = (0x2)
-NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE = (0x802003)
-NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS_MESSAGE_ID = (0x3)
-NV0080_CTRL_CMD_INTERNAL_PERF_CUDA_LIMIT_SET_CONTROL = (0x802009)
-NV0080_CTRL_CMD_INTERNAL_PERF_CUDA_LIMIT_DISABLE = (0x802004)
-NV0080_CTRL_CMD_INTERNAL_PERF_SLI_GPU_BOOST_SYNC_SET_CONTROL = (0x802007)
-NV0080_CTRL_CMD_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS = (0x802008)
-NV_FIFO_PERMANENTLY_DISABLE_CHANNELS_MAX_CLIENTS = 200
-NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS_MESSAGE_ID = (0x08)
-NV0080_CTRL_CMD_FB_GET_CAPS = (0x801301)
-NV0080_CTRL_FB_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
-NV0080_CTRL_FB_CAPS_TBL_SIZE = 3
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO = (0x801306)
-NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS_MESSAGE_ID = (0x6)
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_ADDRESS_SPACE_UNKNOWN = 0
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_ADDRESS_SPACE_SYSMEM = 1
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_ADDRESS_SPACE_FBMEM = 2
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_LEGACY = 0
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_1TO1 = 1
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_1TO4 = 2
-NV0080_CTRL_CMD_FB_GET_COMPBIT_STORE_INFO_POLICY_RAWMODE = 3
-NV0080_CTRL_CMD_FB_GET_CAPS_V2 = (0x801307)
-NV0080_CTRL_FB_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x7)
-NV0080_CTRL_CMD_FB_SET_DEFAULT_VIDMEM_PHYSICALITY = (0x801308)
-NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS_MESSAGE_ID = (0x8)
 NV0080_CTRL_CMD_GR_GET_CAPS = (0x801102)
 NV0080_CTRL_GR_GET_CAPS_PARAMS_MESSAGE_ID = (0x2)
 NV0080_CTRL_GR_CAPS_TBL_SIZE = 23
@@ -16497,46 +16490,1105 @@ NV0080_CTRL_CMD_GR_GET_CAPS_V2 = (0x801109)
 NV0080_CTRL_GR_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x9)
 NV0080_CTRL_CMD_GR_GET_INFO_V2 = (0x801110)
 NV0080_CTRL_GR_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x10)
-NV0080_CTRL_CMD_BSP_GET_CAPS = (0x801c01)
-NV0080_CTRL_BSP_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
-NV0080_CTRL_BSP_CAPS_TBL_SIZE = 8
-NV0080_CTRL_CMD_BSP_GET_CAPS_V2 = (0x801c02)
-NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2_MESSAGE_ID = (0x2)
-NV0080_CTRL_RESERVED = (0x00)
-NV0080_CTRL_BIF = (0x01)
-NV0080_CTRL_GPU = (0x02)
-NV0080_CTRL_CLK = (0x10)
-NV0080_CTRL_GR = (0x11)
-NV0080_CTRL_CIPHER = (0x12)
-NV0080_CTRL_FB = (0x13)
-NV0080_CTRL_HOST = (0x14)
-NV0080_CTRL_VIDEO = (0x15)
-NV0080_CTRL_FIFO = (0x17)
-NV0080_CTRL_DMA = (0x18)
-NV0080_CTRL_PERF = (0x19)
-NV0080_CTRL_PERF_LEGACY_NON_PRIVILEGED = (0x99)
-NV0080_CTRL_MSENC = (0x1B)
-NV0080_CTRL_BSP = (0x1C)
-NV0080_CTRL_RC = (0x1D)
-NV0080_CTRL_OS_UNIX = (0x1E)
-NV0080_CTRL_NVJPG = (0x1F)
-NV0080_CTRL_INTERNAL = (0x20)
-NV0080_CTRL_NVLINK = (0x21)
-NV0080_CTRL_CMD_NULL = (0x800000)
-NV2080_CTRL_CMD_GSP_GET_FEATURES = (0x20803601)
-NV2080_GSP_MAX_BUILD_VERSION_LENGTH = (0x0000040)
-NV2080_CTRL_GSP_GET_FEATURES_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_GSP_GET_FEATURES_UVM_ENABLED_FALSE = (0x00000000)
-NV2080_CTRL_GSP_GET_FEATURES_UVM_ENABLED_TRUE = (0x00000001)
-NV2080_CTRL_GSP_GET_FEATURES_VGPU_GSP_MIG_REFACTORING_ENABLED_FALSE = (0x00000000)
-NV2080_CTRL_GSP_GET_FEATURES_VGPU_GSP_MIG_REFACTORING_ENABLED_TRUE = (0x00000001)
-NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS = (0x20803602)
-NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS = (0x20803603)
-NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS = (0x20803604)
-NV2080_CTRL_GSP_LIBOS_POOL_COUNT_MAX = 64
-NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_MESSAGE_ID = (0x4)
+NV0080_CTRL_CMD_HOST_GET_CAPS = (0x801401)
+NV0080_CTRL_HOST_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
+NV0080_CTRL_HOST_CAPS_TBL_SIZE = 3
+NV0080_CTRL_CMD_HOST_GET_CAPS_V2 = (0x801402)
+NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x2)
+NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE = (0x802002)
+NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS_MESSAGE_ID = (0x2)
+NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE = (0x802003)
+NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS_MESSAGE_ID = (0x3)
+NV0080_CTRL_CMD_INTERNAL_PERF_CUDA_LIMIT_SET_CONTROL = (0x802009)
+NV0080_CTRL_CMD_INTERNAL_PERF_CUDA_LIMIT_DISABLE = (0x802004)
+NV0080_CTRL_CMD_INTERNAL_PERF_SLI_GPU_BOOST_SYNC_SET_CONTROL = (0x802007)
+NV0080_CTRL_CMD_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS = (0x802008)
+NV_FIFO_PERMANENTLY_DISABLE_CHANNELS_MAX_CLIENTS = 200
+NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS_MESSAGE_ID = (0x08)
+NV0080_CTRL_CMD_MSENC_GET_CAPS = (0x801b01)
+NV0080_CTRL_MSENC_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
+NV0080_CTRL_MSENC_CAPS_TBL_SIZE = 4
+NV0080_CTRL_CMD_MSENC_GET_CAPS_V2 = (0x801b02)
+NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x2)
+NV0080_CTRL_NVJPG_CAPS_TBL_SIZE = 9
+NV0080_CTRL_CMD_NVJPG_GET_CAPS_V2 = (0x801f02)
+NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x2)
+NV0080_CTRL_PERF_SLI_GPU_BOOST_SYNC_CONTROL_PARAMS_MESSAGE_ID = (0x7)
+NV0080_CTRL_PERF_CUDA_LIMIT_CONTROL_PARAMS_MESSAGE_ID = (0x9)
+NV0080_CTRL_CMD_PERF_CUDA_LIMIT_SET_CONTROL = (0x801909)
+NV0080_CTRL_CMD_OS_UNIX_VT_SWITCH = (0x801e01)
+NV0080_CTRL_OS_UNIX_VT_SWITCH_PARAMS_MESSAGE_ID = (0x1)
+NV0080_CTRL_OS_UNIX_VT_SWITCH_CMD_SAVE_VT_STATE = (0x00000001)
+NV0080_CTRL_OS_UNIX_VT_SWITCH_CMD_RESTORE_VT_STATE = (0x00000002)
+NV0080_CTRL_OS_UNIX_VT_SWITCH_CMD_CONSOLE_RESTORED = (0x00000003)
+NV0080_CTRL_CMD_OS_UNIX_VT_GET_FB_INFO = (0x801e02)
+NV0080_CTRL_OS_UNIX_VT_GET_FB_INFO_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_RESERVED = (0x00)
+NV2080_CTRL_GPU = (0x01)
+NV2080_CTRL_GPU_LEGACY_NON_PRIVILEGED = (0x81)
+NV2080_CTRL_FUSE = (0x02)
+NV2080_CTRL_FUSE_LEGACY_NON_PRIVILEGED = (0x82)
+NV2080_CTRL_EVENT = (0x03)
+NV2080_CTRL_TIMER = (0x04)
+NV2080_CTRL_THERMAL = (0x05)
+NV2080_CTRL_THERMAL_LEGACY_PRIVILEGED = (0xc5)
+NV2080_CTRL_THERMAL_LEGACY_NON_PRIVILEGED = (0x85)
+NV2080_CTRL_I2C = (0x06)
+NV2080_CTRL_EXTI2C = (0x07)
+NV2080_CTRL_BIOS = (0x08)
+NV2080_CTRL_CIPHER = (0x09)
+NV2080_CTRL_INTERNAL = (0x0A)
+NV2080_CTRL_CLK_LEGACY_PRIVILEGED = (0xd0)
+NV2080_CTRL_CLK_LEGACY_NON_PRIVILEGED = (0x90)
+NV2080_CTRL_CLK = (0x10)
+NV2080_CTRL_FIFO = (0x11)
+NV2080_CTRL_GR = (0x12)
+NV2080_CTRL_FB = (0x13)
+NV2080_CTRL_MC = (0x17)
+NV2080_CTRL_BUS = (0x18)
+NV2080_CTRL_PERF_LEGACY_PRIVILEGED = (0xe0)
+NV2080_CTRL_PERF_LEGACY_NON_PRIVILEGED = (0xa0)
+NV2080_CTRL_PERF = (0x20)
+NV2080_CTRL_NVIF = (0x21)
+NV2080_CTRL_RC = (0x22)
+NV2080_CTRL_GPIO = (0x23)
+NV2080_CTRL_GPIO_LEGACY_NON_PRIVILEGED = (0xa3)
+NV2080_CTRL_NVD = (0x24)
+NV2080_CTRL_DMA = (0x25)
+NV2080_CTRL_PMGR = (0x26)
+NV2080_CTRL_PMGR_LEGACY_PRIVILEGED = (0xe6)
+NV2080_CTRL_PMGR_LEGACY_NON_PRIVILEGED = (0xa6)
+NV2080_CTRL_POWER = (0x27)
+NV2080_CTRL_POWER_LEGACY_NON_PRIVILEGED = (0xa7)
+NV2080_CTRL_LPWR = (0x28)
+NV2080_CTRL_LPWR_LEGACY_NON_PRIVILEGED = (0xa8)
+NV2080_CTRL_LPWR_LEGACY_PRIVILEGED = (0xe8)
+NV2080_CTRL_ACR = (0x29)
+NV2080_CTRL_CE = (0x2A)
+NV2080_CTRL_SPI = (0x2B)
+NV2080_CTRL_NVLINK = (0x30)
+NV2080_CTRL_FLCN = (0x31)
+NV2080_CTRL_VOLT = (0x32)
+NV2080_CTRL_VOLT_LEGACY_PRIVILEGED = (0xf2)
+NV2080_CTRL_VOLT_LEGACY_NON_PRIVILEGED = (0xb2)
+NV2080_CTRL_FAS = (0x33)
+NV2080_CTRL_ECC = (0x34)
+NV2080_CTRL_ECC_NON_PRIVILEGED = (0xb4)
+NV2080_CTRL_FLA = (0x35)
+NV2080_CTRL_GSP = (0x36)
+NV2080_CTRL_NNE = (0x37)
+NV2080_CTRL_NNE_LEGACY_NON_PRIVILEGED = (0xb7)
+NV2080_CTRL_GRMGR = (0x38)
+NV2080_CTRL_UCODE_FUZZER = (0x39)
+NV2080_CTRL_DMABUF = (0x3A)
+NV2080_CTRL_BIF = (0x3B)
+NV2080_CTRL_OS_WINDOWS = (0x3F)
+NV2080_CTRL_OS_MACOS = (0x3E)
+NV2080_CTRL_OS_UNIX = (0x3D)
+NV2080_CTRL_CMD_NULL = (0x20800000)
+NV2080_CTRL_BIOS_INFO_MAX_SIZE = (0x0000000F)
+NV2080_CTRL_BIOS_INFO_INDEX_REVISION = (0x00000000)
+NV2080_CTRL_BIOS_INFO_INDEX_OEM_REVISION = (0x00000001)
+NV2080_CTRL_CMD_BIOS_GET_INFO = (0x20800802)
+NV2080_CTRL_CMD_BIOS_GET_INFO_V2 = (0x20800810)
+NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x10)
+NV2080_CTRL_BIOS_NBSI_MAX_REG_STRING_LENGTH = (0x00000100)
+NV2080_CTRL_BIOS_NBSI_STRING_TYPE_ASCII = (0x00000000)
+NV2080_CTRL_BIOS_NBSI_STRING_TYPE_UNICODE = (0x00000001)
+NV2080_CTRL_BIOS_NBSI_STRING_TYPE_HASH = (0x00000002)
+NV2080_CTRL_BIOS_NBSI_MODULE_ROOT = (0x00000000)
+NV2080_CTRL_BIOS_NBSI_MODULE_RM = (0x00000001)
+NV2080_CTRL_BIOS_NBSI_MODULE_DISPLAYDRIVER = (0x00000002)
+NV2080_CTRL_BIOS_NBSI_MODULE_VIDEO = (0x00000003)
+NV2080_CTRL_BIOS_NBSI_MODULE_CPL = (0x00000004)
+NV2080_CTRL_BIOS_NBSI_MODULE_D3D = (0x00000005)
+NV2080_CTRL_BIOS_NBSI_MODULE_OGL = (0x00000006)
+NV2080_CTRL_BIOS_NBSI_MODULE_PMU = (0x00000007)
+NV2080_CTRL_BIOS_NBSI_MODULE_MODE = (0x00000008)
+NV2080_CTRL_BIOS_NBSI_NUM_MODULES = (0x00000009)
+NV2080_CTRL_BIOS_NBSI_MODULE_UNKNOWN = (0x80000000)
+NV2080_CTRL_BIOS_GET_NBSI_SUCCESS = (0x00000000)
+NV2080_CTRL_BIOS_GET_NBSI_OVERRIDE = (0x00000001)
+NV2080_CTRL_BIOS_GET_NBSI_BAD_HASH = (0xFFFFFFFA)
+NV2080_CTRL_BIOS_GET_NBSI_APITEST_SUCCESS = (0xFFFFFFFB)
+NV2080_CTRL_BIOS_GET_NBSI_BAD_TABLE = (0xFFFFFFFC)
+NV2080_CTRL_BIOS_GET_NBSI_NO_TABLE = (0xFFFFFFFD)
+NV2080_CTRL_BIOS_GET_NBSI_INCOMPLETE = (0xFFFFFFFE)
+NV2080_CTRL_BIOS_GET_NBSI_NOT_FOUND = (0xFFFFFFFF)
+NV2080_CTRL_CMD_BIOS_GET_NBSI = (0x20800803)
+NV2080_CTRL_BIOS_GET_NBSI_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_BIOS_GET_NBSI_V2 = (0x2080080e)
+NV2080_BIOS_GET_NBSI_MAX_RET_SIZE = (0x100)
+NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS_MESSAGE_ID = (0xE)
+NV2080_CTRL_CMD_BIOS_GET_NBSI_OBJ = (0x20800806)
+NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS_MESSAGE_ID = (0x6)
+GLOB_TYPE_GET_NBSI_DIR = 0xfffe
+GLOB_TYPE_APITEST = 0xffff
+GLOB_TYPE_GET_NBSI_ACPI_RAW = 0xfffd
+NV2080_CTRL_CMD_BIOS_GET_SKU_INFO = (0x20800808)
+NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS_MESSAGE_ID = (0x8)
+NV2080_CTRL_CMD_BIOS_GET_POST_TIME = (0x20800809)
+NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_BIOS_GET_UEFI_SUPPORT = (0x2080080b)
+NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS_MESSAGE_ID = (0xB)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_NO = (0x00000000)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_YES = (0x00000001)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_PLACEHOLDER = (0x00000002)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_HIDDEN = (0x00000003)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_RUNNING_FALSE = (0x00000000)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_RUNNING_TRUE = (0x00000001)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_IS_EFI_INIT_FALSE = (0x00000000)
+NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_IS_EFI_INIT_TRUE = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCI_INFO = (0x20801801)
+NV2080_CTRL_BUS_GET_PCI_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_BUS_INFO_INDEX_TYPE = (0x00000000)
+NV2080_CTRL_BUS_INFO_INDEX_INTLINE = (0x00000001)
+NV2080_CTRL_BUS_INFO_INDEX_CAPS = (0x00000002)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CAPS = (0x00000003)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_ROOT_LINK_CAPS = (0x00000004)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_UPSTREAM_LINK_CAPS = (0x00000005)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_DOWNSTREAM_LINK_CAPS = (0x00000006)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CTRL_STATUS = (0x00000007)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_ROOT_LINK_CTRL_STATUS = (0x00000008)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_UPSTREAM_LINK_CTRL_STATUS = (0x00000009)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_DOWNSTREAM_LINK_CTRL_STATUS = (0x0000000A)
+NV2080_CTRL_BUS_INFO_INDEX_COHERENT_DMA_FLAGS = (0x0000000B)
+NV2080_CTRL_BUS_INFO_INDEX_NONCOHERENT_DMA_FLAGS = (0x0000000C)
+NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_SIZE = (0x0000000D)
+NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_FLAGS = (0x0000000E)
+NV2080_CTRL_BUS_INFO_INDEX_BUS_NUMBER = (0x0000000F)
+NV2080_CTRL_BUS_INFO_INDEX_DEVICE_NUMBER = (0x00000010)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_ERRORS = (0x00000011)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_ROOT_LINK_ERRORS = (0x00000012)
+NV2080_CTRL_BUS_INFO_INDEX_INTERFACE_TYPE = (0x00000013)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GEN2_INFO = (0x00000014)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_AER = (0x00000015)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_BOARD_LINK_CAPS = (0x00000016)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_BOARD_LINK_CTRL_STATUS = (0x00000017)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_ASLM_STATUS = (0x00000018)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_LINK_WIDTH_SWITCH_ERROR_COUNT = (0x00000019)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_LINK_SPEED_SWITCH_ERROR_COUNT = (0x0000001A)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_CYA_ASPM = (0x0000001B)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_LINECODE_ERRORS = (0x0000001C)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CRC_ERRORS = (0x0000001D)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NAKS_RECEIVED = (0x0000001E)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FAILED_L0S_EXITS = (0x0000001F)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_LINECODE_ERRORS_CLEAR = (0x00000020)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CRC_ERRORS_CLEAR = (0x00000021)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NAKS_RECEIVED_CLEAR = (0x00000022)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FAILED_L0S_EXITS_CLEAR = (0x00000023)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CORRECTABLE_ERRORS = (0x00000024)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NONFATAL_ERRORS = (0x00000025)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FATAL_ERRORS = (0x00000026)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_UNSUPPORTED_REQUESTS = (0x00000027)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CORRECTABLE_ERRORS_CLEAR = (0x00000028)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NONFATAL_ERRORS_CLEAR = (0x00000029)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FATAL_ERRORS_CLEAR = (0x0000002A)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_UNSUPPORTED_REQUESTS_CLEAR = (0x0000002B)
+NV2080_CTRL_BUS_INFO_INDEX_DOMAIN_NUMBER = (0x0000002C)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_GEN_INFO = (0x0000002D)
+NV2080_CTRL_BUS_INFO_INDEX_GPU_INTERFACE_TYPE = (0x0000002E)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_UPSTREAM_GEN_INFO = (0x0000002F)
+NV2080_CTRL_BUS_INFO_INDEX_PCIE_BOARD_GEN_INFO = (0x00000030)
+NV2080_CTRL_BUS_INFO_INDEX_MSI_INFO = (0x00000031)
+NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_SIZE_HI = (0x00000032)
+NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE = (0x00000033)
+NV2080_CTRL_BUS_INFO_INDEX_MAX = NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE
+NV2080_CTRL_BUS_INFO_MAX_LIST_SIZE = (0x00000034)
+NV2080_CTRL_BUS_INFO_TYPE_PCI = (0x00000001)
+NV2080_CTRL_BUS_INFO_TYPE_PCI_EXPRESS = (0x00000003)
+NV2080_CTRL_BUS_INFO_TYPE_FPCI = (0x00000004)
+NV2080_CTRL_BUS_INFO_TYPE_AXI = (0x00000008)
+NV2080_CTRL_BUS_INFO_CAPS_NEED_IO_FLUSH = (0x00000001)
+NV2080_CTRL_BUS_INFO_CAPS_CHIP_INTEGRATED = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_2500MBPS = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_5000MBPS = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_8000MBPS = (0x00000003)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_16000MBPS = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_32000MBPS = (0x00000005)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_64000MBPS = (0x00000006)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_ASPM_NONE = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_ASPM_L0S = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_ASPM_L0S_L1 = (0x00000003)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN1 = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN2 = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN3 = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN4 = (0x00000003)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN5 = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN6 = (0x00000005)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN1 = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN2 = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN3 = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN4 = (0x00000003)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN5 = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN6 = (0x00000005)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN1 = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN2 = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN3 = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN4 = (0x00000003)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN5 = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN6 = (0x00000005)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_SPEED_CHANGES_ENABLED = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_SPEED_CHANGES_DISABLED = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_DISABLED = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_L0S = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_L1 = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_L0S_L1 = (0x00000003)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_2500MBPS = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_5000MBPS = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_8000MBPS = (0x00000003)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_16000MBPS = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_32000MBPS = (0x00000005)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_64000MBPS = (0x00000006)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_UNDEFINED = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X1 = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X2 = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X4 = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X8 = (0x00000008)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X12 = (0x0000000C)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X16 = (0x00000010)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X32 = (0x00000020)
+NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_CTXDMA_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_CTXDMA_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_GPUGART_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_GPUGART_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_CTXDMA_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_CTXDMA_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_GPUGART_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_GPUGART_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_COH_MODE_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_COH_MODE_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_REQFLUSH_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_REQFLUSH_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_UNIFIED_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_UNIFIED_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_CORR_ERROR = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_NON_FATAL_ERROR = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_FATAL_ERROR = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_UNSUPP_REQUEST = (0x00000008)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_ENTERED_RECOVERY = (0x00000010)
+NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CAP_FALSE = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CAP_TRUE = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CURR_LEVEL_GEN1 = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CURR_LEVEL_GEN2 = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_TRAINING_ERR = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_DLINK_PROTO_ERR = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_POISONED_TLP = (0x00000004)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_FC_PROTO_ERR = (0x00000008)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_CPL_TIMEOUT = (0x00000010)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_CPL_ABORT = (0x00000020)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_UNEXP_CPL = (0x00000040)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_RCVR_OVERFLOW = (0x00000080)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_MALFORMED_TLP = (0x00000100)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_ECRC_ERROR = (0x00000200)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_UNSUPPORTED_REQ = (0x00000400)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_RCV_ERR = (0x00010000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_BAD_TLP = (0x00020000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_BAD_DLLP = (0x00040000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_RPLY_ROLLOVER = (0x00080000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_RPLY_TIMEOUT = (0x00100000)
+NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_ADVISORY_NONFATAL = (0x00200000)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_PCIE_ERROR = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_PCIE_PRESENT = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_CL_CAPABLE_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_CL_CAPABLE_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_OS_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_OS_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_BR04_MISSING = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_BR04_PRESENT = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_VALID_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_VALID_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_DISABLED = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_L0S = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_L1 = (0x00000002)
+NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_L0S_L1 = (0x00000003)
+NV2080_CTRL_BUS_INFO_MSI_STATUS_DISABLED = (0x00000000)
+NV2080_CTRL_BUS_INFO_MSI_STATUS_ENABLED = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_2_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_2_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_1_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_1_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_2_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_2_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_1_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_1_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_L1PM_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_L1PM_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_2_ENABLED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_2_ENABLED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_1_ENABLED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_1_ENABLED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_2_ENABLED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_2_ENABLED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_1_ENABLED_YES = (0x00000001)
+NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_1_ENABLED_NO = (0x00000000)
+NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE_PCIE = (0x00000000)
+NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE_NVLINK = (0x00000001)
+NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE_C2C = (0x00000002)
+NV2080_CTRL_CMD_BUS_GET_INFO = (0x20801802)
+NV2080_CTRL_BUS_GET_INFO_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_BUS_GET_INFO_V2 = (0x20801823)
+NV2080_CTRL_BUS_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x23)
+NV2080_CTRL_CMD_BUS_GET_PCI_BAR_INFO = (0x20801803)
+NV2080_CTRL_BUS_MAX_PCI_BARS = (8)
+NV2080_CTRL_BUS_GET_PCI_BAR_INFO_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_BUS_SET_PCIE_LINK_WIDTH = (0x20801804)
+NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_ERROR_PSTATE = (0x00000001)
+NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_ERROR_PCIE_CFG_ACCESS = (0x00000002)
+NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_ERROR_TRAINING = (0x00000004)
+NV2080_CTRL_CMD_BUS_SET_PCIE_SPEED = (0x20801805)
+NV2080_CTRL_BUS_SET_PCIE_SPEED_PARAMS_MESSAGE_ID = (0x5)
+NV2080_CTRL_BUS_SET_PCIE_SPEED_2500MBPS = (0x00000001)
+NV2080_CTRL_BUS_SET_PCIE_SPEED_5000MBPS = (0x00000002)
+NV2080_CTRL_BUS_SET_PCIE_SPEED_8000MBPS = (0x00000003)
+NV2080_CTRL_BUS_SET_PCIE_SPEED_16000MBPS = (0x00000004)
+NV2080_CTRL_BUS_SET_PCIE_SPEED_32000MBPS = (0x00000005)
+NV2080_CTRL_BUS_SET_PCIE_SPEED_64000MBPS = (0x00000006)
+NV2080_CTRL_CMD_BUS_MAP_BAR2 = (0x20801809)
+NV2080_CTRL_BUS_MAP_BAR2_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_BUS_UNMAP_BAR2 = (0x2080180a)
+NV2080_CTRL_BUS_UNMAP_BAR2_PARAMS_MESSAGE_ID = (0xA)
+NV2080_CTRL_CMD_BUS_VERIFY_BAR2 = (0x2080180b)
+NV2080_CTRL_BUS_VERIFY_BAR2_PARAMS_MESSAGE_ID = (0xB)
+NV2080_CTRL_CMD_BUS_SERVICE_GPU_MULTIFUNC_STATE = (0x20801812)
+NV2080_CTRL_BUS_SERVICE_GPU_MULTIFUNC_STATE_PARAMS_MESSAGE_ID = (0x12)
+NV2080_CTRL_BUS_ENABLE_GPU_MULTIFUNC_STATE = (0x00000000)
+NV2080_CTRL_BUS_DISABLE_GPU_MULTIFUNC_STATE = (0x00000001)
+NV2080_CTRL_BUS_GET_GPU_MULTIFUNC_STATE = (0x00000002)
+NV2080_CTRL_CMD_BUS_GET_PEX_COUNTERS = (0x20801813)
+NV2080_CTRL_PEX_MAX_COUNTER_TYPES = 31
+NV2080_CTRL_BUS_GET_PEX_COUNTERS_PARAMS_MESSAGE_ID = (0x13)
+NV2080_CTRL_BUS_PEX_COUNTER_TYPE = 0x00000000
+NV2080_CTRL_BUS_PEX_COUNTER_RECEIVER_ERRORS = 0x00000001
+NV2080_CTRL_BUS_PEX_COUNTER_REPLAY_COUNT = 0x00000002
+NV2080_CTRL_BUS_PEX_COUNTER_REPLAY_ROLLOVER_COUNT = 0x00000004
+NV2080_CTRL_BUS_PEX_COUNTER_BAD_DLLP_COUNT = 0x00000008
+NV2080_CTRL_BUS_PEX_COUNTER_BAD_TLP_COUNT = 0x00000010
+NV2080_CTRL_BUS_PEX_COUNTER_8B10B_ERRORS_COUNT = 0x00000020
+NV2080_CTRL_BUS_PEX_COUNTER_SYNC_HEADER_ERRORS_COUNT = 0x00000040
+NV2080_CTRL_BUS_PEX_COUNTER_LCRC_ERRORS_COUNT = 0x00000080
+NV2080_CTRL_BUS_PEX_COUNTER_FAILED_L0S_EXITS_COUNT = 0x00000100
+NV2080_CTRL_BUS_PEX_COUNTER_NAKS_SENT_COUNT = 0x00000200
+NV2080_CTRL_BUS_PEX_COUNTER_NAKS_RCVD_COUNT = 0x00000400
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_ERRORS = 0x00000800
+NV2080_CTRL_BUS_PEX_COUNTER_L1_TO_RECOVERY_COUNT = 0x00001000
+NV2080_CTRL_BUS_PEX_COUNTER_L0_TO_RECOVERY_COUNT = 0x00002000
+NV2080_CTRL_BUS_PEX_COUNTER_RECOVERY_COUNT = 0x00004000
+NV2080_CTRL_BUS_PEX_COUNTER_CHIPSET_XMIT_L0S_ENTRY_COUNT = 0x00008000
+NV2080_CTRL_BUS_PEX_COUNTER_GPU_XMIT_L0S_ENTRY_COUNT = 0x00010000
+NV2080_CTRL_BUS_PEX_COUNTER_L1_ENTRY_COUNT = 0x00020000
+NV2080_CTRL_BUS_PEX_COUNTER_L1P_ENTRY_COUNT = 0x00040000
+NV2080_CTRL_BUS_PEX_COUNTER_DEEP_L1_ENTRY_COUNT = 0x00080000
+NV2080_CTRL_BUS_PEX_COUNTER_ASLM_COUNT = 0x00100000
+NV2080_CTRL_BUS_PEX_COUNTER_TOTAL_CORR_ERROR_COUNT = 0x00200000
+NV2080_CTRL_BUS_PEX_COUNTER_CORR_ERROR_COUNT = 0x00400000
+NV2080_CTRL_BUS_PEX_COUNTER_NON_FATAL_ERROR_COUNT = 0x00800000
+NV2080_CTRL_BUS_PEX_COUNTER_FATAL_ERROR_COUNT = 0x01000000
+NV2080_CTRL_BUS_PEX_COUNTER_UNSUPP_REQ_COUNT = 0x02000000
+NV2080_CTRL_BUS_PEX_COUNTER_L1_1_ENTRY_COUNT = 0x04000000
+NV2080_CTRL_BUS_PEX_COUNTER_L1_2_ENTRY_COUNT = 0x08000000
+NV2080_CTRL_BUS_PEX_COUNTER_L1_2_ABORT_COUNT = 0x10000000
+NV2080_CTRL_BUS_PEX_COUNTER_L1SS_TO_DEEP_L1_TIMEOUT_COUNT = 0x20000000
+NV2080_CTRL_BUS_PEX_COUNTER_L1_SHORT_DURATION_COUNT = 0x40000000
+NV2080_CTRL_CMD_BUS_CLEAR_PEX_COUNTERS = (0x20801814)
+NV2080_CTRL_BUS_CLEAR_PEX_COUNTERS_PARAMS_MESSAGE_ID = (0x14)
+NV2080_CTRL_CMD_BUS_FREEZE_PEX_COUNTERS = (0x20801815)
+NV2080_CTRL_BUS_FREEZE_PEX_COUNTERS_PARAMS_MESSAGE_ID = (0x15)
+NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS = (0x20801816)
+NV2080_CTRL_PEX_MAX_LANES = 16
+NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS_PARAMS_MESSAGE_ID = (0x16)
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_TYPE = 0x00000000
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_SYNC_HDR_CODING_ERR = 0x00000001
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_SYNC_HDR_ORDER_ERR = 0x00000002
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_OS_DATA_SEQ_ERR = 0x00000004
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_TSX_DATA_SEQ_ERR = 0x00000008
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_SKPOS_LFSR_ERR = 0x00000010
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_RX_CLK_FIFO_OVERFLOW = 0x00000020
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_ELASTIC_FIFO_OVERFLOW = 0x00000040
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_RCVD_LINK_NUM_ERR = 0x00000080
+NV2080_CTRL_BUS_PEX_COUNTER_LANE_RCVD_LANE_NUM_ERR = 0x00000100
+NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY = (0x20801817)
+NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY_PARAMS_MESSAGE_ID = (0x17)
+NV2080_CTRL_CMD_BUS_SET_PCIE_LTR_LATENCY = (0x20801818)
+NV2080_CTRL_CMD_BUS_SET_PCIE_LTR_LATENCY_PARAMS_MESSAGE_ID = (0x18)
+NV2080_CTRL_BUS_PEX_UTIL_COUNTER_TX_BYTES = 0x00000001
+NV2080_CTRL_BUS_PEX_UTIL_COUNTER_RX_BYTES = 0x00000002
+NV2080_CTRL_BUS_PEX_UTIL_COUNTER_TX_L0 = 0x00000004
+NV2080_CTRL_BUS_PEX_UTIL_COUNTER_RX_L0 = 0x00000008
+NV2080_CTRL_BUS_PEX_UTIL_COUNTER_TX_L0S = 0x00000010
+NV2080_CTRL_BUS_PEX_UTIL_COUNTER_RX_L0S = 0x00000020
+NV2080_CTRL_BUS_PEX_UTIL_COUNTER_NON_L0_L0S = 0x00000040
+NV2080_CTRL_PEX_UTIL_MAX_COUNTER_TYPES = 7
+NV2080_CTRL_CMD_BUS_GET_PEX_UTIL_COUNTERS = (0x20801819)
+NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS_MESSAGE_ID = (0x19)
+NV2080_CTRL_CMD_BUS_CLEAR_PEX_UTIL_COUNTERS = (0x20801820)
+NV2080_CTRL_BUS_CLEAR_PEX_UTIL_COUNTERS_PARAMS_MESSAGE_ID = (0x20)
+NV2080_CTRL_CMD_BUS_GET_BFD = (0x20801821)
+NV2080_CTRL_BUS_GET_BFD_PARAMSARR_MESSAGE_ID = (0x21)
+NV2080_CTRL_ASPM_DISABLE_FLAGS_L1_MASK_REGKEY_OVERRIDE = 0x00000000
+NV2080_CTRL_ASPM_DISABLE_FLAGS_OS_RM_MAKES_POLICY_DECISIONS = 0x00000001
+NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_BEHIND_BRIDGE = 0x00000002
+NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_UPSTREAM_PORT_L1_UNSUPPORTED = 0x00000003
+NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_UPSTREAM_PORT_L1_POR_SUPPORTED = 0x00000004
+NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_UPSTREAM_PORT_L1_POR_MOBILE_ONLY = 0x00000005
+NV2080_CTRL_ASPM_DISABLE_FLAGS_CL_ASPM_L1_CHIPSET_DISABLED = 0x00000006
+NV2080_CTRL_ASPM_DISABLE_FLAGS_CL_ASPM_L1_CHIPSET_ENABLED_MOBILE_ONLY = 0x00000007
+NV2080_CTRL_ASPM_DISABLE_FLAGS_BIF_ENABLE_ASPM_DT_L1 = 0x00000008
+NV2080_CTRL_ASPM_DISABLE_FLAGS_MAX_FLAGS = 9
+NV2080_CTRL_CMD_BUS_GET_ASPM_DISABLE_FLAGS = (0x20801822)
+NV2080_CTRL_BUS_GET_ASPM_DISABLE_FLAGS_PARAMS_MESSAGE_ID = (0x22)
+NV2080_CTRL_CMD_BUS_CONTROL_PUBLIC_ASPM_BITS = (0x20801824)
+NV2080_CTRL_CMD_BUS_CONTROL_PUBLIC_ASPM_BITS_PARAMS_MESSAGE_ID = (0x24)
+NV2080_CTRL_CMD_BUS_GET_NVLINK_PEER_ID_MASK = (0x20801825)
+NV2080_CTRL_BUS_MAX_NUM_GPUS = 32
+NV2080_CTRL_BUS_GET_NVLINK_PEER_ID_MASK_PARAMS_MESSAGE_ID = (0x25)
+NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS = (0x20801826)
+NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS_PARAMS_MESSAGE_ID = (0x26)
+NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE = (0x20801827)
+NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE_PARAMS_MESSAGE_ID = (0x27)
+NV2080_CTRL_CMD_BUS_GET_EOM_STATUS = (0x20801828)
+NV2080_CTRL_BUS_MAX_NUM_LANES = 32
+NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS_MESSAGE_ID = (0x28)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS = (0x20801829)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS_MESSAGE_ID = (0x29)
+NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_SYSMEM = 0x0
+NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_GPU = 0x1
+NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_P2P = 0x2
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_32_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_32_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_64_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_64_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_32_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_32_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_64_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_64_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_32_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_32_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_64_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_64_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_128_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_128_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS = (0x2080182a)
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IADD = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IMIN = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IMAX = 2
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_INC = 3
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_DEC = 4
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IAND = 5
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IOR = 6
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IXOR = 7
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_EXCH = 8
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_CAS = 9
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_FADD = 10
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_FMIN = 11
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_FMAX = 12
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_COUNT = 13
+NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS_MESSAGE_ID = (0x2A)
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SCALAR_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SCALAR_NO = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_VECTOR_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_VECTOR_NO = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_REDUCTION_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_REDUCTION_NO = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_32_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_32_NO = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_64_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_64_NO = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_128_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_128_NO = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIGNED_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIGNED_NO = 0
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_UNSIGNED_YES = 1
+NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_UNSIGNED_NO = 0
+NV2080_CTRL_CMD_BUS_GET_C2C_INFO = (0x2080182b)
+NV2080_CTRL_CMD_BUS_GET_C2C_INFO_PARAMS_MESSAGE_ID = (0x2B)
+NV2080_CTRL_BUS_GET_C2C_INFO_REMOTE_TYPE_CPU = 1
+NV2080_CTRL_BUS_GET_C2C_INFO_REMOTE_TYPE_GPU = 2
+NV2080_CTRL_CMD_BUS_SYSMEM_ACCESS = (0x2080182c)
+NV2080_CTRL_BUS_SYSMEM_ACCESS_PARAMS_MESSAGE_ID = (0x2C)
+NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING = (0x2080182e)
+NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_INVALID = 0
+NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_NVLINK = 1
+NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_PCIE = 2
+NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_PCIE_BAR1 = 3
+NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_C2C = 4
+NV2080_SET_P2P_MAPPING_UUID_LEN = 16
+NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_MESSAGE_ID = (0x2E)
+NV2080_CTRL_CMD_BUS_UNSET_P2P_MAPPING = (0x2080182f)
+NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_MESSAGE_ID = (0x2F)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS = (0x20801830)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS_MESSAGE_ID = (0x30)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_NO = (0x00000000)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_YES = (0x00000001)
+NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_NO = (0x00000000)
+NV2080_CTRL_CMD_CE_GET_CAPS = (0x20802a01)
+NV2080_CTRL_CE_CAPS_TBL_SIZE = 2
+NV2080_CTRL_CE_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_CE_GET_CAPS_V2 = (0x20802a03)
+NV2080_CTRL_CE_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_CE_GET_CE_PCE_MASK = (0x20802a02)
+NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_CE_SET_PCE_LCE_CONFIG = (0x20802a04)
+NV2080_CTRL_MAX_PCES = 32
+NV2080_CTRL_MAX_GRCES = 4
+NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_CE_UPDATE_PCE_LCE_MAPPINGS = (0x20802a05)
+NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS_MESSAGE_ID = (0x5)
+NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_INVALID_LCE = 0xf
+NV2080_CTRL_CMD_CE_UPDATE_CLASS_DB = (0x20802a06)
+NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS_MESSAGE_ID = (0x6)
+NV2080_CTRL_CMD_CE_GET_PHYSICAL_CAPS = (0x20802a07)
+NV2080_CTRL_CE_GET_PHYSICAL_CAPS_PARAMS_MESSAGE_ID = (0x7)
+NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0x8)
+NV2080_CTRL_CMD_CE_GET_FAULT_METHOD_BUFFER_SIZE = (0x20802a08)
+NV2080_CTRL_CMD_CE_GET_HUB_PCE_MASK = (0x20802a09)
+NV2080_CTRL_CE_MAX_HSHUBS = 32
+NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_CE_GET_ALL_CAPS = (0x20802a0a)
+NV2080_CTRL_MAX_CES = 64
+NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS_MESSAGE_ID = (0xa)
+NV2080_CTRL_CMD_CE_GET_ALL_PHYSICAL_CAPS = (0x20802a0b)
+NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS_MESSAGE_ID = (0xb)
+NV2080_CTRL_CMD_CE_GET_LCE_SHIM_INFO = (0x20802a0c)
+NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS_MESSAGE_ID = (0xc)
+NV2080_CTRL_CMD_CE_UPDATE_PCE_LCE_MAPPINGS_V2 = (0x20802a0d)
+NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS_MESSAGE_ID = (0xd)
+NV2080_CTRL_CMD_CE_GET_HUB_PCE_MASK_V2 = (0x20802a0e)
+NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS_MESSAGE_ID = (0xe)
+NV2080_CTRL_CMD_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE = (0x20802a0f)
+NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS_MESSAGE_ID = (0xf)
+NV2080_CTRL_CMD_CE_GET_DECOMP_LCE_MASK = (0x20802a11)
+NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS_MESSAGE_ID = (0x11)
+NV2080_CTRL_CMD_CE_IS_DECOMP_LCE_ENABLED = (0x20802a12)
+NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS_MESSAGE_ID = (0x12)
+NV2080_CTRL_CMD_DMA_INVALIDATE_TLB = (0x20802502)
+NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_GRAPHICS_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_GRAPHICS_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VIDEO_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VIDEO_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_DISPLAY_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_DISPLAY_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_CAPTURE_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_CAPTURE_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_IFB_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_IFB_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MV_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MV_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MPEG_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MPEG_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VLD_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VLD_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_ENCRYPTION_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_ENCRYPTION_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_PERFMON_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_PERFMON_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_POSTPROCESS_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_POSTPROCESS_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_BAR_FALSE = (0x00000000)
+NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_BAR_TRUE = (0x00000001)
+NV2080_CTRL_DMA_INFO_INDEX_SYSTEM_ADDRESS_SIZE = (0x000000000)
+NV2080_CTRL_DMA_INFO_INDEX_MAX = NV2080_CTRL_DMA_INFO_INDEX_SYSTEM_ADDRESS_SIZE
+NV2080_CTRL_CMD_DMA_GET_INFO = (0x20802503)
+NV2080_CTRL_DMA_GET_INFO_MAX_ENTRIES = (256)
+NV2080_CTRL_DMA_GET_INFO_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_DMABUF_EXPORT_OBJECTS_TO_FD = (0x20803a01)
+NV2080_CTRL_DMABUF_MAX_HANDLES = 128
+NV2080_CTRL_DMABUF_EXPORT_MAPPING_TYPE_DEFAULT = (0x00000000)
+NV2080_CTRL_DMABUF_EXPORT_MAPPING_TYPE_FORCE_PCIE = (0x00000001)
+NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_ECC_GET_CLIENT_EXPOSED_COUNTERS = (0x20803400)
+NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS_MESSAGE_ID = (0x0)
+NV2080_CTRL_CMD_ECC_GET_VOLATILE_COUNTS = (0x20803401)
+NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_EVENT_SET_NOTIFICATION = (0x20800301)
+NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_EVENT_SET_NOTIFICATION_ACTION_DISABLE = (0x00000000)
+NV2080_CTRL_EVENT_SET_NOTIFICATION_ACTION_SINGLE = (0x00000001)
+NV2080_CTRL_EVENT_SET_NOTIFICATION_ACTION_REPEAT = (0x00000002)
+NV2080_EVENT_DSTATE_XUSB_D0 = (0x00000000)
+NV2080_EVENT_DSTATE_XUSB_D3 = (0x00000003)
+NV2080_EVENT_DSTATE_XUSB_INVALID = (0xFFFFFFFF)
+NV2080_EVENT_DSTATE_PPC_D0 = (0x00000000)
+NV2080_EVENT_DSTATE_PPC_D3 = (0x00000003)
+NV2080_EVENT_DSTATE_PPC_INVALID = (0xFFFFFFFF)
+NV2080_CTRL_CMD_EVENT_SET_TRIGGER = (0x20800302)
+NV2080_CTRL_CMD_EVENT_SET_MEMORY_NOTIFIES = (0x20800303)
+NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS_MESSAGE_ID = (0x3)
+NV2080_EVENT_MEMORY_NOTIFIES_STATUS_NOTIFIED = 0
+NV2080_EVENT_MEMORY_NOTIFIES_STATUS_PENDING = 1
+NV2080_EVENT_MEMORY_NOTIFIES_STATUS_ERROR = 2
+NV2080_CTRL_CMD_EVENT_SET_SEMAPHORE_MEMORY = (0x20800304)
+NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_EVENT_SET_GUEST_MSI = (0x20800305)
+NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS_MESSAGE_ID = (0x5)
+NV2080_CTRL_CMD_EVENT_SET_SEMA_MEM_VALIDATION = (0x20800306)
+NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS_MESSAGE_ID = (0x6)
+NV2080_CTRL_CMD_EVENT_SET_TRIGGER_FIFO = (0x20800308)
+NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS_MESSAGE_ID = (0x8)
+NV2080_CTRL_CMD_EVENT_VIDEO_BIND_EVTBUF = (0x20800309)
+NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_EVENT_RATS_GSP_TRACE_BIND_EVTBUF = (0x2080030a)
+NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS_MESSAGE_ID = (0xA)
+NV2080_CTRL_FB_INFO_INDEX_TILE_REGION_COUNT = (0x00000000)
+NV2080_CTRL_FB_INFO_INDEX_COMPRESSION_SIZE = (0x00000001)
+NV2080_CTRL_FB_INFO_INDEX_DRAM_PAGE_STRIDE = (0x00000002)
+NV2080_CTRL_FB_INFO_INDEX_TILE_REGION_FREE_COUNT = (0x00000003)
+NV2080_CTRL_FB_INFO_INDEX_PARTITION_COUNT = (0x00000004)
+NV2080_CTRL_FB_INFO_INDEX_BAR1_SIZE = (0x00000005)
+NV2080_CTRL_FB_INFO_INDEX_BANK_SWIZZLE_ALIGNMENT = (0x00000006)
+NV2080_CTRL_FB_INFO_INDEX_RAM_SIZE = (0x00000007)
+NV2080_CTRL_FB_INFO_INDEX_TOTAL_RAM_SIZE = (0x00000008)
+NV2080_CTRL_FB_INFO_INDEX_HEAP_SIZE = (0x00000009)
+NV2080_CTRL_FB_INFO_INDEX_MAPPABLE_HEAP_SIZE = (0x0000000A)
+NV2080_CTRL_FB_INFO_INDEX_BUS_WIDTH = (0x0000000B)
+NV2080_CTRL_FB_INFO_INDEX_RAM_CFG = (0x0000000C)
+NV2080_CTRL_FB_INFO_INDEX_RAM_TYPE = (0x0000000D)
+NV2080_CTRL_FB_INFO_INDEX_BANK_COUNT = (0x0000000E)
+NV2080_CTRL_FB_INFO_INDEX_OVERLAY_OFFSET_ADJUSTMENT = (0x0000000F)
+NV2080_CTRL_FB_INFO_INDEX_GPU_VADDR_SPACE_SIZE_KB = (0x0000000F)
+NV2080_CTRL_FB_INFO_INDEX_GPU_VADDR_HEAP_SIZE_KB = (0x0000000F)
+NV2080_CTRL_FB_INFO_INDEX_GPU_VADDR_MAPPBLE_SIZE_KB = (0x0000000F)
+NV2080_CTRL_FB_INFO_INDEX_EFFECTIVE_BW = (0x0000000F)
+NV2080_CTRL_FB_INFO_INDEX_FB_TAX_SIZE_KB = (0x00000010)
+NV2080_CTRL_FB_INFO_INDEX_HEAP_BASE_KB = (0x00000011)
+NV2080_CTRL_FB_INFO_INDEX_LARGEST_FREE_REGION_SIZE_KB = (0x00000012)
+NV2080_CTRL_FB_INFO_INDEX_LARGEST_FREE_REGION_BASE_KB = (0x00000013)
+NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK = (0x00000014)
+NV2080_CTRL_FB_INFO_INDEX_VISTA_RESERVED_HEAP_SIZE = (0x00000015)
+NV2080_CTRL_FB_INFO_INDEX_HEAP_FREE = (0x00000016)
+NV2080_CTRL_FB_INFO_INDEX_RAM_LOCATION = (0x00000017)
+NV2080_CTRL_FB_INFO_INDEX_FB_IS_BROKEN = (0x00000018)
+NV2080_CTRL_FB_INFO_INDEX_FBP_COUNT = (0x00000019)
+NV2080_CTRL_FB_INFO_INDEX_FBP_MASK = (0x0000001A)
+NV2080_CTRL_FB_INFO_INDEX_L2CACHE_SIZE = (0x0000001B)
+NV2080_CTRL_FB_INFO_INDEX_MEMORYINFO_VENDOR_ID = (0x0000001C)
+NV2080_CTRL_FB_INFO_INDEX_BAR1_AVAIL_SIZE = (0x0000001D)
+NV2080_CTRL_FB_INFO_INDEX_HEAP_START = (0x0000001E)
+NV2080_CTRL_FB_INFO_INDEX_BAR1_MAX_CONTIGUOUS_AVAIL_SIZE = (0x0000001F)
+NV2080_CTRL_FB_INFO_INDEX_USABLE_RAM_SIZE = (0x00000020)
+NV2080_CTRL_FB_INFO_INDEX_TRAINIG_2T = (0x00000021)
+NV2080_CTRL_FB_INFO_INDEX_LTC_COUNT = (0x00000022)
+NV2080_CTRL_FB_INFO_INDEX_LTS_COUNT = (0x00000023)
+NV2080_CTRL_FB_INFO_INDEX_L2CACHE_ONLY_MODE = (0x00000024)
+NV2080_CTRL_FB_INFO_INDEX_PSEUDO_CHANNEL_MODE = (0x00000025)
+NV2080_CTRL_FB_INFO_INDEX_SMOOTHDISP_RSVD_BAR1_SIZE = (0x00000026)
+NV2080_CTRL_FB_INFO_INDEX_HEAP_OFFLINE_SIZE = (0x00000027)
+NV2080_CTRL_FB_INFO_INDEX_1TO1_COMPTAG_ENABLED = (0x00000028)
+NV2080_CTRL_FB_INFO_INDEX_SUSPEND_RESUME_RSVD_SIZE = (0x00000029)
+NV2080_CTRL_FB_INFO_INDEX_ALLOW_PAGE_RETIREMENT = (0x0000002A)
+NV2080_CTRL_FB_INFO_INDEX_LTC_MASK = (0x0000002B)
+NV2080_CTRL_FB_INFO_POISON_FUSE_ENABLED = (0x0000002C)
+NV2080_CTRL_FB_INFO_FBPA_ECC_ENABLED = (0x0000002D)
+NV2080_CTRL_FB_INFO_DYNAMIC_PAGE_OFFLINING_ENABLED = (0x0000002E)
+NV2080_CTRL_FB_INFO_INDEX_FORCED_BAR1_64KB_MAPPING_ENABLED = (0x0000002F)
+NV2080_CTRL_FB_INFO_INDEX_P2P_MAILBOX_SIZE = (0x00000030)
+NV2080_CTRL_FB_INFO_INDEX_P2P_MAILBOX_ALIGNMENT = (0x00000031)
+NV2080_CTRL_FB_INFO_INDEX_P2P_MAILBOX_BAR1_MAX_OFFSET_64KB = (0x00000032)
+NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_TOTAL_KB = (0x00000033)
+NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_FREE_KB = (0x00000034)
+NV2080_CTRL_FB_INFO_INDEX_ECC_STATUS_SIZE = (0x00000035)
+NV2080_CTRL_FB_INFO_INDEX_IS_ZERO_FB = (0x00000036)
+NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_0 = (NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK)
+NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_1 = (0x00000037)
+NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_0 = (NV2080_CTRL_FB_INFO_INDEX_LTC_MASK)
+NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_1 = (0x00000038)
+NV2080_CTRL_FB_INFO_MAX_LIST_SIZE = (0x00000039)
+NV2080_CTRL_FB_INFO_INDEX_MAX = (0x38)
+NV2080_CTRL_FB_INFO_RAM_TYPE_UNKNOWN = (0x00000000)
+NV2080_CTRL_FB_INFO_RAM_TYPE_SDRAM = (0x00000001)
+NV2080_CTRL_FB_INFO_RAM_TYPE_DDR1 = (0x00000002)
+NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR2 = (0x00000003)
+NV2080_CTRL_FB_INFO_RAM_TYPE_DDR2 = NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR2
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR2 = (0x00000004)
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR3 = (0x00000005)
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR4 = (0x00000006)
+NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR3 = (0x00000007)
+NV2080_CTRL_FB_INFO_RAM_TYPE_DDR3 = NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR3
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR5 = (0x00000008)
+NV2080_CTRL_FB_INFO_RAM_TYPE_LPDDR2 = (0x00000009)
+NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR4 = (0x0000000C)
+NV2080_CTRL_FB_INFO_RAM_TYPE_LPDDR4 = (0x0000000D)
+NV2080_CTRL_FB_INFO_RAM_TYPE_HBM1 = (0x0000000E)
+NV2080_CTRL_FB_INFO_RAM_TYPE_HBM2 = (0x0000000F)
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR5X = (0x00000010)
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR6 = (0x00000011)
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR6X = (0x00000012)
+NV2080_CTRL_FB_INFO_RAM_TYPE_LPDDR5 = (0x00000013)
+NV2080_CTRL_FB_INFO_RAM_TYPE_HBM3 = (0x00000014)
+NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR7 = (0x00000015)
+NV2080_CTRL_FB_INFO_RAM_LOCATION_GPU_DEDICATED = (0x00000000)
+NV2080_CTRL_FB_INFO_RAM_LOCATION_SYS_SHARED = (0x00000001)
+NV2080_CTRL_FB_INFO_RAM_LOCATION_SYS_DEDICATED = (0x00000002)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_SAMSUNG = (0x00000001)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_QIMONDA = (0x00000002)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_ELPIDA = (0x00000003)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_ETRON = (0x00000004)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_NANYA = (0x00000005)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_HYNIX = (0x00000006)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_MOSEL = (0x00000007)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_WINBOND = (0x00000008)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_ESMT = (0x00000009)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_MICRON = (0x0000000F)
+NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_UNKNOWN = (0xFFFFFFFF)
+NV2080_CTRL_FB_INFO_PSEUDO_CHANNEL_MODE_UNSUPPORTED = (0x00000000)
+NV2080_CTRL_FB_INFO_PSEUDO_CHANNEL_MODE_DISABLED = (0x00000001)
+NV2080_CTRL_FB_INFO_PSEUDO_CHANNEL_MODE_ENABLED = (0x00000002)
+NV2080_CTRL_CMD_FB_GET_INFO = (0x20801301)
+NV2080_CTRL_FB_GET_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_FB_GET_INFO_V2 = (0x20801303)
+NV2080_CTRL_FB_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_FB_GET_BAR1_OFFSET = (0x20801310)
+NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS_MESSAGE_ID = (0x10)
+NV2080_CTRL_CMD_FB_GET_CALIBRATION_LOCK_FAILED = (0x2080130c)
+NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS_MESSAGE_ID = (0xC)
+NV2080_CTRL_CMD_FB_GET_CAL_FLAG_NONE = (0x00000000)
+NV2080_CTRL_CMD_FB_GET_CAL_FLAG_RESET = (0x00000001)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL = (0x2080130d)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS_MESSAGE_ID = (0xD)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_WRITE_BACK_NO = (0x00000000)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_WRITE_BACK_YES = (0x00000001)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_INVALIDATE_NO = (0x00000000)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_INVALIDATE_YES = (0x00000001)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_FB_FLUSH_NO = (0x00000000)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_FB_FLUSH_YES = (0x00000001)
+NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE = (0x2080130e)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_MAX_ADDRESSES = 500
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS_MESSAGE_ID = (0xE)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_APERTURE_VIDEO_MEMORY = (0x00000000)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_APERTURE_SYSTEM_MEMORY = (0x00000001)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_APERTURE_PEER_MEMORY = (0x00000002)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_WRITE_BACK_NO = (0x00000000)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_WRITE_BACK_YES = (0x00000001)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_INVALIDATE_NO = (0x00000000)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_INVALIDATE_YES = (0x00000001)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_ADDRESS_ARRAY = (0x00000000)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE = (0x00000001)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FB_FLUSH_NO = (0x00000000)
+NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FB_FLUSH_YES = (0x00000001)
+NV2080_CTRL_CMD_FB_IS_KIND = (0x20801313)
+NV2080_CTRL_FB_IS_KIND_PARAMS_MESSAGE_ID = (0x13)
+NV2080_CTRL_FB_IS_KIND_OPERATION_SUPPORTED = (0x00000000)
+NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE = (0x00000001)
+NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE_1 = (0x00000002)
+NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE_2 = (0x00000003)
+NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE_4 = (0x00000004)
+NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC = (0x00000005)
+NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC_ALLOWS_1 = (0x00000006)
+NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC_ALLOWS_2 = (0x00000007)
+NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC_ALLOWS_4 = (0x00000008)
+NV2080_CTRL_CMD_FB_GET_GPU_CACHE_INFO = (0x20801315)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS_MESSAGE_ID = (0x15)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_POWER_STATE_ENABLED = (0x00000000)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_POWER_STATE_DISABLED = (0x00000001)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_WRITE_MODE_WRITETHROUGH = (0x00000000)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_WRITE_MODE_WRITEBACK = (0x00000001)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_BYPASS_MODE_DISABLED = (0x00000000)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_BYPASS_MODE_ENABLED = (0x00000001)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_FULL = (0x00000000)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_TRANSITIONING = (0x00000001)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_REDUCED = (0x00000002)
+NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_ZERO_CACHE = (0x00000003)
+NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO = (0x20801320)
+NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_MEM_TYPES = 17
+NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_MAX_ENTRIES = 16
+NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS_MESSAGE_ID = (0x20)
+NV2080_CTRL_CMD_FB_OFFLINE_PAGES = (0x20801321)
+NV2080_CTRL_FB_OFFLINED_PAGES_MAX_PAGES = (0x00000040)
+NV2080_CTRL_FB_OFFLINED_PAGES_INVALID_ADDRESS = (0xffffffffffffffff)
+NV2080_CTRL_FB_OFFLINED_PAGES_PAGE_SIZE_4K = (0x00000000)
+NV2080_CTRL_FB_OFFLINED_PAGES_PAGE_SIZE_64K = (0x00000001)
+NV2080_CTRL_FB_OFFLINED_PAGES_PAGE_SIZE_128K = (0x00000002)
+NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_MULTIPLE_SBE = (0x00000002)
+NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_DBE = (0x00000004)
+NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_OK = (0x00000000)
+NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_PENDING_RETIREMENT = (0x00000001)
+NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_BLACKLISTING_FAILED = (0x00000002)
+NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_TABLE_FULL = (0x00000003)
+NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_INTERNAL_ERROR = (0x00000004)
+NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_MULTIPLE_SBE = NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_MULTIPLE_SBE
+NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DBE = NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_DBE
+NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS_MESSAGE_ID = (0x21)
+NV2080_CTRL_CMD_FB_GET_OFFLINED_PAGES = (0x20801322)
+NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_SBE_FALSE = 0
+NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_SBE_TRUE = 1
+NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_DBE_FALSE = 0
+NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_DBE_TRUE = 1
+NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x22)
+NV2080_CTRL_CMD_FB_QUERY_ACR_REGION = (0x20801325)
+NV2080_CTRL_CMD_FB_ACR_CLIENT_ID = 2
+NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS_MESSAGE_ID = (0x25)
+NV2080_CTRL_CMD_FB_CLEAR_OFFLINED_PAGES = (0x20801326)
+NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x26)
+NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO = (0x20801327)
+NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS_MESSAGE_ID = (0x27)
+NV2080_CTRL_CMD_FB_GET_LTC_INFO_FOR_FBP = (0x20801328)
+NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS_MESSAGE_ID = (0x28)
+NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT = (0x20801329)
+NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS = (0x2080132a)
+NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS = (0x2080132b)
+NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB = (0x2080132c)
+NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB = (0x2080132d)
+NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1 = (0x20801335)
+NV2080_CTRL_CMD_FB_GET_AMAP_CONF = (0x20801336)
+NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS_MESSAGE_ID = (0x36)
+NV2080_CTRL_CMD_FB_CBC_OP = (0x20801337)
+NV2080_CTRL_CMD_FB_CBC_OP_PARAMS_MESSAGE_ID = (0x37)
+NV2080_CTRL_CMD_FB_GET_CTAGS_FOR_CBC_EVICTION = (0x20801338)
+NV2080_MAX_CTAGS_FOR_CBC_EVICTION = 0x7F
+NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS_MESSAGE_ID = (0x38)
+NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE = (0x20801339)
+NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS_MESSAGE_ID = (0x39)
+NV2080_CTRL_CMD_FB_FREE_TILE = (0x2080133a)
+NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS_MESSAGE_ID = (0x3A)
+NV2080_CTRL_CMD_FB_SETUP_VPR_REGION = (0x2080133b)
+NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS_MESSAGE_ID = (0x3B)
+NV2080_CTRL_CMD_FB_GET_CLI_MANAGED_OFFLINED_PAGES = (0x2080133c)
+NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x3C)
+NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO = (0x2080133d)
+NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS_MESSAGE_ID = (0x3D)
+NV2080_CTRL_CMD_FB_SET_RRD = (0x2080133e)
+NV2080_CTRL_FB_SET_RRD_PARAMS_MESSAGE_ID = (0x3E)
+NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_RESET_VALUE = (0xff)
+NV2080_CTRL_CMD_FB_SET_READ_LIMIT = (0x2080133f)
+NV2080_CTRL_FB_SET_READ_LIMIT_RESET_VALUE = NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_RESET_VALUE
+NV2080_CTRL_FB_SET_READ_LIMIT_PARAMS_MESSAGE_ID = (0x3F)
+NV2080_CTRL_CMD_FB_SET_WRITE_LIMIT = (0x20801340)
+NV2080_CTRL_FB_SET_WRITE_LIMIT_RESET_VALUE = NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_RESET_VALUE
+NV2080_CTRL_FB_SET_WRITE_LIMIT_PARAMS_MESSAGE_ID = (0x40)
+NV2080_CTRL_CMD_FB_PATCH_PBR_FOR_MINING = (0x20801341)
+NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS_MESSAGE_ID = (0x41)
+NV2080_CTRL_CMD_FB_GET_MEM_ALIGNMENT = (0x20801342)
+NV2080_CTRL_FB_GET_MEM_ALIGNMENT_MAX_BANKS = (4)
+NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS_MESSAGE_ID = (0x42)
+NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR = (0x20801343)
+NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS_MESSAGE_ID = (0x43)
+NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_FALSE = 0
+NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_TRUE = 1
+NV2080_CTRL_FB_REMAPPED_ROW_SOURCE_SBE_FIELD = (0x00000002)
+NV2080_CTRL_FB_REMAPPED_ROW_SOURCE_DBE_FIELD = (0x00000003)
+NV2080_CTRL_FB_REMAPPED_ROWS_MAX_ROWS = (0x00000200)
+NV2080_CTRL_CMD_FB_GET_REMAPPED_ROWS = (0x20801344)
+NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_PENDING_FALSE = NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_FALSE
+NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_PENDING_TRUE = NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_TRUE
+NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_FAILURE_FALSE = 0
+NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_FAILURE_TRUE = 1
+NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS_MESSAGE_ID = (0x44)
+NV2080_CTRL_FB_FS_INFO_MAX_QUERY_SIZE = 24
+NV2080_CTRL_FB_FS_INFO_INVALID_QUERY = 0x0
+NV2080_CTRL_FB_FS_INFO_FBP_MASK = 0x1
+NV2080_CTRL_FB_FS_INFO_LTC_MASK = 0x2
+NV2080_CTRL_FB_FS_INFO_LTS_MASK = 0x3
+NV2080_CTRL_FB_FS_INFO_FBPA_MASK = 0x4
+NV2080_CTRL_FB_FS_INFO_ROP_MASK = 0x5
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK = 0x6
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK = 0x7
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK = 0x8
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK = 0x9
+NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK = 0xA
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK = 0xB
+NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP = 0xC
+NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK = 0xD
+NV2080_CTRL_FB_FS_INFO_PAC_MASK = 0xE
+NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK = 0xF
+NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK = 0x10
+NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK = 0x11
+NV2080_CTRL_FB_FS_INFO_MAX_QUERIES = 120
+NV2080_CTRL_FB_GET_FS_INFO_PARAMS_MESSAGE_ID = (0x46)
+NV2080_CTRL_CMD_FB_GET_FS_INFO = (0x20801346)
+NV2080_CTRL_FB_HISTOGRAM_IDX_NO_REMAPPED_ROWS = (0x0)
+NV2080_CTRL_FB_HISTOGRAM_IDX_SINGLE_REMAPPED_ROW = (0x1)
+NV2080_CTRL_FB_HISTOGRAM_IDX_MIXED_REMAPPED_REMAINING_ROWS = (0x2)
+NV2080_CTRL_FB_HISTOGRAM_IDX_SINGLE_REMAINING_ROW = (0x3)
+NV2080_CTRL_FB_HISTOGRAM_IDX_MAX_REMAPPED_ROWS = (0x4)
+NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS_MESSAGE_ID = (0x47)
+NV2080_CTRL_CMD_FB_GET_ROW_REMAPPER_HISTOGRAM = (0x20801347)
+NV2080_CTRL_CMD_FB_GET_DYNAMIC_OFFLINED_PAGES = (0x20801348)
+NV2080_CTRL_FB_DYNAMIC_BLACKLIST_MAX_PAGES = 512
+NV2080_CTRL_FB_DYNAMIC_BLACKLIST_MAX_ENTRIES = 64
+NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x48)
+NV2080_CTRL_FB_DYNAMIC_BLACKLISTED_PAGES_SOURCE_INVALID = (0x00000000)
+NV2080_CTRL_FB_DYNAMIC_BLACKLISTED_PAGES_SOURCE_DPR_DBE = (0x00000001)
+NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO = (0x20801349)
+NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_TYPE_SYSMEM = 0
+NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_TYPE_VIDMEM = 1
+NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_SHARED_FALSE = 0
+NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_SHARED_TRUE = 1
+NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_OWNER_FALSE = 0
+NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_OWNER_TRUE = 1
+NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS_MESSAGE_ID = (0x49)
+NV2080_CTRL_CMD_FB_UPDATE_NUMA_STATUS = (0x20801350)
+NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS_MESSAGE_ID = (0x50)
+NV2080_CTRL_CMD_FB_GET_NUMA_INFO = (0x20801351)
+NV2080_CTRL_FB_NUMA_INFO_MAX_OFFLINE_ADDRESSES = 64
+NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS_MESSAGE_ID = (0x51)
+NV2080_CTRL_CMD_FB_GET_SEMAPHORE_SURFACE_LAYOUT = (0x20801352)
+NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_CAPS_MONITORED_FENCE_SUPPORTED = (0x00000001)
+NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_CAPS_64BIT_SEMAPHORES_SUPPORTED = (0x00000002)
+NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS_MESSAGE_ID = (0x52)
+NV2080_CTRL_CMD_GMMU_COMMIT_TLB_INVALIDATE = (0x20801353)
+NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS_MESSAGE_ID = (0x53)
+NV2080_CTRL_CMD_FB_STATS_MAX_OWNER = 200
+NV2080_CTRL_CMD_FB_STATS_GET = (0x2080132a)
+NV2080_CTRL_CMD_FB_STATS_GET_PARAMS_MESSAGE_ID = (0x2A)
+NV2080_CTRL_CMD_FB_GET_STATIC_BAR1_INFO = (0x20801354)
+NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS_MESSAGE_ID = (0x54)
+NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION = (0x20801355)
+NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_DISABLED = (0x00000000)
+NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_ENABLED = (0x00000001)
+NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS_MESSAGE_ID = (0x55)
+NV2080_CTRL_CMD_FB_SET_DRAM_ENCRYPTION_CONFIGURATION = (0x20801356)
+NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_DISABLE = (0x00000000)
+NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_ENABLE = (0x00000001)
+NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS_MESSAGE_ID = (0x56)
+NV2080_CTRL_CMD_FB_GET_STATUS = (0x20801357)
+NV2080_CTRL_FB_STATUS_FAILED = (0x00000000)
+NV2080_CTRL_FB_STATUS_READY = (0x00000001)
+NV2080_CTRL_FB_STATUS_PENDING = (0x00000002)
+NV2080_CTRL_FB_STATUS_NOT_APPLICABLE = (0x00000003)
+NV2080_CTRL_FB_GET_STATUS_PARAMS_MESSAGE_ID = (0x57)
+NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_INFOROM_SUPPORT = (0x20801358)
+NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_INFOROM_SUPPORT_DISABLED = (0x00000000)
+NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_INFOROM_SUPPORT_ENABLED = (0x00000001)
+NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS_MESSAGE_ID = (0x58)
+NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_STATUS = (0x20801359)
+NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_STATUS_DISABLED = (0x00000000)
+NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_STATUS_ENABLED = (0x00000001)
+NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS_MESSAGE_ID = (0x59)
+NV2080_CTRL_CMD_SET_GPFIFO = (0x20801102)
+NV2080_CTRL_CMD_SET_GPFIFO_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_FIFO_BIND_ENGINES_MAX_CHANNELS = (16)
+NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_FIFO_BIND_ENGINES = (0x20801103)
+NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES = (0x20801104)
+NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_FLAGS_ERROR_ON_STUCK_SEMAPHORE_FALSE = (0x00000000)
+NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_FLAGS_ERROR_ON_STUCK_SEMAPHORE_TRUE = (0x00000001)
+NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT = (0x20801108)
+NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS_MESSAGE_ID = (0x8)
+NV2080_CTRL_FIFO_INFO_INDEX_INSTANCE_TOTAL = (0x000000000)
+NV2080_CTRL_FIFO_INFO_INDEX_MAX_CHANNEL_GROUPS = (0x000000001)
+NV2080_CTRL_FIFO_INFO_INDEX_MAX_CHANNELS_PER_GROUP = (0x000000002)
+NV2080_CTRL_FIFO_INFO_INDEX_MAX_SUBCONTEXT_PER_GROUP = (0x000000003)
+NV2080_CTRL_FIFO_INFO_INDEX_BAR1_USERD_START_OFFSET = (0x000000004)
+NV2080_CTRL_FIFO_INFO_INDEX_DEFAULT_CHANNEL_TIMESLICE = (0x000000005)
+NV2080_CTRL_FIFO_INFO_INDEX_CHANNEL_GROUPS_IN_USE = (0x000000006)
+NV2080_CTRL_FIFO_INFO_INDEX_IS_PER_RUNLIST_CHANNEL_RAM_SUPPORTED = (0x000000007)
+NV2080_CTRL_FIFO_INFO_INDEX_MAX_CHANNEL_GROUPS_PER_ENGINE = (0x000000008)
+NV2080_CTRL_FIFO_INFO_INDEX_CHANNEL_GROUPS_IN_USE_PER_ENGINE = (0x000000009)
+NV2080_CTRL_FIFO_INFO_INDEX_MAX_LOWER_SUBCONTEXT = (0x00000000a)
+NV2080_CTRL_FIFO_INFO_INDEX_MAX = NV2080_CTRL_FIFO_INFO_INDEX_MAX_LOWER_SUBCONTEXT
+NV2080_CTRL_FIFO_GET_INFO_USERD_OFFSET_SHIFT = (12)
+NV2080_CTRL_CMD_FIFO_GET_INFO = (0x20801109)
+NV2080_CTRL_FIFO_GET_INFO_MAX_ENTRIES = (256)
+NV2080_CTRL_FIFO_GET_INFO_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_FIFO_CHANNEL_PREEMPTIVE_REMOVAL = (0x2080110a)
+NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS_MESSAGE_ID = (0xA)
+NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS = (0x2080110b)
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_MAX_ENTRIES = (64)
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_MESSAGE_ID = (0xB)
+NV2080_CTRL_FIFO_DISABLE_CHANNEL_FALSE = (0x00000000)
+NV2080_CTRL_FIFO_DISABLE_CHANNEL_TRUE = (0x00000001)
+NV2080_CTRL_FIFO_ONLY_DISABLE_SCHEDULING_FALSE = (0x00000000)
+NV2080_CTRL_FIFO_ONLY_DISABLE_SCHEDULING_TRUE = (0x00000001)
+NV2080_CTRL_FIFO_GET_CHANNEL_MEM_INFO_MAX_COUNT = 0x2
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO = (0x2080110c)
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS_MESSAGE_ID = (0xC)
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_INVALID = 0x00000000
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_VIDMEM = 0x00000001
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_SYSMEM_COH = 0x00000002
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_SYSMEM_NCOH = 0x00000003
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION = (0x2080110d)
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS_MESSAGE_ID = (0xD)
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_APERTURE_VIDMEM = 0x00000000
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_APERTURE_SYSMEM = 0x00000001
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_ATTRIBUTE_CACHED = 0x00000000
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_ATTRIBUTE_UNCACHED = 0X00000001
+NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_ATTRIBUTE_WRITECOMBINED = 0X00000002
+NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_UNKNOWN = 0
+NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_OTHER = 1
+NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_BEST_EFFORT = 2
+NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_EQUAL_SHARE = 3
+NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_FIXED_SHARE = 4
+NV2080_CTRL_CMD_SUPPORTED_VGPU_SCHEDULER_POLICY_COUNT = 3
+NV2080_CTRL_CMD_VGPU_SCHEDULER_ARR_DEFAULT = 0
+NV2080_CTRL_CMD_VGPU_SCHEDULER_ARR_DISABLE = 1
+NV2080_CTRL_CMD_VGPU_SCHEDULER_ARR_ENABLE = 2
+NV2080_CTRL_CMD_FIFO_OBJSCHED_SW_GET_LOG = (0x2080110e)
+NV2080_CTRL_FIFO_OBJSCHED_SW_COUNT = 32
+NV2080_CTRL_FIFO_OBJSCHED_SW_NCOUNTERS = 8
+NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRIES = 200
+NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS_MESSAGE_ID = (0xE)
+NV2080_CTRL_CMD_FIFO_GET_DEVICE_INFO_TABLE = (0x20801112)
+NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_MAX_DEVICES = 256
+NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_MAX_ENTRIES = 32
+NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_ENGINE_DATA_TYPES = 16
+NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_ENGINE_MAX_PBDMA = 2
+NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_ENGINE_MAX_NAME_LEN = 16
+NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS_MESSAGE_ID = (0x12)
+NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT = (0x20801113)
+NV2080_CTRL_FIFO_CLEAR_FAULTED_BIT_FAULT_TYPE_ENGINE = 0x00000001
+NV2080_CTRL_FIFO_CLEAR_FAULTED_BIT_FAULT_TYPE_PBDMA = 0x00000002
+NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS_MESSAGE_ID = (0x13)
+NV2080_CTRL_CMD_FIFO_RUNLIST_SET_SCHED_POLICY = (0x20801115)
+NV2080_CTRL_FIFO_RUNLIST_SCHED_POLICY_DEFAULT = 0x0
+NV2080_CTRL_FIFO_RUNLIST_SCHED_POLICY_CHANNEL_INTERLEAVED = 0x1
+NV2080_CTRL_FIFO_RUNLIST_SCHED_POLICY_CHANNEL_INTERLEAVED_WDDM = 0x2
+NV2080_CTRL_CMD_FIFO_RUNLIST_SET_SCHED_POLICY_FLAGS_RESTORE_FALSE = (0x00000000)
+NV2080_CTRL_CMD_FIFO_RUNLIST_SET_SCHED_POLICY_FLAGS_RESTORE_TRUE = (0x00000001)
+NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS_MESSAGE_ID = (0x15)
+NV2080_CTRL_CMD_FIFO_UPDATE_CHANNEL_INFO = (0x20801116)
+NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS_MESSAGE_ID = (0x16)
+NV2080_CTRL_CMD_FIFO_DISABLE_USERMODE_CHANNELS = (0x20801117)
+NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS_MESSAGE_ID = (0x17)
+NV2080_CTRL_CMD_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB = (0x20801118)
+NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_MESSAGE_ID = (0x18)
+NV2080_CTRL_CMD_FIFO_GET_ALLOCATED_CHANNELS = (0x20801119)
+NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_MAX_CHANNELS = 4096
+NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS_MESSAGE_ID = (0x19)
+NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION = (0x2080111a)
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_MAX_ENTRIES = (64)
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID = (0x1A)
+NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2 = (0x2080111b)
+NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS_MESSAGE_ID = (0x1B)
+NV2080_CTRL_CMD_FIFO_OBJSCHED_GET_STATE = (0x20801120)
+NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS_MESSAGE_ID = (0x20)
+NV2080_CTRL_CMD_FIFO_OBJSCHED_SET_STATE = (0x20801121)
+NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS_MESSAGE_ID = (0x21)
+NV2080_CTRL_CMD_FIFO_OBJSCHED_GET_CAPS = (0x20801122)
+NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS_MESSAGE_ID = (0x22)
+NV2080_CTRL_CMD_FIFO_MAX_CHANNELS_PER_TSG = 128
+NV2080_CTRL_CMD_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO = (0x20801123)
+NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS_MESSAGE_ID = (0x23)
+NV2080_CTRL_CMD_FIFO_QUERY_CHANNEL_UNIQUE_ID = (0x20801124)
+NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS_MESSAGE_ID = (0x24)
+NV2080_CTRL_CMD_FLA_RANGE = (0x20803501)
+NV2080_CTRL_FLA_RANGE_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_FLA_RANGE_PARAMS_MODE_NONE = 0x00000000
+NV2080_CTRL_FLA_RANGE_PARAMS_MODE_INITIALIZE = NVBIT(0)
+NV2080_CTRL_FLA_RANGE_PARAMS_MODE_DESTROY = NVBIT(1)
+NV2080_CTRL_FLA_RANGE_PARAMS_MODE_HOST_MANAGED_VAS_INITIALIZE = NVBIT(2)
+NV2080_CTRL_FLA_RANGE_PARAMS_MODE_HOST_MANAGED_VAS_DESTROY = NVBIT(3)
+NV2080_CTRL_CMD_FLA_SETUP_INSTANCE_MEM_BLOCK = (0x20803502)
+NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_FLA_GET_RANGE = (0x20803503)
+NV2080_CTRL_FLA_GET_RANGE_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_FLA_GET_FABRIC_MEM_STATS = (0x20803504)
+NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_MESSAGE_ID = (0x4)
 FALCON_ID_PMU = (NV2080_ENGINE_TYPE_PMU)
 FALCON_ID_DPU = (NV2080_ENGINE_TYPE_DPU)
 FALCON_ID_SEC2 = (NV2080_ENGINE_TYPE_SEC2)
@@ -16602,76 +17654,1658 @@ NV2080_CTRL_CMD_FLCN_GET_CTX_BUFFER_INFO = (0x20803124)
 NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS_MESSAGE_ID = (0x24)
 NV2080_CTRL_CMD_FLCN_GET_CTX_BUFFER_SIZE = (0x20803125)
 NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0x25)
-NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_RC_READ_VIRTUAL_MEM = (0x20802204)
-NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS_MESSAGE_ID = (0x5)
-NV2080_CTRL_CMD_RC_GET_ERROR_COUNT = (0x20802205)
-NV2080_CTRL_RC_ERROR_PARAMS_BUFFER_SIZE = (0x2000)
-NV2080_CTRL_CMD_RC_GET_ERROR = (0x20802206)
-NV2080_CTRL_RC_GET_ERROR_V2_PARAMS_MESSAGE_ID = (0x13)
-NV2080_CTRL_CMD_RC_GET_ERROR_V2 = (0x20802213)
-NV2080_CTRL_CMD_RC_SET_CLEAN_ERROR_HISTORY = (0x20802207)
-NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_RC_GET_WATCHDOG_INFO = (0x20802209)
-NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_NONE = (0x00000000)
-NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_DISABLED = (0x00000001)
-NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_RUNNING = (0x00000002)
-NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_INITIALIZED = (0x00000004)
-NV2080_CTRL_CMD_RC_DISABLE_WATCHDOG = (0x2080220a)
-NV2080_CTRL_CMD_RC_ENABLE_WATCHDOG = (0x2080220b)
-NV2080_CTRL_CMD_RC_RELEASE_WATCHDOG_REQUESTS = (0x2080220c)
-NV2080_CTRL_CMD_SET_RC_RECOVERY = (0x2080220d)
-NV2080_CTRL_SET_RC_RECOVERY_PARAMS_MESSAGE_ID = (0xD)
-NV2080_CTRL_CMD_GET_RC_RECOVERY = (0x2080220e)
-NV2080_CTRL_GET_RC_RECOVERY_PARAMS_MESSAGE_ID = (0xE)
-NV2080_CTRL_CMD_RC_RECOVERY_DISABLED = (0x00000000)
-NV2080_CTRL_CMD_RC_RECOVERY_ENABLED = (0x00000001)
-NV2080_CTRL_CMD_TDR_SET_TIMEOUT_STATE = (0x2080220f)
-NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS_MESSAGE_ID = (0xF)
-NV2080_CTRL_TDR_SET_TIMEOUT_STATE_CMD_GPU_RESET_BEGIN = (0x00000000)
-NV2080_CTRL_TDR_SET_TIMEOUT_STATE_CMD_GPU_RESET_END = (0x00000001)
-NV2080_CTRL_TDR_SET_TIMEOUT_STATE_STATUS_SUCCESS = (0x00000000)
-NV2080_CTRL_TDR_SET_TIMEOUT_STATE_STATUS_FAIL = (0x00000001)
-NV2080_CTRL_CMD_RC_SOFT_DISABLE_WATCHDOG = (0x20802210)
-NV2080_CTRL_CMD_SET_RC_INFO = (0x20802211)
-NV2080_CTRL_SET_RC_INFO_PARAMS_MESSAGE_ID = (0x11)
-NV2080_CTRL_CMD_GET_RC_INFO = (0x20802212)
-NV2080_CTRL_GET_RC_INFO_PARAMS_MESSAGE_ID = (0x12)
-NV2080_CTRL_CMD_RC_INFO_MODE_DISABLE = (0x00000000)
-NV2080_CTRL_CMD_RC_INFO_MODE_ENABLE = (0x00000001)
-NV2080_CTRL_CMD_RC_INFO_BREAK_DISABLE = (0x00000000)
-NV2080_CTRL_CMD_RC_INFO_BREAK_ENABLE = (0x00000001)
-NV2080_CTRL_CMD_DMA_INVALIDATE_TLB = (0x20802502)
-NV2080_CTRL_DMA_INVALIDATE_TLB_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_GRAPHICS_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_GRAPHICS_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VIDEO_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VIDEO_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_DISPLAY_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_DISPLAY_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_CAPTURE_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_CAPTURE_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_IFB_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_IFB_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MV_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MV_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MPEG_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_MPEG_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VLD_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_VLD_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_ENCRYPTION_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_ENCRYPTION_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_PERFMON_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_PERFMON_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_POSTPROCESS_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_POSTPROCESS_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_BAR_FALSE = (0x00000000)
-NV2080_CTRL_DMA_INVALIDATE_TLB_ENGINE_BAR_TRUE = (0x00000001)
-NV2080_CTRL_DMA_INFO_INDEX_SYSTEM_ADDRESS_SIZE = (0x000000000)
-NV2080_CTRL_DMA_INFO_INDEX_MAX = NV2080_CTRL_DMA_INFO_INDEX_SYSTEM_ADDRESS_SIZE
-NV2080_CTRL_CMD_DMA_GET_INFO = (0x20802503)
-NV2080_CTRL_DMA_GET_INFO_MAX_ENTRIES = (256)
-NV2080_CTRL_DMA_GET_INFO_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_INTERNAL_GPIO_PROGRAM_DIRECTION = (0x20802300)
+NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS_MESSAGE_ID = (0x00)
+NV2080_CTRL_CMD_INTERNAL_GPIO_PROGRAM_OUTPUT = (0x20802301)
+NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS_MESSAGE_ID = (0x01)
+NV2080_CTRL_CMD_INTERNAL_GPIO_READ_INPUT = (0x20802302)
+NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS_MESSAGE_ID = (0x02)
+NV2080_CTRL_CMD_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION = (0x20802303)
+NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS_MESSAGE_ID = (0x03)
+NV_GRID_LICENSE_INFO_MAX_LENGTH = (128)
+NV_GRID_LICENSE_FEATURE_VPC_EDITION = "GRID-Virtual-PC,2.0;Quadro-Virtual-DWS,5.0;GRID-Virtual-WS,2.0;GRID-Virtual-WS-Ext,2.0"
+NV_GRID_LICENSE_FEATURE_VAPPS_EDITION = "GRID-Virtual-Apps,3.0"
+NV_GRID_LICENSE_FEATURE_VIRTUAL_WORKSTATION_EDITION = "Quadro-Virtual-DWS,5.0;GRID-Virtual-WS,2.0;GRID-Virtual-WS-Ext,2.0"
+NV_GRID_LICENSE_FEATURE_GAMING_EDITION = "GRID-vGaming,8.0"
+NV_GRID_LICENSE_FEATURE_COMPUTE_EDITION = "NVIDIA-vComputeServer,9.0"
+NV_GRID_LICENSED_PRODUCT_VWS = "NVIDIA RTX Virtual Workstation"
+NV_GRID_LICENSED_PRODUCT_GAMING = "NVIDIA Cloud Gaming"
+NV_GRID_LICENSED_PRODUCT_VPC = "NVIDIA Virtual PC"
+NV_GRID_LICENSED_PRODUCT_VAPPS = "NVIDIA Virtual Applications"
+NV_GRID_LICENSED_PRODUCT_COMPUTE = "NVIDIA Virtual Compute Server"
+NV2080_CTRL_GPU_INFO_INDEX_ECID_LO32 = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_ECID_HI32 = (0x00000002)
+NV2080_CTRL_GPU_INFO_INDEX_MINOR_REVISION_EXT = (0x00000004)
+NV2080_CTRL_GPU_INFO_INDEX_NETLIST_REV0 = (0x00000012)
+NV2080_CTRL_GPU_INFO_INDEX_NETLIST_REV1 = (0x00000013)
+NV2080_CTRL_GPU_INFO_INDEX_ECID_EXTENDED = (0x0000001b)
+NV2080_CTRL_GPU_INFO_INDEX_SYSMEM_ACCESS = (0x0000001f)
+NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD = (0x00000022)
+NV2080_CTRL_GPU_INFO_INDEX_SURPRISE_REMOVAL_POSSIBLE = (0x00000025)
+NV2080_CTRL_GPU_INFO_INDEX_GLOBAL_POISON_FUSE_ENABLED = (0x00000027)
+NV2080_CTRL_GPU_INFO_INDEX_NVSWITCH_PROXY_DETECTED = (0x00000028)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SR_SUPPORT = (0x00000029)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SMC_MODE = (0x0000002a)
+NV2080_CTRL_GPU_INFO_INDEX_SPLIT_VAS_MGMT_SERVER_CLIENT_RM = (0x0000002b)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SM_VERSION = (0x0000002c)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_FLA_CAPABILITY = (0x0000002d)
+NV2080_CTRL_GPU_INFO_INDEX_PER_RUNLIST_CHANNEL_RAM = (0x0000002f)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_ATS_CAPABILITY = (0x00000030)
+NV2080_CTRL_GPU_INFO_INDEX_NVENC_STATS_REPORTING_STATE = (0x00000031)
+NV2080_CTRL_GPU_INFO_INDEX_4K_PAGE_ISOLATION_REQUIRED = (0x00000033)
+NV2080_CTRL_GPU_INFO_INDEX_DISPLAY_ENABLED = (0x00000034)
+NV2080_CTRL_GPU_INFO_INDEX_MOBILE_CONFIG_ENABLED = (0x00000035)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_PROFILING_CAPABILITY = (0x00000036)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_DEBUGGING_CAPABILITY = (0x00000037)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_LOCAL_EGM_CAPABILITY = (0x0000003a)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SELF_HOSTED_CAPABILITY = (0x0000003b)
+NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU = (0x0000003c)
+NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY = (0x0000003d)
+NV2080_CTRL_GPU_INFO_INDEX_IS_RESETLESS_MIG_SUPPORTED = (0x0000003f)
+NV2080_CTRL_GPU_INFO_MAX_LIST_SIZE = (0x00000041)
+NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_NONE = (0x00000000)
+NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_P = (0x00000001)
+NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_V = (0x00000002)
+NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_PV = (0x00000003)
+NV2080_CTRL_GPU_INFO_SYSMEM_ACCESS_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_SYSMEM_ACCESS_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_SURPRISE_REMOVAL_POSSIBLE_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_SURPRISE_REMOVAL_POSSIBLE_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GLOBAL_POISON_FUSE_ENABLED_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GLOBAL_POISON_FUSE_ENABLED_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_NVSWITCH_PROXY_DETECTED_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_NVSWITCH_PROXY_DETECTED_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SR_SUPPORT_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SR_SUPPORT_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_UNSUPPORTED = (0x00000000)
+NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_ENABLED = (0x00000001)
+NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_DISABLED = (0x00000002)
+NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_ENABLE_PENDING = (0x00000003)
+NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_DISABLE_PENDING = (0x00000004)
+NV2080_CTRL_GPU_INFO_SPLIT_VAS_MGMT_SERVER_CLIENT_RM_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_SPLIT_VAS_MGMT_SERVER_CLIENT_RM_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_FLA_CAPABILITY_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_FLA_CAPABILITY_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_PER_RUNLIST_CHANNEL_RAM_DISABLED = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_PER_RUNLIST_CHANNEL_RAM_ENABLED = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_ATS_CAPABILITY_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_ATS_CAPABILITY_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_NVENC_STATS_REPORTING_STATE_DISABLED = (0x00000000)
+NV2080_CTRL_GPU_INFO_NVENC_STATS_REPORTING_STATE_ENABLED = (0x00000001)
+NV2080_CTRL_GPU_INFO_NVENC_STATS_REPORTING_STATE_NOT_SUPPORTED = (0x00000002)
+NV2080_CTRL_GPU_INFO_INDEX_4K_PAGE_ISOLATION_REQUIRED_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_4K_PAGE_ISOLATION_REQUIRED_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_DISPLAY_ENABLED_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_DISPLAY_ENABLED_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_MOBILE_CONFIG_ENABLED_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_MOBILE_CONFIG_ENABLED_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_PROFILING_CAPABILITY_DISABLED = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_PROFILING_CAPABILITY_ENABLED = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_DEBUGGING_CAPABILITY_DISABLED = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_DEBUGGING_CAPABILITY_ENABLED = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_LOCAL_EGM_CAPABILITY_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_LOCAL_EGM_CAPABILITY_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SELF_HOSTED_CAPABILITY_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_GPU_SELF_HOSTED_CAPABILITY_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY_YES = (0x00000001)
+NV2080_CTRL_GPU_INFO_INDEX_IS_RESETLESS_MIG_SUPPORTED_NO = (0x00000000)
+NV2080_CTRL_GPU_INFO_INDEX_IS_RESETLESS_MIG_SUPPORTED_YES = (0x00000001)
+NV2080_CTRL_CMD_GPU_GET_INFO = (0x20800101)
+NV2080_CTRL_GPU_GET_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_GPU_GET_INFO_V2 = (0x20800102)
+NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_GPU_GET_NAME_STRING = (0x20800110)
+NV2080_GPU_MAX_NAME_STRING_LENGTH = (0x0000040)
+NV2080_CTRL_GPU_GET_NAME_STRING_FLAGS_TYPE_ASCII = (0x00000000)
+NV2080_CTRL_GPU_GET_NAME_STRING_FLAGS_TYPE_UNICODE = (0x00000001)
+NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS_MESSAGE_ID = (0x10)
+NV2080_CTRL_CMD_GPU_GET_SHORT_NAME_STRING = (0x20800111)
+NV2080_CTRL_GPU_GET_SHORT_NAME_STRING_PARAMS_MESSAGE_ID = (0x11)
+NV2080_CTRL_CMD_GPU_SET_POWER = (0x20800112)
+NV2080_CTRL_GPU_SET_POWER_PARAMS_MESSAGE_ID = (0x12)
+NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_0 = (0x00000000)
+NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_1 = (0x00000001)
+NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_2 = (0x00000002)
+NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_3 = (0x00000003)
+NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_4 = (0x00000004)
+NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_7 = (0x00000007)
+NV2080_CTRL_CMD_GPU_GET_SDM = (0x20800118)
+NV2080_CTRL_GPU_GET_SDM_PARAMS_MESSAGE_ID = (0x18)
+NV2080_CTRL_CMD_GPU_SET_SDM = (0x20800120)
+NV2080_CTRL_GPU_SET_SDM_PARAMS_MESSAGE_ID = (0x20)
+NV2080_CTRL_CMD_GPU_GET_SIMULATION_INFO = (0x20800119)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_PARAMS_MESSAGE_ID = (0x19)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_NONE = (0x00000000)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_MODS_AMODEL = (0x00000001)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_LIVE_AMODEL = (0x00000002)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_FMODEL = (0x00000003)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_RTL = (0x00000004)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_EMU = (0x00000005)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_EMU_LOW_POWER = (0x00000006)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_DFPGA = (0x00000007)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_DFPGA_RTL = (0x00000008)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_DFPGA_FMODEL = (0x00000009)
+NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_UNKNOWN = (0xFFFFFFFF)
+NV2080_CTRL_GPU_REG_OP_READ_32 = (0x00000000)
+NV2080_CTRL_GPU_REG_OP_WRITE_32 = (0x00000001)
+NV2080_CTRL_GPU_REG_OP_READ_64 = (0x00000002)
+NV2080_CTRL_GPU_REG_OP_WRITE_64 = (0x00000003)
+NV2080_CTRL_GPU_REG_OP_READ_08 = (0x00000004)
+NV2080_CTRL_GPU_REG_OP_WRITE_08 = (0x00000005)
+NV2080_CTRL_GPU_REG_OP_TYPE_GLOBAL = (0x00000000)
+NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX = (0x00000001)
+NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_TPC = (0x00000002)
+NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_SM = (0x00000004)
+NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_CROP = (0x00000008)
+NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_ZROP = (0x00000010)
+NV2080_CTRL_GPU_REG_OP_TYPE_FB = (0x00000020)
+NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_QUAD = (0x00000040)
+NV2080_CTRL_GPU_REG_OP_TYPE_DEVICE = (0x00000080)
+NV2080_CTRL_GPU_REG_OP_STATUS_SUCCESS = (0x00)
+NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_OP = (0x01)
+NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_TYPE = (0x02)
+NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_OFFSET = (0x04)
+NV2080_CTRL_GPU_REG_OP_STATUS_UNSUPPORTED_OP = (0x08)
+NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_MASK = (0x10)
+NV2080_CTRL_GPU_REG_OP_STATUS_NOACCESS = (0x20)
+NV2080_CTRL_CMD_GPU_EXEC_REG_OPS = (0x20800122)
+NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_MESSAGE_ID = (0x22)
+NV2080_CTRL_CMD_GPU_GET_ENGINES = (0x20800123)
+NV2080_CTRL_GPU_GET_ENGINES_PARAMS_MESSAGE_ID = (0x23)
+NV2080_CTRL_CMD_GPU_GET_ENGINES_V2 = (0x20800170)
+NV2080_GPU_MAX_ENGINES_LIST_SIZE = 0x54
+NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS_MESSAGE_ID = (0x70)
+NV2080_CTRL_CMD_GPU_GET_ENGINE_CLASSLIST = (0x20800124)
+NV2080_CTRL_GPU_GET_ENGINE_CLASSLIST_PARAMS_MESSAGE_ID = (0x24)
+NV2080_CTRL_CMD_GPU_GET_ENGINE_FAULT_INFO = (0x20800125)
+NV2080_CTRL_GPU_GET_ENGINE_FAULT_INFO_PARAMS_MESSAGE_ID = (0x25)
+NV2080_CTRL_CMD_GPU_QUERY_MODE = (0x20800128)
+NV2080_CTRL_GPU_QUERY_MODE_UNKNOWN_MODE = (0x00000000)
+NV2080_CTRL_GPU_QUERY_MODE_GRAPHICS_MODE = (0x00000001)
+NV2080_CTRL_GPU_QUERY_MODE_COMPUTE_MODE = (0x00000002)
+NV2080_CTRL_GPU_QUERY_MODE_PARAMS_MESSAGE_ID = (0x28)
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_MAIN = 0
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PM = 1
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PATCH = 2
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_BUFFER_BUNDLE_CB = 3
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PAGEPOOL = 4
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_ATTRIBUTE_CB = 5
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_RTV_CB_GLOBAL = 6
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_GFXP_POOL = 7
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_GFXP_CTRL_BLK = 8
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_FECS_EVENT = 9
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PRIV_ACCESS_MAP = 10
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_UNRESTRICTED_PRIV_ACCESS_MAP = 11
+NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_GLOBAL_PRIV_ACCESS_MAP = 12
+NV2080_CTRL_GPU_PROMOTE_CONTEXT_MAX_ENTRIES = 16
+NV2080_CTRL_CMD_GPU_PROMOTE_CTX = (0x2080012b)
+NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_MESSAGE_ID = (0x2B)
+NV2080_CTRL_CMD_GPU_EVICT_CTX = (0x2080012c)
+NV2080_CTRL_GPU_EVICT_CTX_PARAMS_MESSAGE_ID = (0x2C)
+NV2080_CTRL_CMD_GPU_INITIALIZE_CTX = (0x2080012d)
+NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_MESSAGE_ID = (0x2D)
+NV2080_CTRL_GPU_INITIALIZE_CTX_APERTURE_VIDMEM = (0x00000000)
+NV2080_CTRL_GPU_INITIALIZE_CTX_APERTURE_COH_SYS = (0x00000001)
+NV2080_CTRL_GPU_INITIALIZE_CTX_APERTURE_NCOH_SYS = (0x00000002)
+NV2080_CTRL_GPU_INITIALIZE_CTX_GPU_CACHEABLE_YES = (0x00000000)
+NV2080_CTRL_GPU_INITIALIZE_CTX_GPU_CACHEABLE_NO = (0x00000001)
+NV2080_CTRL_GPU_INITIALIZE_CTX_PRESERVE_CTX_NO = (0x00000000)
+NV2080_CTRL_GPU_INITIALIZE_CTX_PRESERVE_CTX_YES = (0x00000001)
+NV2080_CTRL_CMD_GPU_QUERY_ECC_INTR = (0x2080012e)
+NV2080_CTRL_CMD_GPU_QUERY_ECC_STATUS = (0x2080012f)
+NV2080_CTRL_GPU_ECC_UNIT_GSP = (0x0000001D)
+NV2080_CTRL_GPU_ECC_UNIT_COUNT = (0x00000024)
+NV2080_CTRL_GPU_QUERY_ECC_STATUS_FLAGS_TYPE_FILTERED = (0x00000000)
+NV2080_CTRL_GPU_QUERY_ECC_STATUS_FLAGS_TYPE_RAW = (0x00000001)
+NV2080_CTRL_GPU_QUERY_ECC_STATUS_UNC_ERR_FALSE = 0
+NV2080_CTRL_GPU_QUERY_ECC_STATUS_UNC_ERR_TRUE = 1
+NV2080_CTRL_GPU_QUERY_ECC_STATUS_UNC_ERR_INDETERMINATE = 2
+NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_MESSAGE_ID = (0x2F)
+NV2080_CTRL_CMD_GPU_SET_COMPUTE_MODE_RULES = (0x20800130)
+NV2080_CTRL_GPU_COMPUTE_MODE_RULES_NONE = (0x00000000)
+NV2080_CTRL_GPU_COMPUTE_MODE_RULES_EXCLUSIVE_COMPUTE = (0x00000001)
+NV2080_CTRL_GPU_COMPUTE_MODE_RULES_COMPUTE_PROHIBITED = (0x00000002)
+NV2080_CTRL_GPU_COMPUTE_MODE_RULES_EXCLUSIVE_COMPUTE_PROCESS = (0x00000003)
+NV2080_CTRL_GPU_SET_COMPUTE_MODE_RULES_PARAMS_MESSAGE_ID = (0x30)
+NV2080_CTRL_CMD_GPU_QUERY_COMPUTE_MODE_RULES = (0x20800131)
+NV2080_CTRL_GPU_QUERY_COMPUTE_MODE_RULES_PARAMS_MESSAGE_ID = (0x31)
+NV2080_CTRL_CMD_GPU_QUERY_ECC_CONFIGURATION = (0x20800133)
+NV2080_CTRL_GPU_ECC_CONFIGURATION_DISABLED = (0x00000000)
+NV2080_CTRL_GPU_ECC_CONFIGURATION_ENABLED = (0x00000001)
+NV2080_CTRL_GPU_QUERY_ECC_CONFIGURATION_PARAMS_MESSAGE_ID = (0x33)
+NV2080_CTRL_CMD_GPU_SET_ECC_CONFIGURATION = (0x20800134)
+NV2080_CTRL_GPU_ECC_CONFIGURATION_DISABLE = (0x00000000)
+NV2080_CTRL_GPU_ECC_CONFIGURATION_ENABLE = (0x00000001)
+NV2080_CTRL_GPU_SET_ECC_CONFIGURATION_PARAMS_MESSAGE_ID = (0x34)
+NV2080_CTRL_CMD_GPU_RESET_ECC_ERROR_STATUS = (0x20800136)
+NV2080_CTRL_GPU_ECC_ERROR_STATUS_NONE = (0x00000000)
+NV2080_CTRL_GPU_ECC_ERROR_STATUS_VOLATILE = (0x00000001)
+NV2080_CTRL_GPU_ECC_ERROR_STATUS_AGGREGATE = (0x00000002)
+NV2080_CTRL_GPU_RESET_ECC_ERROR_STATUS_FLAGS_FORCE_PURGE_FALSE = 0
+NV2080_CTRL_GPU_RESET_ECC_ERROR_STATUS_FLAGS_FORCE_PURGE_TRUE = 1
+NV2080_CTRL_GPU_RESET_ECC_ERROR_STATUS_PARAMS_MESSAGE_ID = (0x36)
+NV2080_CTRL_CMD_GPU_GET_FERMI_GPC_INFO = (0x20800137)
+NV2080_CTRL_GPU_GET_FERMI_GPC_INFO_PARAMS_MESSAGE_ID = (0x37)
+NV2080_CTRL_CMD_GPU_GET_FERMI_TPC_INFO = (0x20800138)
+NV2080_CTRL_GPU_GET_FERMI_TPC_INFO_PARAMS_MESSAGE_ID = (0x38)
+NV2080_CTRL_CMD_GPU_GET_FERMI_ZCULL_INFO = (0x20800139)
+NV2080_CTRL_GPU_GET_FERMI_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x39)
+NV2080_CTRL_CMD_GPU_GET_OEM_BOARD_INFO = (0x2080013f)
+NV2080_GPU_MAX_MARKETING_NAME_LENGTH = (0x00000018)
+NV2080_GPU_MAX_SERIAL_NUMBER_LENGTH = (0x00000010)
+NV2080_GPU_MAX_MEMORY_PART_ID_LENGTH = (0x00000014)
+NV2080_GPU_MAX_MEMORY_DATE_CODE_LENGTH = (0x00000006)
+NV2080_GPU_MAX_PRODUCT_PART_NUMBER_LENGTH = (0x00000014)
+NV2080_CTRL_GPU_GET_OEM_BOARD_INFO_PARAMS_MESSAGE_ID = (0x3F)
+NV2080_CTRL_CMD_GPU_GET_ID = (0x20800142)
+NV2080_CTRL_GPU_GET_ID_PARAMS_MESSAGE_ID = (0x42)
+NV2080_CTRL_CMD_GPU_SET_GPU_DEBUG_MODE = (0x20800143)
+NV2080_CTRL_GPU_SET_GPU_DEBUG_MODE_PARAMS_MESSAGE_ID = (0x43)
+NV2080_CTRL_GPU_DEBUG_MODE_ENABLED = (0x00000001)
+NV2080_CTRL_GPU_DEBUG_MODE_DISABLED = (0x00000002)
+NV2080_CTRL_CMD_GPU_GET_GPU_DEBUG_MODE = (0x20800144)
+NV2080_CTRL_GPU_GET_GPU_DEBUG_MODE_PARAMS_MESSAGE_ID = (0x44)
+NV2080_CTRL_CMD_GPU_GET_ENGINE_PARTNERLIST = (0x20800147)
+NV2080_CTRL_GPU_MAX_ENGINE_PARTNERS = (0x00000020)
+NV2080_CTRL_GPU_GET_ENGINE_PARTNERLIST_PARAMS_MESSAGE_ID = (0x47)
+NV2080_CTRL_CMD_GPU_GET_GID_INFO = (0x2080014a)
+NV2080_GPU_MAX_GID_LENGTH = (0x000000100)
+NV2080_GPU_MAX_SHA1_BINARY_GID_LENGTH = (0x000000010)
+NV2080_CTRL_GPU_GET_GID_INFO_PARAMS_MESSAGE_ID = (0x4A)
+NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_ASCII = (0x00000000)
+NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY = (0x00000002)
+NV2080_GPU_CMD_GPU_GET_GID_FLAGS_TYPE_SHA1 = (0x00000000)
+NV2080_CTRL_CMD_GPU_GET_INFOROM_OBJECT_VERSION = (0x2080014b)
+NV2080_CTRL_GPU_INFOROM_OBJ_TYPE_LEN = 3
+NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS_MESSAGE_ID = (0x4B)
+NV2080_CTRL_CMD_SET_GPU_OPTIMUS_INFO = (0x2080014c)
+NV2080_CTRL_GPU_OPTIMUS_INFO_PARAMS_MESSAGE_ID = (0x4C)
+NV2080_CTRL_CMD_GPU_GET_IP_VERSION = (0x2080014d)
+NV2080_CTRL_GPU_GET_IP_VERSION_PARAMS_MESSAGE_ID = (0x4D)
+NV2080_CTRL_GPU_GET_IP_VERSION_DISPLAY = (0x00000001)
+NV2080_CTRL_GPU_GET_IP_VERSION_HDACODEC = (0x00000002)
+NV2080_CTRL_GPU_GET_IP_VERSION_PMGR = (0x00000003)
+NV2080_CTRL_GPU_GET_IP_VERSION_PPWR_PMU = (0x00000004)
+NV2080_CTRL_GPU_GET_IP_VERSION_DISP_FALCON = (0x00000005)
+NV2080_CTRL_GPU_ILLUM_ATTRIB_LOGO_BRIGHTNESS = 0
+NV2080_CTRL_GPU_ILLUM_ATTRIB_SLI_BRIGHTNESS = 1
+NV2080_CTRL_CMD_GPU_QUERY_ILLUM_SUPPORT = (0x20800153)
+NV2080_CTRL_CMD_GPU_QUERY_ILLUM_SUPPORT_PARAMS_MESSAGE_ID = (0x53)
+NV2080_CTRL_CMD_GPU_GET_ILLUM = (0x20800154)
+NV2080_CTRL_GPU_GET_ILLUM_PARAMS_MESSAGE_ID = (0x54)
+NV2080_CTRL_CMD_GPU_SET_ILLUM = (0x20800155)
+NV2080_CTRL_GPU_SET_ILLUM_PARAMS_MESSAGE_ID = (0x55)
+NV2080_CTRL_CMD_GPU_GET_INFOROM_IMAGE_VERSION = (0x20800156)
+NV2080_CTRL_GPU_INFOROM_IMAGE_VERSION_LEN = 16
+NV2080_CTRL_GPU_GET_INFOROM_IMAGE_VERSION_PARAMS_MESSAGE_ID = (0x56)
+NV2080_CTRL_CMD_GPU_QUERY_INFOROM_ECC_SUPPORT = (0x20800157)
+NV2080_CTRL_CMD_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO = (0x2080015a)
+NV2080_CTRL_MAX_PHYSICAL_BRIDGE = (100)
+NV2080_CTRL_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO_PARAMS_MESSAGE_ID = (0x5A)
+NV2080_CTRL_CMD_GPU_GET_ALL_BRIDGES_UPSTREAM_OF_GPU = (0x2080015b)
+NV2080_CTRL_GPU_GET_ALL_BRIDGES_UPSTREAM_OF_GPU_PARAMS_MESSAGE_ID = (0x5B)
+NV2080_CTRL_CMD_GPU_QUERY_SCRUBBER_STATUS = (0x2080015f)
+NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_PARAMS_MESSAGE_ID = (0x5F)
+NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_SCRUBBER_RUNNING = (0x00000000)
+NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_SCRUBBER_IDLE = (0x00000001)
+NV2080_CTRL_CMD_GPU_GET_VPR_CAPS = (0x20800160)
+NV2080_CTRL_GPU_GET_VPR_CAPS_PARAMS_MESSAGE_ID = (0x60)
+NV2080_CTRL_CMD_GPU_HANDLE_GPU_SR = (0x20800167)
+NV2080_CTRL_CMD_GPU_GET_PES_INFO = (0x20800168)
+NV2080_CTRL_CMD_GPU_GET_PES_INFO_MAX_TPC_PER_GPC_COUNT = 10
+NV2080_CTRL_GPU_GET_PES_INFO_PARAMS_MESSAGE_ID = (0x68)
+NV2080_CTRL_CMD_GPU_GET_OEM_INFO = (0x20800169)
+NV2080_GPU_MAX_OEM_INFO_LENGTH = (0x000001F8)
+NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS_MESSAGE_ID = (0x69)
+NV2080_CTRL_CMD_GPU_GET_VPR_INFO = (0x2080016b)
+NV2080_CTRL_GPU_GET_VPR_INFO_PARAMS_MESSAGE_ID = (0x6B)
+NV2080_CTRL_CMD_GPU_GET_ENCODER_CAPACITY = (0x2080016c)
+NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_PARAMS_MESSAGE_ID = (0x6C)
+NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_STATS = (0x2080016d)
+NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_STATS_PARAMS_MESSAGE_ID = (0x6D)
+NV2080_CTRL_GPU_NVENC_SESSION_INFO_MAX_COPYOUT_ENTRIES = 0x200
+NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_PARAMS_MESSAGE_ID = (0x6E)
+NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO = (0x2080016e)
+NV2080_CTRL_GPU_SET_FABRIC_BASE_ADDR_PARAMS_MESSAGE_ID = (0x6F)
+NV2080_CTRL_CMD_GPU_SET_FABRIC_BASE_ADDR = (0x2080016f)
+NV2080_CTRL_GPU_VIRTUAL_INTERRUPT_PARAMS_MESSAGE_ID = (0x72)
+NV2080_CTRL_CMD_GPU_VIRTUAL_INTERRUPT = (0x20800172)
+NV2080_CTRL_CMD_GPU_QUERY_FUNCTION_STATUS_PARAMS_MESSAGE_ID = (0x73)
+NV2080_CTRL_CMD_GPU_QUERY_FUNCTION_STATUS = (0x20800173)
+NV_GI_UUID_LEN = 16
+NV2080_CTRL_GPU_PARTITION_ID_INVALID = 0xFFFFFFFF
+NV2080_CTRL_GPU_MAX_PARTITIONS = 0x00000008
+NV2080_CTRL_GPU_MAX_PARTITION_IDS = 0x00000009
+NV2080_CTRL_GPU_MAX_SMC_IDS = 0x00000008
+NV2080_CTRL_GPU_MAX_GPC_PER_SMC = 0x0000000c
+NV2080_CTRL_GPU_MAX_CE_PER_SMC = 0x00000008
+NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_FULL = 0x00000000
+NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_HALF = 0x00000001
+NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_QUARTER = 0x00000002
+NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_EIGHTH = 0x00000003
+NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE__SIZE = 4
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_FULL = 0x00000000
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_HALF = 0x00000001
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_HALF = 0x00000002
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_QUARTER = 0x00000003
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_QUARTER = 0x00000004
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_EIGHTH = 0x00000005
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_06 = 0x00000006
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_07 = 0x00000007
+NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE__SIZE = 8
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_FULL = 0x00000001
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_HALF = 0x00000002
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_MINI_HALF = 0x00000003
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_QUARTER = 0x00000004
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_EIGHTH = 0x00000005
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_RESERVED_INTERNAL_06 = 0x00000006
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_RESERVED_INTERNAL_07 = 0x00000007
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_NONE = 0x00000000
+NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE__SIZE = 8
+NV2080_CTRL_GPU_PARTITION_MAX_TYPES = 40
+NV2080_CTRL_GPU_PARTITION_FLAG_REQ_DEC_JPG_OFA_DISABLE = 0
+NV2080_CTRL_GPU_PARTITION_FLAG_REQ_DEC_JPG_OFA_ENABLE = 1
+NV2080_CTRL_GPU_PARTITION_FLAG_PLACE_AT_SPAN_DISABLE = 0
+NV2080_CTRL_GPU_PARTITION_FLAG_PLACE_AT_SPAN_ENABLE = 1
+NV2080_CTRL_GPU_SET_PARTITIONS_PARAMS_MESSAGE_ID = (0x74)
+NV2080_CTRL_CMD_GPU_SET_PARTITIONS = (0x20800174)
+NV2080_CTRL_GPU_GET_PARTITIONS_PARAMS_MESSAGE_ID = (0x75)
+NV2080_CTRL_CMD_GPU_GET_PARTITIONS = (0x20800175)
+NV2080_CTRL_CMD_GPU_CONFIGURE_PARTITION = (0x20800176)
+NV2080_CTRL_GPU_CONFIGURE_PARTITION_PARAMS_MESSAGE_ID = (0x76)
+NV2080_CTRL_GPU_FAULT_PACKET_SIZE = 32
+NV2080_CTRL_CMD_GPU_REPORT_NON_REPLAYABLE_FAULT = (0x20800177)
+NV2080_CTRL_GPU_REPORT_NON_REPLAYABLE_FAULT_PARAMS_MESSAGE_ID = (0x77)
+NV2080_CTRL_CMD_GPU_EXEC_REG_OPS_VGPU = (0x20800178)
+NV2080_CTRL_GPU_EXEC_REG_OPS_VGPU_PARAMS_MESSAGE_ID = (0x78)
+NV2080_CTRL_CMD_GPU_GET_ENGINE_RUNLIST_PRI_BASE = (0x20800179)
+NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS_MESSAGE_ID = (0x79)
+NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_NULL = (0xFFFFFFFF)
+NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_ERROR = (0xFFFFFFFB)
+NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_INVALID = (0xFFFFFFFF)
+NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_ERROR = (0xFFFFFFFB)
+NV2080_CTRL_CMD_GPU_GET_HW_ENGINE_ID = (0x2080017a)
+NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS_MESSAGE_ID = (0x7A)
+NV2080_CTRL_GPU_GET_HW_ENGINE_ID_NULL = (0xFFFFFFFF)
+NV2080_CTRL_GPU_GET_HW_ENGINE_ID_ERROR = (0xFFFFFFFB)
+NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_STATS = (0x2080017b)
+NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_STATS_PARAMS_MESSAGE_ID = (0x7B)
+NV2080_CTRL_NVFBC_SESSION_FLAG_DIFFMAP_ENABLED = 0x00000001
+NV2080_CTRL_NVFBC_SESSION_FLAG_CLASSIFICATIONMAP_ENABLED = 0x00000002
+NV2080_CTRL_NVFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_NO_WAIT = 0x00000004
+NV2080_CTRL_NVFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_INFINITE = 0x00000008
+NV2080_CTRL_NVFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_TIMEOUT = 0x00000010
+NV2080_GPU_NVFBC_MAX_SESSION_COUNT = 256
+NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_INFO_PARAMS_MESSAGE_ID = (0x7C)
+NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_INFO = (0x2080017c)
+NV2080_CTRL_GPU_GET_FIRST_ASYNC_CE_IDX_PARAMS_MESSAGE_ID = (0xe6)
+NV2080_CTRL_CMD_GPU_GET_FIRST_ASYNC_CE_IDX = (0x208001e6)
+NV2080_CTRL_CMD_GPU_GET_VMMU_SEGMENT_SIZE = (0x2080017e)
+NV2080_CTRL_GPU_GET_VMMU_SEGMENT_SIZE_PARAMS_MESSAGE_ID = (0x7E)
+NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_32MB = 0x02000000
+NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_64MB = 0x04000000
+NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_128MB = 0x08000000
+NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_256MB = 0x10000000
+NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_512MB = 0x20000000
+NV2080_CTRL_CMD_GPU_GET_PARTITION_CAPACITY = (0x20800181)
+NV2080_CTRL_GPU_GET_PARTITION_CAPACITY_PARAMS_MESSAGE_ID = (0x81)
+NV2080_CTRL_CMD_GPU_GET_CACHED_INFO = (0x20800182)
+NV2080_CTRL_GPU_GET_CACHED_INFO_PARAMS_MESSAGE_ID = (0x82)
+NV2080_CTRL_CMD_GPU_SET_PARTITIONING_MODE = (0x20800183)
+NV2080_CTRL_GPU_SET_PARTITIONING_MODE_REPARTITIONING_LEGACY = 0
+NV2080_CTRL_GPU_SET_PARTITIONING_MODE_REPARTITIONING_MAX_PERF = 1
+NV2080_CTRL_GPU_SET_PARTITIONING_MODE_REPARTITIONING_FAST_RECONFIG = 2
+NV2080_CTRL_GPU_SET_PARTITIONING_MODE_PARAMS_MESSAGE_ID = (0x83)
+NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS_MESSAGE_ID = (0x85)
+NV2080_CTRL_CMD_GPU_DESCRIBE_PARTITIONS = (0x20800185)
+NV2080_CTRL_CMD_GPU_GET_MAX_SUPPORTED_PAGE_SIZE = (0x20800188)
+NV2080_CTRL_GPU_GET_MAX_SUPPORTED_PAGE_SIZE_PARAMS_MESSAGE_ID = (0x88)
+NV2080_CTRL_GPU_GET_NUM_MMUS_PER_GPC_PARAMS_MESSAGE_ID = (0x8A)
+NV2080_CTRL_CMD_GPU_GET_NUM_MMUS_PER_GPC = (0x2080018a)
+NV2080_CTRL_GPU_GET_ACTIVE_PARTITION_IDS_PARAMS_MESSAGE_ID = (0x8B)
+NV2080_CTRL_CMD_GPU_GET_ACTIVE_PARTITION_IDS = (0x2080018b)
+NV2080_CTRL_CMD_GPU_GET_PIDS = (0x2080018d)
+NV2080_CTRL_GPU_GET_PIDS_MAX_COUNT = 950
+NV2080_CTRL_GPU_GET_PIDS_PARAMS_MESSAGE_ID = (0x8D)
+NV2080_CTRL_GPU_GET_PIDS_ID_TYPE_CLASS = (0x00000000)
+NV2080_CTRL_GPU_GET_PIDS_ID_TYPE_VGPU_GUEST = (0x00000001)
+NV2080_CTRL_GPU_PID_INFO_INDEX_VIDEO_MEMORY_USAGE = (0x00000000)
+NV2080_CTRL_GPU_PID_INFO_INDEX_MAX = NV2080_CTRL_GPU_PID_INFO_INDEX_VIDEO_MEMORY_USAGE
+NV2080_CTRL_CMD_GPU_GET_PID_INFO = (0x2080018e)
+NV2080_CTRL_GPU_GET_PID_INFO_MAX_COUNT = 200
+NV2080_CTRL_GPU_GET_PID_INFO_PARAMS_MESSAGE_ID = (0x8E)
+NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT = (0x20800192)
+NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_INVALID = 0
+NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_BAR1 = 1
+NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_BAR2 = 2
+NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_PHYSICAL = 3
+NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_UNBOUND_INSTANCE = 4
+NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_MESSAGE_ID = (0x92)
+NV2080_CTRL_GPU_COMPUTE_POLICY_TIMESLICE = 0
+NV2080_CTRL_GPU_COMPUTE_POLICY_MAX = 1
+NV2080_CTRL_GPU_SET_COMPUTE_POLICY_CONFIG_PARAMS_MESSAGE_ID = (0x94)
+NV2080_CTRL_CMD_GPU_GET_COMPUTE_POLICY_CONFIG = (0x20800195)
+NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_LIST_MAX = 32
+NV2080_CTRL_GPU_GET_COMPUTE_POLICY_CONFIG_PARAMS_MESSAGE_ID = (0x95)
+NV2080_CTRL_CMD_GPU_GET_GFID = (0x20800196)
+NV2080_CTRL_GPU_GET_GFID_PARAMS_MESSAGE_ID = (0x96)
+NV2080_CTRL_CMD_GPU_UPDATE_GFID_P2P_CAPABILITY = (0x20800197)
+NV2080_CTRL_CMD_GPU_UPDATE_GFID_P2P_CAPABILITY_PARAMS_MESSAGE_ID = (0x97)
+NV2080_CTRL_CMD_GPU_VALIDATE_MEM_MAP_REQUEST = (0x20800198)
+NV2080_CTRL_GPU_VALIDATE_MEM_MAP_REQUEST_PARAMS_MESSAGE_ID = (0x98)
+NV2080_CTRL_CMD_GPU_SET_EGM_GPA_FABRIC_BASE_ADDR = (0x20800199)
+NV2080_CTRL_GPU_SET_EGM_GPA_FABRIC_BASE_ADDR_PARAMS_MESSAGE_ID = (0x99)
+NV2080_CTRL_CMD_GPU_GET_ENGINE_LOAD_TIMES = (0x2080019b)
+NV2080_CTRL_GPU_MAX_ENGINE_OBJECTS = 0xC8
+NV2080_CTRL_GPU_GET_ENGINE_LOAD_TIMES_PARAMS_MESSAGE_ID = (0x9B)
+NV2080_CTRL_CMD_GPU_GET_ID_NAME_MAPPING = (0x2080019c)
+NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS_MESSAGE_ID = (0x9C)
+NV2080_CTRL_CMD_GPU_EXEC_REG_OPS_NOPTRS = (0x2080019d)
+NV2080_CTRL_REG_OPS_ARRAY_MAX = 100
+NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS_MESSAGE_ID = (0x9D)
+NV2080_GET_P2P_CAPS_UUID_LEN = 16
+NV2080_CTRL_CMD_GET_P2P_CAPS = (0x208001a0)
+NV2080_CTRL_GET_P2P_CAPS_PARAMS_MESSAGE_ID = (0xA0)
+NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS_MESSAGE_ID = (0xA2)
+NV2080_CTRL_CMD_GPU_GET_COMPUTE_PROFILES = (0x208001a2)
+NV2080_CTRL_GPU_FABRIC_PROBE_STATE_UNSUPPORTED = 0
+NV2080_CTRL_GPU_FABRIC_PROBE_STATE_NOT_STARTED = 1
+NV2080_CTRL_GPU_FABRIC_PROBE_STATE_IN_PROGRESS = 2
+NV2080_CTRL_GPU_FABRIC_PROBE_STATE_COMPLETE = 3
+NV2080_GPU_FABRIC_CLUSTER_UUID_LEN = 16
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_NOT_SUPPORTED = 0
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_TRUE = 1
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_FALSE = 2
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ROUTE_UPDATE_NOT_SUPPORTED = 0
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ROUTE_UPDATE_TRUE = 1
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ROUTE_UPDATE_FALSE = 2
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_CONNECTION_UNHEALTHY_NOT_SUPPORTED = 0
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_CONNECTION_UNHEALTHY_TRUE = 1
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_CONNECTION_UNHEALTHY_FALSE = 2
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_NOT_SUPPORTED = 0
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_TRUE = 1
+NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_FALSE = 2
+NV2080_CTRL_CMD_GET_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xA3)
+NV2080_CTRL_CMD_GET_GPU_FABRIC_PROBE_INFO = (0x208001a3)
+NV2080_CTRL_CMD_GPU_GET_CHIP_DETAILS = (0x208001a4)
+GPU_PART_NUMBER_FMT = "%4X-%s-%X%X"
+NV2080_MAX_CHIP_SKU_LENGTH = 0x00000004
+NV2080_CTRL_GPU_GET_CHIP_DETAILS_PARAMS_MESSAGE_ID = (0xA4)
+NV2080_CTRL_CMD_GPU_MOVE_RUNLISTS_ALLOCATION_TO_SUBHEAP = (0x208001a5)
+NV2080_CTRL_GPU_MOVE_RUNLISTS_ALLOCATION_TO_SUBHEAP_PARAMS_MESSAGE_ID = (0xA5)
+NV2080_CTRL_CMD_GPU_MIGRATABLE_OPS = (0x208001a6)
+NV2080_CTRL_CMD_GPU_MIGRATABLE_OPS_GSP = (0x208001a7)
+NV2080_CTRL_CMD_GPU_MIGRATABLE_OPS_VGPU = (0x208001a8)
+NV2080_CTRL_MIGRATABLE_OPS_ARRAY_MAX = 50
+NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_MESSAGE_ID = (0xA6)
+NV2080_CTRL_GPU_MIGRATABLE_OPS_GSP_PARAMS_MESSAGE_ID = (0xA7)
+NV2080_CTRL_GPU_MIGRATABLE_OPS_VGPU_PARAMS_MESSAGE_ID = (0xA8)
+NV2080_CTRL_CMD_GPU_MARK_DEVICE_FOR_RESET = (0x208001a9)
+NV2080_CTRL_CMD_GPU_UNMARK_DEVICE_FOR_RESET = (0x208001aa)
+NV2080_CTRL_CMD_GPU_GET_RESET_STATUS = (0x208001ab)
+NV2080_CTRL_GPU_GET_RESET_STATUS_PARAMS_MESSAGE_ID = (0xAB)
+NV2080_CTRL_CMD_GPU_MARK_DEVICE_FOR_DRAIN_AND_RESET = (0x208001ac)
+NV2080_CTRL_CMD_GPU_UNMARK_DEVICE_FOR_DRAIN_AND_RESET = (0x208001ad)
+NV2080_CTRL_CMD_GPU_GET_DRAIN_AND_RESET_STATUS = (0x208001ae)
+NV2080_CTRL_GPU_GET_DRAIN_AND_RESET_STATUS_PARAMS_MESSAGE_ID = (0xAE)
+NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2_PARAMS_MESSAGE_ID = (0xAF)
+NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2 = (0x208001af)
+NV2080_CTRL_GPU_MAX_CONSTRUCTED_FALCONS = 0x40
+NV2080_CTRL_CMD_GPU_GET_CONSTRUCTED_FALCON_INFO = (0x208001b0)
+NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS_MESSAGE_ID = (0xB0)
+NV2080_CTRL_CMD_GPU_GET_VF_CAPS = (0x208001b1)
+NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS_MESSAGE_ID = (0xB1)
+NV2080_CTRL_CMD_GPU_GET_RECOVERY_ACTION = (0x208001b2)
+NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS_MESSAGE_ID = (0xB2)
+NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS_MESSAGE_ID = (0xe4)
+NV2080_CTRL_GPU_GET_FIPS_STATUS = (0x208001e4)
+NV2080_CTRL_GPU_RAFTS_NUM_MAX_UGPU = 0x2
+NV2080_CTRL_GPU_RAFTS_NUM_MAX_GPC_PER_UGPU = 0xC
+NV2080_CTRL_GPU_RAFTS_NUM_MAX_NUM_GPC = (0x18)
+NV2080_CTRL_GPU_RAFTS_NUM_MAX_FS_UNIT = (0x1a)
+NV2080_CTRL_GPU_GET_RAFTS_FS_MASK_PARAMS_MESSAGE_ID = (0xB3)
+NV2080_CTRL_GPU_GET_RAFTS_FS_MASK = (0x208001b3)
+NV2080_CTRL_CMD_GPU_GET_COMPUTE_PROFILE_CAPACITY = (0x208001e5)
+NV2080_CTRL_GPU_GET_COMPUTE_PROFILE_CAPACITY_PARAMS_MESSAGE_ID = (0xe5)
+NV2080_CTRL_CMD_GPU_GET_TPC_RECONFIG_MASK = (0x208001e7)
+NV2080_CTRL_GPU_GET_TPC_RECONFIG_MASK_PARAMS_MESSAGE_ID = (0xe7)
+NV2080_CTRL_GPUMON_SAMPLE_TYPE_PWR_MONITOR_STATUS = 0x00000001
+NV2080_CTRL_GPUMON_SAMPLE_TYPE_PERFMON_UTIL = 0x00000002
+NV2080_GPUMON_PID_INVALID = ((NvU32)(~0))
+NV2080_CTRL_GR_ROUTE_INFO_FLAGS_TYPE_NONE = 0x0
+NV2080_CTRL_GR_ROUTE_INFO_FLAGS_TYPE_ENGID = 0x1
+NV2080_CTRL_GR_ROUTE_INFO_FLAGS_TYPE_CHANNEL = 0x2
+NV2080_CTRL_GR_INFO_INDEX_MAXCLIPS = NV0080_CTRL_GR_INFO_INDEX_MAXCLIPS
+NV2080_CTRL_GR_INFO_INDEX_MIN_ATTRS_BUG_261894 = NV0080_CTRL_GR_INFO_INDEX_MIN_ATTRS_BUG_261894
+NV2080_CTRL_GR_INFO_XBUF_MAX_PSETS_PER_BANK = NV0080_CTRL_GR_INFO_XBUF_MAX_PSETS_PER_BANK
+NV2080_CTRL_GR_INFO_INDEX_BUFFER_ALIGNMENT = NV0080_CTRL_GR_INFO_INDEX_BUFFER_ALIGNMENT
+NV2080_CTRL_GR_INFO_INDEX_SWIZZLE_ALIGNMENT = NV0080_CTRL_GR_INFO_INDEX_SWIZZLE_ALIGNMENT
+NV2080_CTRL_GR_INFO_INDEX_VERTEX_CACHE_SIZE = NV0080_CTRL_GR_INFO_INDEX_VERTEX_CACHE_SIZE
+NV2080_CTRL_GR_INFO_INDEX_VPE_COUNT = NV0080_CTRL_GR_INFO_INDEX_VPE_COUNT
+NV2080_CTRL_GR_INFO_INDEX_SHADER_PIPE_COUNT = NV0080_CTRL_GR_INFO_INDEX_SHADER_PIPE_COUNT
+NV2080_CTRL_GR_INFO_INDEX_THREAD_STACK_SCALING_FACTOR = NV0080_CTRL_GR_INFO_INDEX_THREAD_STACK_SCALING_FACTOR
+NV2080_CTRL_GR_INFO_INDEX_SHADER_PIPE_SUB_COUNT = NV0080_CTRL_GR_INFO_INDEX_SHADER_PIPE_SUB_COUNT
+NV2080_CTRL_GR_INFO_INDEX_SM_REG_BANK_COUNT = NV0080_CTRL_GR_INFO_INDEX_SM_REG_BANK_COUNT
+NV2080_CTRL_GR_INFO_INDEX_SM_REG_BANK_REG_COUNT = NV0080_CTRL_GR_INFO_INDEX_SM_REG_BANK_REG_COUNT
+NV2080_CTRL_GR_INFO_INDEX_SM_VERSION = NV0080_CTRL_GR_INFO_INDEX_SM_VERSION
+NV2080_CTRL_GR_INFO_INDEX_MAX_WARPS_PER_SM = NV0080_CTRL_GR_INFO_INDEX_MAX_WARPS_PER_SM
+NV2080_CTRL_GR_INFO_INDEX_MAX_THREADS_PER_WARP = NV0080_CTRL_GR_INFO_INDEX_MAX_THREADS_PER_WARP
+NV2080_CTRL_GR_INFO_INDEX_GEOM_GS_OBUF_ENTRIES = NV0080_CTRL_GR_INFO_INDEX_GEOM_GS_OBUF_ENTRIES
+NV2080_CTRL_GR_INFO_INDEX_GEOM_XBUF_ENTRIES = NV0080_CTRL_GR_INFO_INDEX_GEOM_XBUF_ENTRIES
+NV2080_CTRL_GR_INFO_INDEX_FB_MEMORY_REQUEST_GRANULARITY = NV0080_CTRL_GR_INFO_INDEX_FB_MEMORY_REQUEST_GRANULARITY
+NV2080_CTRL_GR_INFO_INDEX_HOST_MEMORY_REQUEST_GRANULARITY = NV0080_CTRL_GR_INFO_INDEX_HOST_MEMORY_REQUEST_GRANULARITY
+NV2080_CTRL_GR_INFO_INDEX_MAX_SP_PER_SM = NV0080_CTRL_GR_INFO_INDEX_MAX_SP_PER_SM
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_ZCULL_BANKS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_ZCULL_BANKS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_MIN_FBPS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_MIN_FBPS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_FBP_PORTS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_FBP_PORTS
+NV2080_CTRL_GR_INFO_INDEX_TIMESLICE_ENABLED = NV0080_CTRL_GR_INFO_INDEX_TIMESLICE_ENABLED
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPAS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPAS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_PES_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_PES_PER_GPC
+NV2080_CTRL_GR_INFO_INDEX_GPU_CORE_COUNT = NV0080_CTRL_GR_INFO_INDEX_GPU_CORE_COUNT
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPCS_PER_PES = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPCS_PER_PES
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_HUB_PORTS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_HUB_PORTS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_HSHUB_FBP_PORTS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_HSHUB_FBP_PORTS
+NV2080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT = NV0080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT
+NV2080_CTRL_GR_INFO_INDEX_TENSOR_CORE_COUNT = NV0080_CTRL_GR_INFO_INDEX_TENSOR_CORE_COUNT
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GRS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GRS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTCS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTCS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_SLICES = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_SLICES
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCMMU_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCMMU_PER_GPC
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_PER_FBP = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_PER_FBP
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_ROP_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_ROP_PER_GPC
+NV2080_CTRL_GR_INFO_INDEX_FAMILY_MAX_TPC_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_FAMILY_MAX_TPC_PER_GPC
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPA_PER_FBP = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPA_PER_FBP
+NV2080_CTRL_GR_INFO_INDEX_MAX_SUBCONTEXT_COUNT = NV0080_CTRL_GR_INFO_INDEX_MAX_SUBCONTEXT_COUNT
+NV2080_CTRL_GR_INFO_INDEX_MAX_LEGACY_SUBCONTEXT_COUNT = NV0080_CTRL_GR_INFO_INDEX_MAX_LEGACY_SUBCONTEXT_COUNT
+NV2080_CTRL_GR_INFO_INDEX_MAX_PER_ENGINE_SUBCONTEXT_COUNT = NV0080_CTRL_GR_INFO_INDEX_MAX_PER_ENGINE_SUBCONTEXT_COUNT
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SLICES_PER_LTC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_SLICES_PER_LTC
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GFXC_SMC_ENGINES = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GFXC_SMC_ENGINES
+NV2080_CTRL_GR_INFO_INDEX_DUMMY = NV0080_CTRL_GR_INFO_INDEX_DUMMY
+NV2080_CTRL_GR_INFO_INDEX_GFX_CAPABILITIES = NV0080_CTRL_GR_INFO_INDEX_GFX_CAPABILITIES
+NV2080_CTRL_GR_INFO_INDEX_MAX_MIG_ENGINES = NV0080_CTRL_GR_INFO_INDEX_MAX_MIG_ENGINES
+NV2080_CTRL_GR_INFO_INDEX_MAX_PARTITIONABLE_GPCS = NV0080_CTRL_GR_INFO_INDEX_MAX_PARTITIONABLE_GPCS
+NV2080_CTRL_GR_INFO_INDEX_LITTER_MIN_SUBCTX_PER_SMC_ENG = NV0080_CTRL_GR_INFO_INDEX_LITTER_MIN_SUBCTX_PER_SMC_ENG
+NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS_PER_DIELET = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS_PER_DIELET
+NV2080_CTRL_GR_INFO_INDEX_LITTER_MAX_NUM_SMC_ENGINES_PER_DIELET = NV0080_CTRL_GR_INFO_INDEX_LITTER_MAX_NUM_SMC_ENGINES_PER_DIELET
+NV2080_CTRL_GR_INFO_INDEX_MAX = NV0080_CTRL_GR_INFO_INDEX_MAX
+NV2080_CTRL_GR_INFO_MAX_SIZE = NV0080_CTRL_GR_INFO_MAX_SIZE
+NV2080_CTRL_GR_INFO_SM_VERSION_NONE = (0x00000000)
+NV2080_CTRL_GR_INFO_SM_VERSION_1_05 = (0x00000105)
+NV2080_CTRL_GR_INFO_SM_VERSION_1_1 = (0x00000110)
+NV2080_CTRL_GR_INFO_SM_VERSION_1_2 = (0x00000120)
+NV2080_CTRL_GR_INFO_SM_VERSION_1_3 = (0x00000130)
+NV2080_CTRL_GR_INFO_SM_VERSION_1_4 = (0x00000140)
+NV2080_CTRL_GR_INFO_SM_VERSION_1_5 = (0x00000150)
+NV2080_CTRL_GR_INFO_SM_VERSION_2_0 = (0x00000200)
+NV2080_CTRL_GR_INFO_SM_VERSION_2_1 = (0x00000210)
+NV2080_CTRL_GR_INFO_SM_VERSION_2_2 = (0x00000220)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_0 = (0x00000300)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_1 = (0x00000310)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_2 = (0x00000320)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_3 = (0x00000330)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_5 = (0x00000350)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_6 = (0x00000360)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_8 = (0x00000380)
+NV2080_CTRL_GR_INFO_SM_VERSION_3_9 = (0x00000390)
+NV2080_CTRL_GR_INFO_SM_VERSION_4_0 = (0x00000400)
+NV2080_CTRL_GR_INFO_SM_VERSION_5_0 = (0x00000500)
+NV2080_CTRL_GR_INFO_SM_VERSION_5_02 = (0x00000502)
+NV2080_CTRL_GR_INFO_SM_VERSION_5_03 = (0x00000503)
+NV2080_CTRL_GR_INFO_SM_VERSION_6_0 = (0x00000600)
+NV2080_CTRL_GR_INFO_SM_VERSION_6_01 = (0x00000601)
+NV2080_CTRL_GR_INFO_SM_VERSION_6_02 = (0x00000602)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_0 = (0x00000700)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_01 = (0x00000701)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_02 = (0x00000702)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_03 = (0x00000703)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_05 = (0x00000705)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_02 = (0x00000802)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_06 = (0x00000806)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_07 = (0x00000807)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_08 = (0x00000808)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_09 = (0x00000809)
+NV2080_CTRL_GR_INFO_SM_VERSION_9_00 = (0x00000900)
+NV2080_CTRL_GR_INFO_SM_VERSION_10_00 = (0x00000A00)
+NV2080_CTRL_GR_INFO_SM_VERSION_10_01 = (0x00000A01)
+NV2080_CTRL_GR_INFO_SM_VERSION_10_04 = (0x00000A04)
+NV2080_CTRL_GR_INFO_SM_VERSION_5_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_5_02)
+NV2080_CTRL_GR_INFO_SM_VERSION_5_3 = (NV2080_CTRL_GR_INFO_SM_VERSION_5_03)
+NV2080_CTRL_GR_INFO_SM_VERSION_6_1 = (NV2080_CTRL_GR_INFO_SM_VERSION_6_01)
+NV2080_CTRL_GR_INFO_SM_VERSION_6_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_6_02)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_1 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_01)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_02)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_3 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_03)
+NV2080_CTRL_GR_INFO_SM_VERSION_7_5 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_05)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_02)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_6 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_06)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_7 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_07)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_8 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_08)
+NV2080_CTRL_GR_INFO_SM_VERSION_8_9 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_09)
+NV2080_CTRL_GR_INFO_SM_VERSION_9_0 = (NV2080_CTRL_GR_INFO_SM_VERSION_9_00)
+NV2080_CTRL_GR_INFO_SM_VERSION_10_0 = (NV2080_CTRL_GR_INFO_SM_VERSION_10_00)
+NV2080_CTRL_GR_INFO_SM_VERSION_10_1 = (NV2080_CTRL_GR_INFO_SM_VERSION_10_01)
+NV2080_CTRL_GR_INFO_SM_VERSION_10_4 = (NV2080_CTRL_GR_INFO_SM_VERSION_10_04)
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_2D_FALSE = 0x0
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_2D_TRUE = 0x1
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_3D_FALSE = 0x0
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_3D_TRUE = 0x1
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_COMPUTE_FALSE = 0x0
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_COMPUTE_TRUE = 0x1
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_I2M_FALSE = 0x0
+NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_I2M_TRUE = 0x1
+NV2080_CTRL_CMD_GR_GET_INFO = (0x20801201)
+NV2080_CTRL_GR_GET_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_GR_CTXSW_ZCULL_MODE = (0x20801205)
+NV2080_CTRL_GR_CTXSW_ZCULL_MODE_PARAMS_MESSAGE_ID = (0x5)
+NV2080_CTRL_CTXSW_ZCULL_MODE_GLOBAL = (0x00000000)
+NV2080_CTRL_CTXSW_ZCULL_MODE_NO_CTXSW = (0x00000001)
+NV2080_CTRL_CTXSW_ZCULL_MODE_SEPARATE_BUFFER = (0x00000002)
+NV2080_CTRL_CMD_GR_GET_ZCULL_INFO = (0x20801206)
+NV2080_CTRL_GR_GET_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x6)
+NV2080_CTRL_CMD_GR_CTXSW_PM_MODE = (0x20801207)
+NV2080_CTRL_GR_CTXSW_PM_MODE_PARAMS_MESSAGE_ID = (0x7)
+NV2080_CTRL_CTXSW_PM_MODE_NO_CTXSW = (0x00000000)
+NV2080_CTRL_CTXSW_PM_MODE_CTXSW = (0x00000001)
+NV2080_CTRL_CTXSW_PM_MODE_STREAM_OUT_CTXSW = (0x00000002)
+NV2080_CTRL_CMD_GR_CTXSW_ZCULL_BIND = (0x20801208)
+NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_MESSAGE_ID = (0x8)
+NV2080_CTRL_CMD_GR_CTXSW_PM_BIND = (0x20801209)
+NV2080_CTRL_GR_CTXSW_PM_BIND_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_GR_CTXSW_SETUP_BIND = (0x2080123a)
+NV2080_CTRL_GR_CTXSW_SETUP_BIND_PARAMS_MESSAGE_ID = (0x3A)
+NV2080_CTRL_GR_SET_GPC_TILE_MAP_MAX_VALUES = 128
+NV2080_CTRL_CMD_GR_SET_GPC_TILE_MAP = (0x2080120a)
+NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS_MESSAGE_ID = (0xA)
+NV2080_CTRL_CMD_GR_CTXSW_SMPC_MODE = (0x2080120e)
+NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS_MESSAGE_ID = (0xE)
+NV2080_CTRL_CTXSW_SMPC_MODE_NO_CTXSW = (0x00000000)
+NV2080_CTRL_CTXSW_SMPC_MODE_CTXSW = (0x00000001)
+NV2080_CTRL_CMD_GR_GET_SM_TO_GPC_TPC_MAPPINGS = (0x2080120f)
+NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_MAX_SM_COUNT = 240
+NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_MESSAGE_ID = (0xF)
+NV2080_CTRL_CMD_GR_SET_CTXSW_PREEMPTION_MODE = (0x20801210)
+NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_MESSAGE_ID = (0x10)
+NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_CILP_IGNORE = (0x00000000)
+NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_CILP_SET = (0x00000001)
+NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_GFXP_IGNORE = (0x00000000)
+NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_GFXP_SET = (0x00000001)
+NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_GFX_WFI = (0x00000000)
+NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_GFX_GFXP = (0x00000001)
+NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_GFX_GFXP_POOL = (0x00000002)
+NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_COMPUTE_WFI = (0x00000000)
+NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_COMPUTE_CTA = (0x00000001)
+NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_COMPUTE_CILP = (0x00000002)
+NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND = (0x20801211)
+NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_MESSAGE_ID = (0x11)
+NV2080_CTRL_CMD_GR_PC_SAMPLING_MODE = (0x20801212)
+NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_MESSAGE_ID = (0x12)
+NV2080_CTRL_PC_SAMPLING_MODE_DISABLED = (0x00000000)
+NV2080_CTRL_PC_SAMPLING_MODE_ENABLED = (0x00000001)
+NV2080_CTRL_CMD_GR_GET_ROP_INFO = (0x20801213)
+NV2080_CTRL_GR_GET_ROP_INFO_PARAMS_MESSAGE_ID = (0x13)
+NV2080_CTRL_CMD_GR_GET_CTXSW_STATS = (0x20801215)
+NV2080_CTRL_GR_GET_CTXSW_STATS_PARAMS_MESSAGE_ID = (0x15)
+NV2080_CTRL_GR_GET_CTXSW_STATS_FLAGS_RESET_FALSE = (0x00000000)
+NV2080_CTRL_GR_GET_CTXSW_STATS_FLAGS_RESET_TRUE = (0x00000001)
+NV2080_CTRL_CMD_GR_GET_CTX_BUFFER_SIZE = (0x20801218)
+NV2080_CTRL_GR_GET_CTX_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0x18)
+NV2080_CTRL_GR_MAX_CTX_BUFFER_COUNT = 64
+NV2080_CTRL_CMD_GR_GET_CTX_BUFFER_INFO = (0x20801219)
+NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS_MESSAGE_ID = (0x19)
+NV2080_CTRL_GR_CTX_BUFFER_INFO_APERTURE_UNKNOWN = 0
+NV2080_CTRL_GR_CTX_BUFFER_INFO_APERTURE_SYSMEM = 1
+NV2080_CTRL_GR_CTX_BUFFER_INFO_APERTURE_FBMEM = 2
+NV2080_CTRL_CMD_GR_GET_GLOBAL_SM_ORDER = (0x2080121b)
+NV2080_CTRL_CMD_GR_GET_GLOBAL_SM_ORDER_MAX_SM_COUNT = 512
+NV2080_CTRL_GR_DISABLED_SM_VGPC_ID = 0xFF
+NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x1B)
+NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL = (0x2080121c)
+NV2080_CTRL_GR_GET_CURRENT_RESIDENT_CHANNEL_PARAMS_MESSAGE_ID = (0x1C)
+NV2080_CTRL_CMD_GR_GET_VAT_ALARM_MAX_GPC_COUNT = 10
+NV2080_CTRL_CMD_GR_GET_VAT_ALARM_MAX_TPC_PER_GPC_COUNT = 10
+NV2080_CTRL_CMD_GR_GET_VAT_ALARM_DATA = (0x2080121d)
+NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS_MESSAGE_ID = (0x1D)
+NV2080_CTRL_CMD_GR_GET_ATTRIBUTE_BUFFER_SIZE = (0x2080121e)
+NV2080_CTRL_GR_GET_ATTRIBUTE_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0x1E)
+NV2080_CTRL_CMD_GR_GFX_POOL_QUERY_SIZE = (0x2080121f)
+NV2080_CTRL_GR_GFX_POOL_QUERY_SIZE_PARAMS_MESSAGE_ID = (0x1F)
+NV2080_CTRL_CMD_GR_GFX_POOL_INITIALIZE = (0x20801220)
+NV2080_CTRL_GR_GFX_POOL_INITIALIZE_PARAMS_MESSAGE_ID = (0x20)
+NV2080_CTRL_GR_GFX_POOL_MAX_SLOTS = 64
+NV2080_CTRL_CMD_GR_GFX_POOL_ADD_SLOTS = (0x20801221)
+NV2080_CTRL_GR_GFX_POOL_ADD_SLOTS_PARAMS_MESSAGE_ID = (0x21)
+NV2080_CTRL_CMD_GR_GFX_POOL_REMOVE_SLOTS = (0x20801222)
+NV2080_CTRL_GR_GFX_POOL_REMOVE_SLOTS_PARAMS_MESSAGE_ID = (0x22)
+NV2080_CTRL_CMD_GR_GET_CAPS_V2 = (0x20801227)
+NV2080_CTRL_GR_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x27)
+NV2080_CTRL_CMD_GR_GET_INFO_V2 = (0x20801228)
+NV2080_CTRL_GR_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x28)
+NV2080_CTRL_CMD_GR_GET_GPC_MASK = (0x2080122a)
+NV2080_CTRL_GR_GET_GPC_MASK_PARAMS_MESSAGE_ID = (0x2A)
+NV2080_CTRL_CMD_GR_GET_TPC_MASK = (0x2080122b)
+NV2080_CTRL_GR_GET_TPC_MASK_PARAMS_MESSAGE_ID = (0x2B)
+NV2080_CTRL_CMD_GR_SET_TPC_PARTITION_MODE = (0x2080122c)
+NV2080_CTRL_GR_SET_TPC_PARTITION_MODE_PARAMS_MESSAGE_ID = (0x2C)
+NV2080_CTRL_CMD_GR_GET_ENGINE_CONTEXT_PROPERTIES = (0x2080122d)
+NV2080_CTRL_GR_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS_MESSAGE_ID = (0x2D)
+NV2080_CTRL_CMD_GR_GET_SM_ISSUE_RATE_MODIFIER = (0x20801230)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_64 = (0x6)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_DP_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_DP_REDUCED_SPEED = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_64 = (0x6)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_64 = (0x6)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_64 = (0x6)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_FULL_SPEED = (0x0)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_2 = (0x1)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_4 = (0x2)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_8 = (0x3)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_16 = (0x4)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_32 = (0x5)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_64 = (0x6)
+NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS_MESSAGE_ID = (0x30)
+NV2080_CTRL_CMD_GR_FECS_BIND_EVTBUF_FOR_UID = (0x20801231)
+NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_PARAMS_MESSAGE_ID = (0x31)
+NV2080_CTRL_CMD_GR_GET_PHYS_GPC_MASK = (0x20801232)
+NV2080_CTRL_GR_GET_PHYS_GPC_MASK_PARAMS_MESSAGE_ID = (0x32)
+NV2080_CTRL_CMD_GR_GET_PPC_MASK = (0x20801233)
+NV2080_CTRL_GR_GET_PPC_MASK_PARAMS_MESSAGE_ID = (0x33)
+NV2080_CTRL_CMD_GR_GET_NUM_TPCS_FOR_GPC = (0x20801234)
+NV2080_CTRL_GR_GET_NUM_TPCS_FOR_GPC_PARAMS_MESSAGE_ID = (0x34)
+NV2080_CTRL_CMD_GR_GET_CTXSW_MODES = (0x20801235)
+NV2080_CTRL_GR_GET_CTXSW_MODES_PARAMS_MESSAGE_ID = (0x35)
+NV2080_CTRL_CMD_GR_GET_GPC_TILE_MAP = (0x20801236)
+NV2080_CTRL_GR_GET_GPC_TILE_MAP_PARAMS_MESSAGE_ID = (0x36)
+NV2080_CTRL_CMD_GR_GET_ZCULL_MASK = (0x20801237)
+NV2080_CTRL_GR_GET_ZCULL_MASK_PARAMS_MESSAGE_ID = (0x37)
+NV2080_CTRL_CMD_GR_FECS_BIND_EVTBUF_FOR_UID_V2 = (0x20801238)
+NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_V2_PARAMS_MESSAGE_ID = (0x38)
+NV2080_CTRL_CMD_GR_GET_GFX_GPC_AND_TPC_INFO = (0x20801239)
+NV2080_CTRL_GR_GET_GFX_GPC_AND_TPC_INFO_PARAMS_MESSAGE_ID = (0x39)
+NV2080_CTRL_CMD_GR_GET_TPC_RECONFIG_MASK = (0x2080123b)
+NV2080_CTRL_GR_GET_TPC_RECONFIG_MASK_PARAMS_MESSAGE_ID = (0x3b)
+NV2080_CTRL_CMD_GRMGR_GET_GR_FS_INFO = (0x20803801)
+NV2080_CTRL_GRMGR_GR_FS_INFO_MAX_QUERIES = 96
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_MAX_SIZE = 32
+NV2080_CTRL_GRMGR_MAX_SMC_IDS = 8
+NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_INVALID = 0
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_GPC_COUNT = 1
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_CHIPLET_GPC_MAP = 2
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_TPC_MASK = 3
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PPC_MASK = 4
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARTITION_CHIPLET_GPC_MAP = 5
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_CHIPLET_SYSPIPE_MASK = 6
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARTITION_CHIPLET_SYSPIPE_IDS = 7
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PROFILER_MON_GPC_MASK = 8
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARTITION_SYSPIPE_ID = 9
+NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_ROP_MASK = 10
+NV2080_CTRL_CMD_GSP_GET_FEATURES = (0x20803601)
+NV2080_GSP_MAX_BUILD_VERSION_LENGTH = (0x0000040)
+NV2080_CTRL_GSP_GET_FEATURES_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_GSP_GET_FEATURES_UVM_ENABLED_FALSE = (0x00000000)
+NV2080_CTRL_GSP_GET_FEATURES_UVM_ENABLED_TRUE = (0x00000001)
+NV2080_CTRL_GSP_GET_FEATURES_VGPU_GSP_MIG_REFACTORING_ENABLED_FALSE = (0x00000000)
+NV2080_CTRL_GSP_GET_FEATURES_VGPU_GSP_MIG_REFACTORING_ENABLED_TRUE = (0x00000001)
+NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS = (0x20803602)
+NV2080_CTRL_GSP_GET_RM_HEAP_STATS_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS = (0x20803603)
+NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS = (0x20803604)
+NV2080_CTRL_GSP_LIBOS_POOL_COUNT_MAX = 64
+NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK = (0x20804101)
+NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE = (0x20804102)
+NV2080_CTRL_I2C_VERSION_0 = 0x00
+NV2080_CTRL_I2C_MAX_ENTRIES = 256
+NV2080_CTRL_I2C_MAX_REG_LEN = 8
+NV2080_CTRL_I2C_MAX_ADDR_ENTRIES = 20
+NV2080_CTRL_I2C_FLAGS_NONSTD_SI1930UC = (0x00000001)
+NV2080_CTRL_I2C_FLAGS_PRIVILEGE = (0x00000002)
+NV2080_CTRL_I2C_FLAGS_DATA_ENCRYPTED = (0x00000004)
+NV2080_CTRL_I2C_FLAGS_PX3540 = (0x00000010)
+NV2080_CTRL_I2C_FLAGS_ADDR_AUTO_INC_NOT_SUPPORTED = (0x00000008)
+NV2080_CTRL_I2C_READ_BUFFER_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_I2C_READ_BUFFER = (0x20800601)
+NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_I2C_WRITE_BUFFER = (0x20800602)
+NV2080_CTRL_CMD_I2C_READ_REG = (0x20800603)
+NV2080_CTRL_I2C_READ_REG_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_I2C_WRITE_REG = (0x20800604)
+NV2080_CTRL_I2C_WRITE_REG_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_I2C_ACCESS = (0x20800610)
+NV2080_CTRL_I2C_ACCESS_PARAMS_MESSAGE_ID = (0x10)
+NV2080_CTRL_I2C_ACCESS_CMD_ACQUIRE = 0x1
+NV2080_CTRL_I2C_ACCESS_CMD_RELEASE = 0x2
+NV2080_CTRL_I2C_ACCESS_CMD_WRITE_BYTE = 0x3
+NV2080_CTRL_I2C_ACCESS_CMD_READ_BYTE = 0x4
+NV2080_CTRL_I2C_ACCESS_CMD_NULL = 0x5
+NV2080_CTRL_I2C_ACCESS_CMD_RESET = 0x6
+NV2080_CTRL_I2C_ACCESS_CMD_TEST_PORT = 0x11
+NV2080_CTRL_I2C_ACCESS_CMD_SET_FAST_MODE = 0x12
+NV2080_CTRL_I2C_ACCESS_CMD_SET_NORMAL_MODE = 0x13
+NV2080_CTRL_I2C_ACCESS_CMD_WRITE_BUFFER = 0x14
+NV2080_CTRL_I2C_ACCESS_CMD_READ_BUFFER = 0x15
+NV2080_CTRL_I2C_ACCESS_CMD_START = 0x17
+NV2080_CTRL_I2C_ACCESS_CMD_STOP = 0x18
+NV2080_CTRL_I2C_ACCESS_CMD_SET_SLOW_MODE = 0x20
+NV2080_CTRL_I2C_ACCESS_FLAG_START = 0x1
+NV2080_CTRL_I2C_ACCESS_FLAG_STOP = 0x2
+NV2080_CTRL_I2C_ACCESS_FLAG_ACK = 0x4
+NV2080_CTRL_I2C_ACCESS_FLAG_RAB = 0x8
+NV2080_CTRL_I2C_ACCESS_FLAG_ADDR_10BITS = 0x10
+NV2080_CTRL_I2C_ACCESS_FLAG_PRIVILEGE = 0x20
+NV2080_CTRL_I2C_ACCESS_FLAG_DATA_ENCRYPTED = 0x40
+NV2080_CTRL_I2C_ACCESS_FLAG_RESTART = 0x80
+NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_33_33PCT = 0x100
+NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_33PCT = 0x200
+NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_10PCT = 0x400
+NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_3_33PCT = 0x800
+NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_3PCT = 0x1000
+NV2080_CTRL_I2C_ACCESS_PORT_DYNAMIC = 0x0
+NV2080_CTRL_I2C_ACCESS_PORT_PRIMARY = 0x1
+NV2080_CTRL_I2C_ACCESS_PORT_SECONDARY = 0x2
+NV2080_CTRL_I2C_ACCESS_PORT_TERTIARY = 0x3
+NV2080_CTRL_I2C_ACCESS_PORT_QUARTIARY = 0x4
+NV2080_CTRL_I2C_ACCESS_PORT_1 = 0x1
+NV2080_CTRL_I2C_ACCESS_PORT_2 = 0x2
+NV2080_CTRL_I2C_ACCESS_PORT_3 = 0x3
+NV2080_CTRL_I2C_ACCESS_PORT_4 = 0x4
+NV2080_CTRL_I2C_ACCESS_PORT_5 = 0x5
+NV2080_CTRL_I2C_ACCESS_PORT_6 = 0x6
+NV2080_CTRL_I2C_ACCESS_PORT_7 = 0x7
+NV2080_CTRL_I2C_ACCESS_PORT_8 = 0x8
+NV2080_CTRL_I2C_ACCESS_PORT_9 = 0x9
+NV2080_CTRL_I2C_ACCESS_PORT_10 = 0x10
+NV2080_CTRL_I2C_ACCESS_NUM_PORTS = NV2080_CTRL_I2C_ACCESS_PORT_10
+NV2080_CTRL_I2C_ACCESS_STATUS_SUCCESS = 0x0
+NV2080_CTRL_I2C_ACCESS_STATUS_ERROR = 0x1
+NV2080_CTRL_I2C_ACCESS_STATUS_PROTOCOL_ERROR = 0x2
+NV2080_CTRL_I2C_ACCESS_STATUS_DEVICE_BUSY = 0x3
+NV2080_CTRL_I2C_ACCESS_STATUS_NACK_AFTER_SEND = 0x4
+NV2080_CTRL_I2C_ACCESS_STATUS_DP2TMDS_DONGLE_MISSING = 0x5
+NV2080_CTRL_CMD_I2C_ENABLE_MONITOR_3D_MODE = (0x20800620)
+NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS_MESSAGE_ID = (0x20)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_GET_STATIC_INFO = (0x20800a01)
+NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_INTERNAL_MEMSYS_GET_STATIC_CONFIG_PARAMS_MESSAGE_ID = (0x1C)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_STATIC_CONFIG = (0x20800a1c)
+NV2080_CTRL_CMD_INTERNAL_UVM_REGISTER_ACCESS_CNTR_BUFFER = (0x20800a1d)
+NV2080_CTRL_INTERNAL_UVM_ACCESS_CNTR_BUFFER_MAX_PAGES = 64
+NV2080_CTRL_INTERNAL_UVM_REGISTER_ACCESS_CNTR_BUFFER_PARAMS_MESSAGE_ID = (0x1D)
+NV2080_CTRL_CMD_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER = (0x20800a1e)
+NV2080_CTRL_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER_PARAMS_MESSAGE_ID = (0x1E)
+NV2080_CTRL_INTERNAL_GR_MAX_ENGINES = 8
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS_MESSAGE_ID = (0x20)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_CAPS = (0x20800a1f)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS_MESSAGE_ID = (0x1F)
+NV2080_CTRL_INTERNAL_GR_MAX_SM = 240
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x23)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_GLOBAL_SM_ORDER = (0x20800a22)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x22)
+NV2080_CTRL_CMD_INTERNAL_MAX_BSPS = 8
+NV2080_CTRL_CMD_INTERNAL_MAX_MSENCS = 8
+NV2080_CTRL_INTERNAL_GR_MAX_GPC = 12
+NV2080_CTRL_INTERNAL_MAX_TPC_PER_GPC_COUNT = 10
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_FLOORSWEEPING_MASKS_PARAMS_MESSAGE_ID = (0x27)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FLOORSWEEPING_MASKS = (0x20800a26)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FLOORSWEEPING_MASKS_PARAMS_MESSAGE_ID = (0x26)
+NV2080_CTRL_KGR_MAX_BUFFER_PTES = 128
+NV2080_CTRL_CMD_KGR_GET_CTX_BUFFER_PTES = (0x20800a28)
+NV2080_CTRL_KGR_GET_CTX_BUFFER_PTES_PARAMS_MESSAGE_ID = (0x28)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_INFO_PARAMS_MESSAGE_ID = (0x2B)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_INFO = (0x20800a2a)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_INFO_PARAMS_MESSAGE_ID = (0x2A)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x2D)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_ZCULL_INFO = (0x20800a2c)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x2C)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_ROP_INFO_PARAMS_MESSAGE_ID = (0x2F)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_ROP_INFO = (0x20800a2e)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_ROP_INFO_PARAMS_MESSAGE_ID = (0x2E)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_PPC_MASKS_PARAMS_MESSAGE_ID = (0x31)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_PPC_MASKS = (0x20800a30)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_PPC_MASKS_PARAMS_MESSAGE_ID = (0x30)
+NV2080_CTRL_INTERNAL_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_COUNT = 0x1a
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_CONTEXT_BUFFERS_INFO_PARAMS_MESSAGE_ID = (0x33)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_CONTEXT_BUFFERS_INFO = (0x20800a32)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CONTEXT_BUFFERS_INFO_PARAMS_MESSAGE_ID = (0x32)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS_MESSAGE_ID = (0x35)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_SM_ISSUE_RATE_MODIFIER = (0x20800a34)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS_MESSAGE_ID = (0x34)
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_CHIP_INFO = (0x20800a36)
+NV2080_CTRL_INTERNAL_GET_CHIP_INFO_REG_BASE_MAX = 16
+NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS_MESSAGE_ID = (0x36)
+NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_HW_ENABLE = (0x20800a37)
+NV2080_CTRL_CMD_INTERNAL_GR_GET_FECS_TRACE_HW_ENABLE = (0x20800a38)
+NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_HW_ENABLE_PARAMS_MESSAGE_ID = (0x37)
+NV2080_CTRL_INTERNAL_GR_GET_FECS_TRACE_HW_ENABLE_PARAMS_MESSAGE_ID = (0x38)
+NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_RD_OFFSET = (0x20800a39)
+NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_WR_OFFSET = (0x20800a3a)
+NV2080_CTRL_CMD_INTERNAL_GR_GET_FECS_TRACE_RD_OFFSET = (0x20800a3b)
+NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_RD_OFFSET_PARAMS_MESSAGE_ID = (0x39)
+NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_WR_OFFSET_PARAMS_MESSAGE_ID = (0x3A)
+NV2080_CTRL_INTERNAL_GR_GET_FECS_TRACE_RD_OFFSET_PARAMS_MESSAGE_ID = (0x3B)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_RECORD_SIZE = (0x20800a3d)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE_PARAMS_MESSAGE_ID = (0x3C)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_RECORD_SIZE_PARAMS_MESSAGE_ID = (0x3D)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES_PARAMS_MESSAGE_ID = (0x3E)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_TRACE_DEFINES = (0x20800a3f)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FECS_TRACE_DEFINES_PARAMS_MESSAGE_ID = (0x3F)
+NV2080_CTRL_CMD_INTERNAL_DEVICE_INFO_MAX_ENTRIES = 512
+NV2080_CTRL_CMD_INTERNAL_GET_DEVICE_INFO_TABLE = (0x20800a40)
+NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS_MESSAGE_ID = (0x40)
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP = (0x20800a41)
+NV2080_CTRL_INTERNAL_GPU_USER_REGISTER_ACCESS_MAP_MAX_COMPRESSED_SIZE = 4096
+NV2080_CTRL_INTERNAL_GPU_USER_REGISTER_ACCESS_MAP_MAX_PROFILING_RANGES = 4096
+NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS_MESSAGE_ID = (0x41)
+NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS_MESSAGE_ID = (0x43)
+NV2080_CTRL_CMD_INTERNAL_KMIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE = (0x20800a44)
+NV2080_CTRL_INTERNAL_KMIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS_MESSAGE_ID = (0x44)
+NV2080_CTRL_CMD_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE = (0x20800a43)
+NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID = (0x45)
+NV2080_CTRL_CMD_INTERNAL_KGR_INIT_BUG4208224_WAR = (0x20800a46)
+NV2080_CTRL_INTERNAL_KGR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID = (0x46)
+NV2080_CTRL_INTERNAL_STATIC_GR_GET_PDB_PROPERTIES_PARAMS_MESSAGE_ID = (0x47)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_PDB_PROPERTIES = (0x20800a48)
+NV2080_CTRL_INTERNAL_STATIC_KGR_GET_PDB_PROPERTIES_PARAMS_MESSAGE_ID = (0x48)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_WRITE_INST_MEM = (0x20800a49)
+NV2080_CTRL_INTERNAL_DISPLAY_WRITE_INST_MEM_PARAMS_MESSAGE_ID = (0x49)
+NV2080_CTRL_CMD_INTERNAL_RECOVER_ALL_COMPUTE_CONTEXTS = (0x20800a4a)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_GET_IP_VERSION = (0x20800a4b)
+NV2080_CTRL_INTERNAL_DISPLAY_GET_IP_VERSION_PARAMS_MESSAGE_ID = (0x4B)
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_SMC_MODE = (0x20800a4c)
+NV2080_CTRL_INTERNAL_GPU_GET_SMC_MODE_PARAMS_MESSAGE_ID = (0x4C)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_SETUP_RG_LINE_INTR = (0x20800a4d)
+NV2080_CTRL_INTERNAL_DISPLAY_SETUP_RG_LINE_INTR_PARAMS_MESSAGE_ID = (0x4D)
+NV2080_CTRL_INTERNAL_GRMGR_PARTITION_MAX_TYPES = 60
+NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PROFILES_PARAMS_MESSAGE_ID = (0x4F)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_PARTITIONABLE_MEM = (0x20800a51)
+NV2080_CTRL_INTERNAL_MEMSYS_SET_PARTITIONABLE_MEM_PARAMS_MESSAGE_ID = (0x51)
+NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PARTITIONABLE_ENGINES_MAX_ENGINES_MASK_SIZE = 4
+NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PARTITIONABLE_ENGINES_PARAMS_MESSAGE_ID = (0x52)
+NV2080_CTRL_INTERNAL_FIFO_MAX_RUNLIST_BUFFERS = 2
+NV2080_CTRL_INTERNAL_FIFO_MAX_RUNLIST_ID = 64
+NV2080_CTRL_CMD_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS = (0x20800a53)
+NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS_MESSAGE_ID = (0x53)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_SET_IMP_INIT_INFO = (0x20800a54)
+NV2080_CTRL_INTERNAL_DISPLAY_SET_IMP_INIT_INFO_PARAMS_MESSAGE_ID = (0x54)
+NV2080_CTRL_CMD_INTERNAL_GET_EGPU_BRIDGE_INFO = (0x20800a55)
+NV2080_CTRL_INTERNAL_GET_EGPU_BRIDGE_INFO_PARAMS_MESSAGE_ID = (0x55)
+NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_NONE = (0x00000000)
+NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_CUSTOM = (0x00000001)
+NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_TB2 = (0x00000002)
+NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_TB3 = (0x00000003)
+NV2080_CTRL_CMD_INTERNAL_BUS_FLUSH_WITH_SYSMEMBAR = (0x20800a70)
+NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_LOCAL = (0x20800a71)
+NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_LOCAL_PARAMS_MESSAGE_ID = (0x71)
+NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE = (0x20800a72)
+NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE_PARAMS_MESSAGE_ID = (0x72)
+NV2080_CTRL_CMD_INTERNAL_BUS_DESTROY_P2P_MAILBOX = (0x20800a73)
+NV2080_CTRL_INTERNAL_BUS_DESTROY_P2P_MAILBOX_PARAMS_MESSAGE_ID = (0x73)
+NV2080_CTRL_CMD_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING = (0x20800a74)
+NV2080_CTRL_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING_PARAMS_MESSAGE_ID = (0x74)
+NV2080_CTRL_CMD_INTERNAL_BUS_REMOVE_C2C_PEER_MAPPING = (0x20800a75)
+NV2080_CTRL_INTERNAL_BUS_REMOVE_C2C_PEER_MAPPING_PARAMS_MESSAGE_ID = (0x75)
+NV2080_CTRL_CMD_INTERNAL_VMMU_GET_SPA_FOR_GPA_ENTRIES = (0x20800a57)
+NV2080_CTRL_INTERNAL_VMMU_MAX_SPA_FOR_GPA_ENTRIES = 128
+NV2080_CTRL_INTERNAL_VMMU_GET_SPA_FOR_GPA_ENTRIES_PARAMS_MESSAGE_ID = (0x57)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER = (0x20800a58)
+NV2080_CTRL_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER_PARAMS_MESSAGE_ID = (0x58)
+NV2080_CTRL_CMD_INTERNAL_GMMU_GET_STATIC_INFO = (0x20800a59)
+NV2080_CTRL_INTERNAL_GMMU_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0x59)
+NV2080_CTRL_CMD_INTERNAL_GR_GET_CTXSW_MODES = (0x20800a5a)
+NV2080_CTRL_INTERNAL_GR_GET_CTXSW_MODES_PARAMS_MESSAGE_ID = (0x5A)
+NV2080_CTRL_CMD_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE = (0x20800a5b)
+NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_PARAMS_MESSAGE_ID = (0x5B)
+NV2080_CTRL_CMD_INTERNAL_INTR_GET_KERNEL_TABLE = (0x20800a5c)
+NV2080_CTRL_INTERNAL_INTR_MAX_TABLE_SIZE = 128
+NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_PARAMS_MESSAGE_ID = (0x5C)
+NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_GR = (0x00000000)
+NV2080_CTRL_CMD_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_CHECK = (0x20800a98)
+NV2080_CTRL_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_CHECK_PARAMS_MESSAGE_ID = (0x98)
+NV2080_CTRL_CMD_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_SET = (0x20800a99)
+NV2080_CTRL_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_SET_PARAMS_MESSAGE_ID = (0x99)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_GET_ACTIVE_DISPLAY_DEVICES = (0x20800a5d)
+NV2080_CTRL_INTERNAL_DISPLAY_GET_ACTIVE_DISPLAY_DEVICES_PARAMS_MESSAGE_ID = (0x5D)
+NV2080_CTRL_CMD_INTERNAL_STATIC_MIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES = (0x20800a60)
+NV2080_CTRL_INTERNAL_MAX_SWIZZ_ID = 15
+NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES_PARAMS_MESSAGE_ID = (0x60)
+NV2080_CTRL_CMD_INTERNAL_FIFO_GET_NUM_CHANNELS = (0x20800a61)
+NV2080_CTRL_INTERNAL_FIFO_GET_NUM_CHANNELS_PARAMS_MESSAGE_ID = (0x61)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_PROFILES = (0x20800a63)
+NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_PROFILES_PARAMS_MESSAGE_ID = (0x63)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_PARTITIONABLE_ENGINES = (0x20800a65)
+NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_PARTITIONABLE_ENGINES_PARAMS_MESSAGE_ID = (0x65)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES = (0x20800a66)
+NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES_PARAMS_MESSAGE_ID = (0x66)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_MIG_MEMORY_CONFIG = (0x20800a68)
+NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_CONFIG_PARAMS_MESSAGE_ID = (0x68)
+NV2080_CTRL_CMD_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG = (0x20800a67)
+NV2080_CTRL_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG_PARAMS_MESSAGE_ID = (0x67)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE = (0x20800a6b)
+NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE_SIZE = 8
+NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE_PARAMS_MESSAGE_ID = (0x6B)
+NV2080_CTRL_CMD_INTERNAL_RC_WATCHDOG_TIMEOUT = (0x20800a6a)
+NV2080_CTRL_CMD_INTERNAL_PERF_CUDA_LIMIT_DISABLE = (0x20800a7a)
+NV2080_CTRL_CMD_INTERNAL_PERF_OPTP_CLI_CLEAR = (0x20800a7c)
+NV2080_CTRL_CMD_INTERNAL_PERF_GET_AUX_POWER_STATE = (0x20800a81)
+NV2080_CTRL_INTERNAL_PERF_GET_AUX_POWER_STATE_PARAMS_MESSAGE_ID = (0x81)
+NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_SET_2X = (0x20800a9a)
+NV2080_CTRL_INTERNAL_PERF_BOOST_SET_PARAMS_2X_MESSAGE_ID = (0x9A)
+NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_PSTATE = 0
+NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_GPCCLK = 1
+NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_LAST = NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_GPCCLK
+NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_NUM = (0x2)
+NV2080_CTRL_CMD_INTERNAL_PERF_GPU_BOOST_SYNC_SET_CONTROL = (0x20800a7e)
+NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_CONTROL_PARAMS_MESSAGE_ID = (0x7E)
+NV2080_CTRL_CMD_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS = (0x20800a7f)
+NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_MESSAGE_ID = (0x7F)
+NV2080_CTRL_CMD_INTERNAL_PERF_GPU_BOOST_SYNC_GET_INFO = (0x20800a80)
+NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_GET_INFO_PARAMS_MESSAGE_ID = (0x80)
+NV2080_CTRL_CMD_INTERNAL_GMMU_REGISTER_FAULT_BUFFER = (0x20800a9b)
+NV2080_CTRL_INTERNAL_GMMU_FAULT_BUFFER_MAX_PAGES = 256
+NV2080_CTRL_INTERNAL_GMMU_REGISTER_FAULT_BUFFER_PARAMS_MESSAGE_ID = (0x9B)
+NV2080_CTRL_CMD_INTERNAL_GMMU_UNREGISTER_FAULT_BUFFER = (0x20800a9c)
+NV2080_CTRL_FAULT_BUFFER_NON_REPLAYABLE = (0x00000000)
+NV2080_CTRL_FAULT_BUFFER_REPLAYABLE = (0x00000001)
+NV2080_CTRL_CMD_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER = (0x20800a9d)
+NV2080_CTRL_INTERNAL_GMMU_CLIENT_SHADOW_FAULT_BUFFER_MAX_PAGES = 3000
+NV2080_CTRL_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAMS_MESSAGE_ID = (0x9D)
+NV2080_CTRL_CMD_INTERNAL_GMMU_UNREGISTER_CLIENT_SHADOW_FAULT_BUFFER = (0x20800a9e)
+NV2080_CTRL_INTERNAL_GMMU_UNREGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAMS_MESSAGE_ID = (0x9E)
+NV2080_CTRL_CMD_INTERNAL_GMMU_COPY_RESERVED_SPLIT_GVASPACE_PDES_TO_SERVER = (0x20800a9f)
+NV2080_CTRL_INTERNAL_GMMU_COPY_RESERVED_SPLIT_GVASPACE_PDES_TO_SERVER_PARAMS_MESSAGE_ID = (0x9F)
+NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_SET_3X = (0x20800aa0)
+NV2080_CTRL_INTERNAL_PERF_BOOST_SET_PARAMS_3X_MESSAGE_ID = (0xA0)
+NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_CLEAR_3X = (0x20800aa1)
+NV2080_CTRL_INTERNAL_PERF_BOOST_CLEAR_PARAMS_3X_MESSAGE_ID = (0xA1)
+NV2080_CTRL_CMD_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO = (0x20800aa2)
+NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO_MAX_SKYLINES = 8
+NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO_MAX_NON_SINGLETON_VGPCS = 12
+NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS_MESSAGE_ID = (0xA2)
+NV2080_CTRL_CMD_INTERNAL_MIGMGR_SET_PARTITIONING_MODE = (0x20800aa3)
+NV2080_CTRL_INTERNAL_MIGMGR_SET_PARTITIONING_MODE_PARAMS_MESSAGE_ID = (0xA3)
+NV2080_CTRL_CMD_INTERNAL_MIGMGR_CONFIGURE_GPU_INSTANCE = (0x20800aa4)
+NV2080_CTRL_INTERNAL_MIGMGR_CONFIGURE_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA4)
+NV2080_CTRL_CMD_INTERNAL_MIGMGR_SET_GPU_INSTANCES = (0x20800aa5)
+NV2080_CTRL_INTERNAL_MIGMGR_SET_GPU_INSTANCES_PARAMS_MESSAGE_ID = (0xA5)
+NV2080_CTRL_CMD_INTERNAL_MIGMGR_GET_GPU_INSTANCES = (0x20800aa6)
+NV2080_CTRL_INTERNAL_MIGMGR_GET_GPU_INSTANCES_PARAMS_MESSAGE_ID = (0xA6)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED = (0x20800a69)
+NV2080_CTRL_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_PARAMS_MESSAGE_ID = (0x69)
+NV2080_CTRL_CMD_INTERNAL_KMIGMGR_EXPORT_GPU_INSTANCE = (0x20800aa7)
+NV2080_CTRL_CMD_INTERNAL_MIGMGR_EXPORT_GPU_INSTANCE = (0x20800aa8)
+NV2080_CTRL_CMD_INTERNAL_KMIGMGR_IMPORT_GPU_INSTANCE = (0x20800aa9)
+NV2080_CTRL_CMD_INTERNAL_MIGMGR_IMPORT_GPU_INSTANCE = (0x20800aaa)
+NV2080_CTRL_INTERNAL_KMIGMGR_EXPORTED_GPU_INSTANCE_MAX_ENGINES_MASK_SIZE = 4
+NV2080_CTRL_INTERNAL_KMIGMGR_EXPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA7)
+NV2080_CTRL_INTERNAL_MIGMGR_EXPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA8)
+NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA9)
+NV2080_CTRL_INTERNAL_MIGMGR_IMPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xAA)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT = (0x20800a6c)
+NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_PARAMS_MESSAGE_ID = (0x6c)
+NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_ALL = (0x00000001)
+NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_FIRST = (0x00000002)
+NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_LAST = (0x00000004)
+NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_NORMAL = (0x00000008)
+NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_CLEAN = (0x00000010)
+NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_WAIT_FB_PULL = (0x00000020)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_FLUSH_L2_ALL_RAMS_AND_CACHES = (0x20800a6d)
+NV2080_CTRL_CMD_INTERNAL_BIF_GET_STATIC_INFO = (0x20800aac)
+NV2080_CTRL_INTERNAL_BIF_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0xac)
+NV2080_CTRL_CMD_INTERNAL_HSHUB_PEER_CONN_CONFIG = (0x20800a88)
+NV2080_CTRL_INTERNAL_HSHUB_PEER_CONN_CONFIG_PARAMS_MESSAGE_ID = (0x88)
+NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS = (0x20800a8a)
+NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_TABLE_SIZE = 32
+NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS_MESSAGE_ID = (0x8a)
+NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_NUM_UNITS = (0x20800a8b)
+NV2080_CTRL_INTERNAL_HSHUB_GET_NUM_UNITS_PARAMS_MESSAGE_ID = (0x8b)
+NV2080_CTRL_CMD_INTERNAL_HSHUB_NEXT_HSHUB_ID = (0x20800a8c)
+NV2080_CTRL_INTERNAL_HSHUB_NEXT_HSHUB_ID_PARAMS_MESSAGE_ID = (0x8c)
+NV2080_CTRL_CMD_INTERNAL_HSHUB_EGM_CONFIG = (0x20800a8d)
+NV2080_CTRL_INTERNAL_HSHUB_EGM_CONFIG_PARAMS_MESSAGE_ID = (0x8d)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_COMPUTE_PEER_ADDR = (0x20800aad)
+NV2080_CTRL_INTERNAL_NVLINK_GET_SET_NVSWITCH_FABRIC_ADDR_PARAMS_MESSAGE_ID = (0xae)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_SET_NVSWITCH_FABRIC_ADDR = (0x20800aae)
+NV2080_CTRL_CMD_INTERNAL_BIF_GET_ASPM_L1_FLAGS = (0x20800ab0)
+NV2080_CTRL_INTERNAL_BIF_GET_ASPM_L1_FLAGS_PARAMS_MESSAGE_ID = (0xb0)
+NV2080_CTRL_CMD_INTERNAL_PERF_CF_CONTROLLERS_SET_MAX_VGPU_VM_COUNT = (0x20800ab1)
+NV2080_CTRL_CMD_INTERNAL_PERF_CF_CONTROLLERS_MAX_ACTIVE_VGPU_VM_COUNT_MAX_VALUE = 32
+NV2080_CTRL_INTERNAL_PERF_CF_CONTROLLERS_SET_MAX_VGPU_VM_COUNT_PARAMS_MESSAGE_ID = (0xB1)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_DISABLE_NVLINK_PEERS = (0x20800a6e)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE = (0x20800a6f)
+NV2080_CTRL_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE_PARAMS_MESSAGE_ID = (0x6f)
+NV2080_CTRL_CMD_INTERNAL_CCU_GET_SAMPLE_INFO = (0x20800ab2)
+NV2080_CTRL_CMD_INTERNAL_CCU_MAP = (0x20800ab3)
+NV2080_CTRL_INTERNAL_CCU_DEV_SHRBUF_COUNT_MAX = 1
+NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS_MESSAGE_ID = (0xB3)
+NV2080_CTRL_CMD_INTERNAL_CCU_UNMAP = (0x20800ab4)
+NV2080_CTRL_INTERNAL_CCU_UNMAP_INFO_PARAMS_MESSAGE_ID = (0xB4)
+NV2080_CTRL_CMD_INTERNAL_SET_P2P_CAPS = (0x20800ab5)
+NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PARAMS_MESSAGE_ID = (0xB5)
+NV2080_CTRL_CMD_INTERNAL_REMOVE_P2P_CAPS = (0x20800ab6)
+NV2080_CTRL_INTERNAL_REMOVE_P2P_CAPS_PARAMS_MESSAGE_ID = (0xB6)
+NV2080_CTRL_CMD_INTERNAL_GET_PCIE_P2P_CAPS = (0x20800ab8)
+NV2080_CTRL_INTERNAL_GET_PCIE_P2P_CAPS_PARAMS_MESSAGE_ID = (0xB8)
+NV2080_CTRL_CMD_INTERNAL_BIF_SET_PCIE_RO = (0x20800ab9)
+NV2080_CTRL_INTERNAL_BIF_SET_PCIE_RO_PARAMS_MESSAGE_ID = (0xB9)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE = (0x20800a76)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE_PARAMS_MESSAGE_ID = (0x76)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_POST_UNIX_CONSOLE = (0x20800a77)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_POST_UNIX_CONSOLE_PARAMS_MESSAGE_ID = (0x77)
+NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS_MESSAGE_ID = (0xBB)
+NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_COMPUTE_PROFILES = (0x20800aba)
+NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_COMPUTE_PROFILES_PARAMS_MESSAGE_ID = (0xBA)
+NV2080_CTRL_CMD_INTERNAL_CCU_SET_STREAM_STATE = (0x20800abd)
+NV2080_CTRL_INTERNAL_CCU_STREAM_STATE_PARAMS_MESSAGE_ID = (0xBD)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_ATTACH_AND_INIT = (0x20800abe)
+NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS_MESSAGE_ID = (0xBE)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS = (0x20800abf)
+NV2080_CTRL_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS_PARAMS_MESSAGE_ID = (0xBF)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_DISPLAY_IDS = (0x20800ac0)
+NV2080_MAX_NUM_HEADS = 4
+NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS_MESSAGE_ID = (0xC0)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_SET_STREO_SYNC = (0x20800ac1)
+NV2080_CTRL_INTERNAL_GSYNC_SET_STREO_SYNC_PARAMS_MESSAGE_ID = (0xC1)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES = (0x20800ac4)
+NV2080_CTRL_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES_PARAMS_MESSAGE_ID = (0xC4)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_IS_DISPLAYID_VALID = (0x20800ac9)
+NV2080_CTRL_INTERNAL_GSYNC_IS_DISPLAYID_VALID_PARAMS_MESSAGE_ID = (0xC9)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_SET_OR_RESTORE_RASTER_SYNC = (0x20800aca)
+NV2080_CTRL_INTERNAL_GSYNC_SET_OR_RESTORE_RASTER_SYNC_PARAMS_MESSAGE_ID = (0xCA)
+NV2080_CTRL_CMD_INTERNAL_FBSR_INIT = (0x20800ac2)
+NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS_MESSAGE_ID = (0xC2)
+NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING = (0x20800ac3)
+NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS_MESSAGE_ID = (0xC3)
+NV2080_CTRL_CMD_INTERNAL_MEMMGR_GET_VGPU_CONFIG_HOST_RESERVED_FB = (0x20800ac5)
+NV2080_CTRL_INTERNAL_MEMMGR_GET_VGPU_CONFIG_HOST_RESERVED_FB_PARAMS_MESSAGE_ID = (0xC5)
+NV2080_CTRL_CMD_INTERNAL_INIT_BRIGHTC_STATE_LOAD = (0x20800ac6)
+NV2080_CTRL_ACPI_DSM_READ_SIZE = (0x1000)
+NV2080_CTRL_INTERNAL_INIT_BRIGHTC_STATE_LOAD_PARAMS_MESSAGE_ID = (0xC6)
+NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL_PARAMS_MESSAGE_ID = (0xC7)
+NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL = (0x20800ac7)
+NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL_PARAMS_MESSAGE_ID = (0xC8)
+NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL = (0x20800ac8)
+NV2080_CTRL_CMD_INTERNAL_SMBPBI_PFM_REQ_HNDLR_CAP_UPDATE = (0x20800acb)
+NV2080_CTRL_INTERNAL_SMBPBI_PFM_REQ_HNDLR_CAP_UPDATE_PARAMS_MESSAGE_ID = (0xCB)
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_TYPE_PMGR = 0x00
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_TYPE_THERM = 0x01
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_TYPE_SMBPBI = 0x02
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_PMGR_LOAD = 0x00
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_THERM_INIT = 0x01
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_SMBPBI_OP_CLEAR = 0x02
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_SMBPBI_OP_SET = 0x03
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_STATE_LOAD_SYNC = (0x20800acc)
+NV2080_CTRL_INTERNAL_PMGR_PFM_REQ_HNDLR_STATE_LOAD_SYNC_PARAMS_MESSAGE_ID = (0xCC)
+NV2080_CTRL_CMD_INTERNAL_THERM_PFM_REQ_HNDLR_STATE_INIT_SYNC = (0x20800acd)
+NV2080_CTRL_INTERNAL_THERM_PFM_REQ_HNDLR_STATE_INIT_SYNC_PARAMS_MESSAGE_ID = (0xCD)
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_GET_PM1_FORCED_OFF_STATUS = 0x00
+NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_GET_PM1_STATUS = 0x01
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_PM1_STATE = (0x20800ace)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_PM1_STATE_PARAMS_MESSAGE_ID = (0xCE)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_PM1_STATE = (0x20800acf)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_PM1_STATE_PARAMS_MESSAGE_ID = (0xCF)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_UPDATE_EDPP_LIMIT = (0x20800ad0)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_UPDATE_EDPP_LIMIT_PARAMS_MESSAGE_ID = (0xD0)
+NV2080_CTRL_CMD_INTERNAL_THERM_PFM_REQ_HNDLR_UPDATE_TGPU_LIMIT = (0x20800ad1)
+NV2080_CTRL_CMD_INTERNAL_THERM_PFM_REQ_HNDLR_UPDATE_TGPU_LIMIT_PARAMS_MESSAGE_ID = (0xD1)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TGP_MODE = (0x20800ad2)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TGP_MODE_PARAMS_MESSAGE_ID = (0xD2)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TURBO_V2 = (0x20800ad3)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TURBO_V2_PARAMS_MESSAGE_ID = (0xD3)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_INFO = (0x20800ad4)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_INFO_PARAMS_MESSAGE_ID = (0xD4)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_MAPPING = (0x20800ad5)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_MAPPING_PARAMS_MESSAGE_ID = (0xD5)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_VPSTATE = (0x20800ad6)
+NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_VPSTATE_PARAMS_MESSAGE_ID = (0xD6)
+NV2080_CTRL_CMD_INTERNAL_GCX_ENTRY_PREREQUISITE = (0x2080a7d7)
+NV2080_CTRL_INTERNAL_GCX_ENTRY_PREREQUISITE_PARAMS_MESSAGE_ID = (0xD7)
+NV2080_CTRL_CMD_INTERNAL_PMGR_UNSET_DYNAMIC_BOOST_LIMIT = (0x20800a7b)
+NV2080_CTRL_CMD_INTERNAL_FIFO_GET_NUM_SECURE_CHANNELS = (0x20800ad8)
+NV2080_CTRL_INTERNAL_FIFO_GET_NUM_SECURE_CHANNELS_PARAMS_MESSAGE_ID = (0xD8)
+NV2080_CTRL_CMD_INTERNAL_BIF_DISABLE_SYSTEM_MEMORY_ACCESS = (0x20800adb)
+NV2080_CTRL_INTERNAL_BIF_DISABLE_SYSTEM_MEMORY_ACCESS_PARAMS_MESSAGE_ID = (0xDB)
+NV2080_CTRL_CMD_INTERNAL_DISP_PINSETS_TO_LOCKPINS = (0x20800adc)
+NV2080_CTRL_INTERNAL_DISP_PINSETS_TO_LOCKPINS_PARAMS_MESSAGE_ID = (0xDC)
+NV2080_CTRL_CMD_INTERNAL_DETECT_HS_VIDEO_BRIDGE = (0x20800add)
+NV2080_CTRL_CMD_INTERNAL_DISP_SET_SLI_LINK_GPIO_SW_CONTROL = (0x20800ade)
+NV2080_CTRL_INTERNAL_DISP_SET_SLI_LINK_GPIO_SW_CONTROL_PARAMS_MESSAGE_ID = (0xDE)
+NV2080_CTRL_CMD_INTERNAL_SET_STATIC_EDID_DATA = (0x20800adf)
+MAX_EDID_SIZE_FROM_SBIOS = 512
+NV2080_CTRL_CMD_INTERNAL_SET_STATIC_EDID_DATA_PARAMS_MESSAGE_ID = (0xDF)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_ACPI_SUBSYSTEM_ACTIVATED = (0x20800af0)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_MODESET = (0x20800af1)
+NV2080_CTRL_CMD_INTERNAL_DISPLAY_POST_MODESET = (0x20800af2)
+NV2080_CTRL_CMD_INTERNAL_GET_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xF4)
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_FABRIC_PROBE_INFO = (0x208001f4)
+NV2080_CTRL_CMD_INTERNAL_START_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xF5)
+NV2080_CTRL_CMD_INTERNAL_GPU_START_FABRIC_PROBE = (0x208001f5)
+NV2080_CTRL_CMD_INTERNAL_GPU_STOP_FABRIC_PROBE = (0x208001f6)
+NV2080_CTRL_CMD_INTERNAL_GPU_SUSPEND_FABRIC_PROBE = (0x208001f7)
+NV2080_CTRL_CMD_INTERNAL_RESUME_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xF8)
+NV2080_CTRL_CMD_INTERNAL_GPU_RESUME_FABRIC_PROBE = (0x208001f8)
+NV2080_CTRL_CMD_INTERNAL_GPU_INVALIDATE_FABRIC_PROBE = (0x208001f9)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_GET_STATIC_INFO = (0x20800af3)
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0xF3)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS = (0x20800ae1)
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SIZE = 3
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_KERNEL = 0
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_USER = 1
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_SCRUBBER = 2
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_COUNT = 3
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_LCE_COUNT = 6
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS_MESSAGE_ID = (0xE1)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS = (0x20800ae2)
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS_MESSAGE_ID = (0xE2)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_ROTATE_KEYS = (0x20800ae5)
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS_MESSAGE_ID = (0xE5)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION = (0x20800ae6)
+NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID = (0xE6)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE = (0x20800ae7)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS_MESSAGE_ID = (0xE7)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY = (0x20800ae8)
+NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS_MESSAGE_ID = (0xE8)
+NV2080_CTRL_CMD_INTERNAL_FIFO_GET_LOGICAL_UPROC_ID = (0x20800aef)
+NV2080_CTRL_INTERNAL_FIFO_GET_LOGICAL_UPROC_ID_PARAMS_MESSAGE_ID = (0xEF)
+NV2080_CTRL_CMD_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP = (0x20800afa)
+CC_AES_256_GCM_AUTH_TAG_SIZE_BYTES = (0x10)
+NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS_MESSAGE_ID = (0xFA)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_LOCAL_ATS_CONFIG = (0x20800afb)
+NV2080_CTRL_INTERNAL_MEMSYS_GET_LOCAL_ATS_CONFIG_PARAMS_MESSAGE_ID = (0xFB)
+NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_PEER_ATS_CONFIG = (0x20800afc)
+NV2080_CTRL_INTERNAL_MEMSYS_SET_PEER_ATS_CONFIG_PARAMS_MESSAGE_ID = (0xFC)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_GET_EDPP_LIMIT_INFO = (0x20800afd)
+NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_GET_EDPP_LIMIT_INFO_PARAMS_MESSAGE_ID = (0xFD)
+NV2080_CTRL_INTERNAL_INIT_USER_SHARED_DATA_PARAMS_MESSAGE_ID = (0xFE)
+NV2080_CTRL_CMD_INTERNAL_INIT_USER_SHARED_DATA = (0x20800afe)
+NV2080_CTRL_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL_PARAMS_MESSAGE_ID = (0xFF)
+NV2080_CTRL_CMD_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL = (0x20800aff)
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS_MESSAGE_ID = (0xE3)
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_OLDEST = 0x00
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_NEWEST = 0x01
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_STOP = 0x02
+NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE = (0x208001e3)
+NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS_MESSAGE_ID = (0xAF)
+NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES = (0x20800aaf)
+NV2080_CTRL_CMD_INTERNAL_GR_CTXSW_SETUP_BIND = (0x20800ae4)
+NV2080_CTRL_INTERNAL_GR_CTXSW_SETUP_BIND_PARAMS_MESSAGE_ID = (0xE4)
+NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS_MESSAGE_ID = (0xE9)
+NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER = (0x20800ae9)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_FATAL_ERROR_RECOVERY = (0x20800aea)
+NV2080_CTRL_INTERNAL_NVLINK_POST_FATAL_ERROR_RECOVERY_PARAMS_MESSAGE_ID = (0xEA)
+NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS_MESSAGE_ID = (0xEB)
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP = (0x20800aeb)
+NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS_MESSAGE_ID = (0xEC)
+NV2080_CTRL_CMD_INTERNAL_GPU_SET_ILLUM = (0x20800aec)
+NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS_MESSAGE_ID = (0xED)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR = (0x20800aed)
+NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM = (0x20800a79)
+NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS_MESSAGE_ID = (0x79)
+NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS_MESSAGE_ID = (0x14)
+NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE = (0x20800a14)
+NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS_MESSAGE_ID = (0xEE)
+NV2080_CTRL_CMD_INTERNAL_GPU_GET_PF_BAR1_SPA = (0x20800aee)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_NVLINK_PEER = (0x20800a21)
+NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x21)
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_OFF = 0x00
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_HS = 0x01
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAFE = 0x02
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAULT = 0x03
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RECOVERY = 0x04
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAIL = 0x05
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DETECT = 0x06
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESET = 0x07
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ENABLE_PM = 0x08
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_PM = 0x09
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SLEEP = 0x0A
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAVE_STATE = 0x0B
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESTORE_STATE = 0x0C
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_PRE_HS = 0x0E
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT = 0x0F
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_DISABLE = 0x10
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN = 0x11
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP = 0x12
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE1 = 0x13
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITNEGOTIATE = 0x14
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE = 0x15
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITOPTIMIZE = 0x16
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE = 0x17
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT = 0x18
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_CONTAIN = 0x19
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITTL = 0x1A
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE5 = 0x1B
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ALI = 0x1C
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ACTIVE_PENDING = 0x1D
+NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INVALID = 0xFF
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_HS = 0x00
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SINGLE_LANE = 0x04
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_LOW_POWER = 0x04
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_TRAIN = 0x05
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SAFE = 0x06
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_OFF = 0x07
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE = 0x08
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE_DISABLE = 0x09
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_DATA_READY = 0x0A
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_EQ = 0x0B
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_PRBS_EN = 0x0C
+NV2080_NVLINK_CORE_SUBLINK_STATE_TX_POST_HS = 0x0D
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_HS = 0x00
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SINGLE_LANE = 0x04
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_LOW_POWER = 0x04
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_TRAIN = 0x05
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SAFE = 0x06
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_OFF = 0x07
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_RXCAL = 0x08
+NV2080_NVLINK_CORE_SUBLINK_STATE_RX_INIT_TERM = 0x09
+NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_NUM = 6
+NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE = (0x7)
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE = 0x00
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE = 0x01
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE = 0x02
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE = 0x03
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE = 0x04
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE = 0x05
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE = 0x06
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE = 0x07
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT = 0x08
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT = 0x09
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN = 0x0A
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN = 0x0B
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE = 0x0C
+NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD = 0x0D
+NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS_MESSAGE_ID = (0x24)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK = (0x20800a24)
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS_MESSAGE_ID = (0x25)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID = (0x20800a25)
+NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS_MESSAGE_ID = (0x29)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_ALI_ENABLED = (0x20800a29)
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_PROGRAM = 0x0
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_RESET = 0x1
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS_MESSAGE_ID = (0x42)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_HSHUB_MUX = (0x20800a42)
+NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x4E)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER = (0x20800a4e)
+NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x50)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER = (0x20800a50)
+NV2080_CTRL_CMD_INTERNAL_LOG_OOB_XID = (0x20800a56)
+NV2080_INTERNAL_OOB_XID_MESSAGE_BUFFER_SIZE = (81)
+NV2080_CTRL_INTERNAL_LOG_OOB_XID_PARAMS_MESSAGE_ID = (0x56)
+NV2080_CTRL_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING_TYPE_SYSMEM = 0x1
+NV2080_CTRL_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING_TYPE_PEER = 0x2
+NV2080_CTRL_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING_PARAMS_MESSAGE_ID = (0x5F)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING = (0x20800a5f)
+NV2080_CTRL_INTERNAL_NVLINK_SAVE_RESTORE_HSHUB_STATE_PARAMS_MESSAGE_ID = (0x62)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_SAVE_RESTORE_HSHUB_STATE = (0x20800a62)
+NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_SET = (0x00000000)
+NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_SAVE = (0x00000001)
+NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_RESTORE = (0x00000002)
+NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_PARAMS_MESSAGE_ID = (0x64)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_PROGRAM_BUFFERREADY = (0x20800a64)
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_CURRENT_CONFIG_PARAMS_MESSAGE_ID = (0x78)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_CURRENT_CONFIG = (0x20800a78)
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_PEER_LINK_MASK_PARAMS_MESSAGE_ID = (0x7D)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_PEER_LINK_MASK = (0x20800a7d)
+NV2080_CTRL_INTERNAL_NVLINK_UPDATE_LINK_CONNECTION_PARAMS_MESSAGE_ID = (0x82)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_LINK_CONNECTION = (0x20800a82)
+NV2080_CTRL_INTERNAL_NVLINK_ENABLE_LINKS_POST_TOPOLOGY_PARAMS_MESSAGE_ID = (0x83)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_LINKS_POST_TOPOLOGY = (0x20800a83)
+NV2080_CTRL_INTERNAL_NVLINK_PRE_LINK_TRAIN_ALI_PARAMS_MESSAGE_ID = (0x84)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_PRE_LINK_TRAIN_ALI = (0x20800a84)
+NV2080_CTRL_INTERNAL_NVLINK_MAX_ARR_SIZE = 64
+NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS_MESSAGE_ID = (0x85)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_LINK_MASK_POST_RX_DET = (0x20800a85)
+NV2080_CTRL_INTERNAL_NVLINK_LINK_TRAIN_ALI_PARAMS_MESSAGE_ID = (0x86)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_LINK_TRAIN_ALI = (0x20800a86)
+NV2080_CTRL_INTERNAL_NVLINK_GET_NVLINK_DEVICE_INFO_PARAMS_MESSAGE_ID = (0x87)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_NVLINK_DEVICE_INFO = (0x20800a87)
+NV2080_CTRL_INTERNAL_NVLINK_MAX_LINKS_PER_IOCTRL_SW = 6
+NV2080_CTRL_INTERNAL_NVLINK_GET_IOCTRL_DEVICE_INFO_PARAMS_MESSAGE_ID = (0x8E)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_IOCTRL_DEVICE_INFO = (0x20800a8e)
+NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_LINK_SPEED_PARAMS_MESSAGE_ID = (0x8F)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_PROGRAM_LINK_SPEED = (0x20800a8f)
+NV2080_CTRL_INTERNAL_NVLINK_ARE_LINKS_TRAINED_PARAMS_MESSAGE_ID = (0x90)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_ARE_LINKS_TRAINED = (0x20800a90)
+NV2080_CTRL_INTERNAL_NVLINK_RESET_FLAGS_ASSERT = (0x00000000)
+NV2080_CTRL_INTERNAL_NVLINK_RESET_FLAGS_DEASSERT = (0x00000001)
+NV2080_CTRL_INTERNAL_NVLINK_RESET_FLAGS_TOGGLE = (0x00000002)
+NV2080_CTRL_INTERNAL_NVLINK_RESET_LINKS_PARAMS_MESSAGE_ID = (0x91)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_RESET_LINKS = (0x20800a91)
+NV2080_CTRL_INTERNAL_NVLINK_DISABLE_DL_INTERRUPTS_PARAMS_MESSAGE_ID = (0x92)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_DISABLE_DL_INTERRUPTS = (0x20800a92)
+NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_INFO_PARAMS_MESSAGE_ID = (0x93)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_INFO = (0x20800a93)
+NV2080_CTRL_INTERNAL_NVLINK_SETUP_NVLINK_SYSMEM_PARAMS_MESSAGE_ID = (0x94)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_SETUP_NVLINK_SYSMEM = (0x20800a94)
+NV2080_CTRL_INTERNAL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS_MESSAGE_ID = (0x95)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_PROCESS_FORCED_CONFIGS = (0x20800a95)
+NV2080_CTRL_INTERNAL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS_MESSAGE_ID = (0x96)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS = (0x20800a96)
+NV2080_CTRL_INTERNAL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS_PARAMS_MESSAGE_ID = (0x97)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS = (0x20800a97)
+NV2080_CTRL_INTERNAL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS_MESSAGE_ID = (0xAB)
+NV2080_CTRL_CMD_INTERNAL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK = (0x20800aab)
+NV2080_CTRL_CMD_LPWR_DIFR_CTRL = (0x20802801)
+NV2080_CTRL_LPWR_DIFR_CTRL_DISABLE = (0x00000001)
+NV2080_CTRL_LPWR_DIFR_CTRL_ENABLE = (0x00000002)
+NV2080_CTRL_LPWR_DIFR_CTRL_SUPPORT_STATUS = (0x00000003)
+NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_LPWR_DIFR_SUPPORTED = (0x00000001)
+NV2080_CTRL_LPWR_DIFR_NOT_SUPPORTED = (0x00000002)
+NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE = (0x20802802)
+NV2080_CTRL_LPWR_DIFR_PREFETCH_SUCCESS = (0x00000001)
+NV2080_CTRL_LPWR_DIFR_PREFETCH_FAIL_OS_FLIPS_ENABLED = (0x00000002)
+NV2080_CTRL_LPWR_DIFR_PREFETCH_FAIL_INSUFFICIENT_L2_SIZE = (0x00000003)
+NV2080_CTRL_LPWR_DIFR_PREFETCH_FAIL_CE_HW_ERROR = (0x00000004)
+NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_MC_GET_ARCH_INFO = (0x20801701)
+NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_T23X = (0xE0000023)
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_TU100 = (0x00000160)
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GA100 = (0x00000170)
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GH100 = (0x00000180)
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_AD100 = (0x00000190)
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GB100 = (0x000001A0)
+NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GB200 = (0x000001B0)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234 = (0x00000004)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234D = (0x00000005)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU100 = (0x00000000)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU102 = (0x00000002)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU104 = (0x00000004)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU106 = (0x00000006)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU116 = (0x00000008)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU117 = (0x00000007)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA100 = (0x00000000)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA102 = (0x00000002)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA103 = (0x00000003)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA104 = (0x00000004)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA106 = (0x00000006)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA107 = (0x00000007)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA10B = (0x0000000B)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100 = (0x00000000)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100_SOC = (0x00000001)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD100 = (0x00000000)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD000 = (0x00000001)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD101 = (0x00000001)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD102 = (0x00000002)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD103 = (0x00000003)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD104 = (0x00000004)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD106 = (0x00000006)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD107 = (0x00000007)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD10B = (0x0000000B)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB100 = (0x00000000)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB102 = (0x00000002)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB200 = (0x00000000)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB202 = (0x00000002)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB203 = (0x00000003)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB204 = (0x00000004)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB205 = (0x00000005)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB206 = (0x00000006)
+NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB207 = (0x00000007)
+NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_NO_SUBREVISION = (0x00000000)
+NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_P = (0x00000001)
+NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_Q = (0x00000002)
+NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_R = (0x00000003)
+NV2080_CTRL_CMD_MC_SERVICE_INTERRUPTS = (0x20801702)
+NV2080_CTRL_MC_ENGINE_ID_GRAPHICS = 0x00000001
+NV2080_CTRL_MC_ENGINE_ID_ALL = 0xFFFFFFFF
+NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_MC_GET_MANUFACTURER = (0x20801703)
+NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP = (0x2080170c)
+NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS_MESSAGE_ID = (0xC)
+NV2080_CTRL_CMD_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS = (0x2080170d)
+NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_MAX_ENGINES = 256
+NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS_MESSAGE_ID = (0xD)
+NV2080_CTRL_CMD_MC_GET_STATIC_INTR_TABLE = (0x2080170e)
+NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_MAX = 32
+NV2080_INTR_TYPE_NULL = (0x00000000)
+NV2080_INTR_TYPE_NON_REPLAYABLE_FAULT = (0x00000001)
+NV2080_INTR_TYPE_NON_REPLAYABLE_FAULT_ERROR = (0x00000002)
+NV2080_INTR_TYPE_INFO_FAULT = (0x00000003)
+NV2080_INTR_TYPE_REPLAYABLE_FAULT = (0x00000004)
+NV2080_INTR_TYPE_REPLAYABLE_FAULT_ERROR = (0x00000005)
+NV2080_INTR_TYPE_ACCESS_CNTR = (0x00000006)
+NV2080_INTR_TYPE_TMR = (0x00000007)
+NV2080_INTR_TYPE_CPU_DOORBELL = (0x00000008)
+NV2080_INTR_TYPE_GR0_FECS_LOG = (0x00000009)
+NV2080_INTR_TYPE_GR1_FECS_LOG = (0x0000000A)
+NV2080_INTR_TYPE_GR2_FECS_LOG = (0x0000000B)
+NV2080_INTR_TYPE_GR3_FECS_LOG = (0x0000000C)
+NV2080_INTR_TYPE_GR4_FECS_LOG = (0x0000000D)
+NV2080_INTR_TYPE_GR5_FECS_LOG = (0x0000000E)
+NV2080_INTR_TYPE_GR6_FECS_LOG = (0x0000000F)
+NV2080_INTR_TYPE_GR7_FECS_LOG = (0x00000010)
+NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS_MESSAGE_ID = (0xE)
+NV2080_CTRL_CMD_NVD_GET_DUMP_SIZE = (0x20802401)
+NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_NVD_GET_DUMP = (0x20802402)
+NV2080_CTRL_NVD_GET_DUMP_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_NVD_GET_NOCAT_JOURNAL = (0x20802409)
+NV2080_NOCAT_JOURNAL_MAX_DIAG_BUFFER = 1024
+NV2080_NOCAT_JOURNAL_MAX_STR_LEN = 65
+NV2080_NOCAT_JOURNAL_MAX_JOURNAL_RECORDS = 10
+NV2080_NOCAT_JOURNAL_MAX_ASSERT_RECORDS = 32
+NV2080_NOCAT_JOURNAL_REC_TYPE_UNKNOWN = 0
+NV2080_NOCAT_JOURNAL_REC_TYPE_BUGCHECK = 1
+NV2080_NOCAT_JOURNAL_REC_TYPE_ENGINE = 2
+NV2080_NOCAT_JOURNAL_REC_TYPE_TDR = 3
+NV2080_NOCAT_JOURNAL_REC_TYPE_RC = 4
+NV2080_NOCAT_JOURNAL_REC_TYPE_ASSERT = 5
+NV2080_NOCAT_JOURNAL_REC_TYPE_ANY = 6
+NV2080_NOCAT_JOURNAL_REC_TYPE_COUNT = (0x7)
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_REQ_IDX = 0
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_GRANDFATHERED_RECORD_IDX = 1
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_ALLOCATED_IDX = 2
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECTED_IDX = 3
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATIONS_IDX = 4
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATION_FAIL_IDX = 5
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_ALLOC_FAILED_IDX = 6
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_FAILED_IDX = 7
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_LOCKED_OUT_IDX = 8
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CTRL_INSERT_RECORDS_IDX = 9
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RPC_INSERT_RECORDS_IDX = 10
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCKED_IDX = 11
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCK_UPDATED_IDX = 12
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_UNLOCKED_IDX = 13
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_RECORDS_IDX = 14
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_BUFFER_IDX = 15
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_MATCH_FOUND_IDX = 16
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_MATCH_IDX = 17
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CLOSEST_FOUND_IDX = 18
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REQUESTED_IDX = 19
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REPORTED_IDX = 20
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_DROPPED_IDX = 21
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_REQ_IDX = 22
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATED_IDX = 23
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_FAILED_IDX = 24
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BUSY_IDX = 25
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_PARAM_IDX = 26
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_TYPE_IDX = 27
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES4_IDX = 28
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES3_IDX = 29
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES2_IDX = 30
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES1_IDX = 31
+NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COUNTER_COUNT = (0x20)
+NV2080_CTRL_NOCAT_GET_COUNTERS_ONLY_YES = 1
+NV2080_CTRL_NOCAT_GET_COUNTERS_ONLY_NO = 0
+NV2080_CTRL_NOCAT_GET_RESET_COUNTERS_YES = 1
+NV2080_CTRL_NOCAT_GET_RESET_COUNTERS_NO = 0
+NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_NVD_SET_NOCAT_JOURNAL_DATA = (0x2080240b)
+NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_EMPTY = 0
+NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_TDR_REASON = 1
+NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_SET_TAG = 2
+NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_RCLOG = 3
+NV2080_CTRL_NOCAT_TDR_TYPE_NONE = 0
+NV2080_CTRL_NOCAT_TDR_TYPE_LEGACY = 1
+NV2080_CTRL_NOCAT_TDR_TYPE_FULLCHIP = 2
+NV2080_CTRL_NOCAT_TDR_TYPE_BUSRESET = 3
+NV2080_CTRL_NOCAT_TDR_TYPE_GC6_RESET = 4
+NV2080_CTRL_NOCAT_TDR_TYPE_SURPRISE_REMOVAL = 5
+NV2080_CTRL_NOCAT_TDR_TYPE_UCODE_RESET = 6
+NV2080_CTRL_NOCAT_TDR_TYPE_TEST = 7
+NV2080_CTRL_NOCAT_TAG_CLEAR_YES = 1
+NV2080_CTRL_NOCAT_TAG_CLEAR_NO = 0
+NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_MESSAGE_ID = (0xB)
+NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD = (0x2080240c)
+NV2080_CTRL_NOCAT_INSERT_ALLOW_NULL_STR_YES = 1
+NV2080_CTRL_NOCAT_INSERT_ALLOW_NULL_STR_NO = 0
+NV2080_CTRL_NOCAT_INSERT_ALLOW_0_LEN_BUFFER_YES = 1
+NV2080_CTRL_NOCAT_INSERT_ALLOW_0_LEN_BUFFER_NO = 0
+NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS_MESSAGE_ID = (0xC)
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_CAPS_PARAMS_MESSAGE_ID = (0x1)
 NV2080_CTRL_NVLINK_CAPS_TBL_SIZE = 2
 NV2080_CTRL_NVLINK_CAPS_NVLINK_VERSION_INVALID = (0x00000000)
@@ -17278,1803 +19912,6 @@ NV2080_CTRL_CMD_NVLINK_CONFIGURE_L1_TOGGLE = (0x2080308e)
 NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_PARAMS_MESSAGE_ID = (0x8E)
 NV2080_CTRL_CMD_NVLINK_GET_L1_TOGGLE = (0x2080308f)
 NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS_MESSAGE_ID = (0x8F)
-NV2080_CTRL_CMD_DMABUF_EXPORT_OBJECTS_TO_FD = (0x20803a01)
-NV2080_CTRL_DMABUF_MAX_HANDLES = 128
-NV2080_CTRL_DMABUF_EXPORT_MAPPING_TYPE_DEFAULT = (0x00000000)
-NV2080_CTRL_DMABUF_EXPORT_MAPPING_TYPE_FORCE_PCIE = (0x00000001)
-NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK = (0x20804001)
-NV2080_CTRL_MAX_VMMU_SEGMENTS = 384
-NV2080_GPU_MAX_ENGINES = 0x54
-NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK = (0x20804002)
-NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE = (0x20804003)
-NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU = (0x20804004)
-NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO = (0x20804005)
-NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS_MESSAGE_ID = (0x5)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE = (0x20804006)
-NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS_MESSAGE_ID = (0x6)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY = (0x20804007)
-NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS_MESSAGE_ID = (0x7)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP = (0x20804008)
-NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS_MESSAGE_ID = (0x8)
-NV2080_CTRL_MAX_NVU32_TO_CONVERTED_STR_LEN = 8
-NV2080_CTRL_MAX_GPC_COUNT = 32
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING = (0x20804009)
-NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT = (0x2080400a)
-NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS_MESSAGE_ID = (0xA)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG = (0x2080400b)
-NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS_MESSAGE_ID = (0xB)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_FREE_STATES = (0x2080400c)
-NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS_MESSAGE_ID = (0xC)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_FRAME_RATE_LIMITER_STATUS = (0x2080400d)
-NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS_MESSAGE_ID = (0xD)
-NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE = (0x2080400e)
-NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS_MESSAGE_ID = (0xE)
-NV2080_CTRL_CMD_BUS_GET_PCI_INFO = (0x20801801)
-NV2080_CTRL_BUS_GET_PCI_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_BUS_INFO_INDEX_TYPE = (0x00000000)
-NV2080_CTRL_BUS_INFO_INDEX_INTLINE = (0x00000001)
-NV2080_CTRL_BUS_INFO_INDEX_CAPS = (0x00000002)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CAPS = (0x00000003)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_ROOT_LINK_CAPS = (0x00000004)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_UPSTREAM_LINK_CAPS = (0x00000005)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_DOWNSTREAM_LINK_CAPS = (0x00000006)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CTRL_STATUS = (0x00000007)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_ROOT_LINK_CTRL_STATUS = (0x00000008)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_UPSTREAM_LINK_CTRL_STATUS = (0x00000009)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_DOWNSTREAM_LINK_CTRL_STATUS = (0x0000000A)
-NV2080_CTRL_BUS_INFO_INDEX_COHERENT_DMA_FLAGS = (0x0000000B)
-NV2080_CTRL_BUS_INFO_INDEX_NONCOHERENT_DMA_FLAGS = (0x0000000C)
-NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_SIZE = (0x0000000D)
-NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_FLAGS = (0x0000000E)
-NV2080_CTRL_BUS_INFO_INDEX_BUS_NUMBER = (0x0000000F)
-NV2080_CTRL_BUS_INFO_INDEX_DEVICE_NUMBER = (0x00000010)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_ERRORS = (0x00000011)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_ROOT_LINK_ERRORS = (0x00000012)
-NV2080_CTRL_BUS_INFO_INDEX_INTERFACE_TYPE = (0x00000013)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GEN2_INFO = (0x00000014)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_AER = (0x00000015)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_BOARD_LINK_CAPS = (0x00000016)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_BOARD_LINK_CTRL_STATUS = (0x00000017)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_ASLM_STATUS = (0x00000018)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_LINK_WIDTH_SWITCH_ERROR_COUNT = (0x00000019)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_LINK_SPEED_SWITCH_ERROR_COUNT = (0x0000001A)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_CYA_ASPM = (0x0000001B)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_LINECODE_ERRORS = (0x0000001C)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CRC_ERRORS = (0x0000001D)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NAKS_RECEIVED = (0x0000001E)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FAILED_L0S_EXITS = (0x0000001F)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_LINECODE_ERRORS_CLEAR = (0x00000020)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CRC_ERRORS_CLEAR = (0x00000021)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NAKS_RECEIVED_CLEAR = (0x00000022)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FAILED_L0S_EXITS_CLEAR = (0x00000023)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CORRECTABLE_ERRORS = (0x00000024)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NONFATAL_ERRORS = (0x00000025)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FATAL_ERRORS = (0x00000026)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_UNSUPPORTED_REQUESTS = (0x00000027)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_CORRECTABLE_ERRORS_CLEAR = (0x00000028)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_NONFATAL_ERRORS_CLEAR = (0x00000029)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_FATAL_ERRORS_CLEAR = (0x0000002A)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GPU_LINK_UNSUPPORTED_REQUESTS_CLEAR = (0x0000002B)
-NV2080_CTRL_BUS_INFO_INDEX_DOMAIN_NUMBER = (0x0000002C)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_GEN_INFO = (0x0000002D)
-NV2080_CTRL_BUS_INFO_INDEX_GPU_INTERFACE_TYPE = (0x0000002E)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_UPSTREAM_GEN_INFO = (0x0000002F)
-NV2080_CTRL_BUS_INFO_INDEX_PCIE_BOARD_GEN_INFO = (0x00000030)
-NV2080_CTRL_BUS_INFO_INDEX_MSI_INFO = (0x00000031)
-NV2080_CTRL_BUS_INFO_INDEX_GPU_GART_SIZE_HI = (0x00000032)
-NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE = (0x00000033)
-NV2080_CTRL_BUS_INFO_INDEX_MAX = NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE
-NV2080_CTRL_BUS_INFO_MAX_LIST_SIZE = (0x00000034)
-NV2080_CTRL_BUS_INFO_TYPE_PCI = (0x00000001)
-NV2080_CTRL_BUS_INFO_TYPE_PCI_EXPRESS = (0x00000003)
-NV2080_CTRL_BUS_INFO_TYPE_FPCI = (0x00000004)
-NV2080_CTRL_BUS_INFO_TYPE_AXI = (0x00000008)
-NV2080_CTRL_BUS_INFO_CAPS_NEED_IO_FLUSH = (0x00000001)
-NV2080_CTRL_BUS_INFO_CAPS_CHIP_INTEGRATED = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_2500MBPS = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_5000MBPS = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_8000MBPS = (0x00000003)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_16000MBPS = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_32000MBPS = (0x00000005)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_MAX_SPEED_64000MBPS = (0x00000006)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_ASPM_NONE = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_ASPM_L0S = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_ASPM_L0S_L1 = (0x00000003)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN1 = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN2 = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN3 = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN4 = (0x00000003)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN5 = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GEN_GEN6 = (0x00000005)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN1 = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN2 = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN3 = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN4 = (0x00000003)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN5 = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_CURR_LEVEL_GEN6 = (0x00000005)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN1 = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN2 = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN3 = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN4 = (0x00000003)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN5 = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_GPU_GEN_GEN6 = (0x00000005)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_SPEED_CHANGES_ENABLED = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CAP_SPEED_CHANGES_DISABLED = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_DISABLED = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_L0S = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_L1 = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_ASPM_L0S_L1 = (0x00000003)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_2500MBPS = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_5000MBPS = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_8000MBPS = (0x00000003)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_16000MBPS = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_32000MBPS = (0x00000005)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_SPEED_64000MBPS = (0x00000006)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_UNDEFINED = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X1 = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X2 = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X4 = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X8 = (0x00000008)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X12 = (0x0000000C)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X16 = (0x00000010)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_CTRL_STATUS_LINK_WIDTH_X32 = (0x00000020)
-NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_CTXDMA_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_CTXDMA_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_GPUGART_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_COHERENT_DMA_FLAGS_GPUGART_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_CTXDMA_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_CTXDMA_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_GPUGART_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_GPUGART_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_COH_MODE_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_NONCOHERENT_DMA_FLAGS_COH_MODE_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_REQFLUSH_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_REQFLUSH_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_UNIFIED_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_GPU_GART_FLAGS_UNIFIED_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_CORR_ERROR = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_NON_FATAL_ERROR = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_FATAL_ERROR = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_UNSUPP_REQUEST = (0x00000008)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_ERRORS_ENTERED_RECOVERY = (0x00000010)
-NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CAP_FALSE = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CAP_TRUE = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CURR_LEVEL_GEN1 = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_GEN2_INFO_CURR_LEVEL_GEN2 = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_TRAINING_ERR = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_DLINK_PROTO_ERR = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_POISONED_TLP = (0x00000004)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_FC_PROTO_ERR = (0x00000008)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_CPL_TIMEOUT = (0x00000010)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_CPL_ABORT = (0x00000020)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_UNEXP_CPL = (0x00000040)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_RCVR_OVERFLOW = (0x00000080)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_MALFORMED_TLP = (0x00000100)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_ECRC_ERROR = (0x00000200)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_UNCORR_UNSUPPORTED_REQ = (0x00000400)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_RCV_ERR = (0x00010000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_BAD_TLP = (0x00020000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_BAD_DLLP = (0x00040000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_RPLY_ROLLOVER = (0x00080000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_RPLY_TIMEOUT = (0x00100000)
-NV2080_CTRL_BUS_INFO_PCIE_LINK_AER_CORR_ADVISORY_NONFATAL = (0x00200000)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_PCIE_ERROR = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_PCIE_PRESENT = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_CL_CAPABLE_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_CL_CAPABLE_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_OS_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_OS_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_BR04_MISSING = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_ASLM_STATUS_BR04_PRESENT = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_VALID_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_VALID_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_DISABLED = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_L0S = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_L1 = (0x00000002)
-NV2080_CTRL_BUS_INFO_PCIE_GPU_CYA_ASPM_L0S_L1 = (0x00000003)
-NV2080_CTRL_BUS_INFO_MSI_STATUS_DISABLED = (0x00000000)
-NV2080_CTRL_BUS_INFO_MSI_STATUS_ENABLED = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_2_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_2_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_1_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_PCIPM_L1_1_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_2_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_2_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_1_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_ASPM_L1_1_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_L1PM_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CAP_L1PM_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_2_ENABLED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_2_ENABLED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_1_ENABLED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_PCIPM_L1_1_ENABLED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_2_ENABLED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_2_ENABLED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_1_ENABLED_YES = (0x00000001)
-NV2080_CTRL_BUS_INFO_PCIE_L1_SS_CTRL1_ASPM_L1_1_ENABLED_NO = (0x00000000)
-NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE_PCIE = (0x00000000)
-NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE_NVLINK = (0x00000001)
-NV2080_CTRL_BUS_INFO_INDEX_SYSMEM_CONNECTION_TYPE_C2C = (0x00000002)
-NV2080_CTRL_CMD_BUS_GET_INFO = (0x20801802)
-NV2080_CTRL_BUS_GET_INFO_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_BUS_GET_INFO_V2 = (0x20801823)
-NV2080_CTRL_BUS_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x23)
-NV2080_CTRL_CMD_BUS_GET_PCI_BAR_INFO = (0x20801803)
-NV2080_CTRL_BUS_MAX_PCI_BARS = (8)
-NV2080_CTRL_BUS_GET_PCI_BAR_INFO_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_BUS_SET_PCIE_LINK_WIDTH = (0x20801804)
-NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_ERROR_PSTATE = (0x00000001)
-NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_ERROR_PCIE_CFG_ACCESS = (0x00000002)
-NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_ERROR_TRAINING = (0x00000004)
-NV2080_CTRL_CMD_BUS_SET_PCIE_SPEED = (0x20801805)
-NV2080_CTRL_BUS_SET_PCIE_SPEED_PARAMS_MESSAGE_ID = (0x5)
-NV2080_CTRL_BUS_SET_PCIE_SPEED_2500MBPS = (0x00000001)
-NV2080_CTRL_BUS_SET_PCIE_SPEED_5000MBPS = (0x00000002)
-NV2080_CTRL_BUS_SET_PCIE_SPEED_8000MBPS = (0x00000003)
-NV2080_CTRL_BUS_SET_PCIE_SPEED_16000MBPS = (0x00000004)
-NV2080_CTRL_BUS_SET_PCIE_SPEED_32000MBPS = (0x00000005)
-NV2080_CTRL_BUS_SET_PCIE_SPEED_64000MBPS = (0x00000006)
-NV2080_CTRL_CMD_BUS_MAP_BAR2 = (0x20801809)
-NV2080_CTRL_BUS_MAP_BAR2_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_BUS_UNMAP_BAR2 = (0x2080180a)
-NV2080_CTRL_BUS_UNMAP_BAR2_PARAMS_MESSAGE_ID = (0xA)
-NV2080_CTRL_CMD_BUS_VERIFY_BAR2 = (0x2080180b)
-NV2080_CTRL_BUS_VERIFY_BAR2_PARAMS_MESSAGE_ID = (0xB)
-NV2080_CTRL_CMD_BUS_SERVICE_GPU_MULTIFUNC_STATE = (0x20801812)
-NV2080_CTRL_BUS_SERVICE_GPU_MULTIFUNC_STATE_PARAMS_MESSAGE_ID = (0x12)
-NV2080_CTRL_BUS_ENABLE_GPU_MULTIFUNC_STATE = (0x00000000)
-NV2080_CTRL_BUS_DISABLE_GPU_MULTIFUNC_STATE = (0x00000001)
-NV2080_CTRL_BUS_GET_GPU_MULTIFUNC_STATE = (0x00000002)
-NV2080_CTRL_CMD_BUS_GET_PEX_COUNTERS = (0x20801813)
-NV2080_CTRL_PEX_MAX_COUNTER_TYPES = 31
-NV2080_CTRL_BUS_GET_PEX_COUNTERS_PARAMS_MESSAGE_ID = (0x13)
-NV2080_CTRL_BUS_PEX_COUNTER_TYPE = 0x00000000
-NV2080_CTRL_BUS_PEX_COUNTER_RECEIVER_ERRORS = 0x00000001
-NV2080_CTRL_BUS_PEX_COUNTER_REPLAY_COUNT = 0x00000002
-NV2080_CTRL_BUS_PEX_COUNTER_REPLAY_ROLLOVER_COUNT = 0x00000004
-NV2080_CTRL_BUS_PEX_COUNTER_BAD_DLLP_COUNT = 0x00000008
-NV2080_CTRL_BUS_PEX_COUNTER_BAD_TLP_COUNT = 0x00000010
-NV2080_CTRL_BUS_PEX_COUNTER_8B10B_ERRORS_COUNT = 0x00000020
-NV2080_CTRL_BUS_PEX_COUNTER_SYNC_HEADER_ERRORS_COUNT = 0x00000040
-NV2080_CTRL_BUS_PEX_COUNTER_LCRC_ERRORS_COUNT = 0x00000080
-NV2080_CTRL_BUS_PEX_COUNTER_FAILED_L0S_EXITS_COUNT = 0x00000100
-NV2080_CTRL_BUS_PEX_COUNTER_NAKS_SENT_COUNT = 0x00000200
-NV2080_CTRL_BUS_PEX_COUNTER_NAKS_RCVD_COUNT = 0x00000400
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_ERRORS = 0x00000800
-NV2080_CTRL_BUS_PEX_COUNTER_L1_TO_RECOVERY_COUNT = 0x00001000
-NV2080_CTRL_BUS_PEX_COUNTER_L0_TO_RECOVERY_COUNT = 0x00002000
-NV2080_CTRL_BUS_PEX_COUNTER_RECOVERY_COUNT = 0x00004000
-NV2080_CTRL_BUS_PEX_COUNTER_CHIPSET_XMIT_L0S_ENTRY_COUNT = 0x00008000
-NV2080_CTRL_BUS_PEX_COUNTER_GPU_XMIT_L0S_ENTRY_COUNT = 0x00010000
-NV2080_CTRL_BUS_PEX_COUNTER_L1_ENTRY_COUNT = 0x00020000
-NV2080_CTRL_BUS_PEX_COUNTER_L1P_ENTRY_COUNT = 0x00040000
-NV2080_CTRL_BUS_PEX_COUNTER_DEEP_L1_ENTRY_COUNT = 0x00080000
-NV2080_CTRL_BUS_PEX_COUNTER_ASLM_COUNT = 0x00100000
-NV2080_CTRL_BUS_PEX_COUNTER_TOTAL_CORR_ERROR_COUNT = 0x00200000
-NV2080_CTRL_BUS_PEX_COUNTER_CORR_ERROR_COUNT = 0x00400000
-NV2080_CTRL_BUS_PEX_COUNTER_NON_FATAL_ERROR_COUNT = 0x00800000
-NV2080_CTRL_BUS_PEX_COUNTER_FATAL_ERROR_COUNT = 0x01000000
-NV2080_CTRL_BUS_PEX_COUNTER_UNSUPP_REQ_COUNT = 0x02000000
-NV2080_CTRL_BUS_PEX_COUNTER_L1_1_ENTRY_COUNT = 0x04000000
-NV2080_CTRL_BUS_PEX_COUNTER_L1_2_ENTRY_COUNT = 0x08000000
-NV2080_CTRL_BUS_PEX_COUNTER_L1_2_ABORT_COUNT = 0x10000000
-NV2080_CTRL_BUS_PEX_COUNTER_L1SS_TO_DEEP_L1_TIMEOUT_COUNT = 0x20000000
-NV2080_CTRL_BUS_PEX_COUNTER_L1_SHORT_DURATION_COUNT = 0x40000000
-NV2080_CTRL_CMD_BUS_CLEAR_PEX_COUNTERS = (0x20801814)
-NV2080_CTRL_BUS_CLEAR_PEX_COUNTERS_PARAMS_MESSAGE_ID = (0x14)
-NV2080_CTRL_CMD_BUS_FREEZE_PEX_COUNTERS = (0x20801815)
-NV2080_CTRL_BUS_FREEZE_PEX_COUNTERS_PARAMS_MESSAGE_ID = (0x15)
-NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS = (0x20801816)
-NV2080_CTRL_PEX_MAX_LANES = 16
-NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS_PARAMS_MESSAGE_ID = (0x16)
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_TYPE = 0x00000000
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_SYNC_HDR_CODING_ERR = 0x00000001
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_SYNC_HDR_ORDER_ERR = 0x00000002
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_OS_DATA_SEQ_ERR = 0x00000004
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_TSX_DATA_SEQ_ERR = 0x00000008
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_SKPOS_LFSR_ERR = 0x00000010
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_RX_CLK_FIFO_OVERFLOW = 0x00000020
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_ELASTIC_FIFO_OVERFLOW = 0x00000040
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_RCVD_LINK_NUM_ERR = 0x00000080
-NV2080_CTRL_BUS_PEX_COUNTER_LANE_RCVD_LANE_NUM_ERR = 0x00000100
-NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY = (0x20801817)
-NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY_PARAMS_MESSAGE_ID = (0x17)
-NV2080_CTRL_CMD_BUS_SET_PCIE_LTR_LATENCY = (0x20801818)
-NV2080_CTRL_CMD_BUS_SET_PCIE_LTR_LATENCY_PARAMS_MESSAGE_ID = (0x18)
-NV2080_CTRL_BUS_PEX_UTIL_COUNTER_TX_BYTES = 0x00000001
-NV2080_CTRL_BUS_PEX_UTIL_COUNTER_RX_BYTES = 0x00000002
-NV2080_CTRL_BUS_PEX_UTIL_COUNTER_TX_L0 = 0x00000004
-NV2080_CTRL_BUS_PEX_UTIL_COUNTER_RX_L0 = 0x00000008
-NV2080_CTRL_BUS_PEX_UTIL_COUNTER_TX_L0S = 0x00000010
-NV2080_CTRL_BUS_PEX_UTIL_COUNTER_RX_L0S = 0x00000020
-NV2080_CTRL_BUS_PEX_UTIL_COUNTER_NON_L0_L0S = 0x00000040
-NV2080_CTRL_PEX_UTIL_MAX_COUNTER_TYPES = 7
-NV2080_CTRL_CMD_BUS_GET_PEX_UTIL_COUNTERS = (0x20801819)
-NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS_MESSAGE_ID = (0x19)
-NV2080_CTRL_CMD_BUS_CLEAR_PEX_UTIL_COUNTERS = (0x20801820)
-NV2080_CTRL_BUS_CLEAR_PEX_UTIL_COUNTERS_PARAMS_MESSAGE_ID = (0x20)
-NV2080_CTRL_CMD_BUS_GET_BFD = (0x20801821)
-NV2080_CTRL_BUS_GET_BFD_PARAMSARR_MESSAGE_ID = (0x21)
-NV2080_CTRL_ASPM_DISABLE_FLAGS_L1_MASK_REGKEY_OVERRIDE = 0x00000000
-NV2080_CTRL_ASPM_DISABLE_FLAGS_OS_RM_MAKES_POLICY_DECISIONS = 0x00000001
-NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_BEHIND_BRIDGE = 0x00000002
-NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_UPSTREAM_PORT_L1_UNSUPPORTED = 0x00000003
-NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_UPSTREAM_PORT_L1_POR_SUPPORTED = 0x00000004
-NV2080_CTRL_ASPM_DISABLE_FLAGS_GPU_UPSTREAM_PORT_L1_POR_MOBILE_ONLY = 0x00000005
-NV2080_CTRL_ASPM_DISABLE_FLAGS_CL_ASPM_L1_CHIPSET_DISABLED = 0x00000006
-NV2080_CTRL_ASPM_DISABLE_FLAGS_CL_ASPM_L1_CHIPSET_ENABLED_MOBILE_ONLY = 0x00000007
-NV2080_CTRL_ASPM_DISABLE_FLAGS_BIF_ENABLE_ASPM_DT_L1 = 0x00000008
-NV2080_CTRL_ASPM_DISABLE_FLAGS_MAX_FLAGS = 9
-NV2080_CTRL_CMD_BUS_GET_ASPM_DISABLE_FLAGS = (0x20801822)
-NV2080_CTRL_BUS_GET_ASPM_DISABLE_FLAGS_PARAMS_MESSAGE_ID = (0x22)
-NV2080_CTRL_CMD_BUS_CONTROL_PUBLIC_ASPM_BITS = (0x20801824)
-NV2080_CTRL_CMD_BUS_CONTROL_PUBLIC_ASPM_BITS_PARAMS_MESSAGE_ID = (0x24)
-NV2080_CTRL_CMD_BUS_GET_NVLINK_PEER_ID_MASK = (0x20801825)
-NV2080_CTRL_BUS_MAX_NUM_GPUS = 32
-NV2080_CTRL_BUS_GET_NVLINK_PEER_ID_MASK_PARAMS_MESSAGE_ID = (0x25)
-NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS = (0x20801826)
-NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS_PARAMS_MESSAGE_ID = (0x26)
-NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE = (0x20801827)
-NV2080_CTRL_CMD_BUS_GET_UPHY_DLN_CFG_SPACE_PARAMS_MESSAGE_ID = (0x27)
-NV2080_CTRL_CMD_BUS_GET_EOM_STATUS = (0x20801828)
-NV2080_CTRL_BUS_MAX_NUM_LANES = 32
-NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS_MESSAGE_ID = (0x28)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS = (0x20801829)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS_MESSAGE_ID = (0x29)
-NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_SYSMEM = 0x0
-NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_GPU = 0x1
-NV2080_CTRL_CMD_BUS_PCIE_ATOMICS_CAPTYPE_P2P = 0x2
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_32_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_32_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_64_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_FETCHADD_64_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_32_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_32_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_64_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_SWAP_64_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_32_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_32_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_64_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_64_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_128_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_CAS_128_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS = (0x2080182a)
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IADD = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IMIN = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IMAX = 2
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_INC = 3
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_DEC = 4
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IAND = 5
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IOR = 6
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_IXOR = 7
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_EXCH = 8
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_CAS = 9
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_FADD = 10
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_FMIN = 11
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_FMAX = 12
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_OP_TYPE_COUNT = 13
-NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS_MESSAGE_ID = (0x2A)
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SCALAR_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SCALAR_NO = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_VECTOR_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_VECTOR_NO = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_REDUCTION_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_REDUCTION_NO = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_32_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_32_NO = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_64_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_64_NO = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_128_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIZE_128_NO = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIGNED_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_SIGNED_NO = 0
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_UNSIGNED_YES = 1
-NV2080_CTRL_PCIE_SUPPORTED_GPU_ATOMICS_ATTRIB_UNSIGNED_NO = 0
-NV2080_CTRL_CMD_BUS_GET_C2C_INFO = (0x2080182b)
-NV2080_CTRL_CMD_BUS_GET_C2C_INFO_PARAMS_MESSAGE_ID = (0x2B)
-NV2080_CTRL_BUS_GET_C2C_INFO_REMOTE_TYPE_CPU = 1
-NV2080_CTRL_BUS_GET_C2C_INFO_REMOTE_TYPE_GPU = 2
-NV2080_CTRL_CMD_BUS_SYSMEM_ACCESS = (0x2080182c)
-NV2080_CTRL_BUS_SYSMEM_ACCESS_PARAMS_MESSAGE_ID = (0x2C)
-NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING = (0x2080182e)
-NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_INVALID = 0
-NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_NVLINK = 1
-NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_PCIE = 2
-NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_PCIE_BAR1 = 3
-NV2080_CTRL_CMD_BUS_SET_P2P_MAPPING_CONNECTION_TYPE_C2C = 4
-NV2080_SET_P2P_MAPPING_UUID_LEN = 16
-NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_MESSAGE_ID = (0x2E)
-NV2080_CTRL_CMD_BUS_UNSET_P2P_MAPPING = (0x2080182f)
-NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_MESSAGE_ID = (0x2F)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS = (0x20801830)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS_MESSAGE_ID = (0x30)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_32_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_FETCHADD_64_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_32_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_SWAP_64_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_32_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_64_NO = (0x00000000)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_YES = (0x00000001)
-NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_CAS_128_NO = (0x00000000)
-NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_HSHUB_GET_AVAILABLE_MASK = (0x20804101)
-NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_HSHUB_SET_EC_THROTTLE_MODE = (0x20804102)
-NV2080_CTRL_CMD_OS_UNIX_GC6_BLOCKER_REFCNT = (0x20803d01)
-NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_INC = (0x00000001)
-NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_DEC = (0x00000002)
-NV2080_CTRL_CMD_OS_UNIX_ALLOW_DISALLOW_GCOFF = (0x20803d02)
-NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_ALLOW = (0x00000001)
-NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_DISALLOW = (0x00000002)
-NV2080_CTRL_CMD_OS_UNIX_AUDIO_DYNAMIC_POWER = (0x20803d03)
-NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_OS_UNIX_INSTALL_PROFILER_HOOKS = (0x20803d04)
-NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_OS_UNIX_FLUSH_SNAPSHOT_BUFFER = (0x20803d05)
-NV2080_CTRL_CMD_OS_UNIX_STOP_PROFILER = (0x20803d06)
-NV2080_CTRL_CMD_OS_UNIX_VIDMEM_PERSISTENCE_STATUS = (0x20803d07)
-NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS_MESSAGE_ID = (0x7)
-NV2080_CTRL_CMD_OS_UNIX_UPDATE_TGP_STATUS = (0x20803d08)
-NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS_MESSAGE_ID = (0x8)
-NV2080_CTRL_BIOS_INFO_MAX_SIZE = (0x0000000F)
-NV2080_CTRL_BIOS_INFO_INDEX_REVISION = (0x00000000)
-NV2080_CTRL_BIOS_INFO_INDEX_OEM_REVISION = (0x00000001)
-NV2080_CTRL_CMD_BIOS_GET_INFO = (0x20800802)
-NV2080_CTRL_CMD_BIOS_GET_INFO_V2 = (0x20800810)
-NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x10)
-NV2080_CTRL_BIOS_NBSI_MAX_REG_STRING_LENGTH = (0x00000100)
-NV2080_CTRL_BIOS_NBSI_STRING_TYPE_ASCII = (0x00000000)
-NV2080_CTRL_BIOS_NBSI_STRING_TYPE_UNICODE = (0x00000001)
-NV2080_CTRL_BIOS_NBSI_STRING_TYPE_HASH = (0x00000002)
-NV2080_CTRL_BIOS_NBSI_MODULE_ROOT = (0x00000000)
-NV2080_CTRL_BIOS_NBSI_MODULE_RM = (0x00000001)
-NV2080_CTRL_BIOS_NBSI_MODULE_DISPLAYDRIVER = (0x00000002)
-NV2080_CTRL_BIOS_NBSI_MODULE_VIDEO = (0x00000003)
-NV2080_CTRL_BIOS_NBSI_MODULE_CPL = (0x00000004)
-NV2080_CTRL_BIOS_NBSI_MODULE_D3D = (0x00000005)
-NV2080_CTRL_BIOS_NBSI_MODULE_OGL = (0x00000006)
-NV2080_CTRL_BIOS_NBSI_MODULE_PMU = (0x00000007)
-NV2080_CTRL_BIOS_NBSI_MODULE_MODE = (0x00000008)
-NV2080_CTRL_BIOS_NBSI_NUM_MODULES = (0x00000009)
-NV2080_CTRL_BIOS_NBSI_MODULE_UNKNOWN = (0x80000000)
-NV2080_CTRL_BIOS_GET_NBSI_SUCCESS = (0x00000000)
-NV2080_CTRL_BIOS_GET_NBSI_OVERRIDE = (0x00000001)
-NV2080_CTRL_BIOS_GET_NBSI_BAD_HASH = (0xFFFFFFFA)
-NV2080_CTRL_BIOS_GET_NBSI_APITEST_SUCCESS = (0xFFFFFFFB)
-NV2080_CTRL_BIOS_GET_NBSI_BAD_TABLE = (0xFFFFFFFC)
-NV2080_CTRL_BIOS_GET_NBSI_NO_TABLE = (0xFFFFFFFD)
-NV2080_CTRL_BIOS_GET_NBSI_INCOMPLETE = (0xFFFFFFFE)
-NV2080_CTRL_BIOS_GET_NBSI_NOT_FOUND = (0xFFFFFFFF)
-NV2080_CTRL_CMD_BIOS_GET_NBSI = (0x20800803)
-NV2080_CTRL_BIOS_GET_NBSI_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_BIOS_GET_NBSI_V2 = (0x2080080e)
-NV2080_BIOS_GET_NBSI_MAX_RET_SIZE = (0x100)
-NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS_MESSAGE_ID = (0xE)
-NV2080_CTRL_CMD_BIOS_GET_NBSI_OBJ = (0x20800806)
-NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS_MESSAGE_ID = (0x6)
-GLOB_TYPE_GET_NBSI_DIR = 0xfffe
-GLOB_TYPE_APITEST = 0xffff
-GLOB_TYPE_GET_NBSI_ACPI_RAW = 0xfffd
-NV2080_CTRL_CMD_BIOS_GET_SKU_INFO = (0x20800808)
-NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS_MESSAGE_ID = (0x8)
-NV2080_CTRL_CMD_BIOS_GET_POST_TIME = (0x20800809)
-NV2080_CTRL_CMD_BIOS_GET_POST_TIME_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_BIOS_GET_UEFI_SUPPORT = (0x2080080b)
-NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS_MESSAGE_ID = (0xB)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_NO = (0x00000000)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_YES = (0x00000001)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_PLACEHOLDER = (0x00000002)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_PRESENCE_HIDDEN = (0x00000003)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_RUNNING_FALSE = (0x00000000)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_RUNNING_TRUE = (0x00000001)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_IS_EFI_INIT_FALSE = (0x00000000)
-NV2080_CTRL_BIOS_UEFI_SUPPORT_FLAGS_IS_EFI_INIT_TRUE = (0x00000001)
-RM_GSP_SPDM_CMD_ID_CC_INIT = (0x1)
-RM_GSP_SPDM_CMD_ID_CC_DEINIT = (0x2)
-RM_GSP_SPDM_CMD_ID_CC_CTRL = (0x3)
-RM_GSP_SPDM_CMD_ID_CC_INIT_RM_DATA = (0x4)
-RM_GSP_SPDM_CMD_ID_CC_HEARTBEAT_CTRL = (0x5)
-RM_GSP_SPDM_CMD_ID_FIPS_SELFTEST = (0x6)
-RM_GSP_SPDM_CMD_ID_INVALID_COMMAND = (0xFF)
-SPDM_SESSION_ESTABLISHMENT_TRANSCRIPT_BUFFER_SIZE = 0x2400
-RSVD7_SIZE = 16
-RSVD8_SIZE = 2
-CE_FIPS_SELF_TEST_DATA_SIZE = 16
-CE_FIPS_SELF_TEST_AUTH_TAG_SIZE = 16
-CE_FIPS_SELF_TEST_IV_SIZE = 12
-RM_GSP_SPDM_MSG_ID_CC_INIT = (0x1)
-RM_GSP_SPDM_MSG_ID_CC_DEINIT = (0x2)
-RM_GSP_SPDM_MSG_ID_CC_CTRL = (0x3)
-RM_GSP_SPDM_MSG_ID_CC_INIT_RM_DATA = (0x4)
-RM_GSP_SPDM_MSG_ID_CC_HEARTBEAT_CTRL = (0x5)
-RM_GSP_SPDM_MSG_ID_FIPS_SELFTEST = (0x6)
-RM_GSP_SPDM_MSG_ID_INVALID_COMMAND = (0xFF)
-NV2080_CTRL_INTERNAL_SPDM_PARTITION = (0x20800ad9)
-NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS_MESSAGE_ID = (0xD9)
-NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT = (0x20800ada)
-NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS_MESSAGE_ID = (0xDA)
-NV2080_CTRL_CMD_GC6_ENTRY = (0x2080270d)
-NV2080_CTRL_GC6_ENTRY_PARAMS_MESSAGE_ID = (0xD)
-NV2080_CTRL_CMD_GC6_EXIT = (0x2080270e)
-NV2080_CTRL_GC6_EXIT_PARAMS_MESSAGE_ID = (0xE)
-NV2080_CTRL_I2C_VERSION_0 = 0x00
-NV2080_CTRL_I2C_MAX_ENTRIES = 256
-NV2080_CTRL_I2C_MAX_REG_LEN = 8
-NV2080_CTRL_I2C_MAX_ADDR_ENTRIES = 20
-NV2080_CTRL_I2C_FLAGS_NONSTD_SI1930UC = (0x00000001)
-NV2080_CTRL_I2C_FLAGS_PRIVILEGE = (0x00000002)
-NV2080_CTRL_I2C_FLAGS_DATA_ENCRYPTED = (0x00000004)
-NV2080_CTRL_I2C_FLAGS_PX3540 = (0x00000010)
-NV2080_CTRL_I2C_FLAGS_ADDR_AUTO_INC_NOT_SUPPORTED = (0x00000008)
-NV2080_CTRL_I2C_READ_BUFFER_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_I2C_READ_BUFFER = (0x20800601)
-NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_I2C_WRITE_BUFFER = (0x20800602)
-NV2080_CTRL_CMD_I2C_READ_REG = (0x20800603)
-NV2080_CTRL_I2C_READ_REG_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_I2C_WRITE_REG = (0x20800604)
-NV2080_CTRL_I2C_WRITE_REG_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_I2C_ACCESS = (0x20800610)
-NV2080_CTRL_I2C_ACCESS_PARAMS_MESSAGE_ID = (0x10)
-NV2080_CTRL_I2C_ACCESS_CMD_ACQUIRE = 0x1
-NV2080_CTRL_I2C_ACCESS_CMD_RELEASE = 0x2
-NV2080_CTRL_I2C_ACCESS_CMD_WRITE_BYTE = 0x3
-NV2080_CTRL_I2C_ACCESS_CMD_READ_BYTE = 0x4
-NV2080_CTRL_I2C_ACCESS_CMD_NULL = 0x5
-NV2080_CTRL_I2C_ACCESS_CMD_RESET = 0x6
-NV2080_CTRL_I2C_ACCESS_CMD_TEST_PORT = 0x11
-NV2080_CTRL_I2C_ACCESS_CMD_SET_FAST_MODE = 0x12
-NV2080_CTRL_I2C_ACCESS_CMD_SET_NORMAL_MODE = 0x13
-NV2080_CTRL_I2C_ACCESS_CMD_WRITE_BUFFER = 0x14
-NV2080_CTRL_I2C_ACCESS_CMD_READ_BUFFER = 0x15
-NV2080_CTRL_I2C_ACCESS_CMD_START = 0x17
-NV2080_CTRL_I2C_ACCESS_CMD_STOP = 0x18
-NV2080_CTRL_I2C_ACCESS_CMD_SET_SLOW_MODE = 0x20
-NV2080_CTRL_I2C_ACCESS_FLAG_START = 0x1
-NV2080_CTRL_I2C_ACCESS_FLAG_STOP = 0x2
-NV2080_CTRL_I2C_ACCESS_FLAG_ACK = 0x4
-NV2080_CTRL_I2C_ACCESS_FLAG_RAB = 0x8
-NV2080_CTRL_I2C_ACCESS_FLAG_ADDR_10BITS = 0x10
-NV2080_CTRL_I2C_ACCESS_FLAG_PRIVILEGE = 0x20
-NV2080_CTRL_I2C_ACCESS_FLAG_DATA_ENCRYPTED = 0x40
-NV2080_CTRL_I2C_ACCESS_FLAG_RESTART = 0x80
-NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_33_33PCT = 0x100
-NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_33PCT = 0x200
-NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_10PCT = 0x400
-NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_3_33PCT = 0x800
-NV2080_CTRL_I2C_ACCESS_FLAG_SLOW_MODE_3PCT = 0x1000
-NV2080_CTRL_I2C_ACCESS_PORT_DYNAMIC = 0x0
-NV2080_CTRL_I2C_ACCESS_PORT_PRIMARY = 0x1
-NV2080_CTRL_I2C_ACCESS_PORT_SECONDARY = 0x2
-NV2080_CTRL_I2C_ACCESS_PORT_TERTIARY = 0x3
-NV2080_CTRL_I2C_ACCESS_PORT_QUARTIARY = 0x4
-NV2080_CTRL_I2C_ACCESS_PORT_1 = 0x1
-NV2080_CTRL_I2C_ACCESS_PORT_2 = 0x2
-NV2080_CTRL_I2C_ACCESS_PORT_3 = 0x3
-NV2080_CTRL_I2C_ACCESS_PORT_4 = 0x4
-NV2080_CTRL_I2C_ACCESS_PORT_5 = 0x5
-NV2080_CTRL_I2C_ACCESS_PORT_6 = 0x6
-NV2080_CTRL_I2C_ACCESS_PORT_7 = 0x7
-NV2080_CTRL_I2C_ACCESS_PORT_8 = 0x8
-NV2080_CTRL_I2C_ACCESS_PORT_9 = 0x9
-NV2080_CTRL_I2C_ACCESS_PORT_10 = 0x10
-NV2080_CTRL_I2C_ACCESS_NUM_PORTS = NV2080_CTRL_I2C_ACCESS_PORT_10
-NV2080_CTRL_I2C_ACCESS_STATUS_SUCCESS = 0x0
-NV2080_CTRL_I2C_ACCESS_STATUS_ERROR = 0x1
-NV2080_CTRL_I2C_ACCESS_STATUS_PROTOCOL_ERROR = 0x2
-NV2080_CTRL_I2C_ACCESS_STATUS_DEVICE_BUSY = 0x3
-NV2080_CTRL_I2C_ACCESS_STATUS_NACK_AFTER_SEND = 0x4
-NV2080_CTRL_I2C_ACCESS_STATUS_DP2TMDS_DONGLE_MISSING = 0x5
-NV2080_CTRL_CMD_I2C_ENABLE_MONITOR_3D_MODE = (0x20800620)
-NV2080_CTRL_I2C_ENABLE_MONITOR_3D_MODE_PARAMS_MESSAGE_ID = (0x20)
-NV_GRID_LICENSE_INFO_MAX_LENGTH = (128)
-NV_GRID_LICENSE_FEATURE_VAPPS_EDITION = "GRID-Virtual-Apps,3.0"
-NV_GRID_LICENSE_FEATURE_GAMING_EDITION = "GRID-vGaming,8.0"
-NV_GRID_LICENSE_FEATURE_COMPUTE_EDITION = "NVIDIA-vComputeServer,9.0"
-NV_GRID_LICENSED_PRODUCT_VWS = "NVIDIA RTX Virtual Workstation"
-NV_GRID_LICENSED_PRODUCT_GAMING = "NVIDIA Cloud Gaming"
-NV_GRID_LICENSED_PRODUCT_VPC = "NVIDIA Virtual PC"
-NV_GRID_LICENSED_PRODUCT_VAPPS = "NVIDIA Virtual Applications"
-NV_GRID_LICENSED_PRODUCT_COMPUTE = "NVIDIA Virtual Compute Server"
-NV2080_CTRL_GPU_INFO_INDEX_ECID_LO32 = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_ECID_HI32 = (0x00000002)
-NV2080_CTRL_GPU_INFO_INDEX_MINOR_REVISION_EXT = (0x00000004)
-NV2080_CTRL_GPU_INFO_INDEX_NETLIST_REV0 = (0x00000012)
-NV2080_CTRL_GPU_INFO_INDEX_NETLIST_REV1 = (0x00000013)
-NV2080_CTRL_GPU_INFO_INDEX_ECID_EXTENDED = (0x0000001b)
-NV2080_CTRL_GPU_INFO_INDEX_SYSMEM_ACCESS = (0x0000001f)
-NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD = (0x00000022)
-NV2080_CTRL_GPU_INFO_INDEX_SURPRISE_REMOVAL_POSSIBLE = (0x00000025)
-NV2080_CTRL_GPU_INFO_INDEX_GLOBAL_POISON_FUSE_ENABLED = (0x00000027)
-NV2080_CTRL_GPU_INFO_INDEX_NVSWITCH_PROXY_DETECTED = (0x00000028)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SR_SUPPORT = (0x00000029)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SMC_MODE = (0x0000002a)
-NV2080_CTRL_GPU_INFO_INDEX_SPLIT_VAS_MGMT_SERVER_CLIENT_RM = (0x0000002b)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SM_VERSION = (0x0000002c)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_FLA_CAPABILITY = (0x0000002d)
-NV2080_CTRL_GPU_INFO_INDEX_PER_RUNLIST_CHANNEL_RAM = (0x0000002f)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_ATS_CAPABILITY = (0x00000030)
-NV2080_CTRL_GPU_INFO_INDEX_NVENC_STATS_REPORTING_STATE = (0x00000031)
-NV2080_CTRL_GPU_INFO_INDEX_4K_PAGE_ISOLATION_REQUIRED = (0x00000033)
-NV2080_CTRL_GPU_INFO_INDEX_DISPLAY_ENABLED = (0x00000034)
-NV2080_CTRL_GPU_INFO_INDEX_MOBILE_CONFIG_ENABLED = (0x00000035)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_PROFILING_CAPABILITY = (0x00000036)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_DEBUGGING_CAPABILITY = (0x00000037)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_LOCAL_EGM_CAPABILITY = (0x0000003a)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SELF_HOSTED_CAPABILITY = (0x0000003b)
-NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU = (0x0000003c)
-NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY = (0x0000003d)
-NV2080_CTRL_GPU_INFO_INDEX_IS_RESETLESS_MIG_SUPPORTED = (0x0000003f)
-NV2080_CTRL_GPU_INFO_MAX_LIST_SIZE = (0x00000041)
-NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_NONE = (0x00000000)
-NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_P = (0x00000001)
-NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_V = (0x00000002)
-NV2080_CTRL_GPU_INFO_MINOR_REVISION_EXT_PV = (0x00000003)
-NV2080_CTRL_GPU_INFO_SYSMEM_ACCESS_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_SYSMEM_ACCESS_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GEMINI_BOARD_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_SURPRISE_REMOVAL_POSSIBLE_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_SURPRISE_REMOVAL_POSSIBLE_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GLOBAL_POISON_FUSE_ENABLED_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GLOBAL_POISON_FUSE_ENABLED_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_NVSWITCH_PROXY_DETECTED_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_NVSWITCH_PROXY_DETECTED_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SR_SUPPORT_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SR_SUPPORT_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_UNSUPPORTED = (0x00000000)
-NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_ENABLED = (0x00000001)
-NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_DISABLED = (0x00000002)
-NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_ENABLE_PENDING = (0x00000003)
-NV2080_CTRL_GPU_INFO_GPU_SMC_MODE_DISABLE_PENDING = (0x00000004)
-NV2080_CTRL_GPU_INFO_SPLIT_VAS_MGMT_SERVER_CLIENT_RM_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_SPLIT_VAS_MGMT_SERVER_CLIENT_RM_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_FLA_CAPABILITY_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_FLA_CAPABILITY_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_PER_RUNLIST_CHANNEL_RAM_DISABLED = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_PER_RUNLIST_CHANNEL_RAM_ENABLED = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_ATS_CAPABILITY_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_ATS_CAPABILITY_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_NVENC_STATS_REPORTING_STATE_DISABLED = (0x00000000)
-NV2080_CTRL_GPU_INFO_NVENC_STATS_REPORTING_STATE_ENABLED = (0x00000001)
-NV2080_CTRL_GPU_INFO_NVENC_STATS_REPORTING_STATE_NOT_SUPPORTED = (0x00000002)
-NV2080_CTRL_GPU_INFO_INDEX_4K_PAGE_ISOLATION_REQUIRED_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_4K_PAGE_ISOLATION_REQUIRED_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_DISPLAY_ENABLED_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_DISPLAY_ENABLED_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_MOBILE_CONFIG_ENABLED_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_MOBILE_CONFIG_ENABLED_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_PROFILING_CAPABILITY_DISABLED = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_PROFILING_CAPABILITY_ENABLED = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_DEBUGGING_CAPABILITY_DISABLED = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_DEBUGGING_CAPABILITY_ENABLED = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_LOCAL_EGM_CAPABILITY_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_LOCAL_EGM_CAPABILITY_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SELF_HOSTED_CAPABILITY_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_GPU_SELF_HOSTED_CAPABILITY_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_CMP_SKU_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_DMABUF_CAPABILITY_YES = (0x00000001)
-NV2080_CTRL_GPU_INFO_INDEX_IS_RESETLESS_MIG_SUPPORTED_NO = (0x00000000)
-NV2080_CTRL_GPU_INFO_INDEX_IS_RESETLESS_MIG_SUPPORTED_YES = (0x00000001)
-NV2080_CTRL_CMD_GPU_GET_INFO = (0x20800101)
-NV2080_CTRL_GPU_GET_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_GPU_GET_INFO_V2 = (0x20800102)
-NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_GPU_GET_NAME_STRING = (0x20800110)
-NV2080_GPU_MAX_NAME_STRING_LENGTH = (0x0000040)
-NV2080_CTRL_GPU_GET_NAME_STRING_FLAGS_TYPE_ASCII = (0x00000000)
-NV2080_CTRL_GPU_GET_NAME_STRING_FLAGS_TYPE_UNICODE = (0x00000001)
-NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS_MESSAGE_ID = (0x10)
-NV2080_CTRL_CMD_GPU_GET_SHORT_NAME_STRING = (0x20800111)
-NV2080_CTRL_GPU_GET_SHORT_NAME_STRING_PARAMS_MESSAGE_ID = (0x11)
-NV2080_CTRL_CMD_GPU_SET_POWER = (0x20800112)
-NV2080_CTRL_GPU_SET_POWER_PARAMS_MESSAGE_ID = (0x12)
-NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_0 = (0x00000000)
-NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_1 = (0x00000001)
-NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_2 = (0x00000002)
-NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_3 = (0x00000003)
-NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_4 = (0x00000004)
-NV2080_CTRL_GPU_SET_POWER_STATE_GPU_LEVEL_7 = (0x00000007)
-NV2080_CTRL_CMD_GPU_GET_SDM = (0x20800118)
-NV2080_CTRL_GPU_GET_SDM_PARAMS_MESSAGE_ID = (0x18)
-NV2080_CTRL_CMD_GPU_SET_SDM = (0x20800120)
-NV2080_CTRL_GPU_SET_SDM_PARAMS_MESSAGE_ID = (0x20)
-NV2080_CTRL_CMD_GPU_GET_SIMULATION_INFO = (0x20800119)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_PARAMS_MESSAGE_ID = (0x19)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_NONE = (0x00000000)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_MODS_AMODEL = (0x00000001)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_LIVE_AMODEL = (0x00000002)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_FMODEL = (0x00000003)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_RTL = (0x00000004)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_EMU = (0x00000005)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_EMU_LOW_POWER = (0x00000006)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_DFPGA = (0x00000007)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_DFPGA_RTL = (0x00000008)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_DFPGA_FMODEL = (0x00000009)
-NV2080_CTRL_GPU_GET_SIMULATION_INFO_TYPE_UNKNOWN = (0xFFFFFFFF)
-NV2080_CTRL_GPU_REG_OP_READ_32 = (0x00000000)
-NV2080_CTRL_GPU_REG_OP_WRITE_32 = (0x00000001)
-NV2080_CTRL_GPU_REG_OP_READ_64 = (0x00000002)
-NV2080_CTRL_GPU_REG_OP_WRITE_64 = (0x00000003)
-NV2080_CTRL_GPU_REG_OP_READ_08 = (0x00000004)
-NV2080_CTRL_GPU_REG_OP_WRITE_08 = (0x00000005)
-NV2080_CTRL_GPU_REG_OP_TYPE_GLOBAL = (0x00000000)
-NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX = (0x00000001)
-NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_TPC = (0x00000002)
-NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_SM = (0x00000004)
-NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_CROP = (0x00000008)
-NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_ZROP = (0x00000010)
-NV2080_CTRL_GPU_REG_OP_TYPE_FB = (0x00000020)
-NV2080_CTRL_GPU_REG_OP_TYPE_GR_CTX_QUAD = (0x00000040)
-NV2080_CTRL_GPU_REG_OP_TYPE_DEVICE = (0x00000080)
-NV2080_CTRL_GPU_REG_OP_STATUS_SUCCESS = (0x00)
-NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_OP = (0x01)
-NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_TYPE = (0x02)
-NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_OFFSET = (0x04)
-NV2080_CTRL_GPU_REG_OP_STATUS_UNSUPPORTED_OP = (0x08)
-NV2080_CTRL_GPU_REG_OP_STATUS_INVALID_MASK = (0x10)
-NV2080_CTRL_GPU_REG_OP_STATUS_NOACCESS = (0x20)
-NV2080_CTRL_CMD_GPU_EXEC_REG_OPS = (0x20800122)
-NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_MESSAGE_ID = (0x22)
-NV2080_CTRL_CMD_GPU_GET_ENGINES = (0x20800123)
-NV2080_CTRL_GPU_GET_ENGINES_PARAMS_MESSAGE_ID = (0x23)
-NV2080_CTRL_CMD_GPU_GET_ENGINES_V2 = (0x20800170)
-NV2080_GPU_MAX_ENGINES_LIST_SIZE = 0x54
-NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS_MESSAGE_ID = (0x70)
-NV2080_CTRL_CMD_GPU_GET_ENGINE_CLASSLIST = (0x20800124)
-NV2080_CTRL_GPU_GET_ENGINE_CLASSLIST_PARAMS_MESSAGE_ID = (0x24)
-NV2080_CTRL_CMD_GPU_GET_ENGINE_FAULT_INFO = (0x20800125)
-NV2080_CTRL_GPU_GET_ENGINE_FAULT_INFO_PARAMS_MESSAGE_ID = (0x25)
-NV2080_CTRL_CMD_GPU_QUERY_MODE = (0x20800128)
-NV2080_CTRL_GPU_QUERY_MODE_UNKNOWN_MODE = (0x00000000)
-NV2080_CTRL_GPU_QUERY_MODE_GRAPHICS_MODE = (0x00000001)
-NV2080_CTRL_GPU_QUERY_MODE_COMPUTE_MODE = (0x00000002)
-NV2080_CTRL_GPU_QUERY_MODE_PARAMS_MESSAGE_ID = (0x28)
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_MAIN = 0
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PM = 1
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PATCH = 2
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_BUFFER_BUNDLE_CB = 3
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PAGEPOOL = 4
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_ATTRIBUTE_CB = 5
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_RTV_CB_GLOBAL = 6
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_GFXP_POOL = 7
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_GFXP_CTRL_BLK = 8
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_FECS_EVENT = 9
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_PRIV_ACCESS_MAP = 10
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_UNRESTRICTED_PRIV_ACCESS_MAP = 11
-NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ID_GLOBAL_PRIV_ACCESS_MAP = 12
-NV2080_CTRL_GPU_PROMOTE_CONTEXT_MAX_ENTRIES = 16
-NV2080_CTRL_CMD_GPU_PROMOTE_CTX = (0x2080012b)
-NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_MESSAGE_ID = (0x2B)
-NV2080_CTRL_CMD_GPU_EVICT_CTX = (0x2080012c)
-NV2080_CTRL_GPU_EVICT_CTX_PARAMS_MESSAGE_ID = (0x2C)
-NV2080_CTRL_CMD_GPU_INITIALIZE_CTX = (0x2080012d)
-NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_MESSAGE_ID = (0x2D)
-NV2080_CTRL_GPU_INITIALIZE_CTX_APERTURE_VIDMEM = (0x00000000)
-NV2080_CTRL_GPU_INITIALIZE_CTX_APERTURE_COH_SYS = (0x00000001)
-NV2080_CTRL_GPU_INITIALIZE_CTX_APERTURE_NCOH_SYS = (0x00000002)
-NV2080_CTRL_GPU_INITIALIZE_CTX_GPU_CACHEABLE_YES = (0x00000000)
-NV2080_CTRL_GPU_INITIALIZE_CTX_GPU_CACHEABLE_NO = (0x00000001)
-NV2080_CTRL_GPU_INITIALIZE_CTX_PRESERVE_CTX_NO = (0x00000000)
-NV2080_CTRL_GPU_INITIALIZE_CTX_PRESERVE_CTX_YES = (0x00000001)
-NV2080_CTRL_CMD_GPU_QUERY_ECC_INTR = (0x2080012e)
-NV2080_CTRL_CMD_GPU_QUERY_ECC_STATUS = (0x2080012f)
-NV2080_CTRL_GPU_ECC_UNIT_GSP = (0x0000001D)
-NV2080_CTRL_GPU_ECC_UNIT_COUNT = (0x00000024)
-NV2080_CTRL_GPU_QUERY_ECC_STATUS_FLAGS_TYPE_FILTERED = (0x00000000)
-NV2080_CTRL_GPU_QUERY_ECC_STATUS_FLAGS_TYPE_RAW = (0x00000001)
-NV2080_CTRL_GPU_QUERY_ECC_STATUS_UNC_ERR_FALSE = 0
-NV2080_CTRL_GPU_QUERY_ECC_STATUS_UNC_ERR_TRUE = 1
-NV2080_CTRL_GPU_QUERY_ECC_STATUS_UNC_ERR_INDETERMINATE = 2
-NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_MESSAGE_ID = (0x2F)
-NV2080_CTRL_CMD_GPU_SET_COMPUTE_MODE_RULES = (0x20800130)
-NV2080_CTRL_GPU_COMPUTE_MODE_RULES_NONE = (0x00000000)
-NV2080_CTRL_GPU_COMPUTE_MODE_RULES_EXCLUSIVE_COMPUTE = (0x00000001)
-NV2080_CTRL_GPU_COMPUTE_MODE_RULES_COMPUTE_PROHIBITED = (0x00000002)
-NV2080_CTRL_GPU_COMPUTE_MODE_RULES_EXCLUSIVE_COMPUTE_PROCESS = (0x00000003)
-NV2080_CTRL_GPU_SET_COMPUTE_MODE_RULES_PARAMS_MESSAGE_ID = (0x30)
-NV2080_CTRL_CMD_GPU_QUERY_COMPUTE_MODE_RULES = (0x20800131)
-NV2080_CTRL_GPU_QUERY_COMPUTE_MODE_RULES_PARAMS_MESSAGE_ID = (0x31)
-NV2080_CTRL_CMD_GPU_QUERY_ECC_CONFIGURATION = (0x20800133)
-NV2080_CTRL_GPU_ECC_CONFIGURATION_DISABLED = (0x00000000)
-NV2080_CTRL_GPU_ECC_CONFIGURATION_ENABLED = (0x00000001)
-NV2080_CTRL_GPU_QUERY_ECC_CONFIGURATION_PARAMS_MESSAGE_ID = (0x33)
-NV2080_CTRL_CMD_GPU_SET_ECC_CONFIGURATION = (0x20800134)
-NV2080_CTRL_GPU_ECC_CONFIGURATION_DISABLE = (0x00000000)
-NV2080_CTRL_GPU_ECC_CONFIGURATION_ENABLE = (0x00000001)
-NV2080_CTRL_GPU_SET_ECC_CONFIGURATION_PARAMS_MESSAGE_ID = (0x34)
-NV2080_CTRL_CMD_GPU_RESET_ECC_ERROR_STATUS = (0x20800136)
-NV2080_CTRL_GPU_ECC_ERROR_STATUS_NONE = (0x00000000)
-NV2080_CTRL_GPU_ECC_ERROR_STATUS_VOLATILE = (0x00000001)
-NV2080_CTRL_GPU_ECC_ERROR_STATUS_AGGREGATE = (0x00000002)
-NV2080_CTRL_GPU_RESET_ECC_ERROR_STATUS_FLAGS_FORCE_PURGE_FALSE = 0
-NV2080_CTRL_GPU_RESET_ECC_ERROR_STATUS_FLAGS_FORCE_PURGE_TRUE = 1
-NV2080_CTRL_GPU_RESET_ECC_ERROR_STATUS_PARAMS_MESSAGE_ID = (0x36)
-NV2080_CTRL_CMD_GPU_GET_FERMI_GPC_INFO = (0x20800137)
-NV2080_CTRL_GPU_GET_FERMI_GPC_INFO_PARAMS_MESSAGE_ID = (0x37)
-NV2080_CTRL_CMD_GPU_GET_FERMI_TPC_INFO = (0x20800138)
-NV2080_CTRL_GPU_GET_FERMI_TPC_INFO_PARAMS_MESSAGE_ID = (0x38)
-NV2080_CTRL_CMD_GPU_GET_FERMI_ZCULL_INFO = (0x20800139)
-NV2080_CTRL_GPU_GET_FERMI_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x39)
-NV2080_CTRL_CMD_GPU_GET_OEM_BOARD_INFO = (0x2080013f)
-NV2080_GPU_MAX_MARKETING_NAME_LENGTH = (0x00000018)
-NV2080_GPU_MAX_SERIAL_NUMBER_LENGTH = (0x00000010)
-NV2080_GPU_MAX_MEMORY_PART_ID_LENGTH = (0x00000014)
-NV2080_GPU_MAX_MEMORY_DATE_CODE_LENGTH = (0x00000006)
-NV2080_GPU_MAX_PRODUCT_PART_NUMBER_LENGTH = (0x00000014)
-NV2080_CTRL_GPU_GET_OEM_BOARD_INFO_PARAMS_MESSAGE_ID = (0x3F)
-NV2080_CTRL_CMD_GPU_GET_ID = (0x20800142)
-NV2080_CTRL_GPU_GET_ID_PARAMS_MESSAGE_ID = (0x42)
-NV2080_CTRL_CMD_GPU_SET_GPU_DEBUG_MODE = (0x20800143)
-NV2080_CTRL_GPU_SET_GPU_DEBUG_MODE_PARAMS_MESSAGE_ID = (0x43)
-NV2080_CTRL_GPU_DEBUG_MODE_ENABLED = (0x00000001)
-NV2080_CTRL_GPU_DEBUG_MODE_DISABLED = (0x00000002)
-NV2080_CTRL_CMD_GPU_GET_GPU_DEBUG_MODE = (0x20800144)
-NV2080_CTRL_GPU_GET_GPU_DEBUG_MODE_PARAMS_MESSAGE_ID = (0x44)
-NV2080_CTRL_CMD_GPU_GET_ENGINE_PARTNERLIST = (0x20800147)
-NV2080_CTRL_GPU_MAX_ENGINE_PARTNERS = (0x00000020)
-NV2080_CTRL_GPU_GET_ENGINE_PARTNERLIST_PARAMS_MESSAGE_ID = (0x47)
-NV2080_CTRL_CMD_GPU_GET_GID_INFO = (0x2080014a)
-NV2080_GPU_MAX_GID_LENGTH = (0x000000100)
-NV2080_GPU_MAX_SHA1_BINARY_GID_LENGTH = (0x000000010)
-NV2080_CTRL_GPU_GET_GID_INFO_PARAMS_MESSAGE_ID = (0x4A)
-NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_ASCII = (0x00000000)
-NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY = (0x00000002)
-NV2080_GPU_CMD_GPU_GET_GID_FLAGS_TYPE_SHA1 = (0x00000000)
-NV2080_CTRL_CMD_GPU_GET_INFOROM_OBJECT_VERSION = (0x2080014b)
-NV2080_CTRL_GPU_INFOROM_OBJ_TYPE_LEN = 3
-NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS_MESSAGE_ID = (0x4B)
-NV2080_CTRL_CMD_SET_GPU_OPTIMUS_INFO = (0x2080014c)
-NV2080_CTRL_GPU_OPTIMUS_INFO_PARAMS_MESSAGE_ID = (0x4C)
-NV2080_CTRL_CMD_GPU_GET_IP_VERSION = (0x2080014d)
-NV2080_CTRL_GPU_GET_IP_VERSION_PARAMS_MESSAGE_ID = (0x4D)
-NV2080_CTRL_GPU_GET_IP_VERSION_DISPLAY = (0x00000001)
-NV2080_CTRL_GPU_GET_IP_VERSION_HDACODEC = (0x00000002)
-NV2080_CTRL_GPU_GET_IP_VERSION_PMGR = (0x00000003)
-NV2080_CTRL_GPU_GET_IP_VERSION_PPWR_PMU = (0x00000004)
-NV2080_CTRL_GPU_GET_IP_VERSION_DISP_FALCON = (0x00000005)
-NV2080_CTRL_GPU_ILLUM_ATTRIB_LOGO_BRIGHTNESS = 0
-NV2080_CTRL_GPU_ILLUM_ATTRIB_SLI_BRIGHTNESS = 1
-NV2080_CTRL_CMD_GPU_QUERY_ILLUM_SUPPORT = (0x20800153)
-NV2080_CTRL_CMD_GPU_QUERY_ILLUM_SUPPORT_PARAMS_MESSAGE_ID = (0x53)
-NV2080_CTRL_CMD_GPU_GET_ILLUM = (0x20800154)
-NV2080_CTRL_GPU_GET_ILLUM_PARAMS_MESSAGE_ID = (0x54)
-NV2080_CTRL_CMD_GPU_SET_ILLUM = (0x20800155)
-NV2080_CTRL_GPU_SET_ILLUM_PARAMS_MESSAGE_ID = (0x55)
-NV2080_CTRL_CMD_GPU_GET_INFOROM_IMAGE_VERSION = (0x20800156)
-NV2080_CTRL_GPU_INFOROM_IMAGE_VERSION_LEN = 16
-NV2080_CTRL_GPU_GET_INFOROM_IMAGE_VERSION_PARAMS_MESSAGE_ID = (0x56)
-NV2080_CTRL_CMD_GPU_QUERY_INFOROM_ECC_SUPPORT = (0x20800157)
-NV2080_CTRL_CMD_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO = (0x2080015a)
-NV2080_CTRL_MAX_PHYSICAL_BRIDGE = (100)
-NV2080_CTRL_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO_PARAMS_MESSAGE_ID = (0x5A)
-NV2080_CTRL_CMD_GPU_GET_ALL_BRIDGES_UPSTREAM_OF_GPU = (0x2080015b)
-NV2080_CTRL_GPU_GET_ALL_BRIDGES_UPSTREAM_OF_GPU_PARAMS_MESSAGE_ID = (0x5B)
-NV2080_CTRL_CMD_GPU_QUERY_SCRUBBER_STATUS = (0x2080015f)
-NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_PARAMS_MESSAGE_ID = (0x5F)
-NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_SCRUBBER_RUNNING = (0x00000000)
-NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_SCRUBBER_IDLE = (0x00000001)
-NV2080_CTRL_CMD_GPU_GET_VPR_CAPS = (0x20800160)
-NV2080_CTRL_GPU_GET_VPR_CAPS_PARAMS_MESSAGE_ID = (0x60)
-NV2080_CTRL_CMD_GPU_HANDLE_GPU_SR = (0x20800167)
-NV2080_CTRL_CMD_GPU_GET_PES_INFO = (0x20800168)
-NV2080_CTRL_CMD_GPU_GET_PES_INFO_MAX_TPC_PER_GPC_COUNT = 10
-NV2080_CTRL_GPU_GET_PES_INFO_PARAMS_MESSAGE_ID = (0x68)
-NV2080_CTRL_CMD_GPU_GET_OEM_INFO = (0x20800169)
-NV2080_GPU_MAX_OEM_INFO_LENGTH = (0x000001F8)
-NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS_MESSAGE_ID = (0x69)
-NV2080_CTRL_CMD_GPU_GET_VPR_INFO = (0x2080016b)
-NV2080_CTRL_GPU_GET_VPR_INFO_PARAMS_MESSAGE_ID = (0x6B)
-NV2080_CTRL_CMD_GPU_GET_ENCODER_CAPACITY = (0x2080016c)
-NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_PARAMS_MESSAGE_ID = (0x6C)
-NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_STATS = (0x2080016d)
-NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_STATS_PARAMS_MESSAGE_ID = (0x6D)
-NV2080_CTRL_GPU_NVENC_SESSION_INFO_MAX_COPYOUT_ENTRIES = 0x200
-NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_PARAMS_MESSAGE_ID = (0x6E)
-NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO = (0x2080016e)
-NV2080_CTRL_GPU_SET_FABRIC_BASE_ADDR_PARAMS_MESSAGE_ID = (0x6F)
-NV2080_CTRL_CMD_GPU_SET_FABRIC_BASE_ADDR = (0x2080016f)
-NV2080_CTRL_GPU_VIRTUAL_INTERRUPT_PARAMS_MESSAGE_ID = (0x72)
-NV2080_CTRL_CMD_GPU_VIRTUAL_INTERRUPT = (0x20800172)
-NV2080_CTRL_CMD_GPU_QUERY_FUNCTION_STATUS_PARAMS_MESSAGE_ID = (0x73)
-NV2080_CTRL_CMD_GPU_QUERY_FUNCTION_STATUS = (0x20800173)
-NV_GI_UUID_LEN = 16
-NV2080_CTRL_GPU_PARTITION_ID_INVALID = 0xFFFFFFFF
-NV2080_CTRL_GPU_MAX_PARTITIONS = 0x00000008
-NV2080_CTRL_GPU_MAX_PARTITION_IDS = 0x00000009
-NV2080_CTRL_GPU_MAX_SMC_IDS = 0x00000008
-NV2080_CTRL_GPU_MAX_GPC_PER_SMC = 0x0000000c
-NV2080_CTRL_GPU_MAX_CE_PER_SMC = 0x00000008
-NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_FULL = 0x00000000
-NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_HALF = 0x00000001
-NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_QUARTER = 0x00000002
-NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE_EIGHTH = 0x00000003
-NV2080_CTRL_GPU_PARTITION_FLAG_MEMORY_SIZE__SIZE = 4
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_FULL = 0x00000000
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_HALF = 0x00000001
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_HALF = 0x00000002
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_QUARTER = 0x00000003
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_MINI_QUARTER = 0x00000004
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_EIGHTH = 0x00000005
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_06 = 0x00000006
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE_RESERVED_INTERNAL_07 = 0x00000007
-NV2080_CTRL_GPU_PARTITION_FLAG_COMPUTE_SIZE__SIZE = 8
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_FULL = 0x00000001
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_HALF = 0x00000002
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_MINI_HALF = 0x00000003
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_QUARTER = 0x00000004
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_EIGHTH = 0x00000005
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_RESERVED_INTERNAL_06 = 0x00000006
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_RESERVED_INTERNAL_07 = 0x00000007
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE_NONE = 0x00000000
-NV2080_CTRL_GPU_PARTITION_FLAG_GFX_SIZE__SIZE = 8
-NV2080_CTRL_GPU_PARTITION_MAX_TYPES = 40
-NV2080_CTRL_GPU_PARTITION_FLAG_REQ_DEC_JPG_OFA_DISABLE = 0
-NV2080_CTRL_GPU_PARTITION_FLAG_REQ_DEC_JPG_OFA_ENABLE = 1
-NV2080_CTRL_GPU_PARTITION_FLAG_PLACE_AT_SPAN_DISABLE = 0
-NV2080_CTRL_GPU_PARTITION_FLAG_PLACE_AT_SPAN_ENABLE = 1
-NV2080_CTRL_GPU_SET_PARTITIONS_PARAMS_MESSAGE_ID = (0x74)
-NV2080_CTRL_CMD_GPU_SET_PARTITIONS = (0x20800174)
-NV2080_CTRL_GPU_GET_PARTITIONS_PARAMS_MESSAGE_ID = (0x75)
-NV2080_CTRL_CMD_GPU_GET_PARTITIONS = (0x20800175)
-NV2080_CTRL_CMD_GPU_CONFIGURE_PARTITION = (0x20800176)
-NV2080_CTRL_GPU_CONFIGURE_PARTITION_PARAMS_MESSAGE_ID = (0x76)
-NV2080_CTRL_GPU_FAULT_PACKET_SIZE = 32
-NV2080_CTRL_CMD_GPU_REPORT_NON_REPLAYABLE_FAULT = (0x20800177)
-NV2080_CTRL_GPU_REPORT_NON_REPLAYABLE_FAULT_PARAMS_MESSAGE_ID = (0x77)
-NV2080_CTRL_CMD_GPU_EXEC_REG_OPS_VGPU = (0x20800178)
-NV2080_CTRL_GPU_EXEC_REG_OPS_VGPU_PARAMS_MESSAGE_ID = (0x78)
-NV2080_CTRL_CMD_GPU_GET_ENGINE_RUNLIST_PRI_BASE = (0x20800179)
-NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS_MESSAGE_ID = (0x79)
-NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_NULL = (0xFFFFFFFF)
-NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_ERROR = (0xFFFFFFFB)
-NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_INVALID = (0xFFFFFFFF)
-NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_ERROR = (0xFFFFFFFB)
-NV2080_CTRL_CMD_GPU_GET_HW_ENGINE_ID = (0x2080017a)
-NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS_MESSAGE_ID = (0x7A)
-NV2080_CTRL_GPU_GET_HW_ENGINE_ID_NULL = (0xFFFFFFFF)
-NV2080_CTRL_GPU_GET_HW_ENGINE_ID_ERROR = (0xFFFFFFFB)
-NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_STATS = (0x2080017b)
-NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_STATS_PARAMS_MESSAGE_ID = (0x7B)
-NV2080_CTRL_NVFBC_SESSION_FLAG_DIFFMAP_ENABLED = 0x00000001
-NV2080_CTRL_NVFBC_SESSION_FLAG_CLASSIFICATIONMAP_ENABLED = 0x00000002
-NV2080_CTRL_NVFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_NO_WAIT = 0x00000004
-NV2080_CTRL_NVFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_INFINITE = 0x00000008
-NV2080_CTRL_NVFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_TIMEOUT = 0x00000010
-NV2080_GPU_NVFBC_MAX_SESSION_COUNT = 256
-NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_INFO_PARAMS_MESSAGE_ID = (0x7C)
-NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_INFO = (0x2080017c)
-NV2080_CTRL_GPU_GET_FIRST_ASYNC_CE_IDX_PARAMS_MESSAGE_ID = (0xe6)
-NV2080_CTRL_CMD_GPU_GET_FIRST_ASYNC_CE_IDX = (0x208001e6)
-NV2080_CTRL_CMD_GPU_GET_VMMU_SEGMENT_SIZE = (0x2080017e)
-NV2080_CTRL_GPU_GET_VMMU_SEGMENT_SIZE_PARAMS_MESSAGE_ID = (0x7E)
-NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_32MB = 0x02000000
-NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_64MB = 0x04000000
-NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_128MB = 0x08000000
-NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_256MB = 0x10000000
-NV2080_CTRL_GPU_VMMU_SEGMENT_SIZE_512MB = 0x20000000
-NV2080_CTRL_CMD_GPU_GET_PARTITION_CAPACITY = (0x20800181)
-NV2080_CTRL_GPU_GET_PARTITION_CAPACITY_PARAMS_MESSAGE_ID = (0x81)
-NV2080_CTRL_CMD_GPU_GET_CACHED_INFO = (0x20800182)
-NV2080_CTRL_GPU_GET_CACHED_INFO_PARAMS_MESSAGE_ID = (0x82)
-NV2080_CTRL_CMD_GPU_SET_PARTITIONING_MODE = (0x20800183)
-NV2080_CTRL_GPU_SET_PARTITIONING_MODE_REPARTITIONING_LEGACY = 0
-NV2080_CTRL_GPU_SET_PARTITIONING_MODE_REPARTITIONING_MAX_PERF = 1
-NV2080_CTRL_GPU_SET_PARTITIONING_MODE_REPARTITIONING_FAST_RECONFIG = 2
-NV2080_CTRL_GPU_SET_PARTITIONING_MODE_PARAMS_MESSAGE_ID = (0x83)
-NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS_MESSAGE_ID = (0x85)
-NV2080_CTRL_CMD_GPU_DESCRIBE_PARTITIONS = (0x20800185)
-NV2080_CTRL_CMD_GPU_GET_MAX_SUPPORTED_PAGE_SIZE = (0x20800188)
-NV2080_CTRL_GPU_GET_MAX_SUPPORTED_PAGE_SIZE_PARAMS_MESSAGE_ID = (0x88)
-NV2080_CTRL_GPU_GET_NUM_MMUS_PER_GPC_PARAMS_MESSAGE_ID = (0x8A)
-NV2080_CTRL_CMD_GPU_GET_NUM_MMUS_PER_GPC = (0x2080018a)
-NV2080_CTRL_GPU_GET_ACTIVE_PARTITION_IDS_PARAMS_MESSAGE_ID = (0x8B)
-NV2080_CTRL_CMD_GPU_GET_ACTIVE_PARTITION_IDS = (0x2080018b)
-NV2080_CTRL_CMD_GPU_GET_PIDS = (0x2080018d)
-NV2080_CTRL_GPU_GET_PIDS_MAX_COUNT = 950
-NV2080_CTRL_GPU_GET_PIDS_PARAMS_MESSAGE_ID = (0x8D)
-NV2080_CTRL_GPU_GET_PIDS_ID_TYPE_CLASS = (0x00000000)
-NV2080_CTRL_GPU_GET_PIDS_ID_TYPE_VGPU_GUEST = (0x00000001)
-NV2080_CTRL_GPU_PID_INFO_INDEX_VIDEO_MEMORY_USAGE = (0x00000000)
-NV2080_CTRL_GPU_PID_INFO_INDEX_MAX = NV2080_CTRL_GPU_PID_INFO_INDEX_VIDEO_MEMORY_USAGE
-NV2080_CTRL_CMD_GPU_GET_PID_INFO = (0x2080018e)
-NV2080_CTRL_GPU_GET_PID_INFO_MAX_COUNT = 200
-NV2080_CTRL_GPU_GET_PID_INFO_PARAMS_MESSAGE_ID = (0x8E)
-NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT = (0x20800192)
-NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_INVALID = 0
-NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_BAR1 = 1
-NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_BAR2 = 2
-NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_PHYSICAL = 3
-NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_TYPE_UNBOUND_INSTANCE = 4
-NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_MESSAGE_ID = (0x92)
-NV2080_CTRL_GPU_COMPUTE_POLICY_TIMESLICE = 0
-NV2080_CTRL_GPU_COMPUTE_POLICY_MAX = 1
-NV2080_CTRL_GPU_SET_COMPUTE_POLICY_CONFIG_PARAMS_MESSAGE_ID = (0x94)
-NV2080_CTRL_CMD_GPU_GET_COMPUTE_POLICY_CONFIG = (0x20800195)
-NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_LIST_MAX = 32
-NV2080_CTRL_GPU_GET_COMPUTE_POLICY_CONFIG_PARAMS_MESSAGE_ID = (0x95)
-NV2080_CTRL_CMD_GPU_GET_GFID = (0x20800196)
-NV2080_CTRL_GPU_GET_GFID_PARAMS_MESSAGE_ID = (0x96)
-NV2080_CTRL_CMD_GPU_UPDATE_GFID_P2P_CAPABILITY = (0x20800197)
-NV2080_CTRL_CMD_GPU_UPDATE_GFID_P2P_CAPABILITY_PARAMS_MESSAGE_ID = (0x97)
-NV2080_CTRL_CMD_GPU_VALIDATE_MEM_MAP_REQUEST = (0x20800198)
-NV2080_CTRL_GPU_VALIDATE_MEM_MAP_REQUEST_PARAMS_MESSAGE_ID = (0x98)
-NV2080_CTRL_CMD_GPU_SET_EGM_GPA_FABRIC_BASE_ADDR = (0x20800199)
-NV2080_CTRL_GPU_SET_EGM_GPA_FABRIC_BASE_ADDR_PARAMS_MESSAGE_ID = (0x99)
-NV2080_CTRL_CMD_GPU_GET_ENGINE_LOAD_TIMES = (0x2080019b)
-NV2080_CTRL_GPU_MAX_ENGINE_OBJECTS = 0xC8
-NV2080_CTRL_GPU_GET_ENGINE_LOAD_TIMES_PARAMS_MESSAGE_ID = (0x9B)
-NV2080_CTRL_CMD_GPU_GET_ID_NAME_MAPPING = (0x2080019c)
-NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS_MESSAGE_ID = (0x9C)
-NV2080_CTRL_CMD_GPU_EXEC_REG_OPS_NOPTRS = (0x2080019d)
-NV2080_CTRL_REG_OPS_ARRAY_MAX = 100
-NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS_MESSAGE_ID = (0x9D)
-NV2080_GET_P2P_CAPS_UUID_LEN = 16
-NV2080_CTRL_CMD_GET_P2P_CAPS = (0x208001a0)
-NV2080_CTRL_GET_P2P_CAPS_PARAMS_MESSAGE_ID = (0xA0)
-NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS_MESSAGE_ID = (0xA2)
-NV2080_CTRL_CMD_GPU_GET_COMPUTE_PROFILES = (0x208001a2)
-NV2080_CTRL_GPU_FABRIC_PROBE_STATE_UNSUPPORTED = 0
-NV2080_CTRL_GPU_FABRIC_PROBE_STATE_NOT_STARTED = 1
-NV2080_CTRL_GPU_FABRIC_PROBE_STATE_IN_PROGRESS = 2
-NV2080_CTRL_GPU_FABRIC_PROBE_STATE_COMPLETE = 3
-NV2080_GPU_FABRIC_CLUSTER_UUID_LEN = 16
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_NOT_SUPPORTED = 0
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_TRUE = 1
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_FALSE = 2
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ROUTE_UPDATE_NOT_SUPPORTED = 0
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ROUTE_UPDATE_TRUE = 1
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ROUTE_UPDATE_FALSE = 2
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_CONNECTION_UNHEALTHY_NOT_SUPPORTED = 0
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_CONNECTION_UNHEALTHY_TRUE = 1
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_CONNECTION_UNHEALTHY_FALSE = 2
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_NOT_SUPPORTED = 0
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_TRUE = 1
-NV2080_CTRL_GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_FALSE = 2
-NV2080_CTRL_CMD_GET_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xA3)
-NV2080_CTRL_CMD_GET_GPU_FABRIC_PROBE_INFO = (0x208001a3)
-NV2080_CTRL_CMD_GPU_GET_CHIP_DETAILS = (0x208001a4)
-GPU_PART_NUMBER_FMT = "%4X-%s-%X%X"
-NV2080_MAX_CHIP_SKU_LENGTH = 0x00000004
-NV2080_CTRL_GPU_GET_CHIP_DETAILS_PARAMS_MESSAGE_ID = (0xA4)
-NV2080_CTRL_CMD_GPU_MOVE_RUNLISTS_ALLOCATION_TO_SUBHEAP = (0x208001a5)
-NV2080_CTRL_GPU_MOVE_RUNLISTS_ALLOCATION_TO_SUBHEAP_PARAMS_MESSAGE_ID = (0xA5)
-NV2080_CTRL_CMD_GPU_MIGRATABLE_OPS = (0x208001a6)
-NV2080_CTRL_CMD_GPU_MIGRATABLE_OPS_GSP = (0x208001a7)
-NV2080_CTRL_CMD_GPU_MIGRATABLE_OPS_VGPU = (0x208001a8)
-NV2080_CTRL_MIGRATABLE_OPS_ARRAY_MAX = 50
-NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_MESSAGE_ID = (0xA6)
-NV2080_CTRL_GPU_MIGRATABLE_OPS_GSP_PARAMS_MESSAGE_ID = (0xA7)
-NV2080_CTRL_GPU_MIGRATABLE_OPS_VGPU_PARAMS_MESSAGE_ID = (0xA8)
-NV2080_CTRL_CMD_GPU_MARK_DEVICE_FOR_RESET = (0x208001a9)
-NV2080_CTRL_CMD_GPU_UNMARK_DEVICE_FOR_RESET = (0x208001aa)
-NV2080_CTRL_CMD_GPU_GET_RESET_STATUS = (0x208001ab)
-NV2080_CTRL_GPU_GET_RESET_STATUS_PARAMS_MESSAGE_ID = (0xAB)
-NV2080_CTRL_CMD_GPU_MARK_DEVICE_FOR_DRAIN_AND_RESET = (0x208001ac)
-NV2080_CTRL_CMD_GPU_UNMARK_DEVICE_FOR_DRAIN_AND_RESET = (0x208001ad)
-NV2080_CTRL_CMD_GPU_GET_DRAIN_AND_RESET_STATUS = (0x208001ae)
-NV2080_CTRL_GPU_GET_DRAIN_AND_RESET_STATUS_PARAMS_MESSAGE_ID = (0xAE)
-NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2_PARAMS_MESSAGE_ID = (0xAF)
-NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2 = (0x208001af)
-NV2080_CTRL_GPU_MAX_CONSTRUCTED_FALCONS = 0x40
-NV2080_CTRL_CMD_GPU_GET_CONSTRUCTED_FALCON_INFO = (0x208001b0)
-NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS_MESSAGE_ID = (0xB0)
-NV2080_CTRL_CMD_GPU_GET_VF_CAPS = (0x208001b1)
-NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS_MESSAGE_ID = (0xB1)
-NV2080_CTRL_CMD_GPU_GET_RECOVERY_ACTION = (0x208001b2)
-NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS_MESSAGE_ID = (0xB2)
-NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS_MESSAGE_ID = (0xe4)
-NV2080_CTRL_GPU_GET_FIPS_STATUS = (0x208001e4)
-NV2080_CTRL_GPU_RAFTS_NUM_MAX_UGPU = 0x2
-NV2080_CTRL_GPU_RAFTS_NUM_MAX_GPC_PER_UGPU = 0xC
-NV2080_CTRL_GPU_RAFTS_NUM_MAX_NUM_GPC = (0x18)
-NV2080_CTRL_GPU_RAFTS_NUM_MAX_FS_UNIT = (0x1a)
-NV2080_CTRL_GPU_GET_RAFTS_FS_MASK_PARAMS_MESSAGE_ID = (0xB3)
-NV2080_CTRL_GPU_GET_RAFTS_FS_MASK = (0x208001b3)
-NV2080_CTRL_CMD_GPU_GET_COMPUTE_PROFILE_CAPACITY = (0x208001e5)
-NV2080_CTRL_GPU_GET_COMPUTE_PROFILE_CAPACITY_PARAMS_MESSAGE_ID = (0xe5)
-NV2080_CTRL_CMD_GPU_GET_TPC_RECONFIG_MASK = (0x208001e7)
-NV2080_CTRL_GPU_GET_TPC_RECONFIG_MASK_PARAMS_MESSAGE_ID = (0xe7)
-NV2080_CTRL_CMD_SET_GPFIFO = (0x20801102)
-NV2080_CTRL_CMD_SET_GPFIFO_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_FIFO_BIND_ENGINES_MAX_CHANNELS = (16)
-NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_FIFO_BIND_ENGINES = (0x20801103)
-NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES = (0x20801104)
-NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_FLAGS_ERROR_ON_STUCK_SEMAPHORE_FALSE = (0x00000000)
-NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_FLAGS_ERROR_ON_STUCK_SEMAPHORE_TRUE = (0x00000001)
-NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT = (0x20801108)
-NV2080_CTRL_FIFO_GET_PHYSICAL_CHANNEL_COUNT_PARAMS_MESSAGE_ID = (0x8)
-NV2080_CTRL_FIFO_INFO_INDEX_INSTANCE_TOTAL = (0x000000000)
-NV2080_CTRL_FIFO_INFO_INDEX_MAX_CHANNEL_GROUPS = (0x000000001)
-NV2080_CTRL_FIFO_INFO_INDEX_MAX_CHANNELS_PER_GROUP = (0x000000002)
-NV2080_CTRL_FIFO_INFO_INDEX_MAX_SUBCONTEXT_PER_GROUP = (0x000000003)
-NV2080_CTRL_FIFO_INFO_INDEX_BAR1_USERD_START_OFFSET = (0x000000004)
-NV2080_CTRL_FIFO_INFO_INDEX_DEFAULT_CHANNEL_TIMESLICE = (0x000000005)
-NV2080_CTRL_FIFO_INFO_INDEX_CHANNEL_GROUPS_IN_USE = (0x000000006)
-NV2080_CTRL_FIFO_INFO_INDEX_IS_PER_RUNLIST_CHANNEL_RAM_SUPPORTED = (0x000000007)
-NV2080_CTRL_FIFO_INFO_INDEX_MAX_CHANNEL_GROUPS_PER_ENGINE = (0x000000008)
-NV2080_CTRL_FIFO_INFO_INDEX_CHANNEL_GROUPS_IN_USE_PER_ENGINE = (0x000000009)
-NV2080_CTRL_FIFO_INFO_INDEX_MAX_LOWER_SUBCONTEXT = (0x00000000a)
-NV2080_CTRL_FIFO_INFO_INDEX_MAX = NV2080_CTRL_FIFO_INFO_INDEX_MAX_LOWER_SUBCONTEXT
-NV2080_CTRL_FIFO_GET_INFO_USERD_OFFSET_SHIFT = (12)
-NV2080_CTRL_CMD_FIFO_GET_INFO = (0x20801109)
-NV2080_CTRL_FIFO_GET_INFO_MAX_ENTRIES = (256)
-NV2080_CTRL_FIFO_GET_INFO_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_FIFO_CHANNEL_PREEMPTIVE_REMOVAL = (0x2080110a)
-NV2080_CTRL_FIFO_CHANNEL_PREEMPTIVE_REMOVAL_PARAMS_MESSAGE_ID = (0xA)
-NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS = (0x2080110b)
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_MAX_ENTRIES = (64)
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_MESSAGE_ID = (0xB)
-NV2080_CTRL_FIFO_DISABLE_CHANNEL_FALSE = (0x00000000)
-NV2080_CTRL_FIFO_DISABLE_CHANNEL_TRUE = (0x00000001)
-NV2080_CTRL_FIFO_ONLY_DISABLE_SCHEDULING_FALSE = (0x00000000)
-NV2080_CTRL_FIFO_ONLY_DISABLE_SCHEDULING_TRUE = (0x00000001)
-NV2080_CTRL_FIFO_GET_CHANNEL_MEM_INFO_MAX_COUNT = 0x2
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO = (0x2080110c)
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_INFO_PARAMS_MESSAGE_ID = (0xC)
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_INVALID = 0x00000000
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_VIDMEM = 0x00000001
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_SYSMEM_COH = 0x00000002
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_MEM_APERTURE_SYSMEM_NCOH = 0x00000003
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION = (0x2080110d)
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS_MESSAGE_ID = (0xD)
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_APERTURE_VIDMEM = 0x00000000
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_APERTURE_SYSMEM = 0x00000001
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_ATTRIBUTE_CACHED = 0x00000000
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_ATTRIBUTE_UNCACHED = 0X00000001
-NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_ATTRIBUTE_WRITECOMBINED = 0X00000002
-NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_UNKNOWN = 0
-NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_OTHER = 1
-NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_BEST_EFFORT = 2
-NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_EQUAL_SHARE = 3
-NV2080_CTRL_CMD_VGPU_SCHEDULER_POLICY_FIXED_SHARE = 4
-NV2080_CTRL_CMD_SUPPORTED_VGPU_SCHEDULER_POLICY_COUNT = 3
-NV2080_CTRL_CMD_VGPU_SCHEDULER_ARR_DEFAULT = 0
-NV2080_CTRL_CMD_VGPU_SCHEDULER_ARR_DISABLE = 1
-NV2080_CTRL_CMD_VGPU_SCHEDULER_ARR_ENABLE = 2
-NV2080_CTRL_CMD_FIFO_OBJSCHED_SW_GET_LOG = (0x2080110e)
-NV2080_CTRL_FIFO_OBJSCHED_SW_COUNT = 32
-NV2080_CTRL_FIFO_OBJSCHED_SW_NCOUNTERS = 8
-NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRIES = 200
-NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS_MESSAGE_ID = (0xE)
-NV2080_CTRL_CMD_FIFO_GET_DEVICE_INFO_TABLE = (0x20801112)
-NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_MAX_DEVICES = 256
-NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_MAX_ENTRIES = 32
-NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_ENGINE_DATA_TYPES = 16
-NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_ENGINE_MAX_PBDMA = 2
-NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_ENGINE_MAX_NAME_LEN = 16
-NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS_MESSAGE_ID = (0x12)
-NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT = (0x20801113)
-NV2080_CTRL_FIFO_CLEAR_FAULTED_BIT_FAULT_TYPE_ENGINE = 0x00000001
-NV2080_CTRL_FIFO_CLEAR_FAULTED_BIT_FAULT_TYPE_PBDMA = 0x00000002
-NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS_MESSAGE_ID = (0x13)
-NV2080_CTRL_CMD_FIFO_RUNLIST_SET_SCHED_POLICY = (0x20801115)
-NV2080_CTRL_FIFO_RUNLIST_SCHED_POLICY_DEFAULT = 0x0
-NV2080_CTRL_FIFO_RUNLIST_SCHED_POLICY_CHANNEL_INTERLEAVED = 0x1
-NV2080_CTRL_FIFO_RUNLIST_SCHED_POLICY_CHANNEL_INTERLEAVED_WDDM = 0x2
-NV2080_CTRL_CMD_FIFO_RUNLIST_SET_SCHED_POLICY_FLAGS_RESTORE_FALSE = (0x00000000)
-NV2080_CTRL_CMD_FIFO_RUNLIST_SET_SCHED_POLICY_FLAGS_RESTORE_TRUE = (0x00000001)
-NV2080_CTRL_FIFO_RUNLIST_SET_SCHED_POLICY_PARAMS_MESSAGE_ID = (0x15)
-NV2080_CTRL_CMD_FIFO_UPDATE_CHANNEL_INFO = (0x20801116)
-NV2080_CTRL_FIFO_UPDATE_CHANNEL_INFO_PARAMS_MESSAGE_ID = (0x16)
-NV2080_CTRL_CMD_FIFO_DISABLE_USERMODE_CHANNELS = (0x20801117)
-NV2080_CTRL_FIFO_DISABLE_USERMODE_CHANNELS_PARAMS_MESSAGE_ID = (0x17)
-NV2080_CTRL_CMD_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB = (0x20801118)
-NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_MESSAGE_ID = (0x18)
-NV2080_CTRL_CMD_FIFO_GET_ALLOCATED_CHANNELS = (0x20801119)
-NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_MAX_CHANNELS = 4096
-NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS_MESSAGE_ID = (0x19)
-NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION = (0x2080111a)
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_MAX_ENTRIES = (64)
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID = (0x1A)
-NV2080_CTRL_CMD_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2 = (0x2080111b)
-NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS_MESSAGE_ID = (0x1B)
-NV2080_CTRL_CMD_FIFO_OBJSCHED_GET_STATE = (0x20801120)
-NV2080_CTRL_FIFO_OBJSCHED_GET_STATE_PARAMS_MESSAGE_ID = (0x20)
-NV2080_CTRL_CMD_FIFO_OBJSCHED_SET_STATE = (0x20801121)
-NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS_MESSAGE_ID = (0x21)
-NV2080_CTRL_CMD_FIFO_OBJSCHED_GET_CAPS = (0x20801122)
-NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS_MESSAGE_ID = (0x22)
-NV2080_CTRL_CMD_FIFO_MAX_CHANNELS_PER_TSG = 128
-NV2080_CTRL_CMD_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO = (0x20801123)
-NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS_MESSAGE_ID = (0x23)
-NV2080_CTRL_CMD_FIFO_QUERY_CHANNEL_UNIQUE_ID = (0x20801124)
-NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS_MESSAGE_ID = (0x24)
-NV2080_CTRL_CMD_GRMGR_GET_GR_FS_INFO = (0x20803801)
-NV2080_CTRL_GRMGR_GR_FS_INFO_MAX_QUERIES = 96
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_MAX_SIZE = 32
-NV2080_CTRL_GRMGR_MAX_SMC_IDS = 8
-NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_INVALID = 0
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_GPC_COUNT = 1
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_CHIPLET_GPC_MAP = 2
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_TPC_MASK = 3
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PPC_MASK = 4
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARTITION_CHIPLET_GPC_MAP = 5
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_CHIPLET_SYSPIPE_MASK = 6
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARTITION_CHIPLET_SYSPIPE_IDS = 7
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PROFILER_MON_GPC_MASK = 8
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARTITION_SYSPIPE_ID = 9
-NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_ROP_MASK = 10
-NV2080_CTRL_CMD_INTERNAL_GPIO_PROGRAM_DIRECTION = (0x20802300)
-NV2080_CTRL_INTERNAL_GPIO_PROGRAM_DIRECTION_PARAMS_MESSAGE_ID = (0x00)
-NV2080_CTRL_CMD_INTERNAL_GPIO_PROGRAM_OUTPUT = (0x20802301)
-NV2080_CTRL_INTERNAL_GPIO_PROGRAM_OUTPUT_PARAMS_MESSAGE_ID = (0x01)
-NV2080_CTRL_CMD_INTERNAL_GPIO_READ_INPUT = (0x20802302)
-NV2080_CTRL_INTERNAL_GPIO_READ_INPUT_PARAMS_MESSAGE_ID = (0x02)
-NV2080_CTRL_CMD_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION = (0x20802303)
-NV2080_CTRL_INTERNAL_GPIO_ACTIVATE_HW_FUNCTION_PARAMS_MESSAGE_ID = (0x03)
-NV2080_CTRL_CMD_NVD_GET_DUMP_SIZE = (0x20802401)
-NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_NVD_GET_DUMP = (0x20802402)
-NV2080_CTRL_NVD_GET_DUMP_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_NVD_GET_NOCAT_JOURNAL = (0x20802409)
-NV2080_NOCAT_JOURNAL_MAX_DIAG_BUFFER = 1024
-NV2080_NOCAT_JOURNAL_MAX_STR_LEN = 65
-NV2080_NOCAT_JOURNAL_MAX_JOURNAL_RECORDS = 10
-NV2080_NOCAT_JOURNAL_MAX_ASSERT_RECORDS = 32
-NV2080_NOCAT_JOURNAL_REC_TYPE_UNKNOWN = 0
-NV2080_NOCAT_JOURNAL_REC_TYPE_BUGCHECK = 1
-NV2080_NOCAT_JOURNAL_REC_TYPE_ENGINE = 2
-NV2080_NOCAT_JOURNAL_REC_TYPE_TDR = 3
-NV2080_NOCAT_JOURNAL_REC_TYPE_RC = 4
-NV2080_NOCAT_JOURNAL_REC_TYPE_ASSERT = 5
-NV2080_NOCAT_JOURNAL_REC_TYPE_ANY = 6
-NV2080_NOCAT_JOURNAL_REC_TYPE_COUNT = (0x7)
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_REQ_IDX = 0
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_GRANDFATHERED_RECORD_IDX = 1
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_ALLOCATED_IDX = 2
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECTED_IDX = 3
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATIONS_IDX = 4
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NOTIFICATION_FAIL_IDX = 5
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_ALLOC_FAILED_IDX = 6
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_FAILED_IDX = 7
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COLLECT_LOCKED_OUT_IDX = 8
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CTRL_INSERT_RECORDS_IDX = 9
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RPC_INSERT_RECORDS_IDX = 10
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCKED_IDX = 11
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_LOCK_UPDATED_IDX = 12
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_JOURNAL_UNLOCKED_IDX = 13
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_RECORDS_IDX = 14
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_BUFFER_IDX = 15
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_MATCH_FOUND_IDX = 16
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_NO_MATCH_IDX = 17
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_CLOSEST_FOUND_IDX = 18
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REQUESTED_IDX = 19
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_REPORTED_IDX = 20
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_DROPPED_IDX = 21
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_REQ_IDX = 22
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATED_IDX = 23
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_UPDATE_FAILED_IDX = 24
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BUSY_IDX = 25
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_PARAM_IDX = 26
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_BAD_TYPE_IDX = 27
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES4_IDX = 28
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES3_IDX = 29
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES2_IDX = 30
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_RES1_IDX = 31
-NV2080_NOCAT_JOURNAL_REPORT_ACTIVITY_COUNTER_COUNT = (0x20)
-NV2080_CTRL_NOCAT_GET_COUNTERS_ONLY_YES = 1
-NV2080_CTRL_NOCAT_GET_COUNTERS_ONLY_NO = 0
-NV2080_CTRL_NOCAT_GET_RESET_COUNTERS_YES = 1
-NV2080_CTRL_NOCAT_GET_RESET_COUNTERS_NO = 0
-NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_NVD_SET_NOCAT_JOURNAL_DATA = (0x2080240b)
-NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_EMPTY = 0
-NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_TDR_REASON = 1
-NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_SET_TAG = 2
-NV2080_CTRL_NOCAT_JOURNAL_DATA_TYPE_RCLOG = 3
-NV2080_CTRL_NOCAT_TDR_TYPE_NONE = 0
-NV2080_CTRL_NOCAT_TDR_TYPE_LEGACY = 1
-NV2080_CTRL_NOCAT_TDR_TYPE_FULLCHIP = 2
-NV2080_CTRL_NOCAT_TDR_TYPE_BUSRESET = 3
-NV2080_CTRL_NOCAT_TDR_TYPE_GC6_RESET = 4
-NV2080_CTRL_NOCAT_TDR_TYPE_SURPRISE_REMOVAL = 5
-NV2080_CTRL_NOCAT_TDR_TYPE_UCODE_RESET = 6
-NV2080_CTRL_NOCAT_TDR_TYPE_TEST = 7
-NV2080_CTRL_NOCAT_TAG_CLEAR_YES = 1
-NV2080_CTRL_NOCAT_TAG_CLEAR_NO = 0
-NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS_MESSAGE_ID = (0xB)
-NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD = (0x2080240c)
-NV2080_CTRL_NOCAT_INSERT_ALLOW_NULL_STR_YES = 1
-NV2080_CTRL_NOCAT_INSERT_ALLOW_NULL_STR_NO = 0
-NV2080_CTRL_NOCAT_INSERT_ALLOW_0_LEN_BUFFER_YES = 1
-NV2080_CTRL_NOCAT_INSERT_ALLOW_0_LEN_BUFFER_NO = 0
-NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS_MESSAGE_ID = (0xC)
-NV2080_CTRL_CMD_LPWR_DIFR_CTRL = (0x20802801)
-NV2080_CTRL_LPWR_DIFR_CTRL_DISABLE = (0x00000001)
-NV2080_CTRL_LPWR_DIFR_CTRL_ENABLE = (0x00000002)
-NV2080_CTRL_LPWR_DIFR_CTRL_SUPPORT_STATUS = (0x00000003)
-NV2080_CTRL_CMD_LPWR_DIFR_CTRL_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_LPWR_DIFR_SUPPORTED = (0x00000001)
-NV2080_CTRL_LPWR_DIFR_NOT_SUPPORTED = (0x00000002)
-NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE = (0x20802802)
-NV2080_CTRL_LPWR_DIFR_PREFETCH_SUCCESS = (0x00000001)
-NV2080_CTRL_LPWR_DIFR_PREFETCH_FAIL_OS_FLIPS_ENABLED = (0x00000002)
-NV2080_CTRL_LPWR_DIFR_PREFETCH_FAIL_INSUFFICIENT_L2_SIZE = (0x00000003)
-NV2080_CTRL_LPWR_DIFR_PREFETCH_FAIL_CE_HW_ERROR = (0x00000004)
-NV2080_CTRL_CMD_LPWR_DIFR_PREFETCH_RESPONSE_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_CE_GET_CAPS = (0x20802a01)
-NV2080_CTRL_CE_CAPS_TBL_SIZE = 2
-NV2080_CTRL_CE_GET_CAPS_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_CE_GET_CAPS_V2 = (0x20802a03)
-NV2080_CTRL_CE_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_CE_GET_CE_PCE_MASK = (0x20802a02)
-NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_CE_SET_PCE_LCE_CONFIG = (0x20802a04)
-NV2080_CTRL_MAX_PCES = 32
-NV2080_CTRL_MAX_GRCES = 4
-NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_CE_UPDATE_PCE_LCE_MAPPINGS = (0x20802a05)
-NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS_MESSAGE_ID = (0x5)
-NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_INVALID_LCE = 0xf
-NV2080_CTRL_CMD_CE_UPDATE_CLASS_DB = (0x20802a06)
-NV2080_CTRL_CE_UPDATE_CLASS_DB_PARAMS_MESSAGE_ID = (0x6)
-NV2080_CTRL_CMD_CE_GET_PHYSICAL_CAPS = (0x20802a07)
-NV2080_CTRL_CE_GET_PHYSICAL_CAPS_PARAMS_MESSAGE_ID = (0x7)
-NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0x8)
-NV2080_CTRL_CMD_CE_GET_FAULT_METHOD_BUFFER_SIZE = (0x20802a08)
-NV2080_CTRL_CMD_CE_GET_HUB_PCE_MASK = (0x20802a09)
-NV2080_CTRL_CE_MAX_HSHUBS = 32
-NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_CE_GET_ALL_CAPS = (0x20802a0a)
-NV2080_CTRL_MAX_CES = 64
-NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS_MESSAGE_ID = (0xa)
-NV2080_CTRL_CMD_CE_GET_ALL_PHYSICAL_CAPS = (0x20802a0b)
-NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS_MESSAGE_ID = (0xb)
-NV2080_CTRL_CMD_CE_GET_LCE_SHIM_INFO = (0x20802a0c)
-NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS_MESSAGE_ID = (0xc)
-NV2080_CTRL_CMD_CE_UPDATE_PCE_LCE_MAPPINGS_V2 = (0x20802a0d)
-NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS_MESSAGE_ID = (0xd)
-NV2080_CTRL_CMD_CE_GET_HUB_PCE_MASK_V2 = (0x20802a0e)
-NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS_MESSAGE_ID = (0xe)
-NV2080_CTRL_CMD_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE = (0x20802a0f)
-NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS_MESSAGE_ID = (0xf)
-NV2080_CTRL_CMD_CE_GET_DECOMP_LCE_MASK = (0x20802a11)
-NV2080_CTRL_CE_GET_DECOMP_LCE_MASK_PARAMS_MESSAGE_ID = (0x11)
-NV2080_CTRL_CMD_CE_IS_DECOMP_LCE_ENABLED = (0x20802a12)
-NV2080_CTRL_CE_IS_DECOMP_LCE_ENABLED_PARAMS_MESSAGE_ID = (0x12)
-NV2080_CTRL_GPUMON_SAMPLE_TYPE_PWR_MONITOR_STATUS = 0x00000001
-NV2080_CTRL_GPUMON_SAMPLE_TYPE_PERFMON_UTIL = 0x00000002
-NV2080_GPUMON_PID_INVALID = ((NvU32)(~0))
-NV2080_CTRL_FB_INFO_INDEX_TILE_REGION_COUNT = (0x00000000)
-NV2080_CTRL_FB_INFO_INDEX_COMPRESSION_SIZE = (0x00000001)
-NV2080_CTRL_FB_INFO_INDEX_DRAM_PAGE_STRIDE = (0x00000002)
-NV2080_CTRL_FB_INFO_INDEX_TILE_REGION_FREE_COUNT = (0x00000003)
-NV2080_CTRL_FB_INFO_INDEX_PARTITION_COUNT = (0x00000004)
-NV2080_CTRL_FB_INFO_INDEX_BAR1_SIZE = (0x00000005)
-NV2080_CTRL_FB_INFO_INDEX_BANK_SWIZZLE_ALIGNMENT = (0x00000006)
-NV2080_CTRL_FB_INFO_INDEX_RAM_SIZE = (0x00000007)
-NV2080_CTRL_FB_INFO_INDEX_TOTAL_RAM_SIZE = (0x00000008)
-NV2080_CTRL_FB_INFO_INDEX_HEAP_SIZE = (0x00000009)
-NV2080_CTRL_FB_INFO_INDEX_MAPPABLE_HEAP_SIZE = (0x0000000A)
-NV2080_CTRL_FB_INFO_INDEX_BUS_WIDTH = (0x0000000B)
-NV2080_CTRL_FB_INFO_INDEX_RAM_CFG = (0x0000000C)
-NV2080_CTRL_FB_INFO_INDEX_RAM_TYPE = (0x0000000D)
-NV2080_CTRL_FB_INFO_INDEX_BANK_COUNT = (0x0000000E)
-NV2080_CTRL_FB_INFO_INDEX_OVERLAY_OFFSET_ADJUSTMENT = (0x0000000F)
-NV2080_CTRL_FB_INFO_INDEX_GPU_VADDR_SPACE_SIZE_KB = (0x0000000F)
-NV2080_CTRL_FB_INFO_INDEX_GPU_VADDR_HEAP_SIZE_KB = (0x0000000F)
-NV2080_CTRL_FB_INFO_INDEX_GPU_VADDR_MAPPBLE_SIZE_KB = (0x0000000F)
-NV2080_CTRL_FB_INFO_INDEX_EFFECTIVE_BW = (0x0000000F)
-NV2080_CTRL_FB_INFO_INDEX_FB_TAX_SIZE_KB = (0x00000010)
-NV2080_CTRL_FB_INFO_INDEX_HEAP_BASE_KB = (0x00000011)
-NV2080_CTRL_FB_INFO_INDEX_LARGEST_FREE_REGION_SIZE_KB = (0x00000012)
-NV2080_CTRL_FB_INFO_INDEX_LARGEST_FREE_REGION_BASE_KB = (0x00000013)
-NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK = (0x00000014)
-NV2080_CTRL_FB_INFO_INDEX_VISTA_RESERVED_HEAP_SIZE = (0x00000015)
-NV2080_CTRL_FB_INFO_INDEX_HEAP_FREE = (0x00000016)
-NV2080_CTRL_FB_INFO_INDEX_RAM_LOCATION = (0x00000017)
-NV2080_CTRL_FB_INFO_INDEX_FB_IS_BROKEN = (0x00000018)
-NV2080_CTRL_FB_INFO_INDEX_FBP_COUNT = (0x00000019)
-NV2080_CTRL_FB_INFO_INDEX_FBP_MASK = (0x0000001A)
-NV2080_CTRL_FB_INFO_INDEX_L2CACHE_SIZE = (0x0000001B)
-NV2080_CTRL_FB_INFO_INDEX_MEMORYINFO_VENDOR_ID = (0x0000001C)
-NV2080_CTRL_FB_INFO_INDEX_BAR1_AVAIL_SIZE = (0x0000001D)
-NV2080_CTRL_FB_INFO_INDEX_HEAP_START = (0x0000001E)
-NV2080_CTRL_FB_INFO_INDEX_BAR1_MAX_CONTIGUOUS_AVAIL_SIZE = (0x0000001F)
-NV2080_CTRL_FB_INFO_INDEX_USABLE_RAM_SIZE = (0x00000020)
-NV2080_CTRL_FB_INFO_INDEX_TRAINIG_2T = (0x00000021)
-NV2080_CTRL_FB_INFO_INDEX_LTC_COUNT = (0x00000022)
-NV2080_CTRL_FB_INFO_INDEX_LTS_COUNT = (0x00000023)
-NV2080_CTRL_FB_INFO_INDEX_L2CACHE_ONLY_MODE = (0x00000024)
-NV2080_CTRL_FB_INFO_INDEX_PSEUDO_CHANNEL_MODE = (0x00000025)
-NV2080_CTRL_FB_INFO_INDEX_SMOOTHDISP_RSVD_BAR1_SIZE = (0x00000026)
-NV2080_CTRL_FB_INFO_INDEX_HEAP_OFFLINE_SIZE = (0x00000027)
-NV2080_CTRL_FB_INFO_INDEX_1TO1_COMPTAG_ENABLED = (0x00000028)
-NV2080_CTRL_FB_INFO_INDEX_SUSPEND_RESUME_RSVD_SIZE = (0x00000029)
-NV2080_CTRL_FB_INFO_INDEX_ALLOW_PAGE_RETIREMENT = (0x0000002A)
-NV2080_CTRL_FB_INFO_INDEX_LTC_MASK = (0x0000002B)
-NV2080_CTRL_FB_INFO_POISON_FUSE_ENABLED = (0x0000002C)
-NV2080_CTRL_FB_INFO_FBPA_ECC_ENABLED = (0x0000002D)
-NV2080_CTRL_FB_INFO_DYNAMIC_PAGE_OFFLINING_ENABLED = (0x0000002E)
-NV2080_CTRL_FB_INFO_INDEX_FORCED_BAR1_64KB_MAPPING_ENABLED = (0x0000002F)
-NV2080_CTRL_FB_INFO_INDEX_P2P_MAILBOX_SIZE = (0x00000030)
-NV2080_CTRL_FB_INFO_INDEX_P2P_MAILBOX_ALIGNMENT = (0x00000031)
-NV2080_CTRL_FB_INFO_INDEX_P2P_MAILBOX_BAR1_MAX_OFFSET_64KB = (0x00000032)
-NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_TOTAL_KB = (0x00000033)
-NV2080_CTRL_FB_INFO_INDEX_PROTECTED_MEM_SIZE_FREE_KB = (0x00000034)
-NV2080_CTRL_FB_INFO_INDEX_ECC_STATUS_SIZE = (0x00000035)
-NV2080_CTRL_FB_INFO_INDEX_IS_ZERO_FB = (0x00000036)
-NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_0 = (NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK)
-NV2080_CTRL_FB_INFO_INDEX_PARTITION_MASK_1 = (0x00000037)
-NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_0 = (NV2080_CTRL_FB_INFO_INDEX_LTC_MASK)
-NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_1 = (0x00000038)
-NV2080_CTRL_FB_INFO_MAX_LIST_SIZE = (0x00000039)
-NV2080_CTRL_FB_INFO_INDEX_MAX = (0x38)
-NV2080_CTRL_FB_INFO_RAM_TYPE_UNKNOWN = (0x00000000)
-NV2080_CTRL_FB_INFO_RAM_TYPE_SDRAM = (0x00000001)
-NV2080_CTRL_FB_INFO_RAM_TYPE_DDR1 = (0x00000002)
-NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR2 = (0x00000003)
-NV2080_CTRL_FB_INFO_RAM_TYPE_DDR2 = NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR2
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR2 = (0x00000004)
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR3 = (0x00000005)
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR4 = (0x00000006)
-NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR3 = (0x00000007)
-NV2080_CTRL_FB_INFO_RAM_TYPE_DDR3 = NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR3
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR5 = (0x00000008)
-NV2080_CTRL_FB_INFO_RAM_TYPE_LPDDR2 = (0x00000009)
-NV2080_CTRL_FB_INFO_RAM_TYPE_SDDR4 = (0x0000000C)
-NV2080_CTRL_FB_INFO_RAM_TYPE_LPDDR4 = (0x0000000D)
-NV2080_CTRL_FB_INFO_RAM_TYPE_HBM1 = (0x0000000E)
-NV2080_CTRL_FB_INFO_RAM_TYPE_HBM2 = (0x0000000F)
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR5X = (0x00000010)
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR6 = (0x00000011)
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR6X = (0x00000012)
-NV2080_CTRL_FB_INFO_RAM_TYPE_LPDDR5 = (0x00000013)
-NV2080_CTRL_FB_INFO_RAM_TYPE_HBM3 = (0x00000014)
-NV2080_CTRL_FB_INFO_RAM_TYPE_GDDR7 = (0x00000015)
-NV2080_CTRL_FB_INFO_RAM_LOCATION_GPU_DEDICATED = (0x00000000)
-NV2080_CTRL_FB_INFO_RAM_LOCATION_SYS_SHARED = (0x00000001)
-NV2080_CTRL_FB_INFO_RAM_LOCATION_SYS_DEDICATED = (0x00000002)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_SAMSUNG = (0x00000001)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_QIMONDA = (0x00000002)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_ELPIDA = (0x00000003)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_ETRON = (0x00000004)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_NANYA = (0x00000005)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_HYNIX = (0x00000006)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_MOSEL = (0x00000007)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_WINBOND = (0x00000008)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_ESMT = (0x00000009)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_MICRON = (0x0000000F)
-NV2080_CTRL_FB_INFO_MEMORYINFO_VENDOR_ID_UNKNOWN = (0xFFFFFFFF)
-NV2080_CTRL_FB_INFO_PSEUDO_CHANNEL_MODE_UNSUPPORTED = (0x00000000)
-NV2080_CTRL_FB_INFO_PSEUDO_CHANNEL_MODE_DISABLED = (0x00000001)
-NV2080_CTRL_FB_INFO_PSEUDO_CHANNEL_MODE_ENABLED = (0x00000002)
-NV2080_CTRL_CMD_FB_GET_INFO = (0x20801301)
-NV2080_CTRL_FB_GET_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_FB_GET_INFO_V2 = (0x20801303)
-NV2080_CTRL_FB_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_FB_GET_BAR1_OFFSET = (0x20801310)
-NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS_MESSAGE_ID = (0x10)
-NV2080_CTRL_CMD_FB_GET_CALIBRATION_LOCK_FAILED = (0x2080130c)
-NV2080_CTRL_FB_GET_CALIBRATION_LOCK_FAILED_PARAMS_MESSAGE_ID = (0xC)
-NV2080_CTRL_CMD_FB_GET_CAL_FLAG_NONE = (0x00000000)
-NV2080_CTRL_CMD_FB_GET_CAL_FLAG_RESET = (0x00000001)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL = (0x2080130d)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS_MESSAGE_ID = (0xD)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_WRITE_BACK_NO = (0x00000000)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_WRITE_BACK_YES = (0x00000001)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_INVALIDATE_NO = (0x00000000)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_INVALIDATE_YES = (0x00000001)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_FB_FLUSH_NO = (0x00000000)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_FLAGS_FB_FLUSH_YES = (0x00000001)
-NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE = (0x2080130e)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_MAX_ADDRESSES = 500
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS_MESSAGE_ID = (0xE)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_APERTURE_VIDEO_MEMORY = (0x00000000)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_APERTURE_SYSTEM_MEMORY = (0x00000001)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_APERTURE_PEER_MEMORY = (0x00000002)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_WRITE_BACK_NO = (0x00000000)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_WRITE_BACK_YES = (0x00000001)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_INVALIDATE_NO = (0x00000000)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_INVALIDATE_YES = (0x00000001)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_ADDRESS_ARRAY = (0x00000000)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE = (0x00000001)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FB_FLUSH_NO = (0x00000000)
-NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FB_FLUSH_YES = (0x00000001)
-NV2080_CTRL_CMD_FB_IS_KIND = (0x20801313)
-NV2080_CTRL_FB_IS_KIND_PARAMS_MESSAGE_ID = (0x13)
-NV2080_CTRL_FB_IS_KIND_OPERATION_SUPPORTED = (0x00000000)
-NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE = (0x00000001)
-NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE_1 = (0x00000002)
-NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE_2 = (0x00000003)
-NV2080_CTRL_FB_IS_KIND_OPERATION_COMPRESSIBLE_4 = (0x00000004)
-NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC = (0x00000005)
-NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC_ALLOWS_1 = (0x00000006)
-NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC_ALLOWS_2 = (0x00000007)
-NV2080_CTRL_FB_IS_KIND_OPERATION_ZBC_ALLOWS_4 = (0x00000008)
-NV2080_CTRL_CMD_FB_GET_GPU_CACHE_INFO = (0x20801315)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS_MESSAGE_ID = (0x15)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_POWER_STATE_ENABLED = (0x00000000)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_POWER_STATE_DISABLED = (0x00000001)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_WRITE_MODE_WRITETHROUGH = (0x00000000)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_WRITE_MODE_WRITEBACK = (0x00000001)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_BYPASS_MODE_DISABLED = (0x00000000)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_BYPASS_MODE_ENABLED = (0x00000001)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_FULL = (0x00000000)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_TRANSITIONING = (0x00000001)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_REDUCED = (0x00000002)
-NV2080_CTRL_FB_GET_GPU_CACHE_INFO_RCM_STATE_ZERO_CACHE = (0x00000003)
-NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO = (0x20801320)
-NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_MEM_TYPES = 17
-NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_MAX_ENTRIES = 16
-NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS_MESSAGE_ID = (0x20)
-NV2080_CTRL_CMD_FB_OFFLINE_PAGES = (0x20801321)
-NV2080_CTRL_FB_OFFLINED_PAGES_MAX_PAGES = (0x00000040)
-NV2080_CTRL_FB_OFFLINED_PAGES_INVALID_ADDRESS = (0xffffffffffffffff)
-NV2080_CTRL_FB_OFFLINED_PAGES_PAGE_SIZE_4K = (0x00000000)
-NV2080_CTRL_FB_OFFLINED_PAGES_PAGE_SIZE_64K = (0x00000001)
-NV2080_CTRL_FB_OFFLINED_PAGES_PAGE_SIZE_128K = (0x00000002)
-NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_MULTIPLE_SBE = (0x00000002)
-NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_DBE = (0x00000004)
-NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_OK = (0x00000000)
-NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_PENDING_RETIREMENT = (0x00000001)
-NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_BLACKLISTING_FAILED = (0x00000002)
-NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_TABLE_FULL = (0x00000003)
-NV2080_CTRL_FB_OFFLINED_PAGES_STATUS_INTERNAL_ERROR = (0x00000004)
-NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_MULTIPLE_SBE = NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_MULTIPLE_SBE
-NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DBE = NV2080_CTRL_FB_OFFLINED_PAGES_SOURCE_DPR_DBE
-NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS_MESSAGE_ID = (0x21)
-NV2080_CTRL_CMD_FB_GET_OFFLINED_PAGES = (0x20801322)
-NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_SBE_FALSE = 0
-NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_SBE_TRUE = 1
-NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_DBE_FALSE = 0
-NV2080_CTRL_FB_GET_OFFLINED_PAGES_RETIREMENT_PENDING_DBE_TRUE = 1
-NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x22)
-NV2080_CTRL_CMD_FB_QUERY_ACR_REGION = (0x20801325)
-NV2080_CTRL_CMD_FB_ACR_CLIENT_ID = 2
-NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS_MESSAGE_ID = (0x25)
-NV2080_CTRL_CMD_FB_CLEAR_OFFLINED_PAGES = (0x20801326)
-NV2080_CTRL_FB_CLEAR_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x26)
-NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO = (0x20801327)
-NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_INFO_PARAMS_MESSAGE_ID = (0x27)
-NV2080_CTRL_CMD_FB_GET_LTC_INFO_FOR_FBP = (0x20801328)
-NV2080_CTRL_FB_GET_LTC_INFO_FOR_FBP_PARAMS_MESSAGE_ID = (0x28)
-NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT = (0x20801329)
-NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS = (0x2080132a)
-NV2080_CTRL_CMD_FB_COMPBITCOPY_PUT_COMPBITS = (0x2080132b)
-NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB = (0x2080132c)
-NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB = (0x2080132d)
-NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_FORCE_BAR1 = (0x20801335)
-NV2080_CTRL_CMD_FB_GET_AMAP_CONF = (0x20801336)
-NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS_MESSAGE_ID = (0x36)
-NV2080_CTRL_CMD_FB_CBC_OP = (0x20801337)
-NV2080_CTRL_CMD_FB_CBC_OP_PARAMS_MESSAGE_ID = (0x37)
-NV2080_CTRL_CMD_FB_GET_CTAGS_FOR_CBC_EVICTION = (0x20801338)
-NV2080_MAX_CTAGS_FOR_CBC_EVICTION = 0x7F
-NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS_MESSAGE_ID = (0x38)
-NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE = (0x20801339)
-NV2080_CTRL_CMD_FB_ALLOC_COMP_RESOURCE_PARAMS_MESSAGE_ID = (0x39)
-NV2080_CTRL_CMD_FB_FREE_TILE = (0x2080133a)
-NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS_MESSAGE_ID = (0x3A)
-NV2080_CTRL_CMD_FB_SETUP_VPR_REGION = (0x2080133b)
-NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS_MESSAGE_ID = (0x3B)
-NV2080_CTRL_CMD_FB_GET_CLI_MANAGED_OFFLINED_PAGES = (0x2080133c)
-NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x3C)
-NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO = (0x2080133d)
-NV2080_CTRL_CMD_FB_GET_COMPBITCOPY_CONSTRUCT_INFO_PARAMS_MESSAGE_ID = (0x3D)
-NV2080_CTRL_CMD_FB_SET_RRD = (0x2080133e)
-NV2080_CTRL_FB_SET_RRD_PARAMS_MESSAGE_ID = (0x3E)
-NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_RESET_VALUE = (0xff)
-NV2080_CTRL_CMD_FB_SET_READ_LIMIT = (0x2080133f)
-NV2080_CTRL_FB_SET_READ_LIMIT_RESET_VALUE = NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_RESET_VALUE
-NV2080_CTRL_FB_SET_READ_LIMIT_PARAMS_MESSAGE_ID = (0x3F)
-NV2080_CTRL_CMD_FB_SET_WRITE_LIMIT = (0x20801340)
-NV2080_CTRL_FB_SET_WRITE_LIMIT_RESET_VALUE = NV2080_CTRL_FB_SET_READ_WRITE_LIMIT_RESET_VALUE
-NV2080_CTRL_FB_SET_WRITE_LIMIT_PARAMS_MESSAGE_ID = (0x40)
-NV2080_CTRL_CMD_FB_PATCH_PBR_FOR_MINING = (0x20801341)
-NV2080_CTRL_FB_PATCH_PBR_FOR_MINING_PARAMS_MESSAGE_ID = (0x41)
-NV2080_CTRL_CMD_FB_GET_MEM_ALIGNMENT = (0x20801342)
-NV2080_CTRL_FB_GET_MEM_ALIGNMENT_MAX_BANKS = (4)
-NV2080_CTRL_FB_GET_MEM_ALIGNMENT_PARAMS_MESSAGE_ID = (0x42)
-NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR = (0x20801343)
-NV2080_CTRL_CMD_FB_GET_CBC_BASE_ADDR_PARAMS_MESSAGE_ID = (0x43)
-NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_FALSE = 0
-NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_TRUE = 1
-NV2080_CTRL_FB_REMAPPED_ROW_SOURCE_SBE_FIELD = (0x00000002)
-NV2080_CTRL_FB_REMAPPED_ROW_SOURCE_DBE_FIELD = (0x00000003)
-NV2080_CTRL_FB_REMAPPED_ROWS_MAX_ROWS = (0x00000200)
-NV2080_CTRL_CMD_FB_GET_REMAPPED_ROWS = (0x20801344)
-NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_PENDING_FALSE = NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_FALSE
-NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_PENDING_TRUE = NV2080_CTRL_FB_REMAP_ENTRY_FLAGS_PENDING_TRUE
-NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_FAILURE_FALSE = 0
-NV2080_CTRL_FB_GET_REMAPPED_ROWS_FLAGS_FAILURE_TRUE = 1
-NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS_MESSAGE_ID = (0x44)
-NV2080_CTRL_FB_FS_INFO_MAX_QUERY_SIZE = 24
-NV2080_CTRL_FB_FS_INFO_INVALID_QUERY = 0x0
-NV2080_CTRL_FB_FS_INFO_FBP_MASK = 0x1
-NV2080_CTRL_FB_FS_INFO_LTC_MASK = 0x2
-NV2080_CTRL_FB_FS_INFO_LTS_MASK = 0x3
-NV2080_CTRL_FB_FS_INFO_FBPA_MASK = 0x4
-NV2080_CTRL_FB_FS_INFO_ROP_MASK = 0x5
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK = 0x6
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK = 0x7
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK = 0x8
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK = 0x9
-NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK = 0xA
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK = 0xB
-NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP = 0xC
-NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK = 0xD
-NV2080_CTRL_FB_FS_INFO_PAC_MASK = 0xE
-NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK = 0xF
-NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK = 0x10
-NV2080_CTRL_SYSL2_FS_INFO_SYSLTS_MASK = 0x11
-NV2080_CTRL_FB_FS_INFO_MAX_QUERIES = 120
-NV2080_CTRL_FB_GET_FS_INFO_PARAMS_MESSAGE_ID = (0x46)
-NV2080_CTRL_CMD_FB_GET_FS_INFO = (0x20801346)
-NV2080_CTRL_FB_HISTOGRAM_IDX_NO_REMAPPED_ROWS = (0x0)
-NV2080_CTRL_FB_HISTOGRAM_IDX_SINGLE_REMAPPED_ROW = (0x1)
-NV2080_CTRL_FB_HISTOGRAM_IDX_MIXED_REMAPPED_REMAINING_ROWS = (0x2)
-NV2080_CTRL_FB_HISTOGRAM_IDX_SINGLE_REMAINING_ROW = (0x3)
-NV2080_CTRL_FB_HISTOGRAM_IDX_MAX_REMAPPED_ROWS = (0x4)
-NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS_MESSAGE_ID = (0x47)
-NV2080_CTRL_CMD_FB_GET_ROW_REMAPPER_HISTOGRAM = (0x20801347)
-NV2080_CTRL_CMD_FB_GET_DYNAMIC_OFFLINED_PAGES = (0x20801348)
-NV2080_CTRL_FB_DYNAMIC_BLACKLIST_MAX_PAGES = 512
-NV2080_CTRL_FB_DYNAMIC_BLACKLIST_MAX_ENTRIES = 64
-NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS_MESSAGE_ID = (0x48)
-NV2080_CTRL_FB_DYNAMIC_BLACKLISTED_PAGES_SOURCE_INVALID = (0x00000000)
-NV2080_CTRL_FB_DYNAMIC_BLACKLISTED_PAGES_SOURCE_DPR_DBE = (0x00000001)
-NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO = (0x20801349)
-NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_TYPE_SYSMEM = 0
-NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_TYPE_VIDMEM = 1
-NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_SHARED_FALSE = 0
-NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_SHARED_TRUE = 1
-NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_OWNER_FALSE = 0
-NV2080_CTRL_CMD_FB_ALLOCATION_FLAGS_OWNER_TRUE = 1
-NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS_MESSAGE_ID = (0x49)
-NV2080_CTRL_CMD_FB_UPDATE_NUMA_STATUS = (0x20801350)
-NV2080_CTRL_FB_UPDATE_NUMA_STATUS_PARAMS_MESSAGE_ID = (0x50)
-NV2080_CTRL_CMD_FB_GET_NUMA_INFO = (0x20801351)
-NV2080_CTRL_FB_NUMA_INFO_MAX_OFFLINE_ADDRESSES = 64
-NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS_MESSAGE_ID = (0x51)
-NV2080_CTRL_CMD_FB_GET_SEMAPHORE_SURFACE_LAYOUT = (0x20801352)
-NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_CAPS_MONITORED_FENCE_SUPPORTED = (0x00000001)
-NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_CAPS_64BIT_SEMAPHORES_SUPPORTED = (0x00000002)
-NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS_MESSAGE_ID = (0x52)
-NV2080_CTRL_CMD_GMMU_COMMIT_TLB_INVALIDATE = (0x20801353)
-NV2080_CTRL_GMMU_COMMIT_TLB_INVALIDATE_PARAMS_MESSAGE_ID = (0x53)
-NV2080_CTRL_CMD_FB_STATS_MAX_OWNER = 200
-NV2080_CTRL_CMD_FB_STATS_GET = (0x2080132a)
-NV2080_CTRL_CMD_FB_STATS_GET_PARAMS_MESSAGE_ID = (0x2A)
-NV2080_CTRL_CMD_FB_GET_STATIC_BAR1_INFO = (0x20801354)
-NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS_MESSAGE_ID = (0x54)
-NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION = (0x20801355)
-NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_DISABLED = (0x00000000)
-NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_ENABLED = (0x00000001)
-NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_PENDING_CONFIGURATION_PARAMS_MESSAGE_ID = (0x55)
-NV2080_CTRL_CMD_FB_SET_DRAM_ENCRYPTION_CONFIGURATION = (0x20801356)
-NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_DISABLE = (0x00000000)
-NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_ENABLE = (0x00000001)
-NV2080_CTRL_FB_SET_DRAM_ENCRYPTION_CONFIGURATION_PARAMS_MESSAGE_ID = (0x56)
-NV2080_CTRL_CMD_FB_GET_STATUS = (0x20801357)
-NV2080_CTRL_FB_STATUS_FAILED = (0x00000000)
-NV2080_CTRL_FB_STATUS_READY = (0x00000001)
-NV2080_CTRL_FB_STATUS_PENDING = (0x00000002)
-NV2080_CTRL_FB_STATUS_NOT_APPLICABLE = (0x00000003)
-NV2080_CTRL_FB_GET_STATUS_PARAMS_MESSAGE_ID = (0x57)
-NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_INFOROM_SUPPORT = (0x20801358)
-NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_INFOROM_SUPPORT_DISABLED = (0x00000000)
-NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_INFOROM_SUPPORT_ENABLED = (0x00000001)
-NV2080_CTRL_FB_DRAM_ENCRYPTION_INFOROM_SUPPORT_PARAMS_MESSAGE_ID = (0x58)
-NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_STATUS = (0x20801359)
-NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_STATUS_DISABLED = (0x00000000)
-NV2080_CTRL_CMD_FB_QUERY_DRAM_ENCRYPTION_STATUS_ENABLED = (0x00000001)
-NV2080_CTRL_FB_QUERY_DRAM_ENCRYPTION_STATUS_PARAMS_MESSAGE_ID = (0x59)
-NV2080_CTRL_CMD_FLA_RANGE = (0x20803501)
-NV2080_CTRL_FLA_RANGE_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_FLA_RANGE_PARAMS_MODE_NONE = 0x00000000
-NV2080_CTRL_FLA_RANGE_PARAMS_MODE_INITIALIZE = NVBIT(0)
-NV2080_CTRL_FLA_RANGE_PARAMS_MODE_DESTROY = NVBIT(1)
-NV2080_CTRL_FLA_RANGE_PARAMS_MODE_HOST_MANAGED_VAS_INITIALIZE = NVBIT(2)
-NV2080_CTRL_FLA_RANGE_PARAMS_MODE_HOST_MANAGED_VAS_DESTROY = NVBIT(3)
-NV2080_CTRL_CMD_FLA_SETUP_INSTANCE_MEM_BLOCK = (0x20803502)
-NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_FLA_GET_RANGE = (0x20803503)
-NV2080_CTRL_FLA_GET_RANGE_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_FLA_GET_FABRIC_MEM_STATS = (0x20803504)
-NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_MC_GET_ARCH_INFO = (0x20801701)
-NV2080_CTRL_MC_GET_ARCH_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_T23X = (0xE0000023)
-NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_TU100 = (0x00000160)
-NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GA100 = (0x00000170)
-NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GH100 = (0x00000180)
-NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_AD100 = (0x00000190)
-NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GB100 = (0x000001A0)
-NV2080_CTRL_MC_ARCH_INFO_ARCHITECTURE_GB200 = (0x000001B0)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234 = (0x00000004)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_T234D = (0x00000005)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU100 = (0x00000000)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU102 = (0x00000002)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU104 = (0x00000004)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU106 = (0x00000006)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU116 = (0x00000008)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_TU117 = (0x00000007)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA100 = (0x00000000)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA102 = (0x00000002)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA103 = (0x00000003)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA104 = (0x00000004)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA106 = (0x00000006)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA107 = (0x00000007)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GA10B = (0x0000000B)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100 = (0x00000000)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GH100_SOC = (0x00000001)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD100 = (0x00000000)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD000 = (0x00000001)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD101 = (0x00000001)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD102 = (0x00000002)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD103 = (0x00000003)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD104 = (0x00000004)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD106 = (0x00000006)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD107 = (0x00000007)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_AD10B = (0x0000000B)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB100 = (0x00000000)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB102 = (0x00000002)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB200 = (0x00000000)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB202 = (0x00000002)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB203 = (0x00000003)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB204 = (0x00000004)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB205 = (0x00000005)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB206 = (0x00000006)
-NV2080_CTRL_MC_ARCH_INFO_IMPLEMENTATION_GB207 = (0x00000007)
-NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_NO_SUBREVISION = (0x00000000)
-NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_P = (0x00000001)
-NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_Q = (0x00000002)
-NV2080_CTRL_MC_ARCH_INFO_SUBREVISION_R = (0x00000003)
-NV2080_CTRL_CMD_MC_SERVICE_INTERRUPTS = (0x20801702)
-NV2080_CTRL_MC_ENGINE_ID_GRAPHICS = 0x00000001
-NV2080_CTRL_MC_ENGINE_ID_ALL = 0xFFFFFFFF
-NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_MESSAGE_ID = (0x2)
-NV2080_CTRL_CMD_MC_GET_MANUFACTURER = (0x20801703)
-NV2080_CTRL_MC_GET_MANUFACTURER_PARAMS_MESSAGE_ID = (0x3)
-NV2080_CTRL_CMD_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP = (0x2080170c)
-NV2080_CTRL_MC_CHANGE_REPLAYABLE_FAULT_OWNERSHIP_PARAMS_MESSAGE_ID = (0xC)
-NV2080_CTRL_CMD_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS = (0x2080170d)
-NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_MAX_ENGINES = 256
-NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS_MESSAGE_ID = (0xD)
-NV2080_CTRL_CMD_MC_GET_STATIC_INTR_TABLE = (0x2080170e)
-NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_MAX = 32
-NV2080_INTR_TYPE_NULL = (0x00000000)
-NV2080_INTR_TYPE_NON_REPLAYABLE_FAULT = (0x00000001)
-NV2080_INTR_TYPE_NON_REPLAYABLE_FAULT_ERROR = (0x00000002)
-NV2080_INTR_TYPE_INFO_FAULT = (0x00000003)
-NV2080_INTR_TYPE_REPLAYABLE_FAULT = (0x00000004)
-NV2080_INTR_TYPE_REPLAYABLE_FAULT_ERROR = (0x00000005)
-NV2080_INTR_TYPE_ACCESS_CNTR = (0x00000006)
-NV2080_INTR_TYPE_TMR = (0x00000007)
-NV2080_INTR_TYPE_CPU_DOORBELL = (0x00000008)
-NV2080_INTR_TYPE_GR0_FECS_LOG = (0x00000009)
-NV2080_INTR_TYPE_GR1_FECS_LOG = (0x0000000A)
-NV2080_INTR_TYPE_GR2_FECS_LOG = (0x0000000B)
-NV2080_INTR_TYPE_GR3_FECS_LOG = (0x0000000C)
-NV2080_INTR_TYPE_GR4_FECS_LOG = (0x0000000D)
-NV2080_INTR_TYPE_GR5_FECS_LOG = (0x0000000E)
-NV2080_INTR_TYPE_GR6_FECS_LOG = (0x0000000F)
-NV2080_INTR_TYPE_GR7_FECS_LOG = (0x00000010)
-NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS_MESSAGE_ID = (0xE)
 NV_SUBPROC_NAME_MAX_LENGTH = 100
 NV2080_CTRL_PERF_BOOST_FLAGS_CMD_CLEAR = (0x00000000)
 NV2080_CTRL_PERF_BOOST_FLAGS_CMD_BOOST_1LEVEL = (0x00000001)
@@ -19170,69 +20007,78 @@ NV2080_CTRL_PERF_PSTATES_SKIP_ENTRY = (0x10000)
 NV2080_CTRL_PERF_PSTATES_ALL = (0xffff)
 NV2080_CTRL_CMD_PERF_GET_CURRENT_PSTATE = (0x20802068)
 NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS_MESSAGE_ID = (0x68)
-NV2080_CTRL_RESERVED = (0x00)
-NV2080_CTRL_GPU = (0x01)
-NV2080_CTRL_GPU_LEGACY_NON_PRIVILEGED = (0x81)
-NV2080_CTRL_FUSE = (0x02)
-NV2080_CTRL_FUSE_LEGACY_NON_PRIVILEGED = (0x82)
-NV2080_CTRL_EVENT = (0x03)
-NV2080_CTRL_TIMER = (0x04)
-NV2080_CTRL_THERMAL = (0x05)
-NV2080_CTRL_THERMAL_LEGACY_PRIVILEGED = (0xc5)
-NV2080_CTRL_THERMAL_LEGACY_NON_PRIVILEGED = (0x85)
-NV2080_CTRL_I2C = (0x06)
-NV2080_CTRL_EXTI2C = (0x07)
-NV2080_CTRL_BIOS = (0x08)
-NV2080_CTRL_CIPHER = (0x09)
-NV2080_CTRL_INTERNAL = (0x0A)
-NV2080_CTRL_CLK_LEGACY_PRIVILEGED = (0xd0)
-NV2080_CTRL_CLK_LEGACY_NON_PRIVILEGED = (0x90)
-NV2080_CTRL_CLK = (0x10)
-NV2080_CTRL_FIFO = (0x11)
-NV2080_CTRL_GR = (0x12)
-NV2080_CTRL_FB = (0x13)
-NV2080_CTRL_MC = (0x17)
-NV2080_CTRL_BUS = (0x18)
-NV2080_CTRL_PERF_LEGACY_PRIVILEGED = (0xe0)
-NV2080_CTRL_PERF_LEGACY_NON_PRIVILEGED = (0xa0)
-NV2080_CTRL_PERF = (0x20)
-NV2080_CTRL_NVIF = (0x21)
-NV2080_CTRL_RC = (0x22)
-NV2080_CTRL_GPIO = (0x23)
-NV2080_CTRL_GPIO_LEGACY_NON_PRIVILEGED = (0xa3)
-NV2080_CTRL_NVD = (0x24)
-NV2080_CTRL_DMA = (0x25)
-NV2080_CTRL_PMGR = (0x26)
-NV2080_CTRL_PMGR_LEGACY_PRIVILEGED = (0xe6)
-NV2080_CTRL_PMGR_LEGACY_NON_PRIVILEGED = (0xa6)
-NV2080_CTRL_POWER = (0x27)
-NV2080_CTRL_POWER_LEGACY_NON_PRIVILEGED = (0xa7)
-NV2080_CTRL_LPWR = (0x28)
-NV2080_CTRL_LPWR_LEGACY_NON_PRIVILEGED = (0xa8)
-NV2080_CTRL_LPWR_LEGACY_PRIVILEGED = (0xe8)
-NV2080_CTRL_ACR = (0x29)
-NV2080_CTRL_CE = (0x2A)
-NV2080_CTRL_SPI = (0x2B)
-NV2080_CTRL_NVLINK = (0x30)
-NV2080_CTRL_FLCN = (0x31)
-NV2080_CTRL_VOLT = (0x32)
-NV2080_CTRL_VOLT_LEGACY_PRIVILEGED = (0xf2)
-NV2080_CTRL_VOLT_LEGACY_NON_PRIVILEGED = (0xb2)
-NV2080_CTRL_FAS = (0x33)
-NV2080_CTRL_ECC = (0x34)
-NV2080_CTRL_ECC_NON_PRIVILEGED = (0xb4)
-NV2080_CTRL_FLA = (0x35)
-NV2080_CTRL_GSP = (0x36)
-NV2080_CTRL_NNE = (0x37)
-NV2080_CTRL_NNE_LEGACY_NON_PRIVILEGED = (0xb7)
-NV2080_CTRL_GRMGR = (0x38)
-NV2080_CTRL_UCODE_FUZZER = (0x39)
-NV2080_CTRL_DMABUF = (0x3A)
-NV2080_CTRL_BIF = (0x3B)
-NV2080_CTRL_OS_WINDOWS = (0x3F)
-NV2080_CTRL_OS_MACOS = (0x3E)
-NV2080_CTRL_OS_UNIX = (0x3D)
-NV2080_CTRL_CMD_NULL = (0x20800000)
+NV2080_CTRL_PMGR_MODULE_INFO_NVSWITCH_NOT_SUPPORTED = 0
+NV2080_CTRL_PMGR_MODULE_INFO_NVSWITCH_SUPPORTED = 1
+NV2080_CTRL_PMGR_MODULE_INFO_NVSWITCH_NOT_APPLICABLE = 2
+NV2080_CTRL_PMGR_MODULE_INFO_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_PMGR_GET_MODULE_INFO = (0x20802609)
+NV2080_CTRL_CMD_GC6_ENTRY = (0x2080270d)
+NV2080_CTRL_GC6_ENTRY_PARAMS_MESSAGE_ID = (0xD)
+NV2080_CTRL_CMD_GC6_EXIT = (0x2080270e)
+NV2080_CTRL_GC6_EXIT_PARAMS_MESSAGE_ID = (0xE)
+NV2080_CTRL_RC_READ_VIRTUAL_MEM_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_RC_READ_VIRTUAL_MEM = (0x20802204)
+NV2080_CTRL_RC_GET_ERROR_COUNT_PARAMS_MESSAGE_ID = (0x5)
+NV2080_CTRL_CMD_RC_GET_ERROR_COUNT = (0x20802205)
+NV2080_CTRL_RC_ERROR_PARAMS_BUFFER_SIZE = (0x2000)
+NV2080_CTRL_CMD_RC_GET_ERROR = (0x20802206)
+NV2080_CTRL_RC_GET_ERROR_V2_PARAMS_MESSAGE_ID = (0x13)
+NV2080_CTRL_CMD_RC_GET_ERROR_V2 = (0x20802213)
+NV2080_CTRL_CMD_RC_SET_CLEAN_ERROR_HISTORY = (0x20802207)
+NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_RC_GET_WATCHDOG_INFO = (0x20802209)
+NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_NONE = (0x00000000)
+NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_DISABLED = (0x00000001)
+NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_RUNNING = (0x00000002)
+NV2080_CTRL_RC_GET_WATCHDOG_INFO_FLAGS_INITIALIZED = (0x00000004)
+NV2080_CTRL_CMD_RC_DISABLE_WATCHDOG = (0x2080220a)
+NV2080_CTRL_CMD_RC_ENABLE_WATCHDOG = (0x2080220b)
+NV2080_CTRL_CMD_RC_RELEASE_WATCHDOG_REQUESTS = (0x2080220c)
+NV2080_CTRL_CMD_SET_RC_RECOVERY = (0x2080220d)
+NV2080_CTRL_SET_RC_RECOVERY_PARAMS_MESSAGE_ID = (0xD)
+NV2080_CTRL_CMD_GET_RC_RECOVERY = (0x2080220e)
+NV2080_CTRL_GET_RC_RECOVERY_PARAMS_MESSAGE_ID = (0xE)
+NV2080_CTRL_CMD_RC_RECOVERY_DISABLED = (0x00000000)
+NV2080_CTRL_CMD_RC_RECOVERY_ENABLED = (0x00000001)
+NV2080_CTRL_CMD_TDR_SET_TIMEOUT_STATE = (0x2080220f)
+NV2080_CTRL_TDR_SET_TIMEOUT_STATE_PARAMS_MESSAGE_ID = (0xF)
+NV2080_CTRL_TDR_SET_TIMEOUT_STATE_CMD_GPU_RESET_BEGIN = (0x00000000)
+NV2080_CTRL_TDR_SET_TIMEOUT_STATE_CMD_GPU_RESET_END = (0x00000001)
+NV2080_CTRL_TDR_SET_TIMEOUT_STATE_STATUS_SUCCESS = (0x00000000)
+NV2080_CTRL_TDR_SET_TIMEOUT_STATE_STATUS_FAIL = (0x00000001)
+NV2080_CTRL_CMD_RC_SOFT_DISABLE_WATCHDOG = (0x20802210)
+NV2080_CTRL_CMD_SET_RC_INFO = (0x20802211)
+NV2080_CTRL_SET_RC_INFO_PARAMS_MESSAGE_ID = (0x11)
+NV2080_CTRL_CMD_GET_RC_INFO = (0x20802212)
+NV2080_CTRL_GET_RC_INFO_PARAMS_MESSAGE_ID = (0x12)
+NV2080_CTRL_CMD_RC_INFO_MODE_DISABLE = (0x00000000)
+NV2080_CTRL_CMD_RC_INFO_MODE_ENABLE = (0x00000001)
+NV2080_CTRL_CMD_RC_INFO_BREAK_DISABLE = (0x00000000)
+NV2080_CTRL_CMD_RC_INFO_BREAK_ENABLE = (0x00000001)
+RM_GSP_SPDM_CMD_ID_CC_INIT = (0x1)
+RM_GSP_SPDM_CMD_ID_CC_DEINIT = (0x2)
+RM_GSP_SPDM_CMD_ID_CC_CTRL = (0x3)
+RM_GSP_SPDM_CMD_ID_CC_INIT_RM_DATA = (0x4)
+RM_GSP_SPDM_CMD_ID_CC_HEARTBEAT_CTRL = (0x5)
+RM_GSP_SPDM_CMD_ID_FIPS_SELFTEST = (0x6)
+RM_GSP_SPDM_CMD_ID_INVALID_COMMAND = (0xFF)
+SPDM_SESSION_ESTABLISHMENT_TRANSCRIPT_BUFFER_SIZE = 0x2400
+RSVD7_SIZE = 16
+RSVD8_SIZE = 2
+CE_FIPS_SELF_TEST_DATA_SIZE = 16
+CE_FIPS_SELF_TEST_AUTH_TAG_SIZE = 16
+CE_FIPS_SELF_TEST_IV_SIZE = 12
+RM_GSP_SPDM_MSG_ID_CC_INIT = (0x1)
+RM_GSP_SPDM_MSG_ID_CC_DEINIT = (0x2)
+RM_GSP_SPDM_MSG_ID_CC_CTRL = (0x3)
+RM_GSP_SPDM_MSG_ID_CC_INIT_RM_DATA = (0x4)
+RM_GSP_SPDM_MSG_ID_CC_HEARTBEAT_CTRL = (0x5)
+RM_GSP_SPDM_MSG_ID_FIPS_SELFTEST = (0x6)
+RM_GSP_SPDM_MSG_ID_INVALID_COMMAND = (0xFF)
+NV2080_CTRL_INTERNAL_SPDM_PARTITION = (0x20800ad9)
+NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS_MESSAGE_ID = (0xD9)
+NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT = (0x20800ada)
+NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS_MESSAGE_ID = (0xDA)
 NV2080_CTRL_CMD_TIMER_SCHEDULE = (0x20800401)
 NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS_MESSAGE_ID = (0x1)
 NV2080_CTRL_TIMER_SCHEDULE_FLAGS_TIME_ABS = (0x00000000)
@@ -19253,900 +20099,56 @@ NV2080_TIMER_GPU_CPU_TIME_CPU_CLK_ID_PROCESSOR_CPU = (0x00000000)
 NV2080_TIMER_GPU_CPU_TIME_CPU_CLK_ID_PROCESSOR_GSP = (0x00000001)
 NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ = (0x20800407)
 NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_MESSAGE_ID = (0x7)
-NV2080_CTRL_GR_ROUTE_INFO_FLAGS_TYPE_NONE = 0x0
-NV2080_CTRL_GR_ROUTE_INFO_FLAGS_TYPE_ENGID = 0x1
-NV2080_CTRL_GR_ROUTE_INFO_FLAGS_TYPE_CHANNEL = 0x2
-NV2080_CTRL_GR_INFO_INDEX_MAXCLIPS = NV0080_CTRL_GR_INFO_INDEX_MAXCLIPS
-NV2080_CTRL_GR_INFO_INDEX_MIN_ATTRS_BUG_261894 = NV0080_CTRL_GR_INFO_INDEX_MIN_ATTRS_BUG_261894
-NV2080_CTRL_GR_INFO_XBUF_MAX_PSETS_PER_BANK = NV0080_CTRL_GR_INFO_XBUF_MAX_PSETS_PER_BANK
-NV2080_CTRL_GR_INFO_INDEX_BUFFER_ALIGNMENT = NV0080_CTRL_GR_INFO_INDEX_BUFFER_ALIGNMENT
-NV2080_CTRL_GR_INFO_INDEX_SWIZZLE_ALIGNMENT = NV0080_CTRL_GR_INFO_INDEX_SWIZZLE_ALIGNMENT
-NV2080_CTRL_GR_INFO_INDEX_VERTEX_CACHE_SIZE = NV0080_CTRL_GR_INFO_INDEX_VERTEX_CACHE_SIZE
-NV2080_CTRL_GR_INFO_INDEX_VPE_COUNT = NV0080_CTRL_GR_INFO_INDEX_VPE_COUNT
-NV2080_CTRL_GR_INFO_INDEX_SHADER_PIPE_COUNT = NV0080_CTRL_GR_INFO_INDEX_SHADER_PIPE_COUNT
-NV2080_CTRL_GR_INFO_INDEX_THREAD_STACK_SCALING_FACTOR = NV0080_CTRL_GR_INFO_INDEX_THREAD_STACK_SCALING_FACTOR
-NV2080_CTRL_GR_INFO_INDEX_SHADER_PIPE_SUB_COUNT = NV0080_CTRL_GR_INFO_INDEX_SHADER_PIPE_SUB_COUNT
-NV2080_CTRL_GR_INFO_INDEX_SM_REG_BANK_COUNT = NV0080_CTRL_GR_INFO_INDEX_SM_REG_BANK_COUNT
-NV2080_CTRL_GR_INFO_INDEX_SM_REG_BANK_REG_COUNT = NV0080_CTRL_GR_INFO_INDEX_SM_REG_BANK_REG_COUNT
-NV2080_CTRL_GR_INFO_INDEX_SM_VERSION = NV0080_CTRL_GR_INFO_INDEX_SM_VERSION
-NV2080_CTRL_GR_INFO_INDEX_MAX_WARPS_PER_SM = NV0080_CTRL_GR_INFO_INDEX_MAX_WARPS_PER_SM
-NV2080_CTRL_GR_INFO_INDEX_MAX_THREADS_PER_WARP = NV0080_CTRL_GR_INFO_INDEX_MAX_THREADS_PER_WARP
-NV2080_CTRL_GR_INFO_INDEX_GEOM_GS_OBUF_ENTRIES = NV0080_CTRL_GR_INFO_INDEX_GEOM_GS_OBUF_ENTRIES
-NV2080_CTRL_GR_INFO_INDEX_GEOM_XBUF_ENTRIES = NV0080_CTRL_GR_INFO_INDEX_GEOM_XBUF_ENTRIES
-NV2080_CTRL_GR_INFO_INDEX_FB_MEMORY_REQUEST_GRANULARITY = NV0080_CTRL_GR_INFO_INDEX_FB_MEMORY_REQUEST_GRANULARITY
-NV2080_CTRL_GR_INFO_INDEX_HOST_MEMORY_REQUEST_GRANULARITY = NV0080_CTRL_GR_INFO_INDEX_HOST_MEMORY_REQUEST_GRANULARITY
-NV2080_CTRL_GR_INFO_INDEX_MAX_SP_PER_SM = NV0080_CTRL_GR_INFO_INDEX_MAX_SP_PER_SM
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_ZCULL_BANKS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_ZCULL_BANKS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_MIN_FBPS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_MIN_FBPS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_FBP_PORTS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_FBP_PORTS
-NV2080_CTRL_GR_INFO_INDEX_TIMESLICE_ENABLED = NV0080_CTRL_GR_INFO_INDEX_TIMESLICE_ENABLED
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPAS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPAS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_PES_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_PES_PER_GPC
-NV2080_CTRL_GR_INFO_INDEX_GPU_CORE_COUNT = NV0080_CTRL_GR_INFO_INDEX_GPU_CORE_COUNT
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPCS_PER_PES = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPCS_PER_PES
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_HUB_PORTS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_MXBAR_HUB_PORTS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_SM_PER_TPC
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_HSHUB_FBP_PORTS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_HSHUB_FBP_PORTS
-NV2080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT = NV0080_CTRL_GR_INFO_INDEX_RT_CORE_COUNT
-NV2080_CTRL_GR_INFO_INDEX_TENSOR_CORE_COUNT = NV0080_CTRL_GR_INFO_INDEX_TENSOR_CORE_COUNT
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GRS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GRS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTCS = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTCS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_SLICES = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_SLICES
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCMMU_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCMMU_PER_GPC
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_PER_FBP = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_LTC_PER_FBP
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_ROP_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_ROP_PER_GPC
-NV2080_CTRL_GR_INFO_INDEX_FAMILY_MAX_TPC_PER_GPC = NV0080_CTRL_GR_INFO_INDEX_FAMILY_MAX_TPC_PER_GPC
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPA_PER_FBP = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_FBPA_PER_FBP
-NV2080_CTRL_GR_INFO_INDEX_MAX_SUBCONTEXT_COUNT = NV0080_CTRL_GR_INFO_INDEX_MAX_SUBCONTEXT_COUNT
-NV2080_CTRL_GR_INFO_INDEX_MAX_LEGACY_SUBCONTEXT_COUNT = NV0080_CTRL_GR_INFO_INDEX_MAX_LEGACY_SUBCONTEXT_COUNT
-NV2080_CTRL_GR_INFO_INDEX_MAX_PER_ENGINE_SUBCONTEXT_COUNT = NV0080_CTRL_GR_INFO_INDEX_MAX_PER_ENGINE_SUBCONTEXT_COUNT
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_SLICES_PER_LTC = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_SLICES_PER_LTC
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GFXC_SMC_ENGINES = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GFXC_SMC_ENGINES
-NV2080_CTRL_GR_INFO_INDEX_DUMMY = NV0080_CTRL_GR_INFO_INDEX_DUMMY
-NV2080_CTRL_GR_INFO_INDEX_GFX_CAPABILITIES = NV0080_CTRL_GR_INFO_INDEX_GFX_CAPABILITIES
-NV2080_CTRL_GR_INFO_INDEX_MAX_MIG_ENGINES = NV0080_CTRL_GR_INFO_INDEX_MAX_MIG_ENGINES
-NV2080_CTRL_GR_INFO_INDEX_MAX_PARTITIONABLE_GPCS = NV0080_CTRL_GR_INFO_INDEX_MAX_PARTITIONABLE_GPCS
-NV2080_CTRL_GR_INFO_INDEX_LITTER_MIN_SUBCTX_PER_SMC_ENG = NV0080_CTRL_GR_INFO_INDEX_LITTER_MIN_SUBCTX_PER_SMC_ENG
-NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS_PER_DIELET = NV0080_CTRL_GR_INFO_INDEX_LITTER_NUM_GPCS_PER_DIELET
-NV2080_CTRL_GR_INFO_INDEX_LITTER_MAX_NUM_SMC_ENGINES_PER_DIELET = NV0080_CTRL_GR_INFO_INDEX_LITTER_MAX_NUM_SMC_ENGINES_PER_DIELET
-NV2080_CTRL_GR_INFO_INDEX_MAX = NV0080_CTRL_GR_INFO_INDEX_MAX
-NV2080_CTRL_GR_INFO_MAX_SIZE = NV0080_CTRL_GR_INFO_MAX_SIZE
-NV2080_CTRL_GR_INFO_SM_VERSION_NONE = (0x00000000)
-NV2080_CTRL_GR_INFO_SM_VERSION_1_05 = (0x00000105)
-NV2080_CTRL_GR_INFO_SM_VERSION_1_1 = (0x00000110)
-NV2080_CTRL_GR_INFO_SM_VERSION_1_2 = (0x00000120)
-NV2080_CTRL_GR_INFO_SM_VERSION_1_3 = (0x00000130)
-NV2080_CTRL_GR_INFO_SM_VERSION_1_4 = (0x00000140)
-NV2080_CTRL_GR_INFO_SM_VERSION_1_5 = (0x00000150)
-NV2080_CTRL_GR_INFO_SM_VERSION_2_0 = (0x00000200)
-NV2080_CTRL_GR_INFO_SM_VERSION_2_1 = (0x00000210)
-NV2080_CTRL_GR_INFO_SM_VERSION_2_2 = (0x00000220)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_0 = (0x00000300)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_1 = (0x00000310)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_2 = (0x00000320)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_3 = (0x00000330)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_5 = (0x00000350)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_6 = (0x00000360)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_8 = (0x00000380)
-NV2080_CTRL_GR_INFO_SM_VERSION_3_9 = (0x00000390)
-NV2080_CTRL_GR_INFO_SM_VERSION_4_0 = (0x00000400)
-NV2080_CTRL_GR_INFO_SM_VERSION_5_0 = (0x00000500)
-NV2080_CTRL_GR_INFO_SM_VERSION_5_02 = (0x00000502)
-NV2080_CTRL_GR_INFO_SM_VERSION_5_03 = (0x00000503)
-NV2080_CTRL_GR_INFO_SM_VERSION_6_0 = (0x00000600)
-NV2080_CTRL_GR_INFO_SM_VERSION_6_01 = (0x00000601)
-NV2080_CTRL_GR_INFO_SM_VERSION_6_02 = (0x00000602)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_0 = (0x00000700)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_01 = (0x00000701)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_02 = (0x00000702)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_03 = (0x00000703)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_05 = (0x00000705)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_02 = (0x00000802)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_06 = (0x00000806)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_07 = (0x00000807)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_08 = (0x00000808)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_09 = (0x00000809)
-NV2080_CTRL_GR_INFO_SM_VERSION_9_00 = (0x00000900)
-NV2080_CTRL_GR_INFO_SM_VERSION_10_00 = (0x00000A00)
-NV2080_CTRL_GR_INFO_SM_VERSION_10_01 = (0x00000A01)
-NV2080_CTRL_GR_INFO_SM_VERSION_10_04 = (0x00000A04)
-NV2080_CTRL_GR_INFO_SM_VERSION_5_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_5_02)
-NV2080_CTRL_GR_INFO_SM_VERSION_5_3 = (NV2080_CTRL_GR_INFO_SM_VERSION_5_03)
-NV2080_CTRL_GR_INFO_SM_VERSION_6_1 = (NV2080_CTRL_GR_INFO_SM_VERSION_6_01)
-NV2080_CTRL_GR_INFO_SM_VERSION_6_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_6_02)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_1 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_01)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_02)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_3 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_03)
-NV2080_CTRL_GR_INFO_SM_VERSION_7_5 = (NV2080_CTRL_GR_INFO_SM_VERSION_7_05)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_2 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_02)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_6 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_06)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_7 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_07)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_8 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_08)
-NV2080_CTRL_GR_INFO_SM_VERSION_8_9 = (NV2080_CTRL_GR_INFO_SM_VERSION_8_09)
-NV2080_CTRL_GR_INFO_SM_VERSION_9_0 = (NV2080_CTRL_GR_INFO_SM_VERSION_9_00)
-NV2080_CTRL_GR_INFO_SM_VERSION_10_0 = (NV2080_CTRL_GR_INFO_SM_VERSION_10_00)
-NV2080_CTRL_GR_INFO_SM_VERSION_10_1 = (NV2080_CTRL_GR_INFO_SM_VERSION_10_01)
-NV2080_CTRL_GR_INFO_SM_VERSION_10_4 = (NV2080_CTRL_GR_INFO_SM_VERSION_10_04)
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_2D_FALSE = 0x0
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_2D_TRUE = 0x1
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_3D_FALSE = 0x0
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_3D_TRUE = 0x1
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_COMPUTE_FALSE = 0x0
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_COMPUTE_TRUE = 0x1
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_I2M_FALSE = 0x0
-NV2080_CTRL_GR_INFO_GFX_CAPABILITIES_I2M_TRUE = 0x1
-NV2080_CTRL_CMD_GR_GET_INFO = (0x20801201)
-NV2080_CTRL_GR_GET_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_CMD_GR_CTXSW_ZCULL_MODE = (0x20801205)
-NV2080_CTRL_GR_CTXSW_ZCULL_MODE_PARAMS_MESSAGE_ID = (0x5)
-NV2080_CTRL_CTXSW_ZCULL_MODE_GLOBAL = (0x00000000)
-NV2080_CTRL_CTXSW_ZCULL_MODE_NO_CTXSW = (0x00000001)
-NV2080_CTRL_CTXSW_ZCULL_MODE_SEPARATE_BUFFER = (0x00000002)
-NV2080_CTRL_CMD_GR_GET_ZCULL_INFO = (0x20801206)
-NV2080_CTRL_GR_GET_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x6)
-NV2080_CTRL_CMD_GR_CTXSW_PM_MODE = (0x20801207)
-NV2080_CTRL_GR_CTXSW_PM_MODE_PARAMS_MESSAGE_ID = (0x7)
-NV2080_CTRL_CTXSW_PM_MODE_NO_CTXSW = (0x00000000)
-NV2080_CTRL_CTXSW_PM_MODE_CTXSW = (0x00000001)
-NV2080_CTRL_CTXSW_PM_MODE_STREAM_OUT_CTXSW = (0x00000002)
-NV2080_CTRL_CMD_GR_CTXSW_ZCULL_BIND = (0x20801208)
-NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_MESSAGE_ID = (0x8)
-NV2080_CTRL_CMD_GR_CTXSW_PM_BIND = (0x20801209)
-NV2080_CTRL_GR_CTXSW_PM_BIND_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_GR_CTXSW_SETUP_BIND = (0x2080123a)
-NV2080_CTRL_GR_CTXSW_SETUP_BIND_PARAMS_MESSAGE_ID = (0x3A)
-NV2080_CTRL_GR_SET_GPC_TILE_MAP_MAX_VALUES = 128
-NV2080_CTRL_CMD_GR_SET_GPC_TILE_MAP = (0x2080120a)
-NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS_MESSAGE_ID = (0xA)
-NV2080_CTRL_CMD_GR_CTXSW_SMPC_MODE = (0x2080120e)
-NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS_MESSAGE_ID = (0xE)
-NV2080_CTRL_CTXSW_SMPC_MODE_NO_CTXSW = (0x00000000)
-NV2080_CTRL_CTXSW_SMPC_MODE_CTXSW = (0x00000001)
-NV2080_CTRL_CMD_GR_GET_SM_TO_GPC_TPC_MAPPINGS = (0x2080120f)
-NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_MAX_SM_COUNT = 240
-NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_MESSAGE_ID = (0xF)
-NV2080_CTRL_CMD_GR_SET_CTXSW_PREEMPTION_MODE = (0x20801210)
-NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_MESSAGE_ID = (0x10)
-NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_CILP_IGNORE = (0x00000000)
-NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_CILP_SET = (0x00000001)
-NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_GFXP_IGNORE = (0x00000000)
-NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_FLAGS_GFXP_SET = (0x00000001)
-NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_GFX_WFI = (0x00000000)
-NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_GFX_GFXP = (0x00000001)
-NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_GFX_GFXP_POOL = (0x00000002)
-NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_COMPUTE_WFI = (0x00000000)
-NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_COMPUTE_CTA = (0x00000001)
-NV2080_CTRL_SET_CTXSW_PREEMPTION_MODE_COMPUTE_CILP = (0x00000002)
-NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND = (0x20801211)
-NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_MESSAGE_ID = (0x11)
-NV2080_CTRL_CMD_GR_PC_SAMPLING_MODE = (0x20801212)
-NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_MESSAGE_ID = (0x12)
-NV2080_CTRL_PC_SAMPLING_MODE_DISABLED = (0x00000000)
-NV2080_CTRL_PC_SAMPLING_MODE_ENABLED = (0x00000001)
-NV2080_CTRL_CMD_GR_GET_ROP_INFO = (0x20801213)
-NV2080_CTRL_GR_GET_ROP_INFO_PARAMS_MESSAGE_ID = (0x13)
-NV2080_CTRL_CMD_GR_GET_CTXSW_STATS = (0x20801215)
-NV2080_CTRL_GR_GET_CTXSW_STATS_PARAMS_MESSAGE_ID = (0x15)
-NV2080_CTRL_GR_GET_CTXSW_STATS_FLAGS_RESET_FALSE = (0x00000000)
-NV2080_CTRL_GR_GET_CTXSW_STATS_FLAGS_RESET_TRUE = (0x00000001)
-NV2080_CTRL_CMD_GR_GET_CTX_BUFFER_SIZE = (0x20801218)
-NV2080_CTRL_GR_GET_CTX_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0x18)
-NV2080_CTRL_GR_MAX_CTX_BUFFER_COUNT = 64
-NV2080_CTRL_CMD_GR_GET_CTX_BUFFER_INFO = (0x20801219)
-NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS_MESSAGE_ID = (0x19)
-NV2080_CTRL_GR_CTX_BUFFER_INFO_APERTURE_UNKNOWN = 0
-NV2080_CTRL_GR_CTX_BUFFER_INFO_APERTURE_SYSMEM = 1
-NV2080_CTRL_GR_CTX_BUFFER_INFO_APERTURE_FBMEM = 2
-NV2080_CTRL_CMD_GR_GET_GLOBAL_SM_ORDER = (0x2080121b)
-NV2080_CTRL_CMD_GR_GET_GLOBAL_SM_ORDER_MAX_SM_COUNT = 512
-NV2080_CTRL_GR_DISABLED_SM_VGPC_ID = 0xFF
-NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x1B)
-NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL = (0x2080121c)
-NV2080_CTRL_GR_GET_CURRENT_RESIDENT_CHANNEL_PARAMS_MESSAGE_ID = (0x1C)
-NV2080_CTRL_CMD_GR_GET_VAT_ALARM_MAX_GPC_COUNT = 10
-NV2080_CTRL_CMD_GR_GET_VAT_ALARM_MAX_TPC_PER_GPC_COUNT = 10
-NV2080_CTRL_CMD_GR_GET_VAT_ALARM_DATA = (0x2080121d)
-NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS_MESSAGE_ID = (0x1D)
-NV2080_CTRL_CMD_GR_GET_ATTRIBUTE_BUFFER_SIZE = (0x2080121e)
-NV2080_CTRL_GR_GET_ATTRIBUTE_BUFFER_SIZE_PARAMS_MESSAGE_ID = (0x1E)
-NV2080_CTRL_CMD_GR_GFX_POOL_QUERY_SIZE = (0x2080121f)
-NV2080_CTRL_GR_GFX_POOL_QUERY_SIZE_PARAMS_MESSAGE_ID = (0x1F)
-NV2080_CTRL_CMD_GR_GFX_POOL_INITIALIZE = (0x20801220)
-NV2080_CTRL_GR_GFX_POOL_INITIALIZE_PARAMS_MESSAGE_ID = (0x20)
-NV2080_CTRL_GR_GFX_POOL_MAX_SLOTS = 64
-NV2080_CTRL_CMD_GR_GFX_POOL_ADD_SLOTS = (0x20801221)
-NV2080_CTRL_GR_GFX_POOL_ADD_SLOTS_PARAMS_MESSAGE_ID = (0x21)
-NV2080_CTRL_CMD_GR_GFX_POOL_REMOVE_SLOTS = (0x20801222)
-NV2080_CTRL_GR_GFX_POOL_REMOVE_SLOTS_PARAMS_MESSAGE_ID = (0x22)
-NV2080_CTRL_CMD_GR_GET_CAPS_V2 = (0x20801227)
-NV2080_CTRL_GR_GET_CAPS_V2_PARAMS_MESSAGE_ID = (0x27)
-NV2080_CTRL_CMD_GR_GET_INFO_V2 = (0x20801228)
-NV2080_CTRL_GR_GET_INFO_V2_PARAMS_MESSAGE_ID = (0x28)
-NV2080_CTRL_CMD_GR_GET_GPC_MASK = (0x2080122a)
-NV2080_CTRL_GR_GET_GPC_MASK_PARAMS_MESSAGE_ID = (0x2A)
-NV2080_CTRL_CMD_GR_GET_TPC_MASK = (0x2080122b)
-NV2080_CTRL_GR_GET_TPC_MASK_PARAMS_MESSAGE_ID = (0x2B)
-NV2080_CTRL_CMD_GR_SET_TPC_PARTITION_MODE = (0x2080122c)
-NV2080_CTRL_GR_SET_TPC_PARTITION_MODE_PARAMS_MESSAGE_ID = (0x2C)
-NV2080_CTRL_CMD_GR_GET_ENGINE_CONTEXT_PROPERTIES = (0x2080122d)
-NV2080_CTRL_GR_GET_ENGINE_CONTEXT_PROPERTIES_PARAMS_MESSAGE_ID = (0x2D)
-NV2080_CTRL_CMD_GR_GET_SM_ISSUE_RATE_MODIFIER = (0x20801230)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA0_REDUCED_SPEED_1_64 = (0x6)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA16_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_DP_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_DP_REDUCED_SPEED = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FMLA32_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_FFMA_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA1_REDUCED_SPEED_1_64 = (0x6)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA2_REDUCED_SPEED_1_64 = (0x6)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA3_REDUCED_SPEED_1_64 = (0x6)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_FULL_SPEED = (0x0)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_2 = (0x1)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_4 = (0x2)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_8 = (0x3)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_16 = (0x4)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_32 = (0x5)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_IMLA4_REDUCED_SPEED_1_64 = (0x6)
-NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS_MESSAGE_ID = (0x30)
-NV2080_CTRL_CMD_GR_FECS_BIND_EVTBUF_FOR_UID = (0x20801231)
-NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_PARAMS_MESSAGE_ID = (0x31)
-NV2080_CTRL_CMD_GR_GET_PHYS_GPC_MASK = (0x20801232)
-NV2080_CTRL_GR_GET_PHYS_GPC_MASK_PARAMS_MESSAGE_ID = (0x32)
-NV2080_CTRL_CMD_GR_GET_PPC_MASK = (0x20801233)
-NV2080_CTRL_GR_GET_PPC_MASK_PARAMS_MESSAGE_ID = (0x33)
-NV2080_CTRL_CMD_GR_GET_NUM_TPCS_FOR_GPC = (0x20801234)
-NV2080_CTRL_GR_GET_NUM_TPCS_FOR_GPC_PARAMS_MESSAGE_ID = (0x34)
-NV2080_CTRL_CMD_GR_GET_CTXSW_MODES = (0x20801235)
-NV2080_CTRL_GR_GET_CTXSW_MODES_PARAMS_MESSAGE_ID = (0x35)
-NV2080_CTRL_CMD_GR_GET_GPC_TILE_MAP = (0x20801236)
-NV2080_CTRL_GR_GET_GPC_TILE_MAP_PARAMS_MESSAGE_ID = (0x36)
-NV2080_CTRL_CMD_GR_GET_ZCULL_MASK = (0x20801237)
-NV2080_CTRL_GR_GET_ZCULL_MASK_PARAMS_MESSAGE_ID = (0x37)
-NV2080_CTRL_CMD_GR_FECS_BIND_EVTBUF_FOR_UID_V2 = (0x20801238)
-NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_V2_PARAMS_MESSAGE_ID = (0x38)
-NV2080_CTRL_CMD_GR_GET_GFX_GPC_AND_TPC_INFO = (0x20801239)
-NV2080_CTRL_GR_GET_GFX_GPC_AND_TPC_INFO_PARAMS_MESSAGE_ID = (0x39)
-NV2080_CTRL_CMD_GR_GET_TPC_RECONFIG_MASK = (0x2080123b)
-NV2080_CTRL_GR_GET_TPC_RECONFIG_MASK_PARAMS_MESSAGE_ID = (0x3b)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_GET_STATIC_INFO = (0x20800a01)
-NV2080_CTRL_INTERNAL_DISPLAY_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_INTERNAL_MEMSYS_GET_STATIC_CONFIG_PARAMS_MESSAGE_ID = (0x1C)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_STATIC_CONFIG = (0x20800a1c)
-NV2080_CTRL_CMD_INTERNAL_UVM_REGISTER_ACCESS_CNTR_BUFFER = (0x20800a1d)
-NV2080_CTRL_INTERNAL_UVM_ACCESS_CNTR_BUFFER_MAX_PAGES = 64
-NV2080_CTRL_INTERNAL_UVM_REGISTER_ACCESS_CNTR_BUFFER_PARAMS_MESSAGE_ID = (0x1D)
-NV2080_CTRL_CMD_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER = (0x20800a1e)
-NV2080_CTRL_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER_PARAMS_MESSAGE_ID = (0x1E)
-NV2080_CTRL_INTERNAL_GR_MAX_ENGINES = 8
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS_MESSAGE_ID = (0x20)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_CAPS = (0x20800a1f)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS_MESSAGE_ID = (0x1F)
-NV2080_CTRL_INTERNAL_GR_MAX_SM = 240
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x23)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_GLOBAL_SM_ORDER = (0x20800a22)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_GLOBAL_SM_ORDER_PARAMS_MESSAGE_ID = (0x22)
-NV2080_CTRL_CMD_INTERNAL_MAX_BSPS = 8
-NV2080_CTRL_CMD_INTERNAL_MAX_MSENCS = 8
-NV2080_CTRL_INTERNAL_GR_MAX_GPC = 12
-NV2080_CTRL_INTERNAL_MAX_TPC_PER_GPC_COUNT = 10
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_FLOORSWEEPING_MASKS_PARAMS_MESSAGE_ID = (0x27)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FLOORSWEEPING_MASKS = (0x20800a26)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FLOORSWEEPING_MASKS_PARAMS_MESSAGE_ID = (0x26)
-NV2080_CTRL_KGR_MAX_BUFFER_PTES = 128
-NV2080_CTRL_CMD_KGR_GET_CTX_BUFFER_PTES = (0x20800a28)
-NV2080_CTRL_KGR_GET_CTX_BUFFER_PTES_PARAMS_MESSAGE_ID = (0x28)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_INFO_PARAMS_MESSAGE_ID = (0x2B)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_INFO = (0x20800a2a)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_INFO_PARAMS_MESSAGE_ID = (0x2A)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x2D)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_ZCULL_INFO = (0x20800a2c)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_ZCULL_INFO_PARAMS_MESSAGE_ID = (0x2C)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_ROP_INFO_PARAMS_MESSAGE_ID = (0x2F)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_ROP_INFO = (0x20800a2e)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_ROP_INFO_PARAMS_MESSAGE_ID = (0x2E)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_PPC_MASKS_PARAMS_MESSAGE_ID = (0x31)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_PPC_MASKS = (0x20800a30)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_PPC_MASKS_PARAMS_MESSAGE_ID = (0x30)
-NV2080_CTRL_INTERNAL_ENGINE_CONTEXT_PROPERTIES_ENGINE_ID_COUNT = 0x1a
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_CONTEXT_BUFFERS_INFO_PARAMS_MESSAGE_ID = (0x33)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_CONTEXT_BUFFERS_INFO = (0x20800a32)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CONTEXT_BUFFERS_INFO_PARAMS_MESSAGE_ID = (0x32)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS_MESSAGE_ID = (0x35)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_SM_ISSUE_RATE_MODIFIER = (0x20800a34)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS_MESSAGE_ID = (0x34)
-NV2080_CTRL_CMD_INTERNAL_GPU_GET_CHIP_INFO = (0x20800a36)
-NV2080_CTRL_INTERNAL_GET_CHIP_INFO_REG_BASE_MAX = 16
-NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS_MESSAGE_ID = (0x36)
-NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_HW_ENABLE = (0x20800a37)
-NV2080_CTRL_CMD_INTERNAL_GR_GET_FECS_TRACE_HW_ENABLE = (0x20800a38)
-NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_HW_ENABLE_PARAMS_MESSAGE_ID = (0x37)
-NV2080_CTRL_INTERNAL_GR_GET_FECS_TRACE_HW_ENABLE_PARAMS_MESSAGE_ID = (0x38)
-NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_RD_OFFSET = (0x20800a39)
-NV2080_CTRL_CMD_INTERNAL_GR_SET_FECS_TRACE_WR_OFFSET = (0x20800a3a)
-NV2080_CTRL_CMD_INTERNAL_GR_GET_FECS_TRACE_RD_OFFSET = (0x20800a3b)
-NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_RD_OFFSET_PARAMS_MESSAGE_ID = (0x39)
-NV2080_CTRL_INTERNAL_GR_SET_FECS_TRACE_WR_OFFSET_PARAMS_MESSAGE_ID = (0x3A)
-NV2080_CTRL_INTERNAL_GR_GET_FECS_TRACE_RD_OFFSET_PARAMS_MESSAGE_ID = (0x3B)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_RECORD_SIZE = (0x20800a3d)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE_PARAMS_MESSAGE_ID = (0x3C)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_RECORD_SIZE_PARAMS_MESSAGE_ID = (0x3D)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES_PARAMS_MESSAGE_ID = (0x3E)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_TRACE_DEFINES = (0x20800a3f)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FECS_TRACE_DEFINES_PARAMS_MESSAGE_ID = (0x3F)
-NV2080_CTRL_CMD_INTERNAL_DEVICE_INFO_MAX_ENTRIES = 512
-NV2080_CTRL_CMD_INTERNAL_GET_DEVICE_INFO_TABLE = (0x20800a40)
-NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS_MESSAGE_ID = (0x40)
-NV2080_CTRL_CMD_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP = (0x20800a41)
-NV2080_CTRL_INTERNAL_GPU_USER_REGISTER_ACCESS_MAP_MAX_COMPRESSED_SIZE = 4096
-NV2080_CTRL_INTERNAL_GPU_USER_REGISTER_ACCESS_MAP_MAX_PROFILING_RANGES = 4096
-NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS_MESSAGE_ID = (0x41)
-NV2080_CTRL_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS_MESSAGE_ID = (0x43)
-NV2080_CTRL_CMD_INTERNAL_KMIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE = (0x20800a44)
-NV2080_CTRL_INTERNAL_KMIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE_PARAMS_MESSAGE_ID = (0x44)
-NV2080_CTRL_CMD_INTERNAL_MIGMGR_PROMOTE_GPU_INSTANCE_MEM_RANGE = (0x20800a43)
-NV2080_CTRL_INTERNAL_GR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID = (0x45)
-NV2080_CTRL_CMD_INTERNAL_KGR_INIT_BUG4208224_WAR = (0x20800a46)
-NV2080_CTRL_INTERNAL_KGR_INIT_BUG4208224_WAR_PARAMS_MESSAGE_ID = (0x46)
-NV2080_CTRL_INTERNAL_STATIC_GR_GET_PDB_PROPERTIES_PARAMS_MESSAGE_ID = (0x47)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_PDB_PROPERTIES = (0x20800a48)
-NV2080_CTRL_INTERNAL_STATIC_KGR_GET_PDB_PROPERTIES_PARAMS_MESSAGE_ID = (0x48)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_WRITE_INST_MEM = (0x20800a49)
-NV2080_CTRL_INTERNAL_DISPLAY_WRITE_INST_MEM_PARAMS_MESSAGE_ID = (0x49)
-NV2080_CTRL_CMD_INTERNAL_RECOVER_ALL_COMPUTE_CONTEXTS = (0x20800a4a)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_GET_IP_VERSION = (0x20800a4b)
-NV2080_CTRL_INTERNAL_DISPLAY_GET_IP_VERSION_PARAMS_MESSAGE_ID = (0x4B)
-NV2080_CTRL_CMD_INTERNAL_GPU_GET_SMC_MODE = (0x20800a4c)
-NV2080_CTRL_INTERNAL_GPU_GET_SMC_MODE_PARAMS_MESSAGE_ID = (0x4C)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_SETUP_RG_LINE_INTR = (0x20800a4d)
-NV2080_CTRL_INTERNAL_DISPLAY_SETUP_RG_LINE_INTR_PARAMS_MESSAGE_ID = (0x4D)
-NV2080_CTRL_INTERNAL_GRMGR_PARTITION_MAX_TYPES = 60
-NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PROFILES_PARAMS_MESSAGE_ID = (0x4F)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_PARTITIONABLE_MEM = (0x20800a51)
-NV2080_CTRL_INTERNAL_MEMSYS_SET_PARTITIONABLE_MEM_PARAMS_MESSAGE_ID = (0x51)
-NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PARTITIONABLE_ENGINES_MAX_ENGINES_MASK_SIZE = 4
-NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PARTITIONABLE_ENGINES_PARAMS_MESSAGE_ID = (0x52)
-NV2080_CTRL_INTERNAL_FIFO_MAX_RUNLIST_BUFFERS = 2
-NV2080_CTRL_INTERNAL_FIFO_MAX_RUNLIST_ID = 64
-NV2080_CTRL_CMD_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS = (0x20800a53)
-NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS_MESSAGE_ID = (0x53)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_SET_IMP_INIT_INFO = (0x20800a54)
-NV2080_CTRL_INTERNAL_DISPLAY_SET_IMP_INIT_INFO_PARAMS_MESSAGE_ID = (0x54)
-NV2080_CTRL_CMD_INTERNAL_GET_EGPU_BRIDGE_INFO = (0x20800a55)
-NV2080_CTRL_INTERNAL_GET_EGPU_BRIDGE_INFO_PARAMS_MESSAGE_ID = (0x55)
-NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_NONE = (0x00000000)
-NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_CUSTOM = (0x00000001)
-NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_TB2 = (0x00000002)
-NV2080_CTRL_INTERNAL_EGPU_BUS_TYPE_TB3 = (0x00000003)
-NV2080_CTRL_CMD_INTERNAL_BUS_FLUSH_WITH_SYSMEMBAR = (0x20800a70)
-NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_LOCAL = (0x20800a71)
-NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_LOCAL_PARAMS_MESSAGE_ID = (0x71)
-NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE = (0x20800a72)
-NV2080_CTRL_CMD_INTERNAL_BUS_SETUP_P2P_MAILBOX_REMOTE_PARAMS_MESSAGE_ID = (0x72)
-NV2080_CTRL_CMD_INTERNAL_BUS_DESTROY_P2P_MAILBOX = (0x20800a73)
-NV2080_CTRL_INTERNAL_BUS_DESTROY_P2P_MAILBOX_PARAMS_MESSAGE_ID = (0x73)
-NV2080_CTRL_CMD_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING = (0x20800a74)
-NV2080_CTRL_INTERNAL_BUS_CREATE_C2C_PEER_MAPPING_PARAMS_MESSAGE_ID = (0x74)
-NV2080_CTRL_CMD_INTERNAL_BUS_REMOVE_C2C_PEER_MAPPING = (0x20800a75)
-NV2080_CTRL_INTERNAL_BUS_REMOVE_C2C_PEER_MAPPING_PARAMS_MESSAGE_ID = (0x75)
-NV2080_CTRL_CMD_INTERNAL_VMMU_GET_SPA_FOR_GPA_ENTRIES = (0x20800a57)
-NV2080_CTRL_INTERNAL_VMMU_MAX_SPA_FOR_GPA_ENTRIES = 128
-NV2080_CTRL_INTERNAL_VMMU_GET_SPA_FOR_GPA_ENTRIES_PARAMS_MESSAGE_ID = (0x57)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER = (0x20800a58)
-NV2080_CTRL_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER_PARAMS_MESSAGE_ID = (0x58)
-NV2080_CTRL_CMD_INTERNAL_GMMU_GET_STATIC_INFO = (0x20800a59)
-NV2080_CTRL_INTERNAL_GMMU_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0x59)
-NV2080_CTRL_CMD_INTERNAL_GR_GET_CTXSW_MODES = (0x20800a5a)
-NV2080_CTRL_INTERNAL_GR_GET_CTXSW_MODES_PARAMS_MESSAGE_ID = (0x5A)
-NV2080_CTRL_CMD_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE = (0x20800a5b)
-NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_PARAMS_MESSAGE_ID = (0x5B)
-NV2080_CTRL_CMD_INTERNAL_INTR_GET_KERNEL_TABLE = (0x20800a5c)
-NV2080_CTRL_INTERNAL_INTR_MAX_TABLE_SIZE = 128
-NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_PARAMS_MESSAGE_ID = (0x5C)
-NV2080_CTRL_INTERNAL_FB_GET_HEAP_RESERVATION_SIZE_GR = (0x00000000)
-NV2080_CTRL_CMD_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_CHECK = (0x20800a98)
-NV2080_CTRL_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_CHECK_PARAMS_MESSAGE_ID = (0x98)
-NV2080_CTRL_CMD_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_SET = (0x20800a99)
-NV2080_CTRL_INTERNAL_PERF_PERFMON_CLIENT_RESERVATION_SET_PARAMS_MESSAGE_ID = (0x99)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_GET_ACTIVE_DISPLAY_DEVICES = (0x20800a5d)
-NV2080_CTRL_INTERNAL_DISPLAY_GET_ACTIVE_DISPLAY_DEVICES_PARAMS_MESSAGE_ID = (0x5D)
-NV2080_CTRL_CMD_INTERNAL_STATIC_MIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES = (0x20800a60)
-NV2080_CTRL_INTERNAL_MAX_SWIZZ_ID = 15
-NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES_PARAMS_MESSAGE_ID = (0x60)
-NV2080_CTRL_CMD_INTERNAL_FIFO_GET_NUM_CHANNELS = (0x20800a61)
-NV2080_CTRL_INTERNAL_FIFO_GET_NUM_CHANNELS_PARAMS_MESSAGE_ID = (0x61)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_PROFILES = (0x20800a63)
-NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_PROFILES_PARAMS_MESSAGE_ID = (0x63)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_PARTITIONABLE_ENGINES = (0x20800a65)
-NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_PARTITIONABLE_ENGINES_PARAMS_MESSAGE_ID = (0x65)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES = (0x20800a66)
-NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES_PARAMS_MESSAGE_ID = (0x66)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_MIG_MEMORY_CONFIG = (0x20800a68)
-NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_CONFIG_PARAMS_MESSAGE_ID = (0x68)
-NV2080_CTRL_CMD_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG = (0x20800a67)
-NV2080_CTRL_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG_PARAMS_MESSAGE_ID = (0x67)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE = (0x20800a6b)
-NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE_SIZE = 8
-NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE_PARAMS_MESSAGE_ID = (0x6B)
-NV2080_CTRL_CMD_INTERNAL_RC_WATCHDOG_TIMEOUT = (0x20800a6a)
-NV2080_CTRL_CMD_INTERNAL_PERF_CUDA_LIMIT_DISABLE = (0x20800a7a)
-NV2080_CTRL_CMD_INTERNAL_PERF_OPTP_CLI_CLEAR = (0x20800a7c)
-NV2080_CTRL_CMD_INTERNAL_PERF_GET_AUX_POWER_STATE = (0x20800a81)
-NV2080_CTRL_INTERNAL_PERF_GET_AUX_POWER_STATE_PARAMS_MESSAGE_ID = (0x81)
-NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_SET_2X = (0x20800a9a)
-NV2080_CTRL_INTERNAL_PERF_BOOST_SET_PARAMS_2X_MESSAGE_ID = (0x9A)
-NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_PSTATE = 0
-NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_GPCCLK = 1
-NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_LAST = NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_GPCCLK
-NV2080_CTRL_INTERNAL_PERF_SYNC_GPU_BOOST_LIMITS_NUM = (0x2)
-NV2080_CTRL_CMD_INTERNAL_PERF_GPU_BOOST_SYNC_SET_CONTROL = (0x20800a7e)
-NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_CONTROL_PARAMS_MESSAGE_ID = (0x7E)
-NV2080_CTRL_CMD_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS = (0x20800a7f)
-NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_MESSAGE_ID = (0x7F)
-NV2080_CTRL_CMD_INTERNAL_PERF_GPU_BOOST_SYNC_GET_INFO = (0x20800a80)
-NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_GET_INFO_PARAMS_MESSAGE_ID = (0x80)
-NV2080_CTRL_CMD_INTERNAL_GMMU_REGISTER_FAULT_BUFFER = (0x20800a9b)
-NV2080_CTRL_INTERNAL_GMMU_FAULT_BUFFER_MAX_PAGES = 256
-NV2080_CTRL_INTERNAL_GMMU_REGISTER_FAULT_BUFFER_PARAMS_MESSAGE_ID = (0x9B)
-NV2080_CTRL_CMD_INTERNAL_GMMU_UNREGISTER_FAULT_BUFFER = (0x20800a9c)
-NV2080_CTRL_FAULT_BUFFER_NON_REPLAYABLE = (0x00000000)
-NV2080_CTRL_FAULT_BUFFER_REPLAYABLE = (0x00000001)
-NV2080_CTRL_CMD_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER = (0x20800a9d)
-NV2080_CTRL_INTERNAL_GMMU_CLIENT_SHADOW_FAULT_BUFFER_MAX_PAGES = 3000
-NV2080_CTRL_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAMS_MESSAGE_ID = (0x9D)
-NV2080_CTRL_CMD_INTERNAL_GMMU_UNREGISTER_CLIENT_SHADOW_FAULT_BUFFER = (0x20800a9e)
-NV2080_CTRL_INTERNAL_GMMU_UNREGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAMS_MESSAGE_ID = (0x9E)
-NV2080_CTRL_CMD_INTERNAL_GMMU_COPY_RESERVED_SPLIT_GVASPACE_PDES_TO_SERVER = (0x20800a9f)
-NV2080_CTRL_INTERNAL_GMMU_COPY_RESERVED_SPLIT_GVASPACE_PDES_TO_SERVER_PARAMS_MESSAGE_ID = (0x9F)
-NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_SET_3X = (0x20800aa0)
-NV2080_CTRL_INTERNAL_PERF_BOOST_SET_PARAMS_3X_MESSAGE_ID = (0xA0)
-NV2080_CTRL_CMD_INTERNAL_PERF_BOOST_CLEAR_3X = (0x20800aa1)
-NV2080_CTRL_INTERNAL_PERF_BOOST_CLEAR_PARAMS_3X_MESSAGE_ID = (0xA1)
-NV2080_CTRL_CMD_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO = (0x20800aa2)
-NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO_MAX_SKYLINES = 8
-NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO_MAX_NON_SINGLETON_VGPCS = 12
-NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS_MESSAGE_ID = (0xA2)
-NV2080_CTRL_CMD_INTERNAL_MIGMGR_SET_PARTITIONING_MODE = (0x20800aa3)
-NV2080_CTRL_INTERNAL_MIGMGR_SET_PARTITIONING_MODE_PARAMS_MESSAGE_ID = (0xA3)
-NV2080_CTRL_CMD_INTERNAL_MIGMGR_CONFIGURE_GPU_INSTANCE = (0x20800aa4)
-NV2080_CTRL_INTERNAL_MIGMGR_CONFIGURE_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA4)
-NV2080_CTRL_CMD_INTERNAL_MIGMGR_SET_GPU_INSTANCES = (0x20800aa5)
-NV2080_CTRL_INTERNAL_MIGMGR_SET_GPU_INSTANCES_PARAMS_MESSAGE_ID = (0xA5)
-NV2080_CTRL_CMD_INTERNAL_MIGMGR_GET_GPU_INSTANCES = (0x20800aa6)
-NV2080_CTRL_INTERNAL_MIGMGR_GET_GPU_INSTANCES_PARAMS_MESSAGE_ID = (0xA6)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED = (0x20800a69)
-NV2080_CTRL_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_PARAMS_MESSAGE_ID = (0x69)
-NV2080_CTRL_CMD_INTERNAL_KMIGMGR_EXPORT_GPU_INSTANCE = (0x20800aa7)
-NV2080_CTRL_CMD_INTERNAL_MIGMGR_EXPORT_GPU_INSTANCE = (0x20800aa8)
-NV2080_CTRL_CMD_INTERNAL_KMIGMGR_IMPORT_GPU_INSTANCE = (0x20800aa9)
-NV2080_CTRL_CMD_INTERNAL_MIGMGR_IMPORT_GPU_INSTANCE = (0x20800aaa)
-NV2080_CTRL_INTERNAL_KMIGMGR_EXPORTED_GPU_INSTANCE_MAX_ENGINES_MASK_SIZE = 4
-NV2080_CTRL_INTERNAL_KMIGMGR_EXPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA7)
-NV2080_CTRL_INTERNAL_MIGMGR_EXPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA8)
-NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xA9)
-NV2080_CTRL_INTERNAL_MIGMGR_IMPORT_GPU_INSTANCE_PARAMS_MESSAGE_ID = (0xAA)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT = (0x20800a6c)
-NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_PARAMS_MESSAGE_ID = (0x6c)
-NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_ALL = (0x00000001)
-NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_FIRST = (0x00000002)
-NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_LAST = (0x00000004)
-NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_NORMAL = (0x00000008)
-NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_CLEAN = (0x00000010)
-NV2080_CTRL_INTERNAL_MEMSYS_L2_INVALIDATE_EVICT_FLAGS_WAIT_FB_PULL = (0x00000020)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_FLUSH_L2_ALL_RAMS_AND_CACHES = (0x20800a6d)
-NV2080_CTRL_CMD_INTERNAL_BIF_GET_STATIC_INFO = (0x20800aac)
-NV2080_CTRL_INTERNAL_BIF_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0xac)
-NV2080_CTRL_CMD_INTERNAL_HSHUB_PEER_CONN_CONFIG = (0x20800a88)
-NV2080_CTRL_INTERNAL_HSHUB_PEER_CONN_CONFIG_PARAMS_MESSAGE_ID = (0x88)
-NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS = (0x20800a8a)
-NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_TABLE_SIZE = 32
-NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS_MESSAGE_ID = (0x8a)
-NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_NUM_UNITS = (0x20800a8b)
-NV2080_CTRL_INTERNAL_HSHUB_GET_NUM_UNITS_PARAMS_MESSAGE_ID = (0x8b)
-NV2080_CTRL_CMD_INTERNAL_HSHUB_NEXT_HSHUB_ID = (0x20800a8c)
-NV2080_CTRL_INTERNAL_HSHUB_NEXT_HSHUB_ID_PARAMS_MESSAGE_ID = (0x8c)
-NV2080_CTRL_CMD_INTERNAL_HSHUB_EGM_CONFIG = (0x20800a8d)
-NV2080_CTRL_INTERNAL_HSHUB_EGM_CONFIG_PARAMS_MESSAGE_ID = (0x8d)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_COMPUTE_PEER_ADDR = (0x20800aad)
-NV2080_CTRL_INTERNAL_NVLINK_GET_SET_NVSWITCH_FABRIC_ADDR_PARAMS_MESSAGE_ID = (0xae)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_SET_NVSWITCH_FABRIC_ADDR = (0x20800aae)
-NV2080_CTRL_CMD_INTERNAL_BIF_GET_ASPM_L1_FLAGS = (0x20800ab0)
-NV2080_CTRL_INTERNAL_BIF_GET_ASPM_L1_FLAGS_PARAMS_MESSAGE_ID = (0xb0)
-NV2080_CTRL_CMD_INTERNAL_PERF_CF_CONTROLLERS_SET_MAX_VGPU_VM_COUNT = (0x20800ab1)
-NV2080_CTRL_CMD_INTERNAL_PERF_CF_CONTROLLERS_MAX_ACTIVE_VGPU_VM_COUNT_MAX_VALUE = 32
-NV2080_CTRL_INTERNAL_PERF_CF_CONTROLLERS_SET_MAX_VGPU_VM_COUNT_PARAMS_MESSAGE_ID = (0xB1)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_DISABLE_NVLINK_PEERS = (0x20800a6e)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE = (0x20800a6f)
-NV2080_CTRL_INTERNAL_MEMSYS_PROGRAM_RAW_COMPRESSION_MODE_PARAMS_MESSAGE_ID = (0x6f)
-NV2080_CTRL_CMD_INTERNAL_CCU_GET_SAMPLE_INFO = (0x20800ab2)
-NV2080_CTRL_CMD_INTERNAL_CCU_MAP = (0x20800ab3)
-NV2080_CTRL_INTERNAL_CCU_DEV_SHRBUF_COUNT_MAX = 1
-NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS_MESSAGE_ID = (0xB3)
-NV2080_CTRL_CMD_INTERNAL_CCU_UNMAP = (0x20800ab4)
-NV2080_CTRL_INTERNAL_CCU_UNMAP_INFO_PARAMS_MESSAGE_ID = (0xB4)
-NV2080_CTRL_CMD_INTERNAL_SET_P2P_CAPS = (0x20800ab5)
-NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PARAMS_MESSAGE_ID = (0xB5)
-NV2080_CTRL_CMD_INTERNAL_REMOVE_P2P_CAPS = (0x20800ab6)
-NV2080_CTRL_INTERNAL_REMOVE_P2P_CAPS_PARAMS_MESSAGE_ID = (0xB6)
-NV2080_CTRL_CMD_INTERNAL_GET_PCIE_P2P_CAPS = (0x20800ab8)
-NV2080_CTRL_INTERNAL_GET_PCIE_P2P_CAPS_PARAMS_MESSAGE_ID = (0xB8)
-NV2080_CTRL_CMD_INTERNAL_BIF_SET_PCIE_RO = (0x20800ab9)
-NV2080_CTRL_INTERNAL_BIF_SET_PCIE_RO_PARAMS_MESSAGE_ID = (0xB9)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE = (0x20800a76)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_UNIX_CONSOLE_PARAMS_MESSAGE_ID = (0x76)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_POST_UNIX_CONSOLE = (0x20800a77)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_POST_UNIX_CONSOLE_PARAMS_MESSAGE_ID = (0x77)
-NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS_MESSAGE_ID = (0xBB)
-NV2080_CTRL_CMD_INTERNAL_STATIC_KMIGMGR_GET_COMPUTE_PROFILES = (0x20800aba)
-NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_COMPUTE_PROFILES_PARAMS_MESSAGE_ID = (0xBA)
-NV2080_CTRL_CMD_INTERNAL_CCU_SET_STREAM_STATE = (0x20800abd)
-NV2080_CTRL_INTERNAL_CCU_STREAM_STATE_PARAMS_MESSAGE_ID = (0xBD)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_ATTACH_AND_INIT = (0x20800abe)
-NV2080_CTRL_INTERNAL_GSYNC_ATTACH_AND_INIT_PARAMS_MESSAGE_ID = (0xBE)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS = (0x20800abf)
-NV2080_CTRL_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS_PARAMS_MESSAGE_ID = (0xBF)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_DISPLAY_IDS = (0x20800ac0)
-NV2080_MAX_NUM_HEADS = 4
-NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS_MESSAGE_ID = (0xC0)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_SET_STREO_SYNC = (0x20800ac1)
-NV2080_CTRL_INTERNAL_GSYNC_SET_STREO_SYNC_PARAMS_MESSAGE_ID = (0xC1)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES = (0x20800ac4)
-NV2080_CTRL_INTERNAL_GSYNC_GET_VERTICAL_ACTIVE_LINES_PARAMS_MESSAGE_ID = (0xC4)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_IS_DISPLAYID_VALID = (0x20800ac9)
-NV2080_CTRL_INTERNAL_GSYNC_IS_DISPLAYID_VALID_PARAMS_MESSAGE_ID = (0xC9)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_SET_OR_RESTORE_RASTER_SYNC = (0x20800aca)
-NV2080_CTRL_INTERNAL_GSYNC_SET_OR_RESTORE_RASTER_SYNC_PARAMS_MESSAGE_ID = (0xCA)
-NV2080_CTRL_CMD_INTERNAL_FBSR_INIT = (0x20800ac2)
-NV2080_CTRL_INTERNAL_FBSR_INIT_PARAMS_MESSAGE_ID = (0xC2)
-NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING = (0x20800ac3)
-NV2080_CTRL_CMD_INTERNAL_FIFO_TOGGLE_ACTIVE_CHANNEL_SCHEDULING_PARAMS_MESSAGE_ID = (0xC3)
-NV2080_CTRL_CMD_INTERNAL_MEMMGR_GET_VGPU_CONFIG_HOST_RESERVED_FB = (0x20800ac5)
-NV2080_CTRL_INTERNAL_MEMMGR_GET_VGPU_CONFIG_HOST_RESERVED_FB_PARAMS_MESSAGE_ID = (0xC5)
-NV2080_CTRL_CMD_INTERNAL_INIT_BRIGHTC_STATE_LOAD = (0x20800ac6)
-NV2080_CTRL_ACPI_DSM_READ_SIZE = (0x1000)
-NV2080_CTRL_INTERNAL_INIT_BRIGHTC_STATE_LOAD_PARAMS_MESSAGE_ID = (0xC6)
-NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL_PARAMS_MESSAGE_ID = (0xC7)
-NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL = (0x20800ac7)
-NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL_PARAMS_MESSAGE_ID = (0xC8)
-NV2080_CTRL_INTERNAL_NVLINK_GET_TOTAL_NUM_LINK_PER_IOCTRL = (0x20800ac8)
-NV2080_CTRL_CMD_INTERNAL_SMBPBI_PFM_REQ_HNDLR_CAP_UPDATE = (0x20800acb)
-NV2080_CTRL_INTERNAL_SMBPBI_PFM_REQ_HNDLR_CAP_UPDATE_PARAMS_MESSAGE_ID = (0xCB)
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_TYPE_PMGR = 0x00
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_TYPE_THERM = 0x01
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_TYPE_SMBPBI = 0x02
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_PMGR_LOAD = 0x00
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_THERM_INIT = 0x01
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_SMBPBI_OP_CLEAR = 0x02
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_FLAGS_SMBPBI_OP_SET = 0x03
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_STATE_LOAD_SYNC = (0x20800acc)
-NV2080_CTRL_INTERNAL_PMGR_PFM_REQ_HNDLR_STATE_LOAD_SYNC_PARAMS_MESSAGE_ID = (0xCC)
-NV2080_CTRL_CMD_INTERNAL_THERM_PFM_REQ_HNDLR_STATE_INIT_SYNC = (0x20800acd)
-NV2080_CTRL_INTERNAL_THERM_PFM_REQ_HNDLR_STATE_INIT_SYNC_PARAMS_MESSAGE_ID = (0xCD)
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_GET_PM1_FORCED_OFF_STATUS = 0x00
-NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_GET_PM1_STATUS = 0x01
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_PM1_STATE = (0x20800ace)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_PM1_STATE_PARAMS_MESSAGE_ID = (0xCE)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_PM1_STATE = (0x20800acf)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_PM1_STATE_PARAMS_MESSAGE_ID = (0xCF)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_UPDATE_EDPP_LIMIT = (0x20800ad0)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_UPDATE_EDPP_LIMIT_PARAMS_MESSAGE_ID = (0xD0)
-NV2080_CTRL_CMD_INTERNAL_THERM_PFM_REQ_HNDLR_UPDATE_TGPU_LIMIT = (0x20800ad1)
-NV2080_CTRL_CMD_INTERNAL_THERM_PFM_REQ_HNDLR_UPDATE_TGPU_LIMIT_PARAMS_MESSAGE_ID = (0xD1)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TGP_MODE = (0x20800ad2)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TGP_MODE_PARAMS_MESSAGE_ID = (0xD2)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TURBO_V2 = (0x20800ad3)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_CONFIGURE_TURBO_V2_PARAMS_MESSAGE_ID = (0xD3)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_INFO = (0x20800ad4)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_INFO_PARAMS_MESSAGE_ID = (0xD4)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_MAPPING = (0x20800ad5)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_GET_VPSTATE_MAPPING_PARAMS_MESSAGE_ID = (0xD5)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_VPSTATE = (0x20800ad6)
-NV2080_CTRL_CMD_INTERNAL_PERF_PFM_REQ_HNDLR_SET_VPSTATE_PARAMS_MESSAGE_ID = (0xD6)
-NV2080_CTRL_CMD_INTERNAL_GCX_ENTRY_PREREQUISITE = (0x2080a7d7)
-NV2080_CTRL_INTERNAL_GCX_ENTRY_PREREQUISITE_PARAMS_MESSAGE_ID = (0xD7)
-NV2080_CTRL_CMD_INTERNAL_PMGR_UNSET_DYNAMIC_BOOST_LIMIT = (0x20800a7b)
-NV2080_CTRL_CMD_INTERNAL_FIFO_GET_NUM_SECURE_CHANNELS = (0x20800ad8)
-NV2080_CTRL_INTERNAL_FIFO_GET_NUM_SECURE_CHANNELS_PARAMS_MESSAGE_ID = (0xD8)
-NV2080_CTRL_CMD_INTERNAL_BIF_DISABLE_SYSTEM_MEMORY_ACCESS = (0x20800adb)
-NV2080_CTRL_INTERNAL_BIF_DISABLE_SYSTEM_MEMORY_ACCESS_PARAMS_MESSAGE_ID = (0xDB)
-NV2080_CTRL_CMD_INTERNAL_DISP_PINSETS_TO_LOCKPINS = (0x20800adc)
-NV2080_CTRL_INTERNAL_DISP_PINSETS_TO_LOCKPINS_PARAMS_MESSAGE_ID = (0xDC)
-NV2080_CTRL_CMD_INTERNAL_DETECT_HS_VIDEO_BRIDGE = (0x20800add)
-NV2080_CTRL_CMD_INTERNAL_DISP_SET_SLI_LINK_GPIO_SW_CONTROL = (0x20800ade)
-NV2080_CTRL_INTERNAL_DISP_SET_SLI_LINK_GPIO_SW_CONTROL_PARAMS_MESSAGE_ID = (0xDE)
-NV2080_CTRL_CMD_INTERNAL_SET_STATIC_EDID_DATA = (0x20800adf)
-MAX_EDID_SIZE_FROM_SBIOS = 512
-NV2080_CTRL_CMD_INTERNAL_SET_STATIC_EDID_DATA_PARAMS_MESSAGE_ID = (0xDF)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_ACPI_SUBSYSTEM_ACTIVATED = (0x20800af0)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_PRE_MODESET = (0x20800af1)
-NV2080_CTRL_CMD_INTERNAL_DISPLAY_POST_MODESET = (0x20800af2)
-NV2080_CTRL_CMD_INTERNAL_GET_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xF4)
-NV2080_CTRL_CMD_INTERNAL_GPU_GET_FABRIC_PROBE_INFO = (0x208001f4)
-NV2080_CTRL_CMD_INTERNAL_START_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xF5)
-NV2080_CTRL_CMD_INTERNAL_GPU_START_FABRIC_PROBE = (0x208001f5)
-NV2080_CTRL_CMD_INTERNAL_GPU_STOP_FABRIC_PROBE = (0x208001f6)
-NV2080_CTRL_CMD_INTERNAL_GPU_SUSPEND_FABRIC_PROBE = (0x208001f7)
-NV2080_CTRL_CMD_INTERNAL_RESUME_GPU_FABRIC_PROBE_INFO_PARAMS_MESSAGE_ID = (0xF8)
-NV2080_CTRL_CMD_INTERNAL_GPU_RESUME_FABRIC_PROBE = (0x208001f8)
-NV2080_CTRL_CMD_INTERNAL_GPU_INVALIDATE_FABRIC_PROBE = (0x208001f9)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_GET_STATIC_INFO = (0x20800af3)
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_GET_STATIC_INFO_PARAMS_MESSAGE_ID = (0xF3)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS = (0x20800ae1)
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SIZE = 3
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_KERNEL = 0
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_USER = 1
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_SCRUBBER = 2
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_SWL_COUNT = 3
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK_LCE_COUNT = 6
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS_MESSAGE_ID = (0xE1)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS = (0x20800ae2)
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS_MESSAGE_ID = (0xE2)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_ROTATE_KEYS = (0x20800ae5)
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS_MESSAGE_ID = (0xE5)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION = (0x20800ae6)
-NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS_MESSAGE_ID = (0xE6)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE = (0x20800ae7)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_GPU_STATE_PARAMS_MESSAGE_ID = (0xE7)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY = (0x20800ae8)
-NV2080_CTRL_CMD_INTERNAL_CONF_COMPUTE_SET_SECURITY_POLICY_PARAMS_MESSAGE_ID = (0xE8)
-NV2080_CTRL_CMD_INTERNAL_FIFO_GET_LOGICAL_UPROC_ID = (0x20800aef)
-NV2080_CTRL_INTERNAL_FIFO_GET_LOGICAL_UPROC_ID_PARAMS_MESSAGE_ID = (0xEF)
-NV2080_CTRL_CMD_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP = (0x20800afa)
-CC_AES_256_GCM_AUTH_TAG_SIZE_BYTES = (0x10)
-NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS_MESSAGE_ID = (0xFA)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_GET_LOCAL_ATS_CONFIG = (0x20800afb)
-NV2080_CTRL_INTERNAL_MEMSYS_GET_LOCAL_ATS_CONFIG_PARAMS_MESSAGE_ID = (0xFB)
-NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_PEER_ATS_CONFIG = (0x20800afc)
-NV2080_CTRL_INTERNAL_MEMSYS_SET_PEER_ATS_CONFIG_PARAMS_MESSAGE_ID = (0xFC)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_GET_EDPP_LIMIT_INFO = (0x20800afd)
-NV2080_CTRL_CMD_INTERNAL_PMGR_PFM_REQ_HNDLR_GET_EDPP_LIMIT_INFO_PARAMS_MESSAGE_ID = (0xFD)
-NV2080_CTRL_INTERNAL_INIT_USER_SHARED_DATA_PARAMS_MESSAGE_ID = (0xFE)
-NV2080_CTRL_CMD_INTERNAL_INIT_USER_SHARED_DATA = (0x20800afe)
-NV2080_CTRL_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL_PARAMS_MESSAGE_ID = (0xFF)
-NV2080_CTRL_CMD_INTERNAL_USER_SHARED_DATA_SET_DATA_POLL = (0x20800aff)
-NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_PARAMS_MESSAGE_ID = (0xE3)
-NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_OLDEST = 0x00
-NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_START_KEEP_NEWEST = 0x01
-NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE_FLAG_STOP = 0x02
-NV2080_CTRL_CMD_INTERNAL_CONTROL_GSP_TRACE = (0x208001e3)
-NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES_PARAMS_MESSAGE_ID = (0xAF)
-NV2080_CTRL_CMD_INTERNAL_GET_ENABLED_SEC2_CLASSES = (0x20800aaf)
-NV2080_CTRL_CMD_INTERNAL_GR_CTXSW_SETUP_BIND = (0x20800ae4)
-NV2080_CTRL_INTERNAL_GR_CTXSW_SETUP_BIND_PARAMS_MESSAGE_ID = (0xE4)
-NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER_PARAMS_MESSAGE_ID = (0xE9)
-NV2080_CTRL_INTERNAL_GPU_CLIENT_LOW_POWER_MODE_ENTER = (0x20800ae9)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_FATAL_ERROR_RECOVERY = (0x20800aea)
-NV2080_CTRL_INTERNAL_NVLINK_POST_FATAL_ERROR_RECOVERY_PARAMS_MESSAGE_ID = (0xEA)
-NV2080_CTRL_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP_PARAMS_MESSAGE_ID = (0xEB)
-NV2080_CTRL_CMD_INTERNAL_GPU_GET_GSP_RM_FREE_HEAP = (0x20800aeb)
-NV2080_CTRL_INTERNAL_GPU_SET_ILLUM_PARAMS_MESSAGE_ID = (0xEC)
-NV2080_CTRL_CMD_INTERNAL_GPU_SET_ILLUM = (0x20800aec)
-NV2080_CTRL_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR_PARAMS_MESSAGE_ID = (0xED)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_APPLY_STEREO_PIN_ALWAYS_HI_WAR = (0x20800aed)
-NV2080_CTRL_CMD_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM = (0x20800a79)
-NV2080_CTRL_INTERNAL_HSHUB_GET_MAX_HSHUBS_PER_SHIM_PARAMS_MESSAGE_ID = (0x79)
-NV2080_CTRL_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE_PARAMS_MESSAGE_ID = (0x14)
-NV2080_CTRL_CMD_INTERNAL_GSYNC_GET_RASTER_SYNC_DECODE_MODE = (0x20800a14)
-NV2080_CTRL_INTERNAL_GPU_GET_PF_BAR1_SPA_PARAMS_MESSAGE_ID = (0xEE)
-NV2080_CTRL_CMD_INTERNAL_GPU_GET_PF_BAR1_SPA = (0x20800aee)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_NVLINK_PEER = (0x20800a21)
-NV2080_CTRL_INTERNAL_NVLINK_ENABLE_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x21)
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_OFF = 0x00
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_HS = 0x01
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAFE = 0x02
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAULT = 0x03
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RECOVERY = 0x04
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_FAIL = 0x05
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DETECT = 0x06
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESET = 0x07
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ENABLE_PM = 0x08
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_PM = 0x09
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SLEEP = 0x0A
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_SAVE_STATE = 0x0B
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_RESTORE_STATE = 0x0C
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_PRE_HS = 0x0E
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_ERR_DETECT = 0x0F
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_DISABLE = 0x10
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_LANE_SHUTDOWN = 0x11
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_TRAFFIC_SETUP = 0x12
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE1 = 0x13
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITNEGOTIATE = 0x14
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITNEGOTIATE = 0x15
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITOPTIMIZE = 0x16
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_POST_INITOPTIMIZE = 0x17
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_DISABLE_HEARTBEAT = 0x18
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_CONTAIN = 0x19
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITTL = 0x1A
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INITPHASE5 = 0x1B
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ALI = 0x1C
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_ACTIVE_PENDING = 0x1D
-NV2080_INTERNAL_NVLINK_CORE_LINK_STATE_INVALID = 0xFF
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_HS = 0x00
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SINGLE_LANE = 0x04
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_LOW_POWER = 0x04
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_TRAIN = 0x05
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_SAFE = 0x06
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_OFF = 0x07
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE = 0x08
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_COMMON_MODE_DISABLE = 0x09
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_DATA_READY = 0x0A
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_EQ = 0x0B
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_PRBS_EN = 0x0C
-NV2080_NVLINK_CORE_SUBLINK_STATE_TX_POST_HS = 0x0D
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_HS = 0x00
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SINGLE_LANE = 0x04
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_LOW_POWER = 0x04
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_TRAIN = 0x05
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_SAFE = 0x06
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_OFF = 0x07
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_RXCAL = 0x08
-NV2080_NVLINK_CORE_SUBLINK_STATE_RX_INIT_TERM = 0x09
-NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_NUM = 6
-NV2080_CTRL_INTERNAL_NVLINK_MAX_SEED_BUFFER_SIZE = (0x7)
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_DL_LINK_MODE = 0x00
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_DL_LINK_MODE = 0x01
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TL_LINK_MODE = 0x02
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TL_LINK_MODE = 0x03
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_TX_SUBLINK_MODE = 0x04
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_TX_SUBLINK_MODE = 0x05
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_MODE = 0x06
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_MODE = 0x07
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_RX_SUBLINK_DETECT = 0x08
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_SET_RX_SUBLINK_DETECT = 0x09
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_WRITE_DISCOVERY_TOKEN = 0x0A
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_READ_DISCOVERY_TOKEN = 0x0B
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_TRAINING_COMPLETE = 0x0C
-NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_TYPE_GET_UPHY_LOAD = 0x0D
-NV2080_CTRL_INTERNAL_NVLINK_CORE_CALLBACK_PARAMS_MESSAGE_ID = (0x24)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_CORE_CALLBACK = (0x20800a24)
-NV2080_CTRL_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID_PARAMS_MESSAGE_ID = (0x25)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_REMOTE_LOCAL_SID = (0x20800a25)
-NV2080_CTRL_INTERNAL_NVLINK_GET_ALI_ENABLED_PARAMS_MESSAGE_ID = (0x29)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_ALI_ENABLED = (0x20800a29)
-NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_PROGRAM = 0x0
-NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_TYPE_RESET = 0x1
-NV2080_CTRL_INTERNAL_NVLINK_UPDATE_HSHUB_MUX_PARAMS_MESSAGE_ID = (0x42)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_HSHUB_MUX = (0x20800a42)
-NV2080_CTRL_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x4E)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_PRE_SETUP_NVLINK_PEER = (0x20800a4e)
-NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS_MESSAGE_ID = (0x50)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER = (0x20800a50)
-NV2080_CTRL_CMD_INTERNAL_LOG_OOB_XID = (0x20800a56)
-NV2080_INTERNAL_OOB_XID_MESSAGE_BUFFER_SIZE = (81)
-NV2080_CTRL_INTERNAL_LOG_OOB_XID_PARAMS_MESSAGE_ID = (0x56)
-NV2080_CTRL_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING_TYPE_SYSMEM = 0x1
-NV2080_CTRL_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING_TYPE_PEER = 0x2
-NV2080_CTRL_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING_PARAMS_MESSAGE_ID = (0x5F)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_REMOVE_NVLINK_MAPPING = (0x20800a5f)
-NV2080_CTRL_INTERNAL_NVLINK_SAVE_RESTORE_HSHUB_STATE_PARAMS_MESSAGE_ID = (0x62)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_SAVE_RESTORE_HSHUB_STATE = (0x20800a62)
-NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_SET = (0x00000000)
-NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_SAVE = (0x00000001)
-NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_FLAGS_RESTORE = (0x00000002)
-NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_BUFFERREADY_PARAMS_MESSAGE_ID = (0x64)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_PROGRAM_BUFFERREADY = (0x20800a64)
-NV2080_CTRL_INTERNAL_NVLINK_UPDATE_CURRENT_CONFIG_PARAMS_MESSAGE_ID = (0x78)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_CURRENT_CONFIG = (0x20800a78)
-NV2080_CTRL_INTERNAL_NVLINK_UPDATE_PEER_LINK_MASK_PARAMS_MESSAGE_ID = (0x7D)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_PEER_LINK_MASK = (0x20800a7d)
-NV2080_CTRL_INTERNAL_NVLINK_UPDATE_LINK_CONNECTION_PARAMS_MESSAGE_ID = (0x82)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_UPDATE_LINK_CONNECTION = (0x20800a82)
-NV2080_CTRL_INTERNAL_NVLINK_ENABLE_LINKS_POST_TOPOLOGY_PARAMS_MESSAGE_ID = (0x83)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_LINKS_POST_TOPOLOGY = (0x20800a83)
-NV2080_CTRL_INTERNAL_NVLINK_PRE_LINK_TRAIN_ALI_PARAMS_MESSAGE_ID = (0x84)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_PRE_LINK_TRAIN_ALI = (0x20800a84)
-NV2080_CTRL_INTERNAL_NVLINK_MAX_ARR_SIZE = 64
-NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS_MESSAGE_ID = (0x85)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_LINK_MASK_POST_RX_DET = (0x20800a85)
-NV2080_CTRL_INTERNAL_NVLINK_LINK_TRAIN_ALI_PARAMS_MESSAGE_ID = (0x86)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_LINK_TRAIN_ALI = (0x20800a86)
-NV2080_CTRL_INTERNAL_NVLINK_GET_NVLINK_DEVICE_INFO_PARAMS_MESSAGE_ID = (0x87)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_NVLINK_DEVICE_INFO = (0x20800a87)
-NV2080_CTRL_INTERNAL_NVLINK_MAX_LINKS_PER_IOCTRL_SW = 6
-NV2080_CTRL_INTERNAL_NVLINK_GET_IOCTRL_DEVICE_INFO_PARAMS_MESSAGE_ID = (0x8E)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_IOCTRL_DEVICE_INFO = (0x20800a8e)
-NV2080_CTRL_INTERNAL_NVLINK_PROGRAM_LINK_SPEED_PARAMS_MESSAGE_ID = (0x8F)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_PROGRAM_LINK_SPEED = (0x20800a8f)
-NV2080_CTRL_INTERNAL_NVLINK_ARE_LINKS_TRAINED_PARAMS_MESSAGE_ID = (0x90)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_ARE_LINKS_TRAINED = (0x20800a90)
-NV2080_CTRL_INTERNAL_NVLINK_RESET_FLAGS_ASSERT = (0x00000000)
-NV2080_CTRL_INTERNAL_NVLINK_RESET_FLAGS_DEASSERT = (0x00000001)
-NV2080_CTRL_INTERNAL_NVLINK_RESET_FLAGS_TOGGLE = (0x00000002)
-NV2080_CTRL_INTERNAL_NVLINK_RESET_LINKS_PARAMS_MESSAGE_ID = (0x91)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_RESET_LINKS = (0x20800a91)
-NV2080_CTRL_INTERNAL_NVLINK_DISABLE_DL_INTERRUPTS_PARAMS_MESSAGE_ID = (0x92)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_DISABLE_DL_INTERRUPTS = (0x20800a92)
-NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_INFO_PARAMS_MESSAGE_ID = (0x93)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_INFO = (0x20800a93)
-NV2080_CTRL_INTERNAL_NVLINK_SETUP_NVLINK_SYSMEM_PARAMS_MESSAGE_ID = (0x94)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_SETUP_NVLINK_SYSMEM = (0x20800a94)
-NV2080_CTRL_INTERNAL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS_MESSAGE_ID = (0x95)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_PROCESS_FORCED_CONFIGS = (0x20800a95)
-NV2080_CTRL_INTERNAL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS_MESSAGE_ID = (0x96)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS = (0x20800a96)
-NV2080_CTRL_INTERNAL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS_PARAMS_MESSAGE_ID = (0x97)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_ENABLE_SYSMEM_NVLINK_ATS = (0x20800a97)
-NV2080_CTRL_INTERNAL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK_PARAMS_MESSAGE_ID = (0xAB)
-NV2080_CTRL_CMD_INTERNAL_NVLINK_HSHUB_GET_SYSMEM_NVLINK_MASK = (0x20800aab)
-NV2080_CTRL_CMD_EVENT_SET_NOTIFICATION = (0x20800301)
-NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_EVENT_SET_NOTIFICATION_ACTION_DISABLE = (0x00000000)
-NV2080_CTRL_EVENT_SET_NOTIFICATION_ACTION_SINGLE = (0x00000001)
-NV2080_CTRL_EVENT_SET_NOTIFICATION_ACTION_REPEAT = (0x00000002)
-NV2080_EVENT_DSTATE_XUSB_D0 = (0x00000000)
-NV2080_EVENT_DSTATE_XUSB_D3 = (0x00000003)
-NV2080_EVENT_DSTATE_XUSB_INVALID = (0xFFFFFFFF)
-NV2080_EVENT_DSTATE_PPC_D0 = (0x00000000)
-NV2080_EVENT_DSTATE_PPC_D3 = (0x00000003)
-NV2080_EVENT_DSTATE_PPC_INVALID = (0xFFFFFFFF)
-NV2080_CTRL_CMD_EVENT_SET_TRIGGER = (0x20800302)
-NV2080_CTRL_CMD_EVENT_SET_MEMORY_NOTIFIES = (0x20800303)
-NV2080_CTRL_EVENT_SET_MEMORY_NOTIFIES_PARAMS_MESSAGE_ID = (0x3)
-NV2080_EVENT_MEMORY_NOTIFIES_STATUS_NOTIFIED = 0
-NV2080_EVENT_MEMORY_NOTIFIES_STATUS_PENDING = 1
-NV2080_EVENT_MEMORY_NOTIFIES_STATUS_ERROR = 2
-NV2080_CTRL_CMD_EVENT_SET_SEMAPHORE_MEMORY = (0x20800304)
-NV2080_CTRL_EVENT_SET_SEMAPHORE_MEMORY_PARAMS_MESSAGE_ID = (0x4)
-NV2080_CTRL_CMD_EVENT_SET_GUEST_MSI = (0x20800305)
-NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS_MESSAGE_ID = (0x5)
-NV2080_CTRL_CMD_EVENT_SET_SEMA_MEM_VALIDATION = (0x20800306)
-NV2080_CTRL_EVENT_SET_SEMA_MEM_VALIDATION_PARAMS_MESSAGE_ID = (0x6)
-NV2080_CTRL_CMD_EVENT_SET_TRIGGER_FIFO = (0x20800308)
-NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS_MESSAGE_ID = (0x8)
-NV2080_CTRL_CMD_EVENT_VIDEO_BIND_EVTBUF = (0x20800309)
-NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_EVENT_RATS_GSP_TRACE_BIND_EVTBUF = (0x2080030a)
-NV2080_CTRL_EVENT_RATS_GSP_TRACE_BIND_EVTBUF_PARAMS_MESSAGE_ID = (0xA)
-NV2080_CTRL_CMD_ECC_GET_CLIENT_EXPOSED_COUNTERS = (0x20803400)
-NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS_MESSAGE_ID = (0x0)
-NV2080_CTRL_CMD_ECC_GET_VOLATILE_COUNTS = (0x20803401)
-NV2080_CTRL_ECC_GET_VOLATILE_COUNTS_PARAMS_MESSAGE_ID = (0x1)
-NV2080_CTRL_PMGR_MODULE_INFO_NVSWITCH_NOT_SUPPORTED = 0
-NV2080_CTRL_PMGR_MODULE_INFO_NVSWITCH_SUPPORTED = 1
-NV2080_CTRL_PMGR_MODULE_INFO_NVSWITCH_NOT_APPLICABLE = 2
-NV2080_CTRL_PMGR_MODULE_INFO_PARAMS_MESSAGE_ID = (0x9)
-NV2080_CTRL_CMD_PMGR_GET_MODULE_INFO = (0x20802609)
+NV2080_CTRL_CMD_OS_UNIX_GC6_BLOCKER_REFCNT = (0x20803d01)
+NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_INC = (0x00000001)
+NV2080_CTRL_OS_UNIX_GC6_BLOCKER_REFCNT_DEC = (0x00000002)
+NV2080_CTRL_CMD_OS_UNIX_ALLOW_DISALLOW_GCOFF = (0x20803d02)
+NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_ALLOW = (0x00000001)
+NV2080_CTRL_OS_UNIX_ALLOW_DISALLOW_GCOFF_DISALLOW = (0x00000002)
+NV2080_CTRL_CMD_OS_UNIX_AUDIO_DYNAMIC_POWER = (0x20803d03)
+NV2080_CTRL_OS_UNIX_AUDIO_DYNAMIC_POWER_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_OS_UNIX_INSTALL_PROFILER_HOOKS = (0x20803d04)
+NV2080_CTRL_OS_UNIX_INSTALL_PROFILER_HOOKS_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_OS_UNIX_FLUSH_SNAPSHOT_BUFFER = (0x20803d05)
+NV2080_CTRL_CMD_OS_UNIX_STOP_PROFILER = (0x20803d06)
+NV2080_CTRL_CMD_OS_UNIX_VIDMEM_PERSISTENCE_STATUS = (0x20803d07)
+NV2080_CTRL_OS_UNIX_VIDMEM_PERSISTENCE_STATUS_PARAMS_MESSAGE_ID = (0x7)
+NV2080_CTRL_CMD_OS_UNIX_UPDATE_TGP_STATUS = (0x20803d08)
+NV2080_CTRL_OS_UNIX_UPDATE_TGP_STATUS_PARAMS_MESSAGE_ID = (0x8)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK = (0x20804001)
+NV2080_CTRL_MAX_VMMU_SEGMENTS = 384
+NV2080_GPU_MAX_ENGINES = 0x54
+NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS_MESSAGE_ID = (0x1)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK = (0x20804002)
+NV2080_CTRL_VGPU_MGR_INTERNAL_SHUTDOWN_GSP_VGPU_PLUGIN_TASK_PARAMS_MESSAGE_ID = (0x2)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE = (0x20804003)
+NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS_MESSAGE_ID = (0x3)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU = (0x20804004)
+NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS_MESSAGE_ID = (0x4)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO = (0x20804005)
+NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS_MESSAGE_ID = (0x5)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE = (0x20804006)
+NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS_MESSAGE_ID = (0x6)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY = (0x20804007)
+NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS_MESSAGE_ID = (0x7)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP = (0x20804008)
+NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS_MESSAGE_ID = (0x8)
+NV2080_CTRL_MAX_NVU32_TO_CONVERTED_STR_LEN = 8
+NV2080_CTRL_MAX_GPC_COUNT = 32
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING = (0x20804009)
+NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS_MESSAGE_ID = (0x9)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT = (0x2080400a)
+NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_MIGRATION_SUPPORT_PARAMS_MESSAGE_ID = (0xA)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG = (0x2080400b)
+NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_MGR_CONFIG_PARAMS_MESSAGE_ID = (0xB)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_FREE_STATES = (0x2080400c)
+NV2080_CTRL_VGPU_MGR_INTERNAL_FREE_STATES_PARAMS_MESSAGE_ID = (0xC)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_GET_FRAME_RATE_LIMITER_STATUS = (0x2080400d)
+NV2080_CTRL_VGPU_MGR_GET_FRAME_RATE_LIMITER_STATUS_PARAMS_MESSAGE_ID = (0xD)
+NV2080_CTRL_CMD_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE = (0x2080400e)
+NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_HETEROGENEOUS_MODE_PARAMS_MESSAGE_ID = (0xE)
 NV83DE_CTRL_RESERVED = (0x00)
 NV83DE_CTRL_GR = (0x01)
 NV83DE_CTRL_FIFO = (0x02)
