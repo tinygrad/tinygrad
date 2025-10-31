@@ -463,7 +463,6 @@ def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
   return x.replace(tag=None)
 
 pm_remove_tags = PatternMatcher([
-  # remove all the tags
   (UPat(GroupOp.All, name="x"), remove_metadata_tags),
 ])
 
