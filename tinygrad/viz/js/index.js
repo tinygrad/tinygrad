@@ -154,11 +154,11 @@ const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
 const ncu_counters = {
   metrics: {
     "Kernel <-> Global": {"unit":"inst", "keys":[
-      "sass__inst_executed_global_loads [inst]",
-      "sass__inst_executed_global_stores [inst]",
+      "sass__inst_executed_global_loads",
+      "sass__inst_executed_global_stores",
       "smsp__inst_executed_op_generic_atom_dot_alu.sum",
       "smsp__inst_executed_op_generic_atom_dot_cas.sum",
-      "smsp__inst_executed_op_global_red.sum [inst]",
+      "smsp__inst_executed_op_global_red.sum",
     ]},
     "Kernel <-> Local": {"unit":"inst", "keys":[
       "sass__inst_executed_local_loads",
