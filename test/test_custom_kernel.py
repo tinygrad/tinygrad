@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp, Context
-from tinygrad.uop.ops import KernelInfo, AxisType
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
 # **** kernels ****
 
@@ -31,6 +31,11 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   C = C[i, j].set(C.after(k)[i, j] + A[i, k] * B[k, j], end=k)
   prog = C.end(i, j)
   return prog.sink(arg=KernelInfo(name=f"custom_gemm_{C.shape[0]}_{C.shape[1]}_{A.shape[1]}", opts_to_apply=()))
+
+def custom_sum(B:UOp, A:UOp) -> UOp:
+  # TODO: write with set and after?
+  i = UOp.range(A.shape[0], 0, axis_type=AxisType.REDUCE)
+  return B[0].store(A[i].reduce(i, arg=Ops.ADD)).sink(arg=KernelInfo(name=f"custom_sum_{A.shape[0]}", opts_to_apply=()))
 
 # **** backward callbacks ****
 
@@ -83,6 +88,13 @@ class TestCustomKernel(unittest.TestCase):
     b = a+1
     b_p1 = Tensor.custom_kernel(tst, b, fxn=custom_add_one_kernel)[0]
     self.assertTrue((b_p1 == 3).all().item())
+
+  def test_sum(self):
+    # TODO: this only works for float, and silently fails with int
+    a = Tensor([1.0, 2, 3, 4, 5])
+    tst = Tensor.empty(1)
+    b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
+    self.assertEqual(b.item(), 15)
 
   def test_gemm(self):
     N = 16
