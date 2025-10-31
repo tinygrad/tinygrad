@@ -356,8 +356,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
 
-  # no tags on AFTER
-  #(UPat(Ops.AFTER, name="a"), lambda a: a.replace(tag=None).forced_reshape(a.shape).rtag(a.tag) if a.tag is not None else None),
   # remove any RESHAPEs on KERNEL
   (UPat(Ops.KERNEL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
 ])
