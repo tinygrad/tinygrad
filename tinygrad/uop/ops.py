@@ -414,6 +414,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.op is Ops.BUFFER
 
   def contiguous(self, *args, **kwargs):
+    if self.op is Ops.CONTIGUOUS: return self
     if self.is_contiguous(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
@@ -750,14 +751,14 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ctx: dict[UOp, str] = {}
     pm = renderer if pm is None else pm
     for u in (s:=self.simplify() if simplify else self).toposort():
-      # if there is any node in the toposort we can't render, we just render the whole thing using UOp pretty printer
-      if (u_str:=pm.rewrite(u, ctx=ctx)) is None: return str(s)
-      ctx[u] = cast(str, u_str)
+      ctx[u] = cast(str, pm.rewrite(u, ctx=ctx))
     return ctx[s]
 
   def pyrender(self): return pyrender(self)
 
   # *** uop high level syntactic sugar ***
+
+  def shrink_to(self, arg:tuple[sint, ...]): return self.shrink(tuple([(0,x) for x in arg]))
 
   @staticmethod
   def placeholder(dtype:DType, shape:tuple[int, ...], slot:int, addrspace=AddrSpace.GLOBAL):
@@ -773,6 +774,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]=()) -> UOp:
     return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val).end(*argfix(end)))
 
+  def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
+    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
+    contig_srcs = tuple(x.contiguous() for x in srcs)
+    kernel = UOp(Ops.KERNEL, src=tuple(x.base for x in contig_srcs), arg=Kernel(fxn(*placeholders), grad_fxn=grad_fxn))
+    return [s.after(kernel) for s in contig_srcs]
+
 @dataclass(frozen=True)
 class KernelInfo:
   name: str = "test"            # name of the kernel
@@ -782,6 +789,12 @@ class KernelInfo:
   opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+
+@dataclass(frozen=True)
+class Kernel:
+  ast: UOp
+  metadata: tuple[Metadata, ...] = ()
+  grad_fxn: Callable|None = None
 
 # ******** ops in python ********
 
@@ -1243,6 +1256,7 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
+_remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
@@ -1277,6 +1291,7 @@ renderer = PatternMatcher([
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda x, ctx: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: f"{{{','.join([ctx[y] for y in x.src])}}}" if not all_same(x.src) else f"{{{ctx[x.src[0]]}, ...}}"),
+  (UPat(GroupOp.All, name="x"), lambda x: str(x)),
 ])
 
 renderer_infer = PatternMatcher([
