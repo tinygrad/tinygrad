@@ -2267,7 +2267,7 @@ class TestContiguous(unittest.TestCase):
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
     b = a.expand((4, 4)).contiguous().contiguous()
-    check_schedule(b, 2) # TODO: should be 1?
+    check_schedule(b, 1)
 
   def test_view_does_not_realize(self):
     a = Tensor.empty(4)

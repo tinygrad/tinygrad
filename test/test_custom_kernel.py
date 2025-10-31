@@ -1,12 +1,16 @@
 import unittest
 from typing import Callable
 from tinygrad import Tensor, UOp
-from tinygrad.uop.ops import Ops, KernelInfo
-from tinygrad.schedule.rangeify import Kernel
+from tinygrad.uop.ops import KernelInfo
 
 def custom_arange_kernel(C:UOp):
   i = UOp.range(C.size, 0)
   return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.size}"))
+
+def custom_add_one_kernel(B:UOp, A:UOp):
+  assert B.size == A.size
+  i = UOp.range(A.size, 0)
+  return B[i].store(A[i] + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.size}"))
 
 def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp):
   i = UOp.range(C.size, 0)
@@ -19,11 +23,7 @@ def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp):
   store_d = D[i].store(A[i]*B[i])
   return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name=f"custom_addmul_kernel_{C.size}")).simplify()
 
-def _kernel(tensors:list[Tensor], fxn:Callable) -> list[Tensor]:
-  placeholders = [UOp.placeholder_like(t.uop, slot=i) for i,t in enumerate(tensors)]
-  ast = fxn(*placeholders)
-  kernel = UOp(Ops.KERNEL, src=tuple(x.uop.base for x in tensors), arg=Kernel(ast))
-  return [Tensor(t.uop.after(kernel)) for t in tensors]
+def _kernel(tensors:list[Tensor], fxn:Callable) -> list[Tensor]: return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in tensors], fxn=fxn)]
 
 class TestCustomKernel(unittest.TestCase):
   def test_simple(self):
@@ -53,6 +53,13 @@ class TestCustomKernel(unittest.TestCase):
     tst = Tensor.empty_like(ref)
     tst = _kernel([tst], custom_arange_kernel)[0]
     self.assertTrue((ref == tst).all().item())
+
+  def test_noncontig(self):
+    a = Tensor.ones(16, 16).contiguous()
+    tst = Tensor.empty_like(a)
+    b = a+1
+    b_p1 = _kernel([tst, b], custom_add_one_kernel)[0]
+    self.assertTrue((b_p1 == 3).all().item())
 
 if __name__ == '__main__':
   unittest.main()

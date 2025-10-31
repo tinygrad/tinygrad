@@ -414,6 +414,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     return self.op is Ops.BUFFER
 
   def contiguous(self, *args, **kwargs):
+    if self.op is Ops.CONTIGUOUS: return self
     if self.is_contiguous(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
@@ -772,6 +773,12 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   # set is store+end+after
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]=()) -> UOp:
     return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val).end(*argfix(end)))
+
+  def custom_kernel(*srcs:UOp, fxn:Callable) -> list[UOp]:
+    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
+    base_srcs = tuple(x.contiguous().base for x in srcs)
+    kernel = UOp(Ops.KERNEL, src=base_srcs, arg=Kernel(fxn(*placeholders)))
+    return [s.after(kernel) for s in base_srcs]
 
 @dataclass(frozen=True)
 class KernelInfo:
