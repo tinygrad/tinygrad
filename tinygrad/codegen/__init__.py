@@ -1,7 +1,7 @@
 from typing import cast
 import itertools
 from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, GroupOp
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes
@@ -19,19 +19,13 @@ from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_s
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 
-pm_preprocess = PatternMatcher([
-  (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
-  (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
-])
-
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
   if SPEC: type_verify(sink, kernel_spec)
 
   # preprocess
-  sink = graph_rewrite(sink, pm_preprocess+pm_mops, name="early movement ops")
+  sink = graph_rewrite(sink, pm_mops, name="early movement ops")
 
   # first we optimize
   if optimize:
