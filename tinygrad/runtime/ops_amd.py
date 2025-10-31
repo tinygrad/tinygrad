@@ -151,7 +151,7 @@ class AMDComputeQueue(HWQueue):
     # disable rlc permon cg
     if (gfx9:=self.dev.target[0] == 9): self.wreg(AMDReg('regRLC_PERFMON_CLK_CNTL', 0x3cbf, 1, {}, self.gc.bases), 1)
 
-    self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1, vmid_mask=0xffff)
+    self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1, **({'vmid_mask':0xffff} if gfx9 else {}))
     if self.dev.target[0] >= 11: self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL2, force_en=1, vmid_en=0xffff)
 
     out_off = 0
