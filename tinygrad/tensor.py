@@ -239,14 +239,6 @@ class Tensor(MathTrait):
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
-  def custom_kernel(self, *lst:Tensor, fxn:Callable, backward_fxn:Callable|None=None):
-    tensors = (self,)+lst
-    placeholders = [UOp.placeholder_like(t.uop, slot=i) for i,t in enumerate(tensors)]
-    ast = fxn(*placeholders)
-    backward_ast = backward_fxn(*placeholders) if backward_fxn else None
-    kernel = UOp(Ops.KERNEL, src=tuple(x.uop.base for x in tensors), arg=Kernel(ast, backward_ast=backward_ast))
-    return [Tensor(t.uop.after(kernel)) for t in tensors]
-
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.

@@ -468,7 +468,7 @@ pm_remove_tags = PatternMatcher([
 ])
 
 pm_add_range_tags = PatternMatcher([
-  (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(()))
+  (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(())),
 ])
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:

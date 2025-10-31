@@ -12,13 +12,6 @@ def reduce_gradient(ctx:UOp, ret:UOp):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if ret.arg[0] == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
-def backward_kernel(ctx:UOp, k:UOp):
-  assert k.arg.backward_ast is not None, "need backward_ast for gradient of Kernel"
-  outs = [UOp.new_buffer(u.device, u.size, u.dtype) for u in k.src[1:]]
-  srcs = (ctx.contiguous(),)+tuple(outs)
-  kernel = UOp(Ops.KERNEL, src=srcs, arg=Kernel(k.arg.backward_ast))
-  return tuple(x.after(kernel).reshape(u.shape) for x,u in zip(srcs, k.src))
-
 # ctx is grad_output
 pm_gradient = PatternMatcher([
   (UPat(Ops.CAST, name="ret"), lambda ctx, ret: (ctx.cast(ret.src[0].dtype),)),
@@ -45,10 +38,6 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
   (UPat(Ops.FLIP, name="ret"), lambda ctx, ret: (ctx.flip(ret.marg),)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
-  # we only support gradients for kernels with a single output in the first position
-  (UPat(Ops.AFTER, src=(UPat.any(UPat(Ops.BUFFER, name="b"), UPat(Ops.BUFFER, name="b").f(Ops.RESHAPE, allow_any_len=True)),
-                        UPat(Ops.KERNEL, src=(UPat(name='b'),), allow_any_len=True))), lambda ctx, b: (ctx, ctx)),
-  (UPat(Ops.KERNEL, name="k"), backward_kernel),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])

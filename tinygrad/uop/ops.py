@@ -787,7 +787,6 @@ class KernelInfo:
 class Kernel:
   ast: UOp
   metadata: tuple[Metadata, ...] = ()
-  backward_ast: UOp|None = None
 
 # ******** ops in python ********
 
