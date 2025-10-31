@@ -1981,8 +1981,8 @@ struct_NV90F1_CTRL_VASPACE_RELEASE_ENTRIES_PARAMS._fields_ = [
 NV90F1_CTRL_VASPACE_RELEASE_ENTRIES_PARAMS = struct_NV90F1_CTRL_VASPACE_RELEASE_ENTRIES_PARAMS
 NV90F1_CTRL_VASPACE_GET_PAGE_LEVEL_INFO_VERIF_PARAMS = struct_NV90F1_CTRL_VASPACE_GET_PAGE_LEVEL_INFO_PARAMS
 class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS(ctypes.Structure): pass
-class _anonstruct13(ctypes.Structure): pass
-_anonstruct13._fields_ = [
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_level(ctypes.Structure): pass
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_level._fields_ = [
   ('physAddress', NvU64),
   ('size', NvU64),
   ('aperture', NvU32),
@@ -1995,7 +1995,7 @@ struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS._fields_ = [
   ('virtAddrLo', NvU64),
   ('virtAddrHi', NvU64),
   ('numLevelsToCopy', NvU32),
-  ('levels', (_anonstruct13 * 6)),
+  ('levels', (struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_level * 6)),
 ]
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS
 class struct_NV90F1_CTRL_VASPACE_GET_HOST_RM_MANAGED_SIZE_PARAMS(ctypes.Structure): pass
@@ -2647,8 +2647,8 @@ struct_NV0000_CTRL_SYSTEM_GPS_CONTROL_PARAMS._fields_ = [
 ]
 NV0000_CTRL_SYSTEM_GPS_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_CONTROL_PARAMS
 class struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS(ctypes.Structure): pass
-class _anonstruct14(ctypes.Structure): pass
-_anonstruct14._fields_ = [
+class struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS_cmdData(ctypes.Structure): pass
+struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS_cmdData._fields_ = [
   ('command', NvU16),
   ('locale', NvU16),
   ('data', NvU32),
@@ -2656,7 +2656,7 @@ _anonstruct14._fields_ = [
 struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS._fields_ = [
   ('cmdCount', NvU32),
   ('succeeded', NvU32),
-  ('cmdData', (_anonstruct14 * 16)),
+  ('cmdData', (struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS_cmdData * 16)),
 ]
 NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS
 class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS(ctypes.Structure): pass
@@ -2904,8 +2904,8 @@ struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CONTROL_PARAMS._fields_ = [
 ]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CONTROL_PARAMS
 class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS(ctypes.Structure): pass
-class _anonstruct15(ctypes.Structure): pass
-_anonstruct15._fields_ = [
+class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS_cmdData(ctypes.Structure): pass
+struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS_cmdData._fields_ = [
   ('command', NvU16),
   ('locale', NvU16),
   ('data', NvU32),
@@ -2913,7 +2913,7 @@ _anonstruct15._fields_ = [
 struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS._fields_ = [
   ('cmdCount', NvU32),
   ('succeeded', NvU32),
-  ('cmdData', (_anonstruct15 * 16)),
+  ('cmdData', (struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS_cmdData * 16)),
 ]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS
 class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CTRL_PARAMS(ctypes.Structure): pass
@@ -4996,9 +4996,9 @@ struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS._fields_ = [
 ]
 NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS = struct_NV2080_CTRL_CMD_FIFO_GET_USERD_LOCATION_PARAMS
 class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS(ctypes.Structure): pass
-class _anonstruct16(ctypes.Structure): pass
+class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS_entry(ctypes.Structure): pass
 NvS64 = ctypes.c_longlong
-_anonstruct16._fields_ = [
+struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS_entry._fields_ = [
   ('timestampNs', NvU64),
   ('timeRunTotalNs', NvS64),
   ('timeRunNs', NvU32),
@@ -5010,7 +5010,7 @@ _anonstruct16._fields_ = [
 struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS._fields_ = [
   ('engineId', NvU32),
   ('count', NvU32),
-  ('entry', (_anonstruct16 * 200)),
+  ('entry', (struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS_entry * 200)),
   ('schedPolicy', NvU32),
   ('arrEnabled', NvU32),
   ('arrAvgFactor', NvU32),
@@ -6301,13 +6301,13 @@ struct_NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS._fields_ = [
 ]
 NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS = struct_NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS
 class struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS(ctypes.Structure): pass
-class _anonstruct17(ctypes.Structure): pass
-_anonstruct17._fields_ = [
+class struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_smId(ctypes.Structure): pass
+struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_smId._fields_ = [
   ('gpcId', NvU32),
   ('tpcId', NvU32),
 ]
 struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS._fields_ = [
-  ('smId', (_anonstruct17 * 240)),
+  ('smId', (struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS_smId * 240)),
   ('smCount', NvU32),
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
 ]
@@ -6405,8 +6405,8 @@ struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS._fields_ = [
 ]
 NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS
 class struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS(ctypes.Structure): pass
-class _anonstruct18(ctypes.Structure): pass
-_anonstruct18._fields_ = [
+class struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS_globalSmId(ctypes.Structure): pass
+struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS_globalSmId._fields_ = [
   ('gpcId', NvU16),
   ('localTpcId', NvU16),
   ('localSmId', NvU16),
@@ -6415,7 +6415,7 @@ _anonstruct18._fields_ = [
   ('migratableTpcId', NvU16),
 ]
 struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS._fields_ = [
-  ('globalSmId', (_anonstruct18 * 512)),
+  ('globalSmId', (struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS_globalSmId * 512)),
   ('numSm', NvU16),
   ('numTpc', NvU16),
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO),
@@ -6878,8 +6878,8 @@ struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS._fields_ = [
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER(ctypes.Structure): pass
-class _anonstruct19(ctypes.Structure): pass
-_anonstruct19._fields_ = [
+class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER_globalSmId(ctypes.Structure): pass
+struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER_globalSmId._fields_ = [
   ('gpcId', NvU16),
   ('localTpcId', NvU16),
   ('localSmId', NvU16),
@@ -6888,7 +6888,7 @@ _anonstruct19._fields_ = [
   ('migratableTpcId', NvU16),
 ]
 struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER._fields_ = [
-  ('globalSmId', (_anonstruct19 * 240)),
+  ('globalSmId', (struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER_globalSmId * 240)),
   ('numSm', NvU16),
   ('numTpc', NvU16),
 ]
@@ -10066,21 +10066,21 @@ struct_CC_AES_CRYPTOBUNDLE._fields_ = [
   ('ivMask', (NvU32 * 3)),
 ]
 CC_AES_CRYPTOBUNDLE = struct_CC_AES_CRYPTOBUNDLE
-class _anonunion20(ctypes.Union): pass
+class _anonunion13(ctypes.Union): pass
 class struct_CC_HMAC_CRYPTOBUNDLE(ctypes.Structure): pass
 struct_CC_HMAC_CRYPTOBUNDLE._fields_ = [
   ('nonce', (NvU32 * 8)),
   ('key', (NvU32 * 8)),
 ]
 CC_HMAC_CRYPTOBUNDLE = struct_CC_HMAC_CRYPTOBUNDLE
-_anonunion20._fields_ = [
+_anonunion13._fields_ = [
   ('hmacBundle', CC_HMAC_CRYPTOBUNDLE),
   ('decryptBundle', CC_AES_CRYPTOBUNDLE),
 ]
 struct_CC_KMB._anonymous_ = ['_0']
 struct_CC_KMB._fields_ = [
   ('encryptBundle', CC_AES_CRYPTOBUNDLE),
-  ('_0', _anonunion20),
+  ('_0', _anonunion13),
   ('bIsWorkLaunch', NvBool),
 ]
 CC_KMB = struct_CC_KMB
