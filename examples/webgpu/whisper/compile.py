@@ -158,7 +158,14 @@ class TextDecoder:
       # return logits.softmax(axis=-1).sort(descending=True)[1].reshape(-1, 1)[0, :]
       # return logits.softmax(axis=-1).argmax()
       # print(logits.shape)
-      return logits
+      # return logits.log_softmax(axis=-1), ((((logits / logits.max(axis=-1, keepdim=True) * 255).int() * (2**16))+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
+      logprobs = logits.log_softmax(axis=-1)
+      sorted_indices = ((((logits / logits.max(axis=-1, keepdim=True) * 255).int() * (2**16))+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
+      sorted_indices_topk = sorted_indices[..., 0:10].contiguous()
+      # logprobs_topk = logprobs[sorted_indices_topk]
+      # return logprobs, sorted_indices_topk
+      return sorted_indices_topk
+      # return logits.topk(10)[1]
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T)
@@ -184,7 +191,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 # IMPORTANT(irwin): unfortunately this doesn't switch all computations to half precision yet
 FLOAT16 = False
 MODEL_NAME = "tiny.en"
-DECODER_BATCH_SIZE = 64
+DECODER_BATCH_SIZE = 32
 
 if __name__ == '__main__':
   def tofull(sd):

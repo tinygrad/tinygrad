@@ -211,12 +211,12 @@ function batch_repeat_helper(array, bs) {
 
 async function decoder_helper(nets, context_inputs, audio_features, context_last_token_index_absolute, decoder_state) {
     context_inputs = batch_repeat_helper(context_inputs, nets.model_metadata.decoder_batch_size);
-    let [decoder_output] = await nets.decoder(context_inputs, audio_features, [context_last_token_index_absolute], [0], [1]);
+    let [decoder_output, sorted] = await nets.decoder(context_inputs, audio_features, [context_last_token_index_absolute], [0], [1]);
     for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
         decoder_state.contexts[i] = [...decoder_state.contexts[i].slice(0, context_last_token_index_absolute), context_inputs[i]];
     }
 
-    return decoder_output;
+    return [decoder_output, sorted];
 }
 
 async function decoder_upload_audio_features(nets, audio_features_batch, decoder_state) {
@@ -315,10 +315,17 @@ async function decodeOne(nets, decode_sequences, decoder_state, audio_features_b
     //     }
     // }
 
-    let decoder_output = await decoder_helper(nets, context_inputs, audio_features, max_context_length - 1, decoder_state);
+    // let [decoder_output, sorted] = await decoder_helper(nets, context_inputs, audio_features, max_context_length - 1, decoder_state);
+    let [sorted] = await decoder_helper(nets, context_inputs, audio_features, max_context_length - 1, decoder_state);
 
+    // let logprobs_topk = 51864;
+    let logprobs_topk = 10;
+    // let indices_topk = 51864;
+    let indices_topk = 10;
     for (let i = 0; i < results.length; ++i) {
-        results[i].decoder_output = decoder_output.slice(i*51864, (i+1)*51864);
+        // results[i].decoder_output = decoder_output.slice(i*logprobs_topk, (i+1)*logprobs_topk);
+
+        results[i].sorted = sorted.slice(i*indices_topk, (i+1)*indices_topk);
     }
     // let o = 0;
     // return decoder_output.slice(o*51864, (o+1)*51864);
@@ -345,18 +352,20 @@ async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
     let nextTokens;
     let max;
 
-    if (SUPPRESS_NONSPEECH_TOKENS) {
-        for (let token_index of suppress) {
-            decoder_output[token_index] = -Infinity;
-        }
-    }
+    // if (SUPPRESS_NONSPEECH_TOKENS) {
+    //     for (let token_index of suppress) {
+    //         decoder_output[token_index] = -Infinity;
+    //     }
+    // }
     if (temperature > 0) decoder_output = decoder_output.map(x => x / temperature);
-    [nextLogprobs, max] = logSoftmax(decoder_output);
-    nextTokens = argsort(nextLogprobs);
+    // [nextLogprobs, max] = logSoftmax(decoder_output);
+    nextLogprobs = decoder_output;
+    // nextTokens = argsort(nextLogprobs);
+    nextTokens = decodeOne_result.sorted;
 
     // decoder_output = decoder_output.filter((t)=> ![TOK_NO_TIMESTAMPS, ...suppress].includes(t));
     let token_count = context.length - context_prompt_length;
-    nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index);
+    // nextTokens = handle_timestamp_tokens(nextTokens, context, token_count, last_token_index, one_before_last_token_index);
     let nextTokenIndex = 0;
     if (temperature > 0) {
         // let sortedSampledIndex = sample(normalize(nextLogprobs));
@@ -365,21 +374,25 @@ async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
     }
 
     // NOTE(irwin): detect and skip abnormal premature TOK_EOS
-    if (nextTokens[nextTokenIndex] == TOK_EOS && Math.abs(last_eos_logprob) - Math.abs(nextLogprobs[TOK_EOS]) > 8) {
-        ++nextTokenIndex;
-    }
+    // if (nextTokens[nextTokenIndex] == TOK_EOS && Math.abs(last_eos_logprob) - Math.abs(nextLogprobs[TOK_EOS]) > 8) {
+    //     ++nextTokenIndex;
+    // }
 
     // NOTE(irwin): up until here, context is not modified  @ContextCopyOrReference
     context.push(nextTokens[nextTokenIndex]);
 
     const decoded_tokens_so_far = context.length - context_prompt_length;
     result.avg_logprob = result.segment_cumlogprob / (decoded_tokens_so_far - context_prompt_length);
-    let nextLogprob = nextLogprobs[nextTokens[nextTokenIndex]];
+    // let nextLogprob = nextLogprobs[nextTokens[nextTokenIndex]];
+    // let nextLogprob = nextLogprobs[nextTokenIndex];
+    let nextLogprob = -0.1;
     decode_sequence.logprobs.push(nextLogprob);
-    decode_sequence.eos_logprobs.push(nextLogprobs[TOK_EOS]);
+    // decode_sequence.eos_logprobs.push(nextLogprobs[TOK_EOS]);
+    decode_sequence.eos_logprobs.push(-10);
     result.segment_cumlogprob += nextLogprob;
     // pendingText = format_text(context.slice(offset).map(j => nets.mapping[j]).join(''), avg_logprob, seek, Math.min(seek+MEL_SPEC_CHUNK_LENGTH, log_specs_full.length));
-    result.last_eos_logprob = nextLogprobs[TOK_EOS];
+    // result.last_eos_logprob = nextLogprobs[TOK_EOS];
+    result.last_eos_logprob = -10;
 
     if (nextTokens[nextTokenIndex] == TOK_EOS) {
         return result;
