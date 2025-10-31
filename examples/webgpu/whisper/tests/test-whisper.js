@@ -101,12 +101,15 @@ const modules = [
   ["decoder", "./decoder.js"],
 ];
 
+// console.log(process.argv);
+
 const BASE_URL = 'http://localhost:8000';
 // const AUDIO_PATH = 'RED_16k.wav';
-const AUDIO_PATH = 'RED_60s.wav';
+// const AUDIO_PATH = 'RED_60s.wav';
+// const AUDIO_PATH = 'RED_you.wav';
 // const AUDIO_PATH = 'test.wav';
 // const AUDIO_PATH = 'test2.wav';
-// const AUDIO_PATH = 'TINYCORP_MEETING_2025-07-07-DSWQCT9mypQ.mp3';
+const AUDIO_PATH = process.argv[2] ? process.argv[2] : 'TINYCORP_MEETING_2025-07-07-DSWQCT9mypQ.mp3';
 // const AUDIO_PATH = `${BASE_URL}/TINYCORP_MEETING_2025-08-25-KA0h9zmJtcs.mp3`;
 
 const getPart = async (key) => {
