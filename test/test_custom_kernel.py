@@ -5,7 +5,7 @@ from tinygrad.schedule.rangeify import Kernel
 
 def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp):
   i = UOp.range(C.size, 0)
-  return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name="custom_add_kernel")).simplify()
+  return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.size}")).simplify()
 
 class TestCustomKernel(unittest.TestCase):
   def test_simple(self):
