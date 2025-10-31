@@ -185,8 +185,8 @@ class AMDComputeQueue(HWQueue):
 
             # Copy counter to memory (src_sel = perf, dst_sel = tc_l2)
             lo, hi = getattr(self.gc, f'{s.reg}_LO'), getattr(self.gc, f'{s.reg}_HI', None)
-            self.pkt3(self.pm4.PACKET3_COPY_DATA, 0x02002500, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
-            if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, 0x02002500, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
+            self.pkt3(self.pm4.PACKET3_COPY_DATA, (2 << 8) | 4, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
+            if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, (2 << 8) | 4, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
 
     return self.pmc_reset_counters(en=True)
 
