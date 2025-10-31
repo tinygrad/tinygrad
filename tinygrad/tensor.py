@@ -10,7 +10,7 @@ from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, p
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.mathtraits import MathTrait
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender
+from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender, Kernel
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
@@ -238,6 +238,14 @@ class Tensor(MathTrait):
     becomes_map = get_rangeify_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
+
+  def custom_kernel(self, *lst:Tensor, fxn:Callable, backward_fxn:Callable|None=None):
+    tensors = (self,)+lst
+    placeholders = [UOp.placeholder_like(t.uop, slot=i) for i,t in enumerate(tensors)]
+    ast = fxn(*placeholders)
+    backward_ast = backward_fxn(*placeholders) if backward_fxn else None
+    kernel = UOp(Ops.KERNEL, src=tuple(x.uop.base for x in tensors), arg=Kernel(ast, backward_ast=backward_ast))
+    return [Tensor(t.uop.after(kernel)) for t in tensors]
 
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[str, int]]:
     """

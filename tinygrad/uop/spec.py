@@ -1,6 +1,6 @@
 import math
 from typing import cast, Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata
 from tinygrad.uop.validate import validate_index
@@ -262,7 +262,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 
 # late imports to avoid circular import
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
+from tinygrad.schedule.rangeify import BufferizeOpts
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel, "Metadata": Metadata,
                         "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}

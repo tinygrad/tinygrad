@@ -1,6 +1,6 @@
 from typing import cast
 import math, dataclasses
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, Kernel
 from tinygrad.helpers import argsort
 
 def reduce_gradient(ctx:UOp, ret:UOp):
@@ -13,7 +13,6 @@ def reduce_gradient(ctx:UOp, ret:UOp):
   if ret.arg[0] == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
 def backward_kernel(ctx:UOp, k:UOp):
-  from tinygrad.schedule.rangeify import Kernel
   assert k.arg.backward_ast is not None, "need backward_ast for gradient of Kernel"
   outs = [UOp.new_buffer(u.device, u.size, u.dtype) for u in k.src[1:]]
   srcs = (ctx.contiguous(),)+tuple(outs)

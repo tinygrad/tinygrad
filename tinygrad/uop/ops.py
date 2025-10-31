@@ -783,6 +783,12 @@ class KernelInfo:
   @property
   def function_name(self): return to_function_name(self.name)
 
+@dataclass(frozen=True)
+class Kernel:
+  ast: UOp
+  metadata: tuple[Metadata, ...] = ()
+  backward_ast: UOp|None = None
+
 # ******** ops in python ********
 
 def safe_exp2(x):

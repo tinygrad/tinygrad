@@ -9,9 +9,10 @@ def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp):
   return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.size}")).simplify()
 
 def custom_elementwise_add_kernel_backward(C:UOp, A:UOp, B:UOp):
+  # NOTE: this is not the real gradient
   i = UOp.range(C.size, 0)
-  store_a = A[i].store(C[i])
-  store_b = B[i].store(C[i])
+  store_a = A[i].store(C[i] + 1)
+  store_b = B[i].store(C[i] + 2)
   return UOp.group(store_a, store_b).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.size}_backward")).simplify()
 
 def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp):
@@ -34,7 +35,7 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.ones(16, 16).contiguous()
     c = Tensor.empty(16, 16)
 
-    c = _kernel([c,a,b], custom_elementwise_add_kernel)[0]
+    c = c.custom_kernel(a, b, fxn=custom_elementwise_add_kernel)[0]
 
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
@@ -52,14 +53,18 @@ class TestCustomKernel(unittest.TestCase):
     assert all(x == 9 for x in d.flatten().tolist()), "all 9"
 
   def test_simple_backward(self):
-    a = Tensor.ones(16, 16).contiguous().requires_grad_()
-    b = Tensor.ones(16, 16).contiguous().requires_grad_()
+    a = Tensor.full((16, 16), 3.).contiguous().requires_grad_()
+    b = Tensor.full((16, 16), 3.).contiguous().requires_grad_()
     c = Tensor.empty(16, 16)
 
     c = _kernel([c,a,b], custom_elementwise_add_kernel, custom_elementwise_add_kernel_backward)[0]
     c.sum().backward()
 
     Tensor.realize(c, a.grad, b.grad)
+
+    assert all(x == 6 for x in c.flatten().tolist()), "all 6"
+    assert all(x == 2 for x in a.grad.flatten().tolist()), "all 2"
+    assert all(x == 3 for x in b.grad.flatten().tolist()), "all 3"
 
 if __name__ == '__main__':
   unittest.main()

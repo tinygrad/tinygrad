@@ -2,9 +2,9 @@ from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate
+from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel
 from tinygrad.uop.symbolic import symbolic_flat
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, Metadata, DEBUG_RANGEIFY
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -470,12 +470,6 @@ pm_remove_tags = PatternMatcher([
 pm_add_range_tags = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(()))
 ])
-
-@dataclass(frozen=True)
-class Kernel:
-  ast: UOp
-  metadata: tuple[Metadata, ...] = ()
-  backward_ast: UOp|None = None
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   if len(x.ranges): return None
