@@ -90,7 +90,7 @@ def hand_spec_kernel3(kernel5=getenv("K5", 0)):
   i = UOp.range(BN * BK // BLOCK_SIZE, 1)
   index_x = threadIdx_x % BN
   index_y = (threadIdx_x // BN) + (BLOCK_SIZE // BN) * i
-  Bs_store = Bs[index_y, index_x % BN].store(b[kId_range, index_y, blockIdx_x, index_x]).end(i)
+  Bs_store = Bs[index_y, index_x].store(b[kId_range, index_y, blockIdx_x, index_x]).end(i)
 
   a = a.reshape((N // BM, BM, N // BK, BK))
   i = UOp.range(BM * BK // BLOCK_SIZE, 2)
