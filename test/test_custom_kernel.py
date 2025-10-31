@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp
+from tinygrad import Tensor, UOp, Context
 from tinygrad.uop.ops import KernelInfo, AxisType
 
 # **** kernels ****
@@ -95,6 +95,8 @@ class TestCustomKernel(unittest.TestCase):
     self.assertLess(err.item(), 1e-6)
 
   def test_gemm_backward_custom(self): self.test_gemm_backward(True)
+  # NOTE: grad_fxn doesn't work with pyrender
+  @Context(SPEC=1)
   def test_gemm_backward(self, custom_backward_gemm=False):
     N = 4
     a_rand = Tensor.randn(N, 8)
