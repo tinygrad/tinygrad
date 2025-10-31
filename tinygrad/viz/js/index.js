@@ -623,8 +623,9 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
-const toggle = d3.create("label").text("Show indexing (r)").node();
-toggle.prepend(d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node());
+const toggleLabel = d3.create("label").text("Show indexing (r)").node();
+const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
+toggleLabel.prepend(toggle);
 
 async function main() {
   // ** left sidebar context list
@@ -744,7 +745,7 @@ async function main() {
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar code blocks
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
-  metadata.replaceChildren(toggle, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -863,7 +864,6 @@ document.addEventListener("keydown", (event) => {
   }
   // r key toggles indexing
   if (event.key === "r") {
-    toggle.checked = !toggle.checked;
     toggle.click();
   }
 });
