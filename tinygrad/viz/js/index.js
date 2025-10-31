@@ -864,7 +864,7 @@ document.addEventListener("keydown", (event) => {
   // r key toggles indexing
   if (event.key === "r") {
     toggle.checked = !toggle.checked;
-    toggle.dispatchEvent(new Event("change"));
+    toggle.click();
   }
 });
 
