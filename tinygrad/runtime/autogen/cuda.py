@@ -2,13 +2,11 @@
 import ctypes
 from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-
-def _dll():
+def dll():
   try: return ctypes.CDLL(find_library('cuda'))
   except: pass
   return None
-dll = _dll()
-
+dll = dll()
 cuuint32_t = ctypes.c_uint
 cuuint64_t = ctypes.c_ulong
 CUdeviceptr_v2 = ctypes.c_ulonglong

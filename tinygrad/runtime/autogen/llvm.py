@@ -2,13 +2,11 @@
 import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support.llvm import LLVM_PATH
-
-def _dll():
+def dll():
   try: return ctypes.CDLL(LLVM_PATH)
   except: pass
   return None
-dll = _dll()
-
+dll = dll()
 intmax_t = ctypes.c_long
 # extern intmax_t imaxabs(intmax_t __n) __attribute__((nothrow)) __attribute__((const))
 try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]

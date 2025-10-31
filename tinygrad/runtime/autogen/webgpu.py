@@ -2,13 +2,11 @@
 import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support.webgpu import WEBGPU_PATH
-
-def _dll():
+def dll():
   try: return ctypes.CDLL(WEBGPU_PATH)
   except: pass
   return None
-dll = _dll()
-
+dll = dll()
 WGPUFlags = ctypes.c_ulong
 WGPUBool = ctypes.c_uint
 class struct_WGPUAdapterImpl(ctypes.Structure): pass
