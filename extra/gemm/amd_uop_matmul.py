@@ -28,32 +28,32 @@ assert (BLOCK_N * BLOCK_K) % THREADS_PER_BLOCK == 0
 assert (BLOCK_M * BLOCK_K) % THREADS_PER_BLOCK == 0
 
 WARPS_PER_BLOCK = THREADS_PER_BLOCK // 32
-WN = 128 if is_kernel5 else 64
-WM = BLOCK_N * BLOCK_M // WARPS_PER_BLOCK // WN
-assert BLOCK_N % WN == 0, "BN must be a multiple of WN"
-assert BLOCK_M % WM == 0, "BM must be a multiple of WM"
-WAVES_IN_BLOCK_X = BLOCK_N // WN
-WAVES_IN_BLOCK_Y = BLOCK_M // WM
+WAVE_TILE_N = 128 if is_kernel5 else 64
+WAVE_TILE_M = BLOCK_N * BLOCK_M // WARPS_PER_BLOCK // WAVE_TILE_N
+assert BLOCK_N % WAVE_TILE_N == 0, "BN must be a multiple of WN"
+assert BLOCK_M % WAVE_TILE_M == 0, "BM must be a multiple of WM"
+WAVES_IN_BLOCK_X = BLOCK_N // WAVE_TILE_N
+WAVES_IN_BLOCK_Y = BLOCK_M // WAVE_TILE_M
 
 LANES_PER_WAVE_X = 8
 LANES_PER_WAVE_Y = 4
-ITERS_PER_WAVE_N = WN // (LANES_PER_WAVE_X * TN)
-ITERS_PER_WAVE_M = WM // (LANES_PER_WAVE_Y * TM)
-N_PER_ITER = WN // ITERS_PER_WAVE_N
-M_PER_ITER = WM // ITERS_PER_WAVE_M
+ITERS_PER_WAVE_N = WAVE_TILE_N // (LANES_PER_WAVE_X * TN)
+ITERS_PER_WAVE_M = WAVE_TILE_M // (LANES_PER_WAVE_Y * TM)
+N_PER_ITER = WAVE_TILE_N // ITERS_PER_WAVE_N
+M_PER_ITER = WAVE_TILE_M // ITERS_PER_WAVE_M
 
 def hand_spec_kernel3():
   # ---------------------------
   # per-thread read mapping
   # ---------------------------
   # A: read BK x BN tiles; B: read BN x BK tiles
-  threadIdx_x = UOp.special(THREADS_PER_BLOCK, "lidx0")
+  tid = UOp.special(THREADS_PER_BLOCK, "lidx0")
 
-  waveIdx = (threadIdx_x // 32) % WAVES_IN_BLOCK_X
-  waveIdy = (threadIdx_x // 32) // WAVES_IN_BLOCK_X
+  waveIdx = (tid // 32) % WAVES_IN_BLOCK_X
+  waveIdy = (tid // 32) // WAVES_IN_BLOCK_X
 
-  idxInWave = (threadIdx_x % 32) % LANES_PER_WAVE_X
-  idyInWave = (threadIdx_x % 32) // LANES_PER_WAVE_X
+  idxInWave = (tid % 32) % LANES_PER_WAVE_X
+  idyInWave = (tid % 32) // LANES_PER_WAVE_X
 
   # ---------------------------
   # block indices & placeholders
@@ -81,16 +81,18 @@ def hand_spec_kernel3():
   # ---------------------------
   # GLOBAL -> LOCAL (As, Bs)
   # ---------------------------
-  b = b.reshape((N // BLOCK_K, BLOCK_K, N // BLOCK_N, BLOCK_N))
+  b = b.reshape((N // BLOCK_K, BLOCK_K,
+                 N // BLOCK_N, BLOCK_N))
   i = UOp.range(BLOCK_N * BLOCK_K // THREADS_PER_BLOCK, 1)
-  index_x = threadIdx_x % BLOCK_N
-  index_y = (threadIdx_x // BLOCK_N) + (THREADS_PER_BLOCK // BLOCK_N) * i
+  index_x = tid % BLOCK_N
+  index_y = (tid // BLOCK_N) + (THREADS_PER_BLOCK // BLOCK_N) * i
   Bs_store = Bs[index_y, index_x].store(b[kId_range, index_y, blockIdx_x, index_x]).end(i)
 
-  a = a.reshape((N // BLOCK_M, BLOCK_M, N // BLOCK_K, BLOCK_K))
+  a = a.reshape((N // BLOCK_M, BLOCK_M,
+                 N // BLOCK_K, BLOCK_K))
   i = UOp.range(BLOCK_M * BLOCK_K // THREADS_PER_BLOCK, 2)
-  index_x = threadIdx_x % BLOCK_K
-  index_y = (threadIdx_x // BLOCK_K) + (THREADS_PER_BLOCK // BLOCK_K) * i
+  index_x = tid % BLOCK_K
+  index_y = (tid // BLOCK_K) + (THREADS_PER_BLOCK // BLOCK_K) * i
   As_store = As[index_x, index_y].store(a[blockIdx_y, index_y, kId_range, index_x]).end(i)
 
   # TODO: can we automate barrier?
@@ -106,12 +108,12 @@ def hand_spec_kernel3():
   # ---------------------------
   iterWaveN = UOp.range(ITERS_PER_WAVE_N, 4)
   i = UOp.range(TN, 5)
-  index = waveIdx * WN + iterWaveN * N_PER_ITER + idxInWave * TN + i
+  index = waveIdx * WAVE_TILE_N + iterWaveN * N_PER_ITER + idxInWave * TN + i
   B_row = B_row[iterWaveN, i].set(Bs[k, index], end=(iterWaveN, i))
 
   iterWaveM = UOp.range(ITERS_PER_WAVE_M, 6)
   i = UOp.range(TM, 7)
-  index = waveIdy * WM + iterWaveM * M_PER_ITER + idyInWave * TM + i
+  index = waveIdy * WAVE_TILE_M + iterWaveM * M_PER_ITER + idyInWave * TM + i
   A_col = A_col[iterWaveM, i].set(As[k, index], end=(iterWaveM, i))
 
   # ---------------------------
@@ -130,7 +132,8 @@ def hand_spec_kernel3():
   # ---------------------------
   # REG -> GLOBAL (epilogue)
   # ---------------------------
-  c = c.reshape((N//BLOCK_M, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM, N//BLOCK_N, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN))
+  c = c.reshape((N//BLOCK_M, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM,
+                 N//BLOCK_N, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN))
   iterWaveM = UOp.range(ITERS_PER_WAVE_M, 1000)
   yt = UOp.range(TM, 1001)
   iterWaveN = UOp.range(ITERS_PER_WAVE_N, 1002)
