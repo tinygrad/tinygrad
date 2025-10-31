@@ -17,7 +17,6 @@ constexpr int BLOCK_N = WORKER_N * SUPER_N;
 constexpr int PIPE_STAGES = 2;
 
 using reg_tile_A = rt_bf<WORKER_M, BLOCK_K>;
-using reg_tile_B = rt_bf<BLOCK_K, WORKER_N>;
 using reg_tile_B_col = rt_bf<BLOCK_K, WORKER_N, ducks::rt_layout::col>;
 using reg_tile_C = rt_fl<WORKER_M, WORKER_N>;
 
@@ -42,7 +41,6 @@ __global__ void kernel(bf16 *c_ptr, bf16 *a_ptr, bf16 *b_ptr) {
   shared_tile_B (&Bs)[SUPER_N][PIPE_STAGES] = al.allocate<shared_tile_B, SUPER_N, PIPE_STAGES>();
 
   reg_tile_A A_reg;
-  reg_tile_B B_reg;
   reg_tile_B_col B_reg_col;
   reg_tile_C C_accum;
 
@@ -80,9 +78,7 @@ __global__ void kernel(bf16 *c_ptr, bf16 *a_ptr, bf16 *b_ptr) {
     __syncthreads();
 
     warp::load(A_reg, As[warp_m][smem_idx]);
-    warp::load(B_reg, Bs[warp_n][smem_idx]);
-
-    warp::swap_layout(B_reg_col, B_reg);
+    warp::load(B_reg_col, Bs[warp_n][smem_idx]);
 
     warp::mma_AB(C_accum, A_reg, B_reg_col, C_accum);
     __syncthreads();
