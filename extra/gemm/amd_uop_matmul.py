@@ -151,15 +151,13 @@ def hand_spec_kernel3():
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
-
-if __name__ == "__main__":
+def test_matmul(sink:UOp, N=N):
   with Context(DEBUG=0):
     a = Tensor.randn(N, N)
     b = Tensor.randn(N, N)
     hc = Tensor.empty(N, N)
     Tensor.realize(a, b, hc)
 
-  sink = hand_spec_kernel3()
   ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in [hc, a, b]])
 
   GlobalCounters.reset()
@@ -177,3 +175,6 @@ if __name__ == "__main__":
   print(f"mean squared error {err}")
   if err > 1e-06:
     raise RuntimeError("matmul is wrong!")
+
+if __name__ == "__main__":
+  test_matmul(hand_spec_kernel3(), N=N)
