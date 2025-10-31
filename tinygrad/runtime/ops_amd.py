@@ -147,25 +147,22 @@ class AMDComputeQueue(HWQueue):
 
   def pmc_start(self, counters):
     self.pmc_reset_counters(en=False)
-
-    # disable rlc permon cg
-    if (gfx9:=self.dev.target[0] == 9): self.wreg(AMDReg('regRLC_PERFMON_CLK_CNTL', 0x3cbf, 1, {}, self.gc.bases), 1)
-
-    self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1, **({'vmid_mask':0xffff} if gfx9 else {}))
+    self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL, cs_en=1, ps_en=1, gs_en=1, hs_en=1, **({'vmid_mask':0xffff} if gfx9:=self.dev.target[0] == 9 else {}))
     if self.dev.target[0] >= 11: self.wreg(self.gc.regSQ_PERFCOUNTER_CTRL2, force_en=1, vmid_en=0xffff)
 
-    out_off = 0
+    end_off = 0
     block2pid:dict[str, itertools.count] = collections.defaultdict(lambda: itertools.count())
     for name,block,idx in counters:
+      # sq block on gfx11+ goes down to wgps
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
         "SQ": (1, self.dev.se_cnt // self.dev.xccs) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
-      out_off += (rec_size:=prod((self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
+
+      end_off += (rec_size:=prod((self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
       self.wreg(getattr(self.gc, (reg:=f'reg{block}_PERFCOUNTER{next(block2pid[block])}') + '_SELECT'), perf_sel=idx,
         **({'simd_mask':0xf, 'sqc_bank_mask':0xf, 'sqc_client_mask':0xf} if gfx9 and block == "SQ" else {}))
-      self.dev.pmc_sched.append(PMCSample(name, block, self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, reg))
+      self.dev.pmc_sched.append(PMCSample(name, block, self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, reg))
 
     if gfx9: self.wreg(self.gc.regSQ_PERFCOUNTER_MASK, sh0_mask=0xffff, sh1_mask=0xffff)
-
     self.wreg(self.gc.regCOMPUTE_PERFCOUNT_ENABLE, 1)
     return self.pmc_reset_counters(en=True)
 
