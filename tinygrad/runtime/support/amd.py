@@ -65,11 +65,11 @@ def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"inclu
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
   res:dict[str, tuple[str, int]] = {}
-  arch = f"gfx{ip[0]:x}{ip[1]:x}{ip[2]:x}"
+  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}"
 
   for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", url=ROCM_URL).split('- name: ')[1:]:
     for arch_spec in sec.split('- architectures:')[1:]:
-      if arch in arch_spec and (block:=re.search(r'block:\s*([A-Za-z0-9_]+)\s*\n', arch_spec)) and (ev:=re.search(r'event:\s*(\d+)', arch_spec)):
+      if arch in arch_spec and (block:=re.search(r'block:\s*([A-Za-z0-9_]+)', arch_spec)) and (ev:=re.search(r'event:\s*(\d+)', arch_spec)):
         res[sec.splitlines()[0].strip()] = (block.group(1), int(ev.group(1)))
 
   return res

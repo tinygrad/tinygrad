@@ -76,7 +76,8 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regGRBM_GFX_INDEX, **{f'{f}_broadcast_writes': 1 for f in ['se', 'sh' if self.dev.target[0] == 9 else 'sa', 'instance']})
   def set_grbm_inst(self, n):
     self.wreg(self.gc.regGRBM_GFX_INDEX, **{f'{f}_broadcast_writes': 1 for f in ['se', 'sh' if self.dev.target[0] == 9 else 'sa']}, instance_index=n)
-  def set_grbm_se_sh(self, se, sh): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, sa_index=sh, instance_broadcast_writes=1)
+  def set_grbm_se_sh(self, se, sh):
+    self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, **{f'{"sh" if self.dev.target[0] == 9 else "sa"}_index':sh}, instance_broadcast_writes=1)
   def set_grbm_se_sh_wgp(self, se, sh, wgp): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, sa_index=sh, instance_index=wgp << 2)
   def set_grbm_se(self, se): self.wreg(self.gc.regGRBM_GFX_INDEX, se_index=se, sh_broadcast_writes=1, instance_broadcast_writes=1)
 
