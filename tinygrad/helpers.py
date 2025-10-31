@@ -487,7 +487,7 @@ def CEnum(typ: type):
   return _CEnum
 
 # C11 gcc-compliant __attribute__((packed))
-class MetaPackedStruct(type(ctypes.Structure)):
+class MetaPackedStruct(type(ctypes.Structure)): # type: ignore
   def __new__(mcs, name, bases, dct):
     if "_fields_" not in dct: return super().__new__(mcs, name, bases, dct)
 
