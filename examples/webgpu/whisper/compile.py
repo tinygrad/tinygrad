@@ -38,8 +38,8 @@ class MultiHeadAttention:
     if self.kv_caching == 'cross':
       if xa is not None:
         if not hasattr(self, 'cache_k'):
-          self.cache_k = Tensor.zeros(DECODER_BATCH_SIZE, 1500, 384)
-          self.cache_v = Tensor.zeros(DECODER_BATCH_SIZE, 1500, 384)
+          self.cache_k = Tensor.zeros(DECODER_BATCH_SIZE, 1500, self.out.weight.shape[1])
+          self.cache_v = Tensor.zeros(DECODER_BATCH_SIZE, 1500, self.out.weight.shape[1])
         new_cache_k = cache_slice_helper(self.cache_k, self.key(xa), off, DECODER_BATCH_SIZE)
         new_cache_v = cache_slice_helper(self.cache_v, self.value(xa), off, DECODER_BATCH_SIZE)
 
