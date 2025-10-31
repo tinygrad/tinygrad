@@ -41,37 +41,6 @@ def _try_dlopen_$name():
 EOF
 }
 
-generate_sqtt() {
-  clang2py -k cdefstum \
-    extra/sqtt/sqtt.h \
-    -o $BASE/sqtt.py
-  fixup $BASE/sqtt.py
-  sed -i "s\import ctypes\import ctypes, os\g" $BASE/sqtt.py
-  python3 -c "import tinygrad.runtime.autogen.sqtt"
-
-  ROCPROF_COMMIT_HASH=dd0485100971522cc4cd8ae136bdda431061a04d
-  ROCPROF_SRC=/tmp/rocprof-trace-decoder-$ROCPROF_COMMIT_HASH
-  if [ ! -d "$ROCPROF_SRC" ]; then
-    git clone https://github.com/ROCm/rocprof-trace-decoder $ROCPROF_SRC
-    pushd .
-    cd $ROCPROF_SRC
-    git reset --hard $ROCPROF_COMMIT_HASH
-    popd
-  fi
-
-  clang2py -k cdefstum \
-    $ROCPROF_SRC/include/rocprof_trace_decoder.h \
-    $ROCPROF_SRC/include/trace_decoder_instrument.h \
-    $ROCPROF_SRC/include/trace_decoder_types.h \
-    -o $BASE/rocprof.py
-  fixup $BASE/rocprof.py
-  sed -i '1s/^/# pylint: skip-file\n/' $BASE/rocprof.py
-  sed -i "s/import ctypes/import ctypes, ctypes.util/g" $BASE/rocprof.py
-  patch_dlopen $BASE/rocprof.py rocprof-trace-decoder "'/usr/local/lib/librocprof-trace-decoder.so'" "'/usr/local/lib/librocprof-trace-decoder.dylib'"
-  sed -i "s/def _try_dlopen_rocprof-trace-decoder():/def _try_dlopen_rocprof_trace_decoder():/g" $BASE/rocprof.py
-  sed -i "s|FunctionFactoryStub()|_try_dlopen_rocprof_trace_decoder()|g" $BASE/rocprof.py
-}
-
 generate_mesa() {
   MESA_TAG="mesa-25.2.4"
   MESA_SRC=/tmp/mesa-$MESA_TAG
@@ -146,8 +115,7 @@ generate_mesa() {
   python3 -c "import tinygrad.runtime.autogen.mesa"
 }
 
-if [ "$1" == "sqtt" ]; then generate_sqtt
-elif [ "$1" == "mesa" ]; then generate_mesa
+if [ "$1" == "mesa" ]; then generate_mesa
 elif [ "$1" == "all" ]; then generate_mesa
 else echo "usage: $0 <type>"
 fi
