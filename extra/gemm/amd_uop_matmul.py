@@ -73,7 +73,7 @@ def hand_spec_kernel3():
   c = UOp.placeholder(dtypes.float, (N, N), slot=0)
 
   BM_As_stride = (BLOCK_M + 4) if is_kernel5 else BLOCK_M
-  As = UOp.placeholder(dtypes.float, (BLOCK_K, BM_As_stride), slot=0, addrspace=AddrSpace.LOCAL)
+  As = UOp.placeholder(dtypes.float, (BLOCK_K, BM_As_stride), slot=0, addrspace=AddrSpace.LOCAL).shrink_to((BLOCK_K, BLOCK_M))
   Bs = UOp.placeholder(dtypes.float, (BLOCK_K, BLOCK_N), slot=1, addrspace=AddrSpace.LOCAL)
 
   A_col = UOp.placeholder(dtypes.float, (ITERS_PER_WAVE_M, TM), slot=0, addrspace=AddrSpace.REG)
@@ -113,15 +113,15 @@ def hand_spec_kernel3():
   # ---------------------------
   # LOCAL -> REG (per-wave tiles)
   # ---------------------------
+  Bs_view = Bs.reshape((BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN))
   iterWaveN = UOp.range(ITERS_PER_WAVE_N, 4)
   i = UOp.range(TN, 5)
-  index = waveIdx * WAVE_TILE_N + iterWaveN * N_PER_ITER + idxInWave * TN + i
-  B_row = B_row[iterWaveN, i].set(Bs[k, index], end=(iterWaveN, i))
+  B_row = B_row[iterWaveN, i].set(Bs_view[k, waveIdx, iterWaveN, idxInWave, i], end=(iterWaveN, i))
 
+  As_view = As.reshape((BLOCK_K, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM))
   iterWaveM = UOp.range(ITERS_PER_WAVE_M, 6)
   i = UOp.range(TM, 7)
-  index = waveIdy * WAVE_TILE_M + iterWaveM * M_PER_ITER + idyInWave * TM + i
-  A_col = A_col[iterWaveM, i].set(As[k, index], end=(iterWaveM, i))
+  A_col = A_col[iterWaveM, i].set(As_view[k, waveIdy, iterWaveM, idyInWave, i], end=(iterWaveM, i))
 
   # ---------------------------
   # FMA: c_regs += A_col * B_row
@@ -149,7 +149,7 @@ def hand_spec_kernel3():
   sink = c_glbl_idx.store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
   sink = sink.end(iterWaveM, iterWaveN, yt, xt)
 
-  return sink.sink(arg=KernelInfo(opts_to_apply=()))
+  return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
 
 if __name__ == "__main__":
