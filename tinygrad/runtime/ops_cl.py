@@ -37,7 +37,7 @@ class CLProgram:
     self.dev, self.name, self.lib = device, name, lib
     self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(lib)),
                                                         to_char_p_p([lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
-                                                        err := ctypes.c_int32()), err)
+                                                        errcode_ret := ctypes.c_int32()), errcode_ret)
     check(binary_status.value)
     check(cl.clBuildProgram(self.program, 1, device.device_id, None, cl.clBuildProgram.argtypes[4](), None)) # NOTE: OSX requires this
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), status := ctypes.c_int32()), status)
