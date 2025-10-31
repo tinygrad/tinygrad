@@ -750,9 +750,7 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
     ctx: dict[UOp, str] = {}
     pm = renderer if pm is None else pm
     for u in (s:=self.simplify() if simplify else self).toposort():
-      # if there is any node in the toposort we can't render, we just render the whole thing using UOp pretty printer
-      if (u_str:=pm.rewrite(u, ctx=ctx)) is None: return str(s)
-      ctx[u] = cast(str, u_str)
+      ctx[u] = cast(str, pm.rewrite(u, ctx=ctx))
     return ctx[s]
 
   def pyrender(self): return pyrender(self)
@@ -1277,6 +1275,7 @@ renderer = PatternMatcher([
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda x, ctx: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: f"{{{','.join([ctx[y] for y in x.src])}}}" if not all_same(x.src) else f"{{{ctx[x.src[0]]}, ...}}"),
+  (UPat(GroupOp.All, name="x"), lambda x: str(x)),
 ])
 
 renderer_infer = PatternMatcher([
