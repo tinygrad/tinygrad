@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel
+from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap
@@ -355,9 +355,9 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
-])
 
-pm_no_reshape_on_kernel = PatternMatcher([
+  # no tags on AFTER
+  #(UPat(Ops.AFTER, name="a"), lambda a: a.replace(tag=None).forced_reshape(a.shape).rtag(a.tag) if a.tag is not None else None),
   # remove any RESHAPEs on KERNEL
   (UPat(Ops.KERNEL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
 ])
@@ -551,7 +551,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags+pm_no_reshape_on_kernel, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
@@ -570,10 +570,14 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
+  # TODO: we can probably get this earlier
+  sink_tags = [s.tag for s in tsink.src]
+  tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
+
   becomes_map: dict[UOp, UOp] = {}
-  for s in tsink.src:
-    assert s.tag is not None
-    for a in s.tag:
+  for tag, s in zip(sink_tags, tsink.src):
+    assert tag is not None
+    for a in tag:
       if a is None: continue
-      becomes_map[uop_list[int(a)]] = s.replace(tag=None)
+      becomes_map[uop_list[int(a)]] = s
   return becomes_map

@@ -711,7 +711,7 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(b.buffer.numpy(), [12])
 
   # unlike schedule, kernelize can be called multiple times on a Tensor
-  def test_double_kerenlize(self):
+  def test_double_kernelize(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
     c = (a+b)

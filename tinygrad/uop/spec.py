@@ -57,10 +57,7 @@ movement_ops = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
 ])
 
-tensor_spec = PatternMatcher([
-  # no tags allowed in tensor graph
-  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
-
+_tensor_spec = PatternMatcher([
   # buffer spec
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
@@ -113,6 +110,11 @@ tensor_spec = PatternMatcher([
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 ])+movement_ops+shared_spec
+
+tensor_spec = PatternMatcher([
+  # no tags allowed in tensor graph
+  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
+])+_tensor_spec
 
 # ***** UOp spec in codegen shared between kernel and program *****
 
@@ -249,7 +251,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.floats), lambda: True),
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
-])+tensor_spec+kernel_spec+program_spec+shared_spec
+])+_tensor_spec+kernel_spec+program_spec+shared_spec
 
 # ***** uop helpers *****
 
