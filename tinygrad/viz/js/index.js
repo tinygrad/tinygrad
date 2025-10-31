@@ -738,12 +738,13 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
+  // ** center UOp graph
   const render = (opts) => renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0, opts);
+  render({ showIndexing:toggle.checked });
+  toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar code blocks
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
   metadata.replaceChildren(toggle, label.node(), codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
-  toggle.onchange = (e) => render({ showIndexing:e.target.checked });
-  render({ showIndexing:toggle.checked });
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
