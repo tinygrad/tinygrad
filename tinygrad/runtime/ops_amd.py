@@ -139,8 +139,8 @@ class AMDComputeQueue(HWQueue):
 
   def pmc_reset_counters(self, en=True):
     self.set_grbm_broadcast()
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=0)
-    if en: self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1)
+    self.wreg(self.gc.regCP_PERFMON_CNTL if self.dev.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=0)
+    if en: self.wreg(self.gc.regCP_PERFMON_CNTL if self.dev.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1)
     return self
 
   def pmc_start(self, counters):
@@ -151,7 +151,8 @@ class AMDComputeQueue(HWQueue):
     out_off = 0
     block2pid:dict[str, itertools.count] = collections.defaultdict(lambda: itertools.count())
     for name,block,idx in counters:
-      inst_cnt, se_cnt, sa_cnt, wgp_cnt = (32, 1, 1, 1) if block != "SQ" else (1, self.dev.se_cnt, 2, self.dev.iface.props['cu_per_simd_array'] // 2)
+      inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1),
+                                           "SQ": (1, self.dev.se_cnt, 2, self.dev.iface.props['cu_per_simd_array'] // 2)}[block]
       reg, out_off = f'reg{block}_PERFCOUNTER{next(block2pid[block])}', out_off + (rec_size:=prod((inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
       self.wreg(getattr(self.gc, f'{reg}_SELECT'), idx)
       self.dev.pmc_sched.append(PMCSample(name, block, inst_cnt, se_cnt, sa_cnt, wgp_cnt, out_off-rec_size, rec_size, reg))
@@ -161,7 +162,7 @@ class AMDComputeQueue(HWQueue):
 
   def pmc_read(self, buf, sched):
     self.set_grbm_broadcast()
-    self.wreg(self.gc.regCP_PERFMON_CNTL, perfmon_state=1, perfmon_sample_enable=1) # read counters
+    self.wreg(self.gc.regCP_PERFMON_CNTL if self.dev.target[0] <= 11 else self.gc.regCP_PERFMON_CNTL_1, perfmon_state=1, perfmon_sample_enable=1)
 
     for s in sched:
       offset = itertools.count(s.off, step=8)
@@ -761,7 +762,7 @@ class PCIIface(PCIIfaceBase):
     self._setup_adev(self.pci_dev)
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
-  def is_in_profile_mode(self): return False
+  def is_in_profile_mode(self): return True
 
   def _setup_adev(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.dev_impl:AMDev = AMDev(pci_dev, dma_regions)
@@ -896,8 +897,8 @@ class AMDDevice(HCQCompiled):
 
     self.pmc_enabled = PROFILE and PMC > 0
     if self.pmc_enabled:
-      if self.target[0] not in {11}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
-      if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: AMD_IFACE=KFD and `amd-smi set -l stable_std`")
+      if self.target[0] not in {11, 12}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
+      if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
       self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
@@ -908,15 +909,14 @@ class AMDDevice(HCQCompiled):
 
       cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([self.pmc_counters[k] for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))
+      self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled = PROFILE and SQTT > 0
     if self.sqtt_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
-      if not self.is_am() and (ppfeaturemask:=int(FileIOInterface('/sys/module/amdgpu/parameters/ppfeaturemask', os.O_RDONLY).read(), 16))&0x8000:
-        raise RuntimeError("SQTT can't be enabled because of hardware bug, to workaround either use AMD_IFACE=PCI or add "
-                           f"ppfeaturemask={(ppfeaturemask&~0x8000):#x} (current {ppfeaturemask=:#x} & ~PP_GFXOFF_MASK) to amdgpu module parameters\n"
-                           "For more information read https://github.com/tinygrad/tinygrad/blob/master/extra/sqtt/README.md")
+      if not self.iface.is_in_profile_mode(): raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
       self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", -1 if SQTT >= 2 else (1 << 1)) # se bitmask: -1 enable all, 0 disable all

@@ -44,6 +44,19 @@ shared_spec = PatternMatcher([
 
 # ***** UOp spec in the Tensor graph *****
 
+movement_ops = PatternMatcher([
+  (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
+
+  # inputs to movement ops
+  (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
+  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
+
+  # AFTER on Movement Op
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
+])
+
 tensor_spec = PatternMatcher([
   # buffer spec
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
@@ -66,14 +79,6 @@ tensor_spec = PatternMatcher([
 
   # MSTACK combines buffers into multi
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(x.device, str) for x in x.src)),
-
-  (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
-  (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index), UPat(dtype=dtypes.index))), lambda mv,x: True),
-  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
-
-  # inputs to movement ops
-  (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
-  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
@@ -104,7 +109,7 @@ tensor_spec = PatternMatcher([
 
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
-])+shared_spec
+])+movement_ops+shared_spec
 
 # ***** UOp spec in codegen shared between kernel and program *****
 
@@ -146,17 +151,13 @@ shared_codegen_spec = PatternMatcher([
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.index, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
 
-  # BARRIER
-  (UPat(Ops.BARRIER, dtypes.void, src=(UPat(),)), lambda: True),
+  # BARRIER (on any length)
+  (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 ])
 
 # ***** UOp spec in kernel graph *****
 
 kernel_spec = PatternMatcher([
-  # RESHAPE (but only RESHAPE) is allowed here
-  (UPat(Ops.RESHAPE, name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
-  (UPat(Ops.AFTER, src=(UPat(Ops.RESHAPE),), allow_any_len=True), lambda: True),
-
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
 
@@ -168,7 +169,7 @@ kernel_spec = PatternMatcher([
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
-])+shared_codegen_spec+shared_spec
+])+movement_ops+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in linearized programs *****
 
