@@ -2,6 +2,15 @@ import collections, functools, dataclasses
 from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
+class BumpAllocator:
+  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
+  def alloc(self, size:int, alignment:int=1) -> int:
+    if round_up(self.ptr, alignment) + size > self.size:
+      if not self.wrap: raise RuntimeError("Out of memory")
+      self.ptr = 0
+    self.ptr = (res:=round_up(self.ptr, alignment)) + size
+    return res + self.base
+
 class TLSFAllocator:
   """
   The allocator is based on the Two-Level Segregated Fit (TLSF) algorithm. The allocator maintains 2 level of buckets:
@@ -19,12 +28,12 @@ class TLSFAllocator:
 
     # self.blocks is more like a linked list, where each entry is a contiguous block.
     self.blocks:dict[int, tuple[int, int|None, int|None, bool]] = {0: (size, None, None, True)} # size, next, prev, is_free
-    self._insert_block(0, size)
+    if size > 0: self._insert_block(0, size)
 
-  @functools.cache
+  @functools.cache # pylint: disable=method-cache-max-size-none
   def lv1(self, size): return size.bit_length()
 
-  @functools.cache
+  @functools.cache # pylint: disable=method-cache-max-size-none
   def lv2(self, size): return (size - (1 << (size.bit_length() - 1))) // (1 << max(0, size.bit_length() - self.l2_cnt))
 
   def _insert_block(self, start:int, size:int, prev:int|None=None):
@@ -115,7 +124,7 @@ class PageTableTraverseContext:
 
     if not pt.valid(pte_idx):
       assert self.create_pts, "Not allowed to create new page table"
-      pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot), table=True, valid=True)
+      pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot, ptable=True), table=True, valid=True)
 
     assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
     child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
@@ -126,7 +135,7 @@ class PageTableTraverseContext:
   def _try_free_pt(self) -> bool:
     pt, _, _ = self.pt_stack[-1]
     if self.free_pts and pt != self.dev.mm.root_page_table and all(not pt.valid(i) for i in range(self._pt_pte_cnt(self.pt_stack[-1][0].lv))):
-      self.dev.mm.pfree(pt.paddr)
+      self.dev.mm.pfree(pt.paddr, ptable=True)
       parent_pt, parent_pte_idx, _ = self.pt_stack[-2]
       parent_pt.set_entry(parent_pte_idx, 0x0, valid=False)
       return True
@@ -158,13 +167,14 @@ class MemoryManager:
   va_allocator: ClassVar[TLSFAllocator|None] = None
 
   def __init__(self, dev, vram_size:int, boot_size:int, pt_t, va_bits:int, va_shifts:list[int], va_base:int,
-               palloc_ranges:list[tuple[int, int]], first_lv:int=0):
+               palloc_ranges:list[tuple[int, int]], first_lv:int=0, reserve_ptable=False):
     self.dev, self.vram_size, self.va_shifts, self.va_base, lvl_msb = dev, vram_size, va_shifts, va_base, va_shifts + [va_bits + 1]
     self.pte_covers, self.pte_cnt = [1 << x for x in va_shifts][::-1], [1 << (lvl_msb[i+1] - lvl_msb[i]) for i in range(len(lvl_msb) - 1)][::-1]
-    self.pt_t, self.palloc_ranges, self.level_cnt, self.va_bits = pt_t, palloc_ranges, len(va_shifts), va_bits
+    self.pt_t, self.palloc_ranges, self.level_cnt, self.va_bits, self.reserve_ptable = pt_t, palloc_ranges, len(va_shifts), va_bits, reserve_ptable
 
-    self.boot_allocator = TLSFAllocator(boot_size, base=0) # per device
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size) # per device
+    self.boot_allocator = TLSFAllocator(boot_size, base=0)
+    self.ptable_allocator = TLSFAllocator(round_up(vram_size // 512, 1 << 20) if self.reserve_ptable else 0, base=self.boot_allocator.size)
+    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size + self.ptable_allocator.size)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
   def _frag_size(self, va, sz, must_cover=True):
@@ -200,7 +210,7 @@ class MemoryManager:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
 
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, free_pts=True)
-    for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(size):
+    for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
       for pte_id in range(pte_idx, pte_idx + pte_cnt):
         assert pt.valid(pte_id), f"PTE not mapped: {pt.entry(pte_id):#x}"
         pt.set_entry(pte_id, paddr=0x0, valid=False)
@@ -241,10 +251,11 @@ class MemoryManager:
     self.va_allocator.free(vm.va_addr)
     for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
 
-  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False) -> int:
+  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False, ptable=False) -> int:
     assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"
-    paddr = (self.boot_allocator if boot else self.pa_allocator).alloc(round_up(size, 0x1000), align)
+    allocator = self.boot_allocator if boot else (self.ptable_allocator if self.reserve_ptable and ptable else self.pa_allocator)
+    paddr = allocator.alloc(round_up(size, 0x1000), align)
     if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
-  def pfree(self, paddr:int): self.pa_allocator.free(paddr)
+  def pfree(self, paddr:int, ptable=False): (self.ptable_allocator if self.reserve_ptable and ptable else self.pa_allocator).free(paddr)

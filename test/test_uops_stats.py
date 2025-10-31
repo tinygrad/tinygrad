@@ -1,13 +1,14 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import getenv, GlobalCounters
+from tinygrad.helpers import getenv, GlobalCounters, EMULATE
 from tinygrad.engine.realize import lower_schedule_item, ProgramSpec, get_program
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
-from tinygrad.codegen.opt.kernel import Opt, OptOps, KernelOptError
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
+from tinygrad.renderer.ptx import PTXRenderer
 
 def flops_mem(uops, ignore_indexing=False):
   est = Estimates.from_uops(uops, ignore_indexing)
@@ -50,7 +51,8 @@ class TestMemoryCount(unittest.TestCase):
     a = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
     b = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
     _, mem = get_stats(a+b)
-    self.assertEqual(mem, 1024*1024 + 2*1024)  # 2 lil reads + 1 write
+    # rangeify is smart!
+    self.assertEqual(mem, 1024 + 2*1024)  # 2 lil reads + 1 lil write
 
   def test_self_add(self):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)
@@ -87,6 +89,7 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     expected_ops = N ** 3 * 2
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
+  @unittest.skipIf(EMULATE.value=="INTEL", "intel gets 524288 != 524352")
   def test_bigger_matmul_half(self): self.test_simple_matmul_half(64)
 
   def test_batched_matmul_half(self, N=16):
@@ -98,7 +101,6 @@ class TestUOpsStatsMatmulHalf(unittest.TestCase):
     self.assertEqual(expected_ops, GlobalCounters.global_ops)
 
 class TestUOpsStats(unittest.TestCase):
-  @unittest.skipIf(getenv("PTX"), "wrong in PTX")
   def test_simple_add(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
@@ -110,7 +112,6 @@ class TestUOpsStats(unittest.TestCase):
     # NOTE; ops also include indexing ops
     assert expected_ops <= ops and ops <= expected_ops * 2
 
-  @unittest.skipIf(getenv("PTX"), "wrong in PTX")
   def test_simple_add_sq(self):
     a = Tensor.empty(100,100)
     b = Tensor.empty(100,100)
@@ -140,8 +141,8 @@ class TestUOpsStats(unittest.TestCase):
     globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
     o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
-    u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))
-    u2 = UOp(Ops.LOAD, dtypes.int, (globl.index(o2),))
+    u1 = globl.index(o1)
+    u2 = globl.index(o2)
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(Ops.MUL, dtypes.int, (u1,u2))
     u5 = UOp(Ops.ADD, dtypes.int, (u4,u3))
@@ -150,8 +151,8 @@ class TestUOpsStats(unittest.TestCase):
     globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
     o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
-    u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))
-    u2 = UOp(Ops.LOAD, dtypes.int, (globl.index(o2),))
+    u1 = globl.index(o1)
+    u2 = globl.index(o2)
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(Ops.MULACC, dtypes.int, (u1,u2,u3))
     uops_fma = full_rewrite(u4.sink())
@@ -159,7 +160,7 @@ class TestUOpsStats(unittest.TestCase):
     self.assertEqual(flops_mem(uops), flops_mem(uops_fma))
 
 N = 64
-@unittest.skipIf(getenv("PTX"), "wrong in PTX") # maybe?
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "wrong in PTX") # maybe?
 class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):

@@ -6,7 +6,7 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import getenv, OSX
 from tinygrad.device import is_dtype_supported
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 
 # pip3 install tabulate
 pytest_plugins = 'onnx.backend.test.report',
@@ -193,12 +193,12 @@ backend_test.exclude('test_adam_cpu')
 backend_test.exclude('test_gradient_of_add_and_mul_cpu')
 backend_test.exclude('test_gradient_of_add_cpu')
 
-if Device.DEFAULT in ['GPU', 'METAL']:
+if Device.DEFAULT in ['CL', 'METAL']:
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
   backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
-if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "GPU"):
+if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "CL"):
   # numerical inaccuracy
   backend_test.exclude('test_mish_cpu')
   backend_test.exclude('test_mish_expanded_cpu')

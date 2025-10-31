@@ -100,7 +100,7 @@ class GraphComputeItem:
   datahash: str
   bufs: tuple[int, ...]
   vars: tuple[Variable, ...]
-  fixedvars: dict[Variable, int]
+  fixedvars: dict[str, int]
   ins: tuple[int, ...]
   outs: tuple[int, ...]
   global_size: tuple[sint, ...]|None
@@ -111,7 +111,7 @@ class GraphAlloc(RemoteRequest):
   graph_num: int
   jit_cache: tuple[GraphComputeItem|Transfer, ...]
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
 
 @dataclass(frozen=True)
 class GraphFree(RemoteRequest):
@@ -121,7 +121,7 @@ class GraphFree(RemoteRequest):
 class GraphExec(RemoteRequest):
   graph_num: int
   bufs: tuple[tuple[SessionKey, int], ...]
-  var_vals: dict[Variable, int]
+  var_vals: dict[str, int]
   wait: bool
 
 # for safe deserialization
@@ -176,7 +176,7 @@ class RemoteHandler:
     self.sessions: defaultdict[SessionKey, RemoteSession] = defaultdict(RemoteSession)
 
     try: self.ib_ctx: IBCtx|None = IBCtx(getenv("IB_DEV", 0))
-    except (IndexError, AttributeError): self.ib_ctx = None
+    except (RuntimeError, IndexError, AttributeError): self.ib_ctx = None
     self.ib_lock = asyncio.Lock()
     self.ib_conns: dict[str, IBConn|None] = {}
     self.iova_cache: dict[tuple[SessionKey, int], tuple[int, int, int]] = {}
@@ -424,7 +424,7 @@ class RemoteConnection:
     conns = RemoteConnection.all.keys()
     datas = {conn: conn.req.serialize() for conn in conns}
     reqs, hashes, hash_datas = sum(len(c.req._q) for c in conns), sum(len(c.req._h) for c in conns), sum(len(data) for data in datas.values())
-    resps = []
+    ret, resps = None, []
     with Timing(f"*** send {reqs:-3d} requests {hashes:-3d} hashes with len {hash_datas/1024:.2f} kB in ", enabled=DEBUG>=3):
       for conn,data in datas.items(): conn.conn.request("POST", "/batch", data)
       for conn in datas.keys():
@@ -471,10 +471,11 @@ class RemoteDevice(Compiled):
     if not renderer[0].startswith("tinygrad.") or not renderer[1].endswith("Renderer"): raise RuntimeError(f"bad renderer {renderer}")
     renderer_class = fromimport(renderer[0], renderer[1])  # TODO: is this secure?
     if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
-    renderer_instance = renderer_class(*renderer[2])
-    renderer_instance.device = device
+
     graph = fromimport('tinygrad.runtime.graph.remote', "RemoteGraph") if self.properties.graph_supported else None
-    super().__init__(device, RemoteAllocator(self), renderer_instance, Compiler(), functools.partial(RemoteProgram, self), graph, id(self.conn))
+    compilers = [(functools.partial(renderer_class, *renderer[2]), Compiler)]
+    super().__init__(device, RemoteAllocator(self), compilers, functools.partial(RemoteProgram, self), graph, id(self.conn))
+    self.renderer.device = device
 
   def finalize(self):
     with contextlib.suppress(ConnectionError, http.client.HTTPException): self.q(SessionFree(), wait=True)

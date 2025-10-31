@@ -1,7 +1,7 @@
 from typing import cast
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
-from tinygrad.uop.ops import UOp, Variable, Ops, buffers
+from tinygrad.uop.ops import UOp, Ops, buffers
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.helpers import Metadata, all_same
 
@@ -12,38 +12,38 @@ class ScheduleItem:
   ast: UOp
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
-  fixedvars: dict[Variable, int] = field(default_factory=dict)
+  fixedvars: dict[str, int] = field(default_factory=dict)
 
 # **** schedule linearizer
 
-def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[Variable, int]]:
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[str, int]]:
   # construct the KERNEL children graph based on assigns
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
-  var_vals: dict[Variable, int] = {}
+  var_vals: dict[str, int] = {}
   for u in sched_sink.toposort():
-    if u.op is not Ops.ASSIGN: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
+    if u.op is not Ops.AFTER: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
     k = u.src[1]
     in_degree.setdefault(k, 0)
     for s in k.src:
-      if s.op is Ops.ASSIGN:
+      if s.op is Ops.AFTER:
         children[s.src[1]].append(k)
         in_degree[k] += 1
       elif s.op in {Ops.MSELECT, Ops.MSTACK}:
         for ss in s.src:
           if ss.op is Ops.MSELECT: ss = ss.src[0]
           if ss.op is not Ops.BUFFER:
-            assert ss.op is Ops.ASSIGN, f"ss.op is not ASSIGN, it's {ss.op}"
+            assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
             children[ss.src[1]].append(k)
             in_degree[k] += 1
       elif s.op is Ops.BUFFER:
         pass  # a BUFFER is already realized, nothing to do here
       elif s.op is Ops.BIND:
         var, val = s.unbind()
-        assert var not in var_vals or var_vals[var] == val, f"bind mismatch on {var}, {var_vals[var]} != {val}"
-        var_vals[var] = val
+        assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
+        var_vals[var.expr] = val
       else:
-        raise RuntimeError(f"input to kernel must be ASSIGN or BUFFER, not {s.op}")
+        raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
   # linearize KERNEL UOps into ScheduleItems in BFS order
 
@@ -72,7 +72,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
       dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
       for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-        schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0]:i} if len(dnums) else {}))
+        schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}))
     else:
       # ONE -> ONE
       schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))

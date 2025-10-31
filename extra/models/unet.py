@@ -1,8 +1,11 @@
-from tinygrad import Tensor, dtypes
-from tinygrad.nn import Linear, Conv2d, GroupNorm, LayerNorm
+from tinygrad import Tensor, dtypes, nn
 from tinygrad.device import is_dtype_supported
-from typing import Optional, Union, List, Any, Tuple
+from typing import Optional, Union, List, Any, Tuple, Callable
 import math
+
+# allow for monkeypatching
+Linear, Conv2d, GroupNorm, LayerNorm = nn.Linear, nn.Conv2d, nn.GroupNorm, nn.LayerNorm
+attention, gelu, mixed_precision_dtype = Tensor.scaled_dot_product_attention, Tensor.gelu, dtypes.float16
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -10,12 +13,12 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   freqs = (-math.log(max_period) * Tensor.arange(half, device=timesteps.device) / half).exp()
   args = timesteps.unsqueeze(1) * freqs.unsqueeze(0)
   out = Tensor.cat(args.cos(), args.sin(), dim=-1)
-  return out.cast(dtypes.float16) if is_dtype_supported(dtypes.float16) else out
+  return out.cast(mixed_precision_dtype) if is_dtype_supported(mixed_precision_dtype) else out
 
 class ResBlock:
-  def __init__(self, channels:int, emb_channels:int, out_channels:int):
+  def __init__(self, channels:int, emb_channels:int, out_channels:int, num_groups:int=32):
     self.in_layers = [
-      GroupNorm(32, channels),
+      GroupNorm(num_groups, channels),
       Tensor.silu,
       Conv2d(channels, out_channels, 3, padding=1),
     ]
@@ -24,7 +27,7 @@ class ResBlock:
       Linear(emb_channels, out_channels),
     ]
     self.out_layers = [
-      GroupNorm(32, out_channels),
+      GroupNorm(num_groups, out_channels),
       Tensor.silu,
       lambda x: x,  # needed for weights loading code to work
       Conv2d(out_channels, out_channels, 3, padding=1),
@@ -45,35 +48,37 @@ class CrossAttention:
     self.to_v = Linear(ctx_dim,   n_heads*d_head, bias=False)
     self.num_heads = n_heads
     self.head_size = d_head
+    self.attn = attention
     self.to_out = [Linear(n_heads*d_head, query_dim)]
 
   def __call__(self, x:Tensor, ctx:Optional[Tensor]=None) -> Tensor:
     ctx = x if ctx is None else ctx
     q,k,v = self.to_q(x), self.to_k(ctx), self.to_v(ctx)
     q,k,v = [y.reshape(x.shape[0], -1, self.num_heads, self.head_size).transpose(1,2) for y in (q,k,v)]
-    attention = Tensor.scaled_dot_product_attention(q, k, v).transpose(1,2)
+    attention = self.attn(q, k, v).transpose(1,2)
     h_ = attention.reshape(x.shape[0], -1, self.num_heads * self.head_size)
     return h_.sequential(self.to_out)
 
 class GEGLU:
   def __init__(self, dim_in:int, dim_out:int):
     self.proj = Linear(dim_in, dim_out * 2)
+    self.gelu = gelu
     self.dim_out = dim_out
 
   def __call__(self, x:Tensor) -> Tensor:
     x, gate = self.proj(x).chunk(2, dim=-1)
-    return x * gate.gelu()
+    return x * self.gelu(gate)
 
 class FeedForward:
   def __init__(self, dim:int, mult:int=4):
-    self.net = [
+    self.net: tuple[GEGLU, Callable, nn.Linear] = (
       GEGLU(dim, dim*mult),
       lambda x: x,  # needed for weights loading code to work
       Linear(dim*mult, dim)
-    ]
+    )
 
   def __call__(self, x:Tensor) -> Tensor:
-    return x.sequential(self.net)
+    return x.sequential(list(self.net))
 
 class BasicTransformerBlock:
   def __init__(self, dim:int, ctx_dim:int, n_heads:int, d_head:int):
@@ -92,12 +97,13 @@ class BasicTransformerBlock:
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/attention.py#L619
 class SpatialTransformer:
-  def __init__(self, channels:int, n_heads:int, d_head:int, ctx_dim:Union[int,List[int]], use_linear:bool, depth:int=1):
+  def __init__(self, channels:int, n_heads:int, d_head:int, ctx_dim:Union[int,List[int]], use_linear:bool, depth:int=1,
+               norm_eps:float=1e-5):
     if isinstance(ctx_dim, int):
       ctx_dim = [ctx_dim]*depth
     else:
       assert isinstance(ctx_dim, list) and depth == len(ctx_dim)
-    self.norm = GroupNorm(32, channels)
+    self.norm = GroupNorm(32, channels, eps=norm_eps)
     assert channels == n_heads * d_head
     self.proj_in  = Linear(channels, channels) if use_linear else Conv2d(channels, channels, 1)
     self.transformer_blocks = [BasicTransformerBlock(channels, ctx_dim[d], n_heads, d_head) for d in range(depth)]
@@ -134,7 +140,9 @@ class Upsample:
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/openaimodel.py#L472
 class UNetModel:
-  def __init__(self, adm_in_ch:Optional[int], in_ch:int, out_ch:int, model_ch:int, attention_resolutions:List[int], num_res_blocks:int, channel_mult:List[int], transformer_depth:List[int], ctx_dim:Union[int,List[int]], use_linear:bool=False, d_head:Optional[int]=None, n_heads:Optional[int]=None):
+  def __init__(self, adm_in_ch:Optional[int], in_ch:int, out_ch:int, model_ch:int, attention_resolutions:List[int], num_res_blocks:int,
+               channel_mult:List[int], transformer_depth:List[int], ctx_dim:Union[int,List[int]], use_linear:bool=False, d_head:Optional[int]=None,
+               n_heads:Optional[int]=None, num_groups:int=32, st_norm_eps:float=1e-5):
     self.model_ch = model_ch
     self.num_res_blocks = [num_res_blocks] * len(channel_mult)
 
@@ -174,12 +182,12 @@ class UNetModel:
     for idx, mult in enumerate(channel_mult):
       for _ in range(self.num_res_blocks[idx]):
         layers: List[Any] = [
-          ResBlock(ch, time_embed_dim, model_ch*mult),
+          ResBlock(ch, time_embed_dim, model_ch*mult, num_groups),
         ]
         ch = mult * model_ch
         if ds in attention_resolutions:
           d_head, n_heads = get_d_and_n_heads(ch)
-          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx]))
+          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx], norm_eps=st_norm_eps))
 
         self.input_blocks.append(layers)
         input_block_channels.append(ch)
@@ -193,9 +201,9 @@ class UNetModel:
 
     d_head, n_heads = get_d_and_n_heads(ch)
     self.middle_block: List = [
-      ResBlock(ch, time_embed_dim, ch),
-      SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[-1]),
-      ResBlock(ch, time_embed_dim, ch),
+      ResBlock(ch, time_embed_dim, ch, num_groups),
+      SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[-1], norm_eps=st_norm_eps),
+      ResBlock(ch, time_embed_dim, ch, num_groups),
     ]
 
     self.output_blocks = []
@@ -203,13 +211,13 @@ class UNetModel:
       for i in range(self.num_res_blocks[idx] + 1):
         ich = input_block_channels.pop()
         layers = [
-          ResBlock(ch + ich, time_embed_dim, model_ch*mult),
+          ResBlock(ch + ich, time_embed_dim, model_ch*mult, num_groups),
         ]
         ch = model_ch * mult
 
         if ds in attention_resolutions:
           d_head, n_heads = get_d_and_n_heads(ch)
-          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx]))
+          layers.append(SpatialTransformer(ch, n_heads, d_head, ctx_dim, use_linear, depth=transformer_depth[idx], norm_eps=st_norm_eps))
 
         if idx > 0 and i == self.num_res_blocks[idx]:
           layers.append(Upsample(ch))
@@ -217,7 +225,7 @@ class UNetModel:
         self.output_blocks.append(layers)
 
     self.out = [
-      GroupNorm(32, ch),
+      GroupNorm(num_groups, ch),
       Tensor.silu,
       Conv2d(model_ch, out_ch, 3, padding=1),
     ]
@@ -230,10 +238,10 @@ class UNetModel:
       assert y.shape[0] == x.shape[0]
       emb = emb + y.sequential(self.label_emb[0])
 
-    if is_dtype_supported(dtypes.float16):
-      emb = emb.cast(dtypes.float16)
-      ctx = ctx.cast(dtypes.float16)
-      x   = x  .cast(dtypes.float16)
+    if is_dtype_supported(mixed_precision_dtype):
+      emb = emb.cast(mixed_precision_dtype)
+      ctx = ctx.cast(mixed_precision_dtype)
+      x   = x  .cast(mixed_precision_dtype)
 
     def run(x:Tensor, bb) -> Tensor:
       if isinstance(bb, ResBlock): x = bb(x, emb)

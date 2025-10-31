@@ -307,7 +307,7 @@ class TestDiskTensor(unittest.TestCase):
     ret = t.bitcast(dtypes.uint16).to("CPU") + 1
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
-  @unittest.skipIf(OSX, "new LLVM has an issue on OSX")
+  @unittest.skipIf(OSX or Device.DEFAULT == "CL", "new LLVM has an issue on OSX, CL=1 gives the wrong output")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{temp('dt_bf16_disk_write_read_f32')}").realize()
@@ -318,7 +318,7 @@ class TestDiskTensor(unittest.TestCase):
     with open(temp('dt_bf16_disk_write_read_bf16'), "wb") as f: f.write(adat)
 
     t = Tensor.empty(5, dtype=dtypes.bfloat16, device=f"disk:{temp('dt_bf16_disk_write_read_bf16')}")
-    ct = t.llvm_bf16_cast(dtypes.float)
+    ct = t.to(Device.DEFAULT).cast(dtypes.float)
     assert ct.numpy().tolist() == [9984., -1, -1000, -9984, 20]
 
   def test_copy_from_disk(self):
@@ -418,5 +418,30 @@ class TestPathTensor(unittest.TestCase):
       Tensor(pathlib.Path(test_file)).tolist()
     os.chmod(test_file, 0o644)
     assert Tensor(pathlib.Path(test_file)).tolist(), list(range(10))
+
+class TestDiskTensorMovement(unittest.TestCase):
+  def setUp(self):
+    self.fn = pathlib.Path(temp("custom_disk_range"))
+    self.fn.unlink(missing_ok=True)
+    Tensor.arange(100, dtype=dtypes.uint8).to(f"disk:{str(self.fn)}").realize()
+
+  def test_simple_read(self):
+    t = Tensor(self.fn)
+    self.assertTrue(Tensor.all(t.to(None) == Tensor.arange(100, dtype=dtypes.uint8)).item())
+
+  def test_slice_read(self):
+    t = Tensor(self.fn)
+    self.assertListEqual(t[16:18].tolist(), [16,17])
+
+  def test_slice_read_cat(self):
+    t = Tensor(self.fn)
+    with self.assertRaises(AssertionError):
+      self.assertListEqual(Tensor.cat(t[16:18], t[20:22]).tolist(), [16,17,20,21])
+
+  def test_slice_sum(self):
+    t = Tensor(self.fn)
+    with self.assertRaises(AssertionError):
+      self.assertListEqual((t[16:18]+t[20:22]).tolist(), [16+20,17+21])
+
 if __name__ == "__main__":
   unittest.main()

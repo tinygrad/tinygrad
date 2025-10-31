@@ -7,9 +7,9 @@ from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
-from tinygrad.runtime.ops_gpu import CLCompiler, CLDevice
+from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -289,20 +289,21 @@ class QCOMAllocator(HCQAllocatorBase):
       buf.texture_info = QCOMTextureInfo(pitch, real_stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]])
     return buf
 
-  def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, dest_off=0, src_off=0):
-    while src_off < src_size:
-      ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
-      src_off, dest_off = src_off+src_stride, dest_off+dest_stride
+  def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
+    with cpu_profile(prof_text, self.dev.device, is_copy=True):
+      while src_off < src_size:
+        ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
+        src_off, dest_off = src_off+src_stride, dest_off+dest_stride
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     stride, pitch = (src.nbytes, src.nbytes) if (ti:=cast(QCOMTextureInfo, dest.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(mv_address(src), dest.va_addr, src.nbytes, stride, stride, pitch)
+    self._do_copy(mv_address(src), dest.va_addr, src.nbytes, stride, stride, pitch, f"TINY -> {self.dev.device}")
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
 
     stride, pitch = (src.size, src.size) if (ti:=cast(QCOMTextureInfo, src.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(src.va_addr, mv_address(dest), src.size, stride, pitch, stride)
+    self._do_copy(src.va_addr, mv_address(dest), src.size, stride, pitch, stride, f"{self.dev.device} -> TINY")
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
@@ -341,8 +342,8 @@ class QCOMDevice(HCQCompiled):
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
     if QCOMDevice.gpu_id >= 700: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
-    super().__init__(device, QCOMAllocator(self), QCOMRenderer(), QCOMCompiler(device), functools.partial(QCOMProgram, self),
-                     QCOMSignal, QCOMComputeQueue, None)
+    compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
+    super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal, QCOMComputeQueue, None)
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
     flags |= kgsl.KGSL_MEMALIGN(alignment_hint:=12) | kgsl.KGSL_MEMFLAGS_USE_CPU_MAP

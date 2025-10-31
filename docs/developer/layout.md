@@ -10,7 +10,7 @@ Directories are listed in order of how they are processed.
 
 Group UOps into kernels.
 
-::: tinygrad.schedule.kernelize.get_kernelize_map
+::: tinygrad.schedule.rangeify.get_rangeify_map
     options:
         members: false
         show_labels: false
@@ -21,12 +21,6 @@ Group UOps into kernels.
 ## tinygrad/codegen/opt
 
 Transforms the ast into an optimized ast. This is where BEAM search and heuristics live.
-
-::: tinygrad.codegen.opt.get_optimized_ast
-    options:
-        members: false
-        show_labels: false
-        show_source: false
 
 ---
 

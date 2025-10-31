@@ -1,6 +1,6 @@
 import ctypes, time, contextlib, functools
 from typing import Literal
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
 
@@ -113,7 +113,7 @@ class AM_GMC(AM_IP):
     for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff)
     self.hub_initted[ip] = True
 
-  @functools.cache
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def get_pte_flags(self, pte_lv, is_table, frag, uncached, system, snooped, valid, extra=0):
     extra |= (am.AMDGPU_PTE_SYSTEM * system) | (am.AMDGPU_PTE_SNOOPED * snooped) | (am.AMDGPU_PTE_VALID * valid) | am.AMDGPU_PTE_FRAG(frag)
     if not is_table: extra |= (am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE)
@@ -175,7 +175,7 @@ class AM_SMU(AM_IP):
 
   def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
     self._smu_cmn_send_msg(msg, param, debug=debug)
-    wait_cond(lambda: (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read(), value=1, timeout_ms=timeout,
+    wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
       msg=f"SMU msg {msg:#x} timeout")
     return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
@@ -242,6 +242,7 @@ class AM_GFX(AM_IP):
       cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0, cp_hqd_aql_control=int(aql),
       cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
       cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2))
+    for se in range(8): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
     # Copy mqd into memory
     self.adev.vram.view(mqd.paddrs[0][0], ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
@@ -271,7 +272,7 @@ class AM_GFX(AM_IP):
     self.adev.regSDMA0_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
     self.adev.regSDMA1_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
 
-    self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=0, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
+    self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=1, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
       grbm_cgtt_sclk_override=0, rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0, gfxip_cgcg_override=0)
 
     self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1)
@@ -417,7 +418,8 @@ class AM_PSP(AM_IP):
 
   def _prep_msg1(self, data:memoryview):
     assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
-    self.msg1_view[:len(data)+4] = bytes(data) + b'\x00' * 4
+    padded_data = pad_bytes(bytes(data) + b'\x00' * 4, 16) # HACK: apple's memcpy requires 16-bytes alignment
+    self.msg1_view[:len(padded_data)] = padded_data
     self.adev.gmc.flush_hdp()
 
   def _bootloader_load_component(self, fw:int, compid:int):

@@ -1,6 +1,6 @@
 # stuff needed to unpack a kernel
 from tinygrad import Variable
-from tinygrad.codegen.opt.kernel import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.shape.shapetracker import ShapeTracker
@@ -81,7 +81,7 @@ def lin_to_feats(lin:Kernel, use_sts=True):
   ret = [float(x) for x in ret]
 
   if use_sts:
-    my_sts = dedup([(x.shape == lin.full_shape, x.real_strides(), any(v.mask is not None for v in x.views), len(x.views)) for x in lin.sts])
+    my_sts = dedup([(x.shape == lin.full_shape, x.is_expanded(), any(v.mask is not None for v in x.views), len(x.views)) for x in lin.sts])
     assert len(my_sts) < MAX_BUFS
     sts_len = 3 + 5*MAX_DIMS
     for s in my_sts:
@@ -115,7 +115,7 @@ def time_linearizer(lin:Kernel, rawbufs:list[Buffer], allow_test_size=True, max_
   assert dev.compiler is not None
 
   rawbufs = _ensure_buffer_alloc(rawbufs)
-  var_vals: dict[Variable, int] = {k:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
+  var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in lin.ast.variables()}
   p = get_program(lin.get_optimized_ast(), lin.opts)
   tms = _time_program(p, dev.compiler.compile(p.src), var_vals, rawbufs,
                       max_global_size=max_global_size if allow_test_size else None, clear_l2=clear_l2, cnt=cnt, name=to_function_name(lin.name))

@@ -1,11 +1,12 @@
 import unittest, math
 from tinygrad import dtypes
-from tinygrad.helpers import all_same
+from tinygrad.helpers import all_same, Context
 from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
 from tinygrad.codegen import full_rewrite_to_sink
 from hypothesis import given, strategies as strat
 
 # Helper function to apply the graph rewrite
+@Context(SPEC=0)
 def apply_rewrite(expr):
   return full_rewrite_to_sink(expr.sink()).src[0]
 
@@ -97,26 +98,29 @@ class TestFoldingAndReduction(unittest.TestCase):
 
 class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_full_graph_rewrite_modulo_folding_with_define_var(self):
-    x_var_uop = UOp.variable('x', 0, 100)
+    # index dtype because div-mod rules only work on index
+    x_var_uop = UOp.variable('x', 0, 100).cast(dtypes.index)
     optimized_mod_uop = apply_rewrite(((x_var_uop * 4) + 2) % 4)
     self.assertEqual(optimized_mod_uop.op, Ops.CONST)
     self.assertEqual(optimized_mod_uop.arg, 2)
 
   def test_full_graph_rewrite_division_folding_with_define_var(self):
-    n_var_uop = UOp.variable('n', 1, 1000)
+    # index dtype because div-mod rules only work on index
+    n_var_uop = UOp.variable('n', 1, 1000).cast(dtypes.index)
     optimized_div_uop = apply_rewrite((n_var_uop * 6) // 3)
     self.assertEqual(optimized_div_uop.op, Ops.MUL)
     self.assertEqual(optimized_div_uop.src[1].arg, 2)
 
   def test_full_graph_rewrite_complex_mod_div_folding(self):
-    k_var_uop = UOp.variable('k', 0, 50)
+    # index dtype because div-mod rules only work on index
+    k_var_uop = UOp.variable('k', 0, 50).cast(dtypes.index)
     optimized_div_uop = apply_rewrite(((k_var_uop * 12 + 8) % 6) // 2)
     self.assertEqual(optimized_div_uop.op, Ops.CONST)
     self.assertEqual(optimized_div_uop.arg, 1)
 
   def test_graph_rewrite_div_folding_bug(self):
     lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
-      UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg=('lidx0', 32), src=()),)*4),
+      UOp(Ops.VECTORIZE, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg='lidx0', src=(UOp.const(dtypes.int, 32),)),)*4),
       UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
     rhs = UOp.const(dtypes.int.vec(4), 2)
     unopt = lhs<rhs
@@ -126,8 +130,9 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
     if opt.op is Ops.VECTORIZE: self.assertFalse(all_same(opt.src))
 
   def test_full_graph_rewrite_modulo_large_divisor(self):
+    # index dtype because div-mod rules only work on index
     x_var_uop = UOp.variable('x', 1, 5)
-    self.assertIs(apply_rewrite(x_var_uop % 10), x_var_uop)
+    self.assertIs(apply_rewrite(x_var_uop.cast(dtypes.index) % 10).render(simplify=False), x_var_uop.render(simplify=False))
 
   def test_full_graph_rewrite_division_with_remainder(self):
     x_var_uop = UOp.variable('x', 7, 9)
@@ -301,19 +306,19 @@ class TestRecurse(unittest.TestCase):
     graph_rewrite(a, pm, bottom_up=True)
 
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.const(dtypes.int, 3)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
-      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
 
   def test_inf_loop_bottom_up(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.const(dtypes.int, 3)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
-      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
@@ -329,6 +334,20 @@ class TestBidirectional(unittest.TestCase):
     ctx_list = []
     graph_rewrite(c, pm, ctx=ctx_list, bpm=bpm)
     self.assertListEqual(ctx_list, [('+', True), (1, True), (1, False), (2, True), (2, False), ('+', False)])
+
+class TestStopEarly(unittest.TestCase):
+  def test_stop_early(self):
+    a = UOp.const(dtypes.int, 3)
+    b = UOp.const(dtypes.int, 4)
+    c = a+b
+    cn = UOp.const(dtypes.int, 7)
+    d = UOp.const(dtypes.int, 2)
+    def visit_const(c:UOp):
+      print(f"visit {c.arg}")
+      assert c.arg not in (3,4)
+    pm_cvisit = PatternMatcher([(UPat(Ops.CONST, name="c"), visit_const),])
+    ret = (c+d).substitute({c:cn}, extra_pm=pm_cvisit)
+    assert ret == cn+d
 
 if __name__ == '__main__':
   unittest.main()

@@ -155,6 +155,10 @@ class RGP:
       device_event = device_events[device]
     sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
+    device_props = sqtt_events[0].props
+    gfx_ver = device_props['gfx_target_version'] // 10000
+    gfx_iplvl = getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}_{(device_props['gfx_target_version']//100)%100}",
+                        getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}", None))
     sqtt_itrace_enabled = any([event.itrace for event in sqtt_events])
     sqtt_itrace_masked = not all_same([event.itrace for event in sqtt_events])
     sqtt_itrace_se_mask = functools.reduce(lambda a,b: a|b, [int(event.itrace) << event.se for event in sqtt_events], 0) if sqtt_itrace_masked else 0
@@ -192,21 +196,21 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id=0x744c,
+        device_id={110000: 0x744c, 110003: 0x7480, 120001: 0x7550}[device_props['gfx_target_version']],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
-        shader_engines=6,
-        compute_unit_per_shader_engine=16,
-        simd_per_compute_unit=2,
-        wavefronts_per_simd=16,
+        shader_engines=device_props['array_count'] // device_props['simd_arrays_per_engine'],
+        compute_unit_per_shader_engine=device_props['simd_count'] // device_props['simd_per_cu'] // (device_props['array_count'] // device_props['simd_arrays_per_engine']),
+        simd_per_compute_unit=device_props['simd_per_cu'],
+        wavefronts_per_simd=device_props['max_waves_per_simd'],
         minimum_vgpr_alloc=4,
         vgpr_alloc_granularity=8,
         minimum_sgpr_alloc=128,
         sgpr_alloc_granularity=128,
         hardware_contexts=8,
         gpu_type=sqtt.SQTT_GPU_TYPE_DISCRETE,
-        gfxip_level=sqtt.SQTT_GFXIP_LEVEL_GFXIP_11_0,
+        gfxip_level=gfx_iplvl,
         gpu_index=0,
         gds_size=0,
         gds_per_shader_engine=0,
@@ -218,7 +222,7 @@ class RGP:
         vram_bus_width=384, # 384-bit
         l2_cache_size=6 * 1024 * 1024, # 6 MB
         l1_cache_size=32 * 1024, # 32 KB per SIMD (?)
-        lds_size=65536, # 64 KB per CU
+        lds_size=device_props['lds_size_in_kb'] * 1024,
         gpu_name=b'NAVI31',
         alu_per_clock=0,
         texture_per_clock=0,
@@ -257,7 +261,7 @@ class RGP:
             major_version=0, minor_version=2,
           ),
           shader_engine_index=sqtt_event.se,
-          sqtt_version=sqtt.SQTT_VERSION_3_2,
+          sqtt_version={11: sqtt.SQTT_VERSION_3_2, 12: sqtt.SQTT_VERSION_3_3}.get(gfx_ver),
           _0=sqtt.union_sqtt_file_chunk_sqtt_desc_0(
             v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
               instrumentation_spec_version=1,

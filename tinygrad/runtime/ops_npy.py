@@ -8,4 +8,4 @@ class NpyAllocator(Allocator['NpyDevice']):
   def _copyout(self, dest:memoryview, src:np.ndarray): dest[:] = self._as_buffer(src)
 
 class NpyDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, NpyAllocator(self), None, None, None)
+  def __init__(self, device:str): super().__init__(device, NpyAllocator(self), None, None)

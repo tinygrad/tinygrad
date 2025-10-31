@@ -50,7 +50,7 @@ class TestBeamSearch(unittest.TestCase):
   def test_variable_shrink_prime_number(self):
     v = Variable("v", 1, 400).bind(367)
     a = rand(400, 367)
-    b = (a.shrink(((0,v), None))+1).reshape(367,367).realize()
+    b = (a.shrink(((0,v), None))+1)[:367,:367].realize()
     np.testing.assert_allclose(b.numpy(), a.numpy()[:367]+1, atol=1e-4, rtol=1e-4)
 
   def test_no_mutate_rawbuffers(self):

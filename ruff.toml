@@ -51,3 +51,6 @@ exclude = [
   "W291", "W293", "UP039", "C416", "RET506", "RET507", "A",
   "FURB110", "RUF018", "F541", "F841"
 ]
+
+[format]
+exclude = ["*"]

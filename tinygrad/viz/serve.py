@@ -5,47 +5,42 @@ from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
-from typing import Any, TypedDict, Generator
-from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent
-from tinygrad.uop.ops import TrackedGraphRewrite, UOp, Ops, printable, GroupOp, srender, sint, sym_infer
+from typing import Any, TypedDict, TypeVar, Generator, Callable
+from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
+from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str, pyrender
+from tinygrad.uop.ops import print_uops, range_start
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
-from tinygrad.codegen.opt.kernel import axis_colors
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
+               Ops.DEFINE_GLOBAL:"#cb9037", **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.VIEW: "#C8F9D4", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
-               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80", Ops.BUFFER_VIEW: "#E5EAFF",
-               Ops.BLOCK: "#C4A484", Ops.BLOCKEND: "#C4A4A4", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
+               Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
+               **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
+               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
-               Ops.CHILDREN: "#80ffc0", Ops.CHILD: "#80fff0", Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e"}
+               Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
 
 # VIZ API
 
-# ** Metadata for a track_rewrites scope
+# ** list all saved rewrites
 
 ref_map:dict[Any, int] = {}
-traces:dict[int, tuple] = {}
-def get_metadata(trace_bufs:list[tuple]) -> list[dict]:
+def get_rewrites(t:RewriteTrace) -> list[dict]:
   ret = []
-  for keys,contexts,uop_fields in trace_bufs:
-    for k,v in zip(keys, contexts):
-      traces[i:=len(traces)] = (k, v, uop_fields)
-      steps = [{"name":s.name, "loc":s.loc, "depth":s.depth, "match_count":len(s.matches), "code_line":printable(s.loc),
-                "query":f"/ctxs?ctx={i}&idx={j}"} for j,s in enumerate(v)]
-      ret.append(r:={"name":k.display_name, "steps":steps})
-      # use the first key to get runtime profiling data about this context
-      if getenv("PROFILE_VALUE") >= 2 and k.keys: r["runtime_stats"] = get_runtime_stats(k.keys[0])
-      # program spec metadata
-      if isinstance(k.ret, ProgramSpec):
-        steps.append({"name":"View Disassembly", "query":f"/disasm?ctx={i}"})
-        r["fmt"] = k.ret.src
-      for key in k.keys: ref_map[key] = i
+  for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
+    steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc),
+              "query":f"/ctxs?ctx={i}&idx={j}", "depth":s.depth} for j,s in enumerate(v)]
+    if isinstance(k.ret, ProgramSpec):
+      steps.append({"name":"View UOp List", "query":f"/render?ctx={i}&fmt=uops", "depth":0})
+      steps.append({"name":"View Program", "query":f"/render?ctx={i}&fmt=src", "depth":0})
+      steps.append({"name":"View Disassembly", "query":f"/render?ctx={i}&fmt=asm", "depth":0})
+    for key in k.keys: ref_map[key] = i
+    ret.append({"name":k.display_name, "steps":steps})
   return ret
 
-# ** Complete rewrite details for a graph_rewrite call
+# ** get the complete UOp graphs for one rewrite
 
 class GraphRewriteDetails(TypedDict):
   graph: dict                            # JSON serialized UOp for this rewrite step
@@ -56,6 +51,9 @@ class GraphRewriteDetails(TypedDict):
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
+def pystr(u:UOp, i:int) -> str:
+  try: return pyrender(u)
+  except Exception: return str(u)
 
 def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
@@ -64,50 +62,57 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   for u in (toposort:=x.toposort()):
     # always exclude DEVICE/CONST/UNIQUE
     if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
-    # only exclude CONST VIEW source if it has no other children in the graph
-    if u.op is Ops.CONST and len(u.src) != 0 and all(cr.op is Ops.CONST for c in u.src[0].children if (cr:=c()) is not None and cr in toposort):
-      excluded.update(u.src)
+    if u.op is Ops.VCONST and u.dtype.scalar() == dtypes.index and u is not x: excluded.add(u)
   for u in toposort:
     if u in excluded: continue
     argst = codecs.decode(str(u.arg), "unicode_escape")
-    if u.op is Ops.VIEW:
-      argst = ("\n".join([f"{shape_to_str(v.shape)} / {shape_to_str(v.strides)}"+("" if v.offset == 0 else f" / {srender(v.offset)}")+
-                          (f"\nMASK {mask_to_str(v.mask)}" if v.mask is not None else "") for v in unwrap(u.st).views]))
+    if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
+    if u.op is Ops.KERNEL:
+      ast_str = f"SINK{tuple(s.op for s in u.arg.ast.src)}" if u.arg.ast.op is Ops.SINK else repr(u.arg.ast.op)
+      argst = f"<Kernel {len(list(u.arg.ast.toposort()))} {ast_str} {[str(m) for m in u.arg.metadata]}>"
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
-    for idx,x in enumerate(u.src):
+    for idx,x in enumerate(u.src[:1] if u.op in {Ops.BUFFERIZE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
       if x in excluded:
-        arg = f"{x.arg:g}" if x.op is Ops.CONST and dtypes.is_float(u.dtype) else f"{x.arg}"
+        arg = f"{x.arg:g}" if x.op is Ops.CONST and dtypes.is_float(x.dtype) else f"{x.arg}"
         label += f"\n{x.op.name}{idx} {arg}" + (f" {x.src[0].op}" if len(x.src) else "")
     try:
-      if u.op not in {Ops.VIEW, Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u.st is not None:
+      if len(rngs:=u.ranges):
+        label += f"\n({','.join([range_str(x, color=True) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
+      if u.op not in {Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
-      elif len(rngs:=u.ranges):
-        label += f"\n({','.join([colored(str(x.arg[0]), axis_colors[x.arg[-1]]) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
+      if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
+        label += f"\n{u.render()}"
+      if u.op in {Ops.END, Ops.REDUCE} and len(trngs:=list(UOp.sink(*u.src[range_start[u.op]:]).ranges)):
+        label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+str(u.metadata)
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src) if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":ref, "tag":u.tag}
+                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None}
   return graph
 
 @functools.cache
-def _reconstruct(a:int, i:int):
-  op, dtype, src, arg, *rest = traces[i][2][a]
-  arg = type(arg)(_reconstruct(arg.ast, i), arg.metadata) if op is Ops.KERNEL else arg
-  return UOp(op, dtype, tuple(_reconstruct(s, i) for s in src), arg, *rest)
+def _reconstruct(a:int):
+  op, dtype, src, arg, *rest = trace.uop_fields[a]
+  arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
+  return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
 
-def get_details(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
-  yield {"graph":uop_to_json(next_sink:=_reconstruct(ctx.sink, i)), "uop":str(next_sink), "changed_nodes":None, "diff":None, "upat":None}
+def get_full_rewrite(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
+  next_sink = _reconstruct(ctx.sink)
+  # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
+  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0_num,u1_num,upat_loc in tqdm(ctx.matches):
-    replaces[u0:=_reconstruct(u0_num, i)] = u1 = _reconstruct(u1_num, i)
+  for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
+    replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
-    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":str(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(str(u0).splitlines(), str(u1).splitlines())), "upat":(upat_loc, printable(upat_loc))}
+    match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
+    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink,i),
+           "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
+           "diff":list(difflib.unified_diff(pystr(u0,i).splitlines(),pystr(u1,i).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
 # encoder helpers
@@ -138,38 +143,53 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
-  exec_points:dict[str, dict] = {}
+  exec_points:dict[str, ProfilePointEvent] = {}
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.key] = e.arg
+    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
     if dur == 0: continue
-    name, info = e.name, None
+    name, info, key = e.name, None, None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
-      if isinstance(p:=traces[ref][0].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
-        info = f"{sym_infer(p.estimates.ops, ei['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei['var_vals'])/t:4.1f}"+ \
-               f"|{sym_infer(p.estimates.lds,ei['var_vals'])/t:.1f} GB/s\n{ei['metadata']}"
+      if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
+        info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
+               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{[str(m) for m in (ei.arg['metadata'] or ())]}"
+        key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    events.append(struct.pack("<IIIfI", enum_str(name, scache), option(ref), st-start_ts, dur, enum_str(info or "", scache)))
+    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), st-start_ts, dur, enum_str(info or "", scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
+
+def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
+  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u8, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
+  for e in execs:
+    num = next(i for i,k in enumerate(e.arg["bufs"]) if k == key)
+    mode = 2 if (num in e.arg["inputs"] and num in e.arg["outputs"]) else 1 if (num in e.arg["outputs"]) else 0
+    ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
+  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIBB", *t) for t in ei_encoding)
 
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
   peak, mem = 0, 0
   temp:dict[int, int] = {}
   events:list[bytes] = []
+  buf_ei:dict[int, list[ProfilePointEvent]] = {}
+
   for st,_,_,e in dev_events:
     if not isinstance(e, ProfilePointEvent): continue
     if e.name == "alloc":
-      events.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), e.arg["sz"]))
+      safe_sz = min(1_000_000_000_000, e.arg["sz"])
+      events.append(struct.pack("<BIIIQ", 1, int(e.ts)-start_ts, e.key, enum_str(e.arg["dtype"].name, scache), safe_sz))
       dtype_size.setdefault(e.arg["dtype"].name, e.arg["dtype"].itemsize)
-      temp[e.key] = nbytes = e.arg["sz"]*e.arg["dtype"].itemsize
+      temp[e.key] = nbytes = safe_sz*e.arg["dtype"].itemsize
       mem += nbytes
       if mem > peak: peak = mem
+    if e.name == "exec" and e.arg["bufs"]:
+      for b in e.arg["bufs"]: buf_ei.setdefault(b, []).append(e)
     if e.name == "free":
-      events.append(struct.pack("<BII", 0, int(e.ts)-start_ts, e.key))
+      events.append(encode_mem_free(e.key, int(e.ts) - start_ts, buf_ei.pop(e.key, []), scache))
       mem -= temp.pop(e.key)
+  for t in temp: events.append(encode_mem_free(t, end_ts-start_ts, buf_ei.pop(t, []), scache))
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
@@ -179,12 +199,14 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
+  markers:list[ProfilePointEvent] = []
   start_ts:int|None = None
   end_ts:int|None = None
   for ts,en,e in flatten_events(profile):
     dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
     if start_ts is None or st < start_ts: start_ts = st
     if end_ts is None or et > end_ts: end_ts = et
+    if isinstance(e, ProfilePointEvent) and e.name == "marker": markers.append(e)
   if start_ts is None: return None
   # return layout of per device events
   layout:dict[str, bytes|None] = {}
@@ -195,16 +217,10 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
-  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in layout.items() if v is not None]
-  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size}).encode()
+  groups = sorted(layout.items(), key=lambda x: '' if len(ss:=x[0].split(" ")) == 1 else ss[1])
+  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in groups if v is not None]
+  index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
-
-def get_runtime_stats(key) -> list[dict]:
-  ret:list[dict] = []
-  for e in profile:
-    if isinstance(e, ProfileRangeEvent) and e.en is not None and e.name == key:
-      ret.append({"device":e.device, "data":[{"name":"Duration", "value":float(e.en-e.st), "unit":"us"}]})
-  return ret
 
 # ** Assembly analyzers
 
@@ -213,7 +229,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
   data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
   cr = data["CodeRegions"][0]
-  resource_labels = data["TargetInfo"]["Resources"]
+  resource_labels = [repr(x)[1:-1] for x in data["TargetInfo"]["Resources"]]
   rows:list = [[instr] for instr in cr["Instructions"]]
   # add scheduler estimates
   for info in cr["InstructionInfoView"]["InstructionList"]: rows[info["Instruction"]].append(info["Latency"])
@@ -228,20 +244,27 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
-def get_disassembly(ctx:list[str]):
-  if not isinstance(prg:=traces[int(ctx[0])][0].ret, ProgramSpec): return
+def get_stdout(f:Callable) -> str:
+  with redirect_stdout(buf:=io.StringIO()): f()
+  return buf.getvalue()
+
+def get_render(i:int, fmt:str) -> dict|None:
+  if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}
+  if fmt == "src": return {"src":prg.src, "lang":"cpp"}
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
-  with redirect_stdout(buf:=io.StringIO()): compiler.disassemble(lib)
-  disasm_str = buf.getvalue()
-  from tinygrad.runtime.ops_llvm import llvm, LLVMCompiler
+  disasm_str = get_stdout(lambda: compiler.disassemble(lib))
+  from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
   if isinstance(compiler, LLVMCompiler):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
     ret = get_llvm_mca(disasm_str, mtriple, mcpu)
-  else: ret = {"src":disasm_str}
-  return json.dumps(ret).encode()
+  else: ret = {"src":disasm_str, "lang":"x86asm"}
+  return ret
 
 # ** HTTP server
+
+def get_int(query:dict[str, list[str]], k:str) -> int: return int(query[k][0])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -256,8 +279,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/disasm": ret, content_type = get_disassembly(**query), "application/json"
-      else: return self.stream_json(get_details(traces[i:=int(query["ctx"][0])][1][int(query["idx"][0])], i))
+      if url.path == "/render": ret, content_type = json.dumps(get_render(get_int(query, "ctx"), query["fmt"][0])).encode(), "application/json"
+      else:
+        try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
+        except (KeyError, IndexError): status_code = 404
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
@@ -292,8 +317,9 @@ def reloader():
       os.execv(sys.executable, [sys.executable] + sys.argv)
     time.sleep(0.1)
 
-def load_pickle(path:pathlib.Path|None) -> list:
-  if path is None or not path.exists(): return []
+T = TypeVar("T")
+def load_pickle(path:pathlib.Path, default:T) -> T:
+  if not path.exists(): return default
   with path.open("rb") as f: return pickle.load(f)
 
 # NOTE: using HTTPServer forces a potentially slow socket.getfqdn
@@ -301,8 +327,8 @@ class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=None)
-  parser.add_argument('--profile', type=pathlib.Path, help='Path profile', default=None)
+  parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -313,9 +339,8 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_metadata(load_pickle(args.kernels))
-
-  profile_ret = get_profile(profile:=load_pickle(args.profile))
+  ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
+  profile_ret = get_profile(load_pickle(args.profile, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
