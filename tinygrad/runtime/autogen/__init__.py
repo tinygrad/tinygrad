@@ -38,7 +38,8 @@ def __getattr__(nm):
   root/"extra/nv_gpu_driver/gsp_static_config.h",root/"extra/nv_gpu_driver/vbios.h"],["-DRPC_MESSAGE_STRUCTURES","-DRPC_STRUCTURES",
   "-I{}/src/nvidia/generated","-I{}/src/common/inc","-I{}/src/nvidia/inc","-I{}/src/nvidia/interface/","-I{}/src/nvidia/inc/kernel",
   "-I{}/src/nvidia/inc/libraries","-I{}/src/nvidia/arch/nvalloc/common/inc","-I{}/kernel-open/nvidia-uvm","-I{}/kernel-open/common/inc",
-  "-I{}/src/common/sdk/nvidia/inc","-I{}/src/nvidia/arch/nvalloc/unix/include","-I{}/src/common/sdk/nvidia/inc/ctrl"],tarball=nv_src)
+  "-I{}/src/common/sdk/nvidia/inc","-I{}/src/nvidia/arch/nvalloc/unix/include","-I{}/src/common/sdk/nvidia/inc/ctrl"],tarball=nv_src,
+  anon_names={"{}/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h:8":"rpc_fns","{}/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h:244":"rpc_events"})
     # this defines all syscall numbers. should probably unify linux autogen?
     case "io_uring": return load("io_uring",[],["/usr/include/liburing.h","/usr/include/linux/io_uring.h","/usr/include/asm-generic/unistd.h"],
                                  rules=[('__NR','NR')])

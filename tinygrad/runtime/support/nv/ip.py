@@ -68,8 +68,8 @@ class NVRpcQueue:
       System.memory_barrier()
 
       if DEBUG >= 3:
-        rpc_names = {**nv.c__Ea_NV_VGPU_MSG_FUNCTION_NOP__enumvalues, **nv.c__Ea_NV_VGPU_MSG_EVENT_FIRST_EVENT__enumvalues}
-        print(f"nv {self.gsp.nvdev.devfmt}: in RPC: {rpc_names.get(hdr.function, f'ev:{hdr.function:x}')}, res:{hdr.rpc_result:#x}")
+        nm = nv.rpc_fns.get(hdr.function, nv.rpc_events.get(hdr.function, f'ev:{hdr.function:x}'))
+        print(f"nv {self.gsp.nvdev.devfmt}: in RPC: {nm}, res:{hdr.rpc_result:#x}")
 
       if hdr.rpc_result != 0: raise RuntimeError(f"RPC call {hdr.function} failed with result {hdr.rpc_result}")
       if hdr.function == cmd: return msg
