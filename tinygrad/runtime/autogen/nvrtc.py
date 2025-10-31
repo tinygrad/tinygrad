@@ -2,13 +2,11 @@
 import ctypes
 from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-
-def _dll():
+def dll():
   try: return ctypes.CDLL(find_library('nvrtc'))
   except: pass
   return None
-dll = _dll()
-
+dll = dll()
 nvrtcResult = CEnum(ctypes.c_uint)
 NVRTC_SUCCESS = nvrtcResult.define('NVRTC_SUCCESS', 0)
 NVRTC_ERROR_OUT_OF_MEMORY = nvrtcResult.define('NVRTC_ERROR_OUT_OF_MEMORY', 1)

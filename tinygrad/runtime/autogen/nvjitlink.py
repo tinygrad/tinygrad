@@ -2,13 +2,11 @@
 import ctypes
 from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-
-def _dll():
+def dll():
   try: return ctypes.CDLL(find_library('nvJitLink'))
   except: pass
   return None
-dll = _dll()
-
+dll = dll()
 nvJitLinkResult = CEnum(ctypes.c_uint)
 NVJITLINK_SUCCESS = nvJitLinkResult.define('NVJITLINK_SUCCESS', 0)
 NVJITLINK_ERROR_UNRECOGNIZED_OPTION = nvJitLinkResult.define('NVJITLINK_ERROR_UNRECOGNIZED_OPTION', 1)

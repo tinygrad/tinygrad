@@ -2,13 +2,11 @@
 import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support.llvm import LLVM_PATH
-
-def _dll():
+def dll():
   try: return ctypes.CDLL(LLVM_PATH)
   except: pass
   return None
-dll = _dll()
-
+dll = dll()
 class struct_LLVMOpaqueError(ctypes.Structure): pass
 struct_LLVMOpaqueError._fields_ = []
 LLVMErrorRef = ctypes.POINTER(struct_LLVMOpaqueError)

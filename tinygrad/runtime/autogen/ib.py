@@ -1,13 +1,11 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-
-def _dll():
+def dll():
   try: return ctypes.CDLL(ibverbs, use_errno=True)
   except: pass
   return None
-dll = _dll()
-
+dll = dll()
 class union_ibv_gid(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte
 class union_ibv_gid_global(ctypes.Structure): pass
@@ -3470,7 +3468,6 @@ IBV_DEVICE_PCI_WRITE_END_PADDING = (1 << 36)
 ibv_query_port = lambda context,port_num,port_attr: ___ibv_query_port(context, port_num, port_attr)
 ibv_reg_mr = lambda pd,addr,length,access: __ibv_reg_mr(pd, addr, length, access, __builtin_constant_p( ((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0))
 ibv_reg_mr_iova = lambda pd,addr,length,iova,access: __ibv_reg_mr_iova(pd, addr, length, iova, access, __builtin_constant_p( ((access) & IBV_ACCESS_OPTIONAL_RANGE) == 0))
-ETHERNET_LL_SIZE = 6
 IB_ROCE_UDP_ENCAP_VALID_PORT_MIN = (0xC000)
 IB_ROCE_UDP_ENCAP_VALID_PORT_MAX = (0xFFFF)
 IB_GRH_FLOWLABEL_MASK = (0x000FFFFF)
