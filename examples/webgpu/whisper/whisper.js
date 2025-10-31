@@ -12,9 +12,6 @@ const TOK_NOSPEECH = 50361;
 const TOK_TS_FIRST = 50363;
 const TOK_TS_LAST = 51863;
 
-// TODO(irwin): should be read from model_metadata.json
-const MODEL_BATCH_SIZE_HARDCODED = 1;
-
 // TODO(irwin): remove or allow setting those from outside
 const NO_TIMESTAMPS = true;
 const NO_CONTEXT = true;
@@ -616,7 +613,6 @@ export {
     TOK_TS_LAST,
     MAX_TOKENS_TO_DECODE,
 
-    MODEL_BATCH_SIZE_HARDCODED,
     NO_TIMESTAMPS,
     NO_CONTEXT,
     SUPPRESS_NONSPEECH_TOKENS,
