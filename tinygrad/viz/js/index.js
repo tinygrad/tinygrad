@@ -658,7 +658,12 @@ async function main() {
         if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({
+    "currentCtx": 2,
+    "currentStep": 0,
+    "currentRewrite": 0,
+    "expandSteps": true
+});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -737,8 +742,12 @@ async function main() {
   if (ret.length === 0) return;
   renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
   // ** right sidebar code blocks
+  const label = d3.create("label").attr("for", "show-ranges").text("Show ranges (r)");
+  const rangeToggle = d3.create("input").attr("type", "checkbox").attr("id", "show-ranges").property("checked", false).on("change", e => {
+    console.log("checked:", e.target.checked)
+  }).node();
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
-  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  metadata.replaceChildren(rangeToggle, label.node(), codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -854,6 +863,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key == " ") {
     event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();
+  }
+  // r key toggles ranges
+  if (event.key === "r") {
+    const rangeToggle = document.getElementById("show-ranges");
+    rangeToggle.checked = !rangeToggle.checked;
+    rangeToggle.dispatchEvent(new Event("change"));
   }
 });
 
