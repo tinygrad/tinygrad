@@ -52,9 +52,12 @@ movement_ops = PatternMatcher([
   # inputs to movement ops
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
+
+  # AFTER on Movement Op
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
 ])
 
-tensor_spec = movement_ops+PatternMatcher([
+tensor_spec = PatternMatcher([
   # buffer spec
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
@@ -106,7 +109,7 @@ tensor_spec = movement_ops+PatternMatcher([
 
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
-])+shared_spec
+])+movement_ops+shared_spec
 
 # ***** UOp spec in codegen shared between kernel and program *****
 
@@ -154,10 +157,7 @@ shared_codegen_spec = PatternMatcher([
 
 # ***** UOp spec in kernel graph *****
 
-kernel_spec = movement_ops+PatternMatcher([
-  # AFTER on Movement Op
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
-
+kernel_spec = PatternMatcher([
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
 
@@ -169,7 +169,7 @@ kernel_spec = movement_ops+PatternMatcher([
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
-])+shared_codegen_spec+shared_spec
+])+movement_ops+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in linearized programs *****
 
