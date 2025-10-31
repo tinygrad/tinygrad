@@ -11,8 +11,9 @@ def try_number(name:str, prev:str) -> int|float|str:
     try: num = int(f) if (f:=float(x)).is_integer() else f
     except ValueError: return prev
   assert num is not None
-  # TODO: there's probably more like this
-  if "[Kbyte]" in name: num = num*1e3
+  if "byte]" in name:
+    x = name.split(" ")[1].split("byte")[0][-1].replace("[", "").strip()
+    if x: num *= {"G":1e9, "M":1e6, "K":1e3}[x]
   return num
 
 def load_custom(fp:str, ctxs:list[dict]):
@@ -22,7 +23,7 @@ def load_custom(fp:str, ctxs:list[dict]):
     for row in reader:
       name, *rest = row.values()
       if not counters: counters = [{} for _ in range(len(rest))]
-      for i,x in enumerate(rest): counters[i][name] = try_number(name, x)
-  steps = [{"name":x["Function Name"], "depth":0, "data":{"src":json.dumps(counters[i], indent=2), "lang":"txt", "device":"CUDA"},
+      for i,x in enumerate(rest): counters[i][name.split(" ")[0]] = try_number(name, x)
+  steps = [{"name":x["Function"], "depth":0, "data":{"src":json.dumps(counters[i], indent=2), "lang":"txt", "device":"CUDA"},
             "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(counters)]
   ctxs.append({"name":"Counters", "steps":steps})

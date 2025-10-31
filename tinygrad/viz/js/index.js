@@ -156,19 +156,19 @@ const ncu_counters = {
     "Kernel <-> Global": {"unit":"inst", "keys":[
       "sass__inst_executed_global_loads [inst]",
       "sass__inst_executed_global_stores [inst]",
-      "smsp__inst_executed_op_generic_atom_dot_alu.sum [inst]",
-      "smsp__inst_executed_op_generic_atom_dot_cas.sum [inst]",
+      "smsp__inst_executed_op_generic_atom_dot_alu.sum",
+      "smsp__inst_executed_op_generic_atom_dot_cas.sum",
       "smsp__inst_executed_op_global_red.sum [inst]",
     ]},
     "Kernel <-> Local": {"unit":"inst", "keys":[
-      "sass__inst_executed_local_loads [inst]",
-      "sass__inst_executed_local_stores [inst]",
+      "sass__inst_executed_local_loads",
+      "sass__inst_executed_local_stores",
     ]},
     "Kernel <-> Shared": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_loads [inst]",
-      "sass__inst_executed_shared_stores [inst]",
-      "smsp__inst_executed_op_shared_atom.sum [inst]",
-      "smsp__inst_executed_op_ldsm.sum [inst]",
+      "sass__inst_executed_shared_loads",
+      "sass__inst_executed_shared_stores",
+      "smsp__inst_executed_op_shared_atom.sum",
+      "smsp__inst_executed_op_ldsm.sum",
     ]},
     "Global <- L1 Cache": {"unit":"req", "keys":[
       "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
@@ -187,34 +187,34 @@ const ncu_counters = {
       "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
     ]},
     "Shared <- Shared Memory": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_loads [inst]",
-      "smsp__inst_executed_op_shared_atom.sum [inst]",
-      "smsp__inst_executed_op_ldsm.sum [inst]",
+      "sass__inst_executed_shared_loads",
+      "smsp__inst_executed_op_shared_atom.sum",
+      "smsp__inst_executed_op_ldsm.sum",
     ]},
     "Shared -> Shared Memory": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_stores [inst]",
-      "smsp__inst_executed_op_shared_atom.sum [inst]",
+      "sass__inst_executed_shared_stores",
+      "smsp__inst_executed_op_shared_atom.sum",
     ]},
     "L1 Hit Rate (%)": {"unit":"%", "keys":[
-      "l1tex__t_sector_hit_rate.pct [%]",
+      "l1tex__t_sector_hit_rate.pct",
     ]},
     "L2 Hit Rate (%)": {"unit":"%", "keys":[
-      "lts__t_sector_hit_rate.pct [%]",
+      "lts__t_sector_hit_rate.pct",
     ]},
     "L1 Cache <- L2 Cache (bytes)": {"unit":"bytes", "keys":[
-      "l1tex__m_xbar2l1tex_read_bytes.sum [Kbyte]",
+      "l1tex__m_xbar2l1tex_read_bytes.sum",
     ]},
     "L1 Cache -> L2 Cache (bytes)": {"unit":"bytes", "keys":[
-      "l1tex__m_l1tex2xbar_write_bytes.sum [Kbyte]",
+      "l1tex__m_l1tex2xbar_write_bytes.sum",
     ]},
     "L1 -> Shared (bytes)": {"unit":"bytes", "keys":[
-      ["sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum [sector]", 32],
+      ["sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum", 32],
     ]},
     "L2 Cache <- Device Memory (bytes)": {"unit":"bytes", "keys":[
-      "dram__bytes_read.sum [Kbyte]",
+      "dram__bytes_read.sum",
     ]},
     "L2 Cache -> Device Memory (bytes)": {"unit":"bytes", "keys":[
-      "dram__bytes_write.sum [byte]",
+      "dram__bytes_write.sum",
     ]},
   },
   units: [
@@ -828,8 +828,8 @@ async function main() {
         if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
       }
     }
-    // return setState({ currentCtx:-1 });
-    return setState({ "currentCtx": 3, "currentStep": 14, "currentRewrite": 0, "expandSteps": true });
+    return setState({ currentCtx:-1 });
+    // return setState({ "currentCtx": 3, "currentStep": 11, "currentRewrite": 0, "expandSteps": true });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
