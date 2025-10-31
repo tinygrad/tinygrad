@@ -18,7 +18,7 @@ if __name__ == "__main__":
 
   prg = device.runtime(kernel_name, lib)
   if getenv("MATMUL2"):
-    prg.smem = 16384 * 2
+    prg.smem = 16384
   else:
     prg.smem = 10000
 
