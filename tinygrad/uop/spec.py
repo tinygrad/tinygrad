@@ -160,7 +160,7 @@ shared_codegen_spec = PatternMatcher([
 
 # ***** UOp spec in kernel graph *****
 
-kernel_spec = movement_ops+PatternMatcher([
+kernel_spec = PatternMatcher([
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
 
@@ -172,7 +172,7 @@ kernel_spec = movement_ops+PatternMatcher([
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
-])+shared_codegen_spec+shared_spec
+])+movement_ops+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in linearized programs *****
 
