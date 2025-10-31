@@ -155,6 +155,10 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+
+    # no ranges on kernels, they are internal
+    if x.op is Ops.KERNEL: continue
+
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
 
@@ -249,9 +253,6 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         if realized_ranges is not None and i in realized_ranges: rng = colored(rng, "yellow")
         disp.append("["+rng+"]")
       print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}", ''.join(disp))
-
-    # no ranges on kernels, they are internal
-    if x.op is Ops.KERNEL: continue
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
