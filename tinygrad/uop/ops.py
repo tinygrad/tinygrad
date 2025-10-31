@@ -774,11 +774,11 @@ class UOp(MathTrait, metaclass=UOpMetaClass):
   def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]=()) -> UOp:
     return self.src[0].after(self.store(UOp.const(self.dtype, val) if not isinstance(val, UOp) else val).end(*argfix(end)))
 
-  def custom_kernel(*srcs:UOp, fxn:Callable) -> list[UOp]:
+  def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
-    base_srcs = tuple(x.contiguous().base for x in srcs)
-    kernel = UOp(Ops.KERNEL, src=base_srcs, arg=Kernel(fxn(*placeholders)))
-    return [s.after(kernel) for s in base_srcs]
+    contig_srcs = tuple(x.contiguous() for x in srcs)
+    kernel = UOp(Ops.KERNEL, src=tuple(x.base for x in contig_srcs), arg=Kernel(fxn(*placeholders), grad_fxn=grad_fxn))
+    return [s.after(kernel) for s in contig_srcs]
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -794,6 +794,7 @@ class KernelInfo:
 class Kernel:
   ast: UOp
   metadata: tuple[Metadata, ...] = ()
+  grad_fxn: Callable|None = None
 
 # ******** ops in python ********
 
