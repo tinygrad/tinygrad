@@ -23,12 +23,14 @@ onmessage = (e) => {
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
   }
+  // optionally hide nodes from the layuot
   if (!opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);
       if (node.label.includes("dtypes.index")) g.removeNode(n);
     }
-    if (g.node("addition").width === 0) g.removeNode("addition");
+    // After all layout changes are complete, remove the overlay node if it's empty
+    if (!g.node("addition")?.width) g.removeNode("addition");
   }
   dagre.layout(g);
   postMessage(dagre.graphlib.json.write(g));
