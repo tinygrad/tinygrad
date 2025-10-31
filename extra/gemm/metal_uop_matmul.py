@@ -4,27 +4,26 @@ from extra.gemm.amd_uop_matmul import test_matmul
 
 N = 2048
 
-# metal has an 8x8 tensor core
+# metal has an 8x8 tensor core. this is the indexing
+def mat_idx(g0, g1, warp, u):
+  l = [(warp//2**i)%2 for i in range(5)]
+  return [g0, l[4], l[2], l[1], g1, l[3], l[0], u]
 
 def hand_spec_tc_cores():
   gx = UOp.special(N // 8, "gidx0")
   gy = UOp.special(N // 8, "gidx1")
   warp = UOp.special(32, "lidx0")
 
-  c = UOp.placeholder(dtypes.float, (N, N), slot=0).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
-  a = UOp.placeholder(dtypes.float, (N, N), slot=1).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
-  b = UOp.placeholder(dtypes.float, (N, N), slot=2).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
+  c = UOp.placeholder((N, N), dtypes.float, slot=0).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
+  a = UOp.placeholder((N, N), dtypes.float, slot=1).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
+  b = UOp.placeholder((N, N), dtypes.float, slot=2).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
 
   gk = UOp.range(N // 8, 0, AxisType.REDUCE)
 
-  # indexing for tensor cores
-  l = [(warp//2**i)%2 for i in range(5)]
-  def mat_idx(g0, g1, u): return [g0, l[4], l[2], l[1], g1, l[3], l[0], u]
+  a_tc = UOp.vectorize(*[a[*mat_idx(gx, gk, warp, i)] for i in range(2)])
+  b_tc = UOp.vectorize(*[b[*mat_idx(gk, gy, warp, i)] for i in range(2)])
 
-  a_tc = UOp.vectorize(*[a[*mat_idx(gx, gk, i)] for i in range(2)])
-  b_tc = UOp.vectorize(*[b[*mat_idx(gk, gy, i)] for i in range(2)])
-
-  acc = UOp.placeholder(dtypes.float, (2,), slot=0, addrspace=AddrSpace.REG)
+  acc = UOp.placeholder((2,), dtypes.float, slot=0, addrspace=AddrSpace.REG)
   acc = acc[0].set(0.0)
   acc = acc[1].set(0.0)
 
@@ -34,9 +33,9 @@ def hand_spec_tc_cores():
   acc_load = UOp.vectorize(acc.after(gk)[0], acc.after(gk)[1])
   out = UOp(Ops.WMMA, dtypes.float.vec(2), (a_tc, b_tc, acc_load), arg=wmma_arg)
 
-  sink = UOp.group(*[acc[i].store(out.gep(i)) for i in range(2)]).end(gk)
+  end_loop = UOp.group(*[acc[i].store(out.gep(i)) for i in range(2)]).end(gk)
 
-  sink = UOp.group(*[c.after(sink)[*mat_idx(gx, gy, i)].store(acc[i]) for i in range(2)])
+  sink = UOp.group(*[c.after(end_loop)[*mat_idx(gx, gy, warp, i)].store(acc[i]) for i in range(2)])
   return sink.sink(arg=KernelInfo(opts_to_apply=()))
 
 if __name__ == "__main__":
