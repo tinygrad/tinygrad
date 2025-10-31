@@ -51,7 +51,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.KERNEL}: return None
+  if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
   if x.op is Ops.AFTER and x.src[1].op is Ops.KERNEL: return None
   new_srcs = []
   for s in x.src:
@@ -249,6 +249,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         if realized_ranges is not None and i in realized_ranges: rng = colored(rng, "yellow")
         disp.append("["+rng+"]")
       print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}", ''.join(disp))
+
+    # no ranges on kernels, they are internal
+    if x.op is Ops.KERNEL: continue
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
