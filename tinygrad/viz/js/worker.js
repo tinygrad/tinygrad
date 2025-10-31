@@ -23,10 +23,10 @@ onmessage = (e) => {
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
   }
-  if (!opts.showRanges) {
+  if (!opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);
-      if (node.label.startsWith("RANGE")) g.removeNode(n);
+      if (node.label.includes("dtypes.index")) g.removeNode(n);
     }
   }
   dagre.layout(g);

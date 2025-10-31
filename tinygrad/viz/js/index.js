@@ -737,13 +737,13 @@ async function main() {
   if (ret.length === 0) return;
   const render = (opts) => renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0, opts);
   // ** right sidebar code blocks
-  const label = d3.create("label").attr("for", "show-ranges").text("Show ranges (r)");
-  const rangeToggle = d3.create("input").attr("type", "checkbox").attr("id", "show-ranges").property("checked", true).on("change", e => {
-    render({ showRanges:e.target.checked });
+  const label = d3.create("label").attr("for", "show-indexing").text("Show indexing (r)").style("margin-left", "4px").style("margin-top", "0");
+  const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).on("change", e => {
+    render({ showIndexing:e.target.checked });
   }).node();
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
-  metadata.replaceChildren(rangeToggle, label.node(), codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
-  render({ showRanges:rangeToggle.checked });
+  metadata.replaceChildren(toggle, label.node(), codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  render({ showIndexing:toggle.checked });
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -860,11 +860,11 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();
   }
-  // r key toggles ranges
+  // r key toggles indexing
   if (event.key === "r") {
-    const rangeToggle = document.getElementById("show-ranges");
-    rangeToggle.checked = !rangeToggle.checked;
-    rangeToggle.dispatchEvent(new Event("change"));
+    const toggle = document.getElementById("show-indexing");
+    toggle.checked = !toggle.checked;
+    toggle.dispatchEvent(new Event("change"));
   }
 });
 
