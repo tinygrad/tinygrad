@@ -5,7 +5,8 @@ const ctx = canvas.getContext("2d");
 ctx.font = `350 ${LINE_HEIGHT}px sans-serif`;
 
 onmessage = (e) => {
-  const { graph, additions } = e.data;
+  const { graph, additions, opts } = e.data;
+  console.log(opts?.showRanges);
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
   if (additions.length !== 0) g.setNode("addition", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
