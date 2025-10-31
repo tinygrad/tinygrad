@@ -623,6 +623,9 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
+const label = d3.create("label").attr("for", "show-indexing").text("Show indexing (r)").style("margin-left", "4px").style("margin-top", "0");
+const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
+
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
@@ -737,12 +740,9 @@ async function main() {
   if (ret.length === 0) return;
   const render = (opts) => renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0, opts);
   // ** right sidebar code blocks
-  const label = d3.create("label").attr("for", "show-indexing").text("Show indexing (r)").style("margin-left", "4px").style("margin-top", "0");
-  const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).on("change", e => {
-    render({ showIndexing:e.target.checked });
-  }).node();
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
   metadata.replaceChildren(toggle, label.node(), codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   render({ showIndexing:toggle.checked });
   // ** rewrite steps
   if (step.match_count >= 1) {
