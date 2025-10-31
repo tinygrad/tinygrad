@@ -7,16 +7,16 @@ N = 2048
 # metal has an 8x8 tensor core. this is the indexing
 def mat_idx(buf, g0, g1, warp, u):
   l = [(warp//2**i)%2 for i in range(5)]
-  return buf[g0, l[4], l[2], l[1], g1, l[3], l[0], u]
+  return buf[g0, l[4]*4 + l[2]*2 + l[1], g1, l[3]*4 + l[0]*2 + u]
 
 def hand_spec_tc_cores():
   gx = UOp.special(N // 8, "gidx0")
   gy = UOp.special(N // 8, "gidx1")
   warp = UOp.special(32, "lidx0")
 
-  c = UOp.placeholder((N, N), dtypes.float, slot=0).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
-  a = UOp.placeholder((N, N), dtypes.float, slot=1).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
-  b = UOp.placeholder((N, N), dtypes.float, slot=2).reshape((N//8, 2, 2, 2, N//8, 2, 2, 2))
+  c = UOp.placeholder((N, N), dtypes.float, slot=0).reshape((N//8, 8, N//8, 8))
+  a = UOp.placeholder((N, N), dtypes.float, slot=1).reshape((N//8, 8, N//8, 8))
+  b = UOp.placeholder((N, N), dtypes.float, slot=2).reshape((N//8, 8, N//8, 8))
 
   gk = UOp.range(N // 8, 0, AxisType.REDUCE)
 
@@ -36,7 +36,7 @@ def hand_spec_tc_cores():
   end_loop = UOp.group(*[acc[i].store(out.gep(i)) for i in range(2)]).end(gk)
 
   sink = UOp.group(*[mat_idx(c.after(end_loop), gx, gy, warp, i).store(acc[i]) for i in range(2)])
-  return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
+  return sink.sink(arg=KernelInfo(name="custom_metal_matmul", opts_to_apply=())).simplify()
 
 if __name__ == "__main__":
   test_matmul(hand_spec_tc_cores(), N=N)
