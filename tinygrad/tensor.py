@@ -239,6 +239,14 @@ class Tensor(MathTrait):
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
+  def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
+    """
+    Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
+
+    This API is alpha and may change.
+    """
+    return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
+
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.

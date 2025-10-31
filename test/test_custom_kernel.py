@@ -1,10 +1,6 @@
 import unittest
-from typing import Callable
 from tinygrad import Tensor, UOp
 from tinygrad.uop.ops import KernelInfo, AxisType
-
-def _kernel(tensors:list[Tensor], fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
-  return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in tensors], fxn=fxn, grad_fxn=grad_fxn)]
 
 # **** kernels ****
 
@@ -46,8 +42,8 @@ def backward_gemm(gradient:UOp, k:UOp) -> tuple[UOp, UOp]:
 
 def backward_gemm_custom(gradient:UOp, k:UOp) -> tuple[UOp, UOp]:
   out, a, b = k.src
-  grad_a = _kernel([Tensor.empty_like(Tensor(a)), Tensor(gradient), Tensor(b).T], fxn=custom_gemm)[0].uop
-  grad_b = _kernel([Tensor.empty_like(Tensor(b)), Tensor(a).T, Tensor(gradient)], fxn=custom_gemm)[0].uop
+  grad_a = Tensor.empty_like(Tensor(a)).custom_kernel(Tensor(gradient), Tensor(b).T, fxn=custom_gemm)[0].uop
+  grad_b = Tensor.empty_like(Tensor(b)).custom_kernel(Tensor(a).T, Tensor(gradient), fxn=custom_gemm)[0].uop
   return (None, grad_a, grad_b)
 
 # **** tests ****
@@ -58,7 +54,7 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.ones(16, 16).contiguous()
     c = Tensor.empty(16, 16)
 
-    c = _kernel([c,a,b], fxn=custom_elementwise_add_kernel)[0]
+    c = Tensor.custom_kernel(c,a,b, fxn=custom_elementwise_add_kernel)[0]
 
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
@@ -69,7 +65,7 @@ class TestCustomKernel(unittest.TestCase):
     c = Tensor.empty(16, 16)
     d = Tensor.empty(16, 16)
 
-    c,d = _kernel([c,d,a,b], custom_elementwise_addmul_kernel)[:2]
+    c,d = Tensor.custom_kernel(c,d,a,b, fxn=custom_elementwise_addmul_kernel)[:2]
     Tensor.realize(c,d)
 
     assert all(x == 6 for x in c.flatten().tolist()), "all 6"
@@ -78,14 +74,14 @@ class TestCustomKernel(unittest.TestCase):
   def test_arange(self):
     ref = Tensor.arange(100)
     tst = Tensor.empty_like(ref)
-    tst = _kernel([tst], custom_arange_kernel)[0]
+    tst = tst.custom_kernel(fxn=custom_arange_kernel)[0]
     self.assertTrue((ref == tst).all().item())
 
   def test_noncontig(self):
     a = Tensor.ones(16, 16).contiguous()
     tst = Tensor.empty_like(a)
     b = a+1
-    b_p1 = _kernel([tst, b], custom_add_one_kernel)[0]
+    b_p1 = Tensor.custom_kernel(tst, b, fxn=custom_add_one_kernel)[0]
     self.assertTrue((b_p1 == 3).all().item())
 
   def test_gemm(self):
@@ -94,7 +90,7 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.randn(N, N)
     c = Tensor.empty(N, N)
 
-    tst = _kernel([c, a, b], custom_gemm)[0]
+    tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     err = (tst - (a@b)).square().max()
     self.assertLess(err.item(), 1e-6)
 
@@ -107,7 +103,7 @@ class TestCustomKernel(unittest.TestCase):
 
     a, b = Tensor(a_rand.numpy(), requires_grad=True), Tensor(b_rand.numpy(), requires_grad=True)
     c = Tensor.empty(N, N)
-    tst = _kernel([c, a, b], custom_gemm, backward_gemm_custom if custom_backward_gemm else backward_gemm)[0]
+    tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm, grad_fxn=backward_gemm_custom if custom_backward_gemm else backward_gemm)[0]
     tst.sum().backward()
     grad_a, grad_b = a.grad, b.grad
     Tensor.realize(tst, grad_a, grad_b)
