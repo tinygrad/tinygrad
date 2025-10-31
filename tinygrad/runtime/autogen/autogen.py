@@ -35,8 +35,8 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
   idx, lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', os' if any('os' in s for s in dll) else ''),
                                 *(["from ctypes.util import find_library"] if any('find_library' in s for s in dll) else []),
                                 "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *prelude]
-  if dll: lines += flatten(["def dll():",[[f"  try: return ctypes.CDLL({d}{', use_errno=True' if use_errno else ''})",'  except: pass'] for d in dll],
-                            "  return None", "dll = dll()"])
+  if dll: lines.extend(["def dll():",*flatten([[f"  try: return ctypes.CDLL({d}{', use_errno=True' if use_errno else ''})",'  except: pass']
+                                                for d in dll]), "  return None", "dll = dll()"])
   macros = []
   types:dict[str,str] = {}
 

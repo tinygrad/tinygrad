@@ -31,16 +31,9 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        amd: 'true'
         pydeps: 'pyyaml mako'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
-    - name: Verify AMD autogen
-      run: |
-        cp tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
-        ./autogen_stubs.sh amd
-        ./autogen_stubs.sh sqtt
-        diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
     - name: Verify mesa autogen
       run: |
         cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
@@ -83,10 +76,14 @@ jobs:
         mv tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         mv tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
         mv tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
-        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, amd_gpu"
+        mv tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
+        mv extra/sqtt/rocprof/rocprof.py /tmp/rocprof.py.bak
+        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, amd_gpu, sqtt; from extra.sqtt.rocprof import rocprof"
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
         diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
+        diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
+        diff /tmp/rocprof.py.bak extra/sqtt/rocprof/rocprof.py
     - name: Verify Linux autogen
       run: |
         mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak

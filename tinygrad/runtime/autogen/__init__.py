@@ -6,8 +6,9 @@ root = (here:=pathlib.Path(__file__).parent).parent.parent.parent
 nv_src = "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8ac3b9bdcc1d56827d116743892a5.tar.gz"
 
 def load(name, *args, **kwargs):
-  if not (f:=(here / f"{name}.py")).exists(): f.write_text(importlib.import_module(f"{__name__}.autogen").gen(*args, **kwargs))
-  return importlib.import_module(f"{__name__}.{name.replace('/', '.')}")
+  path = kwargs.pop("path", __name__)
+  if not (f:=(root/f"{path.replace('.','/')}/{name}.py")).exists(): f.write_text(importlib.import_module(f"{__name__}.autogen").gen(*args, **kwargs))
+  return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
 def __getattr__(nm):
   match nm:
@@ -65,4 +66,5 @@ def __getattr__(nm):
     case "adreno": return load("adreno", [], [root/"extra/qcom_gpu_driver/a6xx.xml.h"])
     case "qcom_dsp":
       return load("qcom_dsp", [], [root/f"extra/dsp/include/{s}.h" for s in ["ion","msm_ion","adsprpc_shared","remote_default","apps_std"]])
+    case "sqtt": return load("sqtt", [], [root/"extra/sqtt/sqtt.h"])
     case _: raise AttributeError(f"no such autogen: {nm}")
