@@ -28,6 +28,7 @@ onmessage = (e) => {
       const node = g.node(n);
       if (node.label.includes("dtypes.index")) g.removeNode(n);
     }
+    if (g.node("addition").width === 0) g.removeNode("addition");
   }
   dagre.layout(g);
   postMessage(dagre.graphlib.json.write(g));
