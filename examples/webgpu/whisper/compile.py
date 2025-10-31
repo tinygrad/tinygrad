@@ -38,22 +38,22 @@ class MultiHeadAttention:
     if self.kv_caching == 'cross':
       if xa is not None:
         if not hasattr(self, 'cache_k'):
-          self.cache_k = Tensor.zeros(x.shape[0], 1500, 384)
-          self.cache_v = Tensor.zeros(x.shape[0], 1500, 384)
-        new_cache_k = cache_slice_helper(self.cache_k, self.key(xa), off, x.shape[0])
-        new_cache_v = cache_slice_helper(self.cache_v, self.value(xa), off, x.shape[0])
+          self.cache_k = Tensor.zeros(DECODER_BATCH_SIZE, 1500, 384)
+          self.cache_v = Tensor.zeros(DECODER_BATCH_SIZE, 1500, 384)
+        new_cache_k = cache_slice_helper(self.cache_k, self.key(xa), off, DECODER_BATCH_SIZE)
+        new_cache_v = cache_slice_helper(self.cache_v, self.value(xa), off, DECODER_BATCH_SIZE)
 
-        # m = (Tensor(cache) > 0).expand(x.shape[0], 1, 1)
+        # m = (Tensor(cache) > 0).expand(DECODER_BATCH_SIZE, 1, 1)
         # self.cache_k.assign(m.where(new_cache_k, self.cache_k).contiguous())
         # self.cache_v.assign(m.where(new_cache_v, self.cache_v).contiguous())
-        # self.cache_k.assign(self.cache_k.shrink(((0, x.shape[0]*cache), None, None)).cat(new_cache_k.shrink(((0, x.shape[0]*(1-cache)), None, None))).contiguous())
-        # self.cache_v.assign(self.cache_v.shrink(((0, x.shape[0]*cache), None, None)).cat(new_cache_v.shrink(((0, x.shape[0]*(1-cache)), None, None))).contiguous())
-        # self.cache_k.assign(self.cache_k.cat(new_cache_k).shrink(((x.shape[0]*cache, x.shape[0]*(cache+1)), None, None)).contiguous())
-        # self.cache_v.assign(self.cache_v.cat(new_cache_v).shrink(((x.shape[0]*cache, x.shape[0]*(cache+1)), None, None)).contiguous())
+        # self.cache_k.assign(self.cache_k.shrink(((0, DECODER_BATCH_SIZE*cache), None, None)).cat(new_cache_k.shrink(((0, DECODER_BATCH_SIZE*(1-cache)), None, None))).contiguous())
+        # self.cache_v.assign(self.cache_v.shrink(((0, DECODER_BATCH_SIZE*cache), None, None)).cat(new_cache_v.shrink(((0, DECODER_BATCH_SIZE*(1-cache)), None, None))).contiguous())
+        # self.cache_k.assign(self.cache_k.cat(new_cache_k).shrink(((DECODER_BATCH_SIZE*cache, DECODER_BATCH_SIZE*(cache+1)), None, None)).contiguous())
+        # self.cache_v.assign(self.cache_v.cat(new_cache_v).shrink(((DECODER_BATCH_SIZE*cache, DECODER_BATCH_SIZE*(cache+1)), None, None)).contiguous())
         # self.cache_k.assign(self.cache_k[None].cat(new_cache_k[None])[cache].contiguous())
         # self.cache_v.assign(self.cache_v[None].cat(new_cache_v[None])[cache].contiguous())
-        self.cache_k.assign(self.cache_k.shrink(((0, cache*x.shape[0]), None, None)).cat(new_cache_k).shrink(((0, x.shape[0]), None, None)).contiguous())
-        self.cache_v.assign(self.cache_v.shrink(((0, cache*x.shape[0]), None, None)).cat(new_cache_v).shrink(((0, x.shape[0]), None, None)).contiguous())
+        self.cache_k.assign(self.cache_k.shrink(((0, cache*DECODER_BATCH_SIZE), None, None)).cat(new_cache_k).shrink(((0, DECODER_BATCH_SIZE), None, None)).contiguous())
+        self.cache_v.assign(self.cache_v.shrink(((0, cache*DECODER_BATCH_SIZE), None, None)).cat(new_cache_v).shrink(((0, DECODER_BATCH_SIZE), None, None)).contiguous())
 
         k, v = self.cache_k, self.cache_v
       else:
@@ -62,8 +62,8 @@ class MultiHeadAttention:
       k, v = self.key(x), self.value(x)
       if self.kv_caching == 'self':
         if not hasattr(self, 'cache_k'):
-          self.cache_k = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
-          self.cache_v = Tensor.zeros(x.shape[0], self.max_self_attn_cache_len, x.shape[2])
+          self.cache_k = Tensor.zeros(DECODER_BATCH_SIZE, self.max_self_attn_cache_len, x.shape[2])
+          self.cache_v = Tensor.zeros(DECODER_BATCH_SIZE, self.max_self_attn_cache_len, x.shape[2])
         k = self.cache_k.shrink((None, (0, len), None)).cat(k, dim=1)
         v = self.cache_v.shrink((None, (0, len), None)).cat(v, dim=1)
         padding = self.max_self_attn_cache_len-len-x.shape[1]
