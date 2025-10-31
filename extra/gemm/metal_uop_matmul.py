@@ -5,9 +5,9 @@ from extra.gemm.amd_uop_matmul import test_matmul
 N = 2048
 
 # metal has an 8x8 tensor core. this is the indexing
-def mat_idx(g0, g1, warp, u):
+def mat_idx(buf, g0, g1, warp, u):
   l = [(warp//2**i)%2 for i in range(5)]
-  return [g0, l[4], l[2], l[1], g1, l[3], l[0], u]
+  return buf[g0, l[4], l[2], l[1], g1, l[3], l[0], u]
 
 def hand_spec_tc_cores():
   gx = UOp.special(N // 8, "gidx0")
@@ -20,8 +20,8 @@ def hand_spec_tc_cores():
 
   gk = UOp.range(N // 8, 0, AxisType.REDUCE)
 
-  a_tc = UOp.vectorize(*[a[*mat_idx(gx, gk, warp, i)] for i in range(2)])
-  b_tc = UOp.vectorize(*[b[*mat_idx(gk, gy, warp, i)] for i in range(2)])
+  a_tc = UOp.vectorize(*[mat_idx(a, gx, gk, warp, i) for i in range(2)])
+  b_tc = UOp.vectorize(*[mat_idx(b, gk, gy, warp, i) for i in range(2)])
 
   acc = UOp.placeholder((2,), dtypes.float, slot=0, addrspace=AddrSpace.REG)
   acc = acc[0].set(0.0)
@@ -35,8 +35,8 @@ def hand_spec_tc_cores():
 
   end_loop = UOp.group(*[acc[i].store(out.gep(i)) for i in range(2)]).end(gk)
 
-  sink = UOp.group(*[c.after(end_loop)[*mat_idx(gx, gy, warp, i)].store(acc[i]) for i in range(2)])
-  return sink.sink(arg=KernelInfo(opts_to_apply=()))
+  sink = UOp.group(*[mat_idx(c.after(end_loop), gx, gy, warp, i).store(acc[i]) for i in range(2)])
+  return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
 if __name__ == "__main__":
   test_matmul(hand_spec_tc_cores(), N=N)
