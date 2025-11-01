@@ -33,7 +33,7 @@ BLOCK_M = 64
 BLOCK_N = 64
 BLOCK_K = 128
 
-WARPGROUP_SIZE = 4
+WARPGROUP_SIZE = 1
 BLOCK_M = BLOCK_M * WARPGROUP_SIZE
 
 # TODO: improve the syntax of this. better syntax, faster iteration
@@ -43,6 +43,8 @@ BLOCK_M = BLOCK_M * WARPGROUP_SIZE
 #  -- improve syntax for vectorized loads/stores (both with DEVECTORIZE and without)
 #  -- be able to use CONTRACT on a range
 
+CUS_PER_GPU = 256
+assert ((M//BLOCK_M) * (N//BLOCK_N)) >= CUS_PER_GPU, "not enough globals"
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # A = (M x K)
@@ -81,7 +83,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   def make_locals(slot) -> tuple[UOp, UOp]:
     BM_As_stride = (BLOCK_M + 1)
     BN_Bs_stride = (BLOCK_N + 0)
-    INNER_SLICE = 1
+    INNER_SLICE = 8
     As = UOp.placeholder((BLOCK_K//INNER_SLICE, BM_As_stride, INNER_SLICE), dtypes.half, slot=slot, addrspace=AddrSpace.LOCAL)
     Bs = UOp.placeholder((BLOCK_K//INNER_SLICE, BN_Bs_stride, INNER_SLICE), dtypes.half, slot=slot+1, addrspace=AddrSpace.LOCAL)
     As = As.permute((0,2,1)).reshape((BLOCK_K, BM_As_stride)).shrink_to((BLOCK_K, BLOCK_M))
@@ -91,16 +93,19 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # load from globals into locals (TODO: use the warpgroup)
 
   def load_to_locals(l_K_outer_loop:UOp, Asl:UOp, Bsl:UOp, rng:int, barrier=True) -> tuple[UOp, UOp]:
-    pA = A.permute((0,2,1,3)).reshape((M//BLOCK_M, K//BLOCK_K, BLOCK_M*BLOCK_K))
-    pas = Asl.permute((1,0)).reshape((BLOCK_M*BLOCK_K,))
-    As_store = generic_copy(pA, (gx, l_K_outer_loop), pas, rng)
+    if getenv("FAKE"):
+      return Asl[0].set(0), Bsl[0].set(0)
+    else:
+      pA = A.permute((0,2,1,3)).reshape((M//BLOCK_M, K//BLOCK_K, BLOCK_M*BLOCK_K))
+      pas = Asl.permute((1,0)).reshape((BLOCK_M*BLOCK_K,))
+      As_store = generic_copy(pA, (gx, l_K_outer_loop), pas, rng)
 
-    pB = B.permute((0,2,1,3)).reshape((K//BLOCK_K, N//BLOCK_N, BLOCK_K*BLOCK_N))
-    pbs = Bsl.reshape((BLOCK_K*BLOCK_N,))
-    Bs_store = generic_copy(pB, (l_K_outer_loop, gy), pbs, rng+2)
+      pB = B.permute((0,2,1,3)).reshape((K//BLOCK_K, N//BLOCK_N, BLOCK_K*BLOCK_N))
+      pbs = Bsl.reshape((BLOCK_K*BLOCK_N,))
+      Bs_store = generic_copy(pB, (l_K_outer_loop, gy), pbs, rng+2)
 
-    barrier = UOp.barrier(As_store, Bs_store) if barrier else UOp.group(As_store, Bs_store)
-    return Asl.after(barrier), Bsl.after(barrier)
+      barrier = UOp.barrier(As_store, Bs_store) if barrier else UOp.group(As_store, Bs_store)
+      return Asl.after(barrier), Bsl.after(barrier)
 
   def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]=()) -> UOp:
     K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.REDUCE)
