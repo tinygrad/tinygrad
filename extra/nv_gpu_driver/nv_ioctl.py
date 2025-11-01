@@ -58,7 +58,7 @@ def install_hook(c_function, python_function):
   return orig_func
 
 # *** ioctl lib end ***
-import tinygrad.runtime.autogen.nv_gpu as nv_gpu
+from tinygrad.runtime.autogen import nv_gpu
 nvescs = {getattr(nv_gpu, x):x for x in dir(nv_gpu) if x.startswith("NV_ESC")}
 nvcmds = {getattr(nv_gpu, x):(x, getattr(nv_gpu, "struct_"+x+"_PARAMS", getattr(nv_gpu, "struct_"+x.replace("_CMD_", "_")+"_PARAMS", None))) for x in dir(nv_gpu) if \
           x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(nv_gpu, x), int)}

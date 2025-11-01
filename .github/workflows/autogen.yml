@@ -14,10 +14,10 @@ on:
     branches:
       - master
   pull_request:
-    paths: 
+    paths:
     - 'tinygrad/runtime/autogen/**/*'
   workflow_dispatch:
-    paths: 
+    paths:
     - 'tinygrad/runtime/autogen/**/*'
 
 jobs:
@@ -31,67 +31,119 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        opencl: 'true'
-        amd: 'true'
-        cuda: 'true'
-        webgpu: 'true'
-        llvm: 'true'
         pydeps: 'pyyaml mako'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
-    - name: Verify OpenCL autogen
-      run: |
-        cp tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
-        ./autogen_stubs.sh opencl
-        diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
-    - name: Verify CUDA autogen
-      run: |
-        cp tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
-        cp tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
-        ./autogen_stubs.sh cuda
-        ./autogen_stubs.sh nv
-        diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
-        diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
-    - name: Verify AMD autogen
-      run: |
-        cp tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
-        cp tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
-        cp tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
-        cp tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
-        cp tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
-        ./autogen_stubs.sh hsa
-        ./autogen_stubs.sh kfd
-        ./autogen_stubs.sh comgr
-        ./autogen_stubs.sh amd
-        ./autogen_stubs.sh sqtt
-        diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
-        diff /tmp/kfd.py.bak tinygrad/runtime/autogen/kfd.py
-        diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
-        diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
-        diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
-    - name: Verify Linux autogen
-      run: |
-        cp tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
-        cp tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
-        cp tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
-        ./autogen_stubs.sh libc
-        ./autogen_stubs.sh io_uring
-        ./autogen_stubs.sh ib
-        diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
-        diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
-        diff /tmp/ib.py.bak tinygrad/runtime/autogen/ib.py
-    - name: Verify WebGPU autogen
-      run: |
-        cp tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
-        ./autogen_stubs.sh webgpu
-        diff /tmp/webgpu.py.bak tinygrad/runtime/autogen/webgpu.py
-    - name: Verify LLVM autogen
-      run: |
-        cp tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
-        ./autogen_stubs.sh llvm
-        diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
     - name: Verify mesa autogen
       run: |
         cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
         ./autogen_stubs.sh mesa
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
+  autogen-ng:
+    name: In-tree Autogen
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        opencl: 'true'
+        amd: 'true'
+        cuda: 'true'
+        llvm: 'true'
+        webgpu: 'true'
+        pydeps: 'clang>=20'
+    - name: Install autogen support packages
+      run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev
+    - name: Verify OpenCL autogen
+      run: |
+        mv tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
+        python3 -c "from tinygrad.runtime.autogen import opencl"
+        diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
+    - name: Verify CUDA autogen
+      run: |
+        mv tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
+        mv tinygrad/runtime/autogen/nvrtc.py /tmp/nvrtc.py.bak
+        mv tinygrad/runtime/autogen/nvjitlink.py /tmp/nvjitlink.py.bak
+        mv tinygrad/runtime/autogen/nv_gpu.py /tmp/nv_gpu.py.bak
+        mv tinygrad/runtime/autogen/nv.py /tmp/nv.py.bak
+        python3 -c "from tinygrad.runtime.autogen import cuda, nvrtc, nvjitlink, nv_gpu, nv"
+        diff /tmp/cuda.py.bak tinygrad/runtime/autogen/cuda.py
+        diff /tmp/nvrtc.py.bak tinygrad/runtime/autogen/nvrtc.py
+        diff /tmp/nvjitlink.py.bak tinygrad/runtime/autogen/nvjitlink.py
+        diff /tmp/nv_gpu.py.bak tinygrad/runtime/autogen/nv_gpu.py
+        diff /tmp/nv.py.bak tinygrad/runtime/autogen/nv.py
+    - name: Verify AMD autogen
+      run: |
+        sudo apt-get install -y --no-install-recommends hip-dev
+        mv tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
+        mv tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
+        mv tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
+        mv tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
+        mv tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
+        mv extra/sqtt/rocprof/rocprof.py /tmp/rocprof.py.bak
+        mv tinygrad/runtime/autogen/am/am.py /tmp/am_am.py.bak
+        mv tinygrad/runtime/autogen/am/pm4_soc15.py /tmp/am_pm4_soc15.py.bak
+        mv tinygrad/runtime/autogen/am/pm4_nv.py /tmp/am_pm4_nv.py.bak
+        mv tinygrad/runtime/autogen/am/sdma_4_0_0.py /tmp/am_sdma_4_0_0.py.bak
+        mv tinygrad/runtime/autogen/am/sdma_5_0_0.py /tmp/am_sdma_5_0_0.py.bak
+        mv tinygrad/runtime/autogen/am/sdma_6_0_0.py /tmp/am_sdma_6_0_0.py.bak
+        mv tinygrad/runtime/autogen/am/smu_v13_0_0.py /tmp/am_smu_v13_0_0.py.bak
+        mv tinygrad/runtime/autogen/am/smu_v14_0_2.py /tmp/am_smu_v14_0_2.py.bak
+        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, hip, amd_gpu, sqtt; from extra.sqtt.rocprof import rocprof; from tinygrad.runtime.autogen.am import am, pm4_soc15, pm4_nv, sdma_4_0_0, sdma_5_0_0, sdma_6_0_0, smu_v13_0_0, smu_v14_0_2"
+        diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
+        diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
+        diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
+        diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
+        diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
+        diff /tmp/rocprof.py.bak extra/sqtt/rocprof/rocprof.py
+        diff /tmp/am_am.py.bak tinygrad/runtime/autogen/am/am.py
+        diff /tmp/am_pm4_soc15.py.bak tinygrad/runtime/autogen/am/pm4_soc15.py
+        diff /tmp/am_pm4_nv.py.bak tinygrad/runtime/autogen/am/pm4_nv.py
+        diff /tmp/am_sdma_4_0_0.py.bak tinygrad/runtime/autogen/am/sdma_4_0_0.py
+        diff /tmp/am_sdma_5_0_0.py.bak tinygrad/runtime/autogen/am/sdma_5_0_0.py
+        diff /tmp/am_sdma_6_0_0.py.bak tinygrad/runtime/autogen/am/sdma_6_0_0.py
+        diff /tmp/am_smu_v13_0_0.py.bak tinygrad/runtime/autogen/am/smu_v13_0_0.py
+        diff /tmp/am_smu_v14_0_2.py.bak tinygrad/runtime/autogen/am/smu_v14_0_2.py
+    - name: Verify Linux autogen
+      run: |
+        mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
+        mv tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
+        mv tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
+        mv tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
+        mv tinygrad/runtime/autogen/pci.py /tmp/pci.py.bak
+        mv tinygrad/runtime/autogen/vfio.py /tmp/vfio.py.bak
+        python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, ib, pci, vfio"
+        diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
+        diff /tmp/kfd.py.bak tinygrad/runtime/autogen/kfd.py
+        diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
+        diff /tmp/ib.py.bak tinygrad/runtime/autogen/ib.py
+        diff /tmp/pci.py.bak tinygrad/runtime/autogen/pci.py
+        diff /tmp/vfio.py.bak tinygrad/runtime/autogen/vfio.py
+    - name: Verify LLVM autogen
+      run: |
+        mv tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
+        python3 -c "from tinygrad.runtime.autogen import llvm"
+        diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
+    - name: Verify WebGPU autogen
+      run: |
+        mv tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
+        python3 -c "from tinygrad.runtime.autogen import webgpu"
+        diff /tmp/webgpu.py.bak tinygrad/runtime/autogen/webgpu.py
+    - name: Verify Qualcomm autogen
+      run: |
+        mv tinygrad/runtime/autogen/kgsl.py /tmp/kgsl.py.bak
+        mv tinygrad/runtime/autogen/adreno.py /tmp/adreno.py.bak
+        mv tinygrad/runtime/autogen/qcom_dsp.py /tmp/qcom_dsp.py.bak
+        python3 -c "from tinygrad.runtime.autogen import kgsl, adreno, qcom_dsp"
+        diff /tmp/kgsl.py.bak tinygrad/runtime/autogen/kgsl.py
+        diff /tmp/adreno.py.bak tinygrad/runtime/autogen/adreno.py
+        diff /tmp/qcom_dsp.py.bak tinygrad/runtime/autogen/qcom_dsp.py
+    - name: Verify libusb autogen
+      run: |
+        sudo apt-get install -y --no-install-recommends libusb-1.0-0-dev
+        mv tinygrad/runtime/autogen/libusb.py /tmp/libusb.py.bak
+        python3 -c "from tinygrad.runtime.autogen import libusb"
+        diff /tmp/libusb.py.bak tinygrad/runtime/autogen/libusb.py
