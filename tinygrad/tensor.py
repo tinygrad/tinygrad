@@ -2372,7 +2372,11 @@ class Tensor(MathTrait):
     for o,s,i,d,k in zip(o_, s_, i_, d_, k_):
       base_f = 1 + int(resolve(o*s > (i - d*(k-1))))
       min_f = ceildiv(o*s - d, i)
-      f_.append(smax(1, smax(base_f, min_f)))
+      # prefer plain Python ints when possible to avoid symbolic repeats
+      if all(isinstance(v, int) for v in (base_f, min_f)):
+        f_.append(max(1, base_f, min_f))
+      else:
+        f_.append(smax(1, smax(base_f, min_f)))
     # # repeats such that we don't need padding
     x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
     # handle dilation
@@ -2382,7 +2386,7 @@ class Tensor(MathTrait):
     x = x.shrink(tuple(noop + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_,o_)))).reshape(noop + flatten((k,o) for k,o in zip(k_,o_)))
     # permute to move reduce to the end
     return x.permute(*range(len(noop)), *[len(noop)+i*2+1 for i in range(len(i_))], *[len(noop)+i*2 for i in range(len(i_))])
-    
+
 
   def _resolve_pool_pads(self, padding:int|Sequence[int], dims:int) -> Sequence[int]:
     if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
