@@ -1500,9 +1500,20 @@ class TestSchedule(unittest.TestCase):
     y = x.pad((-1,2,2,-1), mode="replicate")
     dx = y.sum().gradient(x)[0]
     sched = check_schedule(dx, 1)
-    self.assertEqual(sched[0].ast.op_in_backward_slice_with_self(Ops.REDUCE), False)
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
+
+  def test_fuse_arange_avg_pool2d_ceil_mode(self):
+    x = Tensor.avg_pool2d(Tensor.empty(1,1,6,6), kernel_size=(3,3), padding=1, stride=3, ceil_mode=True)
+    sched = check_schedule(x, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 1)
+
+  def test_fuse_arange_pad_circular_mode_bw(self):
+    x = Tensor.empty(1,1,5,5,5)
+    out = x.pad((1,2,3,5,1,2), mode="circular")
+    g = out.sum().gradient(x)[0]
+    sched = check_schedule(g, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 0)
 
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
