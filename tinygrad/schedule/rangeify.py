@@ -187,6 +187,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       return not buffer_in_reduce
     UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
     del buf_gate
+    assert len(reduces)==0 or buffer_in_reduce
     if buffer_in_reduce:
       if PCONTIG > 2:
         out_in_ratio = (prod(buf.shape)+1) / (sum([x.size for x in accessed_buffers])+1)
