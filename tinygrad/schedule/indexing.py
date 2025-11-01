@@ -2,7 +2,8 @@ from typing import Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, \
+                             canonicalize_shape, canonicalize_dim
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
@@ -47,6 +48,8 @@ class IndexingContext:
   range_idx: Iterator[int] = field(default_factory=itertools.count)
   def new_range(self, s:sint, axistype:AxisType=AxisType.LOOP) -> UOp:
     if isinstance(s, UOp) and s.op is Ops.RANGE: return s
+    # canonicalize to extract any RANGE sizes from symbolic shapes
+    if isinstance(s, UOp): s = canonicalize_dim(s)
     # if a range has a 1 src, it's the same as UOp.const(dtypes.index, 0)
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
@@ -115,23 +118,26 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
   match op:
     case Ops.SHRINK:  rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, arg))
     case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
+    # TODO: do we also need to call canonicalize_shape here?
     case Ops.FLIP:    rngs = tuple(((s-1)-a) if f else a for a,s,f in zip(rngs, in_shape, arg))
-    case Ops.EXPAND:  rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, in_shape, arg))
+    case Ops.EXPAND:
+      rngs = tuple(a if in_sh == out_sh else a.const_like(0) for a,in_sh,out_sh in zip(rngs, canonicalize_shape(in_shape), canonicalize_shape(arg)))
     case Ops.PAD:
       # TODO: why is multiple graph_rewrites faster than one here?
       # TODO: the .where(r-s, i) is not inside the graph_rewrite so that `convert_pad_to_where_to_keep_behavior_local`
       #       wraps the pad with only the newly added valid
-      rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh+s))),
-        symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
+      rngs = tuple(
+        r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh+s))), symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid())
+        for r,sh,(s,e) in zip(rngs, canonicalize_shape(in_shape), tuple(map(canonicalize_shape, arg))))
     case Ops.RESHAPE:
       acc = 1
       axes_in:list[UOp] = []
-      for s,src in list(zip(arg, rngs))[::-1]:
+      for s,src in list(zip(canonicalize_shape(arg), rngs))[::-1]:
         axes_in.append(acc*src)
         acc *= s
       combined_axes = sum(axes_in, start=UOp.const(dtypes.index, 0))
       axes_out:list[UOp] = []
-      for s in in_shape[::-1]:
+      for s in canonicalize_shape(in_shape)[::-1]:
         axes_out.append(combined_axes % s)
         combined_axes //= s
       # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code

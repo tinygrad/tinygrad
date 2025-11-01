@@ -554,3 +554,8 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
   # remove END with empty NOOP
   (UPat(Ops.END, src=(UPat(Ops.NOOP, src=(), name="noop"),), allow_any_len=True), lambda noop:noop),
 ])
+
+pm_canonicalize_shape = PatternMatcher([
+  (UPat(Ops.RANGE, name="r", src=UPat.var("end")), lambda r, end: end),
+  (UPat(Ops.BIND, src=(UPat.var(), UPat.cvar(name="val"))), lambda val: val),
+])+symbolic

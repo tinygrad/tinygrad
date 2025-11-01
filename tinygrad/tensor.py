@@ -10,7 +10,8 @@ from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, p
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.mathtraits import MathTrait
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender
+from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender, \
+                             canonicalize_dim, canonicalize_shape
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
@@ -326,8 +327,9 @@ class Tensor(MathTrait):
     ```
     """
     if 0 in self.shape: return memoryview(bytearray(0)).cast(self.dtype.base.fmt)
-    assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
-    return self._buffer().as_typed_buffer(self.shape)
+    # in Tensor._buffer(), a modified version of self has been realized, so we have to canonicalize self.shape ourselves
+    cshape = tuple(map(lambda d: d if isinstance(d, int) else int(d.cast(dtypes.int)), canonicalize_shape(self.shape)))
+    return self._buffer().as_typed_buffer(cshape)
 
   def item(self) -> ConstType:
     """
@@ -698,7 +700,8 @@ class Tensor(MathTrait):
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
     if start < (dt:=to_dtype(dtype)).min or dt.max < (stop-step): raise ValueError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
+    # here we only care about the dimensions, so the ranges can be replaced by their ends
+    if (output_len:=canonicalize_dim(ceildiv(stop-start, step))) <= 0: return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
 
   @staticmethod
@@ -1057,7 +1060,7 @@ class Tensor(MathTrait):
     # resolve -1
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    if resolve(prod(self.shape) != prod(new_shape), True):
+    if resolve(prod(canonicalize_shape(self.shape)) != prod(canonicalize_shape(new_shape)), True):
       raise ValueError(f"size mismatch, can't reshape ({', '.join(srender(d) for d in self.shape)}) -> ({', '.join(srender(d) for d in new_shape)})")
     return self._apply_uop(UOp.reshape, arg=new_shape) if new_shape != self.shape else self
 
@@ -1222,12 +1225,12 @@ class Tensor(MathTrait):
 
     indices_parsed, dim = [], 0
     for index in indices:
-      size = 1 if index is None else self.shape[dim]
+      # TODO: is this the best place to canonicalize the dim?
+      size = 1 if index is None else canonicalize_dim(self.shape[dim])
       boundary, stride = [0, size], 1  # defaults
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          assert isinstance(size, int), "size must be an int"
           index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
@@ -1579,7 +1582,7 @@ class Tensor(MathTrait):
     """
     if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
     dim = self._resolve_dim(dim)
-    return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
+    return self if not self.ndim or canonicalize_dim(self.shape[dim]) != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
 
   def unsqueeze(self, dim:int) -> Tensor:
     """
@@ -2663,7 +2666,8 @@ class Tensor(MathTrait):
     if IMAGE: return self.image_dot(w, dtype)
     x, dx, dw = self, self.ndim, w.ndim
     if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
-    if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
+    if (x_shape:=canonicalize_shape(x.shape))[-1] != (w_shape:=canonicalize_shape(w.shape))[axis_w:=-min(dw,2)]:
+      raise RuntimeError(f"cannot dot {x_shape} and {w_shape}")
     x = x.reshape(*x.shape[0:-1], *[1]*min(dx-1, dw-1, 1), x.shape[-1])
     w = w.reshape(*w.shape[0:-2], *[1]*min(dx-1, dw-1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
     return (x*w).sum(-1, dtype=dtype).cast(least_upper_dtype(x.dtype, w.dtype) if dtype is None else dtype)
@@ -3634,7 +3638,7 @@ class Tensor(MathTrait):
     # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
     shape, _ = _align_left(self.shape, new_shape)
     # for each dimension, check either dim is 1, or it does not change
-    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
+    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(canonicalize_shape(shape), canonicalize_shape(new_shape))):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
     # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
     return self.reshape(shape).cast(sum_acc_dtype(self.dtype))._apply_uop(UOp.expand, arg=new_shape).cast(self.dtype)
