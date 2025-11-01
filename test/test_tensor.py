@@ -847,14 +847,14 @@ class TestTensorMetadata(unittest.TestCase):
     #self.assertEqual(bw[0].name, "sigmoid")
 
   def test_tracemeta_0(self):
-      with Context(TRACEMETA=0):
-        x = Tensor.rand(3, requires_grad=True)
-        y = Tensor.rand(3, requires_grad=True)
-        out = (x.relu() * y.sigmoid()).sum()
-        self.assertIsNone(out.uop.metadata)
-        self.assertIsNone(out.uop.src[0].metadata)
-        si = out.schedule()[-1]
-        self.assertEqual(si.metadata, ())
+    with Context(TRACEMETA=0):
+      x = Tensor.rand(3, requires_grad=True)
+      y = Tensor.rand(3, requires_grad=True)
+      out = (x.relu() * y.sigmoid()).sum()
+      self.assertIsNone(out.uop.metadata)
+      self.assertIsNone(out.uop.src[0].metadata)
+      si = out.schedule()[-1]
+      self.assertEqual(si.metadata, ())
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):
