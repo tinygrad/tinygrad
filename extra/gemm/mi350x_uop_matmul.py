@@ -4,15 +4,16 @@ np.set_printoptions(linewidth=1000000)
 os.environ["AMD_LLVM"] = "0"
 
 from tinygrad import Tensor, Context, dtypes, UOp, GlobalCounters
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, getenv
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
 WARP_SIZE = 64
 
-N = 16
-M = 32
-K = 128
+# Reg tile sizes (tensor cores)
+TC_M = 16
+TC_N = 16
+TC_K = 32
 
 # 1024 matrix cores
 # 16 cycle mfma
@@ -32,12 +33,13 @@ BLOCK_M = 64
 BLOCK_N = 64
 BLOCK_K = 128
 
-# Reg tile sizes (tensor cores)
-TC_M = 16
-TC_N = 16
-TC_K = 32
-
 WARPGROUP_SIZE = 1
+
+# TODO: improve the syntax of this. better syntax, faster iteration
+#  -- add working slice a[gx, :, i] -> shape of the : (aka (16,16,32) becomes (16,))
+#  -- add argfix to movement (traits shared with Tensor)
+#  -- fix WMMA to not require all the junk
+#  -- improve syntax for vectorized loads/stores (both with DEVECTORIZE and without)
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # A = (M x K)
@@ -64,32 +66,45 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   acc = acc[init_l:=UOp.range(acc.size, 500)].set(UOp.const(dtypes.float.vec(4), 0.0), end=init_l)
 
   # create locals (note A is permuted, and the stride is changed to avoid bank conflicts)
-  As = UOp.placeholder((BLOCK_K//2, BLOCK_M, 2), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
-  Bs = UOp.placeholder((BLOCK_K//2, BLOCK_N, 2), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)
-  As = As.permute((0,2,1)).reshape((BLOCK_K, BLOCK_M))
+  BM_As_stride = (BLOCK_M + 1)
+  INNER_SLICE = 1
+  As = UOp.placeholder((BLOCK_K//INNER_SLICE, BM_As_stride, INNER_SLICE), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
+  Bs = UOp.placeholder((BLOCK_K//INNER_SLICE, BLOCK_N, INNER_SLICE), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)
+
+  As = As.permute((0,2,1)).reshape((BLOCK_K, BM_As_stride)).shrink_to((BLOCK_K, BLOCK_M))
   Bs = Bs.permute((0,2,1)).reshape((BLOCK_K, BLOCK_N))
 
   K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
 
   # load from globals into locals (TODO: use the warpgroup)
-  cp_i, cp_j = UOp.range(BLOCK_M, 1000), UOp.range(BLOCK_K//WARP_SIZE, 1001)
-  loaded = A.reshape((M//BLOCK_M, BLOCK_M, K//BLOCK_K, BLOCK_K//WARP_SIZE, WARP_SIZE))[gx, cp_i, K_outer_loop, cp_j, warp]
-  #loaded = UOp.const(dtypes.half, 2.0)
-  As_store = As.reshape((BLOCK_K//WARP_SIZE, WARP_SIZE, BLOCK_M))[cp_j, warp, cp_i].store(loaded).end(cp_i, cp_j)
+  if getenv("FAKE"):
+    As_store = As.after(K_outer_loop)[0].store(UOp.const(dtypes.float, 2.0))
+    Bs_store = Bs.after(K_outer_loop)[0].store(UOp.const(dtypes.float, 2.0))
+  else:
+    # generic copy logic (not good)
+    def generic_copy(glbl, gargs, lcl, rng):
+      # Fully coalesced 128-bit loads/stores.
+      INNER_SIZE = 8
+      cp_i = UOp.range(lcl.size//(WARPGROUP_SIZE*WARP_SIZE*INNER_SIZE), rng)
+      cp_inner = UOp.range(INNER_SIZE, rng+1, AxisType.UPCAST)
+      idx_i = cp_i*WARPGROUP_SIZE*WARP_SIZE*INNER_SIZE + warpgroup*WARP_SIZE*INNER_SIZE + warp*INNER_SIZE + cp_inner
+      return lcl[idx_i].store(glbl[*gargs, idx_i]).end(cp_i, cp_inner)
 
-  cp_i, cp_j = UOp.range(BLOCK_N, 1002), UOp.range(BLOCK_K//WARP_SIZE, 1003)
-  loaded = B.reshape((K//BLOCK_K, BLOCK_K//WARP_SIZE, WARP_SIZE, N//BLOCK_N, BLOCK_N))[K_outer_loop, cp_j, warp, gy, cp_i]
-  #loaded = UOp.const(dtypes.half, 2.0)
-  Bs_store = Bs.reshape((BLOCK_K//WARP_SIZE, WARP_SIZE, BLOCK_N))[cp_j, warp, cp_i].store(loaded).end(cp_i, cp_j)
+    pA = A.permute((0,2,1,3)).reshape((M//BLOCK_M, K//BLOCK_K, BLOCK_M*BLOCK_K))
+    pas = As.permute((1,0)).reshape((BLOCK_M*BLOCK_K,))
+    As_store = generic_copy(pA, (gx, K_outer_loop), pas, 1000)
+
+    pB = B.permute((0,2,1,3)).reshape((K//BLOCK_K, N//BLOCK_N, BLOCK_K*BLOCK_N))
+    pbs = Bs.reshape((BLOCK_K*BLOCK_N,))
+    Bs_store = generic_copy(pB, (K_outer_loop, gy), pbs, 1002)
 
   barrier = UOp.barrier(As_store, Bs_store)
   As = As.after(barrier).reshape((BLOCK_K//TC_K, TC_K, BLOCK_M//TC_M//WARPGROUP_SIZE, WARPGROUP_SIZE, TC_M))
   Bs = Bs.after(barrier).reshape((BLOCK_K//TC_K, TC_K, BLOCK_N//TC_N, TC_N))
 
-  # load from locals into registers
-
   K_inner_loop = UOp.range(BLOCK_K//TC_K, 1, AxisType.REDUCE)
 
+  # load from locals into registers
   Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half.vec(8), slot=1, addrspace=AddrSpace.REG)
   Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half.vec(8), slot=2, addrspace=AddrSpace.REG)
 
@@ -106,20 +121,14 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
   # load values
   acc_after = acc.after(K_outer_loop, M_inner_loop, N_inner_loop, K_inner_loop)
-  #acc_load = UOp.vectorize(*[acc_after[N_inner_loop, M_inner_loop, i] for i in range(4)])
   acc_load = acc_after[N_inner_loop, M_inner_loop]
 
   A_in = Ar[M_inner_loop]
   B_in = Br[N_inner_loop]
 
-  """
-  A_in = UOp.vectorize(*[As[K_inner_loop, (warp//16)*8+i, M_inner_loop, warpgroup, warp%16] for i in range(8)])
-  B_in = UOp.vectorize(*[Bs[K_inner_loop, (warp//16)*8+i, N_inner_loop, warp%16] for i in range(8)])
-  """
-
   # do WMMA
   wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-  out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
+  out = UOp(Ops.WMMA, dtypes.float.vec(4), (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
 
   # store back the acc
   #acc_store = UOp.group(*[acc[N_inner_loop, M_inner_loop, i].store(out.gep(i)) for i in range(4)])
@@ -133,24 +142,25 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   store = UOp.group(*[c_load(i).store(acc[cp_j, cp_i].gep(i)) for i in range(4)])
   store = store.end(cp_i, cp_j)
 
-  """
-  # init the acc
-  acc = UOp.placeholder((4,), dtypes.float, 0, AddrSpace.REG)
-  acc = acc[init_l:=UOp.range(4, 1)].set(0.0, end=init_l)
-
-  # do the wmma
-  acc_load = UOp.vectorize(*[acc.after(K_loop)[i] for i in range(4)])
-  wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-  out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
-
-  # store back the acc
-  acc = acc.after(UOp.group(*[acc[i].store(out.gep(i)) for i in range(4)]).end(K_loop))
-
-  # store the acc into gmem
-  store = UOp.group(*[C[gx, (warp//16)*4+i, gy, warp%16].store(acc[i]) for i in range(4)])
-  """
-
   return store.sink(arg=KernelInfo(name="custom_gemm", opts_to_apply=())).simplify()
+
+# simplest WMMA
+"""
+# init the acc
+acc = UOp.placeholder((4,), dtypes.float, 0, AddrSpace.REG)
+acc = acc[init_l:=UOp.range(4, 1)].set(0.0, end=init_l)
+
+# do the wmma
+acc_load = UOp.vectorize(*[acc.after(K_loop)[i] for i in range(4)])
+wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
+out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
+
+# store back the acc
+acc = acc.after(UOp.group(*[acc[i].store(out.gep(i)) for i in range(4)]).end(K_loop))
+
+# store the acc into gmem
+store = UOp.group(*[C[gx, (warp//16)*4+i, gy, warp%16].store(acc[i]) for i in range(4)])
+"""
 
 if __name__ == "__main__":
   a = Tensor.randn(M, K, dtype=dtypes.half)
