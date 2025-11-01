@@ -22,6 +22,8 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
               (r'(struct|union|enum)\s*([a-zA-Z_][a-zA-Z0-9_]*\b)', r'\1_\2'),
               (r'\((unsigned )?(char)\)', ''), (r'^.*\d+:\d+.*$', ''), (r'^.*\w##\w.*$', '')]
 
+ints = (TK.INT, TK.UINT, TK.LONG, TK.ULONG, TK.LONGLONG, TK.ULONGLONG)
+
 def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, use_errno=False, anon_names={}):
   files, args = files() if callable(files) else files, args() if callable(args) else args
   if tarball:
@@ -61,8 +63,7 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
         lines.append(f"{t.spelling.replace('::', '_')} = {tname(t.get_canonical())}")
         return types[t.spelling]
       case TK.RECORD:
-        if (decl:=t.get_declaration()).is_anonymous():
-          types[t.spelling] = nm = suggested_name or (f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{anoncnt()}")
+        if decl.is_anonymous(): types[t.spelling] = nm = suggested_name or (f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{anoncnt()}")
         else: types[t.spelling] = nm = t.spelling.replace(' ', '_').replace('::', '_')
         lines.append(f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass")
         aa, acnt = [], itertools.count().__next__
@@ -71,7 +72,7 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
         lines.extend(([f"{nm}._anonymous_ = [{', '.join(aa)}]"] if aa else [])+[f"{nm}._fields_ = [",*ll,"]"] if ll else [f"{nm}._fields_ = []"])
         return nm
       case TK.ENUM:
-        if (decl:=t.get_declaration()).is_anonymous(): types[t.spelling] = suggested_name or f"_anonenum{anoncnt()}"
+        if decl.is_anonymous(): types[t.spelling] = suggested_name or f"_anonenum{anoncnt()}"
         else: types[t.spelling] = t.spelling.replace(' ', '_').replace('::', '_')
         lines.append(f"{types[t.spelling]} = CEnum({tname(decl.enum_type)})\n" +
           "\n".join(f"{e.spelling} = {types[t.spelling]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()
@@ -101,9 +102,10 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
               macros += [f"{c.spelling} = lambda {','.join(_args)}: {readext(f, body[0].location.offset, toks[-1].extent.end.offset)}"]
             else: macros += [f"{c.spelling} = {readext(f, toks[1].location.offset, toks[-1].extent.end.offset)}"]
           case CK.VAR_DECL if c.linkage == LK.INTERNAL:
-            if (c.type.kind == TK.CONSTANTARRAY and c.type.get_array_element_type().kind in (TK.INT,TK.UINT) and
+            if (c.type.kind == TK.CONSTANTARRAY and c.type.get_array_element_type().get_canonical().kind in ints and
                 (init:=last(c)).kind == CK.INIT_LIST_EXPR and all(re.match(r"\[.*\].*=", readext(f, c.extent)) for c in init.get_children())):
               macros += [f"{c.spelling} = {{{','.join(f'{readext(f, next(it:=c.get_children()).extent)}:{readext(f, next(it).extent)}' for c in init.get_children())}}}"]
+            elif c.type.get_canonical().kind in ints: macros += [f"{c.spelling} = {readext(f, last(c).extent)}"]
             else: macros += [f"{c.spelling} = {tname(c.type)}({readext(f, last(c).extent)})"]
       except Exception as e: raise Exception(f"parsing failed at {c.location.file}:{c.location.line}") from e
   main, macros = '\n'.join(lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
@@ -116,5 +118,4 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
       assert macrono >= 0 and macrono < len(macros)
       print(f"Skipping {macros[macrono]}: {e}")
       del macros[macrono]
-    except FileNotFoundError: break
   return main + '\n'.join(macros)
