@@ -3,15 +3,39 @@ import numpy as np
 np.set_printoptions(linewidth=1000000)
 os.environ["AMD_LLVM"] = "0"
 
-from tinygrad import Tensor, Context, dtypes, UOp
+from tinygrad import Tensor, Context, dtypes, UOp, GlobalCounters
+from tinygrad.helpers import DEBUG
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 
-N = 16
-M = 16
-K = 32
+WARP_SIZE = 64
 
-N,M,K = 256,256,64
+N = 16
+M = 32
+K = 128
+
+# 1024 matrix cores
+# 16 cycle mfma
+# 2.2 GHz
+# 16x16x32x2 FLOPS/mma = 16384
+# 2.2*1e9*16384*1024/16*1e-12 TFLOPS = 2306 TFLOPS
+
+#N,M,K = 256,256,64
+N,M,K = 4096,4096,4096
+
+# Threadblock tile sizes (block-level tile of C that a block computes)
+BLOCK_M = 128   # rows of C (M-dim) per block
+BLOCK_N = 128   # columns of C (N-dim) per block
+BLOCK_K = 128   # K-slice per block iteration
+
+BLOCK_M = 32
+BLOCK_N = 32
+BLOCK_K = 64
+
+# Reg tile sizes (tensor cores)
+TC_M = 16
+TC_N = 16
+TC_K = 32
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # A = (M x K)
@@ -23,21 +47,65 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert C.shape[1] == B.shape[1]
   assert A.shape[1] == B.shape[0]
 
-  print(C.shape, A.shape, B.shape)
+  gx, gy = UOp.special(M//BLOCK_M, "gidx0"), UOp.special(N//BLOCK_N, "gidx1")
+  warp = UOp.special(WARP_SIZE, "lidx0")
 
-  # split out the tensor core (checks divisbility too)
-  A = A.reshape((M//16, 16, K//32, 32))
-  B = B.reshape((K//32, 32, N//16, 16))
-  C = C.reshape((M//16, 16, N//16, 16))
+  # split out the globals into blocks
+  C = C.reshape((M//BLOCK_M, BLOCK_M, N//BLOCK_N, BLOCK_N))
+  A = A.reshape((M//BLOCK_M, BLOCK_M, K//BLOCK_K, BLOCK_K))
+  B = B.reshape((K//BLOCK_K, BLOCK_K, N//BLOCK_N, BLOCK_N))
 
-  K_loop = UOp.range(K//32, 0, AxisType.REDUCE)
+  # this is the big accumulator
+  acc = UOp.placeholder((BLOCK_M//TC_M, 4, BLOCK_N//TC_N, 1), dtypes.float, 0, AddrSpace.REG)
+  assert acc.size*WARP_SIZE == BLOCK_M*BLOCK_N
+  acc = acc[init_l:=UOp.range(acc.size, 500)].set(0.0, end=init_l)
 
-  gx, gy = UOp.special(M//16, "gidx0"), UOp.special(N//16, "gidx1")
-  warp = UOp.special(64, "lidx0")
+  # create locals (note A is permuted, and the stride is changed to avoid bank conflicts)
+  As = UOp.placeholder((BLOCK_K, BLOCK_M), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
+  Bs = UOp.placeholder((BLOCK_K, BLOCK_N), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)
 
-  A_in = UOp.vectorize(*[A[gx, warp%16, K_loop, (warp//16)*8+i] for i in range(8)])
-  B_in = UOp.vectorize(*[B[K_loop, (warp//16)*8+i, gy, warp%16] for i in range(8)])
+  K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
 
+  # load from globals into locals
+  cp_i, cp_j = UOp.range(BLOCK_M, 1000), UOp.range(BLOCK_K//WARP_SIZE, 1001)
+  loaded = A.reshape((M//BLOCK_M, BLOCK_M, K//BLOCK_K, BLOCK_K//WARP_SIZE, WARP_SIZE))[gx, cp_i, K_outer_loop, cp_j, warp]
+  As_store = As.reshape((BLOCK_K//WARP_SIZE, WARP_SIZE, BLOCK_M))[cp_j, warp, cp_i].store(loaded).end(cp_i, cp_j)
+
+  cp_i, cp_j = UOp.range(BLOCK_N, 1002), UOp.range(BLOCK_K//WARP_SIZE, 1003)
+  loaded = B.reshape((K//BLOCK_K, BLOCK_K//WARP_SIZE, WARP_SIZE, N//BLOCK_N, BLOCK_N))[K_outer_loop, cp_j, warp, gy, cp_i]
+  Bs_store = Bs.reshape((BLOCK_K//WARP_SIZE, WARP_SIZE, BLOCK_N))[cp_j, warp, cp_i].store(loaded).end(cp_i, cp_j)
+
+  barrier = UOp.barrier(As_store, Bs_store)
+  As = As.after(barrier).reshape((BLOCK_K//TC_K, TC_K, BLOCK_M//TC_M, TC_M))
+  Bs = Bs.after(barrier).reshape((BLOCK_K//TC_K, TC_K, BLOCK_N//TC_N, TC_N))
+
+  # load from locals into registers
+
+  M_inner_loop = UOp.range(BLOCK_M//TC_M, 1)
+  N_inner_loop = UOp.range(BLOCK_N//TC_N, 2)
+  K_inner_loop = UOp.range(BLOCK_K//TC_K, 3, AxisType.REDUCE)
+
+  # load values
+  acc_after = acc.after(K_outer_loop, M_inner_loop, N_inner_loop, K_inner_loop)
+  acc_load = UOp.vectorize(*[acc_after[M_inner_loop, i, N_inner_loop, 0] for i in range(4)])
+  A_in = UOp.vectorize(*[As[K_inner_loop, (warp//16)*8+i, M_inner_loop, warp%16] for i in range(8)])
+  B_in = UOp.vectorize(*[Bs[K_inner_loop, (warp//16)*8+i, N_inner_loop, warp%16] for i in range(8)])
+
+  # do WMMA
+  wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
+  out = UOp(Ops.WMMA, dtypes.float.vec(4), (A_in, B_in, acc_load), arg=wmma_arg)
+
+  # store back the acc
+  acc_store = UOp.group(*[acc[M_inner_loop, i, N_inner_loop, 0].store(out.gep(i)) for i in range(4)])
+  acc_store = acc_store.end(M_inner_loop, N_inner_loop, K_inner_loop).barrier().end(K_outer_loop)
+  acc = acc.after(acc_store)
+
+  # store the acc into gmem
+  cp_i, cp_j = UOp.range(BLOCK_M//TC_M, 1004), UOp.range(BLOCK_N//TC_N, 1005)
+  store = UOp.group(*[C[gx, cp_i*TC_M + (warp//16)*4+i, gy, cp_j*TC_N + warp%16].store(acc[cp_i, i, cp_j, 0]) for i in range(4)])
+  store = store.end(cp_i, cp_j)
+
+  """
   # init the acc
   acc = UOp.placeholder((4,), dtypes.float, 0, AddrSpace.REG)
   acc = acc[init_l:=UOp.range(4, 1)].set(0.0, end=init_l)
@@ -50,21 +118,33 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # store back the acc
   acc = acc.after(UOp.group(*[acc[i].store(out.gep(i)) for i in range(4)]).end(K_loop))
 
+  # store the acc into gmem
   store = UOp.group(*[C[gx, (warp//16)*4+i, gy, warp%16].store(acc[i]) for i in range(4)])
-  #store = UOp.group(*[C[gx, (warp//16)*4+i, gy, warp%16].store(out.gep(i)) for i in range(4)])
+  """
+
   return store.sink(arg=KernelInfo(name="custom_gemm", opts_to_apply=()))
 
 if __name__ == "__main__":
   a = Tensor.randn(M, K, dtype=dtypes.half)
   b = Tensor.randn(K, N, dtype=dtypes.half)
+
+  #a = Tensor.zeros(M, K, dtype=dtypes.half).contiguous()
+  #a[0,16] = 1
+  #b = Tensor.ones(K, N, dtype=dtypes.half).contiguous()
+
   c = Tensor.empty(M, N, dtype=dtypes.float)
   with Context(DEBUG=0): Tensor.realize(a,b)
 
   ref = a.dot(b, dtype=dtypes.float)
   ref.realize()
 
-  tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
-  tst.realize()
+  GlobalCounters.reset()
+  with Context(DEBUG=max(2, DEBUG.value)):
+    tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
+    tst.realize()
+  print(f"{(N*M*K*2 / GlobalCounters.time_sum_s)*1e-12:.2f} REAL TFLOPS")
 
   with Context(DEBUG=0):
+    #print(ref.numpy())
+    #print(tst.numpy())
     assert Tensor.isclose(ref, tst, atol=1e-2).all().item(), "matrix not close"
