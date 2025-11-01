@@ -109,12 +109,12 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(graph, additions, recenter) {
+function renderDag(graph, additions, recenter, layoutOpts) {
   // start calculating the new layout (non-blocking)
   updateProgress({ start:true });
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
-  worker.postMessage({graph, additions});
+  worker.postMessage({graph, additions, opts:layoutOpts });
   worker.onmessage = (e) => {
     displaySelection("#graph");
     updateProgress({ start:false });
@@ -623,6 +623,10 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
+const toggleLabel = d3.create("label").text("Show indexing (r)").node();
+const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
+toggleLabel.prepend(toggle);
+
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
@@ -735,10 +739,13 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0);
+  // ** center UOp graph
+  const render = (opts) => renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0, opts);
+  render({ showIndexing:toggle.checked });
+  toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar code blocks
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
-  metadata.replaceChildren(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
@@ -854,6 +861,10 @@ document.addEventListener("keydown", (event) => {
   if (event.key == " ") {
     event.preventDefault()
     document.getElementById("zoom-to-fit-btn").click();
+  }
+  // r key toggles indexing
+  if (event.key === "r") {
+    toggle.click();
   }
 });
 

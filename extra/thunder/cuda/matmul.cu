@@ -5,11 +5,11 @@ using namespace kittens;
 constexpr int g_N = 8192;
 constexpr int BLOCK_SIZE = 32;
 #define NUM_WORKERS (1)
-#define NUM_THREADS (NUM_WORKERS*kittens::WARP_THREADS)
 
 using sub_tile = st_bf<BLOCK_SIZE,BLOCK_SIZE>;
-using tile_gl =  gl<bf16,  1, 1, g_N, g_N, sub_tile>;
+using tile_gl =  gl<bf16, 1, 1, g_N, g_N>;
 
+__launch_bounds__(NUM_WORKERS*WARP_THREADS, 1)
 __global__ void kernel(bf16 *c_ptr, bf16 *a_ptr, bf16 *b_ptr) {
   tile_gl g_C{c_ptr, nullptr, nullptr, nullptr, nullptr};
   tile_gl g_A{a_ptr, nullptr, nullptr, nullptr, nullptr};

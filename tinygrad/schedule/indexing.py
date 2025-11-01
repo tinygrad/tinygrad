@@ -51,7 +51,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.KERNEL}: return None
+  if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
   if x.op is Ops.AFTER and x.src[1].op is Ops.KERNEL: return None
   new_srcs = []
   for s in x.src:
@@ -155,6 +155,10 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+
+    # no ranges on kernels, they are internal
+    if x.op is Ops.KERNEL: continue
+
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
 

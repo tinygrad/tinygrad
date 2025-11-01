@@ -2,7 +2,7 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '12'
-  PYTHON_CACHE_VERSION: '3'
+  PYTHON_CACHE_VERSION: '4'
   APT_CACHE_VERSION: '1'
   BUILD_CACHE_VERSION: '1'
   CAPTURE_PROCESS_REPLAY: 1
@@ -230,7 +230,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: linting-only
-        python-version: '3.10'
+        python-version: '3.11'
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .

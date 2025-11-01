@@ -21,6 +21,8 @@ class FunctionFactoryStub:
 _libraries = {}
 _libraries['libusb'] = None if (lib_path:=os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0'))) is None else ctypes.CDLL(lib_path) #  ctypes.CDLL('libusb')
 class AsDictMixin:
+    import sys
+    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}

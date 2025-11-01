@@ -2,8 +2,6 @@
 
 ## Getting SQ Thread Trace
 
-Only supported on 7900XTX, requires either AM (`rmmod amdgpu`) or disabling power gating on AMD (`ppfeaturemask=0xffff3fff`, don't forget to rebuild initramfs)
-
 SQTT is implemented on top of normal tinygrad profiling, `VIZ=1 SQTT=1` to get profile pickle with sqtt data embedded in it.
 
 `SQTT_BUFFER_SIZE=X` to change size of SQTT buffer (per shader engine, 6 SEs on 7900xtx) in megabytes, default 256.

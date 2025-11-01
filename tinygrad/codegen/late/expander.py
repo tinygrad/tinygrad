@@ -75,10 +75,18 @@ def do_contract(con:UOp):
     idxs += [_expand_arg_to_idx(ex.arg, {**rpk, **lrpk}) for lrpk in _choices_from_args(con.arg)]
   return UOp(Ops.UNROLL, con.dtype, (ex.src[0].gep(tuple(idxs)),), new_ex_args)
 
+def end_unrolls(u:UOp):
+  unrolls, src = partition(u.src[1:], lambda x: x.op is Ops.UNROLL)
+  if not len(unrolls): return None
+  ret = UOp(Ops.CONTRACT, dtypes.void, (u.src[0],), sum([x.arg for x in unrolls], start=()))
+  return u.replace(src=(ret,)+tuple(src))
+
 expander = PatternMatcher([
   # push broadcast through AFTER
   (UPat.var("x").broadcast(name="b").after(name="a", allow_any_len=True), lambda x,b,a: x.after(*a.src[1:]).broadcast(len(b.src))),
   (UPat.var("x").broadcast(name="b").end(name="a", allow_any_len=True), lambda x,b,a: x.end(*a.src[1:]).broadcast(len(b.src))),
+  # END on UNROLL ends the UNROLL
+  (UPat(Ops.END, name="u"), end_unrolls),
   # BUFFERIZE puts UNROLLs for ranges as contract
   (UPat(Ops.BUFFERIZE, src=(UPat(Ops.UNROLL), UPat(Ops.UNROLL)), name="x"),
     lambda x: x.replace(src=tuple(UOp(Ops.CONTRACT, dtype=s.dtype.vec(x.src[1].src[0].dtype.count), src=(s,), arg=x.src[1].arg) for s in x.src))),

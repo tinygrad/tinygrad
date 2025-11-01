@@ -44,7 +44,9 @@ def fully_flatten(l):
     return flattened
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
+def _is_balanced(s:str) -> bool:
+  return (acc:=list(itertools.accumulate([(1 if ch=='(' else -1 if ch==')' else 0) for ch in s])))[-1]==0 and all(x>=0 for x in acc)
+def strip_parens(fst:str) -> str: return fst[1:-1] if fst and fst[0]=='(' and fst[-1] == ')' and _is_balanced(fst[1:-1]) else fst
 def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def round_down(num:int, amt:int) -> int: return -round_up(-num, amt)

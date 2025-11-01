@@ -246,7 +246,7 @@ class AMDLLVMRenderer(LLVMRenderer):
   def __init__(self, arch:str):
     self.arch = arch
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
-    self.is_cdna = arch.split(":")[0] in {"gfx942", "gfx950"}
+    self.is_cdna = AMDRenderer.is_cdna(arch)
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([

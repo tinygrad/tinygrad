@@ -572,7 +572,7 @@ class TestUOpPrograms(unittest.TestCase):
   def test_simple(self):
     out = Tensor.empty(10,10,dtype=dtypes.int)
 
-    ptr = UOp.placeholder(out.dtype, out.shape, slot=0)
+    ptr = UOp.placeholder(out.shape, out.dtype, slot=0)
     i, j = UOp.range(10, axis_id=0), UOp.range(10, axis_id=1)
     prog = ptr[i,j].set(42).end(i,j)
     self._run(prog.sink(), out)
@@ -592,9 +592,9 @@ class TestUOpPrograms(unittest.TestCase):
     DT = dtypes.float32
 
     # Placeholders (bind slots explicitly)
-    A = UOp.placeholder(DT, (M, K), slot=0)
-    B = UOp.placeholder(DT, (K, N), slot=1)
-    C = UOp.placeholder(DT, (M, N), slot=2)
+    A = UOp.placeholder((M, K), DT, slot=0)
+    B = UOp.placeholder((K, N), DT, slot=1)
+    C = UOp.placeholder((M, N), DT, slot=2)
 
     # Axes: i,j are spatial; k is a reduction axis over the shared dim K
     i = UOp.range(M, axis_id=0)                             # rows of A/C

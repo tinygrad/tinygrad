@@ -84,8 +84,10 @@ if __name__=="__main__":
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
     NUM_WAVES = 4
+    launchBenchmark("v_mfma_f32_16x16x16_f16", (3,0,1), accum=True)
     launchBenchmark("v_mfma_f32_16x16x16_bf16", (3,0,1), accum=True)
     FLOPS_PER_MATMUL = 16*16*32*2
+    launchBenchmark("v_mfma_f32_16x16x32_f16", (3,0,3), accum=True)
     launchBenchmark("v_mfma_f32_16x16x32_bf16", (3,0,3), accum=True)
     FLOPS_PER_MATMUL = 16*16*128*2
     launchBenchmark("v_mfma_f32_16x16x128_f8f6f4", (3,0,7), accum=True) # fp8

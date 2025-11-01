@@ -52,6 +52,8 @@ else:
     c_long_double_t = ctypes.c_ubyte*16
 
 class AsDictMixin:
+    import sys
+    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}

@@ -5,7 +5,7 @@ const ctx = canvas.getContext("2d");
 ctx.font = `350 ${LINE_HEIGHT}px sans-serif`;
 
 onmessage = (e) => {
-  const { graph, additions } = e.data;
+  const { graph, additions, opts } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
   g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
   if (additions.length !== 0) g.setNode("addition", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
@@ -22,6 +22,15 @@ onmessage = (e) => {
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (additions.includes(parseInt(k))) g.setParent(k, "addition");
+  }
+  // optionally hide nodes from the layuot
+  if (!opts.showIndexing) {
+    for (const n of g.nodes()) {
+      const node = g.node(n);
+      if (node.label.includes("dtypes.index")) g.removeNode(n);
+    }
+    // After all layout changes are complete, remove the overlay node if it's empty
+    if (!g.node("addition")?.width) g.removeNode("addition");
   }
   dagre.layout(g);
   postMessage(dagre.graphlib.json.write(g));

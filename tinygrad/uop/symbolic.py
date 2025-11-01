@@ -514,9 +514,8 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
    lambda x,y,alu: UOp(Ops.VECTORIZE, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
   # VECTORIZE of a single element is just that element
   (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
-  # VECTORIZE void is SINK
-  (UPat(Ops.VECTORIZE, dtype=dtypes.void, src=UPat(Ops.BARRIER, name='b')), lambda b: b),
-  (UPat(Ops.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp(Ops.SINK, dtypes.void, x.src)),
+  # VECTORIZE void is GROUP
+  (UPat(Ops.VECTORIZE, dtype=dtypes.void, name='x'), lambda x: UOp.group(*x.src)),
   # tensor core with a 0 input is acc
   (UPat(Ops.WMMA, src=(UPat.const(None, 0.0), UPat.var(), UPat.var("acc"))), lambda acc: acc),
   (UPat(Ops.WMMA, src=(UPat.var(), UPat.const(None, 0.0), UPat.var("acc"))), lambda acc: acc),

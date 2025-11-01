@@ -23,6 +23,8 @@ def _try_dlopen_tinymesa_cpu():
 
 
 class AsDictMixin:
+    import sys
+    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}
@@ -10254,7 +10256,6 @@ nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(s
 class struct_nir_builder(Structure):
     pass
 
-struct_nir_builder._pack_ = 0 # source:False
 struct_nir_builder._fields_ = [
     ('cursor', nir_cursor),
     ('exact', ctypes.c_bool),

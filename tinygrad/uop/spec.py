@@ -1,6 +1,6 @@
 import math
 from typing import cast, Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata
 from tinygrad.uop.validate import validate_index
@@ -44,7 +44,20 @@ shared_spec = PatternMatcher([
 
 # ***** UOp spec in the Tensor graph *****
 
-tensor_spec = PatternMatcher([
+movement_ops = PatternMatcher([
+  (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index), UPat(dtype=dtypes.index))), lambda mv,x: True),
+  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
+
+  # inputs to movement ops
+  (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
+  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
+
+  # AFTER on Movement Op
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
+])
+
+_tensor_spec = PatternMatcher([
   # buffer spec
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
@@ -56,7 +69,7 @@ tensor_spec = PatternMatcher([
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.MSTACK, src=UPat(Ops.BUFFER)),)), lambda: True),
 
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
-  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
+  (UPat(Ops.KERNEL, src=UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND, Ops.CONTIGUOUS))), lambda: True),
 
   # ASSIGN has a target and a value. It can also optionally depend on other assigns
   (UPat(Ops.ASSIGN, name="x"), lambda x: len(x.src) >= 2 and all(s.op is Ops.ASSIGN for s in x.src[2:])),
@@ -66,14 +79,6 @@ tensor_spec = PatternMatcher([
 
   # MSTACK combines buffers into multi
   (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(x.device, str) for x in x.src)),
-
-  (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
-  (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index), UPat(dtype=dtypes.index))), lambda mv,x: True),
-  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
-
-  # inputs to movement ops
-  (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.index), lambda: True),
-  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
@@ -104,7 +109,12 @@ tensor_spec = PatternMatcher([
 
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
-])+shared_spec
+])+movement_ops+shared_spec
+
+tensor_spec = PatternMatcher([
+  # no tags allowed in tensor graph
+  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
+])+_tensor_spec
 
 # ***** UOp spec in codegen shared between kernel and program *****
 
@@ -153,11 +163,6 @@ shared_codegen_spec = PatternMatcher([
 # ***** UOp spec in kernel graph *****
 
 kernel_spec = PatternMatcher([
-  # RESHAPE (but only RESHAPE) is allowed here
-  (UPat(Ops.RESHAPE, name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.index))), lambda mv,x: True),
-  (UPat(Ops.AFTER, src=(UPat(Ops.RESHAPE),), allow_any_len=True), lambda: True),
-  (UPat(Ops.VCONST, dtype=dtypes.index), lambda: True),
-
   # index is allowed here
   (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.index), lambda: True),
 
@@ -169,7 +174,7 @@ kernel_spec = PatternMatcher([
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
-])+shared_codegen_spec+shared_spec
+])+movement_ops+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in linearized programs *****
 
@@ -246,7 +251,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.floats), lambda: True),
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
-])+tensor_spec+kernel_spec+program_spec+shared_spec
+])+_tensor_spec+kernel_spec+program_spec+shared_spec
 
 # ***** uop helpers *****
 
@@ -262,7 +267,7 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 
 # late imports to avoid circular import
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.schedule.rangeify import BufferizeOpts, Kernel
+from tinygrad.schedule.rangeify import BufferizeOpts
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel, "Metadata": Metadata,
                         "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
