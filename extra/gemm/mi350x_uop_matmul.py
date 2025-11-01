@@ -25,21 +25,24 @@ TC_K = 32
 N,M,K = 4096,4096,4096
 
 # Threadblock tile sizes (block-level tile of C that a block computes)
-BLOCK_M = 128   # rows of C (M-dim) per block
-BLOCK_N = 128   # columns of C (N-dim) per block
-BLOCK_K = 128   # K-slice per block iteration
+#BLOCK_M = 128   # rows of C (M-dim) per block
+#BLOCK_N = 128   # columns of C (N-dim) per block
+#BLOCK_K = 128   # K-slice per block iteration
 
 BLOCK_M = 64
 BLOCK_N = 64
 BLOCK_K = 128
 
-WARPGROUP_SIZE = 1
+WARPGROUP_SIZE = 4
+BLOCK_M = BLOCK_M * WARPGROUP_SIZE
 
 # TODO: improve the syntax of this. better syntax, faster iteration
 #  -- add working slice a[gx, :, i] -> shape of the : (aka (16,16,32) becomes (16,))
 #  -- add argfix to movement (traits shared with Tensor)
 #  -- fix WMMA to not require all the junk
 #  -- improve syntax for vectorized loads/stores (both with DEVECTORIZE and without)
+#  -- be able to use CONTRACT on a range
+
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   # A = (M x K)
@@ -55,6 +58,15 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   warp = UOp.special(WARP_SIZE, "lidx0")
   warpgroup = UOp.special(WARPGROUP_SIZE, "lidx1")
 
+  # generic copy logic (not good)
+  def generic_copy(glbl, gargs, lcl, rng):
+    # Fully coalesced 128-bit loads/stores.
+    INNER_SIZE = 8
+    cp_i = UOp.range(lcl.size//(WARPGROUP_SIZE*WARP_SIZE*INNER_SIZE), rng)
+    cp_inner = UOp.range(INNER_SIZE, rng+1, AxisType.UPCAST)
+    idx_i = cp_i*WARPGROUP_SIZE*WARP_SIZE*INNER_SIZE + warpgroup*WARP_SIZE*INNER_SIZE + warp*INNER_SIZE + cp_inner
+    return lcl[idx_i].store(glbl[*gargs, idx_i]).end(cp_i, cp_inner)
+
   # split out the globals into blocks
   C = C.reshape((M//BLOCK_M, BLOCK_M, N//BLOCK_N, BLOCK_N))
   A = A.reshape((M//BLOCK_M, BLOCK_M, K//BLOCK_K, BLOCK_K))
@@ -66,78 +78,100 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   acc = acc[init_l:=UOp.range(acc.size, 500)].set(UOp.const(dtypes.float.vec(4), 0.0), end=init_l)
 
   # create locals (note A is permuted, and the stride is changed to avoid bank conflicts)
-  BM_As_stride = (BLOCK_M + 1)
-  INNER_SLICE = 1
-  As = UOp.placeholder((BLOCK_K//INNER_SLICE, BM_As_stride, INNER_SLICE), dtypes.half, slot=0, addrspace=AddrSpace.LOCAL)
-  Bs = UOp.placeholder((BLOCK_K//INNER_SLICE, BLOCK_N, INNER_SLICE), dtypes.half, slot=1, addrspace=AddrSpace.LOCAL)
-
-  As = As.permute((0,2,1)).reshape((BLOCK_K, BM_As_stride)).shrink_to((BLOCK_K, BLOCK_M))
-  Bs = Bs.permute((0,2,1)).reshape((BLOCK_K, BLOCK_N))
-
-  K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
+  def make_locals(slot) -> tuple[UOp, UOp]:
+    BM_As_stride = (BLOCK_M + 1)
+    BN_Bs_stride = (BLOCK_N + 0)
+    INNER_SLICE = 1
+    As = UOp.placeholder((BLOCK_K//INNER_SLICE, BM_As_stride, INNER_SLICE), dtypes.half, slot=slot, addrspace=AddrSpace.LOCAL)
+    Bs = UOp.placeholder((BLOCK_K//INNER_SLICE, BN_Bs_stride, INNER_SLICE), dtypes.half, slot=slot+1, addrspace=AddrSpace.LOCAL)
+    As = As.permute((0,2,1)).reshape((BLOCK_K, BM_As_stride)).shrink_to((BLOCK_K, BLOCK_M))
+    Bs = Bs.permute((0,2,1)).reshape((BLOCK_K, BN_Bs_stride)).shrink_to((BLOCK_K, BLOCK_N))
+    return As, Bs
 
   # load from globals into locals (TODO: use the warpgroup)
-  if getenv("FAKE"):
-    As_store = As.after(K_outer_loop)[0].store(UOp.const(dtypes.float, 2.0))
-    Bs_store = Bs.after(K_outer_loop)[0].store(UOp.const(dtypes.float, 2.0))
-  else:
-    # generic copy logic (not good)
-    def generic_copy(glbl, gargs, lcl, rng):
-      # Fully coalesced 128-bit loads/stores.
-      INNER_SIZE = 8
-      cp_i = UOp.range(lcl.size//(WARPGROUP_SIZE*WARP_SIZE*INNER_SIZE), rng)
-      cp_inner = UOp.range(INNER_SIZE, rng+1, AxisType.UPCAST)
-      idx_i = cp_i*WARPGROUP_SIZE*WARP_SIZE*INNER_SIZE + warpgroup*WARP_SIZE*INNER_SIZE + warp*INNER_SIZE + cp_inner
-      return lcl[idx_i].store(glbl[*gargs, idx_i]).end(cp_i, cp_inner)
 
+  def load_to_locals(l_K_outer_loop:UOp, Asl:UOp, Bsl:UOp, rng:int, barrier=True) -> tuple[UOp, UOp]:
     pA = A.permute((0,2,1,3)).reshape((M//BLOCK_M, K//BLOCK_K, BLOCK_M*BLOCK_K))
-    pas = As.permute((1,0)).reshape((BLOCK_M*BLOCK_K,))
-    As_store = generic_copy(pA, (gx, K_outer_loop), pas, 1000)
+    pas = Asl.permute((1,0)).reshape((BLOCK_M*BLOCK_K,))
+    As_store = generic_copy(pA, (gx, l_K_outer_loop), pas, rng)
 
     pB = B.permute((0,2,1,3)).reshape((K//BLOCK_K, N//BLOCK_N, BLOCK_K*BLOCK_N))
-    pbs = Bs.reshape((BLOCK_K*BLOCK_N,))
-    Bs_store = generic_copy(pB, (K_outer_loop, gy), pbs, 1002)
+    pbs = Bsl.reshape((BLOCK_K*BLOCK_N,))
+    Bs_store = generic_copy(pB, (l_K_outer_loop, gy), pbs, rng+2)
 
-  barrier = UOp.barrier(As_store, Bs_store)
-  As = As.after(barrier).reshape((BLOCK_K//TC_K, TC_K, BLOCK_M//TC_M//WARPGROUP_SIZE, WARPGROUP_SIZE, TC_M))
-  Bs = Bs.after(barrier).reshape((BLOCK_K//TC_K, TC_K, BLOCK_N//TC_N, TC_N))
+    barrier = UOp.barrier(As_store, Bs_store) if barrier else UOp.group(As_store, Bs_store)
+    return Asl.after(barrier), Bsl.after(barrier)
 
-  K_inner_loop = UOp.range(BLOCK_K//TC_K, 1, AxisType.REDUCE)
+  def compute_on_locals(acc:UOp, Asl:UOp, Bsl:UOp, rng:int, afters:tuple[UOp, ...]=()) -> UOp:
+    K_inner_loop = UOp.range(BLOCK_K//TC_K, rng, AxisType.REDUCE)
 
-  # load from locals into registers
-  Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half.vec(8), slot=1, addrspace=AddrSpace.REG)
-  Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half.vec(8), slot=2, addrspace=AddrSpace.REG)
+    # load from locals into registers
+    Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half.vec(8), slot=1, addrspace=AddrSpace.REG)
+    Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half.vec(8), slot=2, addrspace=AddrSpace.REG)
 
-  M_load_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, 1500)
-  A_in = UOp.vectorize(*[As[K_inner_loop, (warp//16)*8+i, M_load_loop, warpgroup, warp%16] for i in range(8)])
-  Ar = Ar[M_load_loop].set(A_in, end=M_load_loop)
+    M_load_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+1)
+    Asl = Asl.reshape((BLOCK_K//TC_K, TC_K, BLOCK_M//TC_M//WARPGROUP_SIZE, WARPGROUP_SIZE, TC_M))
+    A_in = UOp.vectorize(*[Asl[K_inner_loop, (warp//16)*8+i, M_load_loop, warpgroup, warp%16] for i in range(8)])
+    Ar = Ar[M_load_loop].set(A_in, end=M_load_loop)
 
-  N_load_loop = UOp.range(BLOCK_N//TC_N, 1501)
-  B_in = UOp.vectorize(*[Bs[K_inner_loop, (warp//16)*8+i, N_load_loop, warp%16] for i in range(8)])
-  Br = Br[N_load_loop].set(B_in, end=N_load_loop)
+    N_load_loop = UOp.range(BLOCK_N//TC_N, rng+2)
+    Bsl = Bsl.reshape((BLOCK_K//TC_K, TC_K, BLOCK_N//TC_N, TC_N))
+    B_in = UOp.vectorize(*[Bsl[K_inner_loop, (warp//16)*8+i, N_load_loop, warp%16] for i in range(8)])
+    Br = Br[N_load_loop].set(B_in, end=N_load_loop)
 
-  M_inner_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, 2) #, AxisType.CUNROLL)
-  N_inner_loop = UOp.range(BLOCK_N//TC_N, 3) #, AxisType.CUNROLL)
+    M_inner_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+3)
+    N_inner_loop = UOp.range(BLOCK_N//TC_N, rng+4)
 
-  # load values
-  acc_after = acc.after(K_outer_loop, M_inner_loop, N_inner_loop, K_inner_loop)
-  acc_load = acc_after[N_inner_loop, M_inner_loop]
+    # load values
+    acc_after = acc.after(*afters, M_inner_loop, N_inner_loop, K_inner_loop)
+    acc_load = acc_after[N_inner_loop, M_inner_loop]
 
-  A_in = Ar[M_inner_loop]
-  B_in = Br[N_inner_loop]
+    A_in = Ar[M_inner_loop]
+    B_in = Br[N_inner_loop]
 
-  # do WMMA
-  wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
-  out = UOp(Ops.WMMA, dtypes.float.vec(4), (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
+    # do WMMA
+    wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
+    out = UOp(Ops.WMMA, dtypes.float.vec(4), (Ar[M_inner_loop], Br[N_inner_loop], acc_load), arg=wmma_arg)
 
-  # store back the acc
-  #acc_store = UOp.group(*[acc[N_inner_loop, M_inner_loop, i].store(out.gep(i)) for i in range(4)])
-  acc_store = acc[N_inner_loop, M_inner_loop].store(out)
-  acc_store = acc_store.end(M_inner_loop, N_inner_loop, K_inner_loop).barrier().end(K_outer_loop)
-  acc = acc.after(acc_store)
+    # store back the acc
+    acc_store = acc[N_inner_loop, M_inner_loop].store(out)
+    return acc_store.end(M_inner_loop, N_inner_loop, K_inner_loop)
+
+  # **** START INNER LOOP *****
+  # inner loop -- locals -> regs
+
+  # no pipeline
+  if not getenv("PIPELINE"):
+    As, Bs = make_locals(slot=0)
+
+    K_outer_loop = UOp.range(K//BLOCK_K, 0, AxisType.REDUCE)
+    As, Bs = load_to_locals(K_outer_loop, As, Bs, 1000, barrier=True)
+    acc_store = compute_on_locals(acc, As, Bs, 1500, afters=(K_outer_loop,))
+    acc = acc.after(acc_store.barrier().end(K_outer_loop))
+  else:
+    # this doesn't work
+    As0, Bs0 = make_locals(slot=0)
+    As1, Bs1 = make_locals(slot=2)
+    As0, Bs0 = load_to_locals(0, As0, Bs0, 1000)
+
+    K_outer_loop = UOp.range((K//BLOCK_K-2)//2, 0, AxisType.REDUCE)
+    As1, Bs1 = load_to_locals(K_outer_loop+1, As1, Bs1, 2000, barrier=False)
+    acc_store = compute_on_locals(acc, As0, Bs0, 1500, afters=(K_outer_loop,))
+    As0, Bs0 = load_to_locals(K_outer_loop+2, As0, Bs0, 3000, barrier=False)
+    acc_store = compute_on_locals(acc, As1, Bs1, 2500, afters=(acc_store, As0, Bs0))
+    acc = acc.after(acc_store.barrier().end(K_outer_loop))
+
+    #acc_store = compute_on_locals(acc, As0, Bs0, 3500, afters=(acc_store.barrier().end(K_outer_loop)))
+    """
+    As1, Bs1 = load_to_locals(K//BLOCK_K-1, As1, Bs1, 4000)
+    acc_store = compute_on_locals(acc, As1, Bs1, 4500, afters=(acc_store))
+    """
+    #acc = acc.after(acc_store)
+
+  # **** END LOOPS *****
 
   # store the acc into gmem
-  cp_i, cp_j = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, 1004), UOp.range(BLOCK_N//TC_N, 1005)
+  cp_i, cp_j = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, 10004), UOp.range(BLOCK_N//TC_N, 10005)
   c_load = lambda i: C[gx, cp_i*TC_M*WARPGROUP_SIZE + warpgroup*TC_M + (warp//16)*4+i, gy, cp_j*TC_N + warp%16]
   store = UOp.group(*[c_load(i).store(acc[cp_j, cp_i].gep(i)) for i in range(4)])
   store = store.end(cp_i, cp_j)
