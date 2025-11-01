@@ -1,9 +1,12 @@
 # mypy: ignore-errors
-import ctypes, ctypes.util
+import ctypes, os
+from ctypes.util import find_library
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-import os
-dll = ctypes.CDLL(os.getenv('LIBUSB_PATH', ctypes.util.find_library('usb-1.0')))
-
+def dll():
+  try: return ctypes.CDLL(os.getenv('LIBUSB_PATH', find_library('usb-1.0')))
+  except: pass
+  return None
+dll = dll()
 class _anonunion0(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte
 uint16_t = ctypes.c_ushort
@@ -275,8 +278,8 @@ struct_libusb_version._fields_ = [
   ('minor', uint16_t),
   ('micro', uint16_t),
   ('nano', uint16_t),
-  ('rc', ctypes.POINTER(ctypes.c_ubyte)),
-  ('describe', ctypes.POINTER(ctypes.c_ubyte)),
+  ('rc', ctypes.POINTER(ctypes.c_char)),
+  ('describe', ctypes.POINTER(ctypes.c_char)),
 ]
 libusb_context = struct_libusb_context
 libusb_device = struct_libusb_device
@@ -374,7 +377,7 @@ LIBUSB_OPTION_NO_DEVICE_DISCOVERY = enum_libusb_option.define('LIBUSB_OPTION_NO_
 LIBUSB_OPTION_LOG_CB = enum_libusb_option.define('LIBUSB_OPTION_LOG_CB', 3)
 LIBUSB_OPTION_MAX = enum_libusb_option.define('LIBUSB_OPTION_MAX', 4)
 
-libusb_log_cb = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_context), enum_libusb_log_level, ctypes.POINTER(ctypes.c_ubyte))
+libusb_log_cb = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_context), enum_libusb_log_level, ctypes.POINTER(ctypes.c_char))
 class struct_libusb_init_option(ctypes.Structure): pass
 class struct_libusb_init_option_value(ctypes.Union): pass
 struct_libusb_init_option_value._fields_ = [
@@ -414,15 +417,15 @@ try: (libusb_has_capability:=dll.libusb_has_capability).restype, libusb_has_capa
 except AttributeError: pass
 
 # const char *libusb_error_name(int errcode)
-try: (libusb_error_name:=dll.libusb_error_name).restype, libusb_error_name.argtypes = ctypes.POINTER(ctypes.c_ubyte), [ctypes.c_int]
+try: (libusb_error_name:=dll.libusb_error_name).restype, libusb_error_name.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int]
 except AttributeError: pass
 
 # int libusb_setlocale(const char *locale)
-try: (libusb_setlocale:=dll.libusb_setlocale).restype, libusb_setlocale.argtypes = ctypes.c_int, [ctypes.POINTER(ctypes.c_ubyte)]
+try: (libusb_setlocale:=dll.libusb_setlocale).restype, libusb_setlocale.argtypes = ctypes.c_int, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # const char *libusb_strerror(int errcode)
-try: (libusb_strerror:=dll.libusb_strerror).restype, libusb_strerror.argtypes = ctypes.POINTER(ctypes.c_ubyte), [ctypes.c_int]
+try: (libusb_strerror:=dll.libusb_strerror).restype, libusb_strerror.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int]
 except AttributeError: pass
 
 ssize_t = ctypes.c_long
