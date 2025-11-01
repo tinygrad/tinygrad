@@ -973,11 +973,27 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def _upat_to_uop(p: UPat, **kwargs: UOp) -> UOp:
+  dtype = least_upper_dtype(*{v.dtype for v in kwargs.values()})
+  if p.src is None:
+    if p.op == (Ops.CONST,): return UOp.const(dtype, p.arg)
+    if p.op is None and p.name is not None: return kwargs[p.name]
+  if p.src is not None and p.op:
+    return UOp(p.op[0], dtype=dtype, src=(tuple(_upat_to_uop(c, **kwargs) for c in p.src[0])))
+  raise RuntimeError("can't map upat to uop")
+
+def fixup_pm_function(fxn: Callable|tuple|UPat) -> Callable:
+  if isinstance(fxn, UPat):
+    g = {"Ops": Ops, "UOp": UOp, "least_upper_dtype": least_upper_dtype, "_upat_to_uop": _upat_to_uop}
+    return types.FunctionType(_upat_to_uop.__code__, g, argdefs=(fxn,))
+  if isinstance(fxn, tuple): return types.FunctionType(*fxn)
+  return fxn
+
 class PatternMatcher:
-  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
+  def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple|UPat]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
-    self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
+    self.patterns: list[tuple[UPat, Callable]] = [(p, fixup_pm_function(fxn)) for p, fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
     self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
