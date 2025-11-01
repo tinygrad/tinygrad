@@ -46,8 +46,8 @@ def __getattr__(nm):
                                  rules=[('__NR','NR')])
     case "ib": return load("ib", ["ibverbs"], ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
                                                "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], use_errno=True)
-    case "llvm": return load("llvm", ["LLVM_PATH"], lambda: [sys("llvm-config-14 --includedir")+"/llvm-c/**/*.h"],
-      lambda: sys("llvm-config-14 --cflags").split(), recsym=True, prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
+    case "llvm": return load("llvm", ["LLVM_PATH"], lambda: [sys("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
+      lambda: sys("llvm-config-20 --cflags").split(), recsym=True, prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
     case "pci": return load("pci", [], ["/usr/include/linux/pci_regs.h"])
     case "vfio": return load("vfio", [], ["/usr/include/linux/vfio.h"])
     # could add rule: WGPU_COMMA -> ','
