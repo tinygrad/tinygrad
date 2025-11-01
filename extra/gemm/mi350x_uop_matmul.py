@@ -87,6 +87,7 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
     BN_Bs_stride = (BLOCK_N + 0)
     INNER_SLICE = 8
     As = UOp.placeholder((BLOCK_K//INNER_SLICE, BM_As_stride, INNER_SLICE), dtypes.half, slot=slot, addrspace=AddrSpace.LOCAL)
+    INNER_SLICE = 1
     Bs = UOp.placeholder((BLOCK_K//INNER_SLICE, BN_Bs_stride, INNER_SLICE), dtypes.half, slot=slot+1, addrspace=AddrSpace.LOCAL)
     As = As.permute((0,2,1)).reshape((BLOCK_K, BM_As_stride)).shrink_to((BLOCK_K, BLOCK_M))
     Bs = Bs.permute((0,2,1)).reshape((BLOCK_K, BN_Bs_stride)).shrink_to((BLOCK_K, BLOCK_N))
@@ -116,18 +117,20 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
     Ar = UOp.placeholder((BLOCK_M//TC_M//WARPGROUP_SIZE,), dtypes.half.vec(8), slot=1, addrspace=AddrSpace.REG)
     Br = UOp.placeholder((BLOCK_N//TC_N,), dtypes.half.vec(8), slot=2, addrspace=AddrSpace.REG)
 
-    M_load_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+1)
+    M_load_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+10)
     Asl = Asl.reshape((BLOCK_K//TC_K, TC_K, BLOCK_M//TC_M//WARPGROUP_SIZE, WARPGROUP_SIZE, TC_M))
-    A_in = UOp.vectorize(*[Asl[K_inner_loop, (warp//16)*8+i, M_load_loop, warpgroup, warp%16] for i in range(8)])
+    load_rng = UOp.range(8, rng+11, axis_type=AxisType.UPCAST)
+    A_in = Asl[K_inner_loop, (warp//16)*8+load_rng, M_load_loop, warpgroup, warp%16].contract(load_rng)
     Ar = Ar[M_load_loop].set(A_in, end=M_load_loop)
 
-    N_load_loop = UOp.range(BLOCK_N//TC_N, rng+2)
+    N_load_loop = UOp.range(BLOCK_N//TC_N, rng+20)
     Bsl = Bsl.reshape((BLOCK_K//TC_K, TC_K, BLOCK_N//TC_N, TC_N))
-    B_in = UOp.vectorize(*[Bsl[K_inner_loop, (warp//16)*8+i, N_load_loop, warp%16] for i in range(8)])
+    load_rng = UOp.range(8, rng+21, axis_type=AxisType.UPCAST)
+    B_in = Bsl[K_inner_loop, (warp//16)*8+load_rng, N_load_loop, warp%16].contract(load_rng)
     Br = Br[N_load_loop].set(B_in, end=N_load_loop)
 
-    M_inner_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+3)
-    N_inner_loop = UOp.range(BLOCK_N//TC_N, rng+4)
+    M_inner_loop = UOp.range(BLOCK_M//TC_M//WARPGROUP_SIZE, rng+30)
+    N_inner_loop = UOp.range(BLOCK_N//TC_N, rng+31)
 
     # load values
     acc_after = acc.after(*afters, M_inner_loop, N_inner_loop, K_inner_loop)
