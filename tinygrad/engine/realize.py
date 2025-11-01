@@ -2,8 +2,7 @@ from typing import cast, Generator, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
-from tinygrad.helpers import unwrap
+from tinygrad.helpers import DEVECTORIZE, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -179,18 +178,22 @@ class ExecItem:
       GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.estimates.mem, var_vals))
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
+        def units_to_str(x:float, units:dict, colors:list[str]=['GREEN', 'green', 'yellow', 'yellow', 'RED']) -> str:
+          def align(x, sym, color, sym_width=max(map(len, units.keys()))): return colored(f"{x:3}{sym:{sym_width}}", color)
+          return next((align(int(x//val), sym, colors[i]) for i, (sym, val) in enumerate(units.items()) if x//val>0),
+                      align(0, list(units.keys())[-1], colors[-1]))
         lds_est = sym_infer(self.prg.estimates.lds, var_vals)
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
         header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
-        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-        flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
-        flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-        mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
-          colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
+        mem_str = units_to_str(mem_est, {"TB":1e12, "GB":1e9, "MB":1e6, "KB":1e3, "B":1})
+        ops_str = units_to_str(op_est, {"TFLOPs":1e12, "GFLOPs":1e9, "MFLOPs":1e6, "KFLOPs":1e3, "FLOPs":1})
+        time_str = "" if et is None else units_to_str(et,  {"s":1, "ms":1e-3, "us":1e-6, "ns":1e-9})
+        flops_str = units_to_str(op_est/(et or 1e-20), {"TFLOPS":1e12, "GFLOPS":1e9, "MFLOPS":1e6, "KFLOPS":1e3, "FLOPS":1})
+        membw_str = units_to_str(mem_est/(et or 1e-20), {"TB/s":1e12, "GB/s":1e9, "MB/s":1e6, "KB/s":1e3, "B/s":1})
         print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-          f" {self.prg.display_name+' '*(46-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-          ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
-          f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
+              f" {self.prg.display_name+' '*(46-ansilen(self.prg.display_name))} args={len(bufs):2d}"+
+              f" mem={mem_str} ops={ops_str} tm={time_str} FLOPS={flops_str} membw={membw_str}"+
+              f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
       self.prg.first_run = False
     return et
 
