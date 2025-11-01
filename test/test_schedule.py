@@ -1504,6 +1504,12 @@ class TestSchedule(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
+  def test_fuse_arange_avg_pool2d(self):
+    shape = (1,1,6,6)
+    x = Tensor.avg_pool2d(Tensor.empty(shape), kernel_size=(3,3), padding=1, stride=3, ceil_mode=True)
+    sched = check_schedule(x, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 1)
+
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_base_change_expand_expand(self):
