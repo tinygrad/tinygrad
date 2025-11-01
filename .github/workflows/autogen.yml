@@ -77,14 +77,17 @@ jobs:
         diff /tmp/nv.py.bak tinygrad/runtime/autogen/nv.py
     - name: Verify AMD autogen
       run: |
+        sudo apt-get install -y --no-install-recommends hip-dev
         mv tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         mv tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
+        mv tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
         mv tinygrad/runtime/autogen/amd_gpu.py /tmp/amd_gpu.py.bak
         mv tinygrad/runtime/autogen/sqtt.py /tmp/sqtt.py.bak
         mv extra/sqtt/rocprof/rocprof.py /tmp/rocprof.py.bak
-        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, amd_gpu, sqtt; from extra.sqtt.rocprof import rocprof"
+        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, hip, amd_gpu, sqtt; from extra.sqtt.rocprof import rocprof"
         diff /tmp/comgr.py.bak tinygrad/runtime/autogen/comgr.py
         diff /tmp/hsa.py.bak tinygrad/runtime/autogen/hsa.py
+        diff /tmp/hip.py.bak tinygrad/runtime/autogen/hip.py
         diff /tmp/amd_gpu.py.bak tinygrad/runtime/autogen/amd_gpu.py
         diff /tmp/sqtt.py.bak tinygrad/runtime/autogen/sqtt.py
         diff /tmp/rocprof.py.bak extra/sqtt/rocprof/rocprof.py
