@@ -33,7 +33,7 @@ remu = _try_dlopen_remu()
 def create_sdma_packets():
   # TODO: clean up this, if we want to keep it
   structs = {}
-  for name,pkt in [(name,s) for name,s in amd_gpu.__dict__.items() if name.startswith("struct_SDMA_PKT_") and name.endswith("_TAG")]:
+  for name,pkt in [(name,s) for name,s in amd_gpu.__dict__.items() if name.startswith("rocr_AMD_SDMA_PKT_") and name.endswith("_TAG")]:
     names = set()
     fields = []
     for pkt_fields in pkt._fields_:
@@ -47,7 +47,7 @@ def create_sdma_packets():
           # merge together 64-bit fields, otherwise just append them
           if fname.endswith("_63_32") and fields[-1][0].endswith("_31_0"): fields[-1] = tuple([fname[:-6], ctypes.c_ulong, 64])
           else: fields.append(tuple([fname, *union_fields[1:]]))
-    new_name = name[16:-4].lower()
+    new_name = name[18:-4].lower()
     structs[new_name] = init_c_struct_t(tuple(fields))
     assert ctypes.sizeof(structs[new_name]) == ctypes.sizeof(pkt), f"{ctypes.sizeof(structs[new_name])} != {ctypes.sizeof(pkt)}"
   return type("SDMA_PKTS", (object, ), structs)
