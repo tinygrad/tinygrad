@@ -52,7 +52,7 @@ def copy_buffer_to_buffer(dev:WGPUDevPtr, src:WGPUBufPtr, src_offset:int, dst:WG
 def read_buffer(dev:WGPUDevPtr, buf:WGPUBufPtr) -> memoryview:
   size = webgpu.wgpuBufferGetSize(buf)
   tmp_buffer = webgpu.wgpuDeviceCreateBuffer(dev, webgpu.WGPUBufferDescriptor(size=size,
-    usage=webgpu.WGPUBufferUsage_CopyDst.value | webgpu.WGPUBufferUsage_MapRead.value, mappedAtCreation=False))
+    usage=webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_MapRead, mappedAtCreation=False))
   copy_buffer_to_buffer(dev, buf, 0, tmp_buffer, 0, size)
   _run(webgpu.wgpuBufferMapAsync2, webgpu.WGPUBufferMapCallbackInfo2, webgpu.WGPUBufferMapCallback2, webgpu.WGPUBufferMapAsyncStatus, None, 0,
        tmp_buffer, webgpu.WGPUMapMode_Read, 0, size)
@@ -67,7 +67,7 @@ def pop_error(device:WGPUDevPtr) -> str:
 
 def create_uniform(wgpu_device:WGPUDevPtr, val:int|float) -> WGPUBufPtr:
   buf = webgpu.wgpuDeviceCreateBuffer(wgpu_device,
-    webgpu.WGPUBufferDescriptor(size=4, usage=webgpu.WGPUBufferUsage_Uniform.value | webgpu.WGPUBufferUsage_CopyDst.value))
+    webgpu.WGPUBufferDescriptor(size=4, usage=webgpu.WGPUBufferUsage_Uniform | webgpu.WGPUBufferUsage_CopyDst))
   write_buffer(wgpu_device, buf, 0, val.to_bytes(4, "little") if isinstance(val, int) else struct.pack('<f', val))
   return buf
 
@@ -148,7 +148,7 @@ class WebGPUProgram:
     if wait:
       query_set = webgpu.wgpuDeviceCreateQuerySet(self.dev, webgpu.WGPUQuerySetDescriptor(type=webgpu.WGPUQueryType_Timestamp, count=2))
       query_buf = webgpu.wgpuDeviceCreateBuffer(self.dev,
-        webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve.value | webgpu.WGPUBufferUsage_CopySrc.value))
+        webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve | webgpu.WGPUBufferUsage_CopySrc))
       comp_pass_desc.timestampWrites = ctypes.pointer(webgpu.WGPUComputePassTimestampWrites(
         querySet=query_set, beginningOfPassWriteIndex=0, endOfPassWriteIndex=1))
 
@@ -179,7 +179,7 @@ class WebGpuAllocator(Allocator['WGPUDevPtr']):
   def _alloc(self, size:int, options:BufferSpec) -> WGPUBufPtr:
     # WebGPU buffers have to be 4-byte aligned
     return webgpu.wgpuDeviceCreateBuffer(self.dev, webgpu.WGPUBufferDescriptor(size=round_up(size, 4),
-      usage=webgpu.WGPUBufferUsage_Storage.value | webgpu.WGPUBufferUsage_CopyDst.value | webgpu.WGPUBufferUsage_CopySrc.value))
+      usage=webgpu.WGPUBufferUsage_Storage | webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_CopySrc))
   def _copyin(self, dest:WGPUBufPtr, src:memoryview):
     if src.nbytes % 4:
       padded_src = bytearray(round_up(src.nbytes, 4))
