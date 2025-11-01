@@ -42,6 +42,8 @@ BLOCK_M = BLOCK_M * WARPGROUP_SIZE
 #  -- fix WMMA to not require all the junk
 #  -- improve syntax for vectorized loads/stores (both with DEVECTORIZE and without)
 #  -- be able to use CONTRACT on a range
+#  -- fix upcasted RANGE on an already vectorized buffer
+#  -- improve "all ranges not ended error" / fix the bug with after on ended ranges (if you are after end of range, range is closed)
 
 CUS_PER_GPU = 256
 assert ((M//BLOCK_M) * (N//BLOCK_N)) >= CUS_PER_GPU, "not enough globals"
@@ -130,9 +132,6 @@ def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
     # load values
     acc_after = acc.after(*afters, M_inner_loop, N_inner_loop, K_inner_loop)
     acc_load = acc_after[N_inner_loop, M_inner_loop]
-
-    A_in = Ar[M_inner_loop]
-    B_in = Br[N_inner_loop]
 
     # do WMMA
     wmma_arg = ('WMMA_16_16_32_half_float', (16, 16, 32), dtypes.half, dtypes.float, 'AMD', 64, ((), (), ((3, 2), (2, 2))), ())
