@@ -125,3 +125,9 @@ jobs:
         diff /tmp/kgsl.py.bak tinygrad/runtime/autogen/kgsl.py
         diff /tmp/adreno.py.bak tinygrad/runtime/autogen/adreno.py
         diff /tmp/qcom_dsp.py.bak tinygrad/runtime/autogen/qcom_dsp.py
+    - name: Verify libusb autogen
+      run: |
+        sudo apt-get install -y --no-install-recommends libusb-1.0-0-dev
+        mv tinygrad/runtime/autogen/libusb.py /tmp/libusb.py.bak
+        python3 -c "from tinygrad.runtime.autogen import libusb"
+        diff /tmp/libusb.py.bak tinygrad/runtime/autogen/libusb.py
