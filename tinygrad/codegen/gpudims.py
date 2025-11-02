@@ -47,6 +47,11 @@ def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|No
     if a == 2 and b == 1: ret = [raw_idxs[0] * limited[1] + raw_idxs[1]]
     if a == 3 and b == 1: ret = [raw_idxs[0] * (limited[1] * limited[2]) + raw_idxs[1] * limited[2] + raw_idxs[2]]
     if a == 3 and b == 2: ret = [raw_idxs[0] * limited[1] + raw_idxs[1], raw_idxs[2]]
+  elif limited != dims:
+    # Convert to 1D
+    flat = raw_idxs[0]*limited[1]+raw_idxs[1] if len(dims) == 2 else raw_idxs[0]*(limited[1]*limited[2])+raw_idxs[1]*limited[2]+raw_idxs[2]
+    # Get back original indices from 1D
+    ret = [flat//dims[1], flat%dims[1]] if len(dims) == 2 else [flat//(dims[2]*dims[1]), flat % dims[1], flat % dims[2]]
   return ret[::-1] if reverse else ret
 
 def add_gpudims(ctx:Renderer, s:UOp):
