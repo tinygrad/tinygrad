@@ -17,6 +17,10 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        pydeps: 'tensorflow'
     - name: Cleanup running AM processes
       run: python extra/amdpci/am_smi.py --pids --kill
     - name: Symlink datasets
@@ -26,6 +30,5 @@ jobs:
     - name: Run bert
       run: |
         rm "~/.cache/tinygrad/cache_mlperf.db" || true
-        pip install tensorflow
         BENCHMARK_LOG=mlpert_train_bert LOGMLPERF=0 CACHEDB="~/.cache/tinygrad/cache_mlperf.db" examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/bert/implementations/tinybox_red/run_and_time.sh
         rm "~/.cache/tinygrad/cache_mlperf.db"
