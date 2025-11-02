@@ -1,6 +1,10 @@
-from typing import TypeVar
+from typing import TypeVar, TypeAlias, TYPE_CHECKING
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType
+from tinygrad.helpers import prod, argfix
+if TYPE_CHECKING:
+  from tinygrad.uop.ops import UOp
+  sint:TypeAlias = UOp|int
 
 TMT = TypeVar("TMT", bound="MathTrait")
 class MathTrait:
@@ -171,3 +175,32 @@ class MathTrait:
   def exp2(self): return self.alu(Ops.EXP2)
   def pow(self:TMT, x:TMT|ConstType): return self.alu(Ops.POW, self.ufix(x))
   def __pow__(self:TMT, x:TMT|ConstType): return self.pow(x)
+
+  # **** movement ops ****
+
+  # required to implement
+  def _mop(self:TMT, op:Ops, arg) -> TMT: raise NotImplementedError
+  @property
+  def shape(self) -> tuple["sint", ...]: raise NotImplementedError
+
+  def view(self:TMT, shape, *args) -> TMT:
+    """`.view` is an alias for `.reshape`."""
+    return self.reshape(shape, *args)
+
+  def reshape(self:TMT, shape, *args) -> TMT:
+    """
+    Returns a tensor with the same data as the original tensor but with a different shape.
+    `shape` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6)
+    print(t.reshape(2, 3).numpy())
+    ```
+    """
+    # resolve None and args
+    new_shape = tuple([s if s is not None else self.shape[i] for i,s in enumerate(argfix(shape, *args))])
+    # resolve -1
+    if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
+    if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
+    if prod(self.shape) != prod(new_shape): raise ValueError(f"size mismatch, can't reshape ({self.shape}) -> ({new_shape})")
+    return self._mop(Ops.RESHAPE, arg=new_shape) if new_shape != self.shape else self
