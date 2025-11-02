@@ -65,7 +65,7 @@ mop_cleanup = PatternMatcher([
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
