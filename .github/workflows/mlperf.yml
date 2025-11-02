@@ -20,7 +20,7 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        pydeps: 'tensorflow influxdb3-python'
+        pydeps: 'tensorflow influxdb3-python tqdm'
     - name: Cleanup running AM processes
       run: python extra/amdpci/am_smi.py --pids --kill
     - name: Symlink datasets
