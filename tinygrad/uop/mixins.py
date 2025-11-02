@@ -1,3 +1,4 @@
+# mixins add syntactic sugar to Tensor and UOp
 from typing import TypeAlias, TYPE_CHECKING, Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType
@@ -6,13 +7,13 @@ if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
   sint:TypeAlias = UOp|int
 
-class MathTrait:
+class MathMixin:
   # required to implement
   def alu(self, op:Ops, *src:Self) -> Self: raise NotImplementedError
   def const_like(self, b:ConstType) -> Self: raise NotImplementedError
 
   # great functions you get!
-  def ufix(self, x:Self|ConstType) -> Self: return self.const_like(x) if not isinstance(x, MathTrait) else x
+  def ufix(self, x:Self|ConstType) -> Self: return self.const_like(x) if not isinstance(x, MathMixin) else x
   def _binop(self, op:Ops, x:Self|ConstType, reverse:bool) -> Self:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
   def logical_not(self): return self.ne(True)
@@ -175,13 +176,13 @@ class MathTrait:
   def pow(self, x:Self|ConstType): return self.alu(Ops.POW, self.ufix(x))
   def __pow__(self, x:Self|ConstType): return self.pow(x)
 
-  # **** movement ops ****
-
+class MovementMixin:
   # required to implement
   def _mop(self, op:Ops, arg) -> Self: raise NotImplementedError
   @property
   def shape(self) -> tuple["sint", ...]: raise NotImplementedError
 
+  # great functions you get!
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""
     return self.reshape(shape, *args)
