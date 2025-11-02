@@ -3,7 +3,6 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -16,9 +15,60 @@ from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
-import torch.utils.cpp_extension
+import torch.utils.cpp_extension, weakref
+from tinygrad.helpers import strides_for_shape
+from tinygrad.uop.ops import Ops, GroupOp
+
+def compute_view_strides(x: Tensor) -> tuple[int, ...]:
+  """Compute PyTorch-compatible strides for tinygrad views."""
+  # For realized/contiguous tensors, use simple contiguous strides
+  if x.uop.is_contiguous():
+    return strides_for_shape(x.shape)
+
+  # For unrealized views, compute strides by walking the UOp tree
+  base = x.uop.base
+  if base.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}:
+    return strides_for_shape(x.shape)
+
+  # Start with base strides
+  current_strides = list(strides_for_shape(base.shape))
+  current_uop = x.uop
+
+  # Collect movement ops from current to base
+  mops = []
+  while current_uop is not base:
+    if current_uop.op in GroupOp.Movement:
+      mops.append(current_uop)
+      current_uop = current_uop.src[0]
+    else:
+      return strides_for_shape(x.shape)
+
+  # Apply movement ops in reverse to compute final strides
+  for uop in reversed(mops):
+    if uop.op == Ops.PERMUTE:
+      # Permute: rearrange strides according to permutation
+      perm = uop.marg
+      current_strides = [current_strides[p] for p in perm]
+    elif uop.op == Ops.SHRINK:
+      # Shrink: strides don't change, just offset (we don't track offset)
+      pass
+    else:
+      # For other ops (RESHAPE, EXPAND, PAD, FLIP), fall back to contiguous
+      return strides_for_shape(x.shape)
+
+  return tuple(current_strides)
+
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
-def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
+def wrap(x:Tensor) -> torch.Tensor:
+  # Always realize - ensures data is materialized and contiguous
+  # This breaks lazy view optimization but is necessary for correctness
+  # Tinygrad's lazy UOp-based views are incompatible with PyTorch's storage-based views
+  x.realize()
+
+  # After realize, tensor is always contiguous
+  strides = strides_for_shape(x.shape)
+
+  return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index, strides)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -65,17 +115,15 @@ view_ops = {
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
 # in place operations with views
-def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.st.contiguous: self.replace(self.contiguous())
-  self.replace(self.clone().realize())
-  for v in views:
-    if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
-    ret = self
-    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
-    v.replace(ret)
+# NOTE: Simplified version without ShapeTracker - uses UOp.base for view tracking
 def maybe_realize_storage(self: Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
+  """Realize storage for in-place operations on views"""
+  if realize:=is_view(self):
+    base = canonical_base(self)
+    views = derived_views(base)
+    # Realize the base and all views
+    base.replace(base.clone().realize())
+    if views: Tensor.realize(base, *views)
   return realize
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
@@ -167,26 +215,130 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-@functools.cache
-def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-  return mops
-
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+def _compute_strides(shape: tuple) -> tuple:
+  """Calculate contiguous strides for a given shape (row-major order)"""
+  if not shape: return ()
+  strides = [1]
+  for s in reversed(shape[1:]):
+    strides.insert(0, strides[0] * s)
+  return tuple(strides)
 
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
-  # multiple as_strided do not compound
+  """
+  Implement as_strided using tinygrad movement operations.
+
+  Strategy:
+  1. Work from the canonical base tensor
+  2. Interpret the stride pattern to decompose into movement ops
+  3. Handle common patterns: shrink, reshape, permute, expand
+  """
+  if TORCH_DEBUG >= 1: print(f"as_strided {tensor.shape=} {size=} {stride=} {storage_offset=}")
+
+  size = tuple(size)
+  stride = tuple(stride)
+  storage_offset = storage_offset or 0
+
   base = canonical_base(tensor)
-  # TODO: this is heavyweight
-  st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
-  ret = base
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-  for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-  return ret
+  base_shape = base.shape
+  base_size = prod(base_shape)
+
+  # Flatten the base tensor to work with linear indexing
+  flat = base.flatten()
+
+  # Calculate which linear indices we need
+  # For a strided tensor, element at position (i0,i1,...,in) is at linear index:
+  # offset + stride[0]*i0 + stride[1]*i1 + ... + stride[n]*in
+
+  # First, check for simple patterns we can optimize
+
+  # Pattern 1: Contiguous (can just reshape)
+  expected_contiguous = _compute_strides(size)
+  if stride == expected_contiguous and storage_offset == 0:
+    return base.reshape(size)
+
+  # Pattern 2: Simple shrink (strides match base, just narrower)
+  # This handles cases like taking first N columns of a matrix
+  if storage_offset == 0 and len(size) == len(base_shape):
+    # Check if this is just a shrink operation
+    # Compute what the strides would be if we just shrank base_shape to size
+    expected_shrink_strides = _compute_strides(base_shape)
+    # Adjust for the actual sizes
+    can_shrink = True
+    shrink_arg = []
+    for i, (s, st, bs, est) in enumerate(zip(size, stride, base_shape, expected_shrink_strides)):
+      if st == est or st == 0:  # stride matches or is broadcast
+        shrink_arg.append((0, s))
+      else:
+        can_shrink = False
+        break
+
+    if can_shrink:
+      result = base.shrink(tuple(shrink_arg))
+      # Handle broadcast dimensions (stride=0)
+      expand_shape = []
+      for s, st in zip(size, stride):
+        expand_shape.append(s if st != 0 else s)
+      if expand_shape != list(size):
+        # Need to expand broadcast dimensions
+        result = result.reshape(tuple(1 if st == 0 else s for s, st in zip(size, stride)))
+        result = result.expand(size)
+      return result
+
+  # Pattern 3: Offset + regular strides (common for slicing)
+  # Check if strides are regular (match some base shape's strides)
+  # This handles: flatten()[offset::stride].reshape(size)
+  if len([s for s in stride if s != 0]) == 1:
+    # Only one non-zero stride - this is 1D strided access
+    non_zero_stride = [s for s in stride if s != 0][0]
+    non_zero_dim = [i for i, s in enumerate(stride) if s != 0][0]
+    dim_size = size[non_zero_dim]
+
+    if non_zero_stride == 1:
+      # Consecutive elements
+      result = flat[storage_offset:storage_offset + dim_size]
+    else:
+      # Strided elements
+      result = flat[storage_offset:storage_offset + dim_size * non_zero_stride:non_zero_stride]
+
+    # Reshape and expand to target size
+    result = result.reshape(tuple(s if i == non_zero_dim else 1 for i, s in enumerate(size)))
+    if any(st == 0 for st in stride):
+      result = result.expand(size)
+    return result
+
+  # General case: Build indices for all elements we need
+  # Create index tensor by computing linear offsets
+  from tinygrad import Tensor as T
+
+  # Build coordinate grids for each dimension
+  coords = []
+  for i, s in enumerate(size):
+    # For dimension i with size s, create [0, 1, 2, ..., s-1]
+    coord = T.arange(s, dtype=base.dtype, device=base.device)
+    # Reshape to have size s in dimension i, size 1 elsewhere
+    reshape_arg = tuple(s if j == i else 1 for j in range(len(size)))
+    coord = coord.reshape(reshape_arg)
+    # Expand to full output shape
+    coord = coord.expand(size)
+    coords.append(coord)
+
+  # Compute linear indices: offset + sum(stride[i] * coords[i])
+  indices = T.full(size, storage_offset, dtype=base.dtype, device=base.device)
+  for i, (st, coord) in enumerate(zip(stride, coords)):
+    if st != 0:  # Skip broadcast dimensions
+      indices = indices + st * coord
+
+  # Gather elements using advanced indexing
+  # Convert indices to integer type for indexing
+  indices = indices.cast(dtypes.int32)
+
+  # Flatten indices and gather
+  flat_indices = indices.flatten()
+  result = flat[flat_indices]
+
+  # Reshape to target size
+  return result.reshape(size)
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
@@ -194,8 +346,11 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   return _as_strided(tensor, size, stride, storage_offset)
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
+@wrap_view_op
 def _reshape_alias(tensor:torch.Tensor, size, stride):
-  return _as_strided(tensor, size, stride)
+  """_reshape_alias is just a reshape with stride hint - we can ignore the stride"""
+  if TORCH_DEBUG >= 1: print(f"_reshape_alias {tensor.shape=} {size=} {stride=}")
+  return unwrap(tensor).reshape(size)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -329,7 +484,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
+    if dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
