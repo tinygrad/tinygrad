@@ -31,7 +31,7 @@ AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << 
 class ProfileSQTTEvent(ProfileEvent): device:str; se:int; props:dict; blob:bytes; itrace:bool # noqa: E702
 
 @dataclass(frozen=True)
-class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; reg:str # noqa: E702
+class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; regsample:str # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes # noqa: E702
@@ -158,11 +158,13 @@ class AMDComputeQueue(HWQueue):
         "SQ": (1, self.dev.se_cnt // self.dev.xccs) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
       end_off += (rec_size:=prod((self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
 
-      if (regsel:=getattr(self.gc, (reg:=f'reg{block}_PERFCOUNTER{next(block2pid[block])}') + '_SELECT', None)) is None:
-        raise RuntimeError(f'{block} is out of perfcounter registers: ({reg} is not found)')
+      # gfx11+ and later require even-numbered SQ *_SELECT registers
+      regsample = f'reg{block}_PERFCOUNTER{(pcid:=next(block2pid[block]))}'
+      if (regsel:=getattr(self.gc, (f'reg{block}_PERFCOUNTER{(pcid*2) if self.dev.target[0]>=11 and block=="SQ" else pcid}_SELECT'), None)) is None:
+        raise RuntimeError(f'{block} is out of perfcounter registers: ({regsel.name} is not found)')
 
       self.wreg(regsel, perf_sel=idx, **({'simd_mask':0xf, 'sqc_bank_mask':0xf, 'sqc_client_mask':0xf} if gfx9 and block == "SQ" else {}))
-      self.dev.pmc_sched.append(PMCSample(name, block, self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, reg))
+      self.dev.pmc_sched.append(PMCSample(name, block, self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, regsample))
 
     if gfx9: self.wreg(self.gc.regSQ_PERFCOUNTER_MASK, sh0_mask=0xffff, sh1_mask=0xffff)
     self.wreg(self.gc.regCOMPUTE_PERFCOUNT_ENABLE, 1)
@@ -183,7 +185,7 @@ class AMDComputeQueue(HWQueue):
             else: self.set_grbm_se_sh_wgp(se_idx, sa_idx, wgp_idx)
 
             # Copy counter to memory (src_sel = perf, dst_sel = tc_l2)
-            lo, hi = getattr(self.gc, f'{s.reg}_LO'), getattr(self.gc, f'{s.reg}_HI', None)
+            lo, hi = getattr(self.gc, f'{s.regsample}_LO'), getattr(self.gc, f'{s.regsample}_HI', None)
             self.pkt3(self.pm4.PACKET3_COPY_DATA, (2 << 8) | 4, lo.addr[0], 0, *data64_le(buf.va_addr+(loff:=next(offset))))
             if hi is not None: self.pkt3(self.pm4.PACKET3_COPY_DATA, (2 << 8) | 4, hi.addr[0], 0, *data64_le(buf.va_addr+loff+4))
 
