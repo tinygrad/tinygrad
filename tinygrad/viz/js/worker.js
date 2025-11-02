@@ -29,10 +29,10 @@ onmessage = (e) => {
       const node = g.node(n);
       if (node.label.includes("dtypes.index")) g.removeNode(n);
     }
-    // After all layout changes are complete, remove the overlay node if it's empty
-    if (!g.node("addition")?.width) g.removeNode("addition");
   }
   dagre.layout(g);
+  // remove additions overlay if it's empty
+  if (!g.node("addition")?.width) g.removeNode("addition");
   postMessage(dagre.graphlib.json.write(g));
   self.close();
 }
