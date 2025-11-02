@@ -75,7 +75,7 @@ class AMDComputeQueue(HWQueue):
   def set_grbm(self, instance=None, se=None, sh=None, wgp=None):
     instance_val = (wgp << 2 | (instance or 0)) if wgp is not None else instance
     self.wreg(self.gc.regGRBM_GFX_INDEX, **{(f'{key}_broadcast_writes' if val is None else f'{key}_index'): (1 if val is None else val)
-      for key, val in [('instance', instance), ('se', se), ('sh' if self.dev.target[0] == 9 else 'sa', sh)]})
+      for key, val in [('instance', instance_val), ('se', se), ('sh' if self.dev.target[0] == 9 else 'sa', sh)]})
 
   def wait_reg_mem(self, value, mask=0xffffffff, mem=None, reg=None, reg_done=0, op=WAIT_REG_MEM_FUNCTION_GEQ):
     wrm_info_dw = self.pm4.WAIT_REG_MEM_MEM_SPACE(int(mem is not None)) | self.pm4.WAIT_REG_MEM_OPERATION(int(mem is None and reg_done > 0)) \
