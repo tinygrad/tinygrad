@@ -185,8 +185,8 @@ CU_STREAM_MEMORY_BARRIER_TYPE_GPU = enum_CUstreamMemoryBarrier_flags_enum.define
 CUstreamMemoryBarrier_flags = enum_CUstreamMemoryBarrier_flags_enum
 class union_CUstreamBatchMemOpParams_union(ctypes.Union): pass
 class struct_CUstreamMemOpWaitValueParams_st(ctypes.Structure): pass
-class _anonunion0(ctypes.Union): pass
-_anonunion0._fields_ = [
+class struct_CUstreamMemOpWaitValueParams_st_0(ctypes.Union): pass
+struct_CUstreamMemOpWaitValueParams_st_0._fields_ = [
   ('value', cuuint32_t),
   ('value64', cuuint64_t),
 ]
@@ -194,13 +194,13 @@ struct_CUstreamMemOpWaitValueParams_st._anonymous_ = ['_0']
 struct_CUstreamMemOpWaitValueParams_st._fields_ = [
   ('operation', CUstreamBatchMemOpType),
   ('address', CUdeviceptr),
-  ('_0', _anonunion0),
+  ('_0', struct_CUstreamMemOpWaitValueParams_st_0),
   ('flags', ctypes.c_uint),
   ('alias', CUdeviceptr),
 ]
 class struct_CUstreamMemOpWriteValueParams_st(ctypes.Structure): pass
-class _anonunion1(ctypes.Union): pass
-_anonunion1._fields_ = [
+class struct_CUstreamMemOpWriteValueParams_st_0(ctypes.Union): pass
+struct_CUstreamMemOpWriteValueParams_st_0._fields_ = [
   ('value', cuuint32_t),
   ('value64', cuuint64_t),
 ]
@@ -208,7 +208,7 @@ struct_CUstreamMemOpWriteValueParams_st._anonymous_ = ['_0']
 struct_CUstreamMemOpWriteValueParams_st._fields_ = [
   ('operation', CUstreamBatchMemOpType),
   ('address', CUdeviceptr),
-  ('_0', _anonunion1),
+  ('_0', struct_CUstreamMemOpWriteValueParams_st_0),
   ('flags', ctypes.c_uint),
   ('alias', CUdeviceptr),
 ]

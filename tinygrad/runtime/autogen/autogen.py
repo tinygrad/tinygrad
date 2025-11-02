@@ -67,7 +67,7 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
         else: types[t.spelling] = nm = t.spelling.replace(' ', '_').replace('::', '_')
         lines.append(f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass")
         aa, acnt = [], itertools.count().__next__
-        ll=["  ("+((aa.append(fn:=f"'_{acnt()}'") or fn)+f", {tname(f.type)}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
+        ll=["  ("+((aa.append(fn:=f"'_{acnt()}'") or fn)+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
         lines.extend(([f"{nm}._anonymous_ = [{', '.join(aa)}]"] if aa else [])+[f"{nm}._fields_ = [",*ll,"]"] if ll else [f"{nm}._fields_ = []"])
         return nm

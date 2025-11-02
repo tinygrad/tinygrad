@@ -97,8 +97,8 @@ cl_image_format = struct__cl_image_format
 class struct__cl_image_desc(ctypes.Structure): pass
 size_t = ctypes.c_ulong
 cl_uint = ctypes.c_uint
-class _anonunion0(ctypes.Union): pass
-_anonunion0._fields_ = [
+class struct__cl_image_desc_0(ctypes.Union): pass
+struct__cl_image_desc_0._fields_ = [
   ('buffer', cl_mem),
   ('mem_object', cl_mem),
 ]
@@ -113,7 +113,7 @@ struct__cl_image_desc._fields_ = [
   ('image_slice_pitch', size_t),
   ('num_mip_levels', cl_uint),
   ('num_samples', cl_uint),
-  ('_0', _anonunion0),
+  ('_0', struct__cl_image_desc_0),
 ]
 cl_image_desc = struct__cl_image_desc
 class struct__cl_buffer_region(ctypes.Structure): pass

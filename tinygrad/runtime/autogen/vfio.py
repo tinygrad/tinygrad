@@ -137,14 +137,14 @@ VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0)
 VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 1)
 
 class struct_vfio_pci_dependent_device(ctypes.Structure): pass
-class _anonunion5(ctypes.Union): pass
-_anonunion5._fields_ = [
+class struct_vfio_pci_dependent_device_0(ctypes.Union): pass
+struct_vfio_pci_dependent_device_0._fields_ = [
   ('group_id', ctypes.c_uint),
   ('devid', ctypes.c_uint),
 ]
 struct_vfio_pci_dependent_device._anonymous_ = ['_0']
 struct_vfio_pci_dependent_device._fields_ = [
-  ('_0', _anonunion5),
+  ('_0', struct_vfio_pci_dependent_device_0),
   ('segment', ctypes.c_ushort),
   ('bus', ctypes.c_ubyte),
   ('devfn', ctypes.c_ubyte),
@@ -165,8 +165,8 @@ struct_vfio_pci_hot_reset._fields_ = [
   ('group_fds', (ctypes.c_int * 0)),
 ]
 class struct_vfio_device_gfx_plane_info(ctypes.Structure): pass
-class _anonunion6(ctypes.Union): pass
-_anonunion6._fields_ = [
+class struct_vfio_device_gfx_plane_info_0(ctypes.Union): pass
+struct_vfio_device_gfx_plane_info_0._fields_ = [
   ('region_index', ctypes.c_uint),
   ('dmabuf_id', ctypes.c_uint),
 ]
@@ -185,7 +185,7 @@ struct_vfio_device_gfx_plane_info._fields_ = [
   ('y_pos', ctypes.c_uint),
   ('x_hot', ctypes.c_uint),
   ('y_hot', ctypes.c_uint),
-  ('_0', _anonunion6),
+  ('_0', struct_vfio_device_gfx_plane_info_0),
   ('reserved', ctypes.c_uint),
 ]
 class struct_vfio_device_ioeventfd(ctypes.Structure): pass
@@ -368,8 +368,8 @@ struct_vfio_eeh_pe_err._fields_ = [
   ('mask', ctypes.c_ulonglong),
 ]
 class struct_vfio_eeh_pe_op(ctypes.Structure): pass
-class _anonunion7(ctypes.Union): pass
-_anonunion7._fields_ = [
+class struct_vfio_eeh_pe_op_0(ctypes.Union): pass
+struct_vfio_eeh_pe_op_0._fields_ = [
   ('err', struct_vfio_eeh_pe_err),
 ]
 struct_vfio_eeh_pe_op._anonymous_ = ['_0']
@@ -377,7 +377,7 @@ struct_vfio_eeh_pe_op._fields_ = [
   ('argsz', ctypes.c_uint),
   ('flags', ctypes.c_uint),
   ('op', ctypes.c_uint),
-  ('_0', _anonunion7),
+  ('_0', struct_vfio_eeh_pe_op_0),
 ]
 class struct_vfio_iommu_spapr_register_memory(ctypes.Structure): pass
 struct_vfio_iommu_spapr_register_memory._fields_ = [

@@ -3,8 +3,8 @@ import ctypes
 from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
 class struct_sqtt_data_info(ctypes.Structure): pass
 uint32_t = ctypes.c_uint
-class _anonunion0(ctypes.Union): pass
-_anonunion0._fields_ = [
+class struct_sqtt_data_info_0(ctypes.Union): pass
+struct_sqtt_data_info_0._fields_ = [
   ('gfx9_write_counter', uint32_t),
   ('gfx10_dropped_cntr', uint32_t),
 ]
@@ -12,7 +12,7 @@ struct_sqtt_data_info._anonymous_ = ['_0']
 struct_sqtt_data_info._fields_ = [
   ('cur_offset', uint32_t),
   ('trace_status', uint32_t),
-  ('_0', _anonunion0),
+  ('_0', struct_sqtt_data_info_0),
 ]
 class struct_sqtt_data_se(ctypes.Structure): pass
 struct_sqtt_data_se._fields_ = [
@@ -62,21 +62,21 @@ struct_sqtt_file_chunk_header._fields_ = [
   ('padding', int32_t),
 ]
 class struct_sqtt_file_header_flags(ctypes.Structure): pass
-class _anonunion1(ctypes.Union): pass
-class _anonstruct2(ctypes.Structure): pass
-_anonstruct2._fields_ = [
+class struct_sqtt_file_header_flags_0(ctypes.Union): pass
+class struct_sqtt_file_header_flags_0_0(ctypes.Structure): pass
+struct_sqtt_file_header_flags_0_0._fields_ = [
   ('is_semaphore_queue_timing_etw', uint32_t,1),
   ('no_queue_semaphore_timestamps', uint32_t,1),
   ('reserved', uint32_t,30),
 ]
-_anonunion1._anonymous_ = ['_0']
-_anonunion1._fields_ = [
-  ('_0', _anonstruct2),
+struct_sqtt_file_header_flags_0._anonymous_ = ['_0']
+struct_sqtt_file_header_flags_0._fields_ = [
+  ('_0', struct_sqtt_file_header_flags_0_0),
   ('value', uint32_t),
 ]
 struct_sqtt_file_header_flags._anonymous_ = ['_0']
 struct_sqtt_file_header_flags._fields_ = [
-  ('_0', _anonunion1),
+  ('_0', struct_sqtt_file_header_flags_0),
 ]
 class struct_sqtt_file_header(ctypes.Structure): pass
 struct_sqtt_file_header._fields_ = [
@@ -312,28 +312,28 @@ struct_sqtt_file_chunk_pso_correlation._fields_ = [
   ('record_count', uint32_t),
 ]
 class struct_sqtt_file_chunk_sqtt_desc(ctypes.Structure): pass
-class _anonunion3(ctypes.Union): pass
-class _anonunion3_v0(ctypes.Structure): pass
-_anonunion3_v0._fields_ = [
+class struct_sqtt_file_chunk_sqtt_desc_0(ctypes.Union): pass
+class struct_sqtt_file_chunk_sqtt_desc_0_v0(ctypes.Structure): pass
+struct_sqtt_file_chunk_sqtt_desc_0_v0._fields_ = [
   ('instrumentation_version', int32_t),
 ]
-class _anonunion3_v1(ctypes.Structure): pass
+class struct_sqtt_file_chunk_sqtt_desc_0_v1(ctypes.Structure): pass
 int16_t = ctypes.c_short
-_anonunion3_v1._fields_ = [
+struct_sqtt_file_chunk_sqtt_desc_0_v1._fields_ = [
   ('instrumentation_spec_version', int16_t),
   ('instrumentation_api_version', int16_t),
   ('compute_unit_index', int32_t),
 ]
-_anonunion3._fields_ = [
-  ('v0', _anonunion3_v0),
-  ('v1', _anonunion3_v1),
+struct_sqtt_file_chunk_sqtt_desc_0._fields_ = [
+  ('v0', struct_sqtt_file_chunk_sqtt_desc_0_v0),
+  ('v1', struct_sqtt_file_chunk_sqtt_desc_0_v1),
 ]
 struct_sqtt_file_chunk_sqtt_desc._anonymous_ = ['_0']
 struct_sqtt_file_chunk_sqtt_desc._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('shader_engine_index', int32_t),
   ('sqtt_version', enum_sqtt_version),
-  ('_0', _anonunion3),
+  ('_0', struct_sqtt_file_chunk_sqtt_desc_0),
 ]
 class struct_sqtt_file_chunk_sqtt_data(ctypes.Structure): pass
 struct_sqtt_file_chunk_sqtt_data._fields_ = [
@@ -365,21 +365,21 @@ SQTT_ENGINE_TYPE_HIGH_PRIORITY_UNIVERSAL = enum_sqtt_engine_type.define('SQTT_EN
 SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS', 8)
 
 class struct_sqtt_queue_hardware_info(ctypes.Structure): pass
-class _anonunion4(ctypes.Union): pass
-class _anonstruct5(ctypes.Structure): pass
-_anonstruct5._fields_ = [
+class struct_sqtt_queue_hardware_info_0(ctypes.Union): pass
+class struct_sqtt_queue_hardware_info_0_0(ctypes.Structure): pass
+struct_sqtt_queue_hardware_info_0_0._fields_ = [
   ('queue_type', int32_t,8),
   ('engine_type', int32_t,8),
   ('reserved', uint32_t,16),
 ]
-_anonunion4._anonymous_ = ['_0']
-_anonunion4._fields_ = [
-  ('_0', _anonstruct5),
+struct_sqtt_queue_hardware_info_0._anonymous_ = ['_0']
+struct_sqtt_queue_hardware_info_0._fields_ = [
+  ('_0', struct_sqtt_queue_hardware_info_0_0),
   ('value', uint32_t),
 ]
 struct_sqtt_queue_hardware_info._anonymous_ = ['_0']
 struct_sqtt_queue_hardware_info._fields_ = [
-  ('_0', _anonunion4),
+  ('_0', struct_sqtt_queue_hardware_info_0),
 ]
 class struct_sqtt_queue_info_record(ctypes.Structure): pass
 struct_sqtt_queue_info_record._fields_ = [
@@ -469,70 +469,70 @@ union_rgp_sqtt_marker_cb_id._fields_ = [
   ('all', uint32_t),
 ]
 class struct_rgp_sqtt_marker_cb_start(ctypes.Structure): pass
-class _anonunion6(ctypes.Union): pass
-class _anonstruct7(ctypes.Structure): pass
-_anonstruct7._fields_ = [
+class struct_rgp_sqtt_marker_cb_start_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_cb_start_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_cb_start_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('cb_id', uint32_t,20),
   ('queue', uint32_t,5),
 ]
-_anonunion6._anonymous_ = ['_0']
-_anonunion6._fields_ = [
-  ('_0', _anonstruct7),
+struct_rgp_sqtt_marker_cb_start_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_cb_start_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_cb_start_0_0),
   ('dword01', uint32_t),
 ]
-class _anonunion8(ctypes.Union): pass
-_anonunion8._fields_ = [
+class struct_rgp_sqtt_marker_cb_start_1(ctypes.Union): pass
+struct_rgp_sqtt_marker_cb_start_1._fields_ = [
   ('device_id_low', uint32_t),
   ('dword02', uint32_t),
 ]
-class _anonunion9(ctypes.Union): pass
-_anonunion9._fields_ = [
+class struct_rgp_sqtt_marker_cb_start_2(ctypes.Union): pass
+struct_rgp_sqtt_marker_cb_start_2._fields_ = [
   ('device_id_high', uint32_t),
   ('dword03', uint32_t),
 ]
-class _anonunion10(ctypes.Union): pass
-_anonunion10._fields_ = [
+class struct_rgp_sqtt_marker_cb_start_3(ctypes.Union): pass
+struct_rgp_sqtt_marker_cb_start_3._fields_ = [
   ('queue_flags', uint32_t),
   ('dword04', uint32_t),
 ]
 struct_rgp_sqtt_marker_cb_start._anonymous_ = ['_0', '_1', '_2', '_3']
 struct_rgp_sqtt_marker_cb_start._fields_ = [
-  ('_0', _anonunion6),
-  ('_1', _anonunion8),
-  ('_2', _anonunion9),
-  ('_3', _anonunion10),
+  ('_0', struct_rgp_sqtt_marker_cb_start_0),
+  ('_1', struct_rgp_sqtt_marker_cb_start_1),
+  ('_2', struct_rgp_sqtt_marker_cb_start_2),
+  ('_3', struct_rgp_sqtt_marker_cb_start_3),
 ]
 class struct_rgp_sqtt_marker_cb_end(ctypes.Structure): pass
-class _anonunion11(ctypes.Union): pass
-class _anonstruct12(ctypes.Structure): pass
-_anonstruct12._fields_ = [
+class struct_rgp_sqtt_marker_cb_end_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_cb_end_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_cb_end_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('cb_id', uint32_t,20),
   ('reserved', uint32_t,5),
 ]
-_anonunion11._anonymous_ = ['_0']
-_anonunion11._fields_ = [
-  ('_0', _anonstruct12),
+struct_rgp_sqtt_marker_cb_end_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_cb_end_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_cb_end_0_0),
   ('dword01', uint32_t),
 ]
-class _anonunion13(ctypes.Union): pass
-_anonunion13._fields_ = [
+class struct_rgp_sqtt_marker_cb_end_1(ctypes.Union): pass
+struct_rgp_sqtt_marker_cb_end_1._fields_ = [
   ('device_id_low', uint32_t),
   ('dword02', uint32_t),
 ]
-class _anonunion14(ctypes.Union): pass
-_anonunion14._fields_ = [
+class struct_rgp_sqtt_marker_cb_end_2(ctypes.Union): pass
+struct_rgp_sqtt_marker_cb_end_2._fields_ = [
   ('device_id_high', uint32_t),
   ('dword03', uint32_t),
 ]
 struct_rgp_sqtt_marker_cb_end._anonymous_ = ['_0', '_1', '_2']
 struct_rgp_sqtt_marker_cb_end._fields_ = [
-  ('_0', _anonunion11),
-  ('_1', _anonunion13),
-  ('_2', _anonunion14),
+  ('_0', struct_rgp_sqtt_marker_cb_end_0),
+  ('_1', struct_rgp_sqtt_marker_cb_end_1),
+  ('_2', struct_rgp_sqtt_marker_cb_end_2),
 ]
 enum_rgp_sqtt_marker_general_api_type = CEnum(ctypes.c_uint)
 ApiCmdBindPipeline = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindPipeline', 0)
@@ -588,23 +588,23 @@ ApiRayTracingSeparateCompiled = enum_rgp_sqtt_marker_general_api_type.define('Ap
 ApiInvalid = enum_rgp_sqtt_marker_general_api_type.define('ApiInvalid', 4294967295)
 
 class struct_rgp_sqtt_marker_general_api(ctypes.Structure): pass
-class _anonunion15(ctypes.Union): pass
-class _anonstruct16(ctypes.Structure): pass
-_anonstruct16._fields_ = [
+class struct_rgp_sqtt_marker_general_api_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_general_api_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_general_api_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('api_type', uint32_t,20),
   ('is_end', uint32_t,1),
   ('reserved', uint32_t,4),
 ]
-_anonunion15._anonymous_ = ['_0']
-_anonunion15._fields_ = [
-  ('_0', _anonstruct16),
+struct_rgp_sqtt_marker_general_api_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_general_api_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_general_api_0_0),
   ('dword01', uint32_t),
 ]
 struct_rgp_sqtt_marker_general_api._anonymous_ = ['_0']
 struct_rgp_sqtt_marker_general_api._fields_ = [
-  ('_0', _anonunion15),
+  ('_0', struct_rgp_sqtt_marker_general_api_0),
 ]
 enum_rgp_sqtt_marker_event_type = CEnum(ctypes.c_uint)
 EventCmdDraw = enum_rgp_sqtt_marker_event_type.define('EventCmdDraw', 0)
@@ -650,42 +650,42 @@ EventUnknown = enum_rgp_sqtt_marker_event_type.define('EventUnknown', 32767)
 EventInvalid = enum_rgp_sqtt_marker_event_type.define('EventInvalid', 4294967295)
 
 class struct_rgp_sqtt_marker_event(ctypes.Structure): pass
-class _anonunion17(ctypes.Union): pass
-class _anonstruct18(ctypes.Structure): pass
-_anonstruct18._fields_ = [
+class struct_rgp_sqtt_marker_event_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_event_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_event_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('api_type', uint32_t,24),
   ('has_thread_dims', uint32_t,1),
 ]
-_anonunion17._anonymous_ = ['_0']
-_anonunion17._fields_ = [
-  ('_0', _anonstruct18),
+struct_rgp_sqtt_marker_event_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_event_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_event_0_0),
   ('dword01', uint32_t),
 ]
-class _anonunion19(ctypes.Union): pass
-class _anonstruct20(ctypes.Structure): pass
-_anonstruct20._fields_ = [
+class struct_rgp_sqtt_marker_event_1(ctypes.Union): pass
+class struct_rgp_sqtt_marker_event_1_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_event_1_0._fields_ = [
   ('cb_id', uint32_t,20),
   ('vertex_offset_reg_idx', uint32_t,4),
   ('instance_offset_reg_idx', uint32_t,4),
   ('draw_index_reg_idx', uint32_t,4),
 ]
-_anonunion19._anonymous_ = ['_0']
-_anonunion19._fields_ = [
-  ('_0', _anonstruct20),
+struct_rgp_sqtt_marker_event_1._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_event_1._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_event_1_0),
   ('dword02', uint32_t),
 ]
-class _anonunion21(ctypes.Union): pass
-_anonunion21._fields_ = [
+class struct_rgp_sqtt_marker_event_2(ctypes.Union): pass
+struct_rgp_sqtt_marker_event_2._fields_ = [
   ('cmd_id', uint32_t),
   ('dword03', uint32_t),
 ]
 struct_rgp_sqtt_marker_event._anonymous_ = ['_0', '_1', '_2']
 struct_rgp_sqtt_marker_event._fields_ = [
-  ('_0', _anonunion17),
-  ('_1', _anonunion19),
-  ('_2', _anonunion21),
+  ('_0', struct_rgp_sqtt_marker_event_0),
+  ('_1', struct_rgp_sqtt_marker_event_1),
+  ('_2', struct_rgp_sqtt_marker_event_2),
 ]
 class struct_rgp_sqtt_marker_event_with_dims(ctypes.Structure): pass
 struct_rgp_sqtt_marker_event_with_dims._fields_ = [
@@ -695,39 +695,39 @@ struct_rgp_sqtt_marker_event_with_dims._fields_ = [
   ('thread_z', uint32_t),
 ]
 class struct_rgp_sqtt_marker_barrier_start(ctypes.Structure): pass
-class _anonunion22(ctypes.Union): pass
-class _anonstruct23(ctypes.Structure): pass
-_anonstruct23._fields_ = [
+class struct_rgp_sqtt_marker_barrier_start_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_barrier_start_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_barrier_start_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('cb_id', uint32_t,20),
   ('reserved', uint32_t,5),
 ]
-_anonunion22._anonymous_ = ['_0']
-_anonunion22._fields_ = [
-  ('_0', _anonstruct23),
+struct_rgp_sqtt_marker_barrier_start_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_barrier_start_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_barrier_start_0_0),
   ('dword01', uint32_t),
 ]
-class _anonunion24(ctypes.Union): pass
-class _anonstruct25(ctypes.Structure): pass
-_anonstruct25._fields_ = [
+class struct_rgp_sqtt_marker_barrier_start_1(ctypes.Union): pass
+class struct_rgp_sqtt_marker_barrier_start_1_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_barrier_start_1_0._fields_ = [
   ('driver_reason', uint32_t,31),
   ('internal', uint32_t,1),
 ]
-_anonunion24._anonymous_ = ['_0']
-_anonunion24._fields_ = [
-  ('_0', _anonstruct25),
+struct_rgp_sqtt_marker_barrier_start_1._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_barrier_start_1._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_barrier_start_1_0),
   ('dword02', uint32_t),
 ]
 struct_rgp_sqtt_marker_barrier_start._anonymous_ = ['_0', '_1']
 struct_rgp_sqtt_marker_barrier_start._fields_ = [
-  ('_0', _anonunion22),
-  ('_1', _anonunion24),
+  ('_0', struct_rgp_sqtt_marker_barrier_start_0),
+  ('_1', struct_rgp_sqtt_marker_barrier_start_1),
 ]
 class struct_rgp_sqtt_marker_barrier_end(ctypes.Structure): pass
-class _anonunion26(ctypes.Union): pass
-class _anonstruct27(ctypes.Structure): pass
-_anonstruct27._fields_ = [
+class struct_rgp_sqtt_marker_barrier_end_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_barrier_end_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_barrier_end_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('cb_id', uint32_t,20),
@@ -737,14 +737,14 @@ _anonstruct27._fields_ = [
   ('cs_partial_flush', uint32_t,1),
   ('pfp_sync_me', uint32_t,1),
 ]
-_anonunion26._anonymous_ = ['_0']
-_anonunion26._fields_ = [
-  ('_0', _anonstruct27),
+struct_rgp_sqtt_marker_barrier_end_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_barrier_end_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_barrier_end_0_0),
   ('dword01', uint32_t),
 ]
-class _anonunion28(ctypes.Union): pass
-class _anonstruct29(ctypes.Structure): pass
-_anonstruct29._fields_ = [
+class struct_rgp_sqtt_marker_barrier_end_1(ctypes.Union): pass
+class struct_rgp_sqtt_marker_barrier_end_1_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_barrier_end_1_0._fields_ = [
   ('sync_cp_dma', uint32_t,1),
   ('inval_tcp', uint32_t,1),
   ('inval_sqI', uint32_t,1),
@@ -763,20 +763,20 @@ _anonstruct29._fields_ = [
   ('eos_ts_cs_done', uint32_t,1),
   ('reserved', uint32_t,1),
 ]
-_anonunion28._anonymous_ = ['_0']
-_anonunion28._fields_ = [
-  ('_0', _anonstruct29),
+struct_rgp_sqtt_marker_barrier_end_1._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_barrier_end_1._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_barrier_end_1_0),
   ('dword02', uint32_t),
 ]
 struct_rgp_sqtt_marker_barrier_end._anonymous_ = ['_0', '_1']
 struct_rgp_sqtt_marker_barrier_end._fields_ = [
-  ('_0', _anonunion26),
-  ('_1', _anonunion28),
+  ('_0', struct_rgp_sqtt_marker_barrier_end_0),
+  ('_1', struct_rgp_sqtt_marker_barrier_end_1),
 ]
 class struct_rgp_sqtt_marker_layout_transition(ctypes.Structure): pass
-class _anonunion30(ctypes.Union): pass
-class _anonstruct31(ctypes.Structure): pass
-_anonstruct31._fields_ = [
+class struct_rgp_sqtt_marker_layout_transition_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_layout_transition_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_layout_transition_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('depth_stencil_expand', uint32_t,1),
@@ -789,43 +789,43 @@ _anonstruct31._fields_ = [
   ('init_mask_ram', uint32_t,1),
   ('reserved1', uint32_t,17),
 ]
-_anonunion30._anonymous_ = ['_0']
-_anonunion30._fields_ = [
-  ('_0', _anonstruct31),
+struct_rgp_sqtt_marker_layout_transition_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_layout_transition_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_layout_transition_0_0),
   ('dword01', uint32_t),
 ]
-class _anonunion32(ctypes.Union): pass
-class _anonstruct33(ctypes.Structure): pass
-_anonstruct33._fields_ = [
+class struct_rgp_sqtt_marker_layout_transition_1(ctypes.Union): pass
+class struct_rgp_sqtt_marker_layout_transition_1_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_layout_transition_1_0._fields_ = [
   ('reserved2', uint32_t,32),
 ]
-_anonunion32._anonymous_ = ['_0']
-_anonunion32._fields_ = [
-  ('_0', _anonstruct33),
+struct_rgp_sqtt_marker_layout_transition_1._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_layout_transition_1._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_layout_transition_1_0),
   ('dword02', uint32_t),
 ]
 struct_rgp_sqtt_marker_layout_transition._anonymous_ = ['_0', '_1']
 struct_rgp_sqtt_marker_layout_transition._fields_ = [
-  ('_0', _anonunion30),
-  ('_1', _anonunion32),
+  ('_0', struct_rgp_sqtt_marker_layout_transition_0),
+  ('_1', struct_rgp_sqtt_marker_layout_transition_1),
 ]
 class struct_rgp_sqtt_marker_user_event(ctypes.Structure): pass
-class _anonunion34(ctypes.Union): pass
-class _anonstruct35(ctypes.Structure): pass
-_anonstruct35._fields_ = [
+class struct_rgp_sqtt_marker_user_event_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_user_event_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_user_event_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('reserved0', uint32_t,8),
   ('data_type', uint32_t,8),
   ('reserved1', uint32_t,12),
 ]
-_anonunion34._anonymous_ = ['_0']
-_anonunion34._fields_ = [
-  ('_0', _anonstruct35),
+struct_rgp_sqtt_marker_user_event_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_user_event_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_user_event_0_0),
   ('dword01', uint32_t),
 ]
 struct_rgp_sqtt_marker_user_event._anonymous_ = ['_0']
 struct_rgp_sqtt_marker_user_event._fields_ = [
-  ('_0', _anonunion34),
+  ('_0', struct_rgp_sqtt_marker_user_event_0),
 ]
 class struct_rgp_sqtt_marker_user_event_with_length(ctypes.Structure): pass
 struct_rgp_sqtt_marker_user_event_with_length._fields_ = [
@@ -839,35 +839,35 @@ UserEventPush = enum_rgp_sqtt_marker_user_event_type.define('UserEventPush', 2)
 UserEventObjectName = enum_rgp_sqtt_marker_user_event_type.define('UserEventObjectName', 3)
 
 class struct_rgp_sqtt_marker_pipeline_bind(ctypes.Structure): pass
-class _anonunion36(ctypes.Union): pass
-class _anonstruct37(ctypes.Structure): pass
-_anonstruct37._fields_ = [
+class struct_rgp_sqtt_marker_pipeline_bind_0(ctypes.Union): pass
+class struct_rgp_sqtt_marker_pipeline_bind_0_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_pipeline_bind_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
   ('bind_point', uint32_t,1),
   ('cb_id', uint32_t,20),
   ('reserved', uint32_t,4),
 ]
-_anonunion36._anonymous_ = ['_0']
-_anonunion36._fields_ = [
-  ('_0', _anonstruct37),
+struct_rgp_sqtt_marker_pipeline_bind_0._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_pipeline_bind_0._fields_ = [
+  ('_0', struct_rgp_sqtt_marker_pipeline_bind_0_0),
   ('dword01', uint32_t),
 ]
-class _anonunion38(ctypes.Union): pass
-class _anonstruct39(ctypes.Structure): pass
-_anonstruct39._fields_ = [
+class struct_rgp_sqtt_marker_pipeline_bind_1(ctypes.Union): pass
+class struct_rgp_sqtt_marker_pipeline_bind_1_0(ctypes.Structure): pass
+struct_rgp_sqtt_marker_pipeline_bind_1_0._fields_ = [
   ('dword02', uint32_t),
   ('dword03', uint32_t),
 ]
-_anonunion38._anonymous_ = ['_0']
-_anonunion38._fields_ = [
+struct_rgp_sqtt_marker_pipeline_bind_1._anonymous_ = ['_0']
+struct_rgp_sqtt_marker_pipeline_bind_1._fields_ = [
   ('api_pso_hash', (uint32_t * 2)),
-  ('_0', _anonstruct39),
+  ('_0', struct_rgp_sqtt_marker_pipeline_bind_1_0),
 ]
 struct_rgp_sqtt_marker_pipeline_bind._anonymous_ = ['_0', '_1']
 struct_rgp_sqtt_marker_pipeline_bind._fields_ = [
-  ('_0', _anonunion36),
-  ('_1', _anonunion38),
+  ('_0', struct_rgp_sqtt_marker_pipeline_bind_0),
+  ('_1', struct_rgp_sqtt_marker_pipeline_bind_1),
 ]
 SQTT_FILE_MAGIC_NUMBER = 0x50303042
 SQTT_FILE_VERSION_MAJOR = 1

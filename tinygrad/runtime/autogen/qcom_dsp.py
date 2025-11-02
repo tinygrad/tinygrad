@@ -226,8 +226,8 @@ struct_fastrpc_ctrl_kalloc._fields_ = [
   ('kalloc_support', uint32_t),
 ]
 class struct_fastrpc_ioctl_control(ctypes.Structure): pass
-class _anonunion0(ctypes.Union): pass
-_anonunion0._fields_ = [
+class struct_fastrpc_ioctl_control_0(ctypes.Union): pass
+struct_fastrpc_ioctl_control_0._fields_ = [
   ('lp', struct_fastrpc_ctrl_latency),
   ('smmu', struct_fastrpc_ctrl_smmu),
   ('kalloc', struct_fastrpc_ctrl_kalloc),
@@ -235,7 +235,7 @@ _anonunion0._fields_ = [
 struct_fastrpc_ioctl_control._anonymous_ = ['_0']
 struct_fastrpc_ioctl_control._fields_ = [
   ('req', uint32_t),
-  ('_0', _anonunion0),
+  ('_0', struct_fastrpc_ioctl_control_0),
 ]
 class struct_smq_null_invoke(ctypes.Structure): pass
 struct_smq_null_invoke._fields_ = [
@@ -302,15 +302,15 @@ struct_fastrpc_async_callback._fields_ = [
 ]
 fastrpc_async_callback_t = struct_fastrpc_async_callback
 class struct_fastrpc_async_descriptor(ctypes.Structure): pass
-class _anonunion1(ctypes.Union): pass
-_anonunion1._fields_ = [
+class struct_fastrpc_async_descriptor_0(ctypes.Union): pass
+struct_fastrpc_async_descriptor_0._fields_ = [
   ('cb', fastrpc_async_callback_t),
 ]
 struct_fastrpc_async_descriptor._anonymous_ = ['_0']
 struct_fastrpc_async_descriptor._fields_ = [
   ('type', enum_fastrpc_async_notify_type),
   ('jobid', fastrpc_async_jobid),
-  ('_0', _anonunion1),
+  ('_0', struct_fastrpc_async_descriptor_0),
 ]
 fastrpc_async_descriptor_t = struct_fastrpc_async_descriptor
 enum_fastrpc_process_type = CEnum(ctypes.c_uint)

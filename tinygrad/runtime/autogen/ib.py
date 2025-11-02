@@ -362,9 +362,9 @@ IBV_WC_DRIVER1 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER1', 135)
 IBV_WC_DRIVER2 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER2', 136)
 IBV_WC_DRIVER3 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER3', 137)
 
-class _anonunion0(ctypes.Union): pass
+class struct_ibv_wc_0(ctypes.Union): pass
 __be32 = ctypes.c_uint
-_anonunion0._fields_ = [
+struct_ibv_wc_0._fields_ = [
   ('imm_data', ctypes.c_uint),
   ('invalidated_rkey', uint32_t),
 ]
@@ -375,7 +375,7 @@ struct_ibv_wc._fields_ = [
   ('opcode', enum_ibv_wc_opcode),
   ('vendor_err', uint32_t),
   ('byte_len', uint32_t),
-  ('_0', _anonunion0),
+  ('_0', struct_ibv_wc_0),
   ('qp_num', uint32_t),
   ('src_qp', uint32_t),
   ('wc_flags', ctypes.c_uint),
@@ -414,8 +414,8 @@ IBV_WR_DRIVER1 = enum_ibv_wr_opcode.define('IBV_WR_DRIVER1', 11)
 IBV_WR_FLUSH = enum_ibv_wr_opcode.define('IBV_WR_FLUSH', 14)
 IBV_WR_ATOMIC_WRITE = enum_ibv_wr_opcode.define('IBV_WR_ATOMIC_WRITE', 15)
 
-class _anonunion1(ctypes.Union): pass
-_anonunion1._fields_ = [
+class struct_ibv_send_wr_0(ctypes.Union): pass
+struct_ibv_send_wr_0._fields_ = [
   ('imm_data', ctypes.c_uint),
   ('invalidate_rkey', uint32_t),
 ]
@@ -457,22 +457,22 @@ struct_ibv_send_wr_qp_type_xrc._fields_ = [
 struct_ibv_send_wr_qp_type._fields_ = [
   ('xrc', struct_ibv_send_wr_qp_type_xrc),
 ]
-class _anonunion2(ctypes.Union): pass
-class _anonunion2_bind_mw(ctypes.Structure): pass
-_anonunion2_bind_mw._fields_ = [
+class struct_ibv_send_wr_1(ctypes.Union): pass
+class struct_ibv_send_wr_1_bind_mw(ctypes.Structure): pass
+struct_ibv_send_wr_1_bind_mw._fields_ = [
   ('mw', ctypes.POINTER(struct_ibv_mw)),
   ('rkey', uint32_t),
   ('bind_info', struct_ibv_mw_bind_info),
 ]
-class _anonunion2_tso(ctypes.Structure): pass
-_anonunion2_tso._fields_ = [
+class struct_ibv_send_wr_1_tso(ctypes.Structure): pass
+struct_ibv_send_wr_1_tso._fields_ = [
   ('hdr', ctypes.c_void_p),
   ('hdr_sz', uint16_t),
   ('mss', uint16_t),
 ]
-_anonunion2._fields_ = [
-  ('bind_mw', _anonunion2_bind_mw),
-  ('tso', _anonunion2_tso),
+struct_ibv_send_wr_1._fields_ = [
+  ('bind_mw', struct_ibv_send_wr_1_bind_mw),
+  ('tso', struct_ibv_send_wr_1_tso),
 ]
 struct_ibv_send_wr._anonymous_ = ['_0', '_1']
 struct_ibv_send_wr._fields_ = [
@@ -482,10 +482,10 @@ struct_ibv_send_wr._fields_ = [
   ('num_sge', ctypes.c_int),
   ('opcode', enum_ibv_wr_opcode),
   ('send_flags', ctypes.c_uint),
-  ('_0', _anonunion1),
+  ('_0', struct_ibv_send_wr_0),
   ('wr', struct_ibv_send_wr_wr),
   ('qp_type', struct_ibv_send_wr_qp_type),
-  ('_1', _anonunion2),
+  ('_1', struct_ibv_send_wr_1),
 ]
 struct_ibv_context_ops._fields_ = [
   ('_compat_query_device', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr))),
@@ -666,10 +666,10 @@ IBV_PORT_ARMED = enum_ibv_port_state.define('IBV_PORT_ARMED', 3)
 IBV_PORT_ACTIVE = enum_ibv_port_state.define('IBV_PORT_ACTIVE', 4)
 IBV_PORT_ACTIVE_DEFER = enum_ibv_port_state.define('IBV_PORT_ACTIVE_DEFER', 5)
 
-_anonenum3 = CEnum(ctypes.c_uint)
-IBV_LINK_LAYER_UNSPECIFIED = _anonenum3.define('IBV_LINK_LAYER_UNSPECIFIED', 0)
-IBV_LINK_LAYER_INFINIBAND = _anonenum3.define('IBV_LINK_LAYER_INFINIBAND', 1)
-IBV_LINK_LAYER_ETHERNET = _anonenum3.define('IBV_LINK_LAYER_ETHERNET', 2)
+_anonenum0 = CEnum(ctypes.c_uint)
+IBV_LINK_LAYER_UNSPECIFIED = _anonenum0.define('IBV_LINK_LAYER_UNSPECIFIED', 0)
+IBV_LINK_LAYER_INFINIBAND = _anonenum0.define('IBV_LINK_LAYER_INFINIBAND', 1)
+IBV_LINK_LAYER_ETHERNET = _anonenum0.define('IBV_LINK_LAYER_ETHERNET', 2)
 
 enum_ibv_port_cap_flags = CEnum(ctypes.c_uint)
 IBV_PORT_SM = enum_ibv_port_cap_flags.define('IBV_PORT_SM', 2)
@@ -797,8 +797,8 @@ struct_ibv_async_event._fields_ = [
 try: (ibv_wc_status_str:=dll.ibv_wc_status_str).restype, ibv_wc_status_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_wc_status]
 except AttributeError: pass
 
-_anonenum4 = CEnum(ctypes.c_uint)
-IBV_WC_IP_CSUM_OK_SHIFT = _anonenum4.define('IBV_WC_IP_CSUM_OK_SHIFT', 2)
+_anonenum1 = CEnum(ctypes.c_uint)
+IBV_WC_IP_CSUM_OK_SHIFT = _anonenum1.define('IBV_WC_IP_CSUM_OK_SHIFT', 2)
 
 enum_ibv_create_cq_wc_flags = CEnum(ctypes.c_uint)
 IBV_WC_EX_WITH_BYTE_LEN = enum_ibv_create_cq_wc_flags.define('IBV_WC_EX_WITH_BYTE_LEN', 1)
@@ -814,11 +814,11 @@ IBV_WC_EX_WITH_FLOW_TAG = enum_ibv_create_cq_wc_flags.define('IBV_WC_EX_WITH_FLO
 IBV_WC_EX_WITH_TM_INFO = enum_ibv_create_cq_wc_flags.define('IBV_WC_EX_WITH_TM_INFO', 1024)
 IBV_WC_EX_WITH_COMPLETION_TIMESTAMP_WALLCLOCK = enum_ibv_create_cq_wc_flags.define('IBV_WC_EX_WITH_COMPLETION_TIMESTAMP_WALLCLOCK', 2048)
 
-_anonenum5 = CEnum(ctypes.c_uint)
-IBV_WC_STANDARD_FLAGS = _anonenum5.define('IBV_WC_STANDARD_FLAGS', 127)
+_anonenum2 = CEnum(ctypes.c_uint)
+IBV_WC_STANDARD_FLAGS = _anonenum2.define('IBV_WC_STANDARD_FLAGS', 127)
 
-_anonenum6 = CEnum(ctypes.c_uint)
-IBV_CREATE_CQ_SUP_WC_FLAGS = _anonenum6.define('IBV_CREATE_CQ_SUP_WC_FLAGS', 4095)
+_anonenum3 = CEnum(ctypes.c_uint)
+IBV_CREATE_CQ_SUP_WC_FLAGS = _anonenum3.define('IBV_CREATE_CQ_SUP_WC_FLAGS', 4095)
 
 enum_ibv_wc_flags = CEnum(ctypes.c_uint)
 IBV_WC_GRH = enum_ibv_wc_flags.define('IBV_WC_GRH', 1)
@@ -1525,14 +1525,14 @@ struct_ibv_flow_spec_counter_action._fields_ = [
   ('counters', ctypes.POINTER(struct_ibv_counters)),
 ]
 class struct_ibv_flow_spec(ctypes.Structure): pass
-class _anonunion7(ctypes.Union): pass
-class _anonunion7_hdr(ctypes.Structure): pass
-_anonunion7_hdr._fields_ = [
+class struct_ibv_flow_spec_0(ctypes.Union): pass
+class struct_ibv_flow_spec_0_hdr(ctypes.Structure): pass
+struct_ibv_flow_spec_0_hdr._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
 ]
-_anonunion7._fields_ = [
-  ('hdr', _anonunion7_hdr),
+struct_ibv_flow_spec_0._fields_ = [
+  ('hdr', struct_ibv_flow_spec_0_hdr),
   ('eth', struct_ibv_flow_spec_eth),
   ('ipv4', struct_ibv_flow_spec_ipv4),
   ('tcp_udp', struct_ibv_flow_spec_tcp_udp),
@@ -1549,7 +1549,7 @@ _anonunion7._fields_ = [
 ]
 struct_ibv_flow_spec._anonymous_ = ['_0']
 struct_ibv_flow_spec._fields_ = [
-  ('_0', _anonunion7),
+  ('_0', struct_ibv_flow_spec_0),
 ]
 class struct_ibv_flow_attr(ctypes.Structure): pass
 struct_ibv_flow_attr._fields_ = [
@@ -1589,21 +1589,21 @@ IB_UVERBS_FLOW_ACTION_ESP_REPLAY_NONE = enum_ib_uverbs_flow_action_esp_replay.de
 IB_UVERBS_FLOW_ACTION_ESP_REPLAY_BMP = enum_ib_uverbs_flow_action_esp_replay.define('IB_UVERBS_FLOW_ACTION_ESP_REPLAY_BMP', 1)
 
 class struct_ib_uverbs_flow_action_esp_encap(ctypes.Structure): pass
-class _anonunion8(ctypes.Union): pass
-_anonunion8._fields_ = [
+class struct_ib_uverbs_flow_action_esp_encap_0(ctypes.Union): pass
+struct_ib_uverbs_flow_action_esp_encap_0._fields_ = [
   ('val_ptr', ctypes.c_void_p),
   ('val_ptr_data_u64', ctypes.c_ulonglong),
 ]
-class _anonunion9(ctypes.Union): pass
-_anonunion9._fields_ = [
+class struct_ib_uverbs_flow_action_esp_encap_1(ctypes.Union): pass
+struct_ib_uverbs_flow_action_esp_encap_1._fields_ = [
   ('next_ptr', ctypes.POINTER(struct_ib_uverbs_flow_action_esp_encap)),
   ('next_ptr_data_u64', ctypes.c_ulonglong),
 ]
 __u16 = ctypes.c_ushort
 struct_ib_uverbs_flow_action_esp_encap._anonymous_ = ['_0', '_1']
 struct_ib_uverbs_flow_action_esp_encap._fields_ = [
-  ('_0', _anonunion8),
-  ('_1', _anonunion9),
+  ('_0', struct_ib_uverbs_flow_action_esp_encap_0),
+  ('_1', struct_ib_uverbs_flow_action_esp_encap_1),
   ('len', ctypes.c_ushort),
   ('type', ctypes.c_ushort),
 ]
@@ -1619,9 +1619,9 @@ struct_ibv_flow_action_esp_attr._fields_ = [
   ('comp_mask', uint32_t),
   ('esn', uint32_t),
 ]
-_anonenum10 = CEnum(ctypes.c_uint)
-IBV_SYSFS_NAME_MAX = _anonenum10.define('IBV_SYSFS_NAME_MAX', 64)
-IBV_SYSFS_PATH_MAX = _anonenum10.define('IBV_SYSFS_PATH_MAX', 256)
+_anonenum4 = CEnum(ctypes.c_uint)
+IBV_SYSFS_NAME_MAX = _anonenum4.define('IBV_SYSFS_NAME_MAX', 64)
+IBV_SYSFS_PATH_MAX = _anonenum4.define('IBV_SYSFS_PATH_MAX', 256)
 
 enum_ibv_cq_init_attr_mask = CEnum(ctypes.c_uint)
 IBV_CQ_INIT_ATTR_MASK_FLAGS = enum_ibv_cq_init_attr_mask.define('IBV_CQ_INIT_ATTR_MASK_FLAGS', 1)
@@ -2224,19 +2224,19 @@ IB_USER_VERBS_CMD_CLOSE_XRCD = enum_ib_uverbs_write_cmds.define('IB_USER_VERBS_C
 IB_USER_VERBS_CMD_CREATE_XSRQ = enum_ib_uverbs_write_cmds.define('IB_USER_VERBS_CMD_CREATE_XSRQ', 39)
 IB_USER_VERBS_CMD_OPEN_QP = enum_ib_uverbs_write_cmds.define('IB_USER_VERBS_CMD_OPEN_QP', 40)
 
-_anonenum11 = CEnum(ctypes.c_uint)
-IB_USER_VERBS_EX_CMD_QUERY_DEVICE = _anonenum11.define('IB_USER_VERBS_EX_CMD_QUERY_DEVICE', 1)
-IB_USER_VERBS_EX_CMD_CREATE_CQ = _anonenum11.define('IB_USER_VERBS_EX_CMD_CREATE_CQ', 18)
-IB_USER_VERBS_EX_CMD_CREATE_QP = _anonenum11.define('IB_USER_VERBS_EX_CMD_CREATE_QP', 24)
-IB_USER_VERBS_EX_CMD_MODIFY_QP = _anonenum11.define('IB_USER_VERBS_EX_CMD_MODIFY_QP', 26)
-IB_USER_VERBS_EX_CMD_CREATE_FLOW = _anonenum11.define('IB_USER_VERBS_EX_CMD_CREATE_FLOW', 50)
-IB_USER_VERBS_EX_CMD_DESTROY_FLOW = _anonenum11.define('IB_USER_VERBS_EX_CMD_DESTROY_FLOW', 51)
-IB_USER_VERBS_EX_CMD_CREATE_WQ = _anonenum11.define('IB_USER_VERBS_EX_CMD_CREATE_WQ', 52)
-IB_USER_VERBS_EX_CMD_MODIFY_WQ = _anonenum11.define('IB_USER_VERBS_EX_CMD_MODIFY_WQ', 53)
-IB_USER_VERBS_EX_CMD_DESTROY_WQ = _anonenum11.define('IB_USER_VERBS_EX_CMD_DESTROY_WQ', 54)
-IB_USER_VERBS_EX_CMD_CREATE_RWQ_IND_TBL = _anonenum11.define('IB_USER_VERBS_EX_CMD_CREATE_RWQ_IND_TBL', 55)
-IB_USER_VERBS_EX_CMD_DESTROY_RWQ_IND_TBL = _anonenum11.define('IB_USER_VERBS_EX_CMD_DESTROY_RWQ_IND_TBL', 56)
-IB_USER_VERBS_EX_CMD_MODIFY_CQ = _anonenum11.define('IB_USER_VERBS_EX_CMD_MODIFY_CQ', 57)
+_anonenum5 = CEnum(ctypes.c_uint)
+IB_USER_VERBS_EX_CMD_QUERY_DEVICE = _anonenum5.define('IB_USER_VERBS_EX_CMD_QUERY_DEVICE', 1)
+IB_USER_VERBS_EX_CMD_CREATE_CQ = _anonenum5.define('IB_USER_VERBS_EX_CMD_CREATE_CQ', 18)
+IB_USER_VERBS_EX_CMD_CREATE_QP = _anonenum5.define('IB_USER_VERBS_EX_CMD_CREATE_QP', 24)
+IB_USER_VERBS_EX_CMD_MODIFY_QP = _anonenum5.define('IB_USER_VERBS_EX_CMD_MODIFY_QP', 26)
+IB_USER_VERBS_EX_CMD_CREATE_FLOW = _anonenum5.define('IB_USER_VERBS_EX_CMD_CREATE_FLOW', 50)
+IB_USER_VERBS_EX_CMD_DESTROY_FLOW = _anonenum5.define('IB_USER_VERBS_EX_CMD_DESTROY_FLOW', 51)
+IB_USER_VERBS_EX_CMD_CREATE_WQ = _anonenum5.define('IB_USER_VERBS_EX_CMD_CREATE_WQ', 52)
+IB_USER_VERBS_EX_CMD_MODIFY_WQ = _anonenum5.define('IB_USER_VERBS_EX_CMD_MODIFY_WQ', 53)
+IB_USER_VERBS_EX_CMD_DESTROY_WQ = _anonenum5.define('IB_USER_VERBS_EX_CMD_DESTROY_WQ', 54)
+IB_USER_VERBS_EX_CMD_CREATE_RWQ_IND_TBL = _anonenum5.define('IB_USER_VERBS_EX_CMD_CREATE_RWQ_IND_TBL', 55)
+IB_USER_VERBS_EX_CMD_DESTROY_RWQ_IND_TBL = _anonenum5.define('IB_USER_VERBS_EX_CMD_DESTROY_RWQ_IND_TBL', 56)
+IB_USER_VERBS_EX_CMD_MODIFY_CQ = _anonenum5.define('IB_USER_VERBS_EX_CMD_MODIFY_CQ', 57)
 
 enum_ib_placement_type = CEnum(ctypes.c_uint)
 IB_FLUSH_GLOBAL = enum_ib_placement_type.define('IB_FLUSH_GLOBAL', 1)
@@ -2677,8 +2677,8 @@ struct_ib_uverbs_create_qp._fields_ = [
 enum_ib_uverbs_create_qp_mask = CEnum(ctypes.c_uint)
 IB_UVERBS_CREATE_QP_MASK_IND_TABLE = enum_ib_uverbs_create_qp_mask.define('IB_UVERBS_CREATE_QP_MASK_IND_TABLE', 1)
 
-_anonenum12 = CEnum(ctypes.c_uint)
-IB_UVERBS_CREATE_QP_SUP_COMP_MASK = _anonenum12.define('IB_UVERBS_CREATE_QP_SUP_COMP_MASK', 1)
+_anonenum6 = CEnum(ctypes.c_uint)
+IB_UVERBS_CREATE_QP_SUP_COMP_MASK = _anonenum6.define('IB_UVERBS_CREATE_QP_SUP_COMP_MASK', 1)
 
 class struct_ib_uverbs_ex_create_qp(ctypes.Structure): pass
 struct_ib_uverbs_ex_create_qp._fields_ = [
@@ -2995,21 +2995,21 @@ struct_ib_uverbs_flow_eth_filter._fields_ = [
   ('vlan_tag', ctypes.c_ushort),
 ]
 class struct_ib_uverbs_flow_spec_eth(ctypes.Structure): pass
-class _anonunion13(ctypes.Union): pass
-class _anonstruct14(ctypes.Structure): pass
-_anonstruct14._fields_ = [
+class struct_ib_uverbs_flow_spec_eth_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_eth_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_eth_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion13._anonymous_ = ['_0']
-_anonunion13._fields_ = [
+struct_ib_uverbs_flow_spec_eth_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_eth_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct14),
+  ('_0', struct_ib_uverbs_flow_spec_eth_0_0),
 ]
 struct_ib_uverbs_flow_spec_eth._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_eth._fields_ = [
-  ('_0', _anonunion13),
+  ('_0', struct_ib_uverbs_flow_spec_eth_0),
   ('val', struct_ib_uverbs_flow_eth_filter),
   ('mask', struct_ib_uverbs_flow_eth_filter),
 ]
@@ -3023,21 +3023,21 @@ struct_ib_uverbs_flow_ipv4_filter._fields_ = [
   ('flags', ctypes.c_ubyte),
 ]
 class struct_ib_uverbs_flow_spec_ipv4(ctypes.Structure): pass
-class _anonunion15(ctypes.Union): pass
-class _anonstruct16(ctypes.Structure): pass
-_anonstruct16._fields_ = [
+class struct_ib_uverbs_flow_spec_ipv4_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_ipv4_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_ipv4_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion15._anonymous_ = ['_0']
-_anonunion15._fields_ = [
+struct_ib_uverbs_flow_spec_ipv4_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_ipv4_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct16),
+  ('_0', struct_ib_uverbs_flow_spec_ipv4_0_0),
 ]
 struct_ib_uverbs_flow_spec_ipv4._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_ipv4._fields_ = [
-  ('_0', _anonunion15),
+  ('_0', struct_ib_uverbs_flow_spec_ipv4_0),
   ('val', struct_ib_uverbs_flow_ipv4_filter),
   ('mask', struct_ib_uverbs_flow_ipv4_filter),
 ]
@@ -3047,21 +3047,21 @@ struct_ib_uverbs_flow_tcp_udp_filter._fields_ = [
   ('src_port', ctypes.c_ushort),
 ]
 class struct_ib_uverbs_flow_spec_tcp_udp(ctypes.Structure): pass
-class _anonunion17(ctypes.Union): pass
-class _anonstruct18(ctypes.Structure): pass
-_anonstruct18._fields_ = [
+class struct_ib_uverbs_flow_spec_tcp_udp_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_tcp_udp_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_tcp_udp_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion17._anonymous_ = ['_0']
-_anonunion17._fields_ = [
+struct_ib_uverbs_flow_spec_tcp_udp_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_tcp_udp_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct18),
+  ('_0', struct_ib_uverbs_flow_spec_tcp_udp_0_0),
 ]
 struct_ib_uverbs_flow_spec_tcp_udp._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_tcp_udp._fields_ = [
-  ('_0', _anonunion17),
+  ('_0', struct_ib_uverbs_flow_spec_tcp_udp_0),
   ('val', struct_ib_uverbs_flow_tcp_udp_filter),
   ('mask', struct_ib_uverbs_flow_tcp_udp_filter),
 ]
@@ -3076,95 +3076,95 @@ struct_ib_uverbs_flow_ipv6_filter._fields_ = [
   ('reserved', ctypes.c_ubyte),
 ]
 class struct_ib_uverbs_flow_spec_ipv6(ctypes.Structure): pass
-class _anonunion19(ctypes.Union): pass
-class _anonstruct20(ctypes.Structure): pass
-_anonstruct20._fields_ = [
+class struct_ib_uverbs_flow_spec_ipv6_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_ipv6_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_ipv6_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion19._anonymous_ = ['_0']
-_anonunion19._fields_ = [
+struct_ib_uverbs_flow_spec_ipv6_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_ipv6_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct20),
+  ('_0', struct_ib_uverbs_flow_spec_ipv6_0_0),
 ]
 struct_ib_uverbs_flow_spec_ipv6._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_ipv6._fields_ = [
-  ('_0', _anonunion19),
+  ('_0', struct_ib_uverbs_flow_spec_ipv6_0),
   ('val', struct_ib_uverbs_flow_ipv6_filter),
   ('mask', struct_ib_uverbs_flow_ipv6_filter),
 ]
 class struct_ib_uverbs_flow_spec_action_tag(ctypes.Structure): pass
-class _anonunion21(ctypes.Union): pass
-class _anonstruct22(ctypes.Structure): pass
-_anonstruct22._fields_ = [
+class struct_ib_uverbs_flow_spec_action_tag_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_action_tag_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_action_tag_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion21._anonymous_ = ['_0']
-_anonunion21._fields_ = [
+struct_ib_uverbs_flow_spec_action_tag_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_action_tag_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct22),
+  ('_0', struct_ib_uverbs_flow_spec_action_tag_0_0),
 ]
 struct_ib_uverbs_flow_spec_action_tag._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_tag._fields_ = [
-  ('_0', _anonunion21),
+  ('_0', struct_ib_uverbs_flow_spec_action_tag_0),
   ('tag_id', ctypes.c_uint),
   ('reserved1', ctypes.c_uint),
 ]
 class struct_ib_uverbs_flow_spec_action_drop(ctypes.Structure): pass
-class _anonunion23(ctypes.Union): pass
-class _anonstruct24(ctypes.Structure): pass
-_anonstruct24._fields_ = [
+class struct_ib_uverbs_flow_spec_action_drop_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_action_drop_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_action_drop_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion23._anonymous_ = ['_0']
-_anonunion23._fields_ = [
+struct_ib_uverbs_flow_spec_action_drop_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_action_drop_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct24),
+  ('_0', struct_ib_uverbs_flow_spec_action_drop_0_0),
 ]
 struct_ib_uverbs_flow_spec_action_drop._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_drop._fields_ = [
-  ('_0', _anonunion23),
+  ('_0', struct_ib_uverbs_flow_spec_action_drop_0),
 ]
 class struct_ib_uverbs_flow_spec_action_handle(ctypes.Structure): pass
-class _anonunion25(ctypes.Union): pass
-class _anonstruct26(ctypes.Structure): pass
-_anonstruct26._fields_ = [
+class struct_ib_uverbs_flow_spec_action_handle_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_action_handle_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_action_handle_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion25._anonymous_ = ['_0']
-_anonunion25._fields_ = [
+struct_ib_uverbs_flow_spec_action_handle_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_action_handle_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct26),
+  ('_0', struct_ib_uverbs_flow_spec_action_handle_0_0),
 ]
 struct_ib_uverbs_flow_spec_action_handle._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_handle._fields_ = [
-  ('_0', _anonunion25),
+  ('_0', struct_ib_uverbs_flow_spec_action_handle_0),
   ('handle', ctypes.c_uint),
   ('reserved1', ctypes.c_uint),
 ]
 class struct_ib_uverbs_flow_spec_action_count(ctypes.Structure): pass
-class _anonunion27(ctypes.Union): pass
-class _anonstruct28(ctypes.Structure): pass
-_anonstruct28._fields_ = [
+class struct_ib_uverbs_flow_spec_action_count_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_action_count_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_action_count_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion27._anonymous_ = ['_0']
-_anonunion27._fields_ = [
+struct_ib_uverbs_flow_spec_action_count_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_action_count_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct28),
+  ('_0', struct_ib_uverbs_flow_spec_action_count_0_0),
 ]
 struct_ib_uverbs_flow_spec_action_count._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_count._fields_ = [
-  ('_0', _anonunion27),
+  ('_0', struct_ib_uverbs_flow_spec_action_count_0),
   ('handle', ctypes.c_uint),
   ('reserved1', ctypes.c_uint),
 ]
@@ -3173,21 +3173,21 @@ struct_ib_uverbs_flow_tunnel_filter._fields_ = [
   ('tunnel_id', ctypes.c_uint),
 ]
 class struct_ib_uverbs_flow_spec_tunnel(ctypes.Structure): pass
-class _anonunion29(ctypes.Union): pass
-class _anonstruct30(ctypes.Structure): pass
-_anonstruct30._fields_ = [
+class struct_ib_uverbs_flow_spec_tunnel_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_tunnel_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_tunnel_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion29._anonymous_ = ['_0']
-_anonunion29._fields_ = [
+struct_ib_uverbs_flow_spec_tunnel_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_tunnel_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct30),
+  ('_0', struct_ib_uverbs_flow_spec_tunnel_0_0),
 ]
 struct_ib_uverbs_flow_spec_tunnel._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_tunnel._fields_ = [
-  ('_0', _anonunion29),
+  ('_0', struct_ib_uverbs_flow_spec_tunnel_0),
   ('val', struct_ib_uverbs_flow_tunnel_filter),
   ('mask', struct_ib_uverbs_flow_tunnel_filter),
 ]
@@ -3197,21 +3197,21 @@ struct_ib_uverbs_flow_spec_esp_filter._fields_ = [
   ('seq', ctypes.c_uint),
 ]
 class struct_ib_uverbs_flow_spec_esp(ctypes.Structure): pass
-class _anonunion31(ctypes.Union): pass
-class _anonstruct32(ctypes.Structure): pass
-_anonstruct32._fields_ = [
+class struct_ib_uverbs_flow_spec_esp_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_esp_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_esp_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion31._anonymous_ = ['_0']
-_anonunion31._fields_ = [
+struct_ib_uverbs_flow_spec_esp_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_esp_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct32),
+  ('_0', struct_ib_uverbs_flow_spec_esp_0_0),
 ]
 struct_ib_uverbs_flow_spec_esp._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_esp._fields_ = [
-  ('_0', _anonunion31),
+  ('_0', struct_ib_uverbs_flow_spec_esp_0),
   ('val', struct_ib_uverbs_flow_spec_esp_filter),
   ('mask', struct_ib_uverbs_flow_spec_esp_filter),
 ]
@@ -3222,21 +3222,21 @@ struct_ib_uverbs_flow_gre_filter._fields_ = [
   ('key', ctypes.c_uint),
 ]
 class struct_ib_uverbs_flow_spec_gre(ctypes.Structure): pass
-class _anonunion33(ctypes.Union): pass
-class _anonstruct34(ctypes.Structure): pass
-_anonstruct34._fields_ = [
+class struct_ib_uverbs_flow_spec_gre_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_gre_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_gre_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion33._anonymous_ = ['_0']
-_anonunion33._fields_ = [
+struct_ib_uverbs_flow_spec_gre_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_gre_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct34),
+  ('_0', struct_ib_uverbs_flow_spec_gre_0_0),
 ]
 struct_ib_uverbs_flow_spec_gre._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_gre._fields_ = [
-  ('_0', _anonunion33),
+  ('_0', struct_ib_uverbs_flow_spec_gre_0),
   ('val', struct_ib_uverbs_flow_gre_filter),
   ('mask', struct_ib_uverbs_flow_gre_filter),
 ]
@@ -3245,21 +3245,21 @@ struct_ib_uverbs_flow_mpls_filter._fields_ = [
   ('label', ctypes.c_uint),
 ]
 class struct_ib_uverbs_flow_spec_mpls(ctypes.Structure): pass
-class _anonunion35(ctypes.Union): pass
-class _anonstruct36(ctypes.Structure): pass
-_anonstruct36._fields_ = [
+class struct_ib_uverbs_flow_spec_mpls_0(ctypes.Union): pass
+class struct_ib_uverbs_flow_spec_mpls_0_0(ctypes.Structure): pass
+struct_ib_uverbs_flow_spec_mpls_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
 ]
-_anonunion35._anonymous_ = ['_0']
-_anonunion35._fields_ = [
+struct_ib_uverbs_flow_spec_mpls_0._anonymous_ = ['_0']
+struct_ib_uverbs_flow_spec_mpls_0._fields_ = [
   ('hdr', struct_ib_uverbs_flow_spec_hdr),
-  ('_0', _anonstruct36),
+  ('_0', struct_ib_uverbs_flow_spec_mpls_0_0),
 ]
 struct_ib_uverbs_flow_spec_mpls._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_mpls._fields_ = [
-  ('_0', _anonunion35),
+  ('_0', struct_ib_uverbs_flow_spec_mpls_0),
   ('val', struct_ib_uverbs_flow_mpls_filter),
   ('mask', struct_ib_uverbs_flow_mpls_filter),
 ]

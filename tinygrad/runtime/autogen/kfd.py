@@ -199,15 +199,15 @@ struct_kfd_hsa_signal_event_data._fields_ = [
   ('last_event_age', ctypes.c_ulonglong),
 ]
 class struct_kfd_event_data(ctypes.Structure): pass
-class _anonunion0(ctypes.Union): pass
-_anonunion0._fields_ = [
+class struct_kfd_event_data_0(ctypes.Union): pass
+struct_kfd_event_data_0._fields_ = [
   ('memory_exception_data', struct_kfd_hsa_memory_exception_data),
   ('hw_exception_data', struct_kfd_hsa_hw_exception_data),
   ('signal_event_data', struct_kfd_hsa_signal_event_data),
 ]
 struct_kfd_event_data._anonymous_ = ['_0']
 struct_kfd_event_data._fields_ = [
-  ('_0', _anonunion0),
+  ('_0', struct_kfd_event_data_0),
   ('kfd_event_data_ext', ctypes.c_ulonglong),
   ('event_id', ctypes.c_uint),
   ('pad', ctypes.c_uint),
@@ -633,8 +633,8 @@ struct_kfd_ioctl_dbg_trap_device_snapshot_args._fields_ = [
   ('entry_size', ctypes.c_uint),
 ]
 class struct_kfd_ioctl_dbg_trap_args(ctypes.Structure): pass
-class _anonunion1(ctypes.Union): pass
-_anonunion1._fields_ = [
+class struct_kfd_ioctl_dbg_trap_args_0(ctypes.Union): pass
+struct_kfd_ioctl_dbg_trap_args_0._fields_ = [
   ('enable', struct_kfd_ioctl_dbg_trap_enable_args),
   ('send_runtime_event', struct_kfd_ioctl_dbg_trap_send_runtime_event_args),
   ('set_exceptions_enabled', struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args),
@@ -654,7 +654,7 @@ struct_kfd_ioctl_dbg_trap_args._anonymous_ = ['_0']
 struct_kfd_ioctl_dbg_trap_args._fields_ = [
   ('pid', ctypes.c_uint),
   ('op', ctypes.c_uint),
-  ('_0', _anonunion1),
+  ('_0', struct_kfd_ioctl_dbg_trap_args_0),
 ]
 KFD_IOCTL_MAJOR_VERSION = 1
 KFD_IOCTL_MINOR_VERSION = 14
