@@ -66,7 +66,7 @@ class Scheduler:
   def _output_rngs(self) -> list[UOp]:
     return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
   def _globalizable_rngs(self) -> list[UOp]:
-    ret = self._output_rngs()
+    ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
     for x in self.ast.toposort():
       if x.op is Ops.BUFFERIZE:
