@@ -9,7 +9,7 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, FUSE_ATTENTION, SPEC
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
-from tinygrad.uop.mathtraits import MathTrait
+from tinygrad.uop.mixins import MathMixin, MovementMixin
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
@@ -100,7 +100,7 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-class Tensor(MathTrait):
+class Tensor(MathMixin, MovementMixin):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
