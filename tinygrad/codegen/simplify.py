@@ -153,7 +153,8 @@ def cut_range(ctx, s:UOp, r:UOp):
   if not (cuts:=[c.src[1].arg for c in s.get_consumer_map()[r] if c.op is Ops.CMPLT and r is c.src[0] and c.src[1].op is Ops.CONST]): return None
   cuts = sorted(dedup([0] + cuts + [r.src[0].arg]))
   ranges = [UOp.range((end-start), *(r.arg[0:-1]+(i,r.arg[-1]))) for i,(start,end) in enumerate(zip(cuts[:-1], cuts[1:]))]
-  branches = [graph_rewrite(s.substitute({r: new_r+start}), symbolic_flat, name=f"cut_range_{i}") for i, (new_r, start) in enumerate(zip(ranges, cuts[:-1]))]
+  branches = [graph_rewrite(s.substitute({r: new_r+start}), symbolic_flat, name=f"cut_range_{i}") for i, (new_r, start) in
+    enumerate(zip(ranges, cuts[:-1]))]
   match r.arg[-1]:
    case AxisType.LOOP:
     return UOp.group(*[b.end(new_r) for new_r,b in zip(branches, ranges)])
@@ -161,7 +162,8 @@ def cut_range(ctx, s:UOp, r:UOp):
      # we cant't split gpudims, but we can put an if statement around them
      conds = [(start<=r)&(r<end) for start,end in zip(cuts[:-1], cuts[1:])]
      ifs = [UOp.range(cond.cast(dtypes.index), *(r.arg[0:-1]+(i,)), AxisType.LOOP) for i, cond in enumerate(conds)]
-     return UOp.group(*[b.substitute({new_r: r.after(if_op)-start}).end(if_op) for b,new_r,if_op,start in zip(branches, ranges, ifs, cuts[:-1])]).end(r)
+     return UOp.group(*[b.substitute({new_r: r.after(if_op)-start}).end(if_op) for b,new_r,if_op,start in
+       zip(branches, ranges, ifs, cuts[:-1])]).end(r)
    case _: assert False, "can only cut LOOP ranges"
 
 pm_cut_range = pm_flatten_range+PatternMatcher([

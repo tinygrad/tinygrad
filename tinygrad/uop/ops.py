@@ -1259,7 +1259,8 @@ pm_lower_index_dtype = PatternMatcher([
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.index else s for s in n.src))),
-  (UPat(Ops.AFTER, src=(UPat.var("x").cast(dtypes.index),), allow_any_len=True, name="after"), lambda after,x: x.after(*[u.src[0] for u in after.src[1:] if u.op is Ops.CAST]).cast(dtypes.index))
+  (UPat(Ops.AFTER, src=(UPat.var("x").cast(dtypes.index),), allow_any_len=True, name="after"),
+    lambda after,x: x.after(*[u.src[0] for u in after.src[1:] if u.op is Ops.CAST]).cast(dtypes.index))
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
