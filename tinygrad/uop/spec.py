@@ -125,7 +125,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=()), lambda: True),
 
   # allow AFTER on buffers, GROUP anywhere
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines|{Ops.AFTER}),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER,), lambda: True),
   (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
   # RANGE/SPECIAL define loops, END closes them
