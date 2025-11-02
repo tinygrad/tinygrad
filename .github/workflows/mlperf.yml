@@ -26,5 +26,6 @@ jobs:
     - name: Run bert
       run: |
         rm "~/.cache/tinygrad/cache_mlperf.db" || true
+        pip install tensorflow
         BENCHMARK_LOG=mlpert_train_bert LOGMLPERF=0 CACHEDB="~/.cache/tinygrad/cache_mlperf.db" examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/bert/implementations/tinybox_red/run_and_time.sh
         rm "~/.cache/tinygrad/cache_mlperf.db"
