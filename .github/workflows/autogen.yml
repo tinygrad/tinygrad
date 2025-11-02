@@ -21,24 +21,6 @@ on:
     - 'tinygrad/runtime/autogen/**/*'
 
 jobs:
-  autogen:
-    name: Autogen
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        pydeps: 'pyyaml mako'
-    - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends llvm-14-dev libclang-14-dev llvm-20-dev
-    - name: Verify mesa autogen
-      run: |
-        cp tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
-        ./autogen_stubs.sh mesa
-        diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
   autogen-ng:
     name: In-tree Autogen
     runs-on: ubuntu-24.04
@@ -54,7 +36,8 @@ jobs:
         cuda: 'true'
         llvm: 'true'
         webgpu: 'true'
-        pydeps: 'clang>=20'
+        mesa: 'true'
+        pydeps: 'clang>=20 pyyaml mako'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev
     - name: Verify OpenCL autogen
@@ -147,3 +130,8 @@ jobs:
         mv tinygrad/runtime/autogen/libusb.py /tmp/libusb.py.bak
         python3 -c "from tinygrad.runtime.autogen import libusb"
         diff /tmp/libusb.py.bak tinygrad/runtime/autogen/libusb.py
+    - name: Verify mesa autogen
+      run: |
+        mv tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
+        python3 -c "from tinygrad.runtime.autogen import mesa"
+        diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py

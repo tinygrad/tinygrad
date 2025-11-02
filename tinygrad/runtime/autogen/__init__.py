@@ -7,7 +7,7 @@ nv_src = "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8
 
 def load(name, *args, **kwargs):
   path = kwargs.pop("path", __name__)
-  if not (f:=(root/f"{path.replace('.','/')}/{name}.py")).exists(): f.write_text(importlib.import_module(f"{__name__}.autogen").gen(*args, **kwargs))
+  if not (f:=(root/path.replace('.','/')/f"{name}.py")).exists(): f.write_text(importlib.import_module(f"{__name__}.autogen").gen(*args, **kwargs))
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
 def __getattr__(nm):
@@ -47,12 +47,12 @@ def __getattr__(nm):
     case "ib": return load("ib", ["ibverbs"], ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
                                                "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], use_errno=True)
     case "llvm": return load("llvm", ["LLVM_PATH"], lambda: [sys("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
-      lambda: sys("llvm-config-20 --cflags").split(), recsym=True, prelude=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
+      lambda: sys("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.runtime.support.llvm import LLVM_PATH"])
     case "pci": return load("pci", [], ["/usr/include/linux/pci_regs.h"])
     case "vfio": return load("vfio", [], ["/usr/include/linux/vfio.h"])
     # could add rule: WGPU_COMMA -> ','
     case "webgpu": return load("webgpu", ["WEBGPU_PATH"], [root/"extra/webgpu/webgpu.h"],
-                               prelude=["from tinygrad.runtime.support.webgpu import WEBGPU_PATH"])
+                               prolog=["from tinygrad.runtime.support.webgpu import WEBGPU_PATH"])
     case "libusb": return load("libusb", ["os.getenv('LIBUSB_PATH', find_library('usb-1.0'))"], ["/usr/include/libusb-1.0/libusb.h"])
     case "hip": return load("hip",["os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so'"],["/opt/rocm/include/hip/hip_ext.h",
                             "/opt/rocm/include/hip/hiprtc.h","/opt/rocm/include/hip/hip_runtime_api.h","/opt/rocm/include/hip/driver_types.h"],
@@ -74,4 +74,22 @@ def __getattr__(nm):
   "'/usr/local/lib/rocprof-trace-decoder.dylib'"],
   [f"{{}}/include/{s}.h" for s in ["rocprof_trace_decoder","trace_decoder_instrument","trace_decoder_types"]],
   tarball="https://github.com/ROCm/rocprof-trace-decoder/archive/dd0485100971522cc4cd8ae136bdda431061a04d.tar.gz")
+    case "mesa": return load("mesa", ["find_library('tinymesa_cpu')",
+  "(BASE:=os.getenv('MESA_PATH', f\"/usr{'/local/' if OSX else '/'}lib\"))+'/libtinymesa_cpu'+(EXT:='.dylib' if OSX else '.so')",
+  "f'{BASE}/libtinymesa{EXT}'", "'/opt/homebrew/lib/libtinymesa_cpu.dylib'", "'/opt/homebrew/lib/libtinymesa.dylib'"],
+  [f"{{}}/src/compiler/nir/{s}.h" for s in ["nir","nir_builder","nir_shader_compiler_options","nir_serialize"]]+["{}/gen/nir_intrinsics.h"]+
+  [f"{{}}/src/nouveau/{s}.h" for s in ["headers/nv_device_info", "compiler/nak"]]+
+  [f"{{}}/src/gallium/auxiliary/gallivm/lp_bld{s}.h" for s in ["","_passmgr","_misc","_type","_init","_nir","_struct","_jit_types","_flow","_const"]]+
+  ["{}/src/compiler/glsl_types.h", "{}/src/util/blob.h", "{}/src/util/ralloc.h"], lambda:["-DHAVE_ENDIAN_H","-DHAVE_STRUCT_TIMESPEC","-DHAVE_PTHREAD",
+  "-DHAVE_FUNC_ATTRIBUTE_PACKED","-I{}/src","-I{}/include","-I{}/gen","-I{}/src/compiler/nir","-I{}/src/gallium/auxiliary","-I{}/src/gallium/include",
+  f"-I{sys('llvm-config-20 --includedir')}"], tarball="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.4/mesa-25.2.4.tar.gz",
+  preprocess=lambda path: subprocess.run("""mkdir -p gen/util/format
+python3 src/util/format/u_format_table.py src/util/format/u_format.yaml --enums > gen/util/format/u_format_gen.h
+python3 src/compiler/nir/nir_opcodes_h.py > gen/nir_opcodes.h
+python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
+python3 src/compiler/nir/nir_intrinsics_indices_h.py --outdir gen
+python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h
+python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
+python3 src/compiler/builtin_types_h.py gen/builtin_types.h""", cwd=path, shell=True, check=True),
+  prolog=["import gzip, base64", "from tinygrad.helpers import OSX"], epilog=lambda path: sys(f"{root}/extra/mesa/lvp_nir_options.sh {path}"))
     case _: raise AttributeError(f"no such autogen: {nm}")

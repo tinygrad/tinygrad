@@ -24,7 +24,7 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
 
 ints = (TK.INT, TK.UINT, TK.LONG, TK.ULONG, TK.LONGLONG, TK.ULONGLONG)
 
-def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, use_errno=False, anon_names={}):
+def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None, epilog="", recsym=False, use_errno=False, anon_names={}):
   files, args = files() if callable(files) else files, args() if callable(args) else args
   if tarball:
     # dangerous for arbitrary urls!
@@ -32,18 +32,20 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
       tf.extractall("/tmp")
       base = f"/tmp/{tf.getnames()[0]}"
       files, args, anon_names = [str(f).format(base) for f in files], [a.format(base) for a in args], {k.format(base):v for k,v in anon_names.items()}
+    if preprocess: preprocess(base)
   files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
+  epilog = (epilog(base) if tarball else epilog()) if callable(epilog) else epilog
 
   idx, lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', os' if any('os' in s for s in dll) else ''),
                                 *(["from ctypes.util import find_library"] if any('find_library' in s for s in dll) else []),
-                                "from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR", *prelude]
-  if dll: lines.extend(["def dll():",*flatten([[f"  try: return ctypes.CDLL({d}{', use_errno=True' if use_errno else ''})",'  except: pass']
-                                                for d in dll]), "  return None", "dll = dll()"])
+                                "from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR", *prolog, ""]
+  if dll: lines.extend(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass']
+                                                for d in dll]), "  return None", "dll = dll()\n"])
   macros = []
-  types:dict[str,str] = {}
+  types:dict[str,tuple[str,bool]] = {}
 
   anoncnt = itertools.count().__next__
-  def tname(t, suggested_name=None) -> str:
+  def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{(decl:=t.get_declaration()).location.file}:{decl.location.line}", suggested_name)
     nonlocal lines, types, anoncnt
     tmap = {TK.VOID:"None", TK.CHAR_U:"ctypes.c_ubyte", TK.UCHAR:"ctypes.c_ubyte", TK.CHAR_S:"ctypes.c_char", TK.SCHAR:"ctypes.c_char",
@@ -51,7 +53,7 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
             ["BOOL", "USHORT", "UINT", "ULONG", "ULONGLONG", "WCHAR", "SHORT", "INT", "LONG", "LONGLONG", "FLOAT", "DOUBLE", "LONGDOUBLE"]}}
 
     if t.kind in tmap: return tmap[t.kind]
-    if t.spelling in types: return types[t.spelling]
+    if t.spelling in types and types[t.spelling][1]: return types[t.spelling][0]
     if ((f:=t).kind in (fks:=(TK.FUNCTIONPROTO, TK.FUNCTIONNOPROTO))) or (t.kind == TK.POINTER and (f:=t.get_pointee()).kind in fks):
       return f"ctypes.CFUNCTYPE({tname(f.get_result())}{(', '+', '.join(map(tname, f.argument_types()))) if f.kind==TK.FUNCTIONPROTO else ''})"
     match t.kind:
@@ -59,28 +61,37 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
       case TK.ELABORATED: return tname(t.get_named_type(), suggested_name)
       case TK.TYPEDEF if t.spelling == t.get_canonical().spelling: return tname(t.get_canonical())
       case TK.TYPEDEF:
-        types[t.spelling] = tname(t.get_canonical()) if t.spelling.startswith("__") else t.spelling.replace('::', '_')
-        lines.append(f"{t.spelling.replace('::', '_')} = {tname(t.get_canonical())}")
-        return types[t.spelling]
+        defined, nm = (canon:=t.get_canonical()).spelling in types, tname(canon, typedef=t.spelling.replace('::', '_'))
+        types[t.spelling] = nm if t.spelling.startswith("__") else t.spelling.replace('::', '_'), True
+        # RECORDs need to handle typedefs specially to allow for self-reference
+        if canon.kind != TK.RECORD or defined: lines.append(f"{t.spelling.replace('::', '_')} = {nm}")
+        return types[t.spelling][0]
       case TK.RECORD:
-        if decl.is_anonymous(): types[t.spelling] = nm = suggested_name or (f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{anoncnt()}")
-        else: types[t.spelling] = nm = t.spelling.replace(' ', '_').replace('::', '_')
-        lines.append(f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass")
-        aa, acnt = [], itertools.count().__next__
-        ll=["  ("+((aa.append(fn:=f"'_{acnt()}'") or fn)+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
+        # check for forward declaration
+        if t.spelling in types: types[t.spelling] = (nm:=types[t.spelling][0]), len(list(t.get_fields())) != 0
+        else:
+          if decl.is_anonymous():
+            types[t.spelling] = (nm:=(suggested_name or (f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{anoncnt()}")), True)
+          else: types[t.spelling] = (nm:=t.spelling.replace(' ', '_').replace('::', '_')), len(list(t.get_fields())) != 0
+          lines.append(f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass")
+          if typedef: lines.append(f"{typedef} = {nm}")
+        acnt = itertools.count().__next__
+        ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
-        lines.extend(([f"{nm}._anonymous_ = [{', '.join(aa)}]"] if aa else [])+[f"{nm}._fields_ = [",*ll,"]"] if ll else [f"{nm}._fields_ = []"])
+        lines.extend(([f"{nm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
+                     [f"{nm}._fields_ = [",*ll,"]"] if ll else [])
         return nm
       case TK.ENUM:
-        if decl.is_anonymous(): types[t.spelling] = suggested_name or f"_anonenum{anoncnt()}"
-        else: types[t.spelling] = t.spelling.replace(' ', '_').replace('::', '_')
-        lines.append(f"{types[t.spelling]} = CEnum({tname(decl.enum_type)})\n" +
-          "\n".join(f"{e.spelling} = {types[t.spelling]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()
+        # TODO: C++ and GNU C have forward declared enums
+        if decl.is_anonymous(): types[t.spelling] = suggested_name or f"_anonenum{anoncnt()}", True
+        else: types[t.spelling] = t.spelling.replace(' ', '_').replace('::', '_'), True
+        lines.append(f"{types[t.spelling][0]} = CEnum({tname(decl.enum_type)})\n" +
+          "\n".join(f"{e.spelling} = {types[t.spelling][0]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()
                     if e.kind == CK.ENUM_CONSTANT_DECL) + "\n")
-        return types[t.spelling]
+        return types[t.spelling][0]
       case TK.CONSTANTARRAY:
         return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * {t.get_array_size()})"
-      case TK.INCOMPLETEARRAY: return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * {0})"
+      case TK.INCOMPLETEARRAY: return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * 0)"
       case _: raise NotImplementedError(f"unsupported type {t.kind}")
 
   for f in files:
@@ -91,6 +102,7 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
       try:
         match c.kind:
           case CK.FUNCTION_DECL if c.linkage == LK.EXTERNAL and dll:
+            # TODO: we could support name-mangling
             lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype, {c.spelling}.argtypes = "
               f"{tname(c.result_type)}, [{', '.join(tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
           case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: tname(c.type)
@@ -107,6 +119,8 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
               macros += [f"{c.spelling} = {{{','.join(f'{readext(f, next(it:=c.get_children()).extent)}:{readext(f, next(it).extent)}' for c in init.get_children())}}}"]
             elif c.type.get_canonical().kind in ints: macros += [f"{c.spelling} = {readext(f, last(c).extent)}"]
             else: macros += [f"{c.spelling} = {tname(c.type)}({readext(f, last(c).extent)})"]
+          case CK.VAR_DECL if c.linkage == LK.EXTERNAL:
+            lines.append(f"# {c.pretty_printed(pp)}\ntry: {c.spelling} = {tname(c.type)}.in_dll(dll, '{c.mangled_name}')\nexcept ValueError: pass")
       except Exception as e: raise Exception(f"parsing failed at {c.location.file}:{c.location.line}") from e
   main, macros = '\n'.join(lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
@@ -118,4 +132,5 @@ def gen(dll, files, args=[], prelude=[], rules=[], tarball=None, recsym=False, u
       assert macrono >= 0 and macrono < len(macros)
       print(f"Skipping {macros[macrono]}: {e}")
       del macros[macrono]
-  return main + '\n'.join(macros)
+    except Exception as e: raise e
+  return main + '\n'.join(macros) + '\n' + epilog
