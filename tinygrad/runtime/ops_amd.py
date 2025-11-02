@@ -161,7 +161,7 @@ class AMDComputeQueue(HWQueue):
       # gfx11+ and later require even-numbered SQ *_SELECT registers
       regsample = f'reg{block}_PERFCOUNTER{(pcid:=next(block2pid[block]))}'
       if (regsel:=getattr(self.gc, (f'reg{block}_PERFCOUNTER{(pcid*2) if self.dev.target[0]>=11 and block=="SQ" else pcid}_SELECT'), None)) is None:
-        raise RuntimeError(f'{block} is out of perfcounter registers: ({regsel.name} is not found)')
+        raise RuntimeError(f'{block} is out of perfcounter registers: ({regsample} is not found)')
 
       self.wreg(regsel, perf_sel=idx, **({'simd_mask':0xf, 'sqc_bank_mask':0xf, 'sqc_client_mask':0xf} if gfx9 and block == "SQ" else {}))
       self.dev.pmc_sched.append(PMCSample(name, block, self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt, end_off-rec_size, rec_size, regsample))
