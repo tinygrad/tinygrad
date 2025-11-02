@@ -6,7 +6,7 @@ from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, Suppor
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, FUSE_ATTENTION, SPEC
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, SPEC
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.mixins import MathMixin, MovementMixin
@@ -2131,7 +2131,7 @@ class Tensor(MathMixin, MovementMixin):
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None, _single_kernel=getenv("SINGLE_KERNEL_SOFTMAX")) -> Tensor:
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -2151,9 +2151,6 @@ class Tensor(MathMixin, MovementMixin):
     print(t.softmax(axis=0).numpy())
     ```
     """
-    if _single_kernel:
-      _, e, ss = self.contiguous()._softmax(axis, dtype)
-      return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)
     return e.div(ss)
 
@@ -3013,15 +3010,6 @@ class Tensor(MathMixin, MovementMixin):
     Returns a contiguous tensor.
     """
     return self._apply_uop(UOp.contiguous, extra_args=args, **kwargs)
-
-  def fuse(self) -> Tensor:
-    """
-    Makes this a single kernel back to Ops.CONTIGUOUS on the inputs.
-
-    Useful for single kernel softmax and flash attention.
-    Careful, this can break codegen or make kernels really slow.
-    """
-    return self._apply_uop(UOp.fuse)
 
   def contiguous_backward(self) -> Tensor:
     """
@@ -4002,9 +3990,7 @@ class Tensor(MathMixin, MovementMixin):
       key = key.repeat_interleave(self.shape[-3] // key.shape[-3], dim=-3)
       value = value.repeat_interleave(self.shape[-3] // value.shape[-3], dim=-3)
 
-    if FUSE_ATTENTION: q, key, value = self.contiguous(), key.contiguous(), value.contiguous()
-    else: q = self
-
+    q = self
     qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1])
     # handle attention mask
     if is_causal:
@@ -4013,8 +3999,7 @@ class Tensor(MathMixin, MovementMixin):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-    return attn.fuse() if FUSE_ATTENTION else attn
+    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")

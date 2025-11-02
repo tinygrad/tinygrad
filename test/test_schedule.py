@@ -1042,13 +1042,12 @@ class TestSchedule(unittest.TestCase):
       compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
       np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
-    with Context(FUSE_ATTENTION=1):
-      out = Tensor.scaled_dot_product_attention(q,k,v)
-      run_schedule(check_schedule(out, 4)) # TODO: should be 1?
-      if getenv("CHECK", 1):
-        import torch
-        compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
-        np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
+    out = Tensor.scaled_dot_product_attention(q,k,v)
+    run_schedule(check_schedule(out, 4)) # TODO: should be 1?
+    if getenv("CHECK", 1):
+      import torch
+      compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
+      np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
   def test_ugly_reduceop_pairing(self):
     Tensor.manual_seed(0)
