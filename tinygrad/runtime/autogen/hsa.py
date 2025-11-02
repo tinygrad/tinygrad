@@ -31,6 +31,8 @@ def char_pointer_cast(string, encoding='utf-8'):
 _libraries = {}
 _libraries['libhsa-runtime64.so'] = ctypes.CDLL(os.getenv('ROCM_PATH')+'/lib/libhsa-runtime64.so' if os.getenv('ROCM_PATH') else ctypes.util.find_library('hsa-runtime64'))
 class AsDictMixin:
+    import sys
+    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}

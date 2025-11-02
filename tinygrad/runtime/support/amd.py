@@ -63,10 +63,16 @@ def import_soc(ip):
 
 def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"include/{('sienna_cichlid' if ip[0] > 9 else 'vega20')}_ip_offset.h"))
 
-def import_pmc(ip) -> dict[str, tuple[str, str, int]]:
-  ver = min(ip[0], 11) # 12 is same as 11
-  m = re.search(rf'<gfx{ver}>(.*?)</gfx{ver}>', header_download("rocprofiler/src/core/counters/basic/gfx_metrics.xml", url=ROCM_URL), re.S)
-  return {n:(n,b,int(e)) for n,b,e in re.findall(r'<metric name="([A-Za-z0-9_]+)" block="([A-Za-z0-9_]+)" event="([0-9]+)"', m.group(1))} if m else {}
+def import_pmc(ip) -> dict[str, tuple[str, int]]:
+  res:dict[str, tuple[str, int]] = {}
+  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}"
+
+  for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", url=ROCM_URL).split('- name: ')[1:]:
+    for arch_spec in sec.split('- architectures:')[1:]:
+      if arch in arch_spec and (block:=re.search(r'block:\s*([A-Za-z0-9_]+)', arch_spec)) and (ev:=re.search(r'event:\s*(\d+)', arch_spec)):
+        res[sec.splitlines()[0].strip()] = (block.group(1), int(ev.group(1)))
+
+  return res
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]

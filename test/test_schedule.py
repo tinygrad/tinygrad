@@ -711,7 +711,7 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(b.buffer.numpy(), [12])
 
   # unlike schedule, kernelize can be called multiple times on a Tensor
-  def test_double_kerenlize(self):
+  def test_double_kernelize(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
     c = (a+b)
@@ -1042,13 +1042,12 @@ class TestSchedule(unittest.TestCase):
       compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
       np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
-    with Context(FUSE_ATTENTION=1):
-      out = Tensor.scaled_dot_product_attention(q,k,v)
-      run_schedule(check_schedule(out, 4)) # TODO: should be 1?
-      if getenv("CHECK", 1):
-        import torch
-        compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
-        np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
+    out = Tensor.scaled_dot_product_attention(q,k,v)
+    run_schedule(check_schedule(out, 4)) # TODO: should be 1?
+    if getenv("CHECK", 1):
+      import torch
+      compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
+      np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
   def test_ugly_reduceop_pairing(self):
     Tensor.manual_seed(0)
@@ -1502,6 +1501,18 @@ class TestSchedule(unittest.TestCase):
     sched = check_schedule(dx, 1)
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
+
+  def test_fuse_arange_avg_pool2d_ceil_mode(self):
+    x = Tensor.avg_pool2d(Tensor.empty(1,1,6,6), kernel_size=(3,3), padding=1, stride=3, ceil_mode=True)
+    sched = check_schedule(x, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 1)
+
+  def test_fuse_arange_pad_circular_mode_bw(self):
+    x = Tensor.empty(1,1,5,5,5)
+    out = x.pad((1,2,3,5,1,2), mode="circular")
+    g = out.sum().gradient(x)[0]
+    sched = check_schedule(g, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 0)
 
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
@@ -2267,7 +2278,7 @@ class TestContiguous(unittest.TestCase):
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
     b = a.expand((4, 4)).contiguous().contiguous()
-    check_schedule(b, 2) # TODO: should be 1?
+    check_schedule(b, 1)
 
   def test_view_does_not_realize(self):
     a = Tensor.empty(4)
