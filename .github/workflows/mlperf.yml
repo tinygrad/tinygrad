@@ -23,7 +23,7 @@ jobs:
       run: |
         mkdir -p extra/datasets
         ln -s /raid/datasets/imagenet extra/datasets/imagenet
-    - name: Run resnet
+    - name: Run bert
       run: |
         rm "~/.cache/tinygrad/cache_mlperf.db" || true
         BENCHMARK_LOG=mlpert_train_bert LOGMLPERF=0 CACHEDB="~/.cache/tinygrad/cache_mlperf.db" examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/bert/implementations/tinybox_red/run_and_time.sh
