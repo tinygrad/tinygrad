@@ -44,7 +44,9 @@ class InstInfo:
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
-    self.wave_events, self.disasms, self.addr2prg = {}, {}, {}
+    self.wave_events:dict[tuple[str, int, int, int], dict[int, InstInfo]] = {}
+    self.disasms:dict[int, tuple[str, int]] = {}
+    self.addr2prg:dict[int, ProfileProgramEvent] = {}
 
     for prog in prog_evs:
       for addr, info in llvm_disasm(dev_evs[prog.device].arch, prog.lib).items():
@@ -64,7 +66,7 @@ class _ROCParseCtx:
   def on_wave_ev(self, ev):
     if DEBUG >= 5: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
-    asm = {}
+    asm:dict[int, InstInfo] = {}
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
