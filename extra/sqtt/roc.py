@@ -49,9 +49,9 @@ class _ROCParseCtx:
     self.addr2prg:dict[int, ProfileProgramEvent] = {}
 
     for prog in prog_evs:
-      for addr, info in llvm_disasm(dev_evs[prog.device].arch, prog.lib).items():
-        self.disasms[prog.base + addr] = info
-        self.addr2prg[prog.base + addr] = prog
+      for addr, info in llvm_disasm(dev_evs[prog.device].arch, unwrap(prog.lib)).items():
+        self.disasms[unwrap(prog.base) + addr] = info
+        self.addr2prg[unwrap(prog.base) + addr] = prog
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
