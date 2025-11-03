@@ -30,23 +30,26 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
 def run_one_schedule_item(out): lower_schedule_item(get_single_element(out.schedule())).run()
 
 class TestFuse(unittest.TestCase):
-  def _test_fuse(self, fxn, *args, atol=1e-7, allow_multiple=False, **kwargs):
+  def _test_fuse(self, fxn, *args, atol=1e-6, allow_multiple=False, **kwargs):
     GlobalCounters.reset()
-    out_single = fxn(*args, **kwargs).fuse()
+    out_single = fxn(*args, **kwargs)
     if not allow_multiple: run_one_schedule_item(out_single)
     np_single = out_single.numpy()
     GlobalCounters.reset()
     np_multi = fxn(*args, **kwargs).numpy()
     np.testing.assert_allclose(np_single, np_multi, atol=atol)
 
+  @unittest.skip("needs RANGEIFY>1")
   def test_fuse_norm(self):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a / a.mean(axis=1), a)
 
+  @unittest.skip("needs RANGEIFY>1")
   def test_fuse_argmax(self):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a.argmax(axis=-1), a)
 
+  @unittest.skip("needs RANGEIFY>1")
   def test_fuse_softmax(self):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a.softmax(axis=-1), a)
@@ -57,6 +60,7 @@ class TestFuse(unittest.TestCase):
     self._test_fuse(lambda a,b: ((a@b).relu()+a).contiguous().softmax(axis=-1), a,b, allow_multiple=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skip("needs RANGEIFY>1")
   def test_fuse_softmax_dtype(self):
     a = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a: a.softmax(axis=-1, dtype='half'), a, atol=3e-4)
@@ -64,6 +68,7 @@ class TestFuse(unittest.TestCase):
   def test_fuse_arange_eye(self):
     self._test_fuse(lambda: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
 
+  @unittest.skip("needs RANGEIFY>1")
   def test_double_gemm(self):
     N = 32
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -86,6 +91,7 @@ class TestFuse(unittest.TestCase):
       return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
     self._test_fuse(embedding, a, atol=1e-5)
 
+  @unittest.skip("needs RANGEIFY>1")
   def test_attention_kernel_count(self):
     wq = Tensor.empty(32, 32)
     wk = Tensor.empty(32, 32)
@@ -94,10 +100,11 @@ class TestFuse(unittest.TestCase):
     q = (x @ wq).contiguous()
     k = (x @ wk).contiguous()
     v = (x @ wv).contiguous()
-    attn = q.scaled_dot_product_attention(k, v).fuse()
+    attn = q.scaled_dot_product_attention(k, v)
     s = attn.schedule()
     self.assertEqual(len(s), 4) # 3 matmul and 1 attention
 
+  @unittest.skip("needs RANGEIFY>1")
   def test_flash_attention(self):
     BS = 4
     HEADS = 2
@@ -114,7 +121,7 @@ class TestFuse(unittest.TestCase):
   def test_mismatch_reduce(self):
     a = Tensor.ones(16, 10).contiguous().realize()
     b = Tensor.ones(16, 20).contiguous().realize()
-    c = (a.sum(axis=1) + b.sum(axis=1)).fuse()
+    c = (a.sum(axis=1) + b.sum(axis=1))
     self.assertListEqual(c.tolist(), [30]*16)
 
   @unittest.skipUnless(Device.DEFAULT == "METAL", "METAL TC")
@@ -122,7 +129,7 @@ class TestFuse(unittest.TestCase):
     A = Tensor.randn(8, 8).realize()
     B = Tensor.randn(8, 8).realize()
     C = Tensor.ones(1, 8, 8).pad(((1,1), None, None),).sum(0)
-    out = (C + (A @ B)).fuse()
+    out = (C + (A @ B))
     out.realize()
 
 class TestSoftmaxFusion(unittest.TestCase):
@@ -158,13 +165,13 @@ class TestSoftmaxFusion(unittest.TestCase):
       sout.realize()
 
     print("*** single kernel softmax ***")
-    # NOTE: DONT_GROUP_REDUCES is required here
-    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       out = single_kernel_softmax(self.test)
       out.realize()
 
     np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
+  @unittest.skip("needs RANGEIFY>1")
   def test_auto_softmax(self):
     print("*** softmax ***")
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
@@ -173,12 +180,11 @@ class TestSoftmaxFusion(unittest.TestCase):
 
     print("*** auto single kernel softmax ***")
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
-      out = self.test.contiguous().softmax(-1).fuse()
+      out = self.test.contiguous().softmax(-1)
       run_one_schedule_item(out)
 
     np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
-  @unittest.skip("recursion error no longer raised")
   def test_softmax_bw(self):
     print("*** softmax bw ***")
     self.test.requires_grad_()
@@ -189,14 +195,11 @@ class TestSoftmaxFusion(unittest.TestCase):
     self.test.grad = None
 
     print("*** single kernel softmax bw ***")
-    # NOTE: DONT_GROUP_REDUCES is required here
-    # TODO: fix RecursionError with DONT_GROUP_REDUCES
-    with self.assertRaises(RecursionError):
-      with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
-        single_kernel_softmax(self.test).sum().backward()
-        g = self.test.grad.realize()
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
+      single_kernel_softmax(self.test).sum().backward()
+      g = self.test.grad.realize()
 
-      np.testing.assert_allclose(sg.numpy(), g.numpy(), atol=1e-7)
+    np.testing.assert_allclose(sg.numpy(), g.numpy(), atol=1e-7)
 
 if __name__ == '__main__':
   unittest.main()

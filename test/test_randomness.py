@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, CI, OSX, X86
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 from test.helpers import not_support_multi_device
 
 import numpy as np
@@ -100,8 +101,8 @@ class TestRandomness(unittest.TestCase):
 
     np.testing.assert_allclose(jr, r)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "fails with PTX")
   @unittest.skipIf(Device.DEFAULT == "CPU" and X86, "indexing uses long in x86")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
   def test_threefry_doesnt_use_long(self):
     for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
       if isinstance(ei.prg, CompiledRunner):
@@ -361,6 +362,11 @@ class TestRandomness(unittest.TestCase):
     params = (64,)
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).weight, lambda _: torch.nn.BatchNorm2d(*params).weight.detach())
     assert equal_distribution(lambda *_: nn.BatchNorm2d(*params).bias, lambda _: torch.nn.BatchNorm2d(*params).bias.detach())
+
+  def test_rand_chain(self):
+    # NOTE: this fails if property propagates deeper than stack limit
+    for _ in range(833): Tensor.rand(1)
+    Tensor.rand(1).realize()
 
 # TODO: still fails with MAX_KERNEL_BUFFERS
 @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "WEBGPU Vulkan can only run kernels with up to 10 buffers")

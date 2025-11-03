@@ -1,9 +1,10 @@
 import functools, importlib, re, urllib
 from collections import defaultdict
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, round_up, fetch
-from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.support.usb import ASM24Controller
+from tinygrad.helpers import getbits, fetch
+
+AMDGPU_URL = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd"
+ROCM_URL = "https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects"
 
 @dataclass
 class AMDReg:
@@ -26,9 +27,8 @@ class AMDIP:
 
   def __getattr__(self, name:str):
     if name in self.regs: return self.regs[name]
-
-    # NOTE: gfx10 gc registers always start with mm, no reg prefix
-    return self.regs[name.replace('reg', 'mm')]
+    if (name10:=name.replace('reg', 'mm')) in self.regs: return self.regs[name10]
+    raise AttributeError(f"{self.name.upper()} has no register {name}")
 
 def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
   # override versions
@@ -37,19 +37,19 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
       if version[:len(ver)] == ver: return ovrd_ver
     return version
 
-  if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0)})
+  if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0), (7,3): (7,2,0)})
   elif ip in ['mp', 'smu']: version = _apply_ovrd({(14,0,3): (14,0,2)})
   elif ip in ['gc']: version = _apply_ovrd({(9,5,0): (9,4,3)})
 
   return [version, version[:2], version[:2]+(0,), version[:1]+(0, 0)]
 
-def header_download(file, name=None, subdir="defines") -> str:
-  url = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd"
-  return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
+def header_download(file, name=None, subdir="defines", url=AMDGPU_URL) -> str: return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
 
-def import_header(path:str):
-  t = re.sub(r'//.*|/\*.*?\*/','', header_download(path, subdir="defines"), flags=re.S)
-  return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t)}
+def import_header(path:str, url=AMDGPU_URL):
+  t = re.sub(r'//.*|/\*.*?\*/','', header_download(path, subdir="defines", url=url), flags=re.S)
+  # TODO: refactor when clang2py is replaced
+  return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t) + \
+                                re.findall(r'^\s*#\s*define\s+([A-Za-z_0-9]\w*)\s+(0x[0-9A-Fa-f]+|\d+)', t, re.M)}
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
@@ -57,7 +57,22 @@ def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
     except ImportError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
 
-def import_soc(ip): return type("SOC", (object,), import_header(f"include/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h"))
+def import_soc(ip):
+  # rocm soc headers have more profiling enums than upstream linux
+  return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", ROCM_URL))
+
+def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"include/{('sienna_cichlid' if ip[0] > 9 else 'vega20')}_ip_offset.h"))
+
+def import_pmc(ip) -> dict[str, tuple[str, int]]:
+  res:dict[str, tuple[str, int]] = {}
+  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}"
+
+  for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", url=ROCM_URL).split('- name: ')[1:]:
+    for arch_spec in sec.split('- architectures:')[1:]:
+      if arch in arch_spec and (block:=re.search(r'block:\s*([A-Za-z0-9_]+)', arch_spec)) and (ev:=re.search(r'event:\s*(\d+)', arch_spec)):
+        res[sec.splitlines()[0].strip()] = (block.group(1), int(ev.group(1)))
+
+  return res
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
@@ -86,53 +101,3 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
     # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
     return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
   raise ImportError(f"Failed to load ASIC registers for {prefix.upper()} {'.'.join(map(str, version))}")
-
-def setup_pci_bars(usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
-  for bus in range(gpu_bus):
-    # All 3 values must be written at the same time.
-    buses = (0 << 0) | ((bus+1) << 8) | ((gpu_bus) << 16)
-    usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=buses, size=4)
-
-    usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=(mem_base>>16) & 0xffff, size=2)
-    usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
-    usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=(pref_mem_base>>16) & 0xffff, size=2)
-    usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
-    usb.pcie_cfg_req(pci.PCI_PREF_BASE_UPPER32,  bus=bus, dev=0, fn=0, value=pref_mem_base >> 32, size=4)
-    usb.pcie_cfg_req(pci.PCI_PREF_LIMIT_UPPER32, bus=bus, dev=0, fn=0, value=0xffffffff, size=4)
-
-    usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
-
-  # resize bar 0
-  cap_ptr = 0x100
-  while cap_ptr:
-    if pci.PCI_EXT_CAP_ID(hdr:=usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, dev=0, fn=0, size=4)) == pci.PCI_EXT_CAP_ID_REBAR:
-      cap = usb.pcie_cfg_req(cap_ptr + 0x04, bus=gpu_bus, dev=0, fn=0, size=4)
-      new_ctrl = (usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, size=4) & ~0x1F00) | ((int(cap >> 4).bit_length() - 1) << 8)
-      usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, value=new_ctrl, size=4)
-
-    cap_ptr = pci.PCI_EXT_CAP_NEXT(hdr)
-
-  mem_space_addr, bar_off, bars = [mem_base, pref_mem_base], 0, {}
-  while bar_off < 24:
-    cfg = usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
-    bar_mem, bar_64 = bool(cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH), cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64
-
-    if (cfg & pci.PCI_BASE_ADDRESS_SPACE) == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
-      usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
-      lo = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4) & 0xfffffff0)
-
-      if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
-      hi = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, size=4) if bar_64 else 0)
-
-      bar_size = ((~(((hi << 32) | lo) & ~0xf)) + 1) & (0xffffffffffffffff if bar_64 else 0xffffffff)
-
-      usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] & 0xffffffff, size=4)
-      if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] >> 32, size=4)
-
-      bars[bar_off // 4] = (mem_space_addr[bar_mem], bar_size)
-      mem_space_addr[bar_mem] += round_up(bar_size, 2 << 20)
-
-    bar_off += 8 if bar_64 else 4
-
-  usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
-  return bars

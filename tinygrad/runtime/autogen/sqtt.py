@@ -10,6 +10,8 @@ import ctypes, os
 
 
 class AsDictMixin:
+    import sys
+    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}
@@ -174,12 +176,14 @@ sqtt_version__enumvalues = {
     6: 'SQTT_VERSION_2_3',
     7: 'SQTT_VERSION_2_4',
     11: 'SQTT_VERSION_3_2',
+    12: 'SQTT_VERSION_3_3',
 }
 SQTT_VERSION_NONE = 0
 SQTT_VERSION_2_2 = 5
 SQTT_VERSION_2_3 = 6
 SQTT_VERSION_2_4 = 7
 SQTT_VERSION_3_2 = 11
+SQTT_VERSION_3_3 = 12
 sqtt_version = ctypes.c_uint32 # enum
 
 # values for enumeration 'sqtt_file_chunk_type'
@@ -336,6 +340,8 @@ sqtt_gfxip_level__enumvalues = {
     7: 'SQTT_GFXIP_LEVEL_GFXIP_10_1',
     9: 'SQTT_GFXIP_LEVEL_GFXIP_10_3',
     12: 'SQTT_GFXIP_LEVEL_GFXIP_11_0',
+    13: 'SQTT_GFXIP_LEVEL_GFXIP_11_5',
+    16: 'SQTT_GFXIP_LEVEL_GFXIP_12',
 }
 SQTT_GFXIP_LEVEL_NONE = 0
 SQTT_GFXIP_LEVEL_GFXIP_6 = 1
@@ -346,6 +352,8 @@ SQTT_GFXIP_LEVEL_GFXIP_9 = 5
 SQTT_GFXIP_LEVEL_GFXIP_10_1 = 7
 SQTT_GFXIP_LEVEL_GFXIP_10_3 = 9
 SQTT_GFXIP_LEVEL_GFXIP_11_0 = 12
+SQTT_GFXIP_LEVEL_GFXIP_11_5 = 13
+SQTT_GFXIP_LEVEL_GFXIP_12 = 16
 sqtt_gfxip_level = ctypes.c_uint32 # enum
 
 # values for enumeration 'sqtt_memory_type'
@@ -806,12 +814,16 @@ elf_gfxip_level__enumvalues = {
     51: 'EF_AMDGPU_MACH_AMDGCN_GFX1010',
     54: 'EF_AMDGPU_MACH_AMDGCN_GFX1030',
     65: 'EF_AMDGPU_MACH_AMDGCN_GFX1100',
+    67: 'EF_AMDGPU_MACH_AMDGCN_GFX1150',
+    78: 'EF_AMDGPU_MACH_AMDGCN_GFX1200',
 }
 EF_AMDGPU_MACH_AMDGCN_GFX801 = 40
 EF_AMDGPU_MACH_AMDGCN_GFX900 = 44
 EF_AMDGPU_MACH_AMDGCN_GFX1010 = 51
 EF_AMDGPU_MACH_AMDGCN_GFX1030 = 54
 EF_AMDGPU_MACH_AMDGCN_GFX1100 = 65
+EF_AMDGPU_MACH_AMDGCN_GFX1150 = 67
+EF_AMDGPU_MACH_AMDGCN_GFX1200 = 78
 elf_gfxip_level = ctypes.c_uint32 # enum
 class struct_sqtt_file_chunk_spm_db(Structure):
     pass
@@ -1607,7 +1619,8 @@ __all__ = \
     'ApiCmdUpdateBuffer', 'ApiCmdWaitEvents', 'ApiCmdWriteTimestamp',
     'ApiInvalid', 'ApiRayTracingSeparateCompiled',
     'EF_AMDGPU_MACH_AMDGCN_GFX1010', 'EF_AMDGPU_MACH_AMDGCN_GFX1030',
-    'EF_AMDGPU_MACH_AMDGCN_GFX1100', 'EF_AMDGPU_MACH_AMDGCN_GFX801',
+    'EF_AMDGPU_MACH_AMDGCN_GFX1100', 'EF_AMDGPU_MACH_AMDGCN_GFX1150',
+    'EF_AMDGPU_MACH_AMDGCN_GFX1200', 'EF_AMDGPU_MACH_AMDGCN_GFX801',
     'EF_AMDGPU_MACH_AMDGCN_GFX900', 'EventCmdBlitImage',
     'EventCmdBuildAccelerationStructuresIndirectKHR',
     'EventCmdBuildAccelerationStructuresKHR',
@@ -1671,7 +1684,8 @@ __all__ = \
     'SQTT_FILE_CHUNK_TYPE_SQTT_DESC', 'SQTT_FILE_MAGIC_NUMBER',
     'SQTT_FILE_VERSION_MAJOR', 'SQTT_FILE_VERSION_MINOR',
     'SQTT_GFXIP_LEVEL_GFXIP_10_1', 'SQTT_GFXIP_LEVEL_GFXIP_10_3',
-    'SQTT_GFXIP_LEVEL_GFXIP_11_0', 'SQTT_GFXIP_LEVEL_GFXIP_6',
+    'SQTT_GFXIP_LEVEL_GFXIP_11_0', 'SQTT_GFXIP_LEVEL_GFXIP_11_5',
+    'SQTT_GFXIP_LEVEL_GFXIP_12', 'SQTT_GFXIP_LEVEL_GFXIP_6',
     'SQTT_GFXIP_LEVEL_GFXIP_7', 'SQTT_GFXIP_LEVEL_GFXIP_8',
     'SQTT_GFXIP_LEVEL_GFXIP_8_1', 'SQTT_GFXIP_LEVEL_GFXIP_9',
     'SQTT_GFXIP_LEVEL_NONE', 'SQTT_GPU_NAME_MAX_SIZE',
@@ -1697,9 +1711,9 @@ __all__ = \
     'SQTT_QUEUE_TYPE_COMPUTE', 'SQTT_QUEUE_TYPE_DMA',
     'SQTT_QUEUE_TYPE_UNIVERSAL', 'SQTT_QUEUE_TYPE_UNKNOWN',
     'SQTT_SA_PER_SE', 'SQTT_VERSION_2_2', 'SQTT_VERSION_2_3',
-    'SQTT_VERSION_2_4', 'SQTT_VERSION_3_2', 'SQTT_VERSION_NONE',
-    'UserEventObjectName', 'UserEventPop', 'UserEventPush',
-    'UserEventTrigger', 'elf_gfxip_level',
+    'SQTT_VERSION_2_4', 'SQTT_VERSION_3_2', 'SQTT_VERSION_3_3',
+    'SQTT_VERSION_NONE', 'UserEventObjectName', 'UserEventPop',
+    'UserEventPush', 'UserEventTrigger', 'elf_gfxip_level',
     'rgp_sqtt_marker_event_type', 'rgp_sqtt_marker_general_api_type',
     'rgp_sqtt_marker_identifier', 'rgp_sqtt_marker_user_event_type',
     'sqtt_api_type', 'sqtt_engine_type',

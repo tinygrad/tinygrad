@@ -4,7 +4,7 @@ from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.uop.decompositions import xexp2, xlog2
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, sint_to_uop
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, DType, PtrDType, truncate
 from tinygrad.helpers import prod, AMX
 
@@ -49,9 +49,11 @@ def render_wmma_amx(ctx, wmma: UOp) -> str:
 def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16"}
   # https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-mfma.cl
+  N,M,K = wmma.arg[1]
   if cdna:
+    if K == 32: dt_map.update({dtypes.half: ".f16", dtypes.bfloat16: ".bf16"})
     return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.mfma.{dt_map[wmma.src[-1].dtype.scalar()]}" + \
-           f".16x16x16{dt_map[wmma.src[0].dtype.scalar()]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
+           f".{N}x{M}x{K}{dt_map[wmma.src[0].dtype.scalar()]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
   return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype.scalar()]}.16x16x16." + \
@@ -71,7 +73,7 @@ base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
    f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("mask"))).or_casted("idx"), UPat.var("alt")), name="x"),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("mask"))).or_casted("idx"), UPat.var("alt")), allow_any_len=True, name="x"),
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
@@ -92,6 +94,9 @@ base_rewrite = PatternMatcher([
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
+  # rewrite cast to bool to CMPNE 0
+  (UPat(Ops.CAST, name="x", dtype=dtypes.bool),
+   lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][Ops.CMPNE]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, zeroinitializer"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
@@ -101,14 +106,21 @@ base_rewrite = PatternMatcher([
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
   # range
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_entry_{x.arg[0]}\nloop_entry_{x.arg[0]}:\n"
-   f"  br label %loop_body_{x.arg[0]}\nloop_body_{x.arg[0]}:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [ 0, %loop_entry_{x.arg[0]} ], [ {ctx[x]}phi, %loop_latch_{x.arg[0]} ]"),
-  (UPat(Ops.ENDRANGE, name="x"), lambda ctx,x:
-   f"  br label %loop_latch_{x.src[0].arg[0]}\nloop_latch_{x.src[0].arg[0]}:\n"
-   f"  {ctx[x.src[0]]}phi = add i32 {ctx[x.src[0]]}, 1\n  {ctx[x]} = icmp ult i32 {ctx[x.src[0]]}phi, {ctx[x.src[0].src[0]]}\n"
-   f"  br i1 {ctx[x]}, label %loop_body_{x.src[0].arg[0]}, label %loop_exit_{x.src[0].arg[0]}\nloop_exit_{x.src[0].arg[0]}:"),
+  (UPat(Ops.RANGE, name="r"), lambda ctx,r:
+   f"  br label %loop_entry_{range_str(r)}\n"
+   f"loop_entry_{range_str(r)}:\n"
+   f"  br label %loop_latch_{range_str(r)}\n"
+   f"loop_latch_{range_str(r)}:\n"
+   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
+   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
+   f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype)} {ctx[r]}, {ctx[r.src[0]]}\n"
+   f"  br i1 {ctx[r]}cmp, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\n"
+   f"loop_body_{range_str(r)}:"),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
+   f"  br label %loop_footer_{range_str(r)}\n"
+   f"loop_footer_{range_str(r)}:\n"
+   f"  br label %loop_latch_{range_str(r)}\n"
+   f"loop_exit_{range_str(r)}:"),
 
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
@@ -128,8 +140,6 @@ class LLVMRenderer(Renderer):
   if AMX: tensor_cores = tc.amx
 
   extra_matcher = PatternMatcher([
-    # rewrite cast to bool to CMPNE 0
-    (UPat(Ops.CAST, dtype=dtypes.bool, name="x"), lambda x: x.src[0] != x.src[0].const_like(0)),
     # rewrite MAX to CMPLT + WHERE
     (UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])),
     # copied from cstyle.py, upcast to float32 all the ops that don't support bfloat16
@@ -164,7 +174,10 @@ class LLVMRenderer(Renderer):
 
     name = "test"
     for u in uops:
-      if u.op is Ops.NOOP: continue
+      if u.op in {Ops.NOOP, Ops.GROUP}: continue
+      if u.op is Ops.AFTER:
+        r[u] = r[u.src[0]]
+        continue
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
@@ -174,8 +187,10 @@ class LLVMRenderer(Renderer):
       elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
-        if self.device == "CPU" or u.op is Ops.DEFINE_REG:
+        if u.op is Ops.DEFINE_REG:
           kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]")
+        elif self.device == "CPU" and u.op is Ops.DEFINE_LOCAL:
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}], align 16")
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
@@ -224,14 +239,14 @@ class AMDLLVMRenderer(LLVMRenderer):
   def _render_footer(self, uops: list[UOp]) -> str:
     # TODO: this is copied from cstyle
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
-    requiredMaxThreadsPerBlock = sint_to_uop(prod(local_dims)).vmax
+    requiredMaxThreadsPerBlock = prod([d.vmax for d in local_dims])
     attributes = ["alwaysinline", "nounwind", '"no-builtins"',
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, arch:str):
     self.arch = arch
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
-    self.is_cdna = arch.split(":")[0] in {"gfx942", "gfx950"}
+    self.is_cdna = AMDRenderer.is_cdna(arch)
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([
@@ -246,7 +261,7 @@ class AMDLLVMRenderer(LLVMRenderer):
         (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
           x.src[2]), x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
       ])
-    if self.arch.split(":")[0] == "gfx1201":
+    if self.arch.split(":")[0] in {"gfx1200", "gfx1201"}:
       self.extra_matcher += PatternMatcher([
         (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16.vec(8)), lambda x: UOp(Ops.WMMA, dtypes.uint16.vec(8),
           (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)), x.src[2].bitcast(dtypes.uint16.vec(8))), (*x.arg,))

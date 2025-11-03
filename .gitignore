@@ -38,6 +38,7 @@ extra/huggingface_onnx/models/*
 extra/huggingface_onnx/*.yaml
 extra/weights
 venv
+venv_sd_mlperf
 examples/**/net.*[js,json]
 examples/**/*.safetensors
 node_modules

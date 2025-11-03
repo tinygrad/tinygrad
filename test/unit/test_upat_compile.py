@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, Context
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UPat, track_rewrites, GroupOp, Ops
 from tinygrad.uop.upat import _get_code, upat_compile
@@ -14,6 +14,7 @@ def do_compile(up):
   if DEBUG >= 2: dis.dis(match)
   return match_code[0]
 
+@Context(SPEC=0)
 class TestUPatCompile(unittest.TestCase):
   def test_double(self):
     up = UPat.var("x") * UPat.cvar("c0") + UPat.var("x") * UPat.cvar("c1")

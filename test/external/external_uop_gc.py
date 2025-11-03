@@ -1,7 +1,8 @@
 import gc
-from tinygrad import Tensor, UOp, Device
-from tinygrad.shape.shapetracker import views_to_valid_uop
+from tinygrad import Tensor, UOp, Device, nn
 from tinygrad.engine.realize import method_cache, get_program
+from tinygrad.schedule.indexing import apply_movement_op
+from test.test_tiny import TestTiny
 
 def uops_allocated(): return sum([isinstance(x, UOp) for x in gc.get_objects()])
 def print_uops():
@@ -46,9 +47,16 @@ def realized_gradient():
   z = y.matmul(x).sum()
   z.backward()
   Tensor.realize(x, y, z, x.grad, y.grad)
+def nn_batchnorm(): nn.BatchNorm(64)
+def nn_conv2d(): nn.Conv2d(64, 64, 3)
+def plus(): TestTiny().test_plus()
+def mnist(): TestTiny().test_mnist()
+def mnist_backward(): TestTiny().test_mnist_backward()
+
 tests = [start, single_tensor, two_plus_two, two_plus_two_schedule, two_plus_two_kernel,
          two_plus_two_linearize, two_plus_two_realize, two_plus_two_item, gradient_test,
-         realized_eye, realized_list, kernel_matmul, realized_matmul, realized_gradient]
+         realized_eye, realized_list, kernel_matmul, realized_matmul, realized_gradient,
+         nn_batchnorm, nn_conv2d, plus, mnist, mnist_backward]
 
 if __name__ == "__main__":
   gc.disable()
@@ -60,11 +68,13 @@ if __name__ == "__main__":
 
     # these caches will keep uops alive
     method_cache.clear()
-    views_to_valid_uop.cache_clear()
+    apply_movement_op.cache_clear()
+    Tensor._device_seeds.clear()
+    Tensor._device_rng_counters.clear()
 
     new_uops = uops_allocated()
     gc.collect()
     new_uops_gc = uops_allocated()
     print(f"{t.__name__:30s}: {new_uops:3d} -> {new_uops_gc:3d}")
+    if new_uops != start_uops: print_uops()
     assert new_uops == start_uops
-  #print_uops()

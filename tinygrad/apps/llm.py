@@ -1,64 +1,63 @@
 from __future__ import annotations
-import sys, argparse, typing, re, itertools, unicodedata
+import sys, argparse, typing, re, unicodedata
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
 
-def gpt2_decode_vocab(voc: dict[str, int]): # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
-  c2b = { chr(cp): cp for cp in itertools.chain(range(ord("!"), ord("~")+1), range(ord("¡"), ord("¬")+1), range(ord("®"), ord("ÿ")+1)) }
-  c2b.update({ chr(256+off): cp for off, cp in enumerate(cp for cp in range(256) if chr(cp) not in c2b) })
-  return { bytes(c2b[c] for c in tok): tid for tok, tid in voc.items() }
-
-def get_llama_re():
-  def ucat_range(pre: str): return "".join(re.escape(chr(cp)) for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)).startswith(pre))
-  r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
-  # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
-  return "(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
-    f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+"
-
 class SimpleTokenizer:
-  def __init__(self, pat: str, normal_tokens: dict[bytes, int], special_tokens: dict[str, int]):
-    self._normal_tokens, self._special_tokens, self._pat = normal_tokens, special_tokens, re.compile(pat)
-    self._tok2str = { tid: tok.encode() for tok, tid in special_tokens.items() } | { tid: tok for tok, tid in normal_tokens.items()  }
-    self._special_re = re.compile("|".join(re.escape(tok) for tok in self._special_tokens.keys()) if special_tokens else r"(?!)")
+  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int]):
+    # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
+    bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
+    self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
+
+    # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
+    def ucat_range(pre: str): return "".join(re.escape(chr(cp)) for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)).startswith(pre))
+    r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
+    self._split_to_word = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
+      f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
+    self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
+
+    self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
+    self._special_tokens = special_tokens
+    self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
 
   @staticmethod
-  def from_gguf_kv(kv: dict):
+  def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     if kv["tokenizer.ggml.pre"] not in ("llama3","llama-v3","llama-bpe"): raise ValueError(f"Invalid tokenizer preset '{kv['tokenizer.ggml.pre']}'")
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(get_llama_re(), gpt2_decode_vocab(dict(normal_tokens)), dict(special_tokens))
+    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
 
-  def encode(self, text: str):
+  def _encode_word(self, word:bytes) -> list[int]:
+    if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
+    parts = [bytes([b]) for b in word]
+    # greedily merge any parts that we can
+    while True:
+      i = min([(sys.maxsize, -1)] + [(self._normal_tokens.get(parts[j]+parts[j+1], sys.maxsize), j) for j in range(len(parts)-1)])[1]
+      if i == -1: break
+      parts[i:i+2] = [parts[i] + parts[i+1]]
+    try: return [self._normal_tokens[p] for p in parts]
+    except KeyError: raise RuntimeError("token not found")
+  def _encode_sentence(self, chunk:str) -> list[int]:
+    return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
+  def encode(self, text:str) -> list[int]:
     tokens: list[int] = []
     pos = 0
-    for match in self._special_re.finditer(text):
+    for match in self._split_to_sentence.finditer(text):
       tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
       pos = match.end(0)
     return tokens + self._encode_sentence(text[pos:])
 
-  def decode(self, ids: list[int]) -> str: return b''.join(self._tok2str[tid] for tid in ids).decode()
+  def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode()
   def role(self, role:str): return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
-
-  def _encode_sentence(self, chunk: str): return [ tok for word in self._pat.findall(chunk) for tok in self._encode_word(word.encode()) ]
-  def _encode_word(self, word: bytes):
-    if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
-    parts = [word[i:i+1] for i in range(len(word))]
-    while True:
-      min_tid, min_idx = 2**32, -1
-      for idx, (p1, p2) in enumerate(zip(parts[:-1], parts[1:])):
-        tid = self._normal_tokens.get(p1 + p2, min_tid)
-        if tid < min_tid: min_tid, min_idx = tid, idx
-      if min_idx == -1: break
-      parts = parts[:min_idx] + [parts[min_idx] + parts[min_idx+1]] + parts[min_idx+2:]
-    try: return [ self._normal_tokens[p] for p in parts ]
-    except KeyError: raise RuntimeError("token not found")
 
 def apply_rope(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
   B, H, T, Hd = x.shape
-  assert (Hd & 1) == 0, "RoPE requires an even head dimension"
+  assert isinstance(Hd, int) and (Hd & 1) == 0, "RoPE requires an even head dimension"
   half = Hd // 2
-  angles = (Tensor.arange(T, dtype="float32") + start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
-  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype), angles.sin().reshape(1, 1, T, half).cast(x.dtype)
+  t_start_pos = start_pos if isinstance(start_pos, int) else Tensor(start_pos)
+  angles = (Tensor.arange(T, dtype="float32") + t_start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
+  # contiguous here allows RoPE to be pruned in the JIT
+  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype).contiguous(), angles.sin().reshape(1, 1, T, half).cast(x.dtype).contiguous()
   x_pairs = x.reshape(B, H, T, half, 2)
   return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
                       x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
@@ -118,7 +117,7 @@ class TransformerBlock:
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
-    return self._feed_forward(self._attention(x, start_pos))
+    return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, max_context):
@@ -134,7 +133,7 @@ class Transformer:
     x = self.token_embd(tokens)                           # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
     # TODO: add temperature
-    return self.output(self.output_norm(x))[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
+    return self.output(self.output_norm(x))[:, -1, :].softmax(-1, dtype="float").argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
@@ -145,7 +144,7 @@ class Transformer:
     kv, state_dict = nn.state.gguf_load(gguf.to(None))
 
     # all state items should be float16, not float32
-    state_dict = {k:v.cast('float16') for k,v in state_dict.items()}
+    state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
 
     # some models like Llama 3.2 don't have an output.weight, they just tie to the token_embd.weight
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
@@ -156,6 +155,8 @@ class Transformer:
                         n_heads=kv[f'{arch}.attention.head_count'], n_kv_heads=kv[f'{arch}.attention.head_count_kv'],
                         norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
+    # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
+    for s in nn.state.get_parameters(model): s.replace(s.contiguous())
     return model, kv
 
   def generate(self, tokens:list[int], start_pos=0):

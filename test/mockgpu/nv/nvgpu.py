@@ -1,4 +1,4 @@
-import ctypes, ctypes.util, time
+import ctypes, time
 import tinygrad.runtime.autogen.nv_gpu as nv_gpu
 from enum import Enum, auto
 from test.mockgpu.gpu import VirtGPU

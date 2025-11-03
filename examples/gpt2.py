@@ -26,8 +26,8 @@ class Attention:
       start_pos = start_pos.val
 
     if HALF: x = x.half()
-    xqkv = self.c_attn(x)
-    xq, xk, xv = [xqkv.shrink((None, None, (i*self.dim, (i+1)*self.dim))).reshape(None, None, self.n_heads, self.head_dim) for i in range(3)]
+    xqkv = self.c_attn(x).reshape(None, None, 3, self.n_heads, self.head_dim)
+    xq, xk, xv = [xqkv[:, :, i, :, :] for i in range(3)]
     bsz, seqlen, _, _ = xq.shape
 
     # create kv cache
@@ -35,11 +35,11 @@ class Attention:
       self.cache_kv = Tensor.zeros(2, bsz, MAX_CONTEXT, self.n_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
 
     # update the cache
-    self.cache_kv.shrink((None, None,(start_pos,start_pos+seqlen),None,None)).assign(Tensor.stack(xk, xv)).realize()
+    self.cache_kv[:, :, start_pos:start_pos+seqlen, :, :].assign(Tensor.stack(xk, xv)).realize()
 
     if start_pos > 0:
-      keys = self.cache_kv[0].shrink((None, (0, start_pos+seqlen), None, None))
-      values = self.cache_kv[1].shrink((None, (0, start_pos+seqlen), None, None))
+      keys = self.cache_kv[0][:, :start_pos+seqlen, :, :]
+      values = self.cache_kv[1][:, :start_pos+seqlen, :, :]
     else:
       keys = xk
       values = xv
@@ -64,7 +64,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Variable, mask:Optional[Tensor]):
     h = x + self.attn(self.ln_1(x), start_pos, mask).float()
-    return (h + self.mlp(self.ln_2(h)))
+    return (h + self.mlp(self.ln_2(h))).contiguous()
 
 class Transformer:
   def __init__(self, dim, n_heads, n_layers, norm_eps, vocab_size, max_seq_len=1024):
@@ -232,7 +232,7 @@ if __name__ == "__main__":
   gpt2 = GPT2.build_gguf(args.model_size) if args.model_size.startswith("gpt2_gguf_") else GPT2.build(args.model_size)
 
   if args.benchmark != -1:
-    gpt2.model(Tensor.rand(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
+    gpt2.model(Tensor.randint(args.batch_size, args.benchmark), Variable("a", 0, MAX_CONTEXT).bind(0)).realize()
   else:
     texts = gpt2.generate(args.prompt, args.count, args.temperature, timing=args.timing, batch_size=args.batch_size)
     if not args.noshow:

@@ -2,13 +2,13 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, TRANSCENDENTAL, CPU_LLVM, AMD_LLVM, X86, RANGEIFY
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM, X86
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 
 if getenv("TINY_BACKEND"):
-  import tinygrad.frontend.torch # noqa: F401 # pylint: disable=unused-import
+  import tinygrad.nn.torch # noqa: F401 # pylint: disable=unused-import
   torch.set_default_device("tiny")
 
 if CI:
@@ -698,8 +698,8 @@ class TestOps(unittest.TestCase):
 
   def test_pow_zero_tensor(self):
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
-    # TODO: fix WEBGPU
-    if Device.DEFAULT != "WEBGPU":
+    # TODO: fix WEBGPU and LVP
+    if Device.DEFAULT != "WEBGPU" and not CPU_LVP:
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
   def test_pow_zero_const(self):
@@ -830,6 +830,7 @@ class TestOps(unittest.TestCase):
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().idiv(4).item(), 0)  # NOTE this is trunc-div behaviour
 
+  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
@@ -839,6 +840,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
+  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
@@ -847,6 +849,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
+  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
@@ -901,7 +904,6 @@ class TestOps(unittest.TestCase):
   def test_abs_exact(self):
     helper_test_op(None, torch.abs, Tensor.abs, vals=[[-1.,0,1]])
 
-  @unittest.skipIf(TRANSCENDENTAL and Device.DEFAULT=="AMD", "TODO: remu crashes")
   def test_log(self):
     helper_test_op([(45,65)], torch.log, Tensor.log)
     helper_test_op(None, torch.log, Tensor.log, vals=[[math.inf, -math.inf, math.nan]])
@@ -911,7 +913,6 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, torch.log2, Tensor.log2, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log2, Tensor.log2)
 
-  @unittest.skipIf(TRANSCENDENTAL and Device.DEFAULT=="AMD", "TODO: remu crashes")
   def test_exp(self):
     helper_test_op([(45,65)], torch.exp, Tensor.exp)
     helper_test_op(None, torch.exp, Tensor.exp, vals=[[math.inf, -math.inf, math.nan]])
@@ -1313,7 +1314,7 @@ class TestOps(unittest.TestCase):
   @unittest.skipIf(CI and Device.DEFAULT in ["NV", "CL", "CUDA"] or (Device.DEFAULT == "CPU" and (CPU_LLVM or (X86 and getenv("DEVECTORIZE")==0)))
   or IMAGE or (Device.DEFAULT == "WEBGPU" and platform.system() == "Windows"), "not supported on these in CI/IMAGE")
   def test_gemm_fp16(self):
-    helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3)
+    helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3, grad_atol=5e-3, grad_rtol=5e-3)
   def test_gemm(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.matmul(y))
   @slow_test
@@ -1549,7 +1550,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: torch.stack(torch.std_mean(x, axis=(1,2))),
                                 lambda x: Tensor.stack(*x.std_mean(axis=(1,2))))
 
-  @unittest.skip("TODO: this fails because of loaded nan in mul folding")
   def test_std_mean_loaded_nan(self):
     helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
                                   lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
@@ -2603,17 +2603,13 @@ class TestOps(unittest.TestCase):
       lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
 
-  def test_avg_pool3d_failure(self):
-    with Context(NOOPT=0):
-      helper_test_op([(1,1,16,16,16)],
-        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
-        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
-
-  def test_avg_pool3d_noopt(self):
-    with Context(NOOPT=1):
-      helper_test_op([(1,1,16,16,16)],
-        lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
-        lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), rtol=1e-5, forward_only=True)
+  def test_avg_pool3d(self):
+    # TODO: AMD_LLVM has larger atol
+    # TODO: PYTHON=1 backward hangs?
+    atol = 1e-2 if AMD_LLVM else 1e-6
+    helper_test_op([(1,1,16,16,16)],
+      lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), atol=atol, rtol=1e-5, forward_only=True)
 
   def test_interpolate_linear(self):
     for in_sz, out_sz in [((52,),(29,)), ((29,),(52,))]:
@@ -3041,7 +3037,6 @@ class TestOps(unittest.TestCase):
                                                                                                         pos_weight=torch.tensor(pos_weight)),
                                        lambda x,y: x.binary_crossentropy_logits(y.clip(0,1),pos_weight=Tensor(pos_weight)))
 
-  @unittest.skipIf(RANGEIFY > 1, "broken on RANGEIFY > 1, TODO: fix")
   def test_cross_entropy_class_probabilities(self):
     helper_test_op([(32,), (32,)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
@@ -3165,6 +3160,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))
     helper_test_op([(32,10)], lambda x: x.masked_fill((x<0.1).detach(), -math.inf))
 
+  @unittest.skipIf((getenv("MOCKGPU") or Device.DEFAULT == "PYTHON"), "very slow on MOCKGPU because reduce does not fold")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu runtime issue")
   def test_masked_select(self):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
@@ -3180,6 +3177,7 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
+  @unittest.skip("we have test_linalg, no need to test here. TODO: should be in torch backend tests")
   def test_svd(self):
     # test for tiny backend. real svd tests are in test_linalg
     A = torch.randn(5, 5)

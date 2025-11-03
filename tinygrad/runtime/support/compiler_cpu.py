@@ -58,7 +58,7 @@ class LLVMCompiler(Compiler):
         self.diag_msgs.append(msg)
     self.handle_diag = handle_diag
     llvm.LLVMContextSetDiagnosticHandler(llvm.LLVMGetGlobalContext(), handle_diag, None)
-    super().__init__(f"compile_llvm_{self.target_arch}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
+    super().__init__(f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 

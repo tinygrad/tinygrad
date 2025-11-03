@@ -81,7 +81,7 @@ def lin_to_feats(lin:Kernel, use_sts=True):
   ret = [float(x) for x in ret]
 
   if use_sts:
-    my_sts = dedup([(x.shape == lin.full_shape, x.real_strides(), any(v.mask is not None for v in x.views), len(x.views)) for x in lin.sts])
+    my_sts = dedup([(x.shape == lin.full_shape, x.is_expanded(), any(v.mask is not None for v in x.views), len(x.views)) for x in lin.sts])
     assert len(my_sts) < MAX_BUFS
     sts_len = 3 + 5*MAX_DIMS
     for s in my_sts:

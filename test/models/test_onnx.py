@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad.frontend.onnx import OnnxRunner
+from tinygrad.nn.onnx import OnnxRunner
 from tinygrad.device import Device
 from tinygrad.helpers import fetch, Context
 

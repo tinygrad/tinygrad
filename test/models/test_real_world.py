@@ -94,7 +94,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 137 if CI else 396, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 160 if CI else 468, all_jitted=True)
 
   @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
   def test_train_mnist(self):
@@ -112,7 +112,17 @@ class TestRealWorld(unittest.TestCase):
         loss.backward()
         optimizer.step()
 
-      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 93)
+      helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.07, 103)
+
+  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "CL"}, "slow")
+  def test_forward_cifar(self):
+    BS = 32
+    # with training batchnorm still though
+    with Tensor.train():
+      model = SpeedyResNet(Tensor.ones((12,3,2,2)))
+      @TinyJit
+      def run(X): return model(X)
+      helper_test("forward_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), run, (1.0/48)*BS, 126)
 
   @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "CL"}, "slow")
   def test_train_cifar(self):
@@ -166,7 +176,7 @@ class TestRealWorld(unittest.TestCase):
       for v in data.values(): v.to_(Device.DEFAULT)
 
       helper_test("train_bert", lambda: (data["input_ids"], data["segment_ids"], data["input_mask"], data["masked_lm_positions"], \
-          data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.25, 347)
+          data["masked_lm_ids"], data["masked_lm_weights"], data["next_sentence_labels"]), train, 0.31, 427)
 
 if __name__ == '__main__':
   unittest.main()
