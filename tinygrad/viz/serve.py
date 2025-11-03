@@ -210,7 +210,9 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   for device in device_ts_diffs:
     d = device.split(":")[0]
     if d == "AMD": device_decoders[d] = load_sqtt
-  for fxn in device_decoders.values(): fxn(profile)
+  for fxn in device_decoders.values():
+    try: fxn(profile)
+    except: continue
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
