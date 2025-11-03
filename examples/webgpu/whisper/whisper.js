@@ -177,7 +177,8 @@ function format_seek(seek) {
 }
 
 function format_text(text, segment_cumlogprob, seek, seek_end) {
-    return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
+    // return (segment_cumlogprob).toFixed(2) + '\n' + `${format_seek(seek)} ---> ${format_seek(seek_end)} ` + text;
+    return `${format_seek(seek)} ---> ${format_seek(seek_end)} \n ${text}`;
 }
 
 function tokensToText(tokens, mapping) {
@@ -602,7 +603,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 }
                 previous_context = context.slice();
 
-                onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText: pendingTexts[i] });
+                onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, index: i, pendingText: pendingTexts[i] });
                 pendingTexts[i] = '';
 
                 ++i;

@@ -53,7 +53,7 @@
         .transcription-chunk:empty { display: none; }
         #current-transcription {
             color: #fff;
-            min-height: 1.5em;
+            /* min-height: 1.5em; */
             padding: 0.75rem 0;
         }
         #current-transcription::after {
@@ -169,12 +169,27 @@
         nets.model_metadata = model_metadata;
 
         let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
+        let pendingTexts = [];
         const updateLoop = (now) => {
-            if (pendingText !== null && pendingText !== lastDisplayed && now - lastUpdateTime >= 1000.0 / 30) {
-                currentTranscription.innerText = pendingText;
+            if (pendingText !== null /*&& pendingText !== lastDisplayed*/ && now - lastUpdateTime >= 1000.0 / 30) {
+                let updateScroll = Math.ceil(transcriptionContainer.scrollTop + transcriptionContainer.clientHeight) >= transcriptionContainer.scrollHeight;
+
+                let current = Array.from(document.querySelectorAll("div#current-transcription"));
+                for (let i = 0; i < pendingTexts.length; ++i) {
+                    current[i].innerText = pendingTexts[i];
+                    // currentTranscription.innerText = pendingText;
+                }
                 lastDisplayed = pendingText;
                 lastUpdateTime = now;
-                transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
+                // let ignored = current.at(-1).offsetHeight;
+                // console.log(ignored);
+                // if (updateScroll) {
+                //     transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
+                // }
+                if (updateScroll) {
+                    // transcriptionContainer.scrollTop = transcriptionContainer.scrollHeight;
+                    transcriptionContainer.scrollTo({ top: transcriptionContainer.scrollHeight, behavior: "instant" });
+                }
             }
             if (!inferenceDone) requestAnimationFrame(updateLoop);
         };
@@ -192,11 +207,30 @@
                 currentTranscription.style.display = 'block';
                 requestAnimationFrame(updateLoop);
             } else if (event === "chunkUpdate") {
+                pendingTexts = data.pendingTexts;
                 pendingText = data.pendingTexts[0];
+
+                let height = transcriptionContainer.scrollHeight;
+                let current = Array.from(document.querySelectorAll("div#current-transcription"));
+                for (let i = 0; i < current.length && i < pendingTexts.length; ++i) {
+                    current[i].style.display = 'block';
+                }
+                for (let i = 0; i < pendingTexts.length-current.length; ++i) {
+                    let extraTranscription = document.createElement('div');
+                    extraTranscription.id = "current-transcription";
+                    extraTranscription.style.display = 'block';
+                    transcriptionContainer.appendChild(extraTranscription);
+                }
+                if (transcriptionContainer.scrollHeight > height) {
+                    transcriptionContainer.scrollTo({ top: transcriptionContainer.scrollHeight, behavior: "instant" });
+                }
             } else if (event === "chunkDone") {
+                let current = Array.from(document.querySelectorAll("div#current-transcription"));
+                current[data.index].style.display = 'none';
                 const newChunk = document.createElement('div');
                 newChunk.className = 'transcription-chunk';
-                newChunk.innerText = data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText;
+                // newChunk.innerText = data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText;
+                newChunk.innerText = data.pendingText;
                 console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
                 transcriptionLog.appendChild(newChunk);
                 currentTranscription.innerText = '';
