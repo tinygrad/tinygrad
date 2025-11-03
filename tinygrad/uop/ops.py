@@ -751,6 +751,7 @@ class UOp(MathMixin, MovementMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
     if self.op is Ops.VCONST and Invalid not in self.arg: return (min(self.arg), max(self.arg))
     if self.op is Ops.GEP: return self.src[0]._min_max
+    if self.op is Ops.AFTER: return self.src[0]._min_max
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
     if self.op is Ops.CAST and self.dtype in dtypes.floats+dtypes.sints+(dtypes.index,):
       return max(dtypes.min(self.dtype), self.src[0].vmin), min(self.src[0].vmax, dtypes.max(self.dtype))
@@ -1253,6 +1254,8 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.index, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
   (UPat(Ops.WHERE, dtypes.index, src=(UPat.var("cond"), UPat.var("x").cast(dtypes.index), UPat.var("y").cast(dtypes.index))), lambda cond,x,y:
     cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt)).cast(dtypes.index)),
+  (UPat(Ops.RANGE, src=(UPat.var("end", dtypes.bool).cast(dtypes.index)), name="r"), lambda r,end:
+    r.replace(dtype=dtypes.int32, src=(end.cast(dtypes.int32),)).cast(dtypes.index)),
   (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.index)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.index)),
   (UPat(Ops.VECTORIZE, src=UPat().cast(dtypes.index), name="v"),
     lambda v: v.replace(dtype=(dt:=select_dtype(v)), src=tuple(s.src[0].cast(dt.scalar()) for s in v.src)).cast(dtypes.index)),
@@ -1271,6 +1274,8 @@ pm_lower_index_dtype = PatternMatcher([
     lambda s: s.replace(src=s.src[:2]+tuple(u.src[0] for u in s.src[2:]))),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.index else s for s in n.src))),
+  (UPat(Ops.AFTER, src=(UPat.var("x").cast(dtypes.index),), allow_any_len=True, name="after"),
+    lambda after,x: x.after(*[u.src[0] for u in after.src[1:] if u.op is Ops.CAST]).cast(dtypes.index))
 ])
 def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
@@ -1310,6 +1315,7 @@ renderer = PatternMatcher([
   (UPat((Ops.INDEX, Ops.BUFFERIZE), name="x"), lambda x, ctx: ''.join([f"[{strip_parens(ctx[y])}]" for y in x.src[1:]])),
   (UPat(Ops.VECTORIZE, name="x"),
    lambda ctx,x: f"{{{','.join([ctx[y] for y in x.src])}}}" if not all_same(x.src) else f"{{{ctx[x.src[0]]}, ...}}"),
+  (UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx[x.src[0]]),
   (UPat(GroupOp.All, name="x"), lambda x: str(x)),
 ])
 

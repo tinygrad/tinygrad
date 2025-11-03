@@ -7,7 +7,7 @@ from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
-from tinygrad.codegen.simplify import pm_flatten_range
+from tinygrad.codegen.simplify import pm_flatten_range, pm_cut_range
 from tinygrad.renderer import Renderer
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
@@ -334,6 +334,7 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   if ast.tag is not None: return ast
   k = Scheduler(ast, ren)
   k.convert_loop_to_global()
+  k.ast = graph_rewrite(k.ast, pm_cut_range, name="cut store ranges")
   if ast.arg is not None and ast.arg.opts_to_apply is not None:
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif BEAM >= 1:

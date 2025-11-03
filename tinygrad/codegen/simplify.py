@@ -1,5 +1,5 @@
 import itertools
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType, AxisType
 from tinygrad.uop.symbolic import symbolic_flat
 from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
@@ -148,15 +148,24 @@ pm_load_collapse = PatternMatcher([
   ((UPat.var("x", dtypes.index)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])
 
-def cut_store_range(ctx, store:UOp, r:UOp):
-  # only cut ranges on CPU for now
-  if r.src[0].op is not Ops.CONST or ctx!="CPU": return None
-  if not (cuts:=[c.src[1].arg for c in store.get_consumer_map()[r] if c.op is Ops.CMPLT and r is c.src[0] and c.src[1].op is Ops.CONST]): return None
+def cut_range(ctx, s:UOp, r:UOp):
+  if s.op_in_backward_slice_with_self(Ops.AFTER): return None
+  if not (cuts:=[c.src[1].arg for c in s.get_consumer_map()[r] if c.op is Ops.CMPLT and r is c.src[0] and c.src[1].op is Ops.CONST]): return None
   cuts = sorted(dedup([0] + cuts + [r.src[0].arg]))
   ranges = [UOp.range((end-start), *(r.arg[0:-1]+(i,r.arg[-1]))) for i,(start,end) in enumerate(zip(cuts[:-1], cuts[1:]))]
+  branches = [graph_rewrite(s.substitute({r: new_r+start}), symbolic_flat, name=f"cut_range_{i}") for i, (new_r, start) in
+    enumerate(zip(ranges, cuts[:-1]))]
+  match r.arg[-1]:
+   case AxisType.LOOP:
+    return UOp.group(*[b.end(new_r) for new_r,b in zip(branches, ranges)])
+   case AxisType.GLOBAL:
+     # we cant't split gpudims, but we can put an if statement around them
+     conds = [(start<=r)&(r<end) for start,end in zip(cuts[:-1], cuts[1:])]
+     ifs = [UOp.range(cond.cast(dtypes.index), *(r.arg[0:-1]+(i,)), AxisType.LOOP) for i, cond in enumerate(conds)]
+     return UOp.group(*[b.substitute({new_r: r.after(if_op)-start}).end(if_op) for b,new_r,if_op,start in
+       zip(branches, ranges, ifs, cuts[:-1])]).end(r)
+   case _: assert False, "can only cut LOOP ranges"
 
-  return UOp.group(*[store.substitute({r: new_r+start}).end(new_r) for new_r, start in zip(ranges, cuts[:-1])])
-
-pm_split_store = pm_flatten_range+PatternMatcher([
-  (UPat(Ops.END, src=(UPat(Ops.STORE, name="store"), UPat.var("r"))), cut_store_range),
+pm_cut_range = pm_flatten_range+PatternMatcher([
+  (UPat(Ops.END, src=(UPat.var("s"), UPat(Ops.RANGE, src=(UPat(Ops.CONST),), name="r"))), lambda ctx,s,r: cut_range(ctx,s,r) if not r.tag else None),
 ])
