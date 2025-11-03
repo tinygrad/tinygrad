@@ -13,7 +13,7 @@ if __name__ == "__main__":
   print(pretty_ptx(lib.decode()))
 
   prg = device.runtime(kernel_name, lib)
-  prg.smem = 16384 * 2
+  prg.smem = 16384 * 3
 
   B, N, H, D = 16, 1024, 16, 64
   q = Tensor.randn(B, N, H, D, device='CUDA', dtype="bfloat16")
@@ -22,7 +22,7 @@ if __name__ == "__main__":
   out = Tensor.empty(B, N, H, D, device='CUDA', dtype="bfloat16")
   Tensor.realize(q, k, v, out)
 
-  NUM_WORKERS = 2
+  NUM_WORKERS = 4
   ROWS = 16 * (128 // D)
 
   gsz = (N // (ROWS*NUM_WORKERS), H, B)

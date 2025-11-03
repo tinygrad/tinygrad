@@ -2,7 +2,7 @@
 
 using namespace kittens;
 
-constexpr int NUM_WORKERS = 2;
+constexpr int NUM_WORKERS = 4;
 constexpr int PIPE_STAGES = 3;
 
 constexpr int ATTN_B = 16;

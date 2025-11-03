@@ -91,47 +91,59 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
   # lift x*y out of reduce
   ((UPat.var("x")*UPat.var("y")) < UPat.var("c"), lambda x,y,c: (x < ((c+y-1) // y)) if no_range(y) and no_range(c) and y.vmin > 0 else None),
   # fold the range
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.cvar("val")).reduce(UPat.var("r"), arg=Ops.ADD),
-   lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  (((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.cvar("val"), 0).reduce(UPat.var("r"),
-    arg=Ops.ADD), lambda r,lower,upper,val: (upper.minimum(r.src[0])-lower.maximum(0)).maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
-  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.cvar("val"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
-   lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val),
+  # bound from below
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(0, UPat.var("val")).reduce(UPat.var("r"), arg=Ops.ADD),
+   lambda r,cut,val: (r.src[0]-cut).maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
+  # bound from two sides
+  (((UPat.var("r")<UPat.var("lower")).logical_not()&(UPat(Ops.RANGE, name="r")<UPat.var("upper"))).where(UPat.var("val"), 0).reduce(UPat.var("r"),
+    arg=Ops.ADD), lambda r,lower,upper,val:
+      (upper.minimum(r.src[0])-lower.maximum(0)).maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
+  # bound from above
+  ((UPat(Ops.RANGE, name="r") < UPat.var("cut")).where(UPat.var("val"), 0).reduce(UPat.var("r"), arg=Ops.ADD),
+   lambda r,cut,val: cut.maximum(0).minimum(r.src[0]).cast(val.dtype) * val if no_range(val) else None),
   # REDUCE on ADD
   ((UPat.var("x")+UPat.var("y")).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
    lambda x,y,r: x.reduce(*r.src[1:], arg=Ops.ADD) + y.reduce(*r.src[1:],arg=Ops.ADD)),
-])+symbolic_flat
-
-pm_reduce_load_collapse = PatternMatcher([
+  # AND on WHERE
+  ((UPat(Ops.DEFINE_VAR, name="x") & UPat.var("y")).where(UPat.var("c"), 0).reduce(arg=Ops.ADD, allow_any_len=True, name="r"),
+    lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
+])+symbolic_flat
+
+pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
   # lift x+y out of reduce on ne
   ((UPat.var("x")+UPat.var("y")).or_casted() != UPat.var("c"), lambda x,y,c: (x != (c.cast(y.dtype)-y)) if no_range(y) and no_range(c) else None),
   # reduce on gated load becomes can substitute the range and remove the reduce
   ((UPat.var("idx")!=(UPat(Ops.RANGE, name="r").or_casted())).where(0, UPat.var("expr")).reduce(UPat.var("r"), arg=Ops.ADD),
    lambda r,idx,expr: (v:=(idx.cast(r.dtype) >= 0) & (idx.cast(r.dtype) < r.src[0])).where(expr.substitute({r:idx.cast(r.dtype).valid(v)}),0)),
-])+symbolic_flat
+])
 
-def reduce_collapse(red:UOp, pm=pm_reduce_collapse):
-  included = red.src[0].toposort(gate=lambda x: any(y in x.ranges for y in red.src[1:]))
-  if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
-  replaces: dict[UOp, UOp] = {}
-  for u in included:
-    for s in u.src:
-      if s in included or s in replaces or s.op in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}: continue
-      replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
-  collapse_fxn = red.substitute(replaces)
-  sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
-  return sink.substitute({v:k for k,v in replaces.items()}) if no_range(sink) else None
+def reduce_collapse(red:UOp, u:UOp, pm=pm_reduce_collapse):
+  for r in red.src[1:]:
+    included = u.toposort(gate=lambda x: r in x.ranges)
+    if any(x.op in {Ops.STORE, Ops.REDUCE} for x in included): return None
+    replaces: dict[UOp, UOp] = {}
+    for u in included:
+      for s in u.src:
+        if s in included or s in replaces or s.op in {Ops.CONST, Ops.VCONST, Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_VAR}: continue
+        replaces[s] = UOp(Ops.DEFINE_VAR, dtype=s.dtype, arg=(f'in{len(replaces)}', s.vmin, s.vmax))
+    collapse_fxn = u.substitute(replaces).reduce(r, arg=Ops.ADD)
+    sink = graph_rewrite(collapse_fxn, pm, name="reduce_collapse")
+    if not no_range(sink): return None
+    u = sink.substitute({v:k for k,v in replaces.items()})
+  return u
 
-def reduce_load_collapse(red:UOp): return reduce_collapse(red, pm=pm_reduce_load_collapse)
+def reduce_load_collapse(red:UOp, u:UOp): return reduce_collapse(red, u, pm=pm_reduce_load_collapse)
 
-# remove REDUCE without loads (generic arange opt / indexing). TODO: support multi range
-pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([(UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_collapse),])
+# remove REDUCE without loads (generic arange opt / indexing).
+pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
+  (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=Ops.ADD, name="red"), reduce_collapse),
+])
 # remove REDUCE on load, comes from indexing a tensor with another tensor
 def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward_slice_with_self)
 pm_load_collapse = PatternMatcher([
-  (UPat(Ops.REDUCE, src=(UPat(), UPat()), name="red"), reduce_load_collapse),
+  (UPat(Ops.REDUCE, src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.index)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])
