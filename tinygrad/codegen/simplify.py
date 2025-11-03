@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
-from tinygrad.uop.symbolic import symbolic_flat
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
 
@@ -28,7 +28,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
         s0, s1 = r0.src[0], r1.src[0]
         # do the merge
         new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u, _substitute+symbolic_flat+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
+        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
                              name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
 
         # check if it simplifies
@@ -109,7 +109,7 @@ pm_reduce_collapse = pm_reduce_unparented + PatternMatcher([
     lambda x,y,c,r: y.where(c, 0).reduce(*r.src[1:], arg=Ops.ADD)*x.cast(c.dtype)),
   # MUL casted bool
   ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
-])+symbolic_flat
+])+symbolic
 
 pm_reduce_load_collapse = pm_reduce_collapse + PatternMatcher([
   # lift x+y out of reduce on ne
