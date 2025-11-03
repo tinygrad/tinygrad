@@ -23,6 +23,8 @@ jobs:
         pydeps: 'tensorflow influxdb3-python tqdm'
     - name: Cleanup running AM processes
       run: python extra/amdpci/am_smi.py --pids --kill
+    - name: extra/amdpci/setup_python_cap.sh
+      run: extra/amdpci/setup_python_cap.sh
     - name: Symlink datasets
       run: |
         mkdir -p extra/datasets
