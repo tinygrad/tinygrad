@@ -508,13 +508,6 @@ async function renderProfiler() {
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
 }
 
-// ** Counters view
-
-function renderCounters(ret) {
-  displaySelection("#custom");
-  metadata.innerText = ret.data.src;
-}
-
 // ** zoom and recentering
 
 const vizZoomFilter = e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button && e.type !== 'dblclick';
@@ -692,7 +685,6 @@ async function main() {
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    if (ckey.includes("counters")) return renderCounters(ret);
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();

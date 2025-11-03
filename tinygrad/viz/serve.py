@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import subprocess, ctypes, pathlib
+from dataclasses import asdict
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -196,6 +197,9 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from extra.sqtt.roc import decode
   rctx = decode(profile)
+  steps = [{"name":x[0], "depth":0, "data":{"src":json.dumps({k:asdict(v) for k,v in x[1].items()}, indent=2), "lang":"txt", "device":"AMD"},
+            "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
+  ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
