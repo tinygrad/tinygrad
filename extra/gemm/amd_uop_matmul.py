@@ -93,7 +93,7 @@ def hand_spec_kernel3():
 
   # pre-index the global tensors based on the global ranges
   c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[blockIdx_y, :, blockIdx_x, :]
-  k_tile_range = UOp.range(N // BLOCK_K, 0)
+  k_tile_range = UOp.range(N // BLOCK_K, 0, AxisType.REDUCE)
   a = a.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_K, BLOCK_K)[blockIdx_y, :, k_tile_range, :]
   b = b.reshape(N // BLOCK_K, BLOCK_K, N // BLOCK_N, BLOCK_N)[k_tile_range, :, blockIdx_x, :]
 
@@ -109,7 +109,7 @@ def hand_spec_kernel3():
   As = As.after(barrier)
 
   # open inner k range
-  k = UOp.range(BLOCK_K, 3)
+  k = UOp.range(BLOCK_K, 3, AxisType.REDUCE)
 
   # ---------------------------
   # LOCAL -> REG (per-wave tiles)
