@@ -23,7 +23,7 @@ class MathMixin:
   def _check_dtype(self):
     if (dtype:=getattr(self, 'dtype')) is not None:
       if isinstance(dtype, tuple): dtype = dtype[0]
-      if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype)): raise RuntimeError(f"{dtype} is not supported")
+      if not (dtypes.is_bool(dtype) or dtypes.is_int(dtype) or dtypes.is_mask(dtype)): raise RuntimeError(f"{dtype} is not supported")
   def add(self, x:Self|ConstType, reverse:bool=False):
     """
     Adds `self` and `x`.

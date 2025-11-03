@@ -232,7 +232,7 @@ base_extra_matcher = PatternMatcher([
    lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
   # *** INDEX/LOAD/STORE ***
   # cast index to 64bit
-  (UPat.var("buf").index(UPat.var("idx", dtypes.int32)), lambda buf,idx: buf.index(idx.cast(dtypes.int64))),
+  (UPat.var("buf").index(UPat.var("idx", dtypes.int32)), lambda buf,idx: buf.index(idx.cast(dtypes.int64), ptr=True)),
   # loading from register is a noop
   #(UPat(Ops.DEFINE_REG).load(allow_any_len=True, name="x"), lambda x: x.replace(op=Ops.NOOP)),
   # rewrite index with gate to cmove
@@ -656,10 +656,10 @@ x86_lowerer = PatternMatcher([
   (UPat.var("y", dtypes.float64).gep(name="x"), lambda ctx,y,x: MUOpX86.V_V_VM_I("vshufpd", 0xC6, ctx[x], ctx[y], ctx[y], x.arg[0], 1, 1)),
   # range / endrange
   (UPat(Ops.RANGE, dtypes.int32, name="x"), lambda ctx,x: [MUOpX86.RM_I("mov", 0xC7, 0, ctx[x], 0), MUOpX86("", -1, Label(f".LOOP_{x.arg[0]}:"))]), # noqa: E501
-  (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), name="a"),)), lambda ctx,c,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], 1), # noqa: E501
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.int32, (UPat.cvar("c"),), allow_any_len=True, name="a"))), lambda ctx,c,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], 1), # noqa: E501
                                                                                                                     MUOpX86._RM_I("cmp", 0x81, 7, ctx[a], c.arg), # noqa: E501
                                                                                                                     MUOpX86._I("jl", 0x0F8C, Label(f".LOOP_{a.arg[0]}:"))]), # noqa: E501
-  (UPat(Ops.ENDRANGE, dtypes.void, (UPat(Ops.RANGE, dtypes.int32, (UPat.var("b"),), name="a"),)), lambda ctx,b,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], 1), # noqa: E501
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, dtypes.int32, (UPat.var("b"),), allow_any_len=True, name="a"))), lambda ctx,b,a: [MUOpX86.RM_I("add", 0x81, 0, ctx[a], 1), # noqa: E501
                                                                                                                    MUOpX86._R_RM("cmp", 0x3B, ctx[a], ctx[b]), # noqa: E501
                                                                                                                    MUOpX86._I("jl", 0x0F8C, Label(f".LOOP_{a.arg[0]}:"))]), # noqa: E501
   # if / endif

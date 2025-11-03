@@ -85,7 +85,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # optional pre matcher
-  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
+  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, ctx=ren, name="pre_matcher")
 
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
@@ -123,7 +123,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
-def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
+def full_rewrite(sink:UOp, ren:Renderer=Renderer()) -> list[UOp]:
   """
   Function to transform the Kernel UOp graph into a linearized program.
 
@@ -138,5 +138,5 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   assert len(full_sink.ranges) == 0, "all ranges must end by the sink"
   lst = line_rewrite(linearize(full_sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
+  if SPEC: type_verify(lst, (ren.extra_spec if ren.extra_spec is not None else PatternMatcher([]))+program_spec)
   return lst
