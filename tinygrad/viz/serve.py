@@ -346,7 +346,6 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  parser.add_argument('--custom', type=str, help='Path to custom trace file', default=None)
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
