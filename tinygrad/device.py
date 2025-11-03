@@ -71,6 +71,9 @@ class ProfileGraphEvent(ProfileEvent): ents:list[ProfileGraphEntry]; deps:list[l
 class ProfileSQTTEvent(ProfileEvent): device:str; se:int; props:dict; blob:bytes; itrace:bool # noqa: E702
 
 @dataclass(frozen=True)
+class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; regsample:str # noqa: E702
+
+@dataclass(frozen=True)
 class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes # noqa: E702
 
 

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
-from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT, ProfileSQTTEvent, ProfilePMCEvent
-from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored, prod
+from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT, ProfileSQTTEvent, ProfilePMCEvent, PMCSample
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, suppress_finalizing, lo32, hi32, colored, prod
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
@@ -26,9 +26,6 @@ WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) \
         | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
-
-@dataclass(frozen=True)
-class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; regsample:str # noqa: E702
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
