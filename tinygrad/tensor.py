@@ -2363,8 +2363,10 @@ class Tensor(MathMixin, MovementMixin):
     # TODO: once the shapetracker can optimize well, remove this alternative implementation
     # unified implementation handling all cases (stride, dilation, k>stride)
     # input size scaling factor to make sure shrink for stride is possible
-    # choose minimal f such that (i*f + d) >= (o*s). allow f to be 0 when o*s <= d
-    f_ = [ceildiv(o*s - d, i) if resolve(o*s > d) else 0 for o,s,i,d in zip(o_, s_, i_, d_)]
+    # choose minimal f such that for the worst kernel row (offset (k-1)*d) we still have enough elements:
+    # i*f + d >= o*s + (k-1)*d  =>  i*f >= o*s + (k-1)*d - d
+    # use a slightly stronger bound that is simple and safe: i*f >= o*s + (k-1)*d
+    f_ = [ceildiv(o*s + (k-1)*d, i) for o,s,i,d,k in zip(o_, s_, i_, d_, k_)]
     # repeats such that we have enough elements to build k rows of length (i*f + d)
     x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d), i) for k,i,d,f in zip(k_, i_, d_, f_)])
     # handle dilation by creating k chunks each starting d elements later than the previous
@@ -4525,3 +4527,4 @@ if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
     if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+
