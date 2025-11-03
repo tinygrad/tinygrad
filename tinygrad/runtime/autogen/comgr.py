@@ -1,15 +1,17 @@
 # mypy: ignore-errors
 import ctypes, os
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so')
+  try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so'))
   except: pass
-  try: return ctypes.CDLL('/usr/local/lib/libamd_comgr.dylib')
+  try: return ctypes.CDLL(unwrap('/usr/local/lib/libamd_comgr.dylib'))
   except: pass
-  try: return ctypes.CDLL('/opt/homebrew/lib/libamd_comgr.dylib')
+  try: return ctypes.CDLL(unwrap('/opt/homebrew/lib/libamd_comgr.dylib'))
   except: pass
   return None
 dll = dll()
+
 amd_comgr_status_s = CEnum(ctypes.c_uint)
 AMD_COMGR_STATUS_SUCCESS = amd_comgr_status_s.define('AMD_COMGR_STATUS_SUCCESS', 0)
 AMD_COMGR_STATUS_ERROR = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR', 1)
@@ -21,10 +23,9 @@ amd_comgr_language_s = CEnum(ctypes.c_uint)
 AMD_COMGR_LANGUAGE_NONE = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_NONE', 0)
 AMD_COMGR_LANGUAGE_OPENCL_1_2 = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_OPENCL_1_2', 1)
 AMD_COMGR_LANGUAGE_OPENCL_2_0 = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_OPENCL_2_0', 2)
-AMD_COMGR_LANGUAGE_HC = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_HC', 3)
-AMD_COMGR_LANGUAGE_HIP = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_HIP', 4)
-AMD_COMGR_LANGUAGE_LLVM_IR = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LLVM_IR', 5)
-AMD_COMGR_LANGUAGE_LAST = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LAST', 5)
+AMD_COMGR_LANGUAGE_HIP = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_HIP', 3)
+AMD_COMGR_LANGUAGE_LLVM_IR = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LLVM_IR', 4)
+AMD_COMGR_LANGUAGE_LAST = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LAST', 4)
 
 amd_comgr_language_t = amd_comgr_language_s
 # amd_comgr_status_t amd_comgr_status_string(amd_comgr_status_t status, const char **status_string)
@@ -52,41 +53,42 @@ AMD_COMGR_DATA_KIND_AR = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_AR', 
 AMD_COMGR_DATA_KIND_BC_BUNDLE = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_BC_BUNDLE', 18)
 AMD_COMGR_DATA_KIND_AR_BUNDLE = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_AR_BUNDLE', 19)
 AMD_COMGR_DATA_KIND_OBJ_BUNDLE = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_OBJ_BUNDLE', 20)
-AMD_COMGR_DATA_KIND_LAST = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_LAST', 20)
+AMD_COMGR_DATA_KIND_SPIRV = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_SPIRV', 21)
+AMD_COMGR_DATA_KIND_LAST = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_LAST', 21)
 
 amd_comgr_data_kind_t = amd_comgr_data_kind_s
-class amd_comgr_data_s(ctypes.Structure): pass
+class amd_comgr_data_s(Struct): pass
 uint64_t = ctypes.c_ulong
 amd_comgr_data_s._fields_ = [
   ('handle', uint64_t),
 ]
 amd_comgr_data_t = amd_comgr_data_s
-class amd_comgr_data_set_s(ctypes.Structure): pass
+class amd_comgr_data_set_s(Struct): pass
 amd_comgr_data_set_s._fields_ = [
   ('handle', uint64_t),
 ]
 amd_comgr_data_set_t = amd_comgr_data_set_s
-class amd_comgr_action_info_s(ctypes.Structure): pass
+class amd_comgr_action_info_s(Struct): pass
 amd_comgr_action_info_s._fields_ = [
   ('handle', uint64_t),
 ]
 amd_comgr_action_info_t = amd_comgr_action_info_s
-class amd_comgr_metadata_node_s(ctypes.Structure): pass
+class amd_comgr_metadata_node_s(Struct): pass
 amd_comgr_metadata_node_s._fields_ = [
   ('handle', uint64_t),
 ]
 amd_comgr_metadata_node_t = amd_comgr_metadata_node_s
-class amd_comgr_symbol_s(ctypes.Structure): pass
+class amd_comgr_symbol_s(Struct): pass
 amd_comgr_symbol_s._fields_ = [
   ('handle', uint64_t),
 ]
 amd_comgr_symbol_t = amd_comgr_symbol_s
-class amd_comgr_disassembly_info_s(ctypes.Structure): pass
+class amd_comgr_disassembly_info_s(Struct): pass
 amd_comgr_disassembly_info_s._fields_ = [
   ('handle', uint64_t),
 ]
 amd_comgr_disassembly_info_t = amd_comgr_disassembly_info_s
-class amd_comgr_symbolizer_info_s(ctypes.Structure): pass
+class amd_comgr_symbolizer_info_s(Struct): pass
 amd_comgr_symbolizer_info_s._fields_ = [
   ('handle', uint64_t),
 ]
@@ -207,14 +209,6 @@ except AttributeError: pass
 try: (amd_comgr_action_info_get_language:=dll.amd_comgr_action_info_get_language).restype, amd_comgr_action_info_get_language.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(amd_comgr_language_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("Will be removed in Comgr v3.0 (Rocm v6.0). Use amd_comgr_action_info_set_option_list() instead"))) amd_comgr_status_t amd_comgr_action_info_set_options(amd_comgr_action_info_t action_info, const char *options)
-try: (amd_comgr_action_info_set_options:=dll.amd_comgr_action_info_set_options).restype, amd_comgr_action_info_set_options.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-# __attribute__((deprecated("Will be removed in Comgr v3.0 (Rocm v6.0). Use amd_comgr_action_info_get_option_list_count() and amd_comgr_action_info_get_option_list_item() instead"))) amd_comgr_status_t amd_comgr_action_info_get_options(amd_comgr_action_info_t action_info, size_t *size, char *options)
-try: (amd_comgr_action_info_get_options:=dll.amd_comgr_action_info_get_options).restype, amd_comgr_action_info_get_options.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
 # amd_comgr_status_t amd_comgr_action_info_set_option_list(amd_comgr_action_info_t action_info, const char *options[], size_t count)
 try: (amd_comgr_action_info_set_option_list:=dll.amd_comgr_action_info_set_option_list).restype, amd_comgr_action_info_set_option_list.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, (ctypes.POINTER(ctypes.c_char) * 0), size_t]
 except AttributeError: pass
@@ -239,6 +233,10 @@ except AttributeError: pass
 try: (amd_comgr_action_info_get_bundle_entry_id:=dll.amd_comgr_action_info_get_bundle_entry_id).restype, amd_comgr_action_info_get_bundle_entry_id.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, size_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
+# amd_comgr_status_t amd_comgr_action_info_set_device_lib_linking(amd_comgr_action_info_t action_info, bool should_link_device_libs)
+try: (amd_comgr_action_info_set_device_lib_linking:=dll.amd_comgr_action_info_set_device_lib_linking).restype, amd_comgr_action_info_set_device_lib_linking.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.c_bool]
+except AttributeError: pass
+
 # amd_comgr_status_t amd_comgr_action_info_set_working_directory_path(amd_comgr_action_info_t action_info, const char *path)
 try: (amd_comgr_action_info_set_working_directory_path:=dll.amd_comgr_action_info_set_working_directory_path).restype, amd_comgr_action_info_set_working_directory_path.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
@@ -259,23 +257,21 @@ amd_comgr_action_kind_s = CEnum(ctypes.c_uint)
 AMD_COMGR_ACTION_SOURCE_TO_PREPROCESSOR = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_SOURCE_TO_PREPROCESSOR', 0)
 AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS', 1)
 AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC', 2)
-AMD_COMGR_ACTION_ADD_DEVICE_LIBRARIES = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_ADD_DEVICE_LIBRARIES', 3)
-AMD_COMGR_ACTION_LINK_BC_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LINK_BC_TO_BC', 4)
-AMD_COMGR_ACTION_OPTIMIZE_BC_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_OPTIMIZE_BC_TO_BC', 5)
-AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE', 6)
-AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY', 7)
-AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_RELOCATABLE', 8)
-AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE', 9)
-AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE', 10)
-AMD_COMGR_ACTION_DISASSEMBLE_RELOCATABLE_TO_SOURCE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_DISASSEMBLE_RELOCATABLE_TO_SOURCE', 11)
-AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE', 12)
-AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE', 13)
-AMD_COMGR_ACTION_COMPILE_SOURCE_TO_FATBIN = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_FATBIN', 14)
-AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC', 15)
-AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE', 16)
-AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE', 17)
-AMD_COMGR_ACTION_UNBUNDLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_UNBUNDLE', 18)
-AMD_COMGR_ACTION_LAST = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LAST', 18)
+AMD_COMGR_ACTION_LINK_BC_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LINK_BC_TO_BC', 3)
+AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE', 4)
+AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_CODEGEN_BC_TO_ASSEMBLY', 5)
+AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_RELOCATABLE', 6)
+AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE', 7)
+AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE', 8)
+AMD_COMGR_ACTION_DISASSEMBLE_RELOCATABLE_TO_SOURCE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_DISASSEMBLE_RELOCATABLE_TO_SOURCE', 9)
+AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_DISASSEMBLE_EXECUTABLE_TO_SOURCE', 10)
+AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_DISASSEMBLE_BYTES_TO_SOURCE', 11)
+AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC', 12)
+AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_RELOCATABLE', 13)
+AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE', 14)
+AMD_COMGR_ACTION_UNBUNDLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_UNBUNDLE', 15)
+AMD_COMGR_ACTION_TRANSLATE_SPIRV_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_TRANSLATE_SPIRV_TO_BC', 19)
+AMD_COMGR_ACTION_LAST = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LAST', 19)
 
 amd_comgr_action_kind_t = amd_comgr_action_kind_s
 # amd_comgr_status_t amd_comgr_do_action(amd_comgr_action_kind_t kind, amd_comgr_action_info_t info, amd_comgr_data_set_t input, amd_comgr_data_set_t result)
@@ -383,7 +379,7 @@ except AttributeError: pass
 try: (amd_comgr_map_name_expression_to_symbol_name:=dll.amd_comgr_map_name_expression_to_symbol_name).restype, amd_comgr_map_name_expression_to_symbol_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-class code_object_info_s(ctypes.Structure): pass
+class code_object_info_s(Struct): pass
 code_object_info_s._fields_ = [
   ('isa', ctypes.POINTER(ctypes.c_char)),
   ('size', size_t),
@@ -399,5 +395,5 @@ try: (amd_comgr_map_elf_virtual_address_to_code_object_offset:=dll.amd_comgr_map
 except AttributeError: pass
 
 AMD_COMGR_DEPRECATED = lambda msg: __attribute__((deprecated(msg)))
-AMD_COMGR_INTERFACE_VERSION_MAJOR = 2
-AMD_COMGR_INTERFACE_VERSION_MINOR = 8
+AMD_COMGR_INTERFACE_VERSION_MAJOR = 3
+AMD_COMGR_INTERFACE_VERSION_MINOR = 0
