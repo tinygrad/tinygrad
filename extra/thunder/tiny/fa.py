@@ -5,6 +5,8 @@ from tinygrad.engine.realize import ExecItem, get_runner
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import getenv, prod
 
+WARP_THREADS = 32
+
 global_slot = 0
 def gl(shape, dtype):
   global global_slot
@@ -17,11 +19,19 @@ def st(shape, dtype):
   shared_slot += 1
   return UOp.placeholder(shape, dtype, addrspace=AddrSpace.LOCAL, slot=shared_slot-1)
 
+TILE_ROW_DIM, TILE_COL_DIM = 16, 16
+RT_BASE_TILE_NE = TILE_ROW_DIM * TILE_COL_DIM
+RT_BASE_TILE_NEPT = RT_BASE_TILE_NE // WARP_THREADS
 register_slot = 0
 def rt(shape, dtype):
+  assert len(shape) == 2
+
+  height = shape[0] // TILE_ROW_DIM
+  width = shape[1] // TILE_COL_DIM
+
   global register_slot
   register_slot += 1
-  return UOp.placeholder(shape, dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
+  return UOp.placeholder((height, width, RT_BASE_TILE_NEPT), dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
 
 clear_rid = 16
 def clear(reg:UOp, value:float=0):
@@ -100,7 +110,12 @@ def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,.
 
   return dst.after(dst_store).reshape(dst.shape) if after else dst_store
 
-WARP_THREADS = 32
+# does one 16x16 mma
+def mma_ABt_base(d:UOp, a:UOp, b:UOp, c:UOp):
+  pass
+
+def mma_AB(d:UOp, a:UOp, b:UOp, c:UOp):
+  pass
 
 NUM_WORKERS = 1
 PIPE_STAGES = 3
@@ -139,9 +154,9 @@ def ker():
   o_reg = rt((ROWS, D), dtypes.float32)
   att_block = rt((ROWS, ROWS), dtypes.float32)
   att_block_mma = rt((ROWS, ROWS), dtypes.bfloat16)
-  max_vec_last = rt((ROWS,), dtypes.float32)
-  max_vec = rt((ROWS,), dtypes.float32)
-  norm_vec = rt((ROWS,), dtypes.float32)
+  max_vec_last = rt((ROWS, 1), dtypes.float32)
+  max_vec = rt((ROWS, 1), dtypes.float32)
+  norm_vec = rt((ROWS, 1), dtypes.float32)
 
   max_vec = neg_inf(max_vec)
   norm_vec = zero(norm_vec)
@@ -151,7 +166,11 @@ def ker():
   qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
   q_reg = load(q_reg, qo_smem)
 
-  q_reg = q_reg.mul(UOp.const(dtypes.bfloat16, ((1.0 / math.sqrt(D)) * (1.0 / math.log(2)))))
+  # TODO: doing too much
+  rows_rng = UOp.range(ROWS, 1)
+  d_rng = UOp.range(D, 2)
+  q_reg_store = q_reg[rows_rng, d_rng].store(q_reg[rows_rng, d_rng] * UOp.const(dtypes.bfloat16, ((1.0 / math.sqrt(D)) * (1.0 / math.log(2))))).end(rows_rng, d_rng)
+  q_reg = q_reg.after(q_reg_store).reshape(q_reg.shape)
 
   outer_kv_rng = UOp.range(N // ROWS, 0)
 
@@ -193,7 +212,6 @@ if __name__ == "__main__":
   times = []
   for _ in range(5):
     et = ei.run(wait=True)
-    print(ei.prg)
     times.append(et)
   attn_flops = 2 * B * H * N * N * D + \
                4 * B * H * N * N + \
