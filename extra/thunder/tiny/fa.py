@@ -28,7 +28,7 @@ def clear(reg:UOp, value:float=0):
   global clear_rid
   i = UOp.range(reg.size, clear_rid)
   clear_rid += 1
-  return reg[i].set(value, end=i)
+  return reg.reshape((reg.size,))[i].set(value, end=i).after(reg).reshape(reg.shape)
 
 def zero(reg:UOp): return clear(reg, 0)
 def neg_inf(reg:UOp): return clear(reg, -math.inf)
@@ -62,7 +62,7 @@ def load(dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,..
   if len(dst.shape) != len(src.shape):
     src_last_i += idxs[-2] * src.shape[-1] + idxs[-1]
 
-  dst_store = dstf[*dst_idxs, dst_i].store(src[*idxs[:-2], src_last_i]).end(load_i_outer, load_i_inner)
+  dst_store = dstf[*dst_idxs, dst_i].store(srcp[*idxs[:-2], src_last_i]).end(load_i_outer, load_i_inner)
 
   barrier = UOp.barrier(dst_store)
 
@@ -147,11 +147,25 @@ def ker():
   norm_vec = zero(norm_vec)
   o_reg = zero(o_reg)
 
-  outer_kv_rng = UOp.range(N // ROWS, 0)
-
   # load q tile
   qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
   q_reg = load(q_reg, qo_smem)
+
+  q_reg = q_reg.mul(UOp.const(dtypes.bfloat16, ((1.0 / math.sqrt(D)) * (1.0 / math.log(2)))))
+
+  outer_kv_rng = UOp.range(N // ROWS, 0)
+
+  k_smem = load(k_smem, k, (), (batch, outer_kv_rng, head, 0), axis=1)
+  v_smem = load(v_smem, v, (), (batch, outer_kv_rng, head, 0), axis=1)
+
+  k_reg = load(k_reg, k_smem)
+  att_block = zero(att_block)
+  # TODO: mma_ABt
+
+  max_vec_last = max_vec # TODO: need copy?
+  # max_vec = max(att_block, max_vec)
+  # att_block = att_block.sub(max_vec).exp2()
+  # max_vec_last = max_vec_last.sub(max_vec).exp2()
 
   qo_smem = store(qo_smem, q_reg)
   o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
