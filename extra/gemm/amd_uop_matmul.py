@@ -43,8 +43,6 @@ LANES_PER_WAVE_X = 8
 LANES_PER_WAVE_Y = 4
 ITERS_PER_WAVE_N = WAVE_TILE_N // (LANES_PER_WAVE_X * TN)
 ITERS_PER_WAVE_M = WAVE_TILE_M // (LANES_PER_WAVE_Y * TM)
-N_PER_ITER = WAVE_TILE_N // ITERS_PER_WAVE_N
-M_PER_ITER = WAVE_TILE_M // ITERS_PER_WAVE_M
 assert WAVE_TILE_N % (LANES_PER_WAVE_X * TN) == 0, "WAVE_TILE_N must be divisible by LANES_PER_WAVE_X*TN"
 assert WAVE_TILE_M % (LANES_PER_WAVE_Y * TM) == 0, "WAVE_TILE_M must be divisible by LANES_PER_WAVE_Y*TM"
 
@@ -105,17 +103,15 @@ def hand_spec_kernel3():
   waveIdy = (tid // WARP_SIZE) // WAVES_IN_BLOCK_X
   assert waveIdy.vmax+1 == WAVES_IN_BLOCK_Y
 
-  idxInWave = (tid % WARP_SIZE) % LANES_PER_WAVE_X
-  idyInWave = (tid % WARP_SIZE) // LANES_PER_WAVE_X
-  assert idyInWave.vmax+1 == LANES_PER_WAVE_Y
+  laneIdx = (tid % WARP_SIZE) % LANES_PER_WAVE_X
+  laneIdy = (tid % WARP_SIZE) // LANES_PER_WAVE_X
+  assert laneIdy.vmax+1 == LANES_PER_WAVE_Y
 
-  As_view = As.reshape(BLOCK_K, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM)[k, waveIdy, :, idyInWave, :]
   A_col = UOp.placeholder((ITERS_PER_WAVE_M, TM), dtypes.float, slot=0, addrspace=AddrSpace.REG)
-  A_col = copy(A_col, As_view, 300, set=True, upcast=True)
+  A_col = copy(A_col, As[k, :].reshape(WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM)[waveIdy, :, laneIdy, :], 300, set=True, upcast=True)
 
-  Bs_view = Bs.reshape(BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)[k, waveIdx, :, idxInWave, :]
   B_row = UOp.placeholder((ITERS_PER_WAVE_N, TN), dtypes.float, slot=1, addrspace=AddrSpace.REG)
-  B_row = copy(B_row, Bs_view, 400, set=True, upcast=True)
+  B_row = copy(B_row, Bs[k, :].reshape(WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)[waveIdx, :, laneIdx, :], 400, set=True, upcast=True)
 
   # ---------------------------
   # FMA: c_regs += A_col * B_row
@@ -135,8 +131,10 @@ def hand_spec_kernel3():
   # ---------------------------
   # REG -> GLOBAL (epilogue)
   # ---------------------------
-  c = c.reshape(WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)
-  c = c[waveIdy, :, idyInWave, :, waveIdx, :, idxInWave, :]  # select locals
+  c = c.reshape(WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM,
+                WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)
+  c = c[waveIdy, :, laneIdy, :,
+        waveIdx, :, laneIdx, :]
   sink = copy(c, c_regs.after(sink), rng=600)
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
