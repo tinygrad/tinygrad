@@ -171,7 +171,7 @@ class TextDecoder:
       # print(logits.shape)
       # return logits.log_softmax(axis=-1), ((((logits / logits.max(axis=-1, keepdim=True) * 255).int() * (2**16))+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
       # logprobs = logits.log_softmax(axis=-1)
-      sorted_indices = ((((logits / logits.max(axis=-1, keepdim=True) * 255).int() * (2**16))+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
+      sorted_indices = ((((logits / logits.abs().max(axis=-1, keepdim=True) * 255 + 256).cast(dtypes.uint).lshift(16).int())+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
       # sorted_indices_topk = sorted_indices[..., 0:10]
       sorted_indices_topk = sorted_indices.shrink((None, None, (0, 10)))
       # logprobs_topk = logprobs[sorted_indices_topk]
