@@ -1,12 +1,14 @@
 # mypy: ignore-errors
 import ctypes
 from ctypes.util import find_library
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(find_library('nvrtc'))
+  try: return ctypes.CDLL(unwrap(find_library('nvrtc')))
   except: pass
   return None
 dll = dll()
+
 nvrtcResult = CEnum(ctypes.c_uint)
 NVRTC_SUCCESS = nvrtcResult.define('NVRTC_SUCCESS', 0)
 NVRTC_ERROR_OUT_OF_MEMORY = nvrtcResult.define('NVRTC_ERROR_OUT_OF_MEMORY', 1)
@@ -38,7 +40,6 @@ try: (nvrtcGetSupportedArchs:=dll.nvrtcGetSupportedArchs).restype, nvrtcGetSuppo
 except AttributeError: pass
 
 class struct__nvrtcProgram(ctypes.Structure): pass
-struct__nvrtcProgram._fields_ = []
 nvrtcProgram = ctypes.POINTER(struct__nvrtcProgram)
 # nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog, const char *src, const char *name, int numHeaders, const char *const *headers, const char *const *includeNames)
 try: (nvrtcCreateProgram:=dll.nvrtcCreateProgram).restype, nvrtcCreateProgram.argtypes = nvrtcResult, [ctypes.POINTER(nvrtcProgram), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]

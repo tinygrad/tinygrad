@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 enum_kgsl_user_mem_type = CEnum(ctypes.c_uint)
 KGSL_USER_MEM_TYPE_PMEM = enum_kgsl_user_mem_type.define('KGSL_USER_MEM_TYPE_PMEM', 0)
 KGSL_USER_MEM_TYPE_ASHMEM = enum_kgsl_user_mem_type.define('KGSL_USER_MEM_TYPE_ASHMEM', 1)
@@ -91,7 +92,6 @@ struct_kgsl_cmdbatch_profiling_buffer._fields_ = [
   ('gpu_ticks_retired', ctypes.c_ulong),
 ]
 class struct_kgsl_device_getproperty(ctypes.Structure): pass
-struct_kgsl_device_getproperty._fields_ = []
 class struct_kgsl_device_waittimestamp(ctypes.Structure): pass
 struct_kgsl_device_waittimestamp._fields_ = [
   ('timestamp', ctypes.c_uint),
@@ -239,7 +239,6 @@ struct_kgsl_cff_syncmem._fields_ = [
   ('__pad', (ctypes.c_uint * 2)),
 ]
 class struct_kgsl_timestamp_event(ctypes.Structure): pass
-struct_kgsl_timestamp_event._fields_ = []
 class struct_kgsl_timestamp_event_genlock(ctypes.Structure): pass
 struct_kgsl_timestamp_event_genlock._fields_ = [
   ('handle', ctypes.c_int),
@@ -331,11 +330,8 @@ struct_kgsl_cmd_syncpoint_fence._fields_ = [
   ('fd', ctypes.c_int),
 ]
 class struct_kgsl_cmd_syncpoint(ctypes.Structure): pass
-struct_kgsl_cmd_syncpoint._fields_ = []
 class struct_kgsl_submit_commands(ctypes.Structure): pass
-struct_kgsl_submit_commands._fields_ = []
 class struct_kgsl_device_constraint(ctypes.Structure): pass
-struct_kgsl_device_constraint._fields_ = []
 class struct_kgsl_device_constraint_pwrlevel(ctypes.Structure): pass
 struct_kgsl_device_constraint_pwrlevel._fields_ = [
   ('level', ctypes.c_uint),
@@ -448,7 +444,6 @@ struct_kgsl_command_syncpoint._fields_ = [
   ('type', ctypes.c_uint),
 ]
 class struct_kgsl_gpu_command(ctypes.Structure): pass
-struct_kgsl_gpu_command._fields_ = []
 class struct_kgsl_preemption_counters_query(ctypes.Structure): pass
 struct_kgsl_preemption_counters_query._fields_ = [
   ('__user', ctypes.c_ulong),

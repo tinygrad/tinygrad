@@ -1,33 +1,41 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 class struct_io_uring_sq(ctypes.Structure): pass
 class struct_io_uring_sqe(ctypes.Structure): pass
 __u8 = ctypes.c_ubyte
 __u16 = ctypes.c_ushort
 __s32 = ctypes.c_int
-class _anonunion0(ctypes.Union): pass
+class struct_io_uring_sqe_0(ctypes.Union): pass
 __u64 = ctypes.c_ulonglong
-class _anonstruct1(ctypes.Structure): pass
+class struct_io_uring_sqe_0_0(ctypes.Structure): pass
 __u32 = ctypes.c_uint
-_anonstruct1._fields_ = [
+struct_io_uring_sqe_0_0._fields_ = [
   ('cmd_op', ctypes.c_uint),
   ('__pad1', ctypes.c_uint),
 ]
-_anonunion0._anonymous_ = ['_0']
-_anonunion0._fields_ = [
+struct_io_uring_sqe_0._anonymous_ = ['_0']
+struct_io_uring_sqe_0._fields_ = [
   ('off', ctypes.c_ulonglong),
   ('addr2', ctypes.c_ulonglong),
-  ('_0', _anonstruct1),
+  ('_0', struct_io_uring_sqe_0_0),
 ]
-class _anonunion2(ctypes.Union): pass
-_anonunion2._fields_ = [
+class struct_io_uring_sqe_1(ctypes.Union): pass
+class struct_io_uring_sqe_1_0(ctypes.Structure): pass
+struct_io_uring_sqe_1_0._fields_ = [
+  ('level', ctypes.c_uint),
+  ('optname', ctypes.c_uint),
+]
+struct_io_uring_sqe_1._anonymous_ = ['_0']
+struct_io_uring_sqe_1._fields_ = [
   ('addr', ctypes.c_ulonglong),
   ('splice_off_in', ctypes.c_ulonglong),
+  ('_0', struct_io_uring_sqe_1_0),
 ]
-class _anonunion3(ctypes.Union): pass
+class struct_io_uring_sqe_2(ctypes.Union): pass
 __kernel_rwf_t = ctypes.c_int
-_anonunion3._fields_ = [
+struct_io_uring_sqe_2._fields_ = [
   ('rw_flags', ctypes.c_int),
   ('fsync_flags', ctypes.c_uint),
   ('poll_events', ctypes.c_ushort),
@@ -47,33 +55,40 @@ _anonunion3._fields_ = [
   ('xattr_flags', ctypes.c_uint),
   ('msg_ring_flags', ctypes.c_uint),
   ('uring_cmd_flags', ctypes.c_uint),
+  ('waitid_flags', ctypes.c_uint),
+  ('futex_flags', ctypes.c_uint),
+  ('install_fd_flags', ctypes.c_uint),
+  ('nop_flags', ctypes.c_uint),
 ]
-class _anonunion4(ctypes.Union): pass
-_anonunion4._fields_ = [
+class struct_io_uring_sqe_3(ctypes.Union): pass
+struct_io_uring_sqe_3._fields_ = [
   ('buf_index', ctypes.c_ushort),
   ('buf_group', ctypes.c_ushort),
 ]
-class _anonunion5(ctypes.Union): pass
-class _anonstruct6(ctypes.Structure): pass
-_anonstruct6._fields_ = [
+class struct_io_uring_sqe_4(ctypes.Union): pass
+class struct_io_uring_sqe_4_0(ctypes.Structure): pass
+struct_io_uring_sqe_4_0._fields_ = [
   ('addr_len', ctypes.c_ushort),
   ('__pad3', (ctypes.c_ushort * 1)),
 ]
-_anonunion5._anonymous_ = ['_0']
-_anonunion5._fields_ = [
+struct_io_uring_sqe_4._anonymous_ = ['_0']
+struct_io_uring_sqe_4._fields_ = [
   ('splice_fd_in', ctypes.c_int),
   ('file_index', ctypes.c_uint),
-  ('_0', _anonstruct6),
+  ('zcrx_ifq_idx', ctypes.c_uint),
+  ('optlen', ctypes.c_uint),
+  ('_0', struct_io_uring_sqe_4_0),
 ]
-class _anonunion7(ctypes.Union): pass
-class _anonstruct8(ctypes.Structure): pass
-_anonstruct8._fields_ = [
+class struct_io_uring_sqe_5(ctypes.Union): pass
+class struct_io_uring_sqe_5_0(ctypes.Structure): pass
+struct_io_uring_sqe_5_0._fields_ = [
   ('addr3', ctypes.c_ulonglong),
   ('__pad2', (ctypes.c_ulonglong * 1)),
 ]
-_anonunion7._anonymous_ = ['_0']
-_anonunion7._fields_ = [
-  ('_0', _anonstruct8),
+struct_io_uring_sqe_5._anonymous_ = ['_0']
+struct_io_uring_sqe_5._fields_ = [
+  ('_0', struct_io_uring_sqe_5_0),
+  ('optval', ctypes.c_ulonglong),
   ('cmd', (ctypes.c_ubyte * 0)),
 ]
 struct_io_uring_sqe._anonymous_ = ['_0', '_1', '_2', '_3', '_4', '_5']
@@ -82,15 +97,15 @@ struct_io_uring_sqe._fields_ = [
   ('flags', ctypes.c_ubyte),
   ('ioprio', ctypes.c_ushort),
   ('fd', ctypes.c_int),
-  ('_0', _anonunion0),
-  ('_1', _anonunion2),
+  ('_0', struct_io_uring_sqe_0),
+  ('_1', struct_io_uring_sqe_1),
   ('len', ctypes.c_uint),
-  ('_2', _anonunion3),
+  ('_2', struct_io_uring_sqe_2),
   ('user_data', ctypes.c_ulonglong),
-  ('_3', _anonunion4),
+  ('_3', struct_io_uring_sqe_3),
   ('personality', ctypes.c_ushort),
-  ('_4', _anonunion5),
-  ('_5', _anonunion7),
+  ('_4', struct_io_uring_sqe_4),
+  ('_5', struct_io_uring_sqe_5),
 ]
 size_t = ctypes.c_ulong
 struct_io_uring_sq._fields_ = [
@@ -144,68 +159,58 @@ struct_io_uring._fields_ = [
   ('pad', (ctypes.c_ubyte * 3)),
   ('pad2', ctypes.c_uint),
 ]
-class struct_statx(ctypes.Structure): pass
-class struct_statx_timestamp(ctypes.Structure): pass
-__s64 = ctypes.c_longlong
-struct_statx_timestamp._fields_ = [
-  ('tv_sec', ctypes.c_longlong),
-  ('tv_nsec', ctypes.c_uint),
-  ('__reserved', ctypes.c_int),
+class struct_io_uring_zcrx_rq(ctypes.Structure): pass
+class struct_io_uring_zcrx_rqe(ctypes.Structure): pass
+struct_io_uring_zcrx_rqe._fields_ = [
+  ('off', ctypes.c_ulonglong),
+  ('len', ctypes.c_uint),
+  ('__pad', ctypes.c_uint),
 ]
-struct_statx._fields_ = [
-  ('stx_mask', ctypes.c_uint),
-  ('stx_blksize', ctypes.c_uint),
-  ('stx_attributes', ctypes.c_ulonglong),
-  ('stx_nlink', ctypes.c_uint),
-  ('stx_uid', ctypes.c_uint),
-  ('stx_gid', ctypes.c_uint),
-  ('stx_mode', ctypes.c_ushort),
-  ('__spare0', (ctypes.c_ushort * 1)),
-  ('stx_ino', ctypes.c_ulonglong),
-  ('stx_size', ctypes.c_ulonglong),
-  ('stx_blocks', ctypes.c_ulonglong),
-  ('stx_attributes_mask', ctypes.c_ulonglong),
-  ('stx_atime', struct_statx_timestamp),
-  ('stx_btime', struct_statx_timestamp),
-  ('stx_ctime', struct_statx_timestamp),
-  ('stx_mtime', struct_statx_timestamp),
-  ('stx_rdev_major', ctypes.c_uint),
-  ('stx_rdev_minor', ctypes.c_uint),
-  ('stx_dev_major', ctypes.c_uint),
-  ('stx_dev_minor', ctypes.c_uint),
-  ('stx_mnt_id', ctypes.c_ulonglong),
-  ('stx_dio_mem_align', ctypes.c_uint),
-  ('stx_dio_offset_align', ctypes.c_uint),
-  ('__spare3', (ctypes.c_ulonglong * 12)),
+struct_io_uring_zcrx_rq._fields_ = [
+  ('khead', ctypes.POINTER(ctypes.c_uint)),
+  ('ktail', ctypes.POINTER(ctypes.c_uint)),
+  ('rq_tail', ctypes.c_uint),
+  ('ring_entries', ctypes.c_uint),
+  ('rqes', ctypes.POINTER(struct_io_uring_zcrx_rqe)),
+  ('ring_ptr', ctypes.c_void_p),
+]
+class struct_io_uring_cqe_iter(ctypes.Structure): pass
+struct_io_uring_cqe_iter._fields_ = [
+  ('cqes', ctypes.POINTER(struct_io_uring_cqe)),
+  ('mask', ctypes.c_uint),
+  ('shift', ctypes.c_uint),
+  ('head', ctypes.c_uint),
+  ('tail', ctypes.c_uint),
 ]
 class struct_epoll_event(ctypes.Structure): pass
-struct_epoll_event._fields_ = []
-class _anonunion9(ctypes.Union): pass
-class _anonstruct10(ctypes.Structure): pass
-_anonstruct10._fields_ = [
+class struct_statx(ctypes.Structure): pass
+class struct_futex_waitv(ctypes.Structure): pass
+class _anonunion0(ctypes.Union): pass
+class _anonunion0_0(ctypes.Structure): pass
+_anonunion0_0._fields_ = [
   ('cmd_op', ctypes.c_uint),
   ('__pad1', ctypes.c_uint),
 ]
-_anonunion9._anonymous_ = ['_0']
-_anonunion9._fields_ = [
+_anonunion0._anonymous_ = ['_0']
+_anonunion0._fields_ = [
   ('off', ctypes.c_ulonglong),
   ('addr2', ctypes.c_ulonglong),
-  ('_0', _anonstruct10),
+  ('_0', _anonunion0_0),
 ]
-class _anonunion11(ctypes.Union): pass
-class _anonstruct12(ctypes.Structure): pass
-_anonstruct12._fields_ = [
+class _anonunion1(ctypes.Union): pass
+class _anonunion1_0(ctypes.Structure): pass
+_anonunion1_0._fields_ = [
   ('level', ctypes.c_uint),
   ('optname', ctypes.c_uint),
 ]
-_anonunion11._anonymous_ = ['_0']
-_anonunion11._fields_ = [
+_anonunion1._anonymous_ = ['_0']
+_anonunion1._fields_ = [
   ('addr', ctypes.c_ulonglong),
   ('splice_off_in', ctypes.c_ulonglong),
-  ('_0', _anonstruct12),
+  ('_0', _anonunion1_0),
 ]
-class _anonunion13(ctypes.Union): pass
-_anonunion13._fields_ = [
+class _anonunion2(ctypes.Union): pass
+_anonunion2._fields_ = [
   ('rw_flags', ctypes.c_int),
   ('fsync_flags', ctypes.c_uint),
   ('poll_events', ctypes.c_ushort),
@@ -229,44 +234,44 @@ _anonunion13._fields_ = [
   ('futex_flags', ctypes.c_uint),
   ('install_fd_flags', ctypes.c_uint),
 ]
-class _anonunion14(ctypes.Union): pass
-_anonunion14._fields_ = [
+class _anonunion3(ctypes.Union): pass
+_anonunion3._fields_ = [
   ('buf_index', ctypes.c_ushort),
   ('buf_group', ctypes.c_ushort),
 ]
-class _anonunion15(ctypes.Union): pass
-class _anonstruct16(ctypes.Structure): pass
-_anonstruct16._fields_ = [
+class _anonunion4(ctypes.Union): pass
+class _anonunion4_0(ctypes.Structure): pass
+_anonunion4_0._fields_ = [
   ('addr_len', ctypes.c_ushort),
   ('__pad3', (ctypes.c_ushort * 1)),
 ]
-_anonunion15._anonymous_ = ['_0']
-_anonunion15._fields_ = [
+_anonunion4._anonymous_ = ['_0']
+_anonunion4._fields_ = [
   ('splice_fd_in', ctypes.c_int),
   ('file_index', ctypes.c_uint),
   ('optlen', ctypes.c_uint),
-  ('_0', _anonstruct16),
+  ('_0', _anonunion4_0),
 ]
-class _anonunion17(ctypes.Union): pass
-class _anonstruct18(ctypes.Structure): pass
-_anonstruct18._fields_ = [
+class _anonunion5(ctypes.Union): pass
+class _anonunion5_0(ctypes.Structure): pass
+_anonunion5_0._fields_ = [
   ('addr3', ctypes.c_ulonglong),
   ('__pad2', (ctypes.c_ulonglong * 1)),
 ]
-_anonunion17._anonymous_ = ['_0']
-_anonunion17._fields_ = [
-  ('_0', _anonstruct18),
+_anonunion5._anonymous_ = ['_0']
+_anonunion5._fields_ = [
+  ('_0', _anonunion5_0),
   ('optval', ctypes.c_ulonglong),
   ('cmd', (ctypes.c_ubyte * 0)),
 ]
-_anonenum19 = CEnum(ctypes.c_uint)
-IOSQE_FIXED_FILE_BIT = _anonenum19.define('IOSQE_FIXED_FILE_BIT', 0)
-IOSQE_IO_DRAIN_BIT = _anonenum19.define('IOSQE_IO_DRAIN_BIT', 1)
-IOSQE_IO_LINK_BIT = _anonenum19.define('IOSQE_IO_LINK_BIT', 2)
-IOSQE_IO_HARDLINK_BIT = _anonenum19.define('IOSQE_IO_HARDLINK_BIT', 3)
-IOSQE_ASYNC_BIT = _anonenum19.define('IOSQE_ASYNC_BIT', 4)
-IOSQE_BUFFER_SELECT_BIT = _anonenum19.define('IOSQE_BUFFER_SELECT_BIT', 5)
-IOSQE_CQE_SKIP_SUCCESS_BIT = _anonenum19.define('IOSQE_CQE_SKIP_SUCCESS_BIT', 6)
+_anonenum6 = CEnum(ctypes.c_uint)
+IOSQE_FIXED_FILE_BIT = _anonenum6.define('IOSQE_FIXED_FILE_BIT', 0)
+IOSQE_IO_DRAIN_BIT = _anonenum6.define('IOSQE_IO_DRAIN_BIT', 1)
+IOSQE_IO_LINK_BIT = _anonenum6.define('IOSQE_IO_LINK_BIT', 2)
+IOSQE_IO_HARDLINK_BIT = _anonenum6.define('IOSQE_IO_HARDLINK_BIT', 3)
+IOSQE_ASYNC_BIT = _anonenum6.define('IOSQE_ASYNC_BIT', 4)
+IOSQE_BUFFER_SELECT_BIT = _anonenum6.define('IOSQE_BUFFER_SELECT_BIT', 5)
+IOSQE_CQE_SKIP_SUCCESS_BIT = _anonenum6.define('IOSQE_CQE_SKIP_SUCCESS_BIT', 6)
 
 enum_io_uring_op = CEnum(ctypes.c_uint)
 IORING_OP_NOP = enum_io_uring_op.define('IORING_OP_NOP', 0)
@@ -326,12 +331,12 @@ IORING_OP_FUTEX_WAITV = enum_io_uring_op.define('IORING_OP_FUTEX_WAITV', 53)
 IORING_OP_FIXED_FD_INSTALL = enum_io_uring_op.define('IORING_OP_FIXED_FD_INSTALL', 54)
 IORING_OP_LAST = enum_io_uring_op.define('IORING_OP_LAST', 55)
 
-_anonenum20 = CEnum(ctypes.c_uint)
-IORING_MSG_DATA = _anonenum20.define('IORING_MSG_DATA', 0)
-IORING_MSG_SEND_FD = _anonenum20.define('IORING_MSG_SEND_FD', 1)
+_anonenum7 = CEnum(ctypes.c_uint)
+IORING_MSG_DATA = _anonenum7.define('IORING_MSG_DATA', 0)
+IORING_MSG_SEND_FD = _anonenum7.define('IORING_MSG_SEND_FD', 1)
 
-_anonenum21 = CEnum(ctypes.c_uint)
-IORING_CQE_BUFFER_SHIFT = _anonenum21.define('IORING_CQE_BUFFER_SHIFT', 16)
+_anonenum8 = CEnum(ctypes.c_uint)
+IORING_CQE_BUFFER_SHIFT = _anonenum8.define('IORING_CQE_BUFFER_SHIFT', 16)
 
 class struct_io_sqring_offsets(ctypes.Structure): pass
 struct_io_sqring_offsets._fields_ = [
@@ -370,40 +375,40 @@ struct_io_uring_params._fields_ = [
   ('sq_off', struct_io_sqring_offsets),
   ('cq_off', struct_io_cqring_offsets),
 ]
-_anonenum22 = CEnum(ctypes.c_uint)
-IORING_REGISTER_BUFFERS = _anonenum22.define('IORING_REGISTER_BUFFERS', 0)
-IORING_UNREGISTER_BUFFERS = _anonenum22.define('IORING_UNREGISTER_BUFFERS', 1)
-IORING_REGISTER_FILES = _anonenum22.define('IORING_REGISTER_FILES', 2)
-IORING_UNREGISTER_FILES = _anonenum22.define('IORING_UNREGISTER_FILES', 3)
-IORING_REGISTER_EVENTFD = _anonenum22.define('IORING_REGISTER_EVENTFD', 4)
-IORING_UNREGISTER_EVENTFD = _anonenum22.define('IORING_UNREGISTER_EVENTFD', 5)
-IORING_REGISTER_FILES_UPDATE = _anonenum22.define('IORING_REGISTER_FILES_UPDATE', 6)
-IORING_REGISTER_EVENTFD_ASYNC = _anonenum22.define('IORING_REGISTER_EVENTFD_ASYNC', 7)
-IORING_REGISTER_PROBE = _anonenum22.define('IORING_REGISTER_PROBE', 8)
-IORING_REGISTER_PERSONALITY = _anonenum22.define('IORING_REGISTER_PERSONALITY', 9)
-IORING_UNREGISTER_PERSONALITY = _anonenum22.define('IORING_UNREGISTER_PERSONALITY', 10)
-IORING_REGISTER_RESTRICTIONS = _anonenum22.define('IORING_REGISTER_RESTRICTIONS', 11)
-IORING_REGISTER_ENABLE_RINGS = _anonenum22.define('IORING_REGISTER_ENABLE_RINGS', 12)
-IORING_REGISTER_FILES2 = _anonenum22.define('IORING_REGISTER_FILES2', 13)
-IORING_REGISTER_FILES_UPDATE2 = _anonenum22.define('IORING_REGISTER_FILES_UPDATE2', 14)
-IORING_REGISTER_BUFFERS2 = _anonenum22.define('IORING_REGISTER_BUFFERS2', 15)
-IORING_REGISTER_BUFFERS_UPDATE = _anonenum22.define('IORING_REGISTER_BUFFERS_UPDATE', 16)
-IORING_REGISTER_IOWQ_AFF = _anonenum22.define('IORING_REGISTER_IOWQ_AFF', 17)
-IORING_UNREGISTER_IOWQ_AFF = _anonenum22.define('IORING_UNREGISTER_IOWQ_AFF', 18)
-IORING_REGISTER_IOWQ_MAX_WORKERS = _anonenum22.define('IORING_REGISTER_IOWQ_MAX_WORKERS', 19)
-IORING_REGISTER_RING_FDS = _anonenum22.define('IORING_REGISTER_RING_FDS', 20)
-IORING_UNREGISTER_RING_FDS = _anonenum22.define('IORING_UNREGISTER_RING_FDS', 21)
-IORING_REGISTER_PBUF_RING = _anonenum22.define('IORING_REGISTER_PBUF_RING', 22)
-IORING_UNREGISTER_PBUF_RING = _anonenum22.define('IORING_UNREGISTER_PBUF_RING', 23)
-IORING_REGISTER_SYNC_CANCEL = _anonenum22.define('IORING_REGISTER_SYNC_CANCEL', 24)
-IORING_REGISTER_FILE_ALLOC_RANGE = _anonenum22.define('IORING_REGISTER_FILE_ALLOC_RANGE', 25)
-IORING_REGISTER_PBUF_STATUS = _anonenum22.define('IORING_REGISTER_PBUF_STATUS', 26)
-IORING_REGISTER_LAST = _anonenum22.define('IORING_REGISTER_LAST', 27)
-IORING_REGISTER_USE_REGISTERED_RING = _anonenum22.define('IORING_REGISTER_USE_REGISTERED_RING', 2147483648)
+_anonenum9 = CEnum(ctypes.c_uint)
+IORING_REGISTER_BUFFERS = _anonenum9.define('IORING_REGISTER_BUFFERS', 0)
+IORING_UNREGISTER_BUFFERS = _anonenum9.define('IORING_UNREGISTER_BUFFERS', 1)
+IORING_REGISTER_FILES = _anonenum9.define('IORING_REGISTER_FILES', 2)
+IORING_UNREGISTER_FILES = _anonenum9.define('IORING_UNREGISTER_FILES', 3)
+IORING_REGISTER_EVENTFD = _anonenum9.define('IORING_REGISTER_EVENTFD', 4)
+IORING_UNREGISTER_EVENTFD = _anonenum9.define('IORING_UNREGISTER_EVENTFD', 5)
+IORING_REGISTER_FILES_UPDATE = _anonenum9.define('IORING_REGISTER_FILES_UPDATE', 6)
+IORING_REGISTER_EVENTFD_ASYNC = _anonenum9.define('IORING_REGISTER_EVENTFD_ASYNC', 7)
+IORING_REGISTER_PROBE = _anonenum9.define('IORING_REGISTER_PROBE', 8)
+IORING_REGISTER_PERSONALITY = _anonenum9.define('IORING_REGISTER_PERSONALITY', 9)
+IORING_UNREGISTER_PERSONALITY = _anonenum9.define('IORING_UNREGISTER_PERSONALITY', 10)
+IORING_REGISTER_RESTRICTIONS = _anonenum9.define('IORING_REGISTER_RESTRICTIONS', 11)
+IORING_REGISTER_ENABLE_RINGS = _anonenum9.define('IORING_REGISTER_ENABLE_RINGS', 12)
+IORING_REGISTER_FILES2 = _anonenum9.define('IORING_REGISTER_FILES2', 13)
+IORING_REGISTER_FILES_UPDATE2 = _anonenum9.define('IORING_REGISTER_FILES_UPDATE2', 14)
+IORING_REGISTER_BUFFERS2 = _anonenum9.define('IORING_REGISTER_BUFFERS2', 15)
+IORING_REGISTER_BUFFERS_UPDATE = _anonenum9.define('IORING_REGISTER_BUFFERS_UPDATE', 16)
+IORING_REGISTER_IOWQ_AFF = _anonenum9.define('IORING_REGISTER_IOWQ_AFF', 17)
+IORING_UNREGISTER_IOWQ_AFF = _anonenum9.define('IORING_UNREGISTER_IOWQ_AFF', 18)
+IORING_REGISTER_IOWQ_MAX_WORKERS = _anonenum9.define('IORING_REGISTER_IOWQ_MAX_WORKERS', 19)
+IORING_REGISTER_RING_FDS = _anonenum9.define('IORING_REGISTER_RING_FDS', 20)
+IORING_UNREGISTER_RING_FDS = _anonenum9.define('IORING_UNREGISTER_RING_FDS', 21)
+IORING_REGISTER_PBUF_RING = _anonenum9.define('IORING_REGISTER_PBUF_RING', 22)
+IORING_UNREGISTER_PBUF_RING = _anonenum9.define('IORING_UNREGISTER_PBUF_RING', 23)
+IORING_REGISTER_SYNC_CANCEL = _anonenum9.define('IORING_REGISTER_SYNC_CANCEL', 24)
+IORING_REGISTER_FILE_ALLOC_RANGE = _anonenum9.define('IORING_REGISTER_FILE_ALLOC_RANGE', 25)
+IORING_REGISTER_PBUF_STATUS = _anonenum9.define('IORING_REGISTER_PBUF_STATUS', 26)
+IORING_REGISTER_LAST = _anonenum9.define('IORING_REGISTER_LAST', 27)
+IORING_REGISTER_USE_REGISTERED_RING = _anonenum9.define('IORING_REGISTER_USE_REGISTERED_RING', 2147483648)
 
-_anonenum23 = CEnum(ctypes.c_uint)
-IO_WQ_BOUND = _anonenum23.define('IO_WQ_BOUND', 0)
-IO_WQ_UNBOUND = _anonenum23.define('IO_WQ_UNBOUND', 1)
+_anonenum10 = CEnum(ctypes.c_uint)
+IO_WQ_BOUND = _anonenum10.define('IO_WQ_BOUND', 0)
+IO_WQ_UNBOUND = _anonenum10.define('IO_WQ_UNBOUND', 1)
 
 class struct_io_uring_files_update(ctypes.Structure): pass
 struct_io_uring_files_update._fields_ = [
@@ -450,8 +455,8 @@ struct_io_uring_probe._fields_ = [
   ('ops', (struct_io_uring_probe_op * 0)),
 ]
 class struct_io_uring_restriction(ctypes.Structure): pass
-class _anonunion24(ctypes.Union): pass
-_anonunion24._fields_ = [
+class struct_io_uring_restriction_0(ctypes.Union): pass
+struct_io_uring_restriction_0._fields_ = [
   ('register_op', ctypes.c_ubyte),
   ('sqe_op', ctypes.c_ubyte),
   ('sqe_flags', ctypes.c_ubyte),
@@ -459,7 +464,7 @@ _anonunion24._fields_ = [
 struct_io_uring_restriction._anonymous_ = ['_0']
 struct_io_uring_restriction._fields_ = [
   ('opcode', ctypes.c_ushort),
-  ('_0', _anonunion24),
+  ('_0', struct_io_uring_restriction_0),
   ('resv', ctypes.c_ubyte),
   ('resv2', (ctypes.c_uint * 3)),
 ]
@@ -471,32 +476,31 @@ struct_io_uring_buf._fields_ = [
   ('resv', ctypes.c_ushort),
 ]
 class struct_io_uring_buf_ring(ctypes.Structure): pass
-class _anonunion25(ctypes.Union): pass
-class _anonstruct26(ctypes.Structure): pass
-_anonstruct26._fields_ = [
+class struct_io_uring_buf_ring_0(ctypes.Union): pass
+class struct_io_uring_buf_ring_0_0(ctypes.Structure): pass
+struct_io_uring_buf_ring_0_0._fields_ = [
   ('resv1', ctypes.c_ulonglong),
   ('resv2', ctypes.c_uint),
   ('resv3', ctypes.c_ushort),
   ('tail', ctypes.c_ushort),
 ]
-class _anonstruct27(ctypes.Structure): pass
-class _anonstruct27___empty_bufs(ctypes.Structure): pass
-_anonstruct27___empty_bufs._fields_ = []
-_anonstruct27._fields_ = [
-  ('__empty_bufs', _anonstruct27___empty_bufs),
+class struct_io_uring_buf_ring_0_1(ctypes.Structure): pass
+class struct_io_uring_buf_ring_0_1___empty_bufs(ctypes.Structure): pass
+struct_io_uring_buf_ring_0_1._fields_ = [
+  ('__empty_bufs', struct_io_uring_buf_ring_0_1___empty_bufs),
   ('bufs', (struct_io_uring_buf * 0)),
 ]
-_anonunion25._anonymous_ = ['_0', '_1']
-_anonunion25._fields_ = [
-  ('_0', _anonstruct26),
-  ('_1', _anonstruct27),
+struct_io_uring_buf_ring_0._anonymous_ = ['_0', '_1']
+struct_io_uring_buf_ring_0._fields_ = [
+  ('_0', struct_io_uring_buf_ring_0_0),
+  ('_1', struct_io_uring_buf_ring_0_1),
 ]
 struct_io_uring_buf_ring._anonymous_ = ['_0']
 struct_io_uring_buf_ring._fields_ = [
-  ('_0', _anonunion25),
+  ('_0', struct_io_uring_buf_ring_0),
 ]
-_anonenum28 = CEnum(ctypes.c_uint)
-IOU_PBUF_RING_MMAP = _anonenum28.define('IOU_PBUF_RING_MMAP', 1)
+_anonenum11 = CEnum(ctypes.c_uint)
+IOU_PBUF_RING_MMAP = _anonenum11.define('IOU_PBUF_RING_MMAP', 1)
 
 class struct_io_uring_buf_reg(ctypes.Structure): pass
 struct_io_uring_buf_reg._fields_ = [
@@ -512,12 +516,12 @@ struct_io_uring_buf_status._fields_ = [
   ('head', ctypes.c_uint),
   ('resv', (ctypes.c_uint * 8)),
 ]
-_anonenum29 = CEnum(ctypes.c_uint)
-IORING_RESTRICTION_REGISTER_OP = _anonenum29.define('IORING_RESTRICTION_REGISTER_OP', 0)
-IORING_RESTRICTION_SQE_OP = _anonenum29.define('IORING_RESTRICTION_SQE_OP', 1)
-IORING_RESTRICTION_SQE_FLAGS_ALLOWED = _anonenum29.define('IORING_RESTRICTION_SQE_FLAGS_ALLOWED', 2)
-IORING_RESTRICTION_SQE_FLAGS_REQUIRED = _anonenum29.define('IORING_RESTRICTION_SQE_FLAGS_REQUIRED', 3)
-IORING_RESTRICTION_LAST = _anonenum29.define('IORING_RESTRICTION_LAST', 4)
+_anonenum12 = CEnum(ctypes.c_uint)
+IORING_RESTRICTION_REGISTER_OP = _anonenum12.define('IORING_RESTRICTION_REGISTER_OP', 0)
+IORING_RESTRICTION_SQE_OP = _anonenum12.define('IORING_RESTRICTION_SQE_OP', 1)
+IORING_RESTRICTION_SQE_FLAGS_ALLOWED = _anonenum12.define('IORING_RESTRICTION_SQE_FLAGS_ALLOWED', 2)
+IORING_RESTRICTION_SQE_FLAGS_REQUIRED = _anonenum12.define('IORING_RESTRICTION_SQE_FLAGS_REQUIRED', 3)
+IORING_RESTRICTION_LAST = _anonenum12.define('IORING_RESTRICTION_LAST', 4)
 
 class struct_io_uring_getevents_arg(ctypes.Structure): pass
 struct_io_uring_getevents_arg._fields_ = [
@@ -555,21 +559,18 @@ struct_io_uring_recvmsg_out._fields_ = [
   ('payloadlen', ctypes.c_uint),
   ('flags', ctypes.c_uint),
 ]
-_anonenum30 = CEnum(ctypes.c_uint)
-SOCKET_URING_OP_SIOCINQ = _anonenum30.define('SOCKET_URING_OP_SIOCINQ', 0)
-SOCKET_URING_OP_SIOCOUTQ = _anonenum30.define('SOCKET_URING_OP_SIOCOUTQ', 1)
-SOCKET_URING_OP_GETSOCKOPT = _anonenum30.define('SOCKET_URING_OP_GETSOCKOPT', 2)
-SOCKET_URING_OP_SETSOCKOPT = _anonenum30.define('SOCKET_URING_OP_SETSOCKOPT', 3)
+_anonenum13 = CEnum(ctypes.c_uint)
+SOCKET_URING_OP_SIOCINQ = _anonenum13.define('SOCKET_URING_OP_SIOCINQ', 0)
+SOCKET_URING_OP_SIOCOUTQ = _anonenum13.define('SOCKET_URING_OP_SIOCOUTQ', 1)
+SOCKET_URING_OP_GETSOCKOPT = _anonenum13.define('SOCKET_URING_OP_GETSOCKOPT', 2)
+SOCKET_URING_OP_SETSOCKOPT = _anonenum13.define('SOCKET_URING_OP_SETSOCKOPT', 3)
 
-_XOPEN_SOURCE = 500
 uring_unlikely = lambda cond: __builtin_expect( not  not (cond), 0)
 uring_likely = lambda cond: __builtin_expect( not  not (cond), 1)
 NR_io_uring_setup = 425
 NR_io_uring_enter = 426
 NR_io_uring_register = 427
-io_uring_cqe_index = lambda ring,ptr,mask: (((ptr) & (mask)) << io_uring_cqe_shift(ring))
-UNUSED = lambda x: (void)(x)
-IO_URING_CHECK_VERSION = lambda major,minor: (major > IO_URING_VERSION_MAJOR or (major == IO_URING_VERSION_MAJOR and minor >= IO_URING_VERSION_MINOR))
+IO_URING_CHECK_VERSION = lambda major,minor: (major > IO_URING_VERSION_MAJOR or (major == IO_URING_VERSION_MAJOR and minor > IO_URING_VERSION_MINOR))
 IORING_FILE_INDEX_ALLOC = (~0)
 IOSQE_FIXED_FILE = (1 << IOSQE_FIXED_FILE_BIT)
 IOSQE_IO_DRAIN = (1 << IOSQE_IO_DRAIN_BIT)

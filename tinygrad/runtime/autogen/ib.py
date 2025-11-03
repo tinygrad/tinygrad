@@ -1,11 +1,13 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(ibverbs, use_errno=True)
+  try: return ctypes.CDLL(unwrap(ibverbs), use_errno=True)
   except: pass
   return None
 dll = dll()
+
 class union_ibv_gid(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte
 class union_ibv_gid_global(ctypes.Structure): pass
@@ -160,7 +162,6 @@ struct_ibv_device_attr._fields_ = [
   ('phys_port_cnt', uint8_t),
 ]
 class struct__compat_ibv_port_attr(ctypes.Structure): pass
-struct__compat_ibv_port_attr._fields_ = []
 class struct_ibv_mw(ctypes.Structure): pass
 class struct_ibv_pd(ctypes.Structure): pass
 struct_ibv_pd._fields_ = [
@@ -189,11 +190,11 @@ struct_ibv_comp_channel._fields_ = [
 class pthread_mutex_t(ctypes.Union): pass
 class struct___pthread_mutex_s(ctypes.Structure): pass
 class struct___pthread_internal_list(ctypes.Structure): pass
+__pthread_list_t = struct___pthread_internal_list
 struct___pthread_internal_list._fields_ = [
   ('__prev', ctypes.POINTER(struct___pthread_internal_list)),
   ('__next', ctypes.POINTER(struct___pthread_internal_list)),
 ]
-__pthread_list_t = struct___pthread_internal_list
 struct___pthread_mutex_s._fields_ = [
   ('__lock', ctypes.c_int),
   ('__count', ctypes.c_uint),
@@ -1695,7 +1696,6 @@ IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_WRITE = enum_ib_uverbs_advise_mr_advice.defi
 IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT = enum_ib_uverbs_advise_mr_advice.define('IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT', 2)
 
 class struct_verbs_ex_private(ctypes.Structure): pass
-struct_verbs_ex_private._fields_ = []
 struct_verbs_context._fields_ = [
   ('query_port', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_port_attr), size_t)),
   ('advise_mr', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_pd), enum_ib_uverbs_advise_mr_advice, uint32_t, ctypes.POINTER(struct_ibv_sge), uint32_t)),
@@ -3468,7 +3468,6 @@ IBV_DEVICE_PCI_WRITE_END_PADDING = (1 << 36)
 ibv_query_port = lambda context,port_num,port_attr: ___ibv_query_port(context, port_num, port_attr)
 ibv_reg_mr = lambda pd,addr,length,access: __ibv_reg_mr(pd, addr, length, access, __builtin_constant_p( ((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0))
 ibv_reg_mr_iova = lambda pd,addr,length,iova,access: __ibv_reg_mr_iova(pd, addr, length, iova, access, __builtin_constant_p( ((access) & IBV_ACCESS_OPTIONAL_RANGE) == 0))
-ETHERNET_LL_SIZE = 6
 IB_ROCE_UDP_ENCAP_VALID_PORT_MIN = (0xC000)
 IB_ROCE_UDP_ENCAP_VALID_PORT_MAX = (0xFFFF)
 IB_GRH_FLOWLABEL_MASK = (0x000FFFFF)

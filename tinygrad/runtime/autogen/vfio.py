@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 class struct_vfio_info_cap_header(ctypes.Structure): pass
 __u16 = ctypes.c_ushort
 __u32 = ctypes.c_uint

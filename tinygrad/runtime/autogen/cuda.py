@@ -1,12 +1,14 @@
 # mypy: ignore-errors
 import ctypes
 from ctypes.util import find_library
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(find_library('cuda'))
+  try: return ctypes.CDLL(unwrap(find_library('cuda')))
   except: pass
   return None
 dll = dll()
+
 cuuint32_t = ctypes.c_uint
 cuuint64_t = ctypes.c_ulong
 CUdeviceptr_v2 = ctypes.c_ulonglong
@@ -14,65 +16,46 @@ CUdeviceptr = ctypes.c_ulonglong
 CUdevice_v1 = ctypes.c_int
 CUdevice = ctypes.c_int
 class struct_CUctx_st(ctypes.Structure): pass
-struct_CUctx_st._fields_ = []
 CUcontext = ctypes.POINTER(struct_CUctx_st)
 class struct_CUmod_st(ctypes.Structure): pass
-struct_CUmod_st._fields_ = []
 CUmodule = ctypes.POINTER(struct_CUmod_st)
 class struct_CUfunc_st(ctypes.Structure): pass
-struct_CUfunc_st._fields_ = []
 CUfunction = ctypes.POINTER(struct_CUfunc_st)
 class struct_CUlib_st(ctypes.Structure): pass
-struct_CUlib_st._fields_ = []
 CUlibrary = ctypes.POINTER(struct_CUlib_st)
 class struct_CUkern_st(ctypes.Structure): pass
-struct_CUkern_st._fields_ = []
 CUkernel = ctypes.POINTER(struct_CUkern_st)
 class struct_CUarray_st(ctypes.Structure): pass
-struct_CUarray_st._fields_ = []
 CUarray = ctypes.POINTER(struct_CUarray_st)
 class struct_CUmipmappedArray_st(ctypes.Structure): pass
-struct_CUmipmappedArray_st._fields_ = []
 CUmipmappedArray = ctypes.POINTER(struct_CUmipmappedArray_st)
 class struct_CUtexref_st(ctypes.Structure): pass
-struct_CUtexref_st._fields_ = []
 CUtexref = ctypes.POINTER(struct_CUtexref_st)
 class struct_CUsurfref_st(ctypes.Structure): pass
-struct_CUsurfref_st._fields_ = []
 CUsurfref = ctypes.POINTER(struct_CUsurfref_st)
 class struct_CUevent_st(ctypes.Structure): pass
-struct_CUevent_st._fields_ = []
 CUevent = ctypes.POINTER(struct_CUevent_st)
 class struct_CUstream_st(ctypes.Structure): pass
-struct_CUstream_st._fields_ = []
 CUstream = ctypes.POINTER(struct_CUstream_st)
 class struct_CUgraphicsResource_st(ctypes.Structure): pass
-struct_CUgraphicsResource_st._fields_ = []
 CUgraphicsResource = ctypes.POINTER(struct_CUgraphicsResource_st)
 CUtexObject_v1 = ctypes.c_ulonglong
 CUtexObject = ctypes.c_ulonglong
 CUsurfObject_v1 = ctypes.c_ulonglong
 CUsurfObject = ctypes.c_ulonglong
 class struct_CUextMemory_st(ctypes.Structure): pass
-struct_CUextMemory_st._fields_ = []
 CUexternalMemory = ctypes.POINTER(struct_CUextMemory_st)
 class struct_CUextSemaphore_st(ctypes.Structure): pass
-struct_CUextSemaphore_st._fields_ = []
 CUexternalSemaphore = ctypes.POINTER(struct_CUextSemaphore_st)
 class struct_CUgraph_st(ctypes.Structure): pass
-struct_CUgraph_st._fields_ = []
 CUgraph = ctypes.POINTER(struct_CUgraph_st)
 class struct_CUgraphNode_st(ctypes.Structure): pass
-struct_CUgraphNode_st._fields_ = []
 CUgraphNode = ctypes.POINTER(struct_CUgraphNode_st)
 class struct_CUgraphExec_st(ctypes.Structure): pass
-struct_CUgraphExec_st._fields_ = []
 CUgraphExec = ctypes.POINTER(struct_CUgraphExec_st)
 class struct_CUmemPoolHandle_st(ctypes.Structure): pass
-struct_CUmemPoolHandle_st._fields_ = []
 CUmemoryPool = ctypes.POINTER(struct_CUmemPoolHandle_st)
 class struct_CUuserObject_st(ctypes.Structure): pass
-struct_CUuserObject_st._fields_ = []
 CUuserObject = ctypes.POINTER(struct_CUuserObject_st)
 class struct_CUuuid_st(ctypes.Structure): pass
 struct_CUuuid_st._fields_ = [
@@ -623,7 +606,6 @@ CU_JIT_NUM_INPUT_TYPES = enum_CUjitInputType_enum.define('CU_JIT_NUM_INPUT_TYPES
 
 CUjitInputType = enum_CUjitInputType_enum
 class struct_CUlinkState_st(ctypes.Structure): pass
-struct_CUlinkState_st._fields_ = []
 CUlinkState = ctypes.POINTER(struct_CUlinkState_st)
 enum_CUgraphicsRegisterFlags_enum = CEnum(ctypes.c_uint)
 CU_GRAPHICS_REGISTER_FLAGS_NONE = enum_CUgraphicsRegisterFlags_enum.define('CU_GRAPHICS_REGISTER_FLAGS_NONE', 0)

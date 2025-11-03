@@ -1,38 +1,31 @@
 # mypy: ignore-errors
 import ctypes
 from ctypes.util import find_library
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(find_library('OpenCL'))
+  try: return ctypes.CDLL(unwrap(find_library('OpenCL')))
   except: pass
   return None
 dll = dll()
+
 class struct__cl_platform_id(ctypes.Structure): pass
-struct__cl_platform_id._fields_ = []
 cl_platform_id = ctypes.POINTER(struct__cl_platform_id)
 class struct__cl_device_id(ctypes.Structure): pass
-struct__cl_device_id._fields_ = []
 cl_device_id = ctypes.POINTER(struct__cl_device_id)
 class struct__cl_context(ctypes.Structure): pass
-struct__cl_context._fields_ = []
 cl_context = ctypes.POINTER(struct__cl_context)
 class struct__cl_command_queue(ctypes.Structure): pass
-struct__cl_command_queue._fields_ = []
 cl_command_queue = ctypes.POINTER(struct__cl_command_queue)
 class struct__cl_mem(ctypes.Structure): pass
-struct__cl_mem._fields_ = []
 cl_mem = ctypes.POINTER(struct__cl_mem)
 class struct__cl_program(ctypes.Structure): pass
-struct__cl_program._fields_ = []
 cl_program = ctypes.POINTER(struct__cl_program)
 class struct__cl_kernel(ctypes.Structure): pass
-struct__cl_kernel._fields_ = []
 cl_kernel = ctypes.POINTER(struct__cl_kernel)
 class struct__cl_event(ctypes.Structure): pass
-struct__cl_event._fields_ = []
 cl_event = ctypes.POINTER(struct__cl_event)
 class struct__cl_sampler(ctypes.Structure): pass
-struct__cl_sampler._fields_ = []
 cl_sampler = ctypes.POINTER(struct__cl_sampler)
 cl_bool = ctypes.c_uint
 cl_bitfield = ctypes.c_ulong

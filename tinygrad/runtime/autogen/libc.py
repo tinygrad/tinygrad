@@ -1,12 +1,14 @@
 # mypy: ignore-errors
 import ctypes
 from ctypes.util import find_library
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(find_library('c'), use_errno=True)
+  try: return ctypes.CDLL(unwrap(find_library('c')), use_errno=True)
   except: pass
   return None
 dll = dll()
+
 off_t = ctypes.c_long
 mode_t = ctypes.c_uint
 size_t = ctypes.c_ulong
@@ -125,7 +127,6 @@ except AttributeError: pass
 
 class struct___locale_struct(ctypes.Structure): pass
 class struct___locale_data(ctypes.Structure): pass
-struct___locale_data._fields_ = []
 struct___locale_struct._fields_ = [
   ('__locales', (ctypes.POINTER(struct___locale_data) * 13)),
   ('__ctype_b', ctypes.POINTER(ctypes.c_ushort)),
@@ -742,6 +743,8 @@ except AttributeError: pass
 try: (dup2:=dll.dup2).restype, dup2.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.c_int]
 except AttributeError: pass
 
+try: __environ = ctypes.POINTER(ctypes.POINTER(ctypes.c_char)).in_dll(dll, '__environ')
+except (ValueError,AttributeError): pass
 # extern int execve(const char *__path, char *const __argv[], char *const __envp[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (execve:=dll.execve).restype, execve.argtypes = ctypes.c_int, [ctypes.POINTER(ctypes.c_char), (ctypes.POINTER(ctypes.c_char) * 0), (ctypes.POINTER(ctypes.c_char) * 0)]
 except AttributeError: pass
