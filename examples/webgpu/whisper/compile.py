@@ -9,6 +9,7 @@ from examples.webgpu.whisper.audio_helpers import stft, hann_window, make_stft_b
 from tinygrad import Tensor, TinyJit, Device, Variable, nn
 import json
 
+from tinygrad.dtype import dtypes
 from tinygrad.nn.state import safe_save, safe_load, torch_load, load_state_dict, get_state_dict
 from tinygrad.helpers import getenv, fetch
 
@@ -37,9 +38,11 @@ class MultiHeadAttention:
   def __call__(self, x:Tensor, xa:Optional[Tensor]=None, mask:Optional[Tensor]=None, len: Union[Variable,int]=None, off=None, cache=None):
     if self.kv_caching == 'cross':
       if xa is not None:
+        shp = DECODER_BATCH_SIZE, 1500, self.out.weight.shape[1]
         if not hasattr(self, 'cache_k'):
-          self.cache_k = Tensor.zeros(DECODER_BATCH_SIZE, 1500, self.out.weight.shape[1])
-          self.cache_v = Tensor.zeros(DECODER_BATCH_SIZE, 1500, self.out.weight.shape[1])
+          self.cache_k = Tensor.zeros(shp)
+          self.cache_v = Tensor.zeros(shp)
+
         new_cache_k = cache_slice_helper(self.cache_k, self.key(xa), off, DECODER_BATCH_SIZE)
         new_cache_v = cache_slice_helper(self.cache_v, self.value(xa), off, DECODER_BATCH_SIZE)
 
@@ -52,8 +55,8 @@ class MultiHeadAttention:
         # self.cache_v.assign(self.cache_v.cat(new_cache_v).shrink(((DECODER_BATCH_SIZE*cache, DECODER_BATCH_SIZE*(cache+1)), None, None)).contiguous())
         # self.cache_k.assign(self.cache_k[None].cat(new_cache_k[None])[cache].contiguous())
         # self.cache_v.assign(self.cache_v[None].cat(new_cache_v[None])[cache].contiguous())
-        self.cache_k.assign(self.cache_k.shrink(((0, cache*DECODER_BATCH_SIZE), None, None)).cat(new_cache_k).shrink(((0, DECODER_BATCH_SIZE), None, None)).contiguous())
-        self.cache_v.assign(self.cache_v.shrink(((0, cache*DECODER_BATCH_SIZE), None, None)).cat(new_cache_v).shrink(((0, DECODER_BATCH_SIZE), None, None)).contiguous())
+        self.cache_k.assign(self.cache_k.shrink(((0, cache*DECODER_BATCH_SIZE), None, None)).cat(new_cache_k).shrink(((0, DECODER_BATCH_SIZE), None, None)))
+        self.cache_v.assign(self.cache_v.shrink(((0, cache*DECODER_BATCH_SIZE), None, None)).cat(new_cache_v).shrink(((0, DECODER_BATCH_SIZE), None, None)))
 
         k, v = self.cache_k, self.cache_v
       else:
@@ -61,14 +64,22 @@ class MultiHeadAttention:
     else:
       k, v = self.key(x), self.value(x)
       if self.kv_caching == 'self':
+        shp = (DECODER_BATCH_SIZE, self.max_self_attn_cache_len, x.shape[2])
         if not hasattr(self, 'cache_k'):
-          self.cache_k = Tensor.zeros(DECODER_BATCH_SIZE, self.max_self_attn_cache_len, x.shape[2])
-          self.cache_v = Tensor.zeros(DECODER_BATCH_SIZE, self.max_self_attn_cache_len, x.shape[2])
-        k = self.cache_k.shrink((None, (0, len), None)).cat(k, dim=1)
-        v = self.cache_v.shrink((None, (0, len), None)).cat(v, dim=1)
-        padding = self.max_self_attn_cache_len-len-x.shape[1]
-        self.cache_k.assign(k.pad((None, (0, padding), None)).contiguous()).realize()
-        self.cache_v.assign(v.pad((None, (0, padding), None)).contiguous()).realize()
+          self.cache_k = Tensor.zeros(shp)
+          self.cache_v = Tensor.zeros(shp)
+        def store_cache(c, t):
+          c.assign((Tensor.arange(self.max_self_attn_cache_len).unsqueeze(-1).expand(shp) < len).where(c, t).contiguous()).realize()
+        store_cache(self.cache_k, k.expand(shp))
+        store_cache(self.cache_v, v.expand(shp))
+        k = self.cache_k.shrink((None, (0, len+1), None))
+        v = self.cache_v.shrink((None, (0, len+1), None))
+        # k = self.cache_k.shrink((None, (0, len), None)).cat(k, dim=1)
+        # v = self.cache_v.shrink((None, (0, len), None)).cat(v, dim=1)
+        # padding = self.max_self_attn_cache_len-len-x.shape[1]
+        # self.cache_k.assign(k.pad((None, (0, padding), None)).contiguous()).realize()
+        # self.cache_v.assign(v.pad((None, (0, padding), None)).contiguous()).realize()
+
 
     q = self.query(x)
     n_ctx = q.shape[1]
@@ -159,13 +170,14 @@ class TextDecoder:
       # return logits.softmax(axis=-1).argmax()
       # print(logits.shape)
       # return logits.log_softmax(axis=-1), ((((logits / logits.max(axis=-1, keepdim=True) * 255).int() * (2**16))+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
-      logprobs = logits.log_softmax(axis=-1)
+      # logprobs = logits.log_softmax(axis=-1)
       sorted_indices = ((((logits / logits.max(axis=-1, keepdim=True) * 255).int() * (2**16))+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
-      sorted_indices_topk = sorted_indices[..., 0:10].contiguous()
+      # sorted_indices_topk = sorted_indices[..., 0:10]
+      sorted_indices_topk = sorted_indices.shrink((None, None, (0, 10)))
       # logprobs_topk = logprobs[sorted_indices_topk]
       # return logprobs, sorted_indices_topk
-      return sorted_indices_topk
-      # return logits.topk(10)[1]
+      return sorted_indices_topk.contiguous()
+      # return logits.topk(10)[1].contiguous()
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T)
@@ -284,7 +296,7 @@ if __name__ == '__main__':
     return prg, inp_sizes, out_sizes, state
 
   def export_decoder_2():
-    reload(model.decoder, change_sd=change_sd)
+    # reload(model.decoder, change_sd=change_sd)
     embedding_dims = model.decoder.positional_embedding.shape[1]
     # x = Tensor.randint(model.decoder.max_tokens_to_sample*2, low=0, high=50256).to("WEBGPU").reshape(1, -1)
     x = Tensor.randint(DECODER_BATCH_SIZE, low=0, high=50256).to("WEBGPU").reshape(DECODER_BATCH_SIZE, -1)
@@ -293,7 +305,7 @@ if __name__ == '__main__':
       Device.DEFAULT.lower(),
       x,
       Tensor.rand(1, 1500, embedding_dims),
-      Variable("ctx", 0, model.decoder.max_tokens_to_sample*2-1).bind(1),
+      Variable("ctx", 0, model.decoder.max_tokens_to_sample*2-1).bind(0),
       Variable("off", 0, DECODER_BATCH_SIZE-1).bind(0),
       Variable("update_cache", 0, 1).bind(0),
       model_name="decoder"
