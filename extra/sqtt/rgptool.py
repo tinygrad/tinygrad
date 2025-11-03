@@ -263,7 +263,7 @@ class RGP:
         profiling_mode=sqtt.SQTT_PROFILING_MODE_PRESENT,
         instruction_trace_mode=sqtt.SQTT_INSTRUCTION_TRACE_FULL_FRAME if sqtt_itrace_enabled else sqtt.SQTT_INSTRUCTION_TRACE_DISABLED,
         instruction_trace_data=sqtt.union_sqtt_instruction_trace_data(
-          shader_engine_filter=sqtt.struct_sqtt_instruction_trace_data_shader_engine_filter(mask=sqtt_itrace_se_mask),
+          shader_engine_filter=sqtt.union_sqtt_instruction_trace_data_shader_engine_filter(mask=sqtt_itrace_se_mask),
         ),
       )),
       *flatten([(
