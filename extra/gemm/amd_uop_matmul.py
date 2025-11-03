@@ -114,15 +114,15 @@ def hand_spec_kernel3():
   # ---------------------------
   # LOCAL -> REG (per-wave tiles)
   # ---------------------------
-  Bs_view = Bs.reshape(BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)
+  Bs_view = Bs.reshape(BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)[k, waveIdx, :, idxInWave, :]
   iterWaveN = UOp.range(ITERS_PER_WAVE_N, 4)
   i = UOp.range(TN, 5)
-  B_row = B_row[iterWaveN, i].set(Bs_view[k, waveIdx, iterWaveN, idxInWave, i], end=(iterWaveN, i))
+  B_row = B_row[iterWaveN, i].set(Bs_view[iterWaveN, i], end=(iterWaveN, i))
 
-  As_view = As.reshape(BLOCK_K, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM)
+  As_view = As.reshape(BLOCK_K, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM)[k, waveIdy, :, idyInWave, :]
   iterWaveM = UOp.range(ITERS_PER_WAVE_M, 6)
   i = UOp.range(TM, 7)
-  A_col = A_col[iterWaveM, i].set(As_view[k, waveIdy, iterWaveM, idyInWave, i], end=(iterWaveM, i))
+  A_col = A_col[iterWaveM, i].set(As_view[iterWaveM, i], end=(iterWaveM, i))
 
   # ---------------------------
   # FMA: c_regs += A_col * B_row
@@ -141,12 +141,12 @@ def hand_spec_kernel3():
   # REG -> GLOBAL (epilogue)
   # ---------------------------
   c = c.reshape(WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)
+  c = c[waveIdy, :, idyInWave, :, waveIdx, :, idxInWave, :]  # select locals
   iterWaveM = UOp.range(ITERS_PER_WAVE_M, 1000)
   yt = UOp.range(TM, 1001)
   iterWaveN = UOp.range(ITERS_PER_WAVE_N, 1002)
   xt = UOp.range(TN, 1003)
-  c_glbl_idx = c[waveIdy, iterWaveM, idyInWave, yt, waveIdx, iterWaveN, idxInWave, xt]
-  sink = c_glbl_idx.store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
+  sink = c[iterWaveM, yt, iterWaveN, xt].store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
   sink = sink.end(iterWaveM, iterWaveN, yt, xt)
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
