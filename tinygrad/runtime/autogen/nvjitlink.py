@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from ctypes.util import find_library
-from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 
 def dll():
   try: return ctypes.CDLL(unwrap(find_library('nvJitLink')))
@@ -27,7 +27,7 @@ NVJITLINK_INPUT_FATBIN = nvJitLinkInputType.define('NVJITLINK_INPUT_FATBIN', 4)
 NVJITLINK_INPUT_OBJECT = nvJitLinkInputType.define('NVJITLINK_INPUT_OBJECT', 5)
 NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6)
 
-class struct_nvJitLink(ctypes.Structure): pass
+class struct_nvJitLink(Struct): pass
 nvJitLinkHandle = ctypes.POINTER(struct_nvJitLink)
 uint32_t = ctypes.c_uint
 # extern nvJitLinkResult __nvJitLinkCreate_12_0(nvJitLinkHandle *handle, uint32_t numOptions, const char **options)

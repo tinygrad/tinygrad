@@ -487,23 +487,39 @@ def CEnum(typ: type):
 
   return _CEnum
 
-# C11 gcc-compliant __attribute__((packed))
-class MetaPackedStruct(type(ctypes.Structure)): # type: ignore
+# supports gcc (C11) __attribute__((packed))
+class MetaStruct(type(ctypes.Structure)): # type: ignore
   def __new__(mcs, name, bases, dct):
-    if "_fields_" not in dct: return super().__new__(mcs, name, bases, dct)
+    fields = dct.pop("_fields_", None)
+    cls = super().__new__(mcs, name, bases, dct)
+    if dct.get("_packed_", False) and fields is not None: mcs._build(cls, fields)
+    return cls
 
-    dct['_packed_fields_'], o = dct.pop('_fields_'), 0
-    for n,t,b in [(f[0], f[1], f[2] if len(f) == 3 else 0) for f in dct['_packed_fields_']]:
+  def __setattr__(cls, k, v):
+    # FIXME: _fields_ must be set after _packed_ because PyCStructType_setattro marks _fields_ as final.
+    if k == "_fields_" and getattr(cls, "_packed_", False): type(cls)._build(cls, v)
+    elif k == "_packed_" and hasattr(cls, "_fields_"): type(cls)._build(cls, cls._fields_)
+    else: super().__setattr__(k, v)
+
+  @staticmethod
+  def _build(cls, fields):
+    print(fields)
+    o = 0
+    for n,t,b in [(f[0], f[1], f[2] if len(f) == 3 else 0) for f in fields]:
       if b == 0: o = (o + 7) & ~7
       m = (1 << (sz:=ctypes.sizeof(t)*8 if b == 0 else b)) - 1
       def _s(self,v,m,s,b): self._data[:] = ((int.from_bytes(self._data,sys.byteorder)&~(m<<s))|((v&m)<<s)).to_bytes(len(self._data), sys.byteorder)
-      dct[n] = property(functools.partial(lambda self,m,s:(int.from_bytes(self._data,sys.byteorder)>>s)&m,m=m,s=o), functools.partial(_s,m=m,s=o,b=b))
+      setattr(cls, n, property(functools.partial(lambda self,m,s:(int.from_bytes(self._data,sys.byteorder)>>s)&m,m=m,s=o),
+                               functools.partial(_s,m=m,s=o,b=b)))
       o += sz
 
-    dct['_fields_'] = [('_data', ctypes.c_ubyte * ((o + 7) // 8))]
-    return super().__new__(mcs, name, bases, dct)
+    type(ctypes.Structure).__setattr__(cls, '_fields_', [('_data', ctypes.c_ubyte * ((o + 7) // 8))])
+    type(ctypes.Structure).__setattr__(cls, '_packed_', True)
+    setattr(cls, '_packed_fields_', fields)
 
-class PackedStruct(ctypes.Structure, metaclass=MetaPackedStruct):
+class Struct(ctypes.Structure, metaclass=MetaStruct):
   def __init__(self, *args, **kwargs):
-    for f,v in zip(self._packed_fields_, args): setattr(self, f[0], v)
-    for k,v in kwargs.items(): setattr(self, k, v)
+    if hasattr(self, '_packed_fields_'):
+      for f,v in zip(self._packed_fields_, args): setattr(self, f[0], v)
+      for k,v in kwargs.items(): setattr(self, k, v)
+    else: super().__init__(*args, **kwargs)

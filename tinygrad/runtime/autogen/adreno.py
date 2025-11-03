@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 
 enum_vgt_event_type = CEnum(ctypes.c_uint)
 VS_DEALLOC = enum_vgt_event_type.define('VS_DEALLOC', 0)

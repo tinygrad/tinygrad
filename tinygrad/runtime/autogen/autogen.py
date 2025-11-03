@@ -38,7 +38,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
 
   idx, lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', os' if any('os' in s for s in dll) else ''),
                                 *(["from ctypes.util import find_library"] if any('find_library' in s for s in dll) else []),
-                                "from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR", *prolog, ""]
+                                "from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR", *prolog, ""]
   if dll: lines.extend(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass']
                                                 for d in dll]), "  return None", "dll = dll()\n"])
   macros = []
@@ -67,19 +67,21 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         if canon.kind != TK.RECORD or defined: lines.append(f"{t.spelling.replace('::', '_')} = {nm}")
         return types[t.spelling][0]
       case TK.RECORD:
+        # TODO: packed unions
+        # TODO: pragma pack support
         # check for forward declaration
         if t.spelling in types: types[t.spelling] = (nm:=types[t.spelling][0]), len(list(t.get_fields())) != 0
         else:
           if decl.is_anonymous():
             types[t.spelling] = (nm:=(suggested_name or (f"_anon{'struct' if decl.kind == CK.STRUCT_DECL else 'union'}{anoncnt()}")), True)
           else: types[t.spelling] = (nm:=t.spelling.replace(' ', '_').replace('::', '_')), len(list(t.get_fields())) != 0
-          lines.append(f"class {nm}(ctypes.{'Structure' if decl.kind==CK.STRUCT_DECL else 'Union'}): pass")
+          lines.append(f"class {nm}({'Struct' if decl.kind==CK.STRUCT_DECL else 'ctypes.Union'}): pass")
           if typedef: lines.append(f"{typedef} = {nm}")
         acnt = itertools.count().__next__
         ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
         lines.extend(([f"{nm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
-                     [f"{nm}._fields_ = [",*ll,"]"] if ll else [])
+          ([f"{nm}._packed_ = True"] * any(c.kind==CK.PACKED_ATTR for c in decl.get_children()))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
         return nm
       case TK.ENUM:
         # TODO: C++ and GNU C have forward declared enums

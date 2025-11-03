@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 
 def dll():
   try: return ctypes.CDLL(unwrap(ibverbs), use_errno=True)
@@ -10,7 +10,7 @@ dll = dll()
 
 class union_ibv_gid(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte
-class union_ibv_gid_global(ctypes.Structure): pass
+class union_ibv_gid_global(Struct): pass
 __be64 = ctypes.c_ulonglong
 union_ibv_gid_global._fields_ = [
   ('subnet_prefix', ctypes.c_ulonglong),
@@ -25,7 +25,7 @@ IBV_GID_TYPE_IB = enum_ibv_gid_type.define('IBV_GID_TYPE_IB', 0)
 IBV_GID_TYPE_ROCE_V1 = enum_ibv_gid_type.define('IBV_GID_TYPE_ROCE_V1', 1)
 IBV_GID_TYPE_ROCE_V2 = enum_ibv_gid_type.define('IBV_GID_TYPE_ROCE_V2', 2)
 
-class struct_ibv_gid_entry(ctypes.Structure): pass
+class struct_ibv_gid_entry(Struct): pass
 uint32_t = ctypes.c_uint
 struct_ibv_gid_entry._fields_ = [
   ('gid', union_ibv_gid),
@@ -88,7 +88,7 @@ IBV_ATOMIC_NONE = enum_ibv_atomic_cap.define('IBV_ATOMIC_NONE', 0)
 IBV_ATOMIC_HCA = enum_ibv_atomic_cap.define('IBV_ATOMIC_HCA', 1)
 IBV_ATOMIC_GLOB = enum_ibv_atomic_cap.define('IBV_ATOMIC_GLOB', 2)
 
-class struct_ibv_alloc_dm_attr(ctypes.Structure): pass
+class struct_ibv_alloc_dm_attr(Struct): pass
 size_t = ctypes.c_ulong
 struct_ibv_alloc_dm_attr._fields_ = [
   ('length', size_t),
@@ -98,10 +98,10 @@ struct_ibv_alloc_dm_attr._fields_ = [
 enum_ibv_dm_mask = CEnum(ctypes.c_uint)
 IBV_DM_MASK_HANDLE = enum_ibv_dm_mask.define('IBV_DM_MASK_HANDLE', 1)
 
-class struct_ibv_dm(ctypes.Structure): pass
-class struct_ibv_context(ctypes.Structure): pass
-class struct_ibv_device(ctypes.Structure): pass
-class struct__ibv_device_ops(ctypes.Structure): pass
+class struct_ibv_dm(Struct): pass
+class struct_ibv_context(Struct): pass
+class struct_ibv_device(Struct): pass
+class struct__ibv_device_ops(Struct): pass
 struct__ibv_device_ops._fields_ = [
   ('_dummy1', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device), ctypes.c_int)),
   ('_dummy2', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_context))),
@@ -115,8 +115,8 @@ struct_ibv_device._fields_ = [
   ('dev_path', (ctypes.c_char * 256)),
   ('ibdev_path', (ctypes.c_char * 256)),
 ]
-class struct_ibv_context_ops(ctypes.Structure): pass
-class struct_ibv_device_attr(ctypes.Structure): pass
+class struct_ibv_context_ops(Struct): pass
+class struct_ibv_device_attr(Struct): pass
 uint64_t = ctypes.c_ulong
 uint16_t = ctypes.c_ushort
 struct_ibv_device_attr._fields_ = [
@@ -161,9 +161,9 @@ struct_ibv_device_attr._fields_ = [
   ('local_ca_ack_delay', uint8_t),
   ('phys_port_cnt', uint8_t),
 ]
-class struct__compat_ibv_port_attr(ctypes.Structure): pass
-class struct_ibv_mw(ctypes.Structure): pass
-class struct_ibv_pd(ctypes.Structure): pass
+class struct__compat_ibv_port_attr(Struct): pass
+class struct_ibv_mw(Struct): pass
+class struct_ibv_pd(Struct): pass
 struct_ibv_pd._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
   ('handle', uint32_t),
@@ -179,17 +179,17 @@ struct_ibv_mw._fields_ = [
   ('handle', uint32_t),
   ('type', enum_ibv_mw_type),
 ]
-class struct_ibv_qp(ctypes.Structure): pass
-class struct_ibv_cq(ctypes.Structure): pass
-class struct_ibv_comp_channel(ctypes.Structure): pass
+class struct_ibv_qp(Struct): pass
+class struct_ibv_cq(Struct): pass
+class struct_ibv_comp_channel(Struct): pass
 struct_ibv_comp_channel._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
   ('fd', ctypes.c_int),
   ('refcnt', ctypes.c_int),
 ]
 class pthread_mutex_t(ctypes.Union): pass
-class struct___pthread_mutex_s(ctypes.Structure): pass
-class struct___pthread_internal_list(ctypes.Structure): pass
+class struct___pthread_mutex_s(Struct): pass
+class struct___pthread_internal_list(Struct): pass
 __pthread_list_t = struct___pthread_internal_list
 struct___pthread_internal_list._fields_ = [
   ('__prev', ctypes.POINTER(struct___pthread_internal_list)),
@@ -211,9 +211,9 @@ pthread_mutex_t._fields_ = [
   ('__align', ctypes.c_long),
 ]
 class pthread_cond_t(ctypes.Union): pass
-class struct___pthread_cond_s(ctypes.Structure): pass
+class struct___pthread_cond_s(Struct): pass
 class __atomic_wide_counter(ctypes.Union): pass
-class __atomic_wide_counter___value32(ctypes.Structure): pass
+class __atomic_wide_counter___value32(Struct): pass
 __atomic_wide_counter___value32._fields_ = [
   ('__low', ctypes.c_uint),
   ('__high', ctypes.c_uint),
@@ -247,7 +247,7 @@ struct_ibv_cq._fields_ = [
   ('comp_events_completed', uint32_t),
   ('async_events_completed', uint32_t),
 ]
-class struct_ibv_srq(ctypes.Structure): pass
+class struct_ibv_srq(Struct): pass
 struct_ibv_srq._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
   ('srq_context', ctypes.c_void_p),
@@ -291,9 +291,9 @@ struct_ibv_qp._fields_ = [
   ('cond', pthread_cond_t),
   ('events_completed', uint32_t),
 ]
-class struct_ibv_mw_bind(ctypes.Structure): pass
-class struct_ibv_mw_bind_info(ctypes.Structure): pass
-class struct_ibv_mr(ctypes.Structure): pass
+class struct_ibv_mw_bind(Struct): pass
+class struct_ibv_mw_bind_info(Struct): pass
+class struct_ibv_mr(Struct): pass
 struct_ibv_mr._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
   ('pd', ctypes.POINTER(struct_ibv_pd)),
@@ -314,7 +314,7 @@ struct_ibv_mw_bind._fields_ = [
   ('send_flags', ctypes.c_uint),
   ('bind_info', struct_ibv_mw_bind_info),
 ]
-class struct_ibv_wc(ctypes.Structure): pass
+class struct_ibv_wc(Struct): pass
 enum_ibv_wc_status = CEnum(ctypes.c_uint)
 IBV_WC_SUCCESS = enum_ibv_wc_status.define('IBV_WC_SUCCESS', 0)
 IBV_WC_LOC_LEN_ERR = enum_ibv_wc_status.define('IBV_WC_LOC_LEN_ERR', 1)
@@ -385,8 +385,8 @@ struct_ibv_wc._fields_ = [
   ('sl', uint8_t),
   ('dlid_path_bits', uint8_t),
 ]
-class struct_ibv_recv_wr(ctypes.Structure): pass
-class struct_ibv_sge(ctypes.Structure): pass
+class struct_ibv_recv_wr(Struct): pass
+class struct_ibv_sge(Struct): pass
 struct_ibv_sge._fields_ = [
   ('addr', uint64_t),
   ('length', uint32_t),
@@ -398,7 +398,7 @@ struct_ibv_recv_wr._fields_ = [
   ('sg_list', ctypes.POINTER(struct_ibv_sge)),
   ('num_sge', ctypes.c_int),
 ]
-class struct_ibv_send_wr(ctypes.Structure): pass
+class struct_ibv_send_wr(Struct): pass
 enum_ibv_wr_opcode = CEnum(ctypes.c_uint)
 IBV_WR_RDMA_WRITE = enum_ibv_wr_opcode.define('IBV_WR_RDMA_WRITE', 0)
 IBV_WR_RDMA_WRITE_WITH_IMM = enum_ibv_wr_opcode.define('IBV_WR_RDMA_WRITE_WITH_IMM', 1)
@@ -421,20 +421,20 @@ struct_ibv_send_wr_0._fields_ = [
   ('invalidate_rkey', uint32_t),
 ]
 class struct_ibv_send_wr_wr(ctypes.Union): pass
-class struct_ibv_send_wr_wr_rdma(ctypes.Structure): pass
+class struct_ibv_send_wr_wr_rdma(Struct): pass
 struct_ibv_send_wr_wr_rdma._fields_ = [
   ('remote_addr', uint64_t),
   ('rkey', uint32_t),
 ]
-class struct_ibv_send_wr_wr_atomic(ctypes.Structure): pass
+class struct_ibv_send_wr_wr_atomic(Struct): pass
 struct_ibv_send_wr_wr_atomic._fields_ = [
   ('remote_addr', uint64_t),
   ('compare_add', uint64_t),
   ('swap', uint64_t),
   ('rkey', uint32_t),
 ]
-class struct_ibv_send_wr_wr_ud(ctypes.Structure): pass
-class struct_ibv_ah(ctypes.Structure): pass
+class struct_ibv_send_wr_wr_ud(Struct): pass
+class struct_ibv_ah(Struct): pass
 struct_ibv_ah._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
   ('pd', ctypes.POINTER(struct_ibv_pd)),
@@ -451,7 +451,7 @@ struct_ibv_send_wr_wr._fields_ = [
   ('ud', struct_ibv_send_wr_wr_ud),
 ]
 class struct_ibv_send_wr_qp_type(ctypes.Union): pass
-class struct_ibv_send_wr_qp_type_xrc(ctypes.Structure): pass
+class struct_ibv_send_wr_qp_type_xrc(Struct): pass
 struct_ibv_send_wr_qp_type_xrc._fields_ = [
   ('remote_srqn', uint32_t),
 ]
@@ -459,13 +459,13 @@ struct_ibv_send_wr_qp_type._fields_ = [
   ('xrc', struct_ibv_send_wr_qp_type_xrc),
 ]
 class struct_ibv_send_wr_1(ctypes.Union): pass
-class struct_ibv_send_wr_1_bind_mw(ctypes.Structure): pass
+class struct_ibv_send_wr_1_bind_mw(Struct): pass
 struct_ibv_send_wr_1_bind_mw._fields_ = [
   ('mw', ctypes.POINTER(struct_ibv_mw)),
   ('rkey', uint32_t),
   ('bind_info', struct_ibv_mw_bind_info),
 ]
-class struct_ibv_send_wr_1_tso(ctypes.Structure): pass
+class struct_ibv_send_wr_1_tso(Struct): pass
 struct_ibv_send_wr_1_tso._fields_ = [
   ('hdr', ctypes.c_void_p),
   ('hdr_sz', uint16_t),
@@ -538,7 +538,7 @@ struct_ibv_dm._fields_ = [
   ('comp_mask', uint32_t),
   ('handle', uint32_t),
 ]
-class struct_ibv_query_device_ex_input(ctypes.Structure): pass
+class struct_ibv_query_device_ex_input(Struct): pass
 struct_ibv_query_device_ex_input._fields_ = [
   ('comp_mask', uint32_t),
 ]
@@ -550,8 +550,8 @@ IBV_ODP_SUPPORT_READ = enum_ibv_odp_transport_cap_bits.define('IBV_ODP_SUPPORT_R
 IBV_ODP_SUPPORT_ATOMIC = enum_ibv_odp_transport_cap_bits.define('IBV_ODP_SUPPORT_ATOMIC', 16)
 IBV_ODP_SUPPORT_SRQ_RECV = enum_ibv_odp_transport_cap_bits.define('IBV_ODP_SUPPORT_SRQ_RECV', 32)
 
-class struct_ibv_odp_caps(ctypes.Structure): pass
-class struct_ibv_odp_caps_per_transport_caps(ctypes.Structure): pass
+class struct_ibv_odp_caps(Struct): pass
+class struct_ibv_odp_caps_per_transport_caps(Struct): pass
 struct_ibv_odp_caps_per_transport_caps._fields_ = [
   ('rc_odp_caps', uint32_t),
   ('uc_odp_caps', uint32_t),
@@ -565,7 +565,7 @@ enum_ibv_odp_general_caps = CEnum(ctypes.c_uint)
 IBV_ODP_SUPPORT = enum_ibv_odp_general_caps.define('IBV_ODP_SUPPORT', 1)
 IBV_ODP_SUPPORT_IMPLICIT = enum_ibv_odp_general_caps.define('IBV_ODP_SUPPORT_IMPLICIT', 2)
 
-class struct_ibv_tso_caps(ctypes.Structure): pass
+class struct_ibv_tso_caps(Struct): pass
 struct_ibv_tso_caps._fields_ = [
   ('max_tso', uint32_t),
   ('supported_qpts', uint32_t),
@@ -585,7 +585,7 @@ IBV_RX_HASH_DST_PORT_UDP = enum_ibv_rx_hash_fields.define('IBV_RX_HASH_DST_PORT_
 IBV_RX_HASH_IPSEC_SPI = enum_ibv_rx_hash_fields.define('IBV_RX_HASH_IPSEC_SPI', 256)
 IBV_RX_HASH_INNER = enum_ibv_rx_hash_fields.define('IBV_RX_HASH_INNER', 2147483648)
 
-class struct_ibv_rss_caps(ctypes.Structure): pass
+class struct_ibv_rss_caps(Struct): pass
 struct_ibv_rss_caps._fields_ = [
   ('supported_qpts', uint32_t),
   ('max_rwq_indirection_tables', uint32_t),
@@ -593,7 +593,7 @@ struct_ibv_rss_caps._fields_ = [
   ('rx_hash_fields_mask', uint64_t),
   ('rx_hash_function', uint8_t),
 ]
-class struct_ibv_packet_pacing_caps(ctypes.Structure): pass
+class struct_ibv_packet_pacing_caps(Struct): pass
 struct_ibv_packet_pacing_caps._fields_ = [
   ('qp_rate_limit_min', uint32_t),
   ('qp_rate_limit_max', uint32_t),
@@ -608,7 +608,7 @@ IBV_RAW_PACKET_CAP_DELAY_DROP = enum_ibv_raw_packet_caps.define('IBV_RAW_PACKET_
 enum_ibv_tm_cap_flags = CEnum(ctypes.c_uint)
 IBV_TM_CAP_RC = enum_ibv_tm_cap_flags.define('IBV_TM_CAP_RC', 1)
 
-class struct_ibv_tm_caps(ctypes.Structure): pass
+class struct_ibv_tm_caps(Struct): pass
 struct_ibv_tm_caps._fields_ = [
   ('max_rndv_hdr_size', uint32_t),
   ('max_num_tags', uint32_t),
@@ -616,7 +616,7 @@ struct_ibv_tm_caps._fields_ = [
   ('max_ops', uint32_t),
   ('max_sge', uint32_t),
 ]
-class struct_ibv_cq_moderation_caps(ctypes.Structure): pass
+class struct_ibv_cq_moderation_caps(Struct): pass
 struct_ibv_cq_moderation_caps._fields_ = [
   ('max_cq_count', uint16_t),
   ('max_cq_period', uint16_t),
@@ -626,13 +626,13 @@ IBV_PCI_ATOMIC_OPERATION_4_BYTE_SIZE_SUP = enum_ibv_pci_atomic_op_size.define('I
 IBV_PCI_ATOMIC_OPERATION_8_BYTE_SIZE_SUP = enum_ibv_pci_atomic_op_size.define('IBV_PCI_ATOMIC_OPERATION_8_BYTE_SIZE_SUP', 2)
 IBV_PCI_ATOMIC_OPERATION_16_BYTE_SIZE_SUP = enum_ibv_pci_atomic_op_size.define('IBV_PCI_ATOMIC_OPERATION_16_BYTE_SIZE_SUP', 4)
 
-class struct_ibv_pci_atomic_caps(ctypes.Structure): pass
+class struct_ibv_pci_atomic_caps(Struct): pass
 struct_ibv_pci_atomic_caps._fields_ = [
   ('fetch_add', uint16_t),
   ('swap', uint16_t),
   ('compare_swap', uint16_t),
 ]
-class struct_ibv_device_attr_ex(ctypes.Structure): pass
+class struct_ibv_device_attr_ex(Struct): pass
 struct_ibv_device_attr_ex._fields_ = [
   ('orig_attr', struct_ibv_device_attr),
   ('comp_mask', uint32_t),
@@ -708,7 +708,7 @@ IBV_PORT_LINK_SPEED_HDR_SUP = enum_ibv_port_cap_flags2.define('IBV_PORT_LINK_SPE
 IBV_PORT_LINK_SPEED_NDR_SUP = enum_ibv_port_cap_flags2.define('IBV_PORT_LINK_SPEED_NDR_SUP', 1024)
 IBV_PORT_LINK_SPEED_XDR_SUP = enum_ibv_port_cap_flags2.define('IBV_PORT_LINK_SPEED_XDR_SUP', 4096)
 
-class struct_ibv_port_attr(ctypes.Structure): pass
+class struct_ibv_port_attr(Struct): pass
 struct_ibv_port_attr._fields_ = [
   ('state', enum_ibv_port_state),
   ('max_mtu', enum_ibv_mtu),
@@ -756,9 +756,9 @@ IBV_EVENT_CLIENT_REREGISTER = enum_ibv_event_type.define('IBV_EVENT_CLIENT_REREG
 IBV_EVENT_GID_CHANGE = enum_ibv_event_type.define('IBV_EVENT_GID_CHANGE', 18)
 IBV_EVENT_WQ_FATAL = enum_ibv_event_type.define('IBV_EVENT_WQ_FATAL', 19)
 
-class struct_ibv_async_event(ctypes.Structure): pass
+class struct_ibv_async_event(Struct): pass
 class struct_ibv_async_event_element(ctypes.Union): pass
-class struct_ibv_wq(ctypes.Structure): pass
+class struct_ibv_wq(Struct): pass
 enum_ibv_wq_state = CEnum(ctypes.c_uint)
 IBV_WQS_RESET = enum_ibv_wq_state.define('IBV_WQS_RESET', 0)
 IBV_WQS_RDY = enum_ibv_wq_state.define('IBV_WQS_RDY', 1)
@@ -843,11 +843,11 @@ IBV_ACCESS_FLUSH_GLOBAL = enum_ibv_access_flags.define('IBV_ACCESS_FLUSH_GLOBAL'
 IBV_ACCESS_FLUSH_PERSISTENT = enum_ibv_access_flags.define('IBV_ACCESS_FLUSH_PERSISTENT', 512)
 IBV_ACCESS_RELAXED_ORDERING = enum_ibv_access_flags.define('IBV_ACCESS_RELAXED_ORDERING', 1048576)
 
-class struct_ibv_td_init_attr(ctypes.Structure): pass
+class struct_ibv_td_init_attr(Struct): pass
 struct_ibv_td_init_attr._fields_ = [
   ('comp_mask', uint32_t),
 ]
-class struct_ibv_td(ctypes.Structure): pass
+class struct_ibv_td(Struct): pass
 struct_ibv_td._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
 ]
@@ -856,13 +856,13 @@ IBV_XRCD_INIT_ATTR_FD = enum_ibv_xrcd_init_attr_mask.define('IBV_XRCD_INIT_ATTR_
 IBV_XRCD_INIT_ATTR_OFLAGS = enum_ibv_xrcd_init_attr_mask.define('IBV_XRCD_INIT_ATTR_OFLAGS', 2)
 IBV_XRCD_INIT_ATTR_RESERVED = enum_ibv_xrcd_init_attr_mask.define('IBV_XRCD_INIT_ATTR_RESERVED', 4)
 
-class struct_ibv_xrcd_init_attr(ctypes.Structure): pass
+class struct_ibv_xrcd_init_attr(Struct): pass
 struct_ibv_xrcd_init_attr._fields_ = [
   ('comp_mask', uint32_t),
   ('fd', ctypes.c_int),
   ('oflags', ctypes.c_int),
 ]
-class struct_ibv_xrcd(ctypes.Structure): pass
+class struct_ibv_xrcd(Struct): pass
 struct_ibv_xrcd._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
 ]
@@ -872,7 +872,7 @@ IBV_REREG_MR_CHANGE_PD = enum_ibv_rereg_mr_flags.define('IBV_REREG_MR_CHANGE_PD'
 IBV_REREG_MR_CHANGE_ACCESS = enum_ibv_rereg_mr_flags.define('IBV_REREG_MR_CHANGE_ACCESS', 4)
 IBV_REREG_MR_FLAGS_SUPPORTED = enum_ibv_rereg_mr_flags.define('IBV_REREG_MR_FLAGS_SUPPORTED', 7)
 
-class struct_ibv_global_route(ctypes.Structure): pass
+class struct_ibv_global_route(Struct): pass
 struct_ibv_global_route._fields_ = [
   ('dgid', union_ibv_gid),
   ('flow_label', uint32_t),
@@ -880,7 +880,7 @@ struct_ibv_global_route._fields_ = [
   ('hop_limit', uint8_t),
   ('traffic_class', uint8_t),
 ]
-class struct_ibv_grh(ctypes.Structure): pass
+class struct_ibv_grh(Struct): pass
 __be16 = ctypes.c_ushort
 struct_ibv_grh._fields_ = [
   ('version_tclass_flow', ctypes.c_uint),
@@ -932,7 +932,7 @@ except AttributeError: pass
 try: (mbps_to_ibv_rate:=dll.mbps_to_ibv_rate).restype, mbps_to_ibv_rate.argtypes = enum_ibv_rate, [ctypes.c_int]
 except AttributeError: pass
 
-class struct_ibv_ah_attr(ctypes.Structure): pass
+class struct_ibv_ah_attr(Struct): pass
 struct_ibv_ah_attr._fields_ = [
   ('grh', struct_ibv_global_route),
   ('dlid', uint16_t),
@@ -946,13 +946,13 @@ enum_ibv_srq_attr_mask = CEnum(ctypes.c_uint)
 IBV_SRQ_MAX_WR = enum_ibv_srq_attr_mask.define('IBV_SRQ_MAX_WR', 1)
 IBV_SRQ_LIMIT = enum_ibv_srq_attr_mask.define('IBV_SRQ_LIMIT', 2)
 
-class struct_ibv_srq_attr(ctypes.Structure): pass
+class struct_ibv_srq_attr(Struct): pass
 struct_ibv_srq_attr._fields_ = [
   ('max_wr', uint32_t),
   ('max_sge', uint32_t),
   ('srq_limit', uint32_t),
 ]
-class struct_ibv_srq_init_attr(ctypes.Structure): pass
+class struct_ibv_srq_init_attr(Struct): pass
 struct_ibv_srq_init_attr._fields_ = [
   ('srq_context', ctypes.c_void_p),
   ('attr', struct_ibv_srq_attr),
@@ -970,12 +970,12 @@ IBV_SRQ_INIT_ATTR_CQ = enum_ibv_srq_init_attr_mask.define('IBV_SRQ_INIT_ATTR_CQ'
 IBV_SRQ_INIT_ATTR_TM = enum_ibv_srq_init_attr_mask.define('IBV_SRQ_INIT_ATTR_TM', 16)
 IBV_SRQ_INIT_ATTR_RESERVED = enum_ibv_srq_init_attr_mask.define('IBV_SRQ_INIT_ATTR_RESERVED', 32)
 
-class struct_ibv_tm_cap(ctypes.Structure): pass
+class struct_ibv_tm_cap(Struct): pass
 struct_ibv_tm_cap._fields_ = [
   ('max_num_tags', uint32_t),
   ('max_ops', uint32_t),
 ]
-class struct_ibv_srq_init_attr_ex(ctypes.Structure): pass
+class struct_ibv_srq_init_attr_ex(Struct): pass
 struct_ibv_srq_init_attr_ex._fields_ = [
   ('srq_context', ctypes.c_void_p),
   ('attr', struct_ibv_srq_attr),
@@ -997,7 +997,7 @@ IBV_WQ_FLAGS_DELAY_DROP = enum_ibv_wq_flags.define('IBV_WQ_FLAGS_DELAY_DROP', 4)
 IBV_WQ_FLAGS_PCI_WRITE_END_PADDING = enum_ibv_wq_flags.define('IBV_WQ_FLAGS_PCI_WRITE_END_PADDING', 8)
 IBV_WQ_FLAGS_RESERVED = enum_ibv_wq_flags.define('IBV_WQ_FLAGS_RESERVED', 16)
 
-class struct_ibv_wq_init_attr(ctypes.Structure): pass
+class struct_ibv_wq_init_attr(Struct): pass
 struct_ibv_wq_init_attr._fields_ = [
   ('wq_context', ctypes.c_void_p),
   ('wq_type', enum_ibv_wq_type),
@@ -1014,7 +1014,7 @@ IBV_WQ_ATTR_CURR_STATE = enum_ibv_wq_attr_mask.define('IBV_WQ_ATTR_CURR_STATE', 
 IBV_WQ_ATTR_FLAGS = enum_ibv_wq_attr_mask.define('IBV_WQ_ATTR_FLAGS', 4)
 IBV_WQ_ATTR_RESERVED = enum_ibv_wq_attr_mask.define('IBV_WQ_ATTR_RESERVED', 8)
 
-class struct_ibv_wq_attr(ctypes.Structure): pass
+class struct_ibv_wq_attr(Struct): pass
 struct_ibv_wq_attr._fields_ = [
   ('attr_mask', uint32_t),
   ('wq_state', enum_ibv_wq_state),
@@ -1022,7 +1022,7 @@ struct_ibv_wq_attr._fields_ = [
   ('flags', uint32_t),
   ('flags_mask', uint32_t),
 ]
-class struct_ibv_rwq_ind_table(ctypes.Structure): pass
+class struct_ibv_rwq_ind_table(Struct): pass
 struct_ibv_rwq_ind_table._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
   ('ind_tbl_handle', ctypes.c_int),
@@ -1032,13 +1032,13 @@ struct_ibv_rwq_ind_table._fields_ = [
 enum_ibv_ind_table_init_attr_mask = CEnum(ctypes.c_uint)
 IBV_CREATE_IND_TABLE_RESERVED = enum_ibv_ind_table_init_attr_mask.define('IBV_CREATE_IND_TABLE_RESERVED', 1)
 
-class struct_ibv_rwq_ind_table_init_attr(ctypes.Structure): pass
+class struct_ibv_rwq_ind_table_init_attr(Struct): pass
 struct_ibv_rwq_ind_table_init_attr._fields_ = [
   ('log_ind_tbl_size', uint32_t),
   ('ind_tbl', ctypes.POINTER(ctypes.POINTER(struct_ibv_wq))),
   ('comp_mask', uint32_t),
 ]
-class struct_ibv_qp_cap(ctypes.Structure): pass
+class struct_ibv_qp_cap(Struct): pass
 struct_ibv_qp_cap._fields_ = [
   ('max_send_wr', uint32_t),
   ('max_recv_wr', uint32_t),
@@ -1046,7 +1046,7 @@ struct_ibv_qp_cap._fields_ = [
   ('max_recv_sge', uint32_t),
   ('max_inline_data', uint32_t),
 ]
-class struct_ibv_qp_init_attr(ctypes.Structure): pass
+class struct_ibv_qp_init_attr(Struct): pass
 struct_ibv_qp_init_attr._fields_ = [
   ('qp_context', ctypes.c_void_p),
   ('send_cq', ctypes.POINTER(struct_ibv_cq)),
@@ -1087,14 +1087,14 @@ IBV_QP_EX_WITH_TSO = enum_ibv_qp_create_send_ops_flags.define('IBV_QP_EX_WITH_TS
 IBV_QP_EX_WITH_FLUSH = enum_ibv_qp_create_send_ops_flags.define('IBV_QP_EX_WITH_FLUSH', 2048)
 IBV_QP_EX_WITH_ATOMIC_WRITE = enum_ibv_qp_create_send_ops_flags.define('IBV_QP_EX_WITH_ATOMIC_WRITE', 4096)
 
-class struct_ibv_rx_hash_conf(ctypes.Structure): pass
+class struct_ibv_rx_hash_conf(Struct): pass
 struct_ibv_rx_hash_conf._fields_ = [
   ('rx_hash_function', uint8_t),
   ('rx_hash_key_len', uint8_t),
   ('rx_hash_key', ctypes.POINTER(uint8_t)),
   ('rx_hash_fields_mask', uint64_t),
 ]
-class struct_ibv_qp_init_attr_ex(ctypes.Structure): pass
+class struct_ibv_qp_init_attr_ex(Struct): pass
 struct_ibv_qp_init_attr_ex._fields_ = [
   ('qp_context', ctypes.c_void_p),
   ('send_cq', ctypes.POINTER(struct_ibv_cq)),
@@ -1120,7 +1120,7 @@ IBV_QP_OPEN_ATTR_CONTEXT = enum_ibv_qp_open_attr_mask.define('IBV_QP_OPEN_ATTR_C
 IBV_QP_OPEN_ATTR_TYPE = enum_ibv_qp_open_attr_mask.define('IBV_QP_OPEN_ATTR_TYPE', 8)
 IBV_QP_OPEN_ATTR_RESERVED = enum_ibv_qp_open_attr_mask.define('IBV_QP_OPEN_ATTR_RESERVED', 16)
 
-class struct_ibv_qp_open_attr(ctypes.Structure): pass
+class struct_ibv_qp_open_attr(Struct): pass
 struct_ibv_qp_open_attr._fields_ = [
   ('comp_mask', uint32_t),
   ('qp_num', uint32_t),
@@ -1164,7 +1164,7 @@ IBV_MIG_MIGRATED = enum_ibv_mig_state.define('IBV_MIG_MIGRATED', 0)
 IBV_MIG_REARM = enum_ibv_mig_state.define('IBV_MIG_REARM', 1)
 IBV_MIG_ARMED = enum_ibv_mig_state.define('IBV_MIG_ARMED', 2)
 
-class struct_ibv_qp_attr(ctypes.Structure): pass
+class struct_ibv_qp_attr(Struct): pass
 struct_ibv_qp_attr._fields_ = [
   ('qp_state', enum_ibv_qp_state),
   ('cur_qp_state', enum_ibv_qp_state),
@@ -1193,7 +1193,7 @@ struct_ibv_qp_attr._fields_ = [
   ('alt_timeout', uint8_t),
   ('rate_limit', uint32_t),
 ]
-class struct_ibv_qp_rate_limit_attr(ctypes.Structure): pass
+class struct_ibv_qp_rate_limit_attr(Struct): pass
 struct_ibv_qp_rate_limit_attr._fields_ = [
   ('rate_limit', uint32_t),
   ('max_burst_sz', uint32_t),
@@ -1219,7 +1219,7 @@ enum_ibv_selectivity_level = CEnum(ctypes.c_uint)
 IBV_FLUSH_RANGE = enum_ibv_selectivity_level.define('IBV_FLUSH_RANGE', 0)
 IBV_FLUSH_MR = enum_ibv_selectivity_level.define('IBV_FLUSH_MR', 1)
 
-class struct_ibv_data_buf(ctypes.Structure): pass
+class struct_ibv_data_buf(Struct): pass
 struct_ibv_data_buf._fields_ = [
   ('addr', ctypes.c_void_p),
   ('length', size_t),
@@ -1233,9 +1233,9 @@ enum_ibv_ops_flags = CEnum(ctypes.c_uint)
 IBV_OPS_SIGNALED = enum_ibv_ops_flags.define('IBV_OPS_SIGNALED', 1)
 IBV_OPS_TM_SYNC = enum_ibv_ops_flags.define('IBV_OPS_TM_SYNC', 2)
 
-class struct_ibv_ops_wr(ctypes.Structure): pass
-class struct_ibv_ops_wr_tm(ctypes.Structure): pass
-class struct_ibv_ops_wr_tm_add(ctypes.Structure): pass
+class struct_ibv_ops_wr(Struct): pass
+class struct_ibv_ops_wr_tm(Struct): pass
+class struct_ibv_ops_wr_tm_add(Struct): pass
 struct_ibv_ops_wr_tm_add._fields_ = [
   ('recv_wr_id', uint64_t),
   ('sg_list', ctypes.POINTER(struct_ibv_sge)),
@@ -1255,7 +1255,7 @@ struct_ibv_ops_wr._fields_ = [
   ('flags', ctypes.c_int),
   ('tm', struct_ibv_ops_wr_tm),
 ]
-class struct_ibv_qp_ex(ctypes.Structure): pass
+class struct_ibv_qp_ex(Struct): pass
 struct_ibv_qp_ex._fields_ = [
   ('qp_base', struct_ibv_qp),
   ('comp_mask', uint64_t),
@@ -1288,22 +1288,22 @@ struct_ibv_qp_ex._fields_ = [
 try: (ibv_qp_to_qp_ex:=dll.ibv_qp_to_qp_ex).restype, ibv_qp_to_qp_ex.argtypes = ctypes.POINTER(struct_ibv_qp_ex), [ctypes.POINTER(struct_ibv_qp)]
 except AttributeError: pass
 
-class struct_ibv_ece(ctypes.Structure): pass
+class struct_ibv_ece(Struct): pass
 struct_ibv_ece._fields_ = [
   ('vendor_id', uint32_t),
   ('options', uint32_t),
   ('comp_mask', uint32_t),
 ]
-class struct_ibv_poll_cq_attr(ctypes.Structure): pass
+class struct_ibv_poll_cq_attr(Struct): pass
 struct_ibv_poll_cq_attr._fields_ = [
   ('comp_mask', uint32_t),
 ]
-class struct_ibv_wc_tm_info(ctypes.Structure): pass
+class struct_ibv_wc_tm_info(Struct): pass
 struct_ibv_wc_tm_info._fields_ = [
   ('tag', uint64_t),
   ('priv', uint32_t),
 ]
-class struct_ibv_cq_ex(ctypes.Structure): pass
+class struct_ibv_cq_ex(Struct): pass
 struct_ibv_cq_ex._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
   ('channel', ctypes.POINTER(struct_ibv_comp_channel)),
@@ -1340,12 +1340,12 @@ enum_ibv_cq_attr_mask = CEnum(ctypes.c_uint)
 IBV_CQ_ATTR_MODERATE = enum_ibv_cq_attr_mask.define('IBV_CQ_ATTR_MODERATE', 1)
 IBV_CQ_ATTR_RESERVED = enum_ibv_cq_attr_mask.define('IBV_CQ_ATTR_RESERVED', 2)
 
-class struct_ibv_moderate_cq(ctypes.Structure): pass
+class struct_ibv_moderate_cq(Struct): pass
 struct_ibv_moderate_cq._fields_ = [
   ('cq_count', uint16_t),
   ('cq_period', uint16_t),
 ]
-class struct_ibv_modify_cq_attr(ctypes.Structure): pass
+class struct_ibv_modify_cq_attr(Struct): pass
 struct_ibv_modify_cq_attr._fields_ = [
   ('attr_mask', uint32_t),
   ('moderate', struct_ibv_moderate_cq),
@@ -1377,33 +1377,33 @@ IBV_FLOW_SPEC_ACTION_DROP = enum_ibv_flow_spec_type.define('IBV_FLOW_SPEC_ACTION
 IBV_FLOW_SPEC_ACTION_HANDLE = enum_ibv_flow_spec_type.define('IBV_FLOW_SPEC_ACTION_HANDLE', 4098)
 IBV_FLOW_SPEC_ACTION_COUNT = enum_ibv_flow_spec_type.define('IBV_FLOW_SPEC_ACTION_COUNT', 4099)
 
-class struct_ibv_flow_eth_filter(ctypes.Structure): pass
+class struct_ibv_flow_eth_filter(Struct): pass
 struct_ibv_flow_eth_filter._fields_ = [
   ('dst_mac', (uint8_t * 6)),
   ('src_mac', (uint8_t * 6)),
   ('ether_type', uint16_t),
   ('vlan_tag', uint16_t),
 ]
-class struct_ibv_flow_spec_eth(ctypes.Structure): pass
+class struct_ibv_flow_spec_eth(Struct): pass
 struct_ibv_flow_spec_eth._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_eth_filter),
   ('mask', struct_ibv_flow_eth_filter),
 ]
-class struct_ibv_flow_ipv4_filter(ctypes.Structure): pass
+class struct_ibv_flow_ipv4_filter(Struct): pass
 struct_ibv_flow_ipv4_filter._fields_ = [
   ('src_ip', uint32_t),
   ('dst_ip', uint32_t),
 ]
-class struct_ibv_flow_spec_ipv4(ctypes.Structure): pass
+class struct_ibv_flow_spec_ipv4(Struct): pass
 struct_ibv_flow_spec_ipv4._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_ipv4_filter),
   ('mask', struct_ibv_flow_ipv4_filter),
 ]
-class struct_ibv_flow_ipv4_ext_filter(ctypes.Structure): pass
+class struct_ibv_flow_ipv4_ext_filter(Struct): pass
 struct_ibv_flow_ipv4_ext_filter._fields_ = [
   ('src_ip', uint32_t),
   ('dst_ip', uint32_t),
@@ -1412,14 +1412,14 @@ struct_ibv_flow_ipv4_ext_filter._fields_ = [
   ('ttl', uint8_t),
   ('flags', uint8_t),
 ]
-class struct_ibv_flow_spec_ipv4_ext(ctypes.Structure): pass
+class struct_ibv_flow_spec_ipv4_ext(Struct): pass
 struct_ibv_flow_spec_ipv4_ext._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_ipv4_ext_filter),
   ('mask', struct_ibv_flow_ipv4_ext_filter),
 ]
-class struct_ibv_flow_ipv6_filter(ctypes.Structure): pass
+class struct_ibv_flow_ipv6_filter(Struct): pass
 struct_ibv_flow_ipv6_filter._fields_ = [
   ('src_ip', (uint8_t * 16)),
   ('dst_ip', (uint8_t * 16)),
@@ -1428,85 +1428,85 @@ struct_ibv_flow_ipv6_filter._fields_ = [
   ('traffic_class', uint8_t),
   ('hop_limit', uint8_t),
 ]
-class struct_ibv_flow_spec_ipv6(ctypes.Structure): pass
+class struct_ibv_flow_spec_ipv6(Struct): pass
 struct_ibv_flow_spec_ipv6._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_ipv6_filter),
   ('mask', struct_ibv_flow_ipv6_filter),
 ]
-class struct_ibv_flow_esp_filter(ctypes.Structure): pass
+class struct_ibv_flow_esp_filter(Struct): pass
 struct_ibv_flow_esp_filter._fields_ = [
   ('spi', uint32_t),
   ('seq', uint32_t),
 ]
-class struct_ibv_flow_spec_esp(ctypes.Structure): pass
+class struct_ibv_flow_spec_esp(Struct): pass
 struct_ibv_flow_spec_esp._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_esp_filter),
   ('mask', struct_ibv_flow_esp_filter),
 ]
-class struct_ibv_flow_tcp_udp_filter(ctypes.Structure): pass
+class struct_ibv_flow_tcp_udp_filter(Struct): pass
 struct_ibv_flow_tcp_udp_filter._fields_ = [
   ('dst_port', uint16_t),
   ('src_port', uint16_t),
 ]
-class struct_ibv_flow_spec_tcp_udp(ctypes.Structure): pass
+class struct_ibv_flow_spec_tcp_udp(Struct): pass
 struct_ibv_flow_spec_tcp_udp._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_tcp_udp_filter),
   ('mask', struct_ibv_flow_tcp_udp_filter),
 ]
-class struct_ibv_flow_gre_filter(ctypes.Structure): pass
+class struct_ibv_flow_gre_filter(Struct): pass
 struct_ibv_flow_gre_filter._fields_ = [
   ('c_ks_res0_ver', uint16_t),
   ('protocol', uint16_t),
   ('key', uint32_t),
 ]
-class struct_ibv_flow_spec_gre(ctypes.Structure): pass
+class struct_ibv_flow_spec_gre(Struct): pass
 struct_ibv_flow_spec_gre._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_gre_filter),
   ('mask', struct_ibv_flow_gre_filter),
 ]
-class struct_ibv_flow_mpls_filter(ctypes.Structure): pass
+class struct_ibv_flow_mpls_filter(Struct): pass
 struct_ibv_flow_mpls_filter._fields_ = [
   ('label', uint32_t),
 ]
-class struct_ibv_flow_spec_mpls(ctypes.Structure): pass
+class struct_ibv_flow_spec_mpls(Struct): pass
 struct_ibv_flow_spec_mpls._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_mpls_filter),
   ('mask', struct_ibv_flow_mpls_filter),
 ]
-class struct_ibv_flow_tunnel_filter(ctypes.Structure): pass
+class struct_ibv_flow_tunnel_filter(Struct): pass
 struct_ibv_flow_tunnel_filter._fields_ = [
   ('tunnel_id', uint32_t),
 ]
-class struct_ibv_flow_spec_tunnel(ctypes.Structure): pass
+class struct_ibv_flow_spec_tunnel(Struct): pass
 struct_ibv_flow_spec_tunnel._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('val', struct_ibv_flow_tunnel_filter),
   ('mask', struct_ibv_flow_tunnel_filter),
 ]
-class struct_ibv_flow_spec_action_tag(ctypes.Structure): pass
+class struct_ibv_flow_spec_action_tag(Struct): pass
 struct_ibv_flow_spec_action_tag._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
   ('tag_id', uint32_t),
 ]
-class struct_ibv_flow_spec_action_drop(ctypes.Structure): pass
+class struct_ibv_flow_spec_action_drop(Struct): pass
 struct_ibv_flow_spec_action_drop._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
 ]
-class struct_ibv_flow_spec_action_handle(ctypes.Structure): pass
-class struct_ibv_flow_action(ctypes.Structure): pass
+class struct_ibv_flow_spec_action_handle(Struct): pass
+class struct_ibv_flow_action(Struct): pass
 struct_ibv_flow_action._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
 ]
@@ -1515,8 +1515,8 @@ struct_ibv_flow_spec_action_handle._fields_ = [
   ('size', uint16_t),
   ('action', ctypes.POINTER(struct_ibv_flow_action)),
 ]
-class struct_ibv_flow_spec_counter_action(ctypes.Structure): pass
-class struct_ibv_counters(ctypes.Structure): pass
+class struct_ibv_flow_spec_counter_action(Struct): pass
+class struct_ibv_counters(Struct): pass
 struct_ibv_counters._fields_ = [
   ('context', ctypes.POINTER(struct_ibv_context)),
 ]
@@ -1525,9 +1525,9 @@ struct_ibv_flow_spec_counter_action._fields_ = [
   ('size', uint16_t),
   ('counters', ctypes.POINTER(struct_ibv_counters)),
 ]
-class struct_ibv_flow_spec(ctypes.Structure): pass
+class struct_ibv_flow_spec(Struct): pass
 class struct_ibv_flow_spec_0(ctypes.Union): pass
-class struct_ibv_flow_spec_0_hdr(ctypes.Structure): pass
+class struct_ibv_flow_spec_0_hdr(Struct): pass
 struct_ibv_flow_spec_0_hdr._fields_ = [
   ('type', enum_ibv_flow_spec_type),
   ('size', uint16_t),
@@ -1552,7 +1552,7 @@ struct_ibv_flow_spec._anonymous_ = ['_0']
 struct_ibv_flow_spec._fields_ = [
   ('_0', struct_ibv_flow_spec_0),
 ]
-class struct_ibv_flow_attr(ctypes.Structure): pass
+class struct_ibv_flow_attr(Struct): pass
 struct_ibv_flow_attr._fields_ = [
   ('comp_mask', uint32_t),
   ('type', enum_ibv_flow_attr_type),
@@ -1562,7 +1562,7 @@ struct_ibv_flow_attr._fields_ = [
   ('port', uint8_t),
   ('flags', uint32_t),
 ]
-class struct_ibv_flow(ctypes.Structure): pass
+class struct_ibv_flow(Struct): pass
 struct_ibv_flow._fields_ = [
   ('comp_mask', uint32_t),
   ('context', ctypes.POINTER(struct_ibv_context)),
@@ -1571,8 +1571,8 @@ struct_ibv_flow._fields_ = [
 enum_ibv_flow_action_esp_mask = CEnum(ctypes.c_uint)
 IBV_FLOW_ACTION_ESP_MASK_ESN = enum_ibv_flow_action_esp_mask.define('IBV_FLOW_ACTION_ESP_MASK_ESN', 1)
 
-class struct_ibv_flow_action_esp_attr(ctypes.Structure): pass
-class struct_ib_uverbs_flow_action_esp(ctypes.Structure): pass
+class struct_ibv_flow_action_esp_attr(Struct): pass
+class struct_ib_uverbs_flow_action_esp(Struct): pass
 __u32 = ctypes.c_uint
 __u64 = ctypes.c_ulonglong
 struct_ib_uverbs_flow_action_esp._fields_ = [
@@ -1589,7 +1589,7 @@ enum_ib_uverbs_flow_action_esp_replay = CEnum(ctypes.c_uint)
 IB_UVERBS_FLOW_ACTION_ESP_REPLAY_NONE = enum_ib_uverbs_flow_action_esp_replay.define('IB_UVERBS_FLOW_ACTION_ESP_REPLAY_NONE', 0)
 IB_UVERBS_FLOW_ACTION_ESP_REPLAY_BMP = enum_ib_uverbs_flow_action_esp_replay.define('IB_UVERBS_FLOW_ACTION_ESP_REPLAY_BMP', 1)
 
-class struct_ib_uverbs_flow_action_esp_encap(ctypes.Structure): pass
+class struct_ib_uverbs_flow_action_esp_encap(Struct): pass
 class struct_ib_uverbs_flow_action_esp_encap_0(ctypes.Union): pass
 struct_ib_uverbs_flow_action_esp_encap_0._fields_ = [
   ('val_ptr', ctypes.c_void_p),
@@ -1632,7 +1632,7 @@ enum_ibv_create_cq_attr_flags = CEnum(ctypes.c_uint)
 IBV_CREATE_CQ_ATTR_SINGLE_THREADED = enum_ibv_create_cq_attr_flags.define('IBV_CREATE_CQ_ATTR_SINGLE_THREADED', 1)
 IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN = enum_ibv_create_cq_attr_flags.define('IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN', 2)
 
-class struct_ibv_cq_init_attr_ex(ctypes.Structure): pass
+class struct_ibv_cq_init_attr_ex(Struct): pass
 struct_ibv_cq_init_attr_ex._fields_ = [
   ('cqe', uint32_t),
   ('cq_context', ctypes.c_void_p),
@@ -1647,7 +1647,7 @@ enum_ibv_parent_domain_init_attr_mask = CEnum(ctypes.c_uint)
 IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS = enum_ibv_parent_domain_init_attr_mask.define('IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS', 1)
 IBV_PARENT_DOMAIN_INIT_ATTR_PD_CONTEXT = enum_ibv_parent_domain_init_attr_mask.define('IBV_PARENT_DOMAIN_INIT_ATTR_PD_CONTEXT', 2)
 
-class struct_ibv_parent_domain_init_attr(ctypes.Structure): pass
+class struct_ibv_parent_domain_init_attr(Struct): pass
 struct_ibv_parent_domain_init_attr._fields_ = [
   ('pd', ctypes.POINTER(struct_ibv_pd)),
   ('td', ctypes.POINTER(struct_ibv_td)),
@@ -1656,7 +1656,7 @@ struct_ibv_parent_domain_init_attr._fields_ = [
   ('free', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, ctypes.c_void_p, uint64_t)),
   ('pd_context', ctypes.c_void_p),
 ]
-class struct_ibv_counters_init_attr(ctypes.Structure): pass
+class struct_ibv_counters_init_attr(Struct): pass
 struct_ibv_counters_init_attr._fields_ = [
   ('comp_mask', uint32_t),
 ]
@@ -1664,7 +1664,7 @@ enum_ibv_counter_description = CEnum(ctypes.c_uint)
 IBV_COUNTER_PACKETS = enum_ibv_counter_description.define('IBV_COUNTER_PACKETS', 0)
 IBV_COUNTER_BYTES = enum_ibv_counter_description.define('IBV_COUNTER_BYTES', 1)
 
-class struct_ibv_counter_attach_attr(ctypes.Structure): pass
+class struct_ibv_counter_attach_attr(Struct): pass
 struct_ibv_counter_attach_attr._fields_ = [
   ('counter_desc', enum_ibv_counter_description),
   ('index', uint32_t),
@@ -1677,8 +1677,8 @@ enum_ibv_values_mask = CEnum(ctypes.c_uint)
 IBV_VALUES_MASK_RAW_CLOCK = enum_ibv_values_mask.define('IBV_VALUES_MASK_RAW_CLOCK', 1)
 IBV_VALUES_MASK_RESERVED = enum_ibv_values_mask.define('IBV_VALUES_MASK_RESERVED', 2)
 
-class struct_ibv_values_ex(ctypes.Structure): pass
-class struct_timespec(ctypes.Structure): pass
+class struct_ibv_values_ex(Struct): pass
+class struct_timespec(Struct): pass
 __time_t = ctypes.c_long
 __syscall_slong_t = ctypes.c_long
 struct_timespec._fields_ = [
@@ -1689,13 +1689,13 @@ struct_ibv_values_ex._fields_ = [
   ('comp_mask', uint32_t),
   ('raw_clock', struct_timespec),
 ]
-class struct_verbs_context(ctypes.Structure): pass
+class struct_verbs_context(Struct): pass
 enum_ib_uverbs_advise_mr_advice = CEnum(ctypes.c_uint)
 IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH = enum_ib_uverbs_advise_mr_advice.define('IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH', 0)
 IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_WRITE = enum_ib_uverbs_advise_mr_advice.define('IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_WRITE', 1)
 IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT = enum_ib_uverbs_advise_mr_advice.define('IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT', 2)
 
-class struct_verbs_ex_private(ctypes.Structure): pass
+class struct_verbs_ex_private(Struct): pass
 struct_verbs_context._fields_ = [
   ('query_port', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_port_attr), size_t)),
   ('advise_mr', ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(struct_ibv_pd), enum_ib_uverbs_advise_mr_advice, uint32_t, ctypes.POINTER(struct_ibv_sge), uint32_t)),
@@ -2075,7 +2075,7 @@ IB_UVERBS_QPF_GRH_REQUIRED = enum_ib_uverbs_query_port_flags.define('IB_UVERBS_Q
 enum_ib_uverbs_flow_action_esp_keymat_aes_gcm_iv_algo = CEnum(ctypes.c_uint)
 IB_UVERBS_FLOW_ACTION_IV_ALGO_SEQ = enum_ib_uverbs_flow_action_esp_keymat_aes_gcm_iv_algo.define('IB_UVERBS_FLOW_ACTION_IV_ALGO_SEQ', 0)
 
-class struct_ib_uverbs_flow_action_esp_keymat_aes_gcm(ctypes.Structure): pass
+class struct_ib_uverbs_flow_action_esp_keymat_aes_gcm(Struct): pass
 struct_ib_uverbs_flow_action_esp_keymat_aes_gcm._fields_ = [
   ('iv', ctypes.c_ulonglong),
   ('iv_algo', ctypes.c_uint),
@@ -2084,7 +2084,7 @@ struct_ib_uverbs_flow_action_esp_keymat_aes_gcm._fields_ = [
   ('key_len', ctypes.c_uint),
   ('aes_key', (ctypes.c_uint * 8)),
 ]
-class struct_ib_uverbs_flow_action_esp_replay_bmp(ctypes.Structure): pass
+class struct_ib_uverbs_flow_action_esp_replay_bmp(Struct): pass
 struct_ib_uverbs_flow_action_esp_replay_bmp._fields_ = [
   ('size', ctypes.c_uint),
 ]
@@ -2103,8 +2103,8 @@ IB_UVERBS_READ_COUNTERS_PREFER_CACHED = enum_ib_uverbs_read_counters_flags.defin
 enum_ib_uverbs_advise_mr_flag = CEnum(ctypes.c_uint)
 IB_UVERBS_ADVISE_MR_FLAG_FLUSH = enum_ib_uverbs_advise_mr_flag.define('IB_UVERBS_ADVISE_MR_FLAG_FLUSH', 1)
 
-class struct_ib_uverbs_query_port_resp_ex(ctypes.Structure): pass
-class struct_ib_uverbs_query_port_resp(ctypes.Structure): pass
+class struct_ib_uverbs_query_port_resp_ex(Struct): pass
+class struct_ib_uverbs_query_port_resp(Struct): pass
 __u8 = ctypes.c_ubyte
 struct_ib_uverbs_query_port_resp._fields_ = [
   ('port_cap_flags', ctypes.c_uint),
@@ -2136,7 +2136,7 @@ struct_ib_uverbs_query_port_resp_ex._fields_ = [
   ('reserved', (ctypes.c_ubyte * 2)),
   ('active_speed_ex', ctypes.c_uint),
 ]
-class struct_ib_uverbs_qp_cap(ctypes.Structure): pass
+class struct_ib_uverbs_qp_cap(Struct): pass
 struct_ib_uverbs_qp_cap._fields_ = [
   ('max_send_wr', ctypes.c_uint),
   ('max_recv_wr', ctypes.c_uint),
@@ -2173,7 +2173,7 @@ IB_UVERBS_GID_TYPE_IB = enum_ib_uverbs_gid_type.define('IB_UVERBS_GID_TYPE_IB', 
 IB_UVERBS_GID_TYPE_ROCE_V1 = enum_ib_uverbs_gid_type.define('IB_UVERBS_GID_TYPE_ROCE_V1', 1)
 IB_UVERBS_GID_TYPE_ROCE_V2 = enum_ib_uverbs_gid_type.define('IB_UVERBS_GID_TYPE_ROCE_V2', 2)
 
-class struct_ib_uverbs_gid_entry(ctypes.Structure): pass
+class struct_ib_uverbs_gid_entry(Struct): pass
 struct_ib_uverbs_gid_entry._fields_ = [
   ('gid', (ctypes.c_ulonglong * 2)),
   ('gid_index', ctypes.c_uint),
@@ -2246,52 +2246,52 @@ enum_ib_selectivity_level = CEnum(ctypes.c_uint)
 IB_FLUSH_RANGE = enum_ib_selectivity_level.define('IB_FLUSH_RANGE', 0)
 IB_FLUSH_MR = enum_ib_selectivity_level.define('IB_FLUSH_MR', 1)
 
-class struct_ib_uverbs_async_event_desc(ctypes.Structure): pass
+class struct_ib_uverbs_async_event_desc(Struct): pass
 struct_ib_uverbs_async_event_desc._fields_ = [
   ('element', ctypes.c_ulonglong),
   ('event_type', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_comp_event_desc(ctypes.Structure): pass
+class struct_ib_uverbs_comp_event_desc(Struct): pass
 struct_ib_uverbs_comp_event_desc._fields_ = [
   ('cq_handle', ctypes.c_ulonglong),
 ]
-class struct_ib_uverbs_cq_moderation_caps(ctypes.Structure): pass
+class struct_ib_uverbs_cq_moderation_caps(Struct): pass
 struct_ib_uverbs_cq_moderation_caps._fields_ = [
   ('max_cq_moderation_count', ctypes.c_ushort),
   ('max_cq_moderation_period', ctypes.c_ushort),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_cmd_hdr(ctypes.Structure): pass
+class struct_ib_uverbs_cmd_hdr(Struct): pass
 struct_ib_uverbs_cmd_hdr._fields_ = [
   ('command', ctypes.c_uint),
   ('in_words', ctypes.c_ushort),
   ('out_words', ctypes.c_ushort),
 ]
-class struct_ib_uverbs_ex_cmd_hdr(ctypes.Structure): pass
+class struct_ib_uverbs_ex_cmd_hdr(Struct): pass
 struct_ib_uverbs_ex_cmd_hdr._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('provider_in_words', ctypes.c_ushort),
   ('provider_out_words', ctypes.c_ushort),
   ('cmd_hdr_reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_get_context(ctypes.Structure): pass
+class struct_ib_uverbs_get_context(Struct): pass
 struct_ib_uverbs_get_context._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_get_context_resp(ctypes.Structure): pass
+class struct_ib_uverbs_get_context_resp(Struct): pass
 struct_ib_uverbs_get_context_resp._fields_ = [
   ('async_fd', ctypes.c_uint),
   ('num_comp_vectors', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_query_device(ctypes.Structure): pass
+class struct_ib_uverbs_query_device(Struct): pass
 struct_ib_uverbs_query_device._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_query_device_resp(ctypes.Structure): pass
+class struct_ib_uverbs_query_device_resp(Struct): pass
 struct_ib_uverbs_query_device_resp._fields_ = [
   ('fw_ver', ctypes.c_ulonglong),
   ('node_guid', ctypes.c_ulonglong),
@@ -2335,13 +2335,13 @@ struct_ib_uverbs_query_device_resp._fields_ = [
   ('phys_port_cnt', ctypes.c_ubyte),
   ('reserved', (ctypes.c_ubyte * 4)),
 ]
-class struct_ib_uverbs_ex_query_device(ctypes.Structure): pass
+class struct_ib_uverbs_ex_query_device(Struct): pass
 struct_ib_uverbs_ex_query_device._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_odp_caps(ctypes.Structure): pass
-class struct_ib_uverbs_odp_caps_per_transport_caps(ctypes.Structure): pass
+class struct_ib_uverbs_odp_caps(Struct): pass
+class struct_ib_uverbs_odp_caps_per_transport_caps(Struct): pass
 struct_ib_uverbs_odp_caps_per_transport_caps._fields_ = [
   ('rc_odp_caps', ctypes.c_uint),
   ('uc_odp_caps', ctypes.c_uint),
@@ -2352,14 +2352,14 @@ struct_ib_uverbs_odp_caps._fields_ = [
   ('per_transport_caps', struct_ib_uverbs_odp_caps_per_transport_caps),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_rss_caps(ctypes.Structure): pass
+class struct_ib_uverbs_rss_caps(Struct): pass
 struct_ib_uverbs_rss_caps._fields_ = [
   ('supported_qpts', ctypes.c_uint),
   ('max_rwq_indirection_tables', ctypes.c_uint),
   ('max_rwq_indirection_table_size', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_tm_caps(ctypes.Structure): pass
+class struct_ib_uverbs_tm_caps(Struct): pass
 struct_ib_uverbs_tm_caps._fields_ = [
   ('max_rndv_hdr_size', ctypes.c_uint),
   ('max_num_tags', ctypes.c_uint),
@@ -2368,7 +2368,7 @@ struct_ib_uverbs_tm_caps._fields_ = [
   ('max_sge', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_query_device_resp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_query_device_resp(Struct): pass
 struct_ib_uverbs_ex_query_device_resp._fields_ = [
   ('base', struct_ib_uverbs_query_device_resp),
   ('comp_mask', ctypes.c_uint),
@@ -2386,44 +2386,44 @@ struct_ib_uverbs_ex_query_device_resp._fields_ = [
   ('xrc_odp_caps', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_query_port(ctypes.Structure): pass
+class struct_ib_uverbs_query_port(Struct): pass
 struct_ib_uverbs_query_port._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('port_num', ctypes.c_ubyte),
   ('reserved', (ctypes.c_ubyte * 7)),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_alloc_pd(ctypes.Structure): pass
+class struct_ib_uverbs_alloc_pd(Struct): pass
 struct_ib_uverbs_alloc_pd._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_alloc_pd_resp(ctypes.Structure): pass
+class struct_ib_uverbs_alloc_pd_resp(Struct): pass
 struct_ib_uverbs_alloc_pd_resp._fields_ = [
   ('pd_handle', ctypes.c_uint),
   ('driver_data', (ctypes.c_uint * 0)),
 ]
-class struct_ib_uverbs_dealloc_pd(ctypes.Structure): pass
+class struct_ib_uverbs_dealloc_pd(Struct): pass
 struct_ib_uverbs_dealloc_pd._fields_ = [
   ('pd_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_open_xrcd(ctypes.Structure): pass
+class struct_ib_uverbs_open_xrcd(Struct): pass
 struct_ib_uverbs_open_xrcd._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('fd', ctypes.c_uint),
   ('oflags', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_open_xrcd_resp(ctypes.Structure): pass
+class struct_ib_uverbs_open_xrcd_resp(Struct): pass
 struct_ib_uverbs_open_xrcd_resp._fields_ = [
   ('xrcd_handle', ctypes.c_uint),
   ('driver_data', (ctypes.c_uint * 0)),
 ]
-class struct_ib_uverbs_close_xrcd(ctypes.Structure): pass
+class struct_ib_uverbs_close_xrcd(Struct): pass
 struct_ib_uverbs_close_xrcd._fields_ = [
   ('xrcd_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_reg_mr(ctypes.Structure): pass
+class struct_ib_uverbs_reg_mr(Struct): pass
 struct_ib_uverbs_reg_mr._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('start', ctypes.c_ulonglong),
@@ -2433,14 +2433,14 @@ struct_ib_uverbs_reg_mr._fields_ = [
   ('access_flags', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_reg_mr_resp(ctypes.Structure): pass
+class struct_ib_uverbs_reg_mr_resp(Struct): pass
 struct_ib_uverbs_reg_mr_resp._fields_ = [
   ('mr_handle', ctypes.c_uint),
   ('lkey', ctypes.c_uint),
   ('rkey', ctypes.c_uint),
   ('driver_data', (ctypes.c_uint * 0)),
 ]
-class struct_ib_uverbs_rereg_mr(ctypes.Structure): pass
+class struct_ib_uverbs_rereg_mr(Struct): pass
 struct_ib_uverbs_rereg_mr._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('mr_handle', ctypes.c_uint),
@@ -2452,17 +2452,17 @@ struct_ib_uverbs_rereg_mr._fields_ = [
   ('access_flags', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_rereg_mr_resp(ctypes.Structure): pass
+class struct_ib_uverbs_rereg_mr_resp(Struct): pass
 struct_ib_uverbs_rereg_mr_resp._fields_ = [
   ('lkey', ctypes.c_uint),
   ('rkey', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_dereg_mr(ctypes.Structure): pass
+class struct_ib_uverbs_dereg_mr(Struct): pass
 struct_ib_uverbs_dereg_mr._fields_ = [
   ('mr_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_alloc_mw(ctypes.Structure): pass
+class struct_ib_uverbs_alloc_mw(Struct): pass
 struct_ib_uverbs_alloc_mw._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('pd_handle', ctypes.c_uint),
@@ -2470,25 +2470,25 @@ struct_ib_uverbs_alloc_mw._fields_ = [
   ('reserved', (ctypes.c_ubyte * 3)),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_alloc_mw_resp(ctypes.Structure): pass
+class struct_ib_uverbs_alloc_mw_resp(Struct): pass
 struct_ib_uverbs_alloc_mw_resp._fields_ = [
   ('mw_handle', ctypes.c_uint),
   ('rkey', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_dealloc_mw(ctypes.Structure): pass
+class struct_ib_uverbs_dealloc_mw(Struct): pass
 struct_ib_uverbs_dealloc_mw._fields_ = [
   ('mw_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_create_comp_channel(ctypes.Structure): pass
+class struct_ib_uverbs_create_comp_channel(Struct): pass
 struct_ib_uverbs_create_comp_channel._fields_ = [
   ('response', ctypes.c_ulonglong),
 ]
-class struct_ib_uverbs_create_comp_channel_resp(ctypes.Structure): pass
+class struct_ib_uverbs_create_comp_channel_resp(Struct): pass
 struct_ib_uverbs_create_comp_channel_resp._fields_ = [
   ('fd', ctypes.c_uint),
 ]
-class struct_ib_uverbs_create_cq(ctypes.Structure): pass
+class struct_ib_uverbs_create_cq(Struct): pass
 __s32 = ctypes.c_int
 struct_ib_uverbs_create_cq._fields_ = [
   ('response', ctypes.c_ulonglong),
@@ -2503,7 +2503,7 @@ enum_ib_uverbs_ex_create_cq_flags = CEnum(ctypes.c_uint)
 IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION = enum_ib_uverbs_ex_create_cq_flags.define('IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION', 1)
 IB_UVERBS_CQ_FLAGS_IGNORE_OVERRUN = enum_ib_uverbs_ex_create_cq_flags.define('IB_UVERBS_CQ_FLAGS_IGNORE_OVERRUN', 2)
 
-class struct_ib_uverbs_ex_create_cq(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_cq(Struct): pass
 struct_ib_uverbs_ex_create_cq._fields_ = [
   ('user_handle', ctypes.c_ulonglong),
   ('cqe', ctypes.c_uint),
@@ -2513,32 +2513,32 @@ struct_ib_uverbs_ex_create_cq._fields_ = [
   ('flags', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_create_cq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_create_cq_resp(Struct): pass
 struct_ib_uverbs_create_cq_resp._fields_ = [
   ('cq_handle', ctypes.c_uint),
   ('cqe', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_ex_create_cq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_cq_resp(Struct): pass
 struct_ib_uverbs_ex_create_cq_resp._fields_ = [
   ('base', struct_ib_uverbs_create_cq_resp),
   ('comp_mask', ctypes.c_uint),
   ('response_length', ctypes.c_uint),
 ]
-class struct_ib_uverbs_resize_cq(ctypes.Structure): pass
+class struct_ib_uverbs_resize_cq(Struct): pass
 struct_ib_uverbs_resize_cq._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('cq_handle', ctypes.c_uint),
   ('cqe', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_resize_cq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_resize_cq_resp(Struct): pass
 struct_ib_uverbs_resize_cq_resp._fields_ = [
   ('cqe', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_poll_cq(ctypes.Structure): pass
+class struct_ib_uverbs_poll_cq(Struct): pass
 struct_ib_uverbs_poll_cq._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('cq_handle', ctypes.c_uint),
@@ -2556,7 +2556,7 @@ IB_UVERBS_WC_TSO = enum_ib_uverbs_wc_opcode.define('IB_UVERBS_WC_TSO', 7)
 IB_UVERBS_WC_FLUSH = enum_ib_uverbs_wc_opcode.define('IB_UVERBS_WC_FLUSH', 8)
 IB_UVERBS_WC_ATOMIC_WRITE = enum_ib_uverbs_wc_opcode.define('IB_UVERBS_WC_ATOMIC_WRITE', 9)
 
-class struct_ib_uverbs_wc(ctypes.Structure): pass
+class struct_ib_uverbs_wc(Struct): pass
 class struct_ib_uverbs_wc_ex(ctypes.Union): pass
 struct_ib_uverbs_wc_ex._fields_ = [
   ('imm_data', ctypes.c_uint),
@@ -2579,29 +2579,29 @@ struct_ib_uverbs_wc._fields_ = [
   ('port_num', ctypes.c_ubyte),
   ('reserved', ctypes.c_ubyte),
 ]
-class struct_ib_uverbs_poll_cq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_poll_cq_resp(Struct): pass
 struct_ib_uverbs_poll_cq_resp._fields_ = [
   ('count', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
   ('wc', (struct_ib_uverbs_wc * 0)),
 ]
-class struct_ib_uverbs_req_notify_cq(ctypes.Structure): pass
+class struct_ib_uverbs_req_notify_cq(Struct): pass
 struct_ib_uverbs_req_notify_cq._fields_ = [
   ('cq_handle', ctypes.c_uint),
   ('solicited_only', ctypes.c_uint),
 ]
-class struct_ib_uverbs_destroy_cq(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_cq(Struct): pass
 struct_ib_uverbs_destroy_cq._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('cq_handle', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_destroy_cq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_cq_resp(Struct): pass
 struct_ib_uverbs_destroy_cq_resp._fields_ = [
   ('comp_events_reported', ctypes.c_uint),
   ('async_events_reported', ctypes.c_uint),
 ]
-class struct_ib_uverbs_global_route(ctypes.Structure): pass
+class struct_ib_uverbs_global_route(Struct): pass
 struct_ib_uverbs_global_route._fields_ = [
   ('dgid', (ctypes.c_ubyte * 16)),
   ('flow_label', ctypes.c_uint),
@@ -2610,7 +2610,7 @@ struct_ib_uverbs_global_route._fields_ = [
   ('traffic_class', ctypes.c_ubyte),
   ('reserved', ctypes.c_ubyte),
 ]
-class struct_ib_uverbs_ah_attr(ctypes.Structure): pass
+class struct_ib_uverbs_ah_attr(Struct): pass
 struct_ib_uverbs_ah_attr._fields_ = [
   ('grh', struct_ib_uverbs_global_route),
   ('dlid', ctypes.c_ushort),
@@ -2621,7 +2621,7 @@ struct_ib_uverbs_ah_attr._fields_ = [
   ('port_num', ctypes.c_ubyte),
   ('reserved', ctypes.c_ubyte),
 ]
-class struct_ib_uverbs_qp_attr(ctypes.Structure): pass
+class struct_ib_uverbs_qp_attr(Struct): pass
 struct_ib_uverbs_qp_attr._fields_ = [
   ('qp_attr_mask', ctypes.c_uint),
   ('qp_state', ctypes.c_uint),
@@ -2655,7 +2655,7 @@ struct_ib_uverbs_qp_attr._fields_ = [
   ('alt_timeout', ctypes.c_ubyte),
   ('reserved', (ctypes.c_ubyte * 5)),
 ]
-class struct_ib_uverbs_create_qp(ctypes.Structure): pass
+class struct_ib_uverbs_create_qp(Struct): pass
 struct_ib_uverbs_create_qp._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('user_handle', ctypes.c_ulonglong),
@@ -2680,7 +2680,7 @@ IB_UVERBS_CREATE_QP_MASK_IND_TABLE = enum_ib_uverbs_create_qp_mask.define('IB_UV
 _anonenum6 = CEnum(ctypes.c_uint)
 IB_UVERBS_CREATE_QP_SUP_COMP_MASK = _anonenum6.define('IB_UVERBS_CREATE_QP_SUP_COMP_MASK', 1)
 
-class struct_ib_uverbs_ex_create_qp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_qp(Struct): pass
 struct_ib_uverbs_ex_create_qp._fields_ = [
   ('user_handle', ctypes.c_ulonglong),
   ('pd_handle', ctypes.c_uint),
@@ -2701,7 +2701,7 @@ struct_ib_uverbs_ex_create_qp._fields_ = [
   ('rwq_ind_tbl_handle', ctypes.c_uint),
   ('source_qpn', ctypes.c_uint),
 ]
-class struct_ib_uverbs_open_qp(ctypes.Structure): pass
+class struct_ib_uverbs_open_qp(Struct): pass
 struct_ib_uverbs_open_qp._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('user_handle', ctypes.c_ulonglong),
@@ -2711,7 +2711,7 @@ struct_ib_uverbs_open_qp._fields_ = [
   ('reserved', (ctypes.c_ubyte * 7)),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_create_qp_resp(ctypes.Structure): pass
+class struct_ib_uverbs_create_qp_resp(Struct): pass
 struct_ib_uverbs_create_qp_resp._fields_ = [
   ('qp_handle', ctypes.c_uint),
   ('qpn', ctypes.c_uint),
@@ -2723,13 +2723,13 @@ struct_ib_uverbs_create_qp_resp._fields_ = [
   ('reserved', ctypes.c_uint),
   ('driver_data', (ctypes.c_uint * 0)),
 ]
-class struct_ib_uverbs_ex_create_qp_resp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_qp_resp(Struct): pass
 struct_ib_uverbs_ex_create_qp_resp._fields_ = [
   ('base', struct_ib_uverbs_create_qp_resp),
   ('comp_mask', ctypes.c_uint),
   ('response_length', ctypes.c_uint),
 ]
-class struct_ib_uverbs_qp_dest(ctypes.Structure): pass
+class struct_ib_uverbs_qp_dest(Struct): pass
 struct_ib_uverbs_qp_dest._fields_ = [
   ('dgid', (ctypes.c_ubyte * 16)),
   ('flow_label', ctypes.c_uint),
@@ -2744,14 +2744,14 @@ struct_ib_uverbs_qp_dest._fields_ = [
   ('is_global', ctypes.c_ubyte),
   ('port_num', ctypes.c_ubyte),
 ]
-class struct_ib_uverbs_query_qp(ctypes.Structure): pass
+class struct_ib_uverbs_query_qp(Struct): pass
 struct_ib_uverbs_query_qp._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('qp_handle', ctypes.c_uint),
   ('attr_mask', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_query_qp_resp(ctypes.Structure): pass
+class struct_ib_uverbs_query_qp_resp(Struct): pass
 struct_ib_uverbs_query_qp_resp._fields_ = [
   ('dest', struct_ib_uverbs_qp_dest),
   ('alt_dest', struct_ib_uverbs_qp_dest),
@@ -2785,7 +2785,7 @@ struct_ib_uverbs_query_qp_resp._fields_ = [
   ('reserved', (ctypes.c_ubyte * 5)),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_modify_qp(ctypes.Structure): pass
+class struct_ib_uverbs_modify_qp(Struct): pass
 struct_ib_uverbs_modify_qp._fields_ = [
   ('dest', struct_ib_uverbs_qp_dest),
   ('alt_dest', struct_ib_uverbs_qp_dest),
@@ -2815,28 +2815,28 @@ struct_ib_uverbs_modify_qp._fields_ = [
   ('reserved', (ctypes.c_ubyte * 2)),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_ex_modify_qp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_modify_qp(Struct): pass
 struct_ib_uverbs_ex_modify_qp._fields_ = [
   ('base', struct_ib_uverbs_modify_qp),
   ('rate_limit', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_modify_qp_resp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_modify_qp_resp(Struct): pass
 struct_ib_uverbs_ex_modify_qp_resp._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('response_length', ctypes.c_uint),
 ]
-class struct_ib_uverbs_destroy_qp(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_qp(Struct): pass
 struct_ib_uverbs_destroy_qp._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('qp_handle', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_destroy_qp_resp(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_qp_resp(Struct): pass
 struct_ib_uverbs_destroy_qp_resp._fields_ = [
   ('events_reported', ctypes.c_uint),
 ]
-class struct_ib_uverbs_sge(ctypes.Structure): pass
+class struct_ib_uverbs_sge(Struct): pass
 struct_ib_uverbs_sge._fields_ = [
   ('addr', ctypes.c_ulonglong),
   ('length', ctypes.c_uint),
@@ -2860,20 +2860,20 @@ IB_UVERBS_WR_MASKED_ATOMIC_FETCH_AND_ADD = enum_ib_uverbs_wr_opcode.define('IB_U
 IB_UVERBS_WR_FLUSH = enum_ib_uverbs_wr_opcode.define('IB_UVERBS_WR_FLUSH', 14)
 IB_UVERBS_WR_ATOMIC_WRITE = enum_ib_uverbs_wr_opcode.define('IB_UVERBS_WR_ATOMIC_WRITE', 15)
 
-class struct_ib_uverbs_send_wr(ctypes.Structure): pass
+class struct_ib_uverbs_send_wr(Struct): pass
 class struct_ib_uverbs_send_wr_ex(ctypes.Union): pass
 struct_ib_uverbs_send_wr_ex._fields_ = [
   ('imm_data', ctypes.c_uint),
   ('invalidate_rkey', ctypes.c_uint),
 ]
 class struct_ib_uverbs_send_wr_wr(ctypes.Union): pass
-class struct_ib_uverbs_send_wr_wr_rdma(ctypes.Structure): pass
+class struct_ib_uverbs_send_wr_wr_rdma(Struct): pass
 struct_ib_uverbs_send_wr_wr_rdma._fields_ = [
   ('remote_addr', ctypes.c_ulonglong),
   ('rkey', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_send_wr_wr_atomic(ctypes.Structure): pass
+class struct_ib_uverbs_send_wr_wr_atomic(Struct): pass
 struct_ib_uverbs_send_wr_wr_atomic._fields_ = [
   ('remote_addr', ctypes.c_ulonglong),
   ('compare_add', ctypes.c_ulonglong),
@@ -2881,7 +2881,7 @@ struct_ib_uverbs_send_wr_wr_atomic._fields_ = [
   ('rkey', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_send_wr_wr_ud(ctypes.Structure): pass
+class struct_ib_uverbs_send_wr_wr_ud(Struct): pass
 struct_ib_uverbs_send_wr_wr_ud._fields_ = [
   ('ah', ctypes.c_uint),
   ('remote_qpn', ctypes.c_uint),
@@ -2901,7 +2901,7 @@ struct_ib_uverbs_send_wr._fields_ = [
   ('ex', struct_ib_uverbs_send_wr_ex),
   ('wr', struct_ib_uverbs_send_wr_wr),
 ]
-class struct_ib_uverbs_post_send(ctypes.Structure): pass
+class struct_ib_uverbs_post_send(Struct): pass
 struct_ib_uverbs_post_send._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('qp_handle', ctypes.c_uint),
@@ -2910,17 +2910,17 @@ struct_ib_uverbs_post_send._fields_ = [
   ('wqe_size', ctypes.c_uint),
   ('send_wr', (struct_ib_uverbs_send_wr * 0)),
 ]
-class struct_ib_uverbs_post_send_resp(ctypes.Structure): pass
+class struct_ib_uverbs_post_send_resp(Struct): pass
 struct_ib_uverbs_post_send_resp._fields_ = [
   ('bad_wr', ctypes.c_uint),
 ]
-class struct_ib_uverbs_recv_wr(ctypes.Structure): pass
+class struct_ib_uverbs_recv_wr(Struct): pass
 struct_ib_uverbs_recv_wr._fields_ = [
   ('wr_id', ctypes.c_ulonglong),
   ('num_sge', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_post_recv(ctypes.Structure): pass
+class struct_ib_uverbs_post_recv(Struct): pass
 struct_ib_uverbs_post_recv._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('qp_handle', ctypes.c_uint),
@@ -2929,11 +2929,11 @@ struct_ib_uverbs_post_recv._fields_ = [
   ('wqe_size', ctypes.c_uint),
   ('recv_wr', (struct_ib_uverbs_recv_wr * 0)),
 ]
-class struct_ib_uverbs_post_recv_resp(ctypes.Structure): pass
+class struct_ib_uverbs_post_recv_resp(Struct): pass
 struct_ib_uverbs_post_recv_resp._fields_ = [
   ('bad_wr', ctypes.c_uint),
 ]
-class struct_ib_uverbs_post_srq_recv(ctypes.Structure): pass
+class struct_ib_uverbs_post_srq_recv(Struct): pass
 struct_ib_uverbs_post_srq_recv._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('srq_handle', ctypes.c_uint),
@@ -2942,11 +2942,11 @@ struct_ib_uverbs_post_srq_recv._fields_ = [
   ('wqe_size', ctypes.c_uint),
   ('recv', (struct_ib_uverbs_recv_wr * 0)),
 ]
-class struct_ib_uverbs_post_srq_recv_resp(ctypes.Structure): pass
+class struct_ib_uverbs_post_srq_recv_resp(Struct): pass
 struct_ib_uverbs_post_srq_recv_resp._fields_ = [
   ('bad_wr', ctypes.c_uint),
 ]
-class struct_ib_uverbs_create_ah(ctypes.Structure): pass
+class struct_ib_uverbs_create_ah(Struct): pass
 struct_ib_uverbs_create_ah._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('user_handle', ctypes.c_ulonglong),
@@ -2955,16 +2955,16 @@ struct_ib_uverbs_create_ah._fields_ = [
   ('attr', struct_ib_uverbs_ah_attr),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_create_ah_resp(ctypes.Structure): pass
+class struct_ib_uverbs_create_ah_resp(Struct): pass
 struct_ib_uverbs_create_ah_resp._fields_ = [
   ('ah_handle', ctypes.c_uint),
   ('driver_data', (ctypes.c_uint * 0)),
 ]
-class struct_ib_uverbs_destroy_ah(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_ah(Struct): pass
 struct_ib_uverbs_destroy_ah._fields_ = [
   ('ah_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_attach_mcast(ctypes.Structure): pass
+class struct_ib_uverbs_attach_mcast(Struct): pass
 struct_ib_uverbs_attach_mcast._fields_ = [
   ('gid', (ctypes.c_ubyte * 16)),
   ('qp_handle', ctypes.c_uint),
@@ -2972,7 +2972,7 @@ struct_ib_uverbs_attach_mcast._fields_ = [
   ('reserved', ctypes.c_ushort),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_detach_mcast(ctypes.Structure): pass
+class struct_ib_uverbs_detach_mcast(Struct): pass
 struct_ib_uverbs_detach_mcast._fields_ = [
   ('gid', (ctypes.c_ubyte * 16)),
   ('qp_handle', ctypes.c_uint),
@@ -2980,23 +2980,23 @@ struct_ib_uverbs_detach_mcast._fields_ = [
   ('reserved', ctypes.c_ushort),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_flow_spec_hdr(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_hdr(Struct): pass
 struct_ib_uverbs_flow_spec_hdr._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
   ('reserved', ctypes.c_ushort),
   ('flow_spec_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_flow_eth_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_eth_filter(Struct): pass
 struct_ib_uverbs_flow_eth_filter._fields_ = [
   ('dst_mac', (ctypes.c_ubyte * 6)),
   ('src_mac', (ctypes.c_ubyte * 6)),
   ('ether_type', ctypes.c_ushort),
   ('vlan_tag', ctypes.c_ushort),
 ]
-class struct_ib_uverbs_flow_spec_eth(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_eth(Struct): pass
 class struct_ib_uverbs_flow_spec_eth_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_eth_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_eth_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_eth_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3013,7 +3013,7 @@ struct_ib_uverbs_flow_spec_eth._fields_ = [
   ('val', struct_ib_uverbs_flow_eth_filter),
   ('mask', struct_ib_uverbs_flow_eth_filter),
 ]
-class struct_ib_uverbs_flow_ipv4_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_ipv4_filter(Struct): pass
 struct_ib_uverbs_flow_ipv4_filter._fields_ = [
   ('src_ip', ctypes.c_uint),
   ('dst_ip', ctypes.c_uint),
@@ -3022,9 +3022,9 @@ struct_ib_uverbs_flow_ipv4_filter._fields_ = [
   ('ttl', ctypes.c_ubyte),
   ('flags', ctypes.c_ubyte),
 ]
-class struct_ib_uverbs_flow_spec_ipv4(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_ipv4(Struct): pass
 class struct_ib_uverbs_flow_spec_ipv4_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_ipv4_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_ipv4_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_ipv4_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3041,14 +3041,14 @@ struct_ib_uverbs_flow_spec_ipv4._fields_ = [
   ('val', struct_ib_uverbs_flow_ipv4_filter),
   ('mask', struct_ib_uverbs_flow_ipv4_filter),
 ]
-class struct_ib_uverbs_flow_tcp_udp_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_tcp_udp_filter(Struct): pass
 struct_ib_uverbs_flow_tcp_udp_filter._fields_ = [
   ('dst_port', ctypes.c_ushort),
   ('src_port', ctypes.c_ushort),
 ]
-class struct_ib_uverbs_flow_spec_tcp_udp(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_tcp_udp(Struct): pass
 class struct_ib_uverbs_flow_spec_tcp_udp_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_tcp_udp_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_tcp_udp_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_tcp_udp_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3065,7 +3065,7 @@ struct_ib_uverbs_flow_spec_tcp_udp._fields_ = [
   ('val', struct_ib_uverbs_flow_tcp_udp_filter),
   ('mask', struct_ib_uverbs_flow_tcp_udp_filter),
 ]
-class struct_ib_uverbs_flow_ipv6_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_ipv6_filter(Struct): pass
 struct_ib_uverbs_flow_ipv6_filter._fields_ = [
   ('src_ip', (ctypes.c_ubyte * 16)),
   ('dst_ip', (ctypes.c_ubyte * 16)),
@@ -3075,9 +3075,9 @@ struct_ib_uverbs_flow_ipv6_filter._fields_ = [
   ('hop_limit', ctypes.c_ubyte),
   ('reserved', ctypes.c_ubyte),
 ]
-class struct_ib_uverbs_flow_spec_ipv6(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_ipv6(Struct): pass
 class struct_ib_uverbs_flow_spec_ipv6_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_ipv6_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_ipv6_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_ipv6_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3094,9 +3094,9 @@ struct_ib_uverbs_flow_spec_ipv6._fields_ = [
   ('val', struct_ib_uverbs_flow_ipv6_filter),
   ('mask', struct_ib_uverbs_flow_ipv6_filter),
 ]
-class struct_ib_uverbs_flow_spec_action_tag(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_tag(Struct): pass
 class struct_ib_uverbs_flow_spec_action_tag_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_action_tag_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_tag_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_action_tag_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3113,9 +3113,9 @@ struct_ib_uverbs_flow_spec_action_tag._fields_ = [
   ('tag_id', ctypes.c_uint),
   ('reserved1', ctypes.c_uint),
 ]
-class struct_ib_uverbs_flow_spec_action_drop(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_drop(Struct): pass
 class struct_ib_uverbs_flow_spec_action_drop_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_action_drop_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_drop_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_action_drop_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3130,9 +3130,9 @@ struct_ib_uverbs_flow_spec_action_drop._anonymous_ = ['_0']
 struct_ib_uverbs_flow_spec_action_drop._fields_ = [
   ('_0', struct_ib_uverbs_flow_spec_action_drop_0),
 ]
-class struct_ib_uverbs_flow_spec_action_handle(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_handle(Struct): pass
 class struct_ib_uverbs_flow_spec_action_handle_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_action_handle_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_handle_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_action_handle_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3149,9 +3149,9 @@ struct_ib_uverbs_flow_spec_action_handle._fields_ = [
   ('handle', ctypes.c_uint),
   ('reserved1', ctypes.c_uint),
 ]
-class struct_ib_uverbs_flow_spec_action_count(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_count(Struct): pass
 class struct_ib_uverbs_flow_spec_action_count_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_action_count_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_action_count_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_action_count_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3168,13 +3168,13 @@ struct_ib_uverbs_flow_spec_action_count._fields_ = [
   ('handle', ctypes.c_uint),
   ('reserved1', ctypes.c_uint),
 ]
-class struct_ib_uverbs_flow_tunnel_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_tunnel_filter(Struct): pass
 struct_ib_uverbs_flow_tunnel_filter._fields_ = [
   ('tunnel_id', ctypes.c_uint),
 ]
-class struct_ib_uverbs_flow_spec_tunnel(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_tunnel(Struct): pass
 class struct_ib_uverbs_flow_spec_tunnel_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_tunnel_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_tunnel_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_tunnel_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3191,14 +3191,14 @@ struct_ib_uverbs_flow_spec_tunnel._fields_ = [
   ('val', struct_ib_uverbs_flow_tunnel_filter),
   ('mask', struct_ib_uverbs_flow_tunnel_filter),
 ]
-class struct_ib_uverbs_flow_spec_esp_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_esp_filter(Struct): pass
 struct_ib_uverbs_flow_spec_esp_filter._fields_ = [
   ('spi', ctypes.c_uint),
   ('seq', ctypes.c_uint),
 ]
-class struct_ib_uverbs_flow_spec_esp(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_esp(Struct): pass
 class struct_ib_uverbs_flow_spec_esp_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_esp_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_esp_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_esp_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3215,15 +3215,15 @@ struct_ib_uverbs_flow_spec_esp._fields_ = [
   ('val', struct_ib_uverbs_flow_spec_esp_filter),
   ('mask', struct_ib_uverbs_flow_spec_esp_filter),
 ]
-class struct_ib_uverbs_flow_gre_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_gre_filter(Struct): pass
 struct_ib_uverbs_flow_gre_filter._fields_ = [
   ('c_ks_res0_ver', ctypes.c_ushort),
   ('protocol', ctypes.c_ushort),
   ('key', ctypes.c_uint),
 ]
-class struct_ib_uverbs_flow_spec_gre(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_gre(Struct): pass
 class struct_ib_uverbs_flow_spec_gre_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_gre_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_gre_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_gre_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3240,13 +3240,13 @@ struct_ib_uverbs_flow_spec_gre._fields_ = [
   ('val', struct_ib_uverbs_flow_gre_filter),
   ('mask', struct_ib_uverbs_flow_gre_filter),
 ]
-class struct_ib_uverbs_flow_mpls_filter(ctypes.Structure): pass
+class struct_ib_uverbs_flow_mpls_filter(Struct): pass
 struct_ib_uverbs_flow_mpls_filter._fields_ = [
   ('label', ctypes.c_uint),
 ]
-class struct_ib_uverbs_flow_spec_mpls(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_mpls(Struct): pass
 class struct_ib_uverbs_flow_spec_mpls_0(ctypes.Union): pass
-class struct_ib_uverbs_flow_spec_mpls_0_0(ctypes.Structure): pass
+class struct_ib_uverbs_flow_spec_mpls_0_0(Struct): pass
 struct_ib_uverbs_flow_spec_mpls_0_0._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3263,7 +3263,7 @@ struct_ib_uverbs_flow_spec_mpls._fields_ = [
   ('val', struct_ib_uverbs_flow_mpls_filter),
   ('mask', struct_ib_uverbs_flow_mpls_filter),
 ]
-class struct_ib_uverbs_flow_attr(ctypes.Structure): pass
+class struct_ib_uverbs_flow_attr(Struct): pass
 struct_ib_uverbs_flow_attr._fields_ = [
   ('type', ctypes.c_uint),
   ('size', ctypes.c_ushort),
@@ -3274,23 +3274,23 @@ struct_ib_uverbs_flow_attr._fields_ = [
   ('flags', ctypes.c_uint),
   ('flow_specs', (struct_ib_uverbs_flow_spec_hdr * 0)),
 ]
-class struct_ib_uverbs_create_flow(ctypes.Structure): pass
+class struct_ib_uverbs_create_flow(Struct): pass
 struct_ib_uverbs_create_flow._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('qp_handle', ctypes.c_uint),
   ('flow_attr', struct_ib_uverbs_flow_attr),
 ]
-class struct_ib_uverbs_create_flow_resp(ctypes.Structure): pass
+class struct_ib_uverbs_create_flow_resp(Struct): pass
 struct_ib_uverbs_create_flow_resp._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('flow_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_destroy_flow(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_flow(Struct): pass
 struct_ib_uverbs_destroy_flow._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('flow_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_create_srq(ctypes.Structure): pass
+class struct_ib_uverbs_create_srq(Struct): pass
 struct_ib_uverbs_create_srq._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('user_handle', ctypes.c_ulonglong),
@@ -3300,7 +3300,7 @@ struct_ib_uverbs_create_srq._fields_ = [
   ('srq_limit', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_create_xsrq(ctypes.Structure): pass
+class struct_ib_uverbs_create_xsrq(Struct): pass
 struct_ib_uverbs_create_xsrq._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('user_handle', ctypes.c_ulonglong),
@@ -3314,7 +3314,7 @@ struct_ib_uverbs_create_xsrq._fields_ = [
   ('cq_handle', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_create_srq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_create_srq_resp(Struct): pass
 struct_ib_uverbs_create_srq_resp._fields_ = [
   ('srq_handle', ctypes.c_uint),
   ('max_wr', ctypes.c_uint),
@@ -3322,7 +3322,7 @@ struct_ib_uverbs_create_srq_resp._fields_ = [
   ('srqn', ctypes.c_uint),
   ('driver_data', (ctypes.c_uint * 0)),
 ]
-class struct_ib_uverbs_modify_srq(ctypes.Structure): pass
+class struct_ib_uverbs_modify_srq(Struct): pass
 struct_ib_uverbs_modify_srq._fields_ = [
   ('srq_handle', ctypes.c_uint),
   ('attr_mask', ctypes.c_uint),
@@ -3330,31 +3330,31 @@ struct_ib_uverbs_modify_srq._fields_ = [
   ('srq_limit', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_query_srq(ctypes.Structure): pass
+class struct_ib_uverbs_query_srq(Struct): pass
 struct_ib_uverbs_query_srq._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('srq_handle', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
   ('driver_data', (ctypes.c_ulonglong * 0)),
 ]
-class struct_ib_uverbs_query_srq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_query_srq_resp(Struct): pass
 struct_ib_uverbs_query_srq_resp._fields_ = [
   ('max_wr', ctypes.c_uint),
   ('max_sge', ctypes.c_uint),
   ('srq_limit', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_destroy_srq(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_srq(Struct): pass
 struct_ib_uverbs_destroy_srq._fields_ = [
   ('response', ctypes.c_ulonglong),
   ('srq_handle', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_destroy_srq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_destroy_srq_resp(Struct): pass
 struct_ib_uverbs_destroy_srq_resp._fields_ = [
   ('events_reported', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_create_wq(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_wq(Struct): pass
 struct_ib_uverbs_ex_create_wq._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('wq_type', ctypes.c_uint),
@@ -3366,7 +3366,7 @@ struct_ib_uverbs_ex_create_wq._fields_ = [
   ('create_flags', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_create_wq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_wq_resp(Struct): pass
 struct_ib_uverbs_ex_create_wq_resp._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('response_length', ctypes.c_uint),
@@ -3375,19 +3375,19 @@ struct_ib_uverbs_ex_create_wq_resp._fields_ = [
   ('max_sge', ctypes.c_uint),
   ('wqn', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_destroy_wq(ctypes.Structure): pass
+class struct_ib_uverbs_ex_destroy_wq(Struct): pass
 struct_ib_uverbs_ex_destroy_wq._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('wq_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_destroy_wq_resp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_destroy_wq_resp(Struct): pass
 struct_ib_uverbs_ex_destroy_wq_resp._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('response_length', ctypes.c_uint),
   ('events_reported', ctypes.c_uint),
   ('reserved', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_modify_wq(ctypes.Structure): pass
+class struct_ib_uverbs_ex_modify_wq(Struct): pass
 struct_ib_uverbs_ex_modify_wq._fields_ = [
   ('attr_mask', ctypes.c_uint),
   ('wq_handle', ctypes.c_uint),
@@ -3396,30 +3396,30 @@ struct_ib_uverbs_ex_modify_wq._fields_ = [
   ('flags', ctypes.c_uint),
   ('flags_mask', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_create_rwq_ind_table(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_rwq_ind_table(Struct): pass
 struct_ib_uverbs_ex_create_rwq_ind_table._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('log_ind_tbl_size', ctypes.c_uint),
   ('wq_handles', (ctypes.c_uint * 0)),
 ]
-class struct_ib_uverbs_ex_create_rwq_ind_table_resp(ctypes.Structure): pass
+class struct_ib_uverbs_ex_create_rwq_ind_table_resp(Struct): pass
 struct_ib_uverbs_ex_create_rwq_ind_table_resp._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('response_length', ctypes.c_uint),
   ('ind_tbl_handle', ctypes.c_uint),
   ('ind_tbl_num', ctypes.c_uint),
 ]
-class struct_ib_uverbs_ex_destroy_rwq_ind_table(ctypes.Structure): pass
+class struct_ib_uverbs_ex_destroy_rwq_ind_table(Struct): pass
 struct_ib_uverbs_ex_destroy_rwq_ind_table._fields_ = [
   ('comp_mask', ctypes.c_uint),
   ('ind_tbl_handle', ctypes.c_uint),
 ]
-class struct_ib_uverbs_cq_moderation(ctypes.Structure): pass
+class struct_ib_uverbs_cq_moderation(Struct): pass
 struct_ib_uverbs_cq_moderation._fields_ = [
   ('cq_count', ctypes.c_ushort),
   ('cq_period', ctypes.c_ushort),
 ]
-class struct_ib_uverbs_ex_modify_cq(ctypes.Structure): pass
+class struct_ib_uverbs_ex_modify_cq(Struct): pass
 struct_ib_uverbs_ex_modify_cq._fields_ = [
   ('cq_handle', ctypes.c_uint),
   ('attr_mask', ctypes.c_uint),

@@ -1,12 +1,12 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 
-class _anonstruct0(ctypes.Structure): pass
+class _anonstruct0(Struct): pass
 MCTP_HEADER = _anonstruct0
-class _anonstruct1(ctypes.Structure): pass
+class _anonstruct1(Struct): pass
 NVDM_PAYLOAD_COT = _anonstruct1
-class MESSAGE_QUEUE_INIT_ARGUMENTS(ctypes.Structure): pass
+class MESSAGE_QUEUE_INIT_ARGUMENTS(Struct): pass
 NvU64 = ctypes.c_ulonglong
 NvU32 = ctypes.c_uint
 NvLength = ctypes.c_ulonglong
@@ -16,15 +16,15 @@ MESSAGE_QUEUE_INIT_ARGUMENTS._fields_ = [
   ('cmdQueueOffset', NvLength),
   ('statQueueOffset', NvLength),
 ]
-class GSP_SR_INIT_ARGUMENTS(ctypes.Structure): pass
+class GSP_SR_INIT_ARGUMENTS(Struct): pass
 NvBool = ctypes.c_ubyte
 GSP_SR_INIT_ARGUMENTS._fields_ = [
   ('oldLevel', NvU32),
   ('flags', NvU32),
   ('bInPMTransition', NvBool),
 ]
-class GSP_ARGUMENTS_CACHED(ctypes.Structure): pass
-class GSP_ARGUMENTS_CACHED_profilerArgs(ctypes.Structure): pass
+class GSP_ARGUMENTS_CACHED(Struct): pass
+class GSP_ARGUMENTS_CACHED_profilerArgs(Struct): pass
 GSP_ARGUMENTS_CACHED_profilerArgs._fields_ = [
   ('pa', NvU64),
   ('size', NvU64),
@@ -42,12 +42,12 @@ GSP_DMA_TARGET_COHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COHERENT_
 GSP_DMA_TARGET_NONCOHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_NONCOHERENT_SYSTEM', 2)
 GSP_DMA_TARGET_COUNT = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COUNT', 3)
 
-class struct_GSP_FMC_INIT_PARAMS(ctypes.Structure): pass
+class struct_GSP_FMC_INIT_PARAMS(Struct): pass
 struct_GSP_FMC_INIT_PARAMS._fields_ = [
   ('regkeys', NvU32),
 ]
 GSP_FMC_INIT_PARAMS = struct_GSP_FMC_INIT_PARAMS
-class struct_GSP_ACR_BOOT_GSP_RM_PARAMS(ctypes.Structure): pass
+class struct_GSP_ACR_BOOT_GSP_RM_PARAMS(Struct): pass
 struct_GSP_ACR_BOOT_GSP_RM_PARAMS._fields_ = [
   ('target', GSP_DMA_TARGET),
   ('gspRmDescSize', NvU32),
@@ -57,20 +57,20 @@ struct_GSP_ACR_BOOT_GSP_RM_PARAMS._fields_ = [
   ('bIsGspRmBoot', NvBool),
 ]
 GSP_ACR_BOOT_GSP_RM_PARAMS = struct_GSP_ACR_BOOT_GSP_RM_PARAMS
-class struct_GSP_RM_PARAMS(ctypes.Structure): pass
+class struct_GSP_RM_PARAMS(Struct): pass
 struct_GSP_RM_PARAMS._fields_ = [
   ('target', GSP_DMA_TARGET),
   ('bootArgsOffset', NvU64),
 ]
 GSP_RM_PARAMS = struct_GSP_RM_PARAMS
-class struct_GSP_SPDM_PARAMS(ctypes.Structure): pass
+class struct_GSP_SPDM_PARAMS(Struct): pass
 struct_GSP_SPDM_PARAMS._fields_ = [
   ('target', GSP_DMA_TARGET),
   ('payloadBufferOffset', NvU64),
   ('payloadBufferSize', NvU32),
 ]
 GSP_SPDM_PARAMS = struct_GSP_SPDM_PARAMS
-class struct_GSP_FMC_BOOT_PARAMS(ctypes.Structure): pass
+class struct_GSP_FMC_BOOT_PARAMS(Struct): pass
 struct_GSP_FMC_BOOT_PARAMS._fields_ = [
   ('initParams', GSP_FMC_INIT_PARAMS),
   ('bootGspRmParams', GSP_ACR_BOOT_GSP_RM_PARAMS),
@@ -78,21 +78,21 @@ struct_GSP_FMC_BOOT_PARAMS._fields_ = [
   ('gspSpdmParams', GSP_SPDM_PARAMS),
 ]
 GSP_FMC_BOOT_PARAMS = struct_GSP_FMC_BOOT_PARAMS
-class _anonstruct2(ctypes.Structure): pass
+class _anonstruct2(Struct): pass
 class _anonunion3(ctypes.Union): pass
-class _anonstruct4(ctypes.Structure): pass
-class _anonstruct5(ctypes.Structure): pass
+class _anonstruct4(Struct): pass
+class _anonstruct5(Struct): pass
 class _anonunion6(ctypes.Union): pass
-class _anonstruct7(ctypes.Structure): pass
-class _anonstruct8(ctypes.Structure): pass
+class _anonstruct7(Struct): pass
+class _anonstruct8(Struct): pass
 GspFwWprMeta = _anonstruct2
-class _anonstruct9(ctypes.Structure): pass
+class _anonstruct9(Struct): pass
 GspFwHeapFreeRegion = _anonstruct9
-class _anonstruct10(ctypes.Structure): pass
+class _anonstruct10(Struct): pass
 GspFwHeapFreeList = _anonstruct10
-class _anonstruct11(ctypes.Structure): pass
+class _anonstruct11(Struct): pass
 GspFwSRMeta = _anonstruct11
-class RM_RISCV_UCODE_DESC(ctypes.Structure): pass
+class RM_RISCV_UCODE_DESC(Struct): pass
 RM_RISCV_UCODE_DESC._fields_ = [
   ('version', NvU32),
   ('bootloaderOffset', NvU32),
@@ -143,14 +143,14 @@ NV_RPC_UPDATE_PDE_BAR_1 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_B
 NV_RPC_UPDATE_PDE_BAR_2 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_2', 1)
 NV_RPC_UPDATE_PDE_BAR_INVALID = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_INVALID', 2)
 
-class struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS(ctypes.Structure): pass
+class struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS(Struct): pass
 struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS._fields_ = [
   ('headIndex', NvU32),
   ('maxHResolution', NvU32),
   ('maxVResolution', NvU32),
 ]
 VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS = struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS
-class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS(ctypes.Structure): pass
+class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS(Struct): pass
 struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS._fields_ = [
   ('numHeads', NvU32),
   ('maxNumHeads', NvU32),
@@ -436,9 +436,9 @@ LIBOS_MEMORY_REGION_LOC_NONE = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_
 LIBOS_MEMORY_REGION_LOC_SYSMEM = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_SYSMEM', 1)
 LIBOS_MEMORY_REGION_LOC_FB = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_FB', 2)
 
-class _anonstruct12(ctypes.Structure): pass
+class _anonstruct12(Struct): pass
 LibosMemoryRegionInitArgument = _anonstruct12
-class msgqTxHeader(ctypes.Structure): pass
+class msgqTxHeader(Struct): pass
 msgqTxHeader._fields_ = [
   ('version', NvU32),
   ('size', NvU32),
@@ -449,11 +449,11 @@ msgqTxHeader._fields_ = [
   ('rxHdrOff', NvU32),
   ('entryOff', NvU32),
 ]
-class msgqRxHeader(ctypes.Structure): pass
+class msgqRxHeader(Struct): pass
 msgqRxHeader._fields_ = [
   ('readPtr', NvU32),
 ]
-class msgqMetadata(ctypes.Structure): pass
+class msgqMetadata(Struct): pass
 NvU8 = ctypes.c_ubyte
 msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
 msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p)
@@ -488,7 +488,7 @@ msgqMetadata._fields_ = [
   ('fcnZero', msgqFcnCacheOp),
   ('fcnBarrier', msgqFcnBarrier),
 ]
-class struct_rpc_set_guest_system_info_v03_00(ctypes.Structure): pass
+class struct_rpc_set_guest_system_info_v03_00(Struct): pass
 struct_rpc_set_guest_system_info_v03_00._fields_ = [
   ('vgxVersionMajorNum', NvU32),
   ('vgxVersionMinorNum', NvU32),
@@ -502,7 +502,7 @@ struct_rpc_set_guest_system_info_v03_00._fields_ = [
 ]
 rpc_set_guest_system_info_v03_00 = struct_rpc_set_guest_system_info_v03_00
 rpc_set_guest_system_info_v = struct_rpc_set_guest_system_info_v03_00
-class struct_rpc_set_guest_system_info_ext_v15_02(ctypes.Structure): pass
+class struct_rpc_set_guest_system_info_ext_v15_02(Struct): pass
 NvU16 = ctypes.c_ushort
 struct_rpc_set_guest_system_info_ext_v15_02._fields_ = [
   ('guestDriverBranch', (ctypes.c_char * 256)),
@@ -511,7 +511,7 @@ struct_rpc_set_guest_system_info_ext_v15_02._fields_ = [
   ('device', NvU16),
 ]
 rpc_set_guest_system_info_ext_v15_02 = struct_rpc_set_guest_system_info_ext_v15_02
-class struct_rpc_set_guest_system_info_ext_v25_1B(ctypes.Structure): pass
+class struct_rpc_set_guest_system_info_ext_v25_1B(Struct): pass
 struct_rpc_set_guest_system_info_ext_v25_1B._fields_ = [
   ('guestDriverBranch', (ctypes.c_char * 256)),
   ('domain', NvU32),
@@ -521,7 +521,7 @@ struct_rpc_set_guest_system_info_ext_v25_1B._fields_ = [
 ]
 rpc_set_guest_system_info_ext_v25_1B = struct_rpc_set_guest_system_info_ext_v25_1B
 rpc_set_guest_system_info_ext_v = struct_rpc_set_guest_system_info_ext_v25_1B
-class struct_rpc_alloc_root_v07_00(ctypes.Structure): pass
+class struct_rpc_alloc_root_v07_00(Struct): pass
 NvHandle = ctypes.c_uint
 struct_rpc_alloc_root_v07_00._fields_ = [
   ('hClient', NvHandle),
@@ -530,8 +530,8 @@ struct_rpc_alloc_root_v07_00._fields_ = [
 ]
 rpc_alloc_root_v07_00 = struct_rpc_alloc_root_v07_00
 rpc_alloc_root_v = struct_rpc_alloc_root_v07_00
-class struct_rpc_alloc_memory_v13_01(ctypes.Structure): pass
-class struct_pte_desc(ctypes.Structure): pass
+class struct_rpc_alloc_memory_v13_01(Struct): pass
+class struct_pte_desc(Struct): pass
 class struct_pte_desc_pte_pde(ctypes.Union): pass
 struct_pte_desc_pte_pde._fields_ = [
   ('pte', NvU64),
@@ -557,10 +557,10 @@ struct_rpc_alloc_memory_v13_01._fields_ = [
 ]
 rpc_alloc_memory_v13_01 = struct_rpc_alloc_memory_v13_01
 rpc_alloc_memory_v = struct_rpc_alloc_memory_v13_01
-class struct_rpc_alloc_channel_dma_v1F_04(ctypes.Structure): pass
-class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04(ctypes.Structure): pass
+class struct_rpc_alloc_channel_dma_v1F_04(Struct): pass
+class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04(Struct): pass
 NV_CHANNEL_ALLOC_PARAMS_v1F_04 = struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04
-class struct_NV_MEMORY_DESC_PARAMS_v18_01(ctypes.Structure): pass
+class struct_NV_MEMORY_DESC_PARAMS_v18_01(Struct): pass
 NV_MEMORY_DESC_PARAMS_v18_01 = struct_NV_MEMORY_DESC_PARAMS_v18_01
 struct_NV_MEMORY_DESC_PARAMS_v18_01._fields_ = [
   ('base', NvU64),
@@ -601,10 +601,10 @@ struct_rpc_alloc_channel_dma_v1F_04._fields_ = [
 ]
 rpc_alloc_channel_dma_v1F_04 = struct_rpc_alloc_channel_dma_v1F_04
 rpc_alloc_channel_dma_v = struct_rpc_alloc_channel_dma_v1F_04
-class struct_rpc_alloc_object_v25_08(ctypes.Structure): pass
+class struct_rpc_alloc_object_v25_08(Struct): pass
 class union_alloc_object_params_v25_08(ctypes.Union): pass
 alloc_object_params_v25_08 = union_alloc_object_params_v25_08
-class struct_alloc_object_NV50_TESLA_v03_00(ctypes.Structure): pass
+class struct_alloc_object_NV50_TESLA_v03_00(Struct): pass
 alloc_object_NV50_TESLA_v03_00 = struct_alloc_object_NV50_TESLA_v03_00
 struct_alloc_object_NV50_TESLA_v03_00._fields_ = [
   ('version', NvU32),
@@ -612,13 +612,13 @@ struct_alloc_object_NV50_TESLA_v03_00._fields_ = [
   ('size', NvU32),
   ('caps', NvU32),
 ]
-class struct_alloc_object_GT212_DMA_COPY_v03_00(ctypes.Structure): pass
+class struct_alloc_object_GT212_DMA_COPY_v03_00(Struct): pass
 alloc_object_GT212_DMA_COPY_v03_00 = struct_alloc_object_GT212_DMA_COPY_v03_00
 struct_alloc_object_GT212_DMA_COPY_v03_00._fields_ = [
   ('version', NvU32),
   ('engineInstance', NvU32),
 ]
-class struct_alloc_object_GF100_DISP_SW_v03_00(ctypes.Structure): pass
+class struct_alloc_object_GF100_DISP_SW_v03_00(Struct): pass
 alloc_object_GF100_DISP_SW_v03_00 = struct_alloc_object_GF100_DISP_SW_v03_00
 struct_alloc_object_GF100_DISP_SW_v03_00._fields_ = [
   ('_reserved1', NvU32),
@@ -627,28 +627,28 @@ struct_alloc_object_GF100_DISP_SW_v03_00._fields_ = [
   ('displayMask', NvU32),
   ('caps', NvU32),
 ]
-class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08(ctypes.Structure): pass
+class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08(Struct): pass
 alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08 = struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08
 struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08._fields_ = [
   ('hObjectError', NvU32),
   ('hVASpace', NvU32),
   ('engineType', NvU32),
 ]
-class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00(ctypes.Structure): pass
+class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00(Struct): pass
 alloc_object_FERMI_CONTEXT_SHARE_A_v04_00 = struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00
 struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00._fields_ = [
   ('hVASpace', NvU32),
   ('flags', NvU32),
   ('subctxId', NvU32),
 ]
-class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00(ctypes.Structure): pass
+class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00(Struct): pass
 alloc_object_NVD0B7_VIDEO_ENCODER_v03_00 = struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00
 struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00._fields_ = [
   ('size', NvU32),
   ('prohibitMultipleInstances', NvU32),
   ('engineInstance', NvU32),
 ]
-class struct_alloc_object_FERMI_VASPACE_A_v03_00(ctypes.Structure): pass
+class struct_alloc_object_FERMI_VASPACE_A_v03_00(Struct): pass
 alloc_object_FERMI_VASPACE_A_v03_00 = struct_alloc_object_FERMI_VASPACE_A_v03_00
 struct_alloc_object_FERMI_VASPACE_A_v03_00._fields_ = [
   ('index', NvU32),
@@ -657,34 +657,34 @@ struct_alloc_object_FERMI_VASPACE_A_v03_00._fields_ = [
   ('bigPageSize', NvU32),
   ('vaBase', NvU64),
 ]
-class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00(ctypes.Structure): pass
+class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00(Struct): pass
 alloc_object_NVB0B0_VIDEO_DECODER_v03_00 = struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00
 struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00._fields_ = [
   ('size', NvU32),
   ('prohibitMultipleInstances', NvU32),
 ]
-class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00(Struct): pass
 alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00 = struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00
 struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00._fields_ = [
   ('hDebuggerClient', NvHandle),
   ('hAppClient', NvHandle),
   ('hClass3dObject', NvHandle),
 ]
-class struct_alloc_object_NVENC_SW_SESSION_v06_01(ctypes.Structure): pass
+class struct_alloc_object_NVENC_SW_SESSION_v06_01(Struct): pass
 alloc_object_NVENC_SW_SESSION_v06_01 = struct_alloc_object_NVENC_SW_SESSION_v06_01
 struct_alloc_object_NVENC_SW_SESSION_v06_01._fields_ = [
   ('codecType', NvU32),
   ('hResolution', NvU32),
   ('vResolution', NvU32),
 ]
-class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02(ctypes.Structure): pass
+class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02(Struct): pass
 alloc_object_NVC4B0_VIDEO_DECODER_v12_02 = struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02
 struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02._fields_ = [
   ('size', NvU32),
   ('prohibitMultipleInstances', NvU32),
   ('engineInstance', NvU32),
 ]
-class struct_alloc_object_NVFBC_SW_SESSION_v12_04(ctypes.Structure): pass
+class struct_alloc_object_NVFBC_SW_SESSION_v12_04(Struct): pass
 alloc_object_NVFBC_SW_SESSION_v12_04 = struct_alloc_object_NVFBC_SW_SESSION_v12_04
 struct_alloc_object_NVFBC_SW_SESSION_v12_04._fields_ = [
   ('displayOrdinal', NvU32),
@@ -693,14 +693,14 @@ struct_alloc_object_NVFBC_SW_SESSION_v12_04._fields_ = [
   ('hMaxResolution', NvU32),
   ('vMaxResolution', NvU32),
 ]
-class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02(ctypes.Structure): pass
+class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02(Struct): pass
 alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02 = struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02
 struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02._fields_ = [
   ('size', NvU32),
   ('prohibitMultipleInstances', NvU32),
   ('engineInstance', NvU32),
 ]
-class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02(ctypes.Structure): pass
+class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02(Struct): pass
 alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02 = struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02
 struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02._fields_ = [
   ('hSubDevice', NvHandle),
@@ -711,48 +711,48 @@ struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02._fields_ = [
   ('mailboxTotalSize', NvU32),
   ('flags', NvU32),
 ]
-class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00(ctypes.Structure): pass
+class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00(Struct): pass
 alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00 = struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00
 struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00._fields_ = [
   ('swizzId', NvU32),
 ]
-class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03(ctypes.Structure): pass
+class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03(Struct): pass
 alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03 = struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03
 struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03._fields_ = [
   ('offset', NvU64),
   ('limit', NvU64),
   ('hVASpace', NvHandle),
 ]
-class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06(ctypes.Structure): pass
+class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06(Struct): pass
 alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06 = struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06
 struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06._fields_ = [
   ('execPartitionId', NvU32),
 ]
-class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15(ctypes.Structure): pass
+class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15(Struct): pass
 alloc_object_NV503C_ALLOC_PARAMETERS_v18_15 = struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15
 struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15._fields_ = [
   ('flags', NvU32),
   ('p2pToken', NvU64),
 ]
-class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01(ctypes.Structure): pass
+class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01(Struct): pass
 alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01 = struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01
 struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01._fields_ = [
   ('numHeads', NvU32),
   ('numSors', NvU32),
   ('numDsis', NvU32),
 ]
-class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03(ctypes.Structure): pass
+class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03(Struct): pass
 alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03 = struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03
 struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03._fields_ = [
   ('hSubDevice', NvHandle),
 ]
-class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03(ctypes.Structure): pass
+class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03(Struct): pass
 alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03 = struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03
 struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03._fields_ = [
   ('hClientTarget', NvHandle),
   ('hContextTarget', NvHandle),
 ]
-class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17(ctypes.Structure): pass
+class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17(Struct): pass
 NV_GR_ALLOCATION_PARAMETERS_v1A_17 = struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17
 struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17._fields_ = [
   ('version', NvU32),
@@ -760,15 +760,15 @@ struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17._fields_ = [
   ('size', NvU32),
   ('caps', NvU32),
 ]
-class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B(ctypes.Structure): pass
+class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B(Struct): pass
 alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B = struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B
 struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B._fields_ = [
   ('hClient', NvHandle),
   ('hChannel', NvHandle),
 ]
-class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C(ctypes.Structure): pass
+class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C(Struct): pass
 alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C = struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C
-class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C(ctypes.Structure): pass
+class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C(Struct): pass
 NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C = struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C
 struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C._fields_ = [
   ('offset', NvU64),
@@ -782,13 +782,13 @@ struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C._fields_ = [
   ('allocFlags', NvU32),
   ('map', NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C),
 ]
-class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00(ctypes.Structure): pass
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00(Struct): pass
 alloc_object_NVC9FA_VIDEO_OFA_v1F_00 = struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00
 struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00._fields_ = [
   ('size', NvU32),
   ('prohibitMultipleInstances', NvU32),
 ]
-class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08(ctypes.Structure): pass
+class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08(Struct): pass
 alloc_object_NV2081_ALLOC_PARAMETERS_v25_08 = struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08
 struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08._fields_ = [
   ('reserved', NvU32),
@@ -830,7 +830,7 @@ struct_rpc_alloc_object_v25_08._fields_ = [
   ('params', alloc_object_params_v25_08),
 ]
 rpc_alloc_object_v25_08 = struct_rpc_alloc_object_v25_08
-class struct_rpc_alloc_object_v26_00(ctypes.Structure): pass
+class struct_rpc_alloc_object_v26_00(Struct): pass
 class union_alloc_object_params_v26_00(ctypes.Union): pass
 alloc_object_params_v26_00 = union_alloc_object_params_v26_00
 union_alloc_object_params_v26_00._fields_ = [
@@ -871,7 +871,7 @@ struct_rpc_alloc_object_v26_00._fields_ = [
   ('params', alloc_object_params_v26_00),
 ]
 rpc_alloc_object_v26_00 = struct_rpc_alloc_object_v26_00
-class struct_rpc_alloc_object_v27_00(ctypes.Structure): pass
+class struct_rpc_alloc_object_v27_00(Struct): pass
 class union_alloc_object_params_v27_00(ctypes.Union): pass
 alloc_object_params_v27_00 = union_alloc_object_params_v27_00
 union_alloc_object_params_v27_00._fields_ = [
@@ -912,10 +912,10 @@ struct_rpc_alloc_object_v27_00._fields_ = [
   ('params', alloc_object_params_v27_00),
 ]
 rpc_alloc_object_v27_00 = struct_rpc_alloc_object_v27_00
-class struct_rpc_alloc_object_v29_06(ctypes.Structure): pass
+class struct_rpc_alloc_object_v29_06(Struct): pass
 class union_alloc_object_params_v29_06(ctypes.Union): pass
 alloc_object_params_v29_06 = union_alloc_object_params_v29_06
-class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06(ctypes.Structure): pass
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06(Struct): pass
 alloc_object_NVC9FA_VIDEO_OFA_v29_06 = struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06
 struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06._fields_ = [
   ('size', NvU32),
@@ -961,8 +961,8 @@ struct_rpc_alloc_object_v29_06._fields_ = [
 ]
 rpc_alloc_object_v29_06 = struct_rpc_alloc_object_v29_06
 rpc_alloc_object_v = struct_rpc_alloc_object_v29_06
-class struct_rpc_free_v03_00(ctypes.Structure): pass
-class struct_NVOS00_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_rpc_free_v03_00(Struct): pass
+class struct_NVOS00_PARAMETERS_v03_00(Struct): pass
 NVOS00_PARAMETERS_v03_00 = struct_NVOS00_PARAMETERS_v03_00
 NvV32 = ctypes.c_uint
 struct_NVOS00_PARAMETERS_v03_00._fields_ = [
@@ -976,7 +976,7 @@ struct_rpc_free_v03_00._fields_ = [
 ]
 rpc_free_v03_00 = struct_rpc_free_v03_00
 rpc_free_v = struct_rpc_free_v03_00
-class struct_rpc_log_v03_00(ctypes.Structure): pass
+class struct_rpc_log_v03_00(Struct): pass
 struct_rpc_log_v03_00._fields_ = [
   ('level', NvU32),
   ('log_len', NvU32),
@@ -984,8 +984,8 @@ struct_rpc_log_v03_00._fields_ = [
 ]
 rpc_log_v03_00 = struct_rpc_log_v03_00
 rpc_log_v = struct_rpc_log_v03_00
-class struct_rpc_map_memory_dma_v03_00(ctypes.Structure): pass
-class struct_NVOS46_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_rpc_map_memory_dma_v03_00(Struct): pass
+class struct_NVOS46_PARAMETERS_v03_00(Struct): pass
 NVOS46_PARAMETERS_v03_00 = struct_NVOS46_PARAMETERS_v03_00
 struct_NVOS46_PARAMETERS_v03_00._fields_ = [
   ('hClient', NvHandle),
@@ -1003,8 +1003,8 @@ struct_rpc_map_memory_dma_v03_00._fields_ = [
 ]
 rpc_map_memory_dma_v03_00 = struct_rpc_map_memory_dma_v03_00
 rpc_map_memory_dma_v = struct_rpc_map_memory_dma_v03_00
-class struct_rpc_unmap_memory_dma_v03_00(ctypes.Structure): pass
-class struct_NVOS47_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_rpc_unmap_memory_dma_v03_00(Struct): pass
+class struct_NVOS47_PARAMETERS_v03_00(Struct): pass
 NVOS47_PARAMETERS_v03_00 = struct_NVOS47_PARAMETERS_v03_00
 struct_NVOS47_PARAMETERS_v03_00._fields_ = [
   ('hClient', NvHandle),
@@ -1020,8 +1020,8 @@ struct_rpc_unmap_memory_dma_v03_00._fields_ = [
 ]
 rpc_unmap_memory_dma_v03_00 = struct_rpc_unmap_memory_dma_v03_00
 rpc_unmap_memory_dma_v = struct_rpc_unmap_memory_dma_v03_00
-class struct_rpc_alloc_subdevice_v08_01(ctypes.Structure): pass
-class struct_NVOS21_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_rpc_alloc_subdevice_v08_01(Struct): pass
+class struct_NVOS21_PARAMETERS_v03_00(Struct): pass
 NVOS21_PARAMETERS_v03_00 = struct_NVOS21_PARAMETERS_v03_00
 NvP64 = ctypes.c_void_p
 struct_NVOS21_PARAMETERS_v03_00._fields_ = [
@@ -1038,8 +1038,8 @@ struct_rpc_alloc_subdevice_v08_01._fields_ = [
 ]
 rpc_alloc_subdevice_v08_01 = struct_rpc_alloc_subdevice_v08_01
 rpc_alloc_subdevice_v = struct_rpc_alloc_subdevice_v08_01
-class struct_rpc_dup_object_v03_00(ctypes.Structure): pass
-class struct_NVOS55_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_rpc_dup_object_v03_00(Struct): pass
+class struct_NVOS55_PARAMETERS_v03_00(Struct): pass
 NVOS55_PARAMETERS_v03_00 = struct_NVOS55_PARAMETERS_v03_00
 struct_NVOS55_PARAMETERS_v03_00._fields_ = [
   ('hClient', NvHandle),
@@ -1055,8 +1055,8 @@ struct_rpc_dup_object_v03_00._fields_ = [
 ]
 rpc_dup_object_v03_00 = struct_rpc_dup_object_v03_00
 rpc_dup_object_v = struct_rpc_dup_object_v03_00
-class struct_rpc_idle_channels_v03_00(ctypes.Structure): pass
-class struct_idle_channel_list_v03_00(ctypes.Structure): pass
+class struct_rpc_idle_channels_v03_00(Struct): pass
+class struct_idle_channel_list_v03_00(Struct): pass
 idle_channel_list_v03_00 = struct_idle_channel_list_v03_00
 struct_idle_channel_list_v03_00._fields_ = [
   ('phClient', NvU32),
@@ -1071,7 +1071,7 @@ struct_rpc_idle_channels_v03_00._fields_ = [
 ]
 rpc_idle_channels_v03_00 = struct_rpc_idle_channels_v03_00
 rpc_idle_channels_v = struct_rpc_idle_channels_v03_00
-class struct_rpc_alloc_event_v03_00(ctypes.Structure): pass
+class struct_rpc_alloc_event_v03_00(Struct): pass
 struct_rpc_alloc_event_v03_00._fields_ = [
   ('hClient', NvHandle),
   ('hParentClient', NvHandle),
@@ -1083,8 +1083,8 @@ struct_rpc_alloc_event_v03_00._fields_ = [
 ]
 rpc_alloc_event_v03_00 = struct_rpc_alloc_event_v03_00
 rpc_alloc_event_v = struct_rpc_alloc_event_v03_00
-class struct_rpc_rm_api_control_v25_0D(ctypes.Structure): pass
-class struct_NVOS54_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_0D(Struct): pass
+class struct_NVOS54_PARAMETERS_v03_00(Struct): pass
 NVOS54_PARAMETERS_v03_00 = struct_NVOS54_PARAMETERS_v03_00
 NvRmctrlCmd = ctypes.c_uint
 struct_NVOS54_PARAMETERS_v03_00._fields_ = [
@@ -1100,81 +1100,81 @@ struct_rpc_rm_api_control_v25_0D._fields_ = [
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_0D = struct_rpc_rm_api_control_v25_0D
-class struct_rpc_rm_api_control_v25_0F(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_0F(Struct): pass
 struct_rpc_rm_api_control_v25_0F._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_0F = struct_rpc_rm_api_control_v25_0F
-class struct_rpc_rm_api_control_v25_10(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_10(Struct): pass
 struct_rpc_rm_api_control_v25_10._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_10 = struct_rpc_rm_api_control_v25_10
-class struct_rpc_rm_api_control_v25_14(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_14(Struct): pass
 struct_rpc_rm_api_control_v25_14._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_14 = struct_rpc_rm_api_control_v25_14
-class struct_rpc_rm_api_control_v25_15(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_15(Struct): pass
 struct_rpc_rm_api_control_v25_15._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_15 = struct_rpc_rm_api_control_v25_15
-class struct_rpc_rm_api_control_v25_16(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_16(Struct): pass
 struct_rpc_rm_api_control_v25_16._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_16 = struct_rpc_rm_api_control_v25_16
-class struct_rpc_rm_api_control_v25_17(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_17(Struct): pass
 struct_rpc_rm_api_control_v25_17._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_17 = struct_rpc_rm_api_control_v25_17
-class struct_rpc_rm_api_control_v25_18(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_18(Struct): pass
 struct_rpc_rm_api_control_v25_18._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_18 = struct_rpc_rm_api_control_v25_18
-class struct_rpc_rm_api_control_v25_19(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_19(Struct): pass
 struct_rpc_rm_api_control_v25_19._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_19 = struct_rpc_rm_api_control_v25_19
-class struct_rpc_rm_api_control_v25_1A(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v25_1A(Struct): pass
 struct_rpc_rm_api_control_v25_1A._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v25_1A = struct_rpc_rm_api_control_v25_1A
-class struct_rpc_rm_api_control_v27_03(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v27_03(Struct): pass
 struct_rpc_rm_api_control_v27_03._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v27_03 = struct_rpc_rm_api_control_v27_03
-class struct_rpc_rm_api_control_v29_04(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v29_04(Struct): pass
 struct_rpc_rm_api_control_v29_04._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v29_04 = struct_rpc_rm_api_control_v29_04
-class struct_rpc_rm_api_control_v29_09(ctypes.Structure): pass
+class struct_rpc_rm_api_control_v29_09(Struct): pass
 struct_rpc_rm_api_control_v29_09._fields_ = [
   ('params', NVOS54_PARAMETERS_v03_00),
   ('rm_api_params', NvP64),
 ]
 rpc_rm_api_control_v29_09 = struct_rpc_rm_api_control_v29_09
 rpc_rm_api_control_v = struct_rpc_rm_api_control_v29_09
-class struct_rpc_alloc_share_device_v03_00(ctypes.Structure): pass
-class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00(ctypes.Structure): pass
+class struct_rpc_alloc_share_device_v03_00(Struct): pass
+class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00(Struct): pass
 NV_DEVICE_ALLOCATION_PARAMETERS_v03_00 = struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00
 struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00._fields_ = [
   ('szName', NvP64),
@@ -1194,10 +1194,10 @@ struct_rpc_alloc_share_device_v03_00._fields_ = [
 ]
 rpc_alloc_share_device_v03_00 = struct_rpc_alloc_share_device_v03_00
 rpc_alloc_share_device_v = struct_rpc_alloc_share_device_v03_00
-class struct_rpc_get_engine_utilization_v1F_0E(ctypes.Structure): pass
+class struct_rpc_get_engine_utilization_v1F_0E(Struct): pass
 class union_vgpuGetEngineUtilization_data_v1F_0E(ctypes.Union): pass
 vgpuGetEngineUtilization_data_v1F_0E = union_vgpuGetEngineUtilization_data_v1F_0E
-class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(ctypes.Structure): pass
+class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(Struct): pass
 NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00 = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00
 enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVENC', 1)
@@ -1211,21 +1211,21 @@ struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00._fields_ = [
   ('clkPercentBusy', NvU32),
   ('samplingPeriodUs', NvU32),
 ]
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C(ctypes.Structure): pass
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C
 struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = [
   ('gpuId', NvU32),
   ('vmPid', NvU32),
   ('state', NvU32),
 ]
-class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C(ctypes.Structure): pass
+class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C
 struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = [
   ('gpuId', NvU32),
   ('vmPid', NvU32),
   ('newState', NvU32),
 ]
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C(ctypes.Structure): pass
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C
 struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C._fields_ = [
   ('gpuId', NvU32),
@@ -1234,7 +1234,7 @@ struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C._fields_ = [
   ('pidCount', NvU32),
   ('pidTable', (NvU32 * 1000)),
 ]
-class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C(ctypes.Structure): pass
+class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C
 struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C._fields_ = [
   ('gpuId', NvU32),
@@ -1246,15 +1246,15 @@ struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C._fields_ = [
   ('startTime', NvU64),
   ('endTime', NvU64),
 ]
-class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C(ctypes.Structure): pass
+class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C
 struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C._fields_ = [
   ('gpuId', NvU32),
   ('vmPid', NvU32),
 ]
-class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E(ctypes.Structure): pass
+class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E(Struct): pass
 NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E = struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E
-class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00(ctypes.Structure): pass
+class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00(Struct): pass
 NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00 = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00
 struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00._fields_ = [
   ('util', NvU32),
@@ -1285,7 +1285,7 @@ struct_rpc_get_engine_utilization_v1F_0E._fields_ = [
 ]
 rpc_get_engine_utilization_v1F_0E = struct_rpc_get_engine_utilization_v1F_0E
 rpc_get_engine_utilization_v = struct_rpc_get_engine_utilization_v1F_0E
-class struct_rpc_perf_get_level_info_v03_00(ctypes.Structure): pass
+class struct_rpc_perf_get_level_info_v03_00(Struct): pass
 struct_rpc_perf_get_level_info_v03_00._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
@@ -1297,8 +1297,8 @@ struct_rpc_perf_get_level_info_v03_00._fields_ = [
 ]
 rpc_perf_get_level_info_v03_00 = struct_rpc_perf_get_level_info_v03_00
 rpc_perf_get_level_info_v = struct_rpc_perf_get_level_info_v03_00
-class struct_rpc_set_surface_properties_v07_07(ctypes.Structure): pass
-class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07(ctypes.Structure): pass
+class struct_rpc_set_surface_properties_v07_07(Struct): pass
+class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07(Struct): pass
 NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07 = struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07
 struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07._fields_ = [
   ('headIndex', NvU32),
@@ -1326,8 +1326,8 @@ struct_rpc_set_surface_properties_v07_07._fields_ = [
 ]
 rpc_set_surface_properties_v07_07 = struct_rpc_set_surface_properties_v07_07
 rpc_set_surface_properties_v = struct_rpc_set_surface_properties_v07_07
-class struct_rpc_cleanup_surface_v03_00(ctypes.Structure): pass
-class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_cleanup_surface_v03_00(Struct): pass
+class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00(Struct): pass
 NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00 = struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00
 struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00._fields_ = [
   ('headIndex', NvU32),
@@ -1338,7 +1338,7 @@ struct_rpc_cleanup_surface_v03_00._fields_ = [
 ]
 rpc_cleanup_surface_v03_00 = struct_rpc_cleanup_surface_v03_00
 rpc_cleanup_surface_v = struct_rpc_cleanup_surface_v03_00
-class struct_rpc_unloading_guest_driver_v1F_07(ctypes.Structure): pass
+class struct_rpc_unloading_guest_driver_v1F_07(Struct): pass
 struct_rpc_unloading_guest_driver_v1F_07._fields_ = [
   ('bInPMTransition', NvBool),
   ('bGc6Entering', NvBool),
@@ -1346,12 +1346,12 @@ struct_rpc_unloading_guest_driver_v1F_07._fields_ = [
 ]
 rpc_unloading_guest_driver_v1F_07 = struct_rpc_unloading_guest_driver_v1F_07
 rpc_unloading_guest_driver_v = struct_rpc_unloading_guest_driver_v1F_07
-class struct_rpc_gpu_exec_reg_ops_v12_01(ctypes.Structure): pass
-class struct_gpu_exec_reg_ops_v12_01(ctypes.Structure): pass
+class struct_rpc_gpu_exec_reg_ops_v12_01(Struct): pass
+class struct_gpu_exec_reg_ops_v12_01(Struct): pass
 gpu_exec_reg_ops_v12_01 = struct_gpu_exec_reg_ops_v12_01
-class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01(Struct): pass
 NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01 = struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01
-class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01(ctypes.Structure): pass
+class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01(Struct): pass
 NV2080_CTRL_GR_ROUTE_INFO_v12_01 = struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01
 struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01._fields_ = [
   ('flags', NvU32),
@@ -1365,7 +1365,7 @@ struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01._fields_ = [
   ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
   ('regOps', NvP64),
 ]
-class struct_NV2080_CTRL_GPU_REG_OP_v03_00(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_REG_OP_v03_00(Struct): pass
 NV2080_CTRL_GPU_REG_OP_v03_00 = struct_NV2080_CTRL_GPU_REG_OP_v03_00
 struct_NV2080_CTRL_GPU_REG_OP_v03_00._fields_ = [
   ('regOp', NvU8),
@@ -1391,14 +1391,14 @@ struct_rpc_gpu_exec_reg_ops_v12_01._fields_ = [
 ]
 rpc_gpu_exec_reg_ops_v12_01 = struct_rpc_gpu_exec_reg_ops_v12_01
 rpc_gpu_exec_reg_ops_v = struct_rpc_gpu_exec_reg_ops_v12_01
-class struct_rpc_get_static_data_v25_0E(ctypes.Structure): pass
+class struct_rpc_get_static_data_v25_0E(Struct): pass
 struct_rpc_get_static_data_v25_0E._fields_ = [
   ('offset', NvU32),
   ('size', NvU32),
   ('payload', (NvU8 * 0)),
 ]
 rpc_get_static_data_v25_0E = struct_rpc_get_static_data_v25_0E
-class struct_rpc_get_static_data_v27_01(ctypes.Structure): pass
+class struct_rpc_get_static_data_v27_01(Struct): pass
 struct_rpc_get_static_data_v27_01._fields_ = [
   ('offset', NvU32),
   ('size', NvU32),
@@ -1406,7 +1406,7 @@ struct_rpc_get_static_data_v27_01._fields_ = [
 ]
 rpc_get_static_data_v27_01 = struct_rpc_get_static_data_v27_01
 rpc_get_static_data_v = struct_rpc_get_static_data_v27_01
-class struct_rpc_get_consolidated_gr_static_info_v1B_04(ctypes.Structure): pass
+class struct_rpc_get_consolidated_gr_static_info_v1B_04(Struct): pass
 struct_rpc_get_consolidated_gr_static_info_v1B_04._fields_ = [
   ('offset', NvU32),
   ('size', NvU32),
@@ -1414,8 +1414,8 @@ struct_rpc_get_consolidated_gr_static_info_v1B_04._fields_ = [
 ]
 rpc_get_consolidated_gr_static_info_v1B_04 = struct_rpc_get_consolidated_gr_static_info_v1B_04
 rpc_get_consolidated_gr_static_info_v = struct_rpc_get_consolidated_gr_static_info_v1B_04
-class struct_rpc_set_page_directory_v1E_05(ctypes.Structure): pass
-class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(ctypes.Structure): pass
+class struct_rpc_set_page_directory_v1E_05(Struct): pass
+class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(Struct): pass
 NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05 = struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05
 struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = [
   ('physAddress', NvU64),
@@ -1434,8 +1434,8 @@ struct_rpc_set_page_directory_v1E_05._fields_ = [
 ]
 rpc_set_page_directory_v1E_05 = struct_rpc_set_page_directory_v1E_05
 rpc_set_page_directory_v = struct_rpc_set_page_directory_v1E_05
-class struct_rpc_unset_page_directory_v1E_05(ctypes.Structure): pass
-class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05(ctypes.Structure): pass
+class struct_rpc_unset_page_directory_v1E_05(Struct): pass
+class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05(Struct): pass
 NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05 = struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05
 struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = [
   ('hVASpace', NvHandle),
@@ -1448,14 +1448,14 @@ struct_rpc_unset_page_directory_v1E_05._fields_ = [
 ]
 rpc_unset_page_directory_v1E_05 = struct_rpc_unset_page_directory_v1E_05
 rpc_unset_page_directory_v = struct_rpc_unset_page_directory_v1E_05
-class struct_rpc_get_gsp_static_info_v14_00(ctypes.Structure): pass
+class struct_rpc_get_gsp_static_info_v14_00(Struct): pass
 struct_rpc_get_gsp_static_info_v14_00._fields_ = [
   ('data', NvU32),
 ]
 rpc_get_gsp_static_info_v14_00 = struct_rpc_get_gsp_static_info_v14_00
 rpc_get_gsp_static_info_v = struct_rpc_get_gsp_static_info_v14_00
-class struct_rpc_update_bar_pde_v15_00(ctypes.Structure): pass
-class struct_UpdateBarPde_v15_00(ctypes.Structure): pass
+class struct_rpc_update_bar_pde_v15_00(Struct): pass
+class struct_UpdateBarPde_v15_00(Struct): pass
 UpdateBarPde_v15_00 = struct_UpdateBarPde_v15_00
 struct_UpdateBarPde_v15_00._fields_ = [
   ('barType', NV_RPC_UPDATE_PDE_BAR_TYPE),
@@ -1467,7 +1467,7 @@ struct_rpc_update_bar_pde_v15_00._fields_ = [
 ]
 rpc_update_bar_pde_v15_00 = struct_rpc_update_bar_pde_v15_00
 rpc_update_bar_pde_v = struct_rpc_update_bar_pde_v15_00
-class struct_rpc_get_encoder_capacity_v07_00(ctypes.Structure): pass
+class struct_rpc_get_encoder_capacity_v07_00(Struct): pass
 struct_rpc_get_encoder_capacity_v07_00._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
@@ -1475,7 +1475,7 @@ struct_rpc_get_encoder_capacity_v07_00._fields_ = [
 ]
 rpc_get_encoder_capacity_v07_00 = struct_rpc_get_encoder_capacity_v07_00
 rpc_get_encoder_capacity_v = struct_rpc_get_encoder_capacity_v07_00
-class struct_rpc_vgpu_pf_reg_read32_v15_00(ctypes.Structure): pass
+class struct_rpc_vgpu_pf_reg_read32_v15_00(Struct): pass
 struct_rpc_vgpu_pf_reg_read32_v15_00._fields_ = [
   ('address', NvU64),
   ('value', NvU32),
@@ -1483,8 +1483,8 @@ struct_rpc_vgpu_pf_reg_read32_v15_00._fields_ = [
 ]
 rpc_vgpu_pf_reg_read32_v15_00 = struct_rpc_vgpu_pf_reg_read32_v15_00
 rpc_vgpu_pf_reg_read32_v = struct_rpc_vgpu_pf_reg_read32_v15_00
-class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08(ctypes.Structure): pass
-class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02(ctypes.Structure): pass
+class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08(Struct): pass
+class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02(Struct): pass
 NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02 = struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02
 struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02._fields_ = [
   ('fbUsed', NvU64),
@@ -1494,8 +1494,8 @@ struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08._fields_ = [
 ]
 rpc_ctrl_set_vgpu_fb_usage_v1A_08 = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
 rpc_ctrl_set_vgpu_fb_usage_v = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
-class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09(ctypes.Structure): pass
-class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01(ctypes.Structure): pass
+class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09(Struct): pass
+class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01(Struct): pass
 NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01 = struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01
 struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01._fields_ = [
   ('hResolution', NvU32),
@@ -1512,8 +1512,8 @@ struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09._fields_ = [
 ]
 rpc_ctrl_nvenc_sw_session_update_info_v1A_09 = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
 rpc_ctrl_nvenc_sw_session_update_info_v = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
-class struct_rpc_ctrl_reset_channel_v1A_09(ctypes.Structure): pass
-class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01(ctypes.Structure): pass
+class struct_rpc_ctrl_reset_channel_v1A_09(Struct): pass
+class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01(Struct): pass
 NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01 = struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01
 struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01._fields_ = [
   ('engineID', NvU32),
@@ -1527,8 +1527,8 @@ struct_rpc_ctrl_reset_channel_v1A_09._fields_ = [
 ]
 rpc_ctrl_reset_channel_v1A_09 = struct_rpc_ctrl_reset_channel_v1A_09
 rpc_ctrl_reset_channel_v = struct_rpc_ctrl_reset_channel_v1A_09
-class struct_rpc_ctrl_reset_isolated_channel_v1A_09(ctypes.Structure): pass
-class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_reset_isolated_channel_v1A_09(Struct): pass
+class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00(Struct): pass
 NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00 = struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00
 struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00._fields_ = [
   ('exceptType', NvU32),
@@ -1541,8 +1541,8 @@ struct_rpc_ctrl_reset_isolated_channel_v1A_09._fields_ = [
 ]
 rpc_ctrl_reset_isolated_channel_v1A_09 = struct_rpc_ctrl_reset_isolated_channel_v1A_09
 rpc_ctrl_reset_isolated_channel_v = struct_rpc_ctrl_reset_isolated_channel_v1A_09
-class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09(Struct): pass
+class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09(Struct): pass
 NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09 = struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09
 struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09._fields_ = [
   ('faultType', NvU32),
@@ -1554,8 +1554,8 @@ struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09._fields_ = [
 ]
 rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09 = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
 rpc_ctrl_gpu_handle_vf_pri_fault_v = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
-class struct_rpc_ctrl_perf_boost_v1A_09(ctypes.Structure): pass
-class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_perf_boost_v1A_09(Struct): pass
+class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_PERF_BOOST_PARAMS_v03_00 = struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00
 struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00._fields_ = [
   ('flags', NvU32),
@@ -1568,10 +1568,10 @@ struct_rpc_ctrl_perf_boost_v1A_09._fields_ = [
 ]
 rpc_ctrl_perf_boost_v1A_09 = struct_rpc_ctrl_perf_boost_v1A_09
 rpc_ctrl_perf_boost_v = struct_rpc_ctrl_perf_boost_v1A_09
-class struct_rpc_ctrl_get_zbc_clear_table_v1A_09(ctypes.Structure): pass
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00(ctypes.Structure): pass
+class struct_rpc_ctrl_get_zbc_clear_table_v1A_09(Struct): pass
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00(ctypes.Structure): pass
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00
 struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00._fields_ = [
   ('colorFB', (NvU32 * 4)),
@@ -1593,8 +1593,8 @@ struct_rpc_ctrl_get_zbc_clear_table_v1A_09._fields_ = [
 ]
 rpc_ctrl_get_zbc_clear_table_v1A_09 = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
 rpc_ctrl_get_zbc_clear_table_v = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
-class struct_rpc_ctrl_set_zbc_color_clear_v1A_09(ctypes.Structure): pass
-class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_set_zbc_color_clear_v1A_09(Struct): pass
+class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00(Struct): pass
 NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00 = struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00
 struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00._fields_ = [
   ('colorFB', (NvU32 * 4)),
@@ -1608,8 +1608,8 @@ struct_rpc_ctrl_set_zbc_color_clear_v1A_09._fields_ = [
 ]
 rpc_ctrl_set_zbc_color_clear_v1A_09 = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
 rpc_ctrl_set_zbc_color_clear_v = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
-class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09(ctypes.Structure): pass
-class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09(Struct): pass
+class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00(Struct): pass
 NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00 = struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00
 struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00._fields_ = [
   ('depth', NvU32),
@@ -1622,8 +1622,8 @@ struct_rpc_ctrl_set_zbc_depth_clear_v1A_09._fields_ = [
 ]
 rpc_ctrl_set_zbc_depth_clear_v1A_09 = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
 rpc_ctrl_set_zbc_depth_clear_v = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
-class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06(ctypes.Structure): pass
-class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06(ctypes.Structure): pass
+class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06(Struct): pass
+class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06(Struct): pass
 NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06 = struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06
 struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06._fields_ = [
   ('stencil', NvU32),
@@ -1637,8 +1637,8 @@ struct_rpc_ctrl_set_zbc_stencil_clear_v27_06._fields_ = [
 ]
 rpc_ctrl_set_zbc_stencil_clear_v27_06 = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
 rpc_ctrl_set_zbc_stencil_clear_v = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
-class struct_rpc_ctrl_gpfifo_schedule_v1A_0A(ctypes.Structure): pass
-class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_gpfifo_schedule_v1A_0A(Struct): pass
+class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00(Struct): pass
 NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00 = struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00
 struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00._fields_ = [
   ('bEnable', NvBool),
@@ -1651,8 +1651,8 @@ struct_rpc_ctrl_gpfifo_schedule_v1A_0A._fields_ = [
 ]
 rpc_ctrl_gpfifo_schedule_v1A_0A = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
 rpc_ctrl_gpfifo_schedule_v = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
-class struct_rpc_ctrl_set_timeslice_v1A_0A(ctypes.Structure): pass
-class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00(ctypes.Structure): pass
+class struct_rpc_ctrl_set_timeslice_v1A_0A(Struct): pass
+class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00(Struct): pass
 NVA06C_CTRL_TIMESLICE_PARAMS_v06_00 = struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00
 struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00._fields_ = [
   ('timesliceUs', NvU64),
@@ -1664,8 +1664,8 @@ struct_rpc_ctrl_set_timeslice_v1A_0A._fields_ = [
 ]
 rpc_ctrl_set_timeslice_v1A_0A = struct_rpc_ctrl_set_timeslice_v1A_0A
 rpc_ctrl_set_timeslice_v = struct_rpc_ctrl_set_timeslice_v1A_0A
-class struct_rpc_ctrl_fifo_disable_channels_v1A_0A(ctypes.Structure): pass
-class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00(ctypes.Structure): pass
+class struct_rpc_ctrl_fifo_disable_channels_v1A_0A(Struct): pass
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00(Struct): pass
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00 = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00
 struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00._fields_ = [
   ('bDisable', NvBool),
@@ -1683,8 +1683,8 @@ struct_rpc_ctrl_fifo_disable_channels_v1A_0A._fields_ = [
 ]
 rpc_ctrl_fifo_disable_channels_v1A_0A = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
 rpc_ctrl_fifo_disable_channels_v = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
-class struct_rpc_ctrl_preempt_v1A_0A(ctypes.Structure): pass
-class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A(ctypes.Structure): pass
+class struct_rpc_ctrl_preempt_v1A_0A(Struct): pass
+class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A(Struct): pass
 NVA06C_CTRL_PREEMPT_PARAMS_v09_0A = struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A
 struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A._fields_ = [
   ('bWait', NvBool),
@@ -1698,8 +1698,8 @@ struct_rpc_ctrl_preempt_v1A_0A._fields_ = [
 ]
 rpc_ctrl_preempt_v1A_0A = struct_rpc_ctrl_preempt_v1A_0A
 rpc_ctrl_preempt_v = struct_rpc_ctrl_preempt_v1A_0A
-class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A(ctypes.Structure): pass
-class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(ctypes.Structure): pass
+class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A(Struct): pass
+class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Struct): pass
 NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02 = struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
 struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = [
   ('tsgInterleaveLevel', NvU32),
@@ -1711,8 +1711,8 @@ struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A._fields_ = [
 ]
 rpc_ctrl_set_tsg_interleave_level_v1A_0A = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
 rpc_ctrl_set_tsg_interleave_level_v = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
-class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A(ctypes.Structure): pass
-class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(ctypes.Structure): pass
+class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A(Struct): pass
+class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Struct): pass
 NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02 = struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
 struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = [
   ('channelInterleaveLevel', NvU32),
@@ -1724,8 +1724,8 @@ struct_rpc_ctrl_set_channel_interleave_level_v1A_0A._fields_ = [
 ]
 rpc_ctrl_set_channel_interleave_level_v1A_0A = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
 rpc_ctrl_set_channel_interleave_level_v = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
-class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E(ctypes.Structure): pass
-class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01(ctypes.Structure): pass
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E(Struct): pass
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01(Struct): pass
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01 = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01
 struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01._fields_ = [
   ('flags', NvU32),
@@ -1742,8 +1742,8 @@ struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E._fields_ = [
   ('ctrlParams', NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01),
 ]
 rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E
-class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07(ctypes.Structure): pass
-class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07(ctypes.Structure): pass
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07(Struct): pass
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07(Struct): pass
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07 = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07
 struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07._fields_ = [
   ('flags', NvU32),
@@ -1761,8 +1761,8 @@ struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07._fields_ = [
 ]
 rpc_ctrl_gr_ctxsw_preemption_bind_v28_07 = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
 rpc_ctrl_gr_ctxsw_preemption_bind_v = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
-class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E(ctypes.Structure): pass
-class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01(ctypes.Structure): pass
+class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E(Struct): pass
+class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01(Struct): pass
 NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01 = struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01
 struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01._fields_ = [
   ('flags', NvU32),
@@ -1778,8 +1778,8 @@ struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E._fields_ = [
 ]
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
-class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E(ctypes.Structure): pass
-class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E(Struct): pass
+class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00 = struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00
 struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00._fields_ = [
   ('hClient', NvHandle),
@@ -1794,8 +1794,8 @@ struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E._fields_ = [
 ]
 rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
 rpc_ctrl_gr_ctxsw_zcull_bind_v = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
-class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E(Struct): pass
+class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00 = struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00
 struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00._fields_ = [
   ('engineType', NvU32),
@@ -1817,10 +1817,10 @@ struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E._fields_ = [
 ]
 rpc_ctrl_gpu_initialize_ctx_v1A_0E = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
 rpc_ctrl_gpu_initialize_ctx_v = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
-class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04(ctypes.Structure): pass
-class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04(ctypes.Structure): pass
+class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04(Struct): pass
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04(Struct): pass
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04 = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04
-class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04(ctypes.Structure): pass
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04(Struct): pass
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04 = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04
 struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04._fields_ = [
   ('physAddress', NvU64),
@@ -1844,8 +1844,8 @@ struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04._fields_ = [
 ]
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04 = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
-class struct_rpc_ctrl_mc_service_interrupts_v1A_0E(ctypes.Structure): pass
-class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01(ctypes.Structure): pass
+class struct_rpc_ctrl_mc_service_interrupts_v1A_0E(Struct): pass
+class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01(Struct): pass
 NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01 = struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01
 struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01._fields_ = [
   ('engines', NvU32),
@@ -1857,7 +1857,7 @@ struct_rpc_ctrl_mc_service_interrupts_v1A_0E._fields_ = [
 ]
 rpc_ctrl_mc_service_interrupts_v1A_0E = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
 rpc_ctrl_mc_service_interrupts_v = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
-class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D(ctypes.Structure): pass
+class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D(Struct): pass
 struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D._fields_ = [
   ('iter', NvU8),
   ('gpuIds', (NvU32 * 32)),
@@ -1870,10 +1870,10 @@ struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D._fields_ = [
 ]
 rpc_ctrl_get_p2p_caps_v2_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
 rpc_ctrl_get_p2p_caps_v2_v = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
-class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02(ctypes.Structure): pass
-class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02(ctypes.Structure): pass
+class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02(Struct): pass
+class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02(Struct): pass
 NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02 = struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02
-class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02(Struct): pass
 NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02 = struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02
 struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02._fields_ = [
   ('gpuId', NvU32),
@@ -1895,8 +1895,8 @@ struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02._fields_ = [
 ]
 rpc_ctrl_subdevice_get_p2p_caps_v21_02 = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
 rpc_ctrl_subdevice_get_p2p_caps_v = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
-class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03(ctypes.Structure): pass
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03(Struct): pass
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03(Struct): pass
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03 = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03
 struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03._fields_ = [
   ('allocatedSize', NvU64),
@@ -1911,8 +1911,8 @@ struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03._fields_ = [
   ('ctrlParams', NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03),
 ]
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03
-class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06(ctypes.Structure): pass
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06(Struct): pass
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06(Struct): pass
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06 = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06
 struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06._fields_ = [
   ('allocatedSize', NvU64),
@@ -1929,8 +1929,8 @@ struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06._fields_ = [
 ]
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
-class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00(Struct): pass
 NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00 = struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00
 struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00._fields_ = [
   ('hTargetChannel', NvHandle),
@@ -1943,10 +1943,10 @@ struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C._fields_ = [
 ]
 rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
 rpc_ctrl_dbg_clear_all_sm_error_states_v = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
-class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06(Struct): pass
 NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06 = struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06
-class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06(ctypes.Structure): pass
+class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06(Struct): pass
 NV83DE_SM_ERROR_STATE_REGISTERS_v21_06 = struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06
 struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06._fields_ = [
   ('hwwGlobalEsr', NvU32),
@@ -1959,7 +1959,7 @@ struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06._fields_ = [
   ('hwwCgaEsr', NvU32),
   ('hwwCgaEsrReportMask', NvU32),
 ]
-class struct_NV83DE_MMU_FAULT_INFO_v16_03(ctypes.Structure): pass
+class struct_NV83DE_MMU_FAULT_INFO_v16_03(Struct): pass
 NV83DE_MMU_FAULT_INFO_v16_03 = struct_NV83DE_MMU_FAULT_INFO_v16_03
 struct_NV83DE_MMU_FAULT_INFO_v16_03._fields_ = [
   ('valid', NvBool),
@@ -1980,8 +1980,8 @@ struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06._fields_ = [
 ]
 rpc_ctrl_dbg_read_all_sm_error_states_v21_06 = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
 rpc_ctrl_dbg_read_all_sm_error_states_v = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
-class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00(Struct): pass
 NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00 = struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00
 struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00._fields_ = [
   ('exceptionMask', NvU32),
@@ -1993,10 +1993,10 @@ struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C._fields_ = [
 ]
 rpc_ctrl_dbg_set_exception_mask_v1A_0C = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
 rpc_ctrl_dbg_set_exception_mask_v = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
-class struct_rpc_ctrl_gpu_promote_ctx_v1A_20(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_promote_ctx_v1A_20(Struct): pass
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20(Struct): pass
 NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20 = struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20
-class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20(Struct): pass
 NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20 = struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20
 struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20._fields_ = [
   ('gpuPhysAddr', NvU64),
@@ -2026,8 +2026,8 @@ struct_rpc_ctrl_gpu_promote_ctx_v1A_20._fields_ = [
 ]
 rpc_ctrl_gpu_promote_ctx_v1A_20 = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
 rpc_ctrl_gpu_promote_ctx_v = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
-class struct_rpc_ctrl_dbg_suspend_context_v1A_10(ctypes.Structure): pass
-class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_suspend_context_v1A_10(Struct): pass
+class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06 = struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06
 struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06._fields_ = [
   ('waitForEvent', NvU32),
@@ -2040,15 +2040,15 @@ struct_rpc_ctrl_dbg_suspend_context_v1A_10._fields_ = [
 ]
 rpc_ctrl_dbg_suspend_context_v1A_10 = struct_rpc_ctrl_dbg_suspend_context_v1A_10
 rpc_ctrl_dbg_suspend_context_v = struct_rpc_ctrl_dbg_suspend_context_v1A_10
-class struct_rpc_ctrl_dbg_resume_context_v1A_10(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_resume_context_v1A_10(Struct): pass
 struct_rpc_ctrl_dbg_resume_context_v1A_10._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
 ]
 rpc_ctrl_dbg_resume_context_v1A_10 = struct_rpc_ctrl_dbg_resume_context_v1A_10
 rpc_ctrl_dbg_resume_context_v = struct_rpc_ctrl_dbg_resume_context_v1A_10
-class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06
 struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06._fields_ = [
   ('bNonTransactional', NvBool),
@@ -2062,8 +2062,8 @@ struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10._fields_ = [
 ]
 rpc_ctrl_dbg_exec_reg_ops_v1A_10 = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
 rpc_ctrl_dbg_exec_reg_ops_v = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
-class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06
 struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06._fields_ = [
   ('action', NvU32),
@@ -2075,8 +2075,8 @@ struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10._fields_ = [
 ]
 rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
 rpc_ctrl_dbg_set_mode_mmu_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
-class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Struct): pass
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07 = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
 struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = [
   ('action', NvU32),
@@ -2088,8 +2088,8 @@ struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07._fields_ = [
 ]
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
-class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06(Struct): pass
 NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06 = struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06
 struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06._fields_ = [
   ('hTargetChannel', NvHandle),
@@ -2103,8 +2103,8 @@ struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06._fields_ = [
 ]
 rpc_ctrl_dbg_read_single_sm_error_state_v21_06 = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
 rpc_ctrl_dbg_read_single_sm_error_state_v = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
-class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06
 struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06._fields_ = [
   ('hTargetChannel', NvHandle),
@@ -2117,8 +2117,8 @@ struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10._fields_ = [
 ]
 rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10 = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
 rpc_ctrl_dbg_clear_single_sm_error_state_v = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
-class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06
 struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06._fields_ = [
   ('action', NvU32),
@@ -2130,8 +2130,8 @@ struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10._fields_ = [
 ]
 rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
 rpc_ctrl_dbg_set_mode_errbar_debug_v = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
-class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06
 struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06._fields_ = [
   ('stopTriggerType', NvU32),
@@ -2143,8 +2143,8 @@ struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10._fields_ = [
 ]
 rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10 = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
 rpc_ctrl_dbg_set_next_stop_trigger_type_v = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
-class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E(ctypes.Structure): pass
-class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E(Struct): pass
+class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00(Struct): pass
 NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00 = struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00
 struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00._fields_ = [
   ('hVASpace', NvHandle),
@@ -2156,8 +2156,8 @@ struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E._fields_ = [
 ]
 rpc_ctrl_dma_set_default_vaspace_v1A_0E = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
 rpc_ctrl_dma_set_default_vaspace_v = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
-class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E(ctypes.Structure): pass
-class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07(ctypes.Structure): pass
+class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E(Struct): pass
+class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07(Struct): pass
 NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07 = struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07
 struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07._fields_ = [
   ('ceEngineType', NvU32),
@@ -2170,10 +2170,10 @@ struct_rpc_ctrl_get_ce_pce_mask_v1A_0E._fields_ = [
 ]
 rpc_ctrl_get_ce_pce_mask_v1A_0E = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
 rpc_ctrl_get_ce_pce_mask_v = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
-class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E(ctypes.Structure): pass
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07(ctypes.Structure): pass
+class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E(Struct): pass
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07(ctypes.Structure): pass
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07
 struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07._fields_ = [
   ('colorFB', (NvU32 * 4)),
@@ -2203,12 +2203,12 @@ struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E._fields_ = [
 ]
 rpc_ctrl_get_zbc_clear_table_entry_v1A_0E = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
 rpc_ctrl_get_zbc_clear_table_entry_v = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
-class struct_rpc_ctrl_get_nvlink_status_v23_04(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04(ctypes.Structure): pass
+class struct_rpc_ctrl_get_nvlink_status_v23_04(Struct): pass
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04(Struct): pass
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04 = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04
-class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D(ctypes.Structure): pass
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D(Struct): pass
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D
-class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02(ctypes.Structure): pass
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02(Struct): pass
 NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02 = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02
 struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02._fields_ = [
   ('deviceIdFlags', NvU32),
@@ -2248,12 +2248,12 @@ struct_rpc_ctrl_get_nvlink_status_v23_04._fields_ = [
   ('ctrlParams', NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04),
 ]
 rpc_ctrl_get_nvlink_status_v23_04 = struct_rpc_ctrl_get_nvlink_status_v23_04
-class struct_rpc_ctrl_get_nvlink_status_v28_09(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09(ctypes.Structure): pass
+class struct_rpc_ctrl_get_nvlink_status_v28_09(Struct): pass
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09(Struct): pass
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09 = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09
-class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09(ctypes.Structure): pass
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09(Struct): pass
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09 = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09
-class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09(ctypes.Structure): pass
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09(Struct): pass
 NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09 = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09
 struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09._fields_ = [
   ('deviceIdFlags', NvU32),
@@ -2295,8 +2295,8 @@ struct_rpc_ctrl_get_nvlink_status_v28_09._fields_ = [
 ]
 rpc_ctrl_get_nvlink_status_v28_09 = struct_rpc_ctrl_get_nvlink_status_v28_09
 rpc_ctrl_get_nvlink_status_v = struct_rpc_ctrl_get_nvlink_status_v28_09
-class struct_rpc_ctrl_get_p2p_caps_v1F_0D(ctypes.Structure): pass
-class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D(ctypes.Structure): pass
+class struct_rpc_ctrl_get_p2p_caps_v1F_0D(Struct): pass
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D(Struct): pass
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D
 struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D._fields_ = [
   ('gpuIds', (NvU32 * 32)),
@@ -2313,10 +2313,10 @@ struct_rpc_ctrl_get_p2p_caps_v1F_0D._fields_ = [
 ]
 rpc_ctrl_get_p2p_caps_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v1F_0D
 rpc_ctrl_get_p2p_caps_v = struct_rpc_ctrl_get_p2p_caps_v1F_0D
-class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E(ctypes.Structure): pass
-class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A(ctypes.Structure): pass
+class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E(Struct): pass
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A(Struct): pass
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A
-class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A(ctypes.Structure): pass
+class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A(Struct): pass
 NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A = struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A
 struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A._fields_ = [
   ('array', (NvU32 * 8)),
@@ -2339,8 +2339,8 @@ struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E._fields_ = [
 ]
 rpc_ctrl_get_p2p_caps_matrix_v1A_0E = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
 rpc_ctrl_get_p2p_caps_matrix_v = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
-class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F(ctypes.Structure): pass
+class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F(Struct): pass
+class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F(Struct): pass
 NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F = struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F
 struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F._fields_ = [
   ('ctxsw', NvBool),
@@ -2352,8 +2352,8 @@ struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F._fields_ = [
 ]
 rpc_ctrl_reserve_pm_area_smpc_v1A_0F = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
 rpc_ctrl_reserve_pm_area_smpc_v = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
-class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F(ctypes.Structure): pass
+class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F(Struct): pass
+class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F(Struct): pass
 NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F = struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F
 struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F._fields_ = [
   ('ctxsw', NvBool),
@@ -2365,8 +2365,8 @@ struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F._fields_ = [
 ]
 rpc_ctrl_reserve_hwpm_legacy_v1A_0F = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
 rpc_ctrl_reserve_hwpm_legacy_v = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
-class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F(ctypes.Structure): pass
+class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(Struct): pass
+class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F(Struct): pass
 NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F = struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F
 enum_NVB0CC_REGOPS_MODE = CEnum(ctypes.c_uint)
 NVB0CC_REGOPS_MODE_ALL_OR_NONE = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_ALL_OR_NONE', 0)
@@ -2387,15 +2387,15 @@ struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F._fields_ = [
 ]
 rpc_ctrl_b0cc_exec_reg_ops_v1A_0F = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
 rpc_ctrl_b0cc_exec_reg_ops_v = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
-class struct_rpc_ctrl_bind_pm_resources_v1A_0F(ctypes.Structure): pass
+class struct_rpc_ctrl_bind_pm_resources_v1A_0F(Struct): pass
 struct_rpc_ctrl_bind_pm_resources_v1A_0F._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
 ]
 rpc_ctrl_bind_pm_resources_v1A_0F = struct_rpc_ctrl_bind_pm_resources_v1A_0F
 rpc_ctrl_bind_pm_resources_v = struct_rpc_ctrl_bind_pm_resources_v1A_0F
-class struct_rpc_ctrl_alloc_pma_stream_v1A_14(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14(ctypes.Structure): pass
+class struct_rpc_ctrl_alloc_pma_stream_v1A_14(Struct): pass
+class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14(Struct): pass
 NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14 = struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14
 struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14._fields_ = [
   ('hMemPmaBuffer', NvHandle),
@@ -2414,8 +2414,8 @@ struct_rpc_ctrl_alloc_pma_stream_v1A_14._fields_ = [
 ]
 rpc_ctrl_alloc_pma_stream_v1A_14 = struct_rpc_ctrl_alloc_pma_stream_v1A_14
 rpc_ctrl_alloc_pma_stream_v = struct_rpc_ctrl_alloc_pma_stream_v1A_14
-class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14(ctypes.Structure): pass
+class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14(Struct): pass
+class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14(Struct): pass
 NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14 = struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14
 struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14._fields_ = [
   ('bytesConsumed', NvU64),
@@ -2433,10 +2433,10 @@ struct_rpc_ctrl_pma_stream_update_get_put_v1A_14._fields_ = [
 ]
 rpc_ctrl_pma_stream_update_get_put_v1A_14 = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
 rpc_ctrl_pma_stream_update_get_put_v = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
-class struct_rpc_ctrl_fb_get_info_v2_v25_0A(ctypes.Structure): pass
-class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A(ctypes.Structure): pass
+class struct_rpc_ctrl_fb_get_info_v2_v25_0A(Struct): pass
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A(Struct): pass
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A
-class struct_NV2080_CTRL_FB_INFO_v1A_15(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_INFO_v1A_15(Struct): pass
 NV2080_CTRL_FB_INFO_v1A_15 = struct_NV2080_CTRL_FB_INFO_v1A_15
 struct_NV2080_CTRL_FB_INFO_v1A_15._fields_ = [
   ('index', NvU32),
@@ -2452,8 +2452,8 @@ struct_rpc_ctrl_fb_get_info_v2_v25_0A._fields_ = [
   ('ctrlParams', NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A),
 ]
 rpc_ctrl_fb_get_info_v2_v25_0A = struct_rpc_ctrl_fb_get_info_v2_v25_0A
-class struct_rpc_ctrl_fb_get_info_v2_v27_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00(ctypes.Structure): pass
+class struct_rpc_ctrl_fb_get_info_v2_v27_00(Struct): pass
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00(Struct): pass
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00 = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00
 struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00._fields_ = [
   ('fbInfoListSize', NvU32),
@@ -2466,8 +2466,8 @@ struct_rpc_ctrl_fb_get_info_v2_v27_00._fields_ = [
 ]
 rpc_ctrl_fb_get_info_v2_v27_00 = struct_rpc_ctrl_fb_get_info_v2_v27_00
 rpc_ctrl_fb_get_info_v2_v = struct_rpc_ctrl_fb_get_info_v2_v27_00
-class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16(ctypes.Structure): pass
-class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16(Struct): pass
+class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00(Struct): pass
 NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00 = struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00
 struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00._fields_ = [
   ('hChannel', NvHandle),
@@ -2481,8 +2481,8 @@ struct_rpc_ctrl_fifo_set_channel_properties_v1A_16._fields_ = [
 ]
 rpc_ctrl_fifo_set_channel_properties_v1A_16 = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
 rpc_ctrl_fifo_set_channel_properties_v = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
-class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C(Struct): pass
+class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00 = struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00
 struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00._fields_ = [
   ('engineType', NvU32),
@@ -2498,90 +2498,90 @@ struct_rpc_ctrl_gpu_evict_ctx_v1A_1C._fields_ = [
 ]
 rpc_ctrl_gpu_evict_ctx_v1A_1C = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
 rpc_ctrl_gpu_evict_ctx_v = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
-class struct_rpc_ctrl_fb_get_fs_info_v24_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00(ctypes.Structure): pass
+class struct_rpc_ctrl_fb_get_fs_info_v24_00(Struct): pass
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00(Struct): pass
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00 = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D
 class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D(ctypes.Union): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D
-class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D._fields_ = [
   ('data', (NvU8 * 24)),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D._fields_ = [
   ('swizzId', NvU32),
   ('fbpEnMask', NvU64),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('ltcEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('ltsEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('fbpaEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('ropEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('swizzId', NvU32),
   ('ltcEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('swizzId', NvU32),
   ('ltsEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('swizzId', NvU32),
   ('fbpaEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('swizzId', NvU32),
   ('ropEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('swizzId', NvU32),
   ('fbpaSubpEnMask', NvU64),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
   ('fbpaSubpEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D
 struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D._fields_ = [
   ('fbpIndex', NvU32),
@@ -2619,32 +2619,32 @@ struct_rpc_ctrl_fb_get_fs_info_v24_00._fields_ = [
   ('params', NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00),
 ]
 rpc_ctrl_fb_get_fs_info_v24_00 = struct_rpc_ctrl_fb_get_fs_info_v24_00
-class struct_rpc_ctrl_fb_get_fs_info_v26_04(ctypes.Structure): pass
-class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04(ctypes.Structure): pass
+class struct_rpc_ctrl_fb_get_fs_info_v26_04(Struct): pass
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04 = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04
 class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04(ctypes.Union): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04 = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04
-class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04(ctypes.Structure): pass
+class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04
 struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04._fields_ = [
   ('sysIdx', NvU32),
   ('sysl2LtcEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04
 struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04._fields_ = [
   ('fbpIndex', NvU32),
   ('pacEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04
 struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = [
   ('fbpIndex', NvU32),
   ('logicalLtcEnMask', NvU64),
 ]
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04(ctypes.Structure): pass
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04
 struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = [
   ('fbpIndex', NvU32),
@@ -2688,68 +2688,68 @@ struct_rpc_ctrl_fb_get_fs_info_v26_04._fields_ = [
 ]
 rpc_ctrl_fb_get_fs_info_v26_04 = struct_rpc_ctrl_fb_get_fs_info_v26_04
 rpc_ctrl_fb_get_fs_info_v = struct_rpc_ctrl_fb_get_fs_info_v26_04
-class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D(ctypes.Structure): pass
-class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D(Struct): pass
+class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D
 class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D(ctypes.Union): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D = union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D._fields_ = [
   ('gpcCount', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = [
   ('gpcId', NvU32),
   ('chipletGpcMap', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D._fields_ = [
   ('gpcId', NvU32),
   ('tpcMask', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D._fields_ = [
   ('gpcId', NvU32),
   ('ppcMask', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = [
   ('swizzId', NvU32),
   ('gpcId', NvU32),
   ('chipletGpcMap', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D._fields_ = [
   ('chipletSyspipeMask', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D._fields_ = [
   ('swizzId', NvU16),
   ('physSyspipeIdCount', NvU16),
   ('physSyspipeId', (NvU8 * 8)),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D._fields_ = [
   ('swizzId', NvU32),
   ('grIdx', NvU32),
   ('gpcEnMask', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D._fields_ = [
   ('syspipeId', NvU32),
 ]
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D(ctypes.Structure): pass
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D
 struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = [
   ('gpcId', NvU32),
@@ -2785,8 +2785,8 @@ struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D._fields_ = [
 ]
 rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
 rpc_ctrl_grmgr_get_gr_fs_info_v = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
-class struct_rpc_ctrl_stop_channel_v1A_1E(ctypes.Structure): pass
-class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E(ctypes.Structure): pass
+class struct_rpc_ctrl_stop_channel_v1A_1E(Struct): pass
+class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E(Struct): pass
 NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E = struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E
 struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E._fields_ = [
   ('bImmediate', NvBool),
@@ -2798,8 +2798,8 @@ struct_rpc_ctrl_stop_channel_v1A_1E._fields_ = [
 ]
 rpc_ctrl_stop_channel_v1A_1E = struct_rpc_ctrl_stop_channel_v1A_1E
 rpc_ctrl_stop_channel_v = struct_rpc_ctrl_stop_channel_v1A_1E
-class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F(ctypes.Structure): pass
-class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F(ctypes.Structure): pass
+class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F(Struct): pass
+class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F = struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F
 struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F._fields_ = [
   ('hChannel', NvHandle),
@@ -2813,10 +2813,10 @@ struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F._fields_ = [
 ]
 rpc_ctrl_gr_pc_sampling_mode_v1A_1F = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
 rpc_ctrl_gr_pc_sampling_mode_v = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
-class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F(ctypes.Structure): pass
-class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F(ctypes.Structure): pass
+class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F(Struct): pass
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F
-class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F(ctypes.Structure): pass
+class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F(Struct): pass
 PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F = struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F
 struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F._fields_ = [
   ('clientActiveMask', NvU32),
@@ -2842,8 +2842,8 @@ struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F._fields_ = [
 ]
 rpc_ctrl_perf_rated_tdp_get_status_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
 rpc_ctrl_perf_rated_tdp_get_status_v = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
-class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(ctypes.Structure): pass
-class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F(ctypes.Structure): pass
+class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(Struct): pass
+class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F
 enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', 0)
@@ -2865,8 +2865,8 @@ struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F._fields_ = [
 ]
 rpc_ctrl_perf_rated_tdp_set_control_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
 rpc_ctrl_perf_rated_tdp_set_control_v = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
-class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F(ctypes.Structure): pass
+class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F(Struct): pass
+class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F = struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F
 struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F._fields_ = [
   ('bSetMaxFreq', NvBool),
@@ -2878,8 +2878,8 @@ struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F._fields_ = [
 ]
 rpc_ctrl_timer_set_gr_tick_freq_v1A_1F = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
 rpc_ctrl_timer_set_gr_tick_freq_v = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
-class struct_rpc_ctrl_free_pma_stream_v1A_1F(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F(ctypes.Structure): pass
+class struct_rpc_ctrl_free_pma_stream_v1A_1F(Struct): pass
+class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F(Struct): pass
 NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F = struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F
 struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F._fields_ = [
   ('pmaChannelIdx', NvU32),
@@ -2891,8 +2891,8 @@ struct_rpc_ctrl_free_pma_stream_v1A_1F._fields_ = [
 ]
 rpc_ctrl_free_pma_stream_v1A_1F = struct_rpc_ctrl_free_pma_stream_v1A_1F
 rpc_ctrl_free_pma_stream_v = struct_rpc_ctrl_free_pma_stream_v1A_1F
-class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23(ctypes.Structure): pass
-class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23(ctypes.Structure): pass
+class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23(Struct): pass
+class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23(Struct): pass
 NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23 = struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23
 struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23._fields_ = [
   ('base', NvU64),
@@ -2907,8 +2907,8 @@ struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23._fields_ = [
 ]
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23 = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
-class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02(Struct): pass
 NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02 = struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02
 struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02._fields_ = [
   ('smID', NvU32),
@@ -2921,8 +2921,8 @@ struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02._fields_ = [
 ]
 rpc_ctrl_dbg_set_single_sm_single_step_v1C_02 = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
 rpc_ctrl_dbg_set_single_sm_single_step_v = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
-class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(ctypes.Structure): pass
-class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04(ctypes.Structure): pass
+class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(Struct): pass
+class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04(Struct): pass
 NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04 = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04
 enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE', 0)
@@ -2943,7 +2943,7 @@ struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04._fields_ = [
 ]
 rpc_ctrl_gr_get_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_get_tpc_partition_mode_v = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
-class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04(ctypes.Structure): pass
+class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04(Struct): pass
 struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
@@ -2951,10 +2951,10 @@ struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04._fields_ = [
 ]
 rpc_ctrl_gr_set_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_set_tpc_partition_mode_v = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
-class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07(ctypes.Structure): pass
-class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07(ctypes.Structure): pass
+class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07(Struct): pass
+class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07(Struct): pass
 NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07 = struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07
-class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07(ctypes.Structure): pass
+class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07(Struct): pass
 NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07 = struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07
 struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07._fields_ = [
   ('base', NvU64),
@@ -2975,8 +2975,8 @@ struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07._fields_ = [
 ]
 rpc_ctrl_internal_promote_fault_method_buffers_v1E_07 = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
 rpc_ctrl_internal_promote_fault_method_buffers_v = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
-class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05(ctypes.Structure): pass
+class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05(Struct): pass
+class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05(Struct): pass
 NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05 = struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05
 struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05._fields_ = [
   ('bZbcSurfacesExist', NvBool),
@@ -2988,8 +2988,8 @@ struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05._fields_ = [
 ]
 rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05 = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
 rpc_ctrl_internal_memsys_set_zbc_referenced_v = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
-class struct_rpc_ctrl_fabric_memory_describe_v1E_0C(ctypes.Structure): pass
-class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C(ctypes.Structure): pass
+class struct_rpc_ctrl_fabric_memory_describe_v1E_0C(Struct): pass
+class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C(Struct): pass
 NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C = struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C
 struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C._fields_ = [
   ('offset', NvU64),
@@ -3004,8 +3004,8 @@ struct_rpc_ctrl_fabric_memory_describe_v1E_0C._fields_ = [
 ]
 rpc_ctrl_fabric_memory_describe_v1E_0C = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
 rpc_ctrl_fabric_memory_describe_v = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
-class struct_rpc_ctrl_fabric_mem_stats_v1E_0C(ctypes.Structure): pass
-class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C(ctypes.Structure): pass
+class struct_rpc_ctrl_fabric_mem_stats_v1E_0C(Struct): pass
+class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C(Struct): pass
 NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C = struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C
 struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C._fields_ = [
   ('totalSize', NvU64),
@@ -3018,8 +3018,8 @@ struct_rpc_ctrl_fabric_mem_stats_v1E_0C._fields_ = [
 ]
 rpc_ctrl_fabric_mem_stats_v1E_0C = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
 rpc_ctrl_fabric_mem_stats_v = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
-class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03(ctypes.Structure): pass
-class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03(ctypes.Structure): pass
+class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03(Struct): pass
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03(Struct): pass
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03 = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03
 struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03._fields_ = [
   ('connectionType', NvU32),
@@ -3035,8 +3035,8 @@ struct_rpc_ctrl_bus_set_p2p_mapping_v21_03._fields_ = [
   ('params', NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03),
 ]
 rpc_ctrl_bus_set_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_set_p2p_mapping_v21_03
-class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08(ctypes.Structure): pass
-class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08(ctypes.Structure): pass
+class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08(Struct): pass
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08(Struct): pass
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08 = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08
 struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08._fields_ = [
   ('connectionType', NvU32),
@@ -3054,8 +3054,8 @@ struct_rpc_ctrl_bus_set_p2p_mapping_v29_08._fields_ = [
 ]
 rpc_ctrl_bus_set_p2p_mapping_v29_08 = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
 rpc_ctrl_bus_set_p2p_mapping_v = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
-class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03(ctypes.Structure): pass
-class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03(ctypes.Structure): pass
+class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03(Struct): pass
+class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03(Struct): pass
 NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03 = struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03
 struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03._fields_ = [
   ('connectionType', NvU32),
@@ -3071,10 +3071,10 @@ struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03._fields_ = [
 ]
 rpc_ctrl_bus_unset_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
 rpc_ctrl_bus_unset_p2p_mapping_v = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
-class struct_rpc_ctrl_gpu_get_info_v2_v25_11(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_get_info_v2_v25_11(Struct): pass
+class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11(Struct): pass
 NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11 = struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11
-class struct_NV2080_CTRL_GPU_INFO_v25_11(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_INFO_v25_11(Struct): pass
 NV2080_CTRL_GPU_INFO_v25_11 = struct_NV2080_CTRL_GPU_INFO_v25_11
 struct_NV2080_CTRL_GPU_INFO_v25_11._fields_ = [
   ('index', NvU32),
@@ -3091,7 +3091,7 @@ struct_rpc_ctrl_gpu_get_info_v2_v25_11._fields_ = [
 ]
 rpc_ctrl_gpu_get_info_v2_v25_11 = struct_rpc_ctrl_gpu_get_info_v2_v25_11
 rpc_ctrl_gpu_get_info_v2_v = struct_rpc_ctrl_gpu_get_info_v2_v25_11
-class struct_rpc_update_gpm_guest_buffer_info_v27_01(ctypes.Structure): pass
+class struct_rpc_update_gpm_guest_buffer_info_v27_01(Struct): pass
 struct_rpc_update_gpm_guest_buffer_info_v27_01._fields_ = [
   ('gpfn', NvU64),
   ('swizzId', NvU32),
@@ -3101,8 +3101,8 @@ struct_rpc_update_gpm_guest_buffer_info_v27_01._fields_ = [
 ]
 rpc_update_gpm_guest_buffer_info_v27_01 = struct_rpc_update_gpm_guest_buffer_info_v27_01
 rpc_update_gpm_guest_buffer_info_v = struct_rpc_update_gpm_guest_buffer_info_v27_01
-class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08(ctypes.Structure): pass
+class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08(Struct): pass
+class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08(Struct): pass
 NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08 = struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08
 struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08._fields_ = [
   ('pmaChannelIdx', NvU32),
@@ -3115,8 +3115,8 @@ struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08._fields_ = [
 ]
 rpc_ctrl_internal_quiesce_pma_channel_v1C_08 = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
 rpc_ctrl_internal_quiesce_pma_channel_v = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
-class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C(ctypes.Structure): pass
+class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C(Struct): pass
+class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C(Struct): pass
 NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C = struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C
 struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C._fields_ = [
   ('pmaChannelIdx', NvU32),
@@ -3133,10 +3133,10 @@ struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C._fields_ = [
 ]
 rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
 rpc_ctrl_internal_sriov_promote_pma_stream_v = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
-class struct_rpc_ctrl_exec_partitions_create_v24_05(ctypes.Structure): pass
-class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05(ctypes.Structure): pass
+class struct_rpc_ctrl_exec_partitions_create_v24_05(Struct): pass
+class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05(Struct): pass
 NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05
-class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05(ctypes.Structure): pass
+class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05(Struct): pass
 NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05
 struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05._fields_ = [
   ('gpcCount', NvU32),
@@ -3166,8 +3166,8 @@ struct_rpc_ctrl_exec_partitions_create_v24_05._fields_ = [
 ]
 rpc_ctrl_exec_partitions_create_v24_05 = struct_rpc_ctrl_exec_partitions_create_v24_05
 rpc_ctrl_exec_partitions_create_v = struct_rpc_ctrl_exec_partitions_create_v24_05
-class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05(ctypes.Structure): pass
-class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04(ctypes.Structure): pass
+class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05(Struct): pass
+class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04(Struct): pass
 NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04 = struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04
 struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04._fields_ = [
   ('imbPhysAddr', NvU64),
@@ -3181,8 +3181,8 @@ struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05._fields_ = [
 ]
 rpc_ctrl_fla_setup_instance_mem_block_v21_05 = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
 rpc_ctrl_fla_setup_instance_mem_block_v = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
-class struct_rpc_ctrl_get_total_hs_credits_v21_08(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08(ctypes.Structure): pass
+class struct_rpc_ctrl_get_total_hs_credits_v21_08(Struct): pass
+class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08(Struct): pass
 NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08
 struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08._fields_ = [
   ('numCredits', NvU32),
@@ -3194,16 +3194,16 @@ struct_rpc_ctrl_get_total_hs_credits_v21_08._fields_ = [
 ]
 rpc_ctrl_get_total_hs_credits_v21_08 = struct_rpc_ctrl_get_total_hs_credits_v21_08
 rpc_ctrl_get_total_hs_credits_v = struct_rpc_ctrl_get_total_hs_credits_v21_08
-class struct_rpc_ctrl_get_hs_credits_v21_08(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08(ctypes.Structure): pass
+class struct_rpc_ctrl_get_hs_credits_v21_08(Struct): pass
+class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08(Struct): pass
 NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08
-class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08(ctypes.Structure): pass
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08(Struct): pass
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08 = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08
 struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08._fields_ = [
   ('status', NvU8),
   ('entryIndex', NvU8),
 ]
-class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08(ctypes.Structure): pass
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08(Struct): pass
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08 = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08
 struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08._fields_ = [
   ('chipletType', NvU8),
@@ -3223,12 +3223,12 @@ struct_rpc_ctrl_get_hs_credits_v21_08._fields_ = [
 ]
 rpc_ctrl_get_hs_credits_v21_08 = struct_rpc_ctrl_get_hs_credits_v21_08
 rpc_ctrl_get_hs_credits_v = struct_rpc_ctrl_get_hs_credits_v21_08
-class struct_rpc_ctrl_reserve_hes_v29_07(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07(ctypes.Structure): pass
+class struct_rpc_ctrl_reserve_hes_v29_07(Struct): pass
+class struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07(Struct): pass
 NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07
-class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07(ctypes.Structure): pass
+class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07(Struct): pass
 NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07 = struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07
-class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07(ctypes.Structure): pass
+class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07(Struct): pass
 NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07
 struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07._fields_ = [
   ('ctxsw', NvBool),
@@ -3247,8 +3247,8 @@ struct_rpc_ctrl_reserve_hes_v29_07._fields_ = [
 ]
 rpc_ctrl_reserve_hes_v29_07 = struct_rpc_ctrl_reserve_hes_v29_07
 rpc_ctrl_reserve_hes_v = struct_rpc_ctrl_reserve_hes_v29_07
-class struct_rpc_ctrl_release_hes_v29_07(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07(ctypes.Structure): pass
+class struct_rpc_ctrl_release_hes_v29_07(Struct): pass
+class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07(Struct): pass
 NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07 = struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07
 struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07._fields_ = [
   ('type', NvU32),
@@ -3260,8 +3260,8 @@ struct_rpc_ctrl_release_hes_v29_07._fields_ = [
 ]
 rpc_ctrl_release_hes_v29_07 = struct_rpc_ctrl_release_hes_v29_07
 rpc_ctrl_release_hes_v = struct_rpc_ctrl_release_hes_v29_07
-class struct_rpc_ctrl_reserve_ccu_prof_v29_07(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07(ctypes.Structure): pass
+class struct_rpc_ctrl_reserve_ccu_prof_v29_07(Struct): pass
+class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07(Struct): pass
 NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07
 struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07._fields_ = [
   ('ctxsw', NvBool),
@@ -3273,15 +3273,15 @@ struct_rpc_ctrl_reserve_ccu_prof_v29_07._fields_ = [
 ]
 rpc_ctrl_reserve_ccu_prof_v29_07 = struct_rpc_ctrl_reserve_ccu_prof_v29_07
 rpc_ctrl_reserve_ccu_prof_v = struct_rpc_ctrl_reserve_ccu_prof_v29_07
-class struct_rpc_ctrl_release_ccu_prof_v29_07(ctypes.Structure): pass
+class struct_rpc_ctrl_release_ccu_prof_v29_07(Struct): pass
 struct_rpc_ctrl_release_ccu_prof_v29_07._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
 ]
 rpc_ctrl_release_ccu_prof_v29_07 = struct_rpc_ctrl_release_ccu_prof_v29_07
 rpc_ctrl_release_ccu_prof_v = struct_rpc_ctrl_release_ccu_prof_v29_07
-class struct_rpc_ctrl_set_hs_credits_v21_08(ctypes.Structure): pass
-class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08(ctypes.Structure): pass
+class struct_rpc_ctrl_set_hs_credits_v21_08(Struct): pass
+class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08(Struct): pass
 NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08
 struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08._fields_ = [
   ('pmaChannelIdx', NvU8),
@@ -3296,7 +3296,7 @@ struct_rpc_ctrl_set_hs_credits_v21_08._fields_ = [
 ]
 rpc_ctrl_set_hs_credits_v21_08 = struct_rpc_ctrl_set_hs_credits_v21_08
 rpc_ctrl_set_hs_credits_v = struct_rpc_ctrl_set_hs_credits_v21_08
-class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B(ctypes.Structure): pass
+class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B(Struct): pass
 struct_rpc_ctrl_pm_area_pc_sampler_v21_0B._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
@@ -3304,8 +3304,8 @@ struct_rpc_ctrl_pm_area_pc_sampler_v21_0B._fields_ = [
 ]
 rpc_ctrl_pm_area_pc_sampler_v21_0B = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
 rpc_ctrl_pm_area_pc_sampler_v = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
-class struct_rpc_ctrl_exec_partitions_delete_v1F_0A(ctypes.Structure): pass
-class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05(ctypes.Structure): pass
+class struct_rpc_ctrl_exec_partitions_delete_v1F_0A(Struct): pass
+class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05(Struct): pass
 NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05
 struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05._fields_ = [
   ('execPartCount', NvU32),
@@ -3318,8 +3318,8 @@ struct_rpc_ctrl_exec_partitions_delete_v1F_0A._fields_ = [
 ]
 rpc_ctrl_exec_partitions_delete_v1F_0A = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
 rpc_ctrl_exec_partitions_delete_v = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
-class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A(ctypes.Structure): pass
-class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00(ctypes.Structure): pass
+class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A(Struct): pass
+class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00(Struct): pass
 NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00 = struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00
 struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00._fields_ = [
   ('workSubmitToken', NvU32),
@@ -3331,8 +3331,8 @@ struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A._fields_ = [
 ]
 rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
 rpc_ctrl_gpfifo_get_work_submit_token_v = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
-class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A(ctypes.Structure): pass
-class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04(ctypes.Structure): pass
+class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A(Struct): pass
+class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04(Struct): pass
 NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04 = struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04
 struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04._fields_ = [
   ('index', NvU32),
@@ -3344,8 +3344,8 @@ struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A._fields_ = [
 ]
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
-class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D(ctypes.Structure): pass
-class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B(ctypes.Structure): pass
+class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D(Struct): pass
+class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B(Struct): pass
 NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B = struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B
 struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B._fields_ = [
   ('eccMask', NvU32),
@@ -3358,22 +3358,22 @@ struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D._fields_
 ]
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
-class struct_rpc_save_hibernation_data_v1E_0E(ctypes.Structure): pass
+class struct_rpc_save_hibernation_data_v1E_0E(Struct): pass
 struct_rpc_save_hibernation_data_v1E_0E._fields_ = [
   ('remainedBytes', NvU32),
   ('payload', (NvU8 * 0)),
 ]
 rpc_save_hibernation_data_v1E_0E = struct_rpc_save_hibernation_data_v1E_0E
 rpc_save_hibernation_data_v = struct_rpc_save_hibernation_data_v1E_0E
-class struct_rpc_restore_hibernation_data_v1E_0E(ctypes.Structure): pass
+class struct_rpc_restore_hibernation_data_v1E_0E(Struct): pass
 struct_rpc_restore_hibernation_data_v1E_0E._fields_ = [
   ('remainedBytes', NvU32),
   ('payload', (NvU8 * 0)),
 ]
 rpc_restore_hibernation_data_v1E_0E = struct_rpc_restore_hibernation_data_v1E_0E
 rpc_restore_hibernation_data_v = struct_rpc_restore_hibernation_data_v1E_0E
-class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06(ctypes.Structure): pass
-class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06(ctypes.Structure): pass
+class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06(Struct): pass
+class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06(Struct): pass
 NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06 = struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06
 struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06._fields_ = [
   ('bMode', NvBool),
@@ -3385,14 +3385,14 @@ struct_rpc_ctrl_get_mmu_debug_mode_v1E_06._fields_ = [
 ]
 rpc_ctrl_get_mmu_debug_mode_v1E_06 = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
 rpc_ctrl_get_mmu_debug_mode_v = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
-class struct_rpc_disable_channels_v1E_0B(ctypes.Structure): pass
+class struct_rpc_disable_channels_v1E_0B(Struct): pass
 struct_rpc_disable_channels_v1E_0B._fields_ = [
   ('bDisable', NvU32),
 ]
 rpc_disable_channels_v1E_0B = struct_rpc_disable_channels_v1E_0B
 rpc_disable_channels_v = struct_rpc_disable_channels_v1E_0B
-class struct_rpc_ctrl_gpu_migratable_ops_v21_07(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_migratable_ops_v21_07(Struct): pass
+class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07(Struct): pass
 NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07 = struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07
 struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07._fields_ = [
   ('hClientTarget', NvHandle),
@@ -3410,26 +3410,26 @@ struct_rpc_ctrl_gpu_migratable_ops_v21_07._fields_ = [
 ]
 rpc_ctrl_gpu_migratable_ops_v21_07 = struct_rpc_ctrl_gpu_migratable_ops_v21_07
 rpc_ctrl_gpu_migratable_ops_v = struct_rpc_ctrl_gpu_migratable_ops_v21_07
-class struct_rpc_invalidate_tlb_v23_03(ctypes.Structure): pass
+class struct_rpc_invalidate_tlb_v23_03(Struct): pass
 struct_rpc_invalidate_tlb_v23_03._fields_ = [
   ('pdbAddress', NvU64),
   ('regVal', NvU32),
 ]
 rpc_invalidate_tlb_v23_03 = struct_rpc_invalidate_tlb_v23_03
 rpc_invalidate_tlb_v = struct_rpc_invalidate_tlb_v23_03
-class struct_rpc_get_brand_caps_v25_12(ctypes.Structure): pass
+class struct_rpc_get_brand_caps_v25_12(Struct): pass
 struct_rpc_get_brand_caps_v25_12._fields_ = [
   ('brands', NvU32),
 ]
 rpc_get_brand_caps_v25_12 = struct_rpc_get_brand_caps_v25_12
 rpc_get_brand_caps_v = struct_rpc_get_brand_caps_v25_12
-class struct_rpc_gsp_set_system_info_v17_00(ctypes.Structure): pass
+class struct_rpc_gsp_set_system_info_v17_00(Struct): pass
 struct_rpc_gsp_set_system_info_v17_00._fields_ = [
   ('data', NvU32),
 ]
 rpc_gsp_set_system_info_v17_00 = struct_rpc_gsp_set_system_info_v17_00
 rpc_gsp_set_system_info_v = struct_rpc_gsp_set_system_info_v17_00
-class struct_rpc_gsp_rm_alloc_v03_00(ctypes.Structure): pass
+class struct_rpc_gsp_rm_alloc_v03_00(Struct): pass
 struct_rpc_gsp_rm_alloc_v03_00._fields_ = [
   ('hClient', NvHandle),
   ('hParent', NvHandle),
@@ -3443,7 +3443,7 @@ struct_rpc_gsp_rm_alloc_v03_00._fields_ = [
 ]
 rpc_gsp_rm_alloc_v03_00 = struct_rpc_gsp_rm_alloc_v03_00
 rpc_gsp_rm_alloc_v = struct_rpc_gsp_rm_alloc_v03_00
-class struct_rpc_gsp_rm_control_v03_00(ctypes.Structure): pass
+class struct_rpc_gsp_rm_control_v03_00(Struct): pass
 struct_rpc_gsp_rm_control_v03_00._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
@@ -3455,7 +3455,7 @@ struct_rpc_gsp_rm_control_v03_00._fields_ = [
 ]
 rpc_gsp_rm_control_v03_00 = struct_rpc_gsp_rm_control_v03_00
 rpc_gsp_rm_control_v = struct_rpc_gsp_rm_control_v03_00
-class struct_rpc_dump_protobuf_component_v18_12(ctypes.Structure): pass
+class struct_rpc_dump_protobuf_component_v18_12(Struct): pass
 struct_rpc_dump_protobuf_component_v18_12._fields_ = [
   ('component', NvU16),
   ('nvDumpType', NvU8),
@@ -3467,7 +3467,7 @@ struct_rpc_dump_protobuf_component_v18_12._fields_ = [
 ]
 rpc_dump_protobuf_component_v18_12 = struct_rpc_dump_protobuf_component_v18_12
 rpc_dump_protobuf_component_v = struct_rpc_dump_protobuf_component_v18_12
-class struct_rpc_run_cpu_sequencer_v17_00(ctypes.Structure): pass
+class struct_rpc_run_cpu_sequencer_v17_00(Struct): pass
 struct_rpc_run_cpu_sequencer_v17_00._fields_ = [
   ('bufferSizeDWord', NvU32),
   ('cmdIndex', NvU32),
@@ -3476,7 +3476,7 @@ struct_rpc_run_cpu_sequencer_v17_00._fields_ = [
 ]
 rpc_run_cpu_sequencer_v17_00 = struct_rpc_run_cpu_sequencer_v17_00
 rpc_run_cpu_sequencer_v = struct_rpc_run_cpu_sequencer_v17_00
-class struct_rpc_post_event_v17_00(ctypes.Structure): pass
+class struct_rpc_post_event_v17_00(Struct): pass
 struct_rpc_post_event_v17_00._fields_ = [
   ('hClient', NvHandle),
   ('hEvent', NvHandle),
@@ -3490,7 +3490,7 @@ struct_rpc_post_event_v17_00._fields_ = [
 ]
 rpc_post_event_v17_00 = struct_rpc_post_event_v17_00
 rpc_post_event_v = struct_rpc_post_event_v17_00
-class struct_rpc_rc_triggered_v17_02(ctypes.Structure): pass
+class struct_rpc_rc_triggered_v17_02(Struct): pass
 struct_rpc_rc_triggered_v17_02._fields_ = [
   ('nv2080EngineType', NvU32),
   ('chid', NvU32),
@@ -3508,7 +3508,7 @@ struct_rpc_rc_triggered_v17_02._fields_ = [
 ]
 rpc_rc_triggered_v17_02 = struct_rpc_rc_triggered_v17_02
 rpc_rc_triggered_v = struct_rpc_rc_triggered_v17_02
-class struct_rpc_os_error_log_v17_00(ctypes.Structure): pass
+class struct_rpc_os_error_log_v17_00(Struct): pass
 struct_rpc_os_error_log_v17_00._fields_ = [
   ('exceptType', NvU32),
   ('runlistId', NvU32),
@@ -3517,14 +3517,14 @@ struct_rpc_os_error_log_v17_00._fields_ = [
 ]
 rpc_os_error_log_v17_00 = struct_rpc_os_error_log_v17_00
 rpc_os_error_log_v = struct_rpc_os_error_log_v17_00
-class struct_rpc_rg_line_intr_v17_00(ctypes.Structure): pass
+class struct_rpc_rg_line_intr_v17_00(Struct): pass
 struct_rpc_rg_line_intr_v17_00._fields_ = [
   ('head', NvU32),
   ('rgIntr', NvU32),
 ]
 rpc_rg_line_intr_v17_00 = struct_rpc_rg_line_intr_v17_00
 rpc_rg_line_intr_v = struct_rpc_rg_line_intr_v17_00
-class struct_rpc_display_modeset_v01_00(ctypes.Structure): pass
+class struct_rpc_display_modeset_v01_00(Struct): pass
 struct_rpc_display_modeset_v01_00._fields_ = [
   ('bModesetStart', NvBool),
   ('minRequiredIsoBandwidthKBPS', NvU32),
@@ -3532,8 +3532,8 @@ struct_rpc_display_modeset_v01_00._fields_ = [
 ]
 rpc_display_modeset_v01_00 = struct_rpc_display_modeset_v01_00
 rpc_display_modeset_v = struct_rpc_display_modeset_v01_00
-class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E(ctypes.Structure): pass
-class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E(ctypes.Structure): pass
+class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E(Struct): pass
+class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E(Struct): pass
 NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E = struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E
 struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E._fields_ = [
   ('type', NvU8),
@@ -3547,27 +3547,27 @@ struct_rpc_gpuacct_perfmon_util_samples_v1F_0E._fields_ = [
 ]
 rpc_gpuacct_perfmon_util_samples_v1F_0E = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
 rpc_gpuacct_perfmon_util_samples_v = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
-class struct_rpc_vgpu_gsp_plugin_triggered_v17_00(ctypes.Structure): pass
+class struct_rpc_vgpu_gsp_plugin_triggered_v17_00(Struct): pass
 struct_rpc_vgpu_gsp_plugin_triggered_v17_00._fields_ = [
   ('gfid', NvU32),
   ('notifyIndex', NvU32),
 ]
 rpc_vgpu_gsp_plugin_triggered_v17_00 = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
 rpc_vgpu_gsp_plugin_triggered_v = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
-class struct_rpc_vgpu_config_event_v17_00(ctypes.Structure): pass
+class struct_rpc_vgpu_config_event_v17_00(Struct): pass
 struct_rpc_vgpu_config_event_v17_00._fields_ = [
   ('notifyIndex', NvU32),
 ]
 rpc_vgpu_config_event_v17_00 = struct_rpc_vgpu_config_event_v17_00
 rpc_vgpu_config_event_v = struct_rpc_vgpu_config_event_v17_00
-class struct_rpc_dce_rm_init_v01_00(ctypes.Structure): pass
+class struct_rpc_dce_rm_init_v01_00(Struct): pass
 struct_rpc_dce_rm_init_v01_00._fields_ = [
   ('bInit', NvBool),
   ('hInternalClient', NvU32),
 ]
 rpc_dce_rm_init_v01_00 = struct_rpc_dce_rm_init_v01_00
 rpc_dce_rm_init_v = struct_rpc_dce_rm_init_v01_00
-class struct_rpc_sim_read_v1E_01(ctypes.Structure): pass
+class struct_rpc_sim_read_v1E_01(Struct): pass
 struct_rpc_sim_read_v1E_01._fields_ = [
   ('path', (ctypes.c_char * 256)),
   ('index', NvU32),
@@ -3575,7 +3575,7 @@ struct_rpc_sim_read_v1E_01._fields_ = [
 ]
 rpc_sim_read_v1E_01 = struct_rpc_sim_read_v1E_01
 rpc_sim_read_v = struct_rpc_sim_read_v1E_01
-class struct_rpc_sim_write_v1E_01(ctypes.Structure): pass
+class struct_rpc_sim_write_v1E_01(Struct): pass
 struct_rpc_sim_write_v1E_01._fields_ = [
   ('path', (ctypes.c_char * 256)),
   ('index', NvU32),
@@ -3584,7 +3584,7 @@ struct_rpc_sim_write_v1E_01._fields_ = [
 ]
 rpc_sim_write_v1E_01 = struct_rpc_sim_write_v1E_01
 rpc_sim_write_v = struct_rpc_sim_write_v1E_01
-class struct_rpc_ucode_libos_print_v1E_08(ctypes.Structure): pass
+class struct_rpc_ucode_libos_print_v1E_08(Struct): pass
 struct_rpc_ucode_libos_print_v1E_08._fields_ = [
   ('ucodeEngDesc', NvU32),
   ('libosPrintBufSize', NvU32),
@@ -3592,13 +3592,13 @@ struct_rpc_ucode_libos_print_v1E_08._fields_ = [
 ]
 rpc_ucode_libos_print_v1E_08 = struct_rpc_ucode_libos_print_v1E_08
 rpc_ucode_libos_print_v = struct_rpc_ucode_libos_print_v1E_08
-class struct_rpc_init_done_v17_00(ctypes.Structure): pass
+class struct_rpc_init_done_v17_00(Struct): pass
 struct_rpc_init_done_v17_00._fields_ = [
   ('not_used', NvU32),
 ]
 rpc_init_done_v17_00 = struct_rpc_init_done_v17_00
 rpc_init_done_v = struct_rpc_init_done_v17_00
-class struct_rpc_semaphore_schedule_callback_v17_00(ctypes.Structure): pass
+class struct_rpc_semaphore_schedule_callback_v17_00(Struct): pass
 struct_rpc_semaphore_schedule_callback_v17_00._fields_ = [
   ('GPUVA', NvU64),
   ('hVASpace', NvU32),
@@ -3610,7 +3610,7 @@ struct_rpc_semaphore_schedule_callback_v17_00._fields_ = [
 ]
 rpc_semaphore_schedule_callback_v17_00 = struct_rpc_semaphore_schedule_callback_v17_00
 rpc_semaphore_schedule_callback_v = struct_rpc_semaphore_schedule_callback_v17_00
-class struct_rpc_timed_semaphore_release_v01_00(ctypes.Structure): pass
+class struct_rpc_timed_semaphore_release_v01_00(Struct): pass
 struct_rpc_timed_semaphore_release_v01_00._fields_ = [
   ('semaphoreVA', NvU64),
   ('notifierVA', NvU64),
@@ -3622,8 +3622,8 @@ struct_rpc_timed_semaphore_release_v01_00._fields_ = [
 ]
 rpc_timed_semaphore_release_v01_00 = struct_rpc_timed_semaphore_release_v01_00
 rpc_timed_semaphore_release_v = struct_rpc_timed_semaphore_release_v01_00
-class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00(Struct): pass
+class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00 = struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00
 struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00._fields_ = [
   ('flags', NvU32),
@@ -3635,20 +3635,20 @@ struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00._fields_ = [
 ]
 rpc_perf_gpu_boost_sync_limits_callback_v17_00 = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
 rpc_perf_gpu_boost_sync_limits_callback_v = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
-class struct_rpc_perf_bridgeless_info_update_v17_00(ctypes.Structure): pass
+class struct_rpc_perf_bridgeless_info_update_v17_00(Struct): pass
 struct_rpc_perf_bridgeless_info_update_v17_00._fields_ = [
   ('bBridgeless', NvU64),
 ]
 rpc_perf_bridgeless_info_update_v17_00 = struct_rpc_perf_bridgeless_info_update_v17_00
 rpc_perf_bridgeless_info_update_v = struct_rpc_perf_bridgeless_info_update_v17_00
-class struct_rpc_nvlink_fault_up_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_fault_up_v17_00(Struct): pass
 struct_rpc_nvlink_fault_up_v17_00._fields_ = [
   ('linkId', NvU32),
 ]
 rpc_nvlink_fault_up_v17_00 = struct_rpc_nvlink_fault_up_v17_00
 rpc_nvlink_fault_up_v = struct_rpc_nvlink_fault_up_v17_00
-class struct_rpc_nvlink_inband_received_data_256_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_inband_received_data_256_v17_00(Struct): pass
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00
 struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00._fields_ = [
   ('dataSize', NvU32),
@@ -3659,8 +3659,8 @@ struct_rpc_nvlink_inband_received_data_256_v17_00._fields_ = [
 ]
 rpc_nvlink_inband_received_data_256_v17_00 = struct_rpc_nvlink_inband_received_data_256_v17_00
 rpc_nvlink_inband_received_data_256_v = struct_rpc_nvlink_inband_received_data_256_v17_00
-class struct_rpc_nvlink_inband_received_data_512_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_inband_received_data_512_v17_00(Struct): pass
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00
 struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00._fields_ = [
   ('dataSize', NvU32),
@@ -3671,8 +3671,8 @@ struct_rpc_nvlink_inband_received_data_512_v17_00._fields_ = [
 ]
 rpc_nvlink_inband_received_data_512_v17_00 = struct_rpc_nvlink_inband_received_data_512_v17_00
 rpc_nvlink_inband_received_data_512_v = struct_rpc_nvlink_inband_received_data_512_v17_00
-class struct_rpc_nvlink_inband_received_data_1024_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_inband_received_data_1024_v17_00(Struct): pass
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00
 struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00._fields_ = [
   ('dataSize', NvU32),
@@ -3683,8 +3683,8 @@ struct_rpc_nvlink_inband_received_data_1024_v17_00._fields_ = [
 ]
 rpc_nvlink_inband_received_data_1024_v17_00 = struct_rpc_nvlink_inband_received_data_1024_v17_00
 rpc_nvlink_inband_received_data_1024_v = struct_rpc_nvlink_inband_received_data_1024_v17_00
-class struct_rpc_nvlink_inband_received_data_2048_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_inband_received_data_2048_v17_00(Struct): pass
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00
 struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00._fields_ = [
   ('dataSize', NvU32),
@@ -3695,8 +3695,8 @@ struct_rpc_nvlink_inband_received_data_2048_v17_00._fields_ = [
 ]
 rpc_nvlink_inband_received_data_2048_v17_00 = struct_rpc_nvlink_inband_received_data_2048_v17_00
 rpc_nvlink_inband_received_data_2048_v = struct_rpc_nvlink_inband_received_data_2048_v17_00
-class struct_rpc_nvlink_inband_received_data_4096_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_inband_received_data_4096_v17_00(Struct): pass
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00
 struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00._fields_ = [
   ('dataSize', NvU32),
@@ -3707,8 +3707,8 @@ struct_rpc_nvlink_inband_received_data_4096_v17_00._fields_ = [
 ]
 rpc_nvlink_inband_received_data_4096_v17_00 = struct_rpc_nvlink_inband_received_data_4096_v17_00
 rpc_nvlink_inband_received_data_4096_v = struct_rpc_nvlink_inband_received_data_4096_v17_00
-class struct_rpc_nvlink_is_gpu_degraded_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_is_gpu_degraded_v17_00(Struct): pass
+class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00
 struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00._fields_ = [
   ('linkId', NvU32),
@@ -3719,8 +3719,8 @@ struct_rpc_nvlink_is_gpu_degraded_v17_00._fields_ = [
 ]
 rpc_nvlink_is_gpu_degraded_v17_00 = struct_rpc_nvlink_is_gpu_degraded_v17_00
 rpc_nvlink_is_gpu_degraded_v = struct_rpc_nvlink_is_gpu_degraded_v17_00
-class struct_rpc_nvlink_fatal_error_recovery_v17_00(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00(ctypes.Structure): pass
+class struct_rpc_nvlink_fatal_error_recovery_v17_00(Struct): pass
+class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00
 struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00._fields_ = [
   ('bRecoverable', NvBool),
@@ -3731,20 +3731,20 @@ struct_rpc_nvlink_fatal_error_recovery_v17_00._fields_ = [
 ]
 rpc_nvlink_fatal_error_recovery_v17_00 = struct_rpc_nvlink_fatal_error_recovery_v17_00
 rpc_nvlink_fatal_error_recovery_v = struct_rpc_nvlink_fatal_error_recovery_v17_00
-class struct_rpc_update_gsp_trace_v01_00(ctypes.Structure): pass
+class struct_rpc_update_gsp_trace_v01_00(Struct): pass
 struct_rpc_update_gsp_trace_v01_00._fields_ = [
   ('records', NvU32),
   ('data', NvU32),
 ]
 rpc_update_gsp_trace_v01_00 = struct_rpc_update_gsp_trace_v01_00
 rpc_update_gsp_trace_v = struct_rpc_update_gsp_trace_v01_00
-class struct_rpc_gsp_post_nocat_record_v01_00(ctypes.Structure): pass
+class struct_rpc_gsp_post_nocat_record_v01_00(Struct): pass
 struct_rpc_gsp_post_nocat_record_v01_00._fields_ = [
   ('data', NvU32),
 ]
 rpc_gsp_post_nocat_record_v01_00 = struct_rpc_gsp_post_nocat_record_v01_00
 rpc_gsp_post_nocat_record_v = struct_rpc_gsp_post_nocat_record_v01_00
-class struct_rpc_extdev_intr_service_v17_00(ctypes.Structure): pass
+class struct_rpc_extdev_intr_service_v17_00(Struct): pass
 struct_rpc_extdev_intr_service_v17_00._fields_ = [
   ('lossRegStatus', NvU8),
   ('gainRegStatus', NvU8),
@@ -3753,14 +3753,14 @@ struct_rpc_extdev_intr_service_v17_00._fields_ = [
 ]
 rpc_extdev_intr_service_v17_00 = struct_rpc_extdev_intr_service_v17_00
 rpc_extdev_intr_service_v = struct_rpc_extdev_intr_service_v17_00
-class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04(ctypes.Structure): pass
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04(ctypes.Structure): pass
+class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04(Struct): pass
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04(Struct): pass
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04(ctypes.Structure): pass
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04(Struct): pass
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04
 class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04(ctypes.Union): pass
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04 = union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04(ctypes.Structure): pass
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04(Struct): pass
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04
 struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04._fields_ = [
   ('sensorId', NvU32),
@@ -3782,7 +3782,7 @@ struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04._fields_ = [
 ]
 rpc_pfm_req_hndlr_state_sync_callback_v21_04 = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
 rpc_pfm_req_hndlr_state_sync_callback_v = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
-class struct_rpc_vgpu_gsp_mig_ci_config_v21_03(ctypes.Structure): pass
+class struct_rpc_vgpu_gsp_mig_ci_config_v21_03(Struct): pass
 struct_rpc_vgpu_gsp_mig_ci_config_v21_03._fields_ = [
   ('execPartCount', NvU32),
   ('execPartId', (NvU32 * 8)),
@@ -3791,18 +3791,18 @@ struct_rpc_vgpu_gsp_mig_ci_config_v21_03._fields_ = [
 ]
 rpc_vgpu_gsp_mig_ci_config_v21_03 = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
 rpc_vgpu_gsp_mig_ci_config_v = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
-class struct_rpc_gsp_lockdown_notice_v17_00(ctypes.Structure): pass
+class struct_rpc_gsp_lockdown_notice_v17_00(Struct): pass
 struct_rpc_gsp_lockdown_notice_v17_00._fields_ = [
   ('bLockdownEngaging', NvBool),
 ]
 rpc_gsp_lockdown_notice_v17_00 = struct_rpc_gsp_lockdown_notice_v17_00
 rpc_gsp_lockdown_notice_v = struct_rpc_gsp_lockdown_notice_v17_00
-class struct_rpc_ctrl_gpu_query_ecc_status_v24_06(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_query_ecc_status_v24_06(Struct): pass
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06(Struct): pass
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06 = struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06
-class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01(Struct): pass
 NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 = struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01
-class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01(ctypes.Structure): pass
+class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01(Struct): pass
 NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01 = struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01
 struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01._fields_ = [
   ('count', NvU64),
@@ -3827,8 +3827,8 @@ struct_rpc_ctrl_gpu_query_ecc_status_v24_06._fields_ = [
   ('params', NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06),
 ]
 rpc_ctrl_gpu_query_ecc_status_v24_06 = struct_rpc_ctrl_gpu_query_ecc_status_v24_06
-class struct_rpc_ctrl_gpu_query_ecc_status_v26_02(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02(ctypes.Structure): pass
+class struct_rpc_ctrl_gpu_query_ecc_status_v26_02(Struct): pass
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02(Struct): pass
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02 = struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02
 struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02._fields_ = [
   ('units', (NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 * 30)),
@@ -3842,8 +3842,8 @@ struct_rpc_ctrl_gpu_query_ecc_status_v26_02._fields_ = [
 ]
 rpc_ctrl_gpu_query_ecc_status_v26_02 = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
 rpc_ctrl_gpu_query_ecc_status_v = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
-class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04(Struct): pass
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04 = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04
 struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04._fields_ = [
   ('value', NvU32),
@@ -3855,8 +3855,8 @@ struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04._fields_ = [
 ]
 rpc_ctrl_dbg_get_mode_mmu_debug_v25_04 = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
 rpc_ctrl_dbg_get_mode_mmu_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
-class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07(ctypes.Structure): pass
-class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(ctypes.Structure): pass
+class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07(Struct): pass
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Struct): pass
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07 = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
 struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = [
   ('value', NvU32),
@@ -3868,14 +3868,14 @@ struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07._fields_ = [
 ]
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
-class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09(ctypes.Structure): pass
+class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09(Struct): pass
 struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09._fields_ = [
   ('bwMode', NvU8),
 ]
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09 = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
-class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C(ctypes.Structure): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C(ctypes.Structure): pass
+class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C(Struct): pass
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C
 struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C._fields_ = [
   ('dataSize', NvU32),
@@ -3888,21 +3888,21 @@ struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C._fields_ = [
 ]
 rpc_ctrl_nvlink_get_inband_received_data_v25_0C = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
 rpc_ctrl_nvlink_get_inband_received_data_v = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
-class struct_rpc_fecs_error_v26_02(ctypes.Structure): pass
+class struct_rpc_fecs_error_v26_02(Struct): pass
 struct_rpc_fecs_error_v26_02._fields_ = [
   ('grIdx', NvU32),
   ('error_type', NvU8),
 ]
 rpc_fecs_error_v26_02 = struct_rpc_fecs_error_v26_02
 rpc_fecs_error_v = struct_rpc_fecs_error_v26_02
-class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05(ctypes.Structure): pass
+class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05(Struct): pass
 struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05._fields_ = [
   ('buffer', (NvU8 * 1024)),
   ('dataSize', NvU32),
 ]
 rpc_ctrl_cmd_nvlink_inband_send_data_v26_05 = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
 rpc_ctrl_cmd_nvlink_inband_send_data_v = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
-class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00(ctypes.Structure): pass
+class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00(Struct): pass
 struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00._fields_ = [
   ('bufferSize', NvU32),
   ('tracepointMask', NvU32),
@@ -3912,17 +3912,17 @@ struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00._fields_ = [
 ]
 rpc_ctrl_cmd_internal_control_gsp_trace_v28_00 = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
 rpc_ctrl_cmd_internal_control_gsp_trace_v = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
-class struct_rpc_recovery_action_v28_01(ctypes.Structure): pass
+class struct_rpc_recovery_action_v28_01(Struct): pass
 struct_rpc_recovery_action_v28_01._fields_ = [
   ('type', NvU32),
   ('value', NvBool),
 ]
 rpc_recovery_action_v28_01 = struct_rpc_recovery_action_v28_01
 rpc_recovery_action_v = struct_rpc_recovery_action_v28_01
-class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02(ctypes.Structure): pass
-class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02(ctypes.Structure): pass
+class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02(Struct): pass
+class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02(Struct): pass
 NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02 = struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02
-class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02(ctypes.Structure): pass
+class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02(Struct): pass
 NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02 = struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02
 struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02._fields_ = [
   ('allocations', NvU32),
@@ -3941,15 +3941,15 @@ struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02._fields_ = [
 ]
 rpc_ctrl_subdevice_get_libos_heap_stats_v29_02 = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 rpc_ctrl_subdevice_get_libos_heap_stats_v = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
-class struct_GSP_MSG_QUEUE_ELEMENT(ctypes.Structure): pass
+class struct_GSP_MSG_QUEUE_ELEMENT(Struct): pass
 GSP_MSG_QUEUE_ELEMENT = struct_GSP_MSG_QUEUE_ELEMENT
 class union_rpc_message_rpc_union_field_v03_00(ctypes.Union): pass
 rpc_message_rpc_union_field_v03_00 = union_rpc_message_rpc_union_field_v03_00
 rpc_message_rpc_union_field_v = union_rpc_message_rpc_union_field_v03_00
-class struct_rpc_message_header_v03_00(ctypes.Structure): pass
+class struct_rpc_message_header_v03_00(Struct): pass
 rpc_message_header_v03_00 = struct_rpc_message_header_v03_00
 rpc_message_header_v = struct_rpc_message_header_v03_00
-class struct_PACKED_REGISTRY_ENTRY(ctypes.Structure): pass
+class struct_PACKED_REGISTRY_ENTRY(Struct): pass
 struct_PACKED_REGISTRY_ENTRY._fields_ = [
   ('nameOffset', NvU32),
   ('type', NvU8),
@@ -3957,7 +3957,7 @@ struct_PACKED_REGISTRY_ENTRY._fields_ = [
   ('length', NvU32),
 ]
 PACKED_REGISTRY_ENTRY = struct_PACKED_REGISTRY_ENTRY
-class struct_PACKED_REGISTRY_TABLE(ctypes.Structure): pass
+class struct_PACKED_REGISTRY_TABLE(Struct): pass
 struct_PACKED_REGISTRY_TABLE._fields_ = [
   ('size', NvU32),
   ('numEntries', NvU32),
@@ -3968,7 +3968,7 @@ dispMuxState_None = DISPMUXSTATE.define('dispMuxState_None', 0)
 dispMuxState_IntegratedGPU = DISPMUXSTATE.define('dispMuxState_IntegratedGPU', 1)
 dispMuxState_DiscreteGPU = DISPMUXSTATE.define('dispMuxState_DiscreteGPU', 2)
 
-class ACPI_DSM_CACHE(ctypes.Structure): pass
+class ACPI_DSM_CACHE(Struct): pass
 ACPI_DSM_CACHE._fields_ = [
   ('suppFuncStatus', NvU32),
   ('suppFuncs', (NvU8 * 8)),
@@ -3977,7 +3977,7 @@ ACPI_DSM_CACHE._fields_ = [
   ('callbackStatus', NvU32),
   ('callback', NvU32),
 ]
-class ACPI_DATA(ctypes.Structure): pass
+class ACPI_DATA(Struct): pass
 enum__ACPI_DSM_FUNCTION = CEnum(ctypes.c_uint)
 ACPI_DSM_FUNCTION_NBSI = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NBSI', 0)
 ACPI_DSM_FUNCTION_NVHG = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NVHG', 1)
@@ -4008,7 +4008,7 @@ ACPI_DATA._fields_ = [
   ('dsmCurrentSubFunc', (NvU32 * 8)),
   ('dsmCurrentFuncSupport', NvU32),
 ]
-class struct_DOD_METHOD_DATA(ctypes.Structure): pass
+class struct_DOD_METHOD_DATA(Struct): pass
 NV_STATUS = ctypes.c_uint
 struct_DOD_METHOD_DATA._fields_ = [
   ('status', NV_STATUS),
@@ -4016,7 +4016,7 @@ struct_DOD_METHOD_DATA._fields_ = [
   ('acpiIdList', (NvU32 * 16)),
 ]
 DOD_METHOD_DATA = struct_DOD_METHOD_DATA
-class struct_JT_METHOD_DATA(ctypes.Structure): pass
+class struct_JT_METHOD_DATA(Struct): pass
 struct_JT_METHOD_DATA._fields_ = [
   ('status', NV_STATUS),
   ('jtCaps', NvU32),
@@ -4024,14 +4024,14 @@ struct_JT_METHOD_DATA._fields_ = [
   ('bSBIOSCaps', NvBool),
 ]
 JT_METHOD_DATA = struct_JT_METHOD_DATA
-class struct_MUX_METHOD_DATA_ELEMENT(ctypes.Structure): pass
+class struct_MUX_METHOD_DATA_ELEMENT(Struct): pass
 struct_MUX_METHOD_DATA_ELEMENT._fields_ = [
   ('acpiId', NvU32),
   ('mode', NvU32),
   ('status', NV_STATUS),
 ]
 MUX_METHOD_DATA_ELEMENT = struct_MUX_METHOD_DATA_ELEMENT
-class struct_MUX_METHOD_DATA(ctypes.Structure): pass
+class struct_MUX_METHOD_DATA(Struct): pass
 struct_MUX_METHOD_DATA._fields_ = [
   ('tableLen', NvU32),
   ('acpiIdMuxModeTable', (MUX_METHOD_DATA_ELEMENT * 16)),
@@ -4039,13 +4039,13 @@ struct_MUX_METHOD_DATA._fields_ = [
   ('acpiIdMuxStateTable', (MUX_METHOD_DATA_ELEMENT * 16)),
 ]
 MUX_METHOD_DATA = struct_MUX_METHOD_DATA
-class struct_CAPS_METHOD_DATA(ctypes.Structure): pass
+class struct_CAPS_METHOD_DATA(Struct): pass
 struct_CAPS_METHOD_DATA._fields_ = [
   ('status', NV_STATUS),
   ('optimusCaps', NvU32),
 ]
 CAPS_METHOD_DATA = struct_CAPS_METHOD_DATA
-class struct_ACPI_METHOD_DATA(ctypes.Structure): pass
+class struct_ACPI_METHOD_DATA(Struct): pass
 struct_ACPI_METHOD_DATA._fields_ = [
   ('bValid', NvBool),
   ('dodMethodData', DOD_METHOD_DATA),
@@ -4141,7 +4141,7 @@ RM_ENGINE_TYPE_RESERVED52 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_RESERVED52', 8
 RM_ENGINE_TYPE_RESERVED53 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_RESERVED53', 83)
 RM_ENGINE_TYPE_LAST = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_LAST', 84)
 
-class BUSINFO(ctypes.Structure): pass
+class BUSINFO(Struct): pass
 BUSINFO._fields_ = [
   ('deviceID', NvU16),
   ('vendorID', NvU16),
@@ -4149,7 +4149,7 @@ BUSINFO._fields_ = [
   ('subvendorID', NvU16),
   ('revisionID', NvU8),
 ]
-class struct_GSP_VF_INFO(ctypes.Structure): pass
+class struct_GSP_VF_INFO(Struct): pass
 struct_GSP_VF_INFO._fields_ = [
   ('totalVFs', NvU32),
   ('firstVFOffset', NvU32),
@@ -4161,23 +4161,23 @@ struct_GSP_VF_INFO._fields_ = [
   ('b64bitBar2', NvBool),
 ]
 GSP_VF_INFO = struct_GSP_VF_INFO
-class GSP_PCIE_CONFIG_REG(ctypes.Structure): pass
+class GSP_PCIE_CONFIG_REG(Struct): pass
 GSP_PCIE_CONFIG_REG._fields_ = [
   ('linkCap', NvU32),
 ]
-class EcidManufacturingInfo(ctypes.Structure): pass
+class EcidManufacturingInfo(Struct): pass
 EcidManufacturingInfo._fields_ = [
   ('ecidLow', NvU32),
   ('ecidHigh', NvU32),
   ('ecidExtended', NvU32),
 ]
-class FW_WPR_LAYOUT_OFFSET(ctypes.Structure): pass
+class FW_WPR_LAYOUT_OFFSET(Struct): pass
 FW_WPR_LAYOUT_OFFSET._fields_ = [
   ('nonWprHeapOffset', NvU64),
   ('frtsOffset', NvU64),
 ]
-class struct_GspStaticConfigInfo_t(ctypes.Structure): pass
-class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(ctypes.Structure): pass
+class struct_GspStaticConfigInfo_t(Struct): pass
+class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(Struct): pass
 NV2080_CTRL_GPU_GET_GID_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS
 struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS._fields_ = [
   ('index', NvU32),
@@ -4185,7 +4185,7 @@ struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS._fields_ = [
   ('length', NvU32),
   ('data', (NvU8 * 256)),
 ]
-class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS(Struct): pass
 NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
 struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS._fields_ = [
   ('BoardID', NvU32),
@@ -4198,9 +4198,9 @@ struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS._fields_ = [
   ('projectSKUMod', (ctypes.c_char * 2)),
   ('businessCycle', NvU32),
 ]
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS(ctypes.Structure): pass
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS(Struct): pass
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(ctypes.Structure): pass
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(Struct): pass
 NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO
 NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = (ctypes.c_ubyte * 17)
 struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO._fields_ = [
@@ -4217,7 +4217,7 @@ struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS._fields_ = [
   ('numFBRegions', NvU32),
   ('fbRegion', (NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO * 16)),
 ]
-class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS(ctypes.Structure): pass
+class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS(Struct): pass
 NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS = struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS
 struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS._fields_ = [
   ('totalVFs', NvU32),
@@ -4295,7 +4295,7 @@ struct_GspStaticConfigInfo_t._fields_ = [
   ('fwWprLayoutOffset', FW_WPR_LAYOUT_OFFSET),
 ]
 GspStaticConfigInfo = struct_GspStaticConfigInfo_t
-class struct_GspSystemInfo(ctypes.Structure): pass
+class struct_GspSystemInfo(Struct): pass
 struct_GspSystemInfo._fields_ = [
   ('gpuPhysAddr', NvU64),
   ('gpuPhysFbAddr', NvU64),
@@ -4347,13 +4347,17 @@ struct_GspSystemInfo._fields_ = [
   ('hostPageSize', NvU64),
 ]
 GspSystemInfo = struct_GspSystemInfo
-class _anonstruct13(ctypes.Structure): pass
+class _anonstruct13(Struct): pass
+_anonstruct13._packed_ = True
 FALCON_APPLICATION_INTERFACE_HEADER_V1 = _anonstruct13
-class _anonstruct14(ctypes.Structure): pass
+class _anonstruct14(Struct): pass
+_anonstruct14._packed_ = True
 FALCON_APPLICATION_INTERFACE_ENTRY_V1 = _anonstruct14
-class _anonstruct15(ctypes.Structure): pass
+class _anonstruct15(Struct): pass
+_anonstruct15._packed_ = True
 FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3 = _anonstruct15
-class struct_BIT_HEADER_V1_00(ctypes.Structure): pass
+class struct_BIT_HEADER_V1_00(Struct): pass
+struct_BIT_HEADER_V1_00._packed_ = True
 struct_BIT_HEADER_V1_00._fields_ = [
   ('Id', ctypes.c_ushort),
   ('Signature', ctypes.c_uint),
@@ -4364,7 +4368,8 @@ struct_BIT_HEADER_V1_00._fields_ = [
   ('HeaderChksum', ctypes.c_ubyte),
 ]
 BIT_HEADER_V1_00 = struct_BIT_HEADER_V1_00
-class struct_BIT_TOKEN_V1_00(ctypes.Structure): pass
+class struct_BIT_TOKEN_V1_00(Struct): pass
+struct_BIT_TOKEN_V1_00._packed_ = True
 struct_BIT_TOKEN_V1_00._fields_ = [
   ('TokenId', ctypes.c_ubyte),
   ('DataVersion', ctypes.c_ubyte),
@@ -4372,16 +4377,19 @@ struct_BIT_TOKEN_V1_00._fields_ = [
   ('DataPtr', ctypes.c_uint),
 ]
 BIT_TOKEN_V1_00 = struct_BIT_TOKEN_V1_00
-class BIT_DATA_BIOSDATA_BINVER(ctypes.Structure): pass
+class BIT_DATA_BIOSDATA_BINVER(Struct): pass
+BIT_DATA_BIOSDATA_BINVER._packed_ = True
 BIT_DATA_BIOSDATA_BINVER._fields_ = [
   ('Version', ctypes.c_uint),
   ('OemVersion', ctypes.c_ubyte),
 ]
-class BIT_DATA_FALCON_DATA_V2(ctypes.Structure): pass
+class BIT_DATA_FALCON_DATA_V2(Struct): pass
+BIT_DATA_FALCON_DATA_V2._packed_ = True
 BIT_DATA_FALCON_DATA_V2._fields_ = [
   ('FalconUcodeTablePtr', ctypes.c_uint),
 ]
-class FALCON_UCODE_TABLE_HDR_V1(ctypes.Structure): pass
+class FALCON_UCODE_TABLE_HDR_V1(Struct): pass
+FALCON_UCODE_TABLE_HDR_V1._packed_ = True
 FALCON_UCODE_TABLE_HDR_V1._fields_ = [
   ('Version', ctypes.c_ubyte),
   ('HeaderSize', ctypes.c_ubyte),
@@ -4390,17 +4398,19 @@ FALCON_UCODE_TABLE_HDR_V1._fields_ = [
   ('DescVersion', ctypes.c_ubyte),
   ('DescSize', ctypes.c_ubyte),
 ]
-class FALCON_UCODE_TABLE_ENTRY_V1(ctypes.Structure): pass
+class FALCON_UCODE_TABLE_ENTRY_V1(Struct): pass
+FALCON_UCODE_TABLE_ENTRY_V1._packed_ = True
 FALCON_UCODE_TABLE_ENTRY_V1._fields_ = [
   ('ApplicationID', ctypes.c_ubyte),
   ('TargetID', ctypes.c_ubyte),
   ('DescPtr', ctypes.c_uint),
 ]
-class FALCON_UCODE_DESC_HEADER(ctypes.Structure): pass
+class FALCON_UCODE_DESC_HEADER(Struct): pass
+FALCON_UCODE_DESC_HEADER._packed_ = True
 FALCON_UCODE_DESC_HEADER._fields_ = [
   ('vDesc', ctypes.c_uint),
 ]
-class FALCON_UCODE_DESC_V3(ctypes.Structure): pass
+class FALCON_UCODE_DESC_V3(Struct): pass
 FALCON_UCODE_DESC_V3._fields_ = [
   ('Hdr', FALCON_UCODE_DESC_HEADER),
   ('StoredSize', ctypes.c_uint),
@@ -4417,11 +4427,14 @@ FALCON_UCODE_DESC_V3._fields_ = [
   ('SignatureVersions', ctypes.c_ushort),
   ('Reserved', ctypes.c_ushort),
 ]
-class _anonstruct16(ctypes.Structure): pass
+class _anonstruct16(Struct): pass
+_anonstruct16._packed_ = True
 FWSECLIC_READ_VBIOS_DESC = _anonstruct16
-class _anonstruct17(ctypes.Structure): pass
+class _anonstruct17(Struct): pass
+_anonstruct17._packed_ = True
 FWSECLIC_FRTS_REGION_DESC = _anonstruct17
-class _anonstruct18(ctypes.Structure): pass
+class _anonstruct18(Struct): pass
+_anonstruct18._packed_ = True
 FWSECLIC_FRTS_CMD = _anonstruct18
 class struct__PCI_EXP_ROM_STANDARD(ctypes.Structure): pass
 PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD

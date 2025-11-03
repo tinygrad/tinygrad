@@ -1,8 +1,8 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 
-class struct_sqtt_data_info(ctypes.Structure): pass
+class struct_sqtt_data_info(Struct): pass
 uint32_t = ctypes.c_uint
 class struct_sqtt_data_info_0(ctypes.Union): pass
 struct_sqtt_data_info_0._fields_ = [
@@ -15,7 +15,7 @@ struct_sqtt_data_info._fields_ = [
   ('trace_status', uint32_t),
   ('_0', struct_sqtt_data_info_0),
 ]
-class struct_sqtt_data_se(ctypes.Structure): pass
+class struct_sqtt_data_se(Struct): pass
 struct_sqtt_data_se._fields_ = [
   ('info', struct_sqtt_data_info),
   ('data_ptr', ctypes.c_void_p),
@@ -46,14 +46,14 @@ SQTT_FILE_CHUNK_TYPE_PSO_CORRELATION = enum_sqtt_file_chunk_type.define('SQTT_FI
 SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE', 12)
 SQTT_FILE_CHUNK_TYPE_COUNT = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_COUNT', 13)
 
-class struct_sqtt_file_chunk_id(ctypes.Structure): pass
+class struct_sqtt_file_chunk_id(Struct): pass
 int32_t = ctypes.c_int
 struct_sqtt_file_chunk_id._fields_ = [
   ('type', int32_t,8),
   ('index', int32_t,8),
   ('reserved', int32_t,16),
 ]
-class struct_sqtt_file_chunk_header(ctypes.Structure): pass
+class struct_sqtt_file_chunk_header(Struct): pass
 uint16_t = ctypes.c_ushort
 struct_sqtt_file_chunk_header._fields_ = [
   ('chunk_id', struct_sqtt_file_chunk_id),
@@ -62,9 +62,9 @@ struct_sqtt_file_chunk_header._fields_ = [
   ('size_in_bytes', int32_t),
   ('padding', int32_t),
 ]
-class struct_sqtt_file_header_flags(ctypes.Structure): pass
+class struct_sqtt_file_header_flags(Struct): pass
 class struct_sqtt_file_header_flags_0(ctypes.Union): pass
-class struct_sqtt_file_header_flags_0_0(ctypes.Structure): pass
+class struct_sqtt_file_header_flags_0_0(Struct): pass
 struct_sqtt_file_header_flags_0_0._fields_ = [
   ('is_semaphore_queue_timing_etw', uint32_t,1),
   ('no_queue_semaphore_timestamps', uint32_t,1),
@@ -79,7 +79,7 @@ struct_sqtt_file_header_flags._anonymous_ = ['_0']
 struct_sqtt_file_header_flags._fields_ = [
   ('_0', struct_sqtt_file_header_flags_0),
 ]
-class struct_sqtt_file_header(ctypes.Structure): pass
+class struct_sqtt_file_header(Struct): pass
 struct_sqtt_file_header._fields_ = [
   ('magic_number', uint32_t),
   ('version_major', uint32_t),
@@ -96,7 +96,7 @@ struct_sqtt_file_header._fields_ = [
   ('day_in_year', int32_t),
   ('is_daylight_savings', int32_t),
 ]
-class struct_sqtt_file_chunk_cpu_info(ctypes.Structure): pass
+class struct_sqtt_file_chunk_cpu_info(Struct): pass
 uint64_t = ctypes.c_ulong
 struct_sqtt_file_chunk_cpu_info._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
@@ -149,7 +149,7 @@ SQTT_MEMORY_TYPE_HBM3 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_HBM3', 34
 SQTT_MEMORY_TYPE_LPDDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR4', 48)
 SQTT_MEMORY_TYPE_LPDDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR5', 49)
 
-class struct_sqtt_file_chunk_asic_info(ctypes.Structure): pass
+class struct_sqtt_file_chunk_asic_info(Struct): pass
 int64_t = ctypes.c_long
 struct_sqtt_file_chunk_asic_info._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
@@ -222,17 +222,17 @@ SQTT_PROFILING_MODE_INDEX = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE
 SQTT_PROFILING_MODE_TAG = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_TAG', 3)
 
 class union_sqtt_profiling_mode_data(ctypes.Union): pass
-class union_sqtt_profiling_mode_data_user_marker_profiling_data(ctypes.Structure): pass
+class union_sqtt_profiling_mode_data_user_marker_profiling_data(Struct): pass
 union_sqtt_profiling_mode_data_user_marker_profiling_data._fields_ = [
   ('start', (ctypes.c_char * 256)),
   ('end', (ctypes.c_char * 256)),
 ]
-class union_sqtt_profiling_mode_data_index_profiling_data(ctypes.Structure): pass
+class union_sqtt_profiling_mode_data_index_profiling_data(Struct): pass
 union_sqtt_profiling_mode_data_index_profiling_data._fields_ = [
   ('start', uint32_t),
   ('end', uint32_t),
 ]
-class union_sqtt_profiling_mode_data_tag_profiling_data(ctypes.Structure): pass
+class union_sqtt_profiling_mode_data_tag_profiling_data(Struct): pass
 union_sqtt_profiling_mode_data_tag_profiling_data._fields_ = [
   ('begin_hi', uint32_t),
   ('begin_lo', uint32_t),
@@ -245,11 +245,11 @@ union_sqtt_profiling_mode_data._fields_ = [
   ('tag_profiling_data', union_sqtt_profiling_mode_data_tag_profiling_data),
 ]
 class union_sqtt_instruction_trace_data(ctypes.Union): pass
-class union_sqtt_instruction_trace_data_api_pso_data(ctypes.Structure): pass
+class union_sqtt_instruction_trace_data_api_pso_data(Struct): pass
 union_sqtt_instruction_trace_data_api_pso_data._fields_ = [
   ('api_pso_filter', uint64_t),
 ]
-class union_sqtt_instruction_trace_data_shader_engine_filter(ctypes.Structure): pass
+class union_sqtt_instruction_trace_data_shader_engine_filter(Struct): pass
 union_sqtt_instruction_trace_data_shader_engine_filter._fields_ = [
   ('mask', uint32_t),
 ]
@@ -257,7 +257,7 @@ union_sqtt_instruction_trace_data._fields_ = [
   ('api_pso_data', union_sqtt_instruction_trace_data_api_pso_data),
   ('shader_engine_filter', union_sqtt_instruction_trace_data_shader_engine_filter),
 ]
-class struct_sqtt_file_chunk_api_info(ctypes.Structure): pass
+class struct_sqtt_file_chunk_api_info(Struct): pass
 struct_sqtt_file_chunk_api_info._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('api_type', enum_sqtt_api_type),
@@ -270,11 +270,11 @@ struct_sqtt_file_chunk_api_info._fields_ = [
   ('reserved2', uint32_t),
   ('instruction_trace_data', union_sqtt_instruction_trace_data),
 ]
-class struct_sqtt_code_object_database_record(ctypes.Structure): pass
+class struct_sqtt_code_object_database_record(Struct): pass
 struct_sqtt_code_object_database_record._fields_ = [
   ('size', uint32_t),
 ]
-class struct_sqtt_file_chunk_code_object_database(ctypes.Structure): pass
+class struct_sqtt_file_chunk_code_object_database(Struct): pass
 struct_sqtt_file_chunk_code_object_database._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('offset', uint32_t),
@@ -282,7 +282,7 @@ struct_sqtt_file_chunk_code_object_database._fields_ = [
   ('size', uint32_t),
   ('record_count', uint32_t),
 ]
-class struct_sqtt_code_object_loader_events_record(ctypes.Structure): pass
+class struct_sqtt_code_object_loader_events_record(Struct): pass
 struct_sqtt_code_object_loader_events_record._fields_ = [
   ('loader_event_type', uint32_t),
   ('reserved', uint32_t),
@@ -290,7 +290,7 @@ struct_sqtt_code_object_loader_events_record._fields_ = [
   ('code_object_hash', (uint64_t * 2)),
   ('time_stamp', uint64_t),
 ]
-class struct_sqtt_file_chunk_code_object_loader_events(ctypes.Structure): pass
+class struct_sqtt_file_chunk_code_object_loader_events(Struct): pass
 struct_sqtt_file_chunk_code_object_loader_events._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('offset', uint32_t),
@@ -298,13 +298,13 @@ struct_sqtt_file_chunk_code_object_loader_events._fields_ = [
   ('record_size', uint32_t),
   ('record_count', uint32_t),
 ]
-class struct_sqtt_pso_correlation_record(ctypes.Structure): pass
+class struct_sqtt_pso_correlation_record(Struct): pass
 struct_sqtt_pso_correlation_record._fields_ = [
   ('api_pso_hash', uint64_t),
   ('pipeline_hash', (uint64_t * 2)),
   ('api_level_obj_name', (ctypes.c_char * 64)),
 ]
-class struct_sqtt_file_chunk_pso_correlation(ctypes.Structure): pass
+class struct_sqtt_file_chunk_pso_correlation(Struct): pass
 struct_sqtt_file_chunk_pso_correlation._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('offset', uint32_t),
@@ -312,13 +312,13 @@ struct_sqtt_file_chunk_pso_correlation._fields_ = [
   ('record_size', uint32_t),
   ('record_count', uint32_t),
 ]
-class struct_sqtt_file_chunk_sqtt_desc(ctypes.Structure): pass
+class struct_sqtt_file_chunk_sqtt_desc(Struct): pass
 class struct_sqtt_file_chunk_sqtt_desc_0(ctypes.Union): pass
-class struct_sqtt_file_chunk_sqtt_desc_0_v0(ctypes.Structure): pass
+class struct_sqtt_file_chunk_sqtt_desc_0_v0(Struct): pass
 struct_sqtt_file_chunk_sqtt_desc_0_v0._fields_ = [
   ('instrumentation_version', int32_t),
 ]
-class struct_sqtt_file_chunk_sqtt_desc_0_v1(ctypes.Structure): pass
+class struct_sqtt_file_chunk_sqtt_desc_0_v1(Struct): pass
 int16_t = ctypes.c_short
 struct_sqtt_file_chunk_sqtt_desc_0_v1._fields_ = [
   ('instrumentation_spec_version', int16_t),
@@ -336,13 +336,13 @@ struct_sqtt_file_chunk_sqtt_desc._fields_ = [
   ('sqtt_version', enum_sqtt_version),
   ('_0', struct_sqtt_file_chunk_sqtt_desc_0),
 ]
-class struct_sqtt_file_chunk_sqtt_data(ctypes.Structure): pass
+class struct_sqtt_file_chunk_sqtt_data(Struct): pass
 struct_sqtt_file_chunk_sqtt_data._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('offset', int32_t),
   ('size', int32_t),
 ]
-class struct_sqtt_file_chunk_queue_event_timings(ctypes.Structure): pass
+class struct_sqtt_file_chunk_queue_event_timings(Struct): pass
 struct_sqtt_file_chunk_queue_event_timings._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('queue_info_table_record_count', uint32_t),
@@ -365,9 +365,9 @@ SQTT_ENGINE_TYPE_DMA = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_DMA', 4)
 SQTT_ENGINE_TYPE_HIGH_PRIORITY_UNIVERSAL = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_HIGH_PRIORITY_UNIVERSAL', 7)
 SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS', 8)
 
-class struct_sqtt_queue_hardware_info(ctypes.Structure): pass
+class struct_sqtt_queue_hardware_info(Struct): pass
 class struct_sqtt_queue_hardware_info_0(ctypes.Union): pass
-class struct_sqtt_queue_hardware_info_0_0(ctypes.Structure): pass
+class struct_sqtt_queue_hardware_info_0_0(Struct): pass
 struct_sqtt_queue_hardware_info_0_0._fields_ = [
   ('queue_type', int32_t,8),
   ('engine_type', int32_t,8),
@@ -382,7 +382,7 @@ struct_sqtt_queue_hardware_info._anonymous_ = ['_0']
 struct_sqtt_queue_hardware_info._fields_ = [
   ('_0', struct_sqtt_queue_hardware_info_0),
 ]
-class struct_sqtt_queue_info_record(ctypes.Structure): pass
+class struct_sqtt_queue_info_record(Struct): pass
 struct_sqtt_queue_info_record._fields_ = [
   ('queue_id', uint64_t),
   ('queue_context', uint64_t),
@@ -395,7 +395,7 @@ SQTT_QUEUE_TIMING_EVENT_SIGNAL_SEMAPHORE = enum_sqtt_queue_event_type.define('SQ
 SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE', 2)
 SQTT_QUEUE_TIMING_EVENT_PRESENT = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_PRESENT', 3)
 
-class struct_sqtt_queue_event_record(ctypes.Structure): pass
+class struct_sqtt_queue_event_record(Struct): pass
 struct_sqtt_queue_event_record._fields_ = [
   ('event_type', enum_sqtt_queue_event_type),
   ('sqtt_cb_id', uint32_t),
@@ -406,7 +406,7 @@ struct_sqtt_queue_event_record._fields_ = [
   ('cpu_timestamp', uint64_t),
   ('gpu_timestamps', (uint64_t * 2)),
 ]
-class struct_sqtt_file_chunk_clock_calibration(ctypes.Structure): pass
+class struct_sqtt_file_chunk_clock_calibration(Struct): pass
 struct_sqtt_file_chunk_clock_calibration._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('cpu_timestamp', uint64_t),
@@ -422,7 +422,7 @@ EF_AMDGPU_MACH_AMDGCN_GFX1100 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDG
 EF_AMDGPU_MACH_AMDGCN_GFX1150 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1150', 67)
 EF_AMDGPU_MACH_AMDGCN_GFX1200 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1200', 78)
 
-class struct_sqtt_file_chunk_spm_db(ctypes.Structure): pass
+class struct_sqtt_file_chunk_spm_db(Struct): pass
 struct_sqtt_file_chunk_spm_db._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('flags', uint32_t),
@@ -451,14 +451,14 @@ RGP_SQTT_MARKER_IDENTIFIER_RESERVED5 = enum_rgp_sqtt_marker_identifier.define('R
 RGP_SQTT_MARKER_IDENTIFIER_RESERVED6 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED6', 15)
 
 class union_rgp_sqtt_marker_cb_id(ctypes.Union): pass
-class union_rgp_sqtt_marker_cb_id_per_frame_cb_id(ctypes.Structure): pass
+class union_rgp_sqtt_marker_cb_id_per_frame_cb_id(Struct): pass
 union_rgp_sqtt_marker_cb_id_per_frame_cb_id._fields_ = [
   ('per_frame', uint32_t,1),
   ('frame_index', uint32_t,7),
   ('cb_index', uint32_t,12),
   ('reserved', uint32_t,12),
 ]
-class union_rgp_sqtt_marker_cb_id_global_cb_id(ctypes.Structure): pass
+class union_rgp_sqtt_marker_cb_id_global_cb_id(Struct): pass
 union_rgp_sqtt_marker_cb_id_global_cb_id._fields_ = [
   ('per_frame', uint32_t,1),
   ('cb_index', uint32_t,19),
@@ -469,9 +469,9 @@ union_rgp_sqtt_marker_cb_id._fields_ = [
   ('global_cb_id', union_rgp_sqtt_marker_cb_id_global_cb_id),
   ('all', uint32_t),
 ]
-class struct_rgp_sqtt_marker_cb_start(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_cb_start(Struct): pass
 class struct_rgp_sqtt_marker_cb_start_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_cb_start_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_cb_start_0_0(Struct): pass
 struct_rgp_sqtt_marker_cb_start_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -505,9 +505,9 @@ struct_rgp_sqtt_marker_cb_start._fields_ = [
   ('_2', struct_rgp_sqtt_marker_cb_start_2),
   ('_3', struct_rgp_sqtt_marker_cb_start_3),
 ]
-class struct_rgp_sqtt_marker_cb_end(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_cb_end(Struct): pass
 class struct_rgp_sqtt_marker_cb_end_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_cb_end_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_cb_end_0_0(Struct): pass
 struct_rgp_sqtt_marker_cb_end_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -588,9 +588,9 @@ ApiCmdDrawMeshTasksIndirectEXT = enum_rgp_sqtt_marker_general_api_type.define('A
 ApiRayTracingSeparateCompiled = enum_rgp_sqtt_marker_general_api_type.define('ApiRayTracingSeparateCompiled', 8388608)
 ApiInvalid = enum_rgp_sqtt_marker_general_api_type.define('ApiInvalid', 4294967295)
 
-class struct_rgp_sqtt_marker_general_api(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_general_api(Struct): pass
 class struct_rgp_sqtt_marker_general_api_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_general_api_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_general_api_0_0(Struct): pass
 struct_rgp_sqtt_marker_general_api_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -650,9 +650,9 @@ EventCmdDrawMeshTasksIndirectEXT = enum_rgp_sqtt_marker_event_type.define('Event
 EventUnknown = enum_rgp_sqtt_marker_event_type.define('EventUnknown', 32767)
 EventInvalid = enum_rgp_sqtt_marker_event_type.define('EventInvalid', 4294967295)
 
-class struct_rgp_sqtt_marker_event(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_event(Struct): pass
 class struct_rgp_sqtt_marker_event_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_event_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_event_0_0(Struct): pass
 struct_rgp_sqtt_marker_event_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -665,7 +665,7 @@ struct_rgp_sqtt_marker_event_0._fields_ = [
   ('dword01', uint32_t),
 ]
 class struct_rgp_sqtt_marker_event_1(ctypes.Union): pass
-class struct_rgp_sqtt_marker_event_1_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_event_1_0(Struct): pass
 struct_rgp_sqtt_marker_event_1_0._fields_ = [
   ('cb_id', uint32_t,20),
   ('vertex_offset_reg_idx', uint32_t,4),
@@ -688,16 +688,16 @@ struct_rgp_sqtt_marker_event._fields_ = [
   ('_1', struct_rgp_sqtt_marker_event_1),
   ('_2', struct_rgp_sqtt_marker_event_2),
 ]
-class struct_rgp_sqtt_marker_event_with_dims(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_event_with_dims(Struct): pass
 struct_rgp_sqtt_marker_event_with_dims._fields_ = [
   ('event', struct_rgp_sqtt_marker_event),
   ('thread_x', uint32_t),
   ('thread_y', uint32_t),
   ('thread_z', uint32_t),
 ]
-class struct_rgp_sqtt_marker_barrier_start(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_barrier_start(Struct): pass
 class struct_rgp_sqtt_marker_barrier_start_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_barrier_start_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_barrier_start_0_0(Struct): pass
 struct_rgp_sqtt_marker_barrier_start_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -710,7 +710,7 @@ struct_rgp_sqtt_marker_barrier_start_0._fields_ = [
   ('dword01', uint32_t),
 ]
 class struct_rgp_sqtt_marker_barrier_start_1(ctypes.Union): pass
-class struct_rgp_sqtt_marker_barrier_start_1_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_barrier_start_1_0(Struct): pass
 struct_rgp_sqtt_marker_barrier_start_1_0._fields_ = [
   ('driver_reason', uint32_t,31),
   ('internal', uint32_t,1),
@@ -725,9 +725,9 @@ struct_rgp_sqtt_marker_barrier_start._fields_ = [
   ('_0', struct_rgp_sqtt_marker_barrier_start_0),
   ('_1', struct_rgp_sqtt_marker_barrier_start_1),
 ]
-class struct_rgp_sqtt_marker_barrier_end(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_barrier_end(Struct): pass
 class struct_rgp_sqtt_marker_barrier_end_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_barrier_end_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_barrier_end_0_0(Struct): pass
 struct_rgp_sqtt_marker_barrier_end_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -744,7 +744,7 @@ struct_rgp_sqtt_marker_barrier_end_0._fields_ = [
   ('dword01', uint32_t),
 ]
 class struct_rgp_sqtt_marker_barrier_end_1(ctypes.Union): pass
-class struct_rgp_sqtt_marker_barrier_end_1_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_barrier_end_1_0(Struct): pass
 struct_rgp_sqtt_marker_barrier_end_1_0._fields_ = [
   ('sync_cp_dma', uint32_t,1),
   ('inval_tcp', uint32_t,1),
@@ -774,9 +774,9 @@ struct_rgp_sqtt_marker_barrier_end._fields_ = [
   ('_0', struct_rgp_sqtt_marker_barrier_end_0),
   ('_1', struct_rgp_sqtt_marker_barrier_end_1),
 ]
-class struct_rgp_sqtt_marker_layout_transition(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_layout_transition(Struct): pass
 class struct_rgp_sqtt_marker_layout_transition_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_layout_transition_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_layout_transition_0_0(Struct): pass
 struct_rgp_sqtt_marker_layout_transition_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -796,7 +796,7 @@ struct_rgp_sqtt_marker_layout_transition_0._fields_ = [
   ('dword01', uint32_t),
 ]
 class struct_rgp_sqtt_marker_layout_transition_1(ctypes.Union): pass
-class struct_rgp_sqtt_marker_layout_transition_1_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_layout_transition_1_0(Struct): pass
 struct_rgp_sqtt_marker_layout_transition_1_0._fields_ = [
   ('reserved2', uint32_t,32),
 ]
@@ -810,9 +810,9 @@ struct_rgp_sqtt_marker_layout_transition._fields_ = [
   ('_0', struct_rgp_sqtt_marker_layout_transition_0),
   ('_1', struct_rgp_sqtt_marker_layout_transition_1),
 ]
-class struct_rgp_sqtt_marker_user_event(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_user_event(Struct): pass
 class struct_rgp_sqtt_marker_user_event_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_user_event_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_user_event_0_0(Struct): pass
 struct_rgp_sqtt_marker_user_event_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('reserved0', uint32_t,8),
@@ -828,7 +828,7 @@ struct_rgp_sqtt_marker_user_event._anonymous_ = ['_0']
 struct_rgp_sqtt_marker_user_event._fields_ = [
   ('_0', struct_rgp_sqtt_marker_user_event_0),
 ]
-class struct_rgp_sqtt_marker_user_event_with_length(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_user_event_with_length(Struct): pass
 struct_rgp_sqtt_marker_user_event_with_length._fields_ = [
   ('user_event', struct_rgp_sqtt_marker_user_event),
   ('length', uint32_t),
@@ -839,9 +839,9 @@ UserEventPop = enum_rgp_sqtt_marker_user_event_type.define('UserEventPop', 1)
 UserEventPush = enum_rgp_sqtt_marker_user_event_type.define('UserEventPush', 2)
 UserEventObjectName = enum_rgp_sqtt_marker_user_event_type.define('UserEventObjectName', 3)
 
-class struct_rgp_sqtt_marker_pipeline_bind(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_pipeline_bind(Struct): pass
 class struct_rgp_sqtt_marker_pipeline_bind_0(ctypes.Union): pass
-class struct_rgp_sqtt_marker_pipeline_bind_0_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_pipeline_bind_0_0(Struct): pass
 struct_rgp_sqtt_marker_pipeline_bind_0_0._fields_ = [
   ('identifier', uint32_t,4),
   ('ext_dwords', uint32_t,3),
@@ -855,7 +855,7 @@ struct_rgp_sqtt_marker_pipeline_bind_0._fields_ = [
   ('dword01', uint32_t),
 ]
 class struct_rgp_sqtt_marker_pipeline_bind_1(ctypes.Union): pass
-class struct_rgp_sqtt_marker_pipeline_bind_1_0(ctypes.Structure): pass
+class struct_rgp_sqtt_marker_pipeline_bind_1_0(Struct): pass
 struct_rgp_sqtt_marker_pipeline_bind_1_0._fields_ = [
   ('dword02', uint32_t),
   ('dword03', uint32_t),

@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from ctypes.util import find_library
-from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 
 def dll():
   try: return ctypes.CDLL(unwrap(find_library('nvrtc')))
@@ -39,7 +39,7 @@ except AttributeError: pass
 try: (nvrtcGetSupportedArchs:=dll.nvrtcGetSupportedArchs).restype, nvrtcGetSupportedArchs.argtypes = nvrtcResult, [ctypes.POINTER(ctypes.c_int)]
 except AttributeError: pass
 
-class struct__nvrtcProgram(ctypes.Structure): pass
+class struct__nvrtcProgram(Struct): pass
 nvrtcProgram = ctypes.POINTER(struct__nvrtcProgram)
 # nvrtcResult nvrtcCreateProgram(nvrtcProgram *prog, const char *src, const char *name, int numHeaders, const char *const *headers, const char *const *includeNames)
 try: (nvrtcCreateProgram:=dll.nvrtcCreateProgram).restype, nvrtcCreateProgram.argtypes = nvrtcResult, [ctypes.POINTER(nvrtcProgram), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]

@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 
 ion_user_handle_t = ctypes.c_int
 enum_ion_heap_type = CEnum(ctypes.c_uint)
@@ -12,7 +12,7 @@ ION_HEAP_TYPE_DMA = enum_ion_heap_type.define('ION_HEAP_TYPE_DMA', 4)
 ION_HEAP_TYPE_CUSTOM = enum_ion_heap_type.define('ION_HEAP_TYPE_CUSTOM', 5)
 ION_NUM_HEAPS = enum_ion_heap_type.define('ION_NUM_HEAPS', 16)
 
-class struct_ion_allocation_data(ctypes.Structure): pass
+class struct_ion_allocation_data(Struct): pass
 size_t = ctypes.c_ulong
 struct_ion_allocation_data._fields_ = [
   ('len', size_t),
@@ -21,16 +21,16 @@ struct_ion_allocation_data._fields_ = [
   ('flags', ctypes.c_uint),
   ('handle', ion_user_handle_t),
 ]
-class struct_ion_fd_data(ctypes.Structure): pass
+class struct_ion_fd_data(Struct): pass
 struct_ion_fd_data._fields_ = [
   ('handle', ion_user_handle_t),
   ('fd', ctypes.c_int),
 ]
-class struct_ion_handle_data(ctypes.Structure): pass
+class struct_ion_handle_data(Struct): pass
 struct_ion_handle_data._fields_ = [
   ('handle', ion_user_handle_t),
 ]
-class struct_ion_custom_data(ctypes.Structure): pass
+class struct_ion_custom_data(Struct): pass
 struct_ion_custom_data._fields_ = [
   ('cmd', ctypes.c_uint),
   ('arg', ctypes.c_ulong),
@@ -75,7 +75,7 @@ CAMERA_SECURE_CP_USAGE = enum_cp_mem_usage.define('CAMERA_SECURE_CP_USAGE', 5)
 MAX_USAGE = enum_cp_mem_usage.define('MAX_USAGE', 6)
 UNKNOWN = enum_cp_mem_usage.define('UNKNOWN', 2147483647)
 
-class struct_ion_flush_data(ctypes.Structure): pass
+class struct_ion_flush_data(Struct): pass
 struct_ion_flush_data._fields_ = [
   ('handle', ion_user_handle_t),
   ('fd', ctypes.c_int),
@@ -83,26 +83,26 @@ struct_ion_flush_data._fields_ = [
   ('offset', ctypes.c_uint),
   ('length', ctypes.c_uint),
 ]
-class struct_ion_prefetch_regions(ctypes.Structure): pass
+class struct_ion_prefetch_regions(Struct): pass
 struct_ion_prefetch_regions._fields_ = [
   ('vmid', ctypes.c_uint),
   ('sizes', ctypes.POINTER(size_t)),
   ('nr_sizes', ctypes.c_uint),
 ]
-class struct_ion_prefetch_data(ctypes.Structure): pass
+class struct_ion_prefetch_data(Struct): pass
 struct_ion_prefetch_data._fields_ = [
   ('heap_id', ctypes.c_int),
   ('len', ctypes.c_ulong),
   ('regions', ctypes.POINTER(struct_ion_prefetch_regions)),
   ('nr_regions', ctypes.c_uint),
 ]
-class struct_remote_buf64(ctypes.Structure): pass
+class struct_remote_buf64(Struct): pass
 uint64_t = ctypes.c_ulong
 struct_remote_buf64._fields_ = [
   ('pv', uint64_t),
   ('len', uint64_t),
 ]
-class struct_remote_dma_handle64(ctypes.Structure): pass
+class struct_remote_dma_handle64(Struct): pass
 uint32_t = ctypes.c_uint
 struct_remote_dma_handle64._fields_ = [
   ('fd', ctypes.c_int),
@@ -115,12 +115,12 @@ union_remote_arg64._fields_ = [
   ('dma', struct_remote_dma_handle64),
   ('h', uint32_t),
 ]
-class struct_remote_buf(ctypes.Structure): pass
+class struct_remote_buf(Struct): pass
 struct_remote_buf._fields_ = [
   ('pv', ctypes.c_void_p),
   ('len', size_t),
 ]
-class struct_remote_dma_handle(ctypes.Structure): pass
+class struct_remote_dma_handle(Struct): pass
 struct_remote_dma_handle._fields_ = [
   ('fd', ctypes.c_int),
   ('offset', uint32_t),
@@ -131,31 +131,31 @@ union_remote_arg._fields_ = [
   ('dma', struct_remote_dma_handle),
   ('h', uint32_t),
 ]
-class struct_fastrpc_ioctl_invoke(ctypes.Structure): pass
+class struct_fastrpc_ioctl_invoke(Struct): pass
 struct_fastrpc_ioctl_invoke._fields_ = [
   ('handle', uint32_t),
   ('sc', uint32_t),
   ('pra', ctypes.POINTER(union_remote_arg)),
 ]
-class struct_fastrpc_ioctl_invoke_fd(ctypes.Structure): pass
+class struct_fastrpc_ioctl_invoke_fd(Struct): pass
 struct_fastrpc_ioctl_invoke_fd._fields_ = [
   ('inv', struct_fastrpc_ioctl_invoke),
   ('fds', ctypes.POINTER(ctypes.c_int)),
 ]
-class struct_fastrpc_ioctl_invoke_attrs(ctypes.Structure): pass
+class struct_fastrpc_ioctl_invoke_attrs(Struct): pass
 struct_fastrpc_ioctl_invoke_attrs._fields_ = [
   ('inv', struct_fastrpc_ioctl_invoke),
   ('fds', ctypes.POINTER(ctypes.c_int)),
   ('attrs', ctypes.POINTER(ctypes.c_uint)),
 ]
-class struct_fastrpc_ioctl_invoke_crc(ctypes.Structure): pass
+class struct_fastrpc_ioctl_invoke_crc(Struct): pass
 struct_fastrpc_ioctl_invoke_crc._fields_ = [
   ('inv', struct_fastrpc_ioctl_invoke),
   ('fds', ctypes.POINTER(ctypes.c_int)),
   ('attrs', ctypes.POINTER(ctypes.c_uint)),
   ('crc', ctypes.POINTER(ctypes.c_uint)),
 ]
-class struct_fastrpc_ioctl_init(ctypes.Structure): pass
+class struct_fastrpc_ioctl_init(Struct): pass
 uintptr_t = ctypes.c_ulong
 int32_t = ctypes.c_int
 struct_fastrpc_ioctl_init._fields_ = [
@@ -167,23 +167,23 @@ struct_fastrpc_ioctl_init._fields_ = [
   ('memlen', uint32_t),
   ('memfd', int32_t),
 ]
-class struct_fastrpc_ioctl_init_attrs(ctypes.Structure): pass
+class struct_fastrpc_ioctl_init_attrs(Struct): pass
 struct_fastrpc_ioctl_init_attrs._fields_ = [
   ('init', struct_fastrpc_ioctl_init),
   ('attrs', ctypes.c_int),
   ('siglen', ctypes.c_uint),
 ]
-class struct_fastrpc_ioctl_munmap(ctypes.Structure): pass
+class struct_fastrpc_ioctl_munmap(Struct): pass
 struct_fastrpc_ioctl_munmap._fields_ = [
   ('vaddrout', uintptr_t),
   ('size', size_t),
 ]
-class struct_fastrpc_ioctl_munmap_64(ctypes.Structure): pass
+class struct_fastrpc_ioctl_munmap_64(Struct): pass
 struct_fastrpc_ioctl_munmap_64._fields_ = [
   ('vaddrout', uint64_t),
   ('size', size_t),
 ]
-class struct_fastrpc_ioctl_mmap(ctypes.Structure): pass
+class struct_fastrpc_ioctl_mmap(Struct): pass
 struct_fastrpc_ioctl_mmap._fields_ = [
   ('fd', ctypes.c_int),
   ('flags', uint32_t),
@@ -191,7 +191,7 @@ struct_fastrpc_ioctl_mmap._fields_ = [
   ('size', size_t),
   ('vaddrout', uintptr_t),
 ]
-class struct_fastrpc_ioctl_mmap_64(ctypes.Structure): pass
+class struct_fastrpc_ioctl_mmap_64(Struct): pass
 struct_fastrpc_ioctl_mmap_64._fields_ = [
   ('fd', ctypes.c_int),
   ('flags', uint32_t),
@@ -199,7 +199,7 @@ struct_fastrpc_ioctl_mmap_64._fields_ = [
   ('size', size_t),
   ('vaddrout', uint64_t),
 ]
-class struct_fastrpc_ioctl_munmap_fd(ctypes.Structure): pass
+class struct_fastrpc_ioctl_munmap_fd(Struct): pass
 ssize_t = ctypes.c_long
 struct_fastrpc_ioctl_munmap_fd._fields_ = [
   ('fd', ctypes.c_int),
@@ -207,26 +207,26 @@ struct_fastrpc_ioctl_munmap_fd._fields_ = [
   ('va', uintptr_t),
   ('len', ssize_t),
 ]
-class struct_fastrpc_ioctl_perf(ctypes.Structure): pass
+class struct_fastrpc_ioctl_perf(Struct): pass
 struct_fastrpc_ioctl_perf._fields_ = [
   ('data', uintptr_t),
   ('numkeys', uint32_t),
   ('keys', uintptr_t),
 ]
-class struct_fastrpc_ctrl_latency(ctypes.Structure): pass
+class struct_fastrpc_ctrl_latency(Struct): pass
 struct_fastrpc_ctrl_latency._fields_ = [
   ('enable', uint32_t),
   ('level', uint32_t),
 ]
-class struct_fastrpc_ctrl_smmu(ctypes.Structure): pass
+class struct_fastrpc_ctrl_smmu(Struct): pass
 struct_fastrpc_ctrl_smmu._fields_ = [
   ('sharedcb', uint32_t),
 ]
-class struct_fastrpc_ctrl_kalloc(ctypes.Structure): pass
+class struct_fastrpc_ctrl_kalloc(Struct): pass
 struct_fastrpc_ctrl_kalloc._fields_ = [
   ('kalloc_support', uint32_t),
 ]
-class struct_fastrpc_ioctl_control(ctypes.Structure): pass
+class struct_fastrpc_ioctl_control(Struct): pass
 class struct_fastrpc_ioctl_control_0(ctypes.Union): pass
 struct_fastrpc_ioctl_control_0._fields_ = [
   ('lp', struct_fastrpc_ctrl_latency),
@@ -238,34 +238,34 @@ struct_fastrpc_ioctl_control._fields_ = [
   ('req', uint32_t),
   ('_0', struct_fastrpc_ioctl_control_0),
 ]
-class struct_smq_null_invoke(ctypes.Structure): pass
+class struct_smq_null_invoke(Struct): pass
 struct_smq_null_invoke._fields_ = [
   ('ctx', uint64_t),
   ('handle', uint32_t),
   ('sc', uint32_t),
 ]
-class struct_smq_phy_page(ctypes.Structure): pass
+class struct_smq_phy_page(Struct): pass
 struct_smq_phy_page._fields_ = [
   ('addr', uint64_t),
   ('size', uint64_t),
 ]
-class struct_smq_invoke_buf(ctypes.Structure): pass
+class struct_smq_invoke_buf(Struct): pass
 struct_smq_invoke_buf._fields_ = [
   ('num', ctypes.c_int),
   ('pgidx', ctypes.c_int),
 ]
-class struct_smq_invoke(ctypes.Structure): pass
+class struct_smq_invoke(Struct): pass
 struct_smq_invoke._fields_ = [
   ('header', struct_smq_null_invoke),
   ('page', struct_smq_phy_page),
 ]
-class struct_smq_msg(ctypes.Structure): pass
+class struct_smq_msg(Struct): pass
 struct_smq_msg._fields_ = [
   ('pid', uint32_t),
   ('tid', uint32_t),
   ('invoke', struct_smq_invoke),
 ]
-class struct_smq_invoke_rsp(ctypes.Structure): pass
+class struct_smq_invoke_rsp(Struct): pass
 struct_smq_invoke_rsp._fields_ = [
   ('ctx', uint64_t),
   ('retval', ctypes.c_int),
@@ -273,12 +273,12 @@ struct_smq_invoke_rsp._fields_ = [
 remote_handle = ctypes.c_uint
 remote_handle64 = ctypes.c_ulong
 fastrpc_async_jobid = ctypes.c_ulong
-class remote_buf(ctypes.Structure): pass
+class remote_buf(Struct): pass
 remote_buf._fields_ = [
   ('pv', ctypes.c_void_p),
   ('nLen', size_t),
 ]
-class remote_dma_handle(ctypes.Structure): pass
+class remote_dma_handle(Struct): pass
 remote_dma_handle._fields_ = [
   ('fd', int32_t),
   ('offset', uint32_t),
@@ -296,13 +296,13 @@ FASTRPC_ASYNC_CALLBACK = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_CA
 FASTRPC_ASYNC_POLL = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_POLL', 2)
 FASTRPC_ASYNC_TYPE_MAX = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_TYPE_MAX', 3)
 
-class struct_fastrpc_async_callback(ctypes.Structure): pass
+class struct_fastrpc_async_callback(Struct): pass
 struct_fastrpc_async_callback._fields_ = [
   ('fn', ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int)),
   ('context', ctypes.c_void_p),
 ]
 fastrpc_async_callback_t = struct_fastrpc_async_callback
-class struct_fastrpc_async_descriptor(ctypes.Structure): pass
+class struct_fastrpc_async_descriptor(Struct): pass
 class struct_fastrpc_async_descriptor_0(ctypes.Union): pass
 struct_fastrpc_async_descriptor_0._fields_ = [
   ('cb', fastrpc_async_callback_t),
@@ -331,7 +331,7 @@ RPC_ADAPTIVE_QOS = enum_remote_rpc_latency_flags.define('RPC_ADAPTIVE_QOS', 2)
 RPC_POLL_QOS = enum_remote_rpc_latency_flags.define('RPC_POLL_QOS', 3)
 
 remote_rpc_control_latency_t = enum_remote_rpc_latency_flags
-class struct_remote_rpc_control_latency(ctypes.Structure): pass
+class struct_remote_rpc_control_latency(Struct): pass
 struct_remote_rpc_control_latency._fields_ = [
   ('enable', remote_rpc_control_latency_t),
   ('latency', uint32_t),
@@ -350,18 +350,18 @@ ASYNC_FASTRPC_SUPPORT = enum_remote_dsp_attributes.define('ASYNC_FASTRPC_SUPPORT
 STATUS_NOTIFICATION_SUPPORT = enum_remote_dsp_attributes.define('STATUS_NOTIFICATION_SUPPORT', 10)
 FASTRPC_MAX_DSP_ATTRIBUTES = enum_remote_dsp_attributes.define('FASTRPC_MAX_DSP_ATTRIBUTES', 11)
 
-class struct_remote_dsp_capability(ctypes.Structure): pass
+class struct_remote_dsp_capability(Struct): pass
 struct_remote_dsp_capability._fields_ = [
   ('domain', uint32_t),
   ('attribute_ID', uint32_t),
   ('capability', uint32_t),
 ]
 fastrpc_capability = struct_remote_dsp_capability
-class struct_remote_rpc_control_wakelock(ctypes.Structure): pass
+class struct_remote_rpc_control_wakelock(Struct): pass
 struct_remote_rpc_control_wakelock._fields_ = [
   ('enable', uint32_t),
 ]
-class struct_remote_rpc_get_domain(ctypes.Structure): pass
+class struct_remote_rpc_get_domain(Struct): pass
 struct_remote_rpc_get_domain._fields_ = [
   ('domain', ctypes.c_int),
 ]
@@ -377,36 +377,36 @@ FASTRPC_REMOTE_PROCESS_EXCEPTION = enum_session_control_req_id.define('FASTRPC_R
 FASTRPC_REMOTE_PROCESS_TYPE = enum_session_control_req_id.define('FASTRPC_REMOTE_PROCESS_TYPE', 10)
 FASTRPC_REGISTER_STATUS_NOTIFICATIONS = enum_session_control_req_id.define('FASTRPC_REGISTER_STATUS_NOTIFICATIONS', 11)
 
-class struct_remote_rpc_thread_params(ctypes.Structure): pass
+class struct_remote_rpc_thread_params(Struct): pass
 struct_remote_rpc_thread_params._fields_ = [
   ('domain', ctypes.c_int),
   ('prio', ctypes.c_int),
   ('stack_size', ctypes.c_int),
 ]
-class struct_remote_rpc_control_unsigned_module(ctypes.Structure): pass
+class struct_remote_rpc_control_unsigned_module(Struct): pass
 struct_remote_rpc_control_unsigned_module._fields_ = [
   ('domain', ctypes.c_int),
   ('enable', ctypes.c_int),
 ]
-class struct_remote_rpc_relative_thread_priority(ctypes.Structure): pass
+class struct_remote_rpc_relative_thread_priority(Struct): pass
 struct_remote_rpc_relative_thread_priority._fields_ = [
   ('domain', ctypes.c_int),
   ('relative_thread_priority', ctypes.c_int),
 ]
-class struct_remote_rpc_process_clean_params(ctypes.Structure): pass
+class struct_remote_rpc_process_clean_params(Struct): pass
 struct_remote_rpc_process_clean_params._fields_ = [
   ('domain', ctypes.c_int),
 ]
-class struct_remote_rpc_session_close(ctypes.Structure): pass
+class struct_remote_rpc_session_close(Struct): pass
 struct_remote_rpc_session_close._fields_ = [
   ('domain', ctypes.c_int),
 ]
-class struct_remote_rpc_control_pd_dump(ctypes.Structure): pass
+class struct_remote_rpc_control_pd_dump(Struct): pass
 struct_remote_rpc_control_pd_dump._fields_ = [
   ('domain', ctypes.c_int),
   ('enable', ctypes.c_int),
 ]
-class struct_remote_process_type(ctypes.Structure): pass
+class struct_remote_process_type(Struct): pass
 struct_remote_process_type._fields_ = [
   ('domain', ctypes.c_int),
   ('process_type', ctypes.c_int),
@@ -421,7 +421,7 @@ FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
 remote_rpc_status_flags_t = enum_remote_rpc_status_flags
 fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, enum_remote_rpc_status_flags)
-class struct_remote_rpc_notif_register(ctypes.Structure): pass
+class struct_remote_rpc_notif_register(Struct): pass
 struct_remote_rpc_notif_register._fields_ = [
   ('context', ctypes.c_void_p),
   ('domain', ctypes.c_int),
@@ -448,7 +448,7 @@ FASTRPC_MAP_FD = enum_fastrpc_map_flags.define('FASTRPC_MAP_FD', 2)
 FASTRPC_MAP_FD_DELAYED = enum_fastrpc_map_flags.define('FASTRPC_MAP_FD_DELAYED', 3)
 FASTRPC_MAP_MAX = enum_fastrpc_map_flags.define('FASTRPC_MAP_MAX', 4)
 
-class struct__cstring1_s(ctypes.Structure): pass
+class struct__cstring1_s(Struct): pass
 struct__cstring1_s._fields_ = [
   ('data', ctypes.POINTER(ctypes.c_char)),
   ('dataLen', ctypes.c_int),
@@ -462,19 +462,19 @@ APPS_STD_SEEK_END = enum_apps_std_SEEK.define('APPS_STD_SEEK_END', 2)
 _32BIT_PLACEHOLDER_apps_std_SEEK = enum_apps_std_SEEK.define('_32BIT_PLACEHOLDER_apps_std_SEEK', 2147483647)
 
 apps_std_SEEK = enum_apps_std_SEEK
-class struct_apps_std_DIR(ctypes.Structure): pass
+class struct_apps_std_DIR(Struct): pass
 uint64 = ctypes.c_ulonglong
 struct_apps_std_DIR._fields_ = [
   ('handle', uint64),
 ]
 apps_std_DIR = struct_apps_std_DIR
-class struct_apps_std_DIRENT(ctypes.Structure): pass
+class struct_apps_std_DIRENT(Struct): pass
 struct_apps_std_DIRENT._fields_ = [
   ('ino', ctypes.c_int),
   ('name', (ctypes.c_char * 255)),
 ]
 apps_std_DIRENT = struct_apps_std_DIRENT
-class struct_apps_std_STAT(ctypes.Structure): pass
+class struct_apps_std_STAT(Struct): pass
 uint32 = ctypes.c_uint
 int64 = ctypes.c_longlong
 struct_apps_std_STAT._fields_ = [
