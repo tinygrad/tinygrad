@@ -1,13 +1,13 @@
 import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
 from extra.sqtt.rocprof import rocprof
-from tinygrad.helpers import temp, DEBUG
+from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
 from tinygrad.runtime.autogen import llvm
 from tinygrad.runtime.support.elf import elf_loader
 
 # to pass NULL to callbacks
-llvm.LLVMCreateDisasmCPUFeatures.argtypes = llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5] + [ctypes.c_void_p, ctypes.c_void_p]
+llvm.LLVMCreateDisasmCPUFeatures.argtypes = tuple(llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5]) + (ctypes.c_void_p, ctypes.c_void_p)
 def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
   llvm.LLVMInitializeAMDGPUTargetInfo()
   llvm.LLVMInitializeAMDGPUTargetMC()
@@ -16,8 +16,8 @@ def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
   ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, None, None)
 
   image, sections, relocs = elf_loader(lib)
-  text = next((sh.header for sh in sections if sh.name == ".text"), -1)
-  off, sz = text.sh_addr, text.sh_size
+  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  off, sz = unwrap(text).sh_addr, unwrap(text).sh_size
 
   addr_table:dict[int, tuple[str, int]] = {}
   out = ctypes.create_string_buffer(128)
