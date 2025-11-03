@@ -2,8 +2,7 @@ import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
 from extra.sqtt.rocprof import rocprof
 from extra.sqtt.disasm import comgr_get_address_table
 from tinygrad.helpers import temp, DEBUG
-from tinygrad.device import ProfileEvent, ProfileProgramEvent
-from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
+from tinygrad.device import ProfileEvent, ProfileProgramEvent, ProfileSQTTEvent, ProfilePMCEvent
 
 @dataclasses.dataclass
 class InstInfo:

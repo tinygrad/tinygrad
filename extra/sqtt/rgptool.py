@@ -2,8 +2,7 @@
 from __future__ import annotations
 import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
 import tinygrad.runtime.autogen.sqtt as sqtt
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
-from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent, ProfileSQTTEvent
 from tinygrad.helpers import round_up, flatten, all_same
 from dataclasses import dataclass
 
