@@ -193,10 +193,20 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+def load_sqtt(profile:list[ProfileEvent]) -> None:
+  from extra.sqtt.roc import decode
+  rctx = decode(profile)
+
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
+  # load device specific counters
+  device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
+  for device in device_ts_diffs:
+    d = device.split(":")[0]
+    if d == "AMD": device_decoders[d] = load_sqtt
+  for fxn in device_decoders.values(): fxn(profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []

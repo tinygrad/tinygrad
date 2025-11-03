@@ -49,18 +49,11 @@ class _ROCParseCtx:
 
     self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
 
-if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  args = parser.parse_args()
-
-  with args.profile.open("rb") as f: profile = pickle.load(f)
+def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   sqtt_events:list[ProfileSQTTEvent] = []
-  pmc_events:list[ProfilePMCEvent] = []
   prog_events:list[ProfileProgramEvent] = []
   for e in profile:
     if isinstance(e, ProfileSQTTEvent): sqtt_events.append(e)
-    if isinstance(e, ProfilePMCEvent): pmc_events.append(e)
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD"): prog_events.append(e)
 
   ROCParseCtx = _ROCParseCtx(sqtt_events, prog_events)
@@ -85,7 +78,9 @@ if __name__ == "__main__":
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
-    instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
+    try:
+      instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
+    except: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0
@@ -98,12 +93,22 @@ if __name__ == "__main__":
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
+  rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
+  return ROCParseCtx
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  args = parser.parse_args()
+
+  with args.profile.open("rb") as f: profile = pickle.load(f)
   try:
-    rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-    print('SQTT:', ROCParseCtx.wave_events.keys())
+    rctx = decode(profile)
+    print('SQTT:', rctx.wave_events.keys())
   except Exception as e: print("Error in sqtt decoder:", e)
 
-  for ev in pmc_events:
+  for ev in profile:
+    if not isinstance(ev, ProfilePMCEvent): continue
     print(f"PMC Event: dev={ev.device} kern={ev.kern}")
     ptr = 0
     for s in ev.sched:
