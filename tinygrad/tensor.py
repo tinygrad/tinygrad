@@ -1435,6 +1435,11 @@ class Tensor(MathMixin, MovementMixin):
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(unsqueezed_shape).expand(expanded_shape).reshape(final_shape)
 
+  def _resolve_dim(self, dim:int, *, extra:bool=False) -> int:
+    total = self.ndim + int(extra)
+    if not -max(1, total) <= dim <= max(1, total)-1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total)-1]}")
+    return dim + total if dim < 0 else dim
+
   def split(self, sizes:int|Sequence[int], dim:int=0) -> tuple[Tensor, ...]:
     """
     Splits the tensor into chunks along the dimension specified by `dim`.
@@ -1591,6 +1596,22 @@ class Tensor(MathMixin, MovementMixin):
     order = list(range(self.ndim))
     order[dim0], order[dim1] = order[dim1], order[dim0]
     return self.permute(order)
+
+  def flatten(self, start_dim=0, end_dim=-1) -> Tensor:
+    """
+    Flattens the tensor by reshaping it into a one-dimensional tensor.
+    If `start_dim` or `end_dim` are passed, only dimensions starting with `start_dim` and ending with `end_dim` are flattened.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(8).reshape(2, 2, 2)
+    print(t.flatten().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.flatten(start_dim=1).numpy())
+    ```
+    """
+    start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
+    return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
 
   def unflatten(self, dim:int, sizes:tuple[int,...]) -> Tensor:
     """
@@ -1905,12 +1926,6 @@ class Tensor(MathMixin, MovementMixin):
     is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
-
-  def allclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> bool:
-    """
-    Check if all self and other are close. Return True or False.
-    """
-    return bool(self.isclose(other, rtol=rtol, atol=atol, equal_nan=equal_nan).all().item())
 
   def mean(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
@@ -4178,6 +4193,29 @@ class Tensor(MathMixin, MovementMixin):
     return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   # ***** Tensor Properties *****
+
+  @property
+  def ndim(self) -> int:
+    """
+    Returns the number of dimensions in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    print(t.ndim)
+    ```
+    """
+    return len(self.shape)
+
+  def numel(self) -> sint:
+    """
+    Returns the total number of elements in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
+    print(t.numel())
+    ```
+    """
+    return prod(self.shape)
 
   def element_size(self) -> int:
     """
