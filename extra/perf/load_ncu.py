@@ -1,5 +1,5 @@
 # load csv export output from ncu
-import csv, json
+import csv, json, sys
 
 # temp for ncu csv export numeric data
 def try_number(name:str, prev:str) -> int|float|str:
@@ -24,6 +24,12 @@ def load_custom(fp:str, ctxs:list[dict]):
       name, *rest = row.values()
       if not counters: counters = [{} for _ in range(len(rest))]
       for i,x in enumerate(rest): counters[i][name.split(" ")[0]] = try_number(name, x)
-  steps = [{"name":x["Function"], "depth":0, "data":{"src":json.dumps(counters[i], indent=2), "lang":"txt", "device":"CUDA"},
+  steps = [{"name":x["Function"], "depth":0, "data":{"src":json.dumps(counters[i], indent=2), "device":"CUDA"},
             "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(counters)]
   ctxs.append({"name":"Counters", "steps":steps})
+
+if __name__ == "__main__":
+  load_custom(sys.argv[1], cret:=[])
+  for x in cret[0]["steps"]:
+    print(x["name"])
+    print(json.loads(x["data"]["src"]))

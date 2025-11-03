@@ -345,9 +345,6 @@ if __name__ == "__main__":
 
   ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
-  if args.custom is not None:
-    from extra.perf.counters import load_custom
-    load_custom(args.custom, ctxs)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

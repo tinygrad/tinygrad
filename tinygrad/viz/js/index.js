@@ -50,7 +50,7 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const drawGraph = (data, opts) => {
+const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
@@ -92,14 +92,13 @@ const drawGraph = (data, opts) => {
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
-  // by default we shift the points toward center of each port
-  d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", !opts?.simplePaths ? (e) => {
+  d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
     const edge = g.edge(e);
     const points = edge.points.slice(1, edge.points.length-1);
     points.unshift(intersectRect(g.node(e.v), points[0]));
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
-  } : (e) => line(g.edge(e).points)).attr("marker-end", "url(#arrowhead)").style("stroke", e => g.edge(e).color);
+  }).attr("marker-end", "url(#arrowhead)");
 }
 
 // ** UOp graph
@@ -137,171 +136,6 @@ function renderDag(graph, additions, recenter, layoutOpts) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
-}
-
-// ** Cache metrics graph
-
-// each backend should define: metrics, units and links
-// metrics define a unit and a formula using raw counters
-// units define a relative width (1-100), height (1-100), key, label and color
-// links connect two units. The visual representation of a link can optionally:
-// - specify a metric, if the value is 0 the line is grayed out
-// - vertically aligned (default is horizantal v->w)
-// - have a "reverse" metric from w->v, if it's a read+write link.
-// - have a double arrow
-
-const colors = {LOGICAL:"#7fa55c", PHYSICAL:"#013367"};
-const ncu_counters = {
-  metrics: {
-    "Kernel <-> Global": {"unit":"inst", "keys":[
-      "sass__inst_executed_global_loads",
-      "sass__inst_executed_global_stores",
-      "smsp__inst_executed_op_generic_atom_dot_alu.sum",
-      "smsp__inst_executed_op_generic_atom_dot_cas.sum",
-      "smsp__inst_executed_op_global_red.sum",
-    ]},
-    "Kernel <-> Local": {"unit":"inst", "keys":[
-      "sass__inst_executed_local_loads",
-      "sass__inst_executed_local_stores",
-    ]},
-    "Kernel <-> Shared": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_loads",
-      "sass__inst_executed_shared_stores",
-      "smsp__inst_executed_op_shared_atom.sum",
-      "smsp__inst_executed_op_ldsm.sum",
-    ]},
-    "Global <- L1 Cache": {"unit":"req", "keys":[
-      "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
-      "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
-      ["sm__sass_l1tex_t_requests_pipe_lsu_mem_global_op_ldgsts.sum", -1],
-    ]},
-    "Global -> L1 Cache": {"unit":"req", "keys":[
-      "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum",
-      "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
-      "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum",
-    ]},
-    "Local <- L1 Cache": {"unit":"req", "keys":[
-      "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum",
-    ]},
-    "Local -> L1 Cache": {"unit":"req", "keys":[
-      "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
-    ]},
-    "Shared <- Shared Memory": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_loads",
-      "smsp__inst_executed_op_shared_atom.sum",
-      "smsp__inst_executed_op_ldsm.sum",
-    ]},
-    "Shared -> Shared Memory": {"unit":"inst", "keys":[
-      "sass__inst_executed_shared_stores",
-      "smsp__inst_executed_op_shared_atom.sum",
-    ]},
-    "L1 Hit Rate (%)": {"unit":"%", "keys":[
-      "l1tex__t_sector_hit_rate.pct",
-    ]},
-    "L2 Hit Rate (%)": {"unit":"%", "keys":[
-      "lts__t_sector_hit_rate.pct",
-    ]},
-    "L1 Cache <- L2 Cache (bytes)": {"unit":"bytes", "keys":[
-      "l1tex__m_xbar2l1tex_read_bytes.sum",
-    ]},
-    "L1 Cache -> L2 Cache (bytes)": {"unit":"bytes", "keys":[
-      "l1tex__m_l1tex2xbar_write_bytes.sum",
-    ]},
-    "L1 -> Shared (bytes)": {"unit":"bytes", "keys":[
-      ["sm__sass_l1tex_t_sectors_pipe_lsu_mem_global_op_ldgsts_cache_access.sum", 32],
-    ]},
-    "L2 Cache <- Device Memory (bytes)": {"unit":"bytes", "keys":[
-      "dram__bytes_read.sum",
-    ]},
-    "L2 Cache -> Device Memory (bytes)": {"unit":"bytes", "keys":[
-      "dram__bytes_write.sum",
-    ]},
-  },
-  units: [
-    ["kernel", 40, 100, colors.LOGICAL, "Kernel"],
-    ["instr_global", 100, 10, colors.LOGICAL, "Global"],
-    ["instr_local", 100, 10, colors.LOGICAL, "Local"],
-    ["instr_shared", 100, 10, colors.LOGICAL, "Shared"],
-    ["l1", 100, 70, colors.PHYSICAL, "L1 Hit Rate (%)"],
-    ["shared", 100, 10, colors.PHYSICAL, "Shared Memory"],
-    ["l2", 100, 90, colors.PHYSICAL, "L2 Hit Rate (%)"],
-    ["dram", 100, 10, colors.PHYSICAL, "Device Memory"],
-  ],
-  links: [
-    ["kernel", "instr_global", {k:"Kernel <-> Global", dbl:true}],
-    ["kernel", "instr_local",  {k:"Kernel <-> Local",  dbl:true}],
-    ["kernel", "instr_shared", {k:"Kernel <-> Shared", dbl:true}],
-    ["instr_global", "l1", {k:"Global <- L1 Cache", rev:"Global -> L1 Cache"}],
-    ["instr_local", "l1", {k:"Local <- L1 Cache", rev:"Local -> L1 Cache"}],
-    ["instr_shared", "shared", {k:"Shared <- Shared Memory", rev:"Shared -> Shared Memory"}],
-    ["l1", "shared", {k:"L1 -> Shared (bytes)", vert:true}],
-    ["l1", "l2", {k:"L1 Cache <- L2 Cache (bytes)", rev:"L1 Cache -> L2 Cache (bytes)"}],
-    ["l2", "dram", {k:"L2 Cache <- Device Memory (bytes)", rev:"L2 Cache -> Device Memory (bytes)"}],
-  ],
-}
-
-const MEMORY_METRICS = {"CUDA":ncu_counters}
-function renderCacheGraph(data) {
-  const { units, links, metrics }  = MEMORY_METRICS[data.device];
-  displaySelection("#graph");
-  const counters = JSON.parse(data.src);
-  function calc(metric) {
-    let num = 0;
-    for (let k of metrics[metric].keys) {
-      const [key, w] = Array.isArray(k) ? k : [k, 1]
-      num += counters[key]*w;
-    }
-    return num;
-  }
-  const fmt = (metric) => formatUnit(calc(metric), " "+metrics[metric].unit);
-  // graph layout (represent the data flow as a dag)
-  const g = new dagre.graphlib.Graph({ multigraph:true });
-  g.setGraph({ rankdir:"LR", edgesep:10, ranksep:100 }).setDefaultEdgeLabel(() => ({}));
-  const baseWidth = 140, baseHeight = 440;
-  for (const unit of units) {
-    let [key, width, height, color, label] = unit;
-    if (metrics[label] != null) label += "\n"+fmt(label)
-    g.setNode(key, { width:baseWidth*(width/100), height:baseHeight*(height/100), color, label });
-  }
-  for (const [v, w, opts] of links) !opts.vert && g.setEdge(v, w, opts);
-  dagre.layout(g);
-  // post process custom edges
-  const sep = g.graph().edgesep;
-  const linkColors = {ACTIVE:"#98a0c2"};
-  const addEdge = (v, w, k, points, labelPos) => {
-    const value = k == null ? 0 : calc(k);
-    g.setEdge(v, w, { points, labelPos, label:value > 0 ? fmt(k) : null, color:value > 0 ? linkColors.ACTIVE : null });
-  }
-  for (const [v, w, opts] of links) {
-    const p = g.edge(v, w);
-    if (p == null) {
-      const nv = g.node(v), nw = g.node(w);
-      addEdge(w, v, opts.k, [{x:nv.x, y:nv.y+nv.height/2}, {x:nv.x, y:nw.y-nw.height/2}], "right");
-    } else {
-      g.removeEdge(v, w);
-      // pick y side of the smallest
-      const baseY = g.node(v).height < g.node(w).height ? p.points[0].y : p.points[1].y;
-      const points = p.points.map((p) => ({ x:p.x, y:baseY }));
-      addEdge(v, w, opts.k, points, "top");
-      if (p.dbl) addEdge(w, v, opts.k, [...points].reverse());
-      if (p.rev != null) addEdge(w, v, p.rev, points.map(p => ({x:p.x, y:p.y+sep})).reverse(), "bottom");
-    }
-  }
-  // draw the svg
-  const graph = dagre.graphlib.json.write(g);
-  drawGraph(graph, { simplePaths:true });
-  const edgeLabels = d3.select("#edge-labels").html("").selectAll("g.edge").data(graph.edges).join("g").classed("edge-text", true);
-  edgeLabels.append("text").attr("text-anchor", "middle").attr("dominant-baseline", "middle").style("fill", e => e.value.color).text(e => e.value.label);
-  edgeLabels.attr("transform", (e, i, nodes) => {
-    const p1 = e.value.points[0], p2 = e.value.points.at(-1);
-    let x = (p1.x+p2.x)/2, y = (p1.y+p2.y)/2;
-    const box = nodes[i].getBBox();
-    if (e.value.labelPos === "bottom") y += box.height/2+1;
-    else if (e.value.labelPos === "right") x += box.width/2+1;
-    else y -= box.height/2+1;
-    return `translate(${x}, ${y})`;
-  });
-  document.getElementById("zoom-to-fit-btn").click();
 }
 
 // ** profiler graph
@@ -674,6 +508,13 @@ async function renderProfiler() {
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
 }
 
+// ** Counters view
+
+function renderCounters(ret) {
+  displaySelection("#custom");
+  metadata.innerText = ret.data.src;
+}
+
 // ** zoom and recentering
 
 const vizZoomFilter = e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mousedown') && !e.button && e.type !== 'dblclick';
@@ -829,7 +670,6 @@ async function main() {
       }
     }
     return setState({ currentCtx:-1 });
-    // return setState({ "currentCtx": 3, "currentStep": 11, "currentRewrite": 0, "expandSteps": true });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
@@ -852,7 +692,7 @@ async function main() {
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
-    if (ckey.includes("counters")) return renderCacheGraph(ret);
+    if (ckey.includes("counters")) return renderCounters(ret);
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();
