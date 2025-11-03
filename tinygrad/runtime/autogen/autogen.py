@@ -121,7 +121,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
               macros += [f"{c.spelling} = {{{','.join(f'{readext(f, next(it:=c.get_children()).extent)}:{readext(f, next(it).extent)}' for c in init.get_children())}}}"]
             elif c.type.get_canonical().kind in ints: macros += [f"{c.spelling} = {readext(f, last(c).extent)}"]
             else: macros += [f"{c.spelling} = {tname(c.type)}({readext(f, last(c).extent)})"]
-          case CK.VAR_DECL if c.linkage == LK.EXTERNAL:
+          case CK.VAR_DECL if c.linkage == LK.EXTERNAL and dll:
             lines.append(f"try: {c.spelling} = {tname(c.type)}.in_dll(dll, '{c.mangled_name}')\nexcept (ValueError,AttributeError): pass")
       except Exception as e: raise Exception(f"parsing failed at {c.location.file}:{c.location.line}") from e
   main, macros = '\n'.join(lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
