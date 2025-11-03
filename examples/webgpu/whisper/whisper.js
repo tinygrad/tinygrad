@@ -472,6 +472,11 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
 
     await decoder_upload_audio_features(nets, audio_features_batch, decoder_state);
 
+    let pendingTexts = [];
+    for (let sequence_index = 0; sequence_index < sequences.length; ++sequence_index) {
+        pendingTexts.push('');
+    }
+
     for (let i = 0; i < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS); ++i) {
         if (cancelToken.cancelled) return;
 
@@ -491,11 +496,12 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
             const detokenized = tokensToText(sequences[idx].context.slice(context_prompt_length), nets.mapping);
             const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
             let pendingText = format_text(detokenized, sequences[idx].avg_logprob, seek, seek_end);
-            updatedCallback(pendingText);
+            pendingTexts[idx] = pendingText;
             // console.log(pendingText);
 
             // if (!keep_going) break;
         }
+        updatedCallback(pendingTexts.slice());
     }
 
     for (let seq of sequences) {
@@ -531,7 +537,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
     }
 
-    let pendingText = null;
+    let pendingTexts = [];
 
     onEvent("inferenceBegin");
     console.log("begin new transcription");
@@ -565,9 +571,9 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             audio_features_batch.push(audio_features);
         }
 
-        function updateCallback(pd) {
-            pendingText = pd;
-            onEvent("chunkUpdate", { pendingText });
+        function updateCallback(pds) {
+            pendingTexts = pds;
+            onEvent("chunkUpdate", { pendingTexts: pendingTexts });
         }
 
         let seeks_batch = [];
@@ -596,8 +602,8 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 }
                 previous_context = context.slice();
 
-                onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText });
-                pendingText = '';
+                onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, pendingText: pendingTexts[i] });
+                pendingTexts[i] = '';
 
                 ++i;
             }

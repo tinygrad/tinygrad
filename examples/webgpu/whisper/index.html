@@ -192,7 +192,7 @@
                 currentTranscription.style.display = 'block';
                 requestAnimationFrame(updateLoop);
             } else if (event === "chunkUpdate") {
-                pendingText = data.pendingText;
+                pendingText = data.pendingTexts[0];
             } else if (event === "chunkDone") {
                 const newChunk = document.createElement('div');
                 newChunk.className = 'transcription-chunk';
