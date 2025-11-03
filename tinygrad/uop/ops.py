@@ -195,7 +195,7 @@ class UOp(MathMixin, MovementMixin, metaclass=UOpMetaClass):
         # non pointer index doesn't have a shape
         if not isinstance(self.dtype, PtrDType): return None
         # fully indexed doesn't have a shape. TODO: remove this
-        if len(self.src[1:]) == len(self.src[0].shape): return None
+        if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
         # pointer index
         return self.src[0].shape[len(self.src[1:]):]
 
