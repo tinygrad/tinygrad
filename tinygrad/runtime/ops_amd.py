@@ -982,6 +982,7 @@ class AMDDevice(HCQCompiled):
 
   def on_device_hang(self): self.iface.on_device_hang()
 
+  def device_info(self): return self.arch
   def _at_profile_finalize(self):
     if self.sqtt_enabled:
       wptrs_buf = self.allocator.alloc(round_up(len(self.sqtt_buffers), 0x1000), BufferSpec(cpu_access=True, nolru=True))

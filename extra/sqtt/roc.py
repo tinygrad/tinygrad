@@ -1,9 +1,33 @@
 import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
 from extra.sqtt.rocprof import rocprof
-from extra.sqtt.disasm import comgr_get_address_table
 from tinygrad.helpers import temp, DEBUG
-from tinygrad.device import ProfileEvent, ProfileProgramEvent
+from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
+from tinygrad.runtime.autogen import llvm
+from tinygrad.runtime.support.elf import elf_loader
+
+# to pass NULL to callbacks
+llvm.LLVMCreateDisasmCPUFeatures.argtypes = llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5] + [ctypes.c_void_p, ctypes.c_void_p]
+def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
+  llvm.LLVMInitializeAMDGPUTargetInfo()
+  llvm.LLVMInitializeAMDGPUTargetMC()
+  llvm.LLVMInitializeAMDGPUAsmParser()
+  llvm.LLVMInitializeAMDGPUDisassembler()
+  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, None, None)
+
+  image, sections, relocs = elf_loader(lib)
+  text = next((sh.header for sh in sections if sh.name == ".text"), -1)
+  off, sz = text.sh_addr, text.sh_size
+
+  addr_table:dict[int, tuple[str, int]] = {}
+  out = ctypes.create_string_buffer(128)
+  cur_off = off
+  while cur_off < sz + off:
+    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
+    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
+    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
+    cur_off += instr_sz
+  return addr_table
 
 @dataclasses.dataclass
 class InstInfo:
@@ -18,12 +42,12 @@ class InstInfo:
     self.hit, self.lat, self.stall = self.hit + 1, self.lat + ev.duration, self.stall + ev.stall
 
 class _ROCParseCtx:
-  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
-    self.sqtt_evs, self.prog_evs = iter(sqtt_evs), prog_evs
+  def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
+    self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
     self.wave_events, self.disasms, self.addr2prg = {}, {}, {}
 
     for prog in prog_evs:
-      for addr, info in comgr_get_address_table(prog.lib).items():
+      for addr, info in llvm_disasm(dev_evs[prog.device].arch, prog.lib).items():
         self.disasms[prog.base + addr] = info
         self.addr2prg[prog.base + addr] = prog
 
@@ -50,13 +74,15 @@ class _ROCParseCtx:
     self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
+  dev_events:dict[str, ProfileDeviceEvent] = {}
   sqtt_events:list[ProfileSQTTEvent] = []
   prog_events:list[ProfileProgramEvent] = []
   for e in profile:
+    if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
     if isinstance(e, ProfileSQTTEvent): sqtt_events.append(e)
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD"): prog_events.append(e)
 
-  ROCParseCtx = _ROCParseCtx(sqtt_events, prog_events)
+  ROCParseCtx = _ROCParseCtx(dev_events, sqtt_events, prog_events)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
   def copy_cb(buf, buf_size, data_ptr):
