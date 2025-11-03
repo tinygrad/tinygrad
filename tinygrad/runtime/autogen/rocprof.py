@@ -1,9 +1,10 @@
 # mypy: ignore-errors
 import ctypes
 from ctypes.util import find_library
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(find_library('rocprof-trace-decoder'))
+  try: return ctypes.CDLL(unwrap(find_library('rocprof-trace-decoder')))
   except: pass
   try: return ctypes.CDLL('/usr/local/lib/rocprof-trace-decoder.so')
   except: pass
@@ -11,6 +12,7 @@ def dll():
   except: pass
   return None
 dll = dll()
+
 rocprofiler_thread_trace_decoder_status_t = CEnum(ctypes.c_uint)
 ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS = rocprofiler_thread_trace_decoder_status_t.define('ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS', 0)
 ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR = rocprofiler_thread_trace_decoder_status_t.define('ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR', 1)
@@ -32,7 +34,7 @@ ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY = enum_rocprofiler_thread_t
 ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST = enum_rocprofiler_thread_trace_decoder_record_type_t.define('ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST', 9)
 
 rocprof_trace_decoder_trace_callback_t = ctypes.CFUNCTYPE(rocprofiler_thread_trace_decoder_status_t, enum_rocprofiler_thread_trace_decoder_record_type_t, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p)
-class struct_rocprofiler_thread_trace_decoder_pc_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_pc_t(Struct): pass
 uint64_t = ctypes.c_ulong
 struct_rocprofiler_thread_trace_decoder_pc_t._fields_ = [
   ('address', uint64_t),
@@ -66,8 +68,8 @@ try: (rocprof_trace_decoder_dump_data:=dll.rocprof_trace_decoder_dump_data).rest
 except AttributeError: pass
 
 class union_rocprof_trace_decoder_gfx9_header_t(ctypes.Union): pass
-class _anonstruct0(ctypes.Structure): pass
-_anonstruct0._fields_ = [
+class union_rocprof_trace_decoder_gfx9_header_t_0(Struct): pass
+union_rocprof_trace_decoder_gfx9_header_t_0._fields_ = [
   ('legacy_version', uint64_t,13),
   ('gfx9_version2', uint64_t,3),
   ('DSIMDM', uint64_t,4),
@@ -78,13 +80,13 @@ _anonstruct0._fields_ = [
 ]
 union_rocprof_trace_decoder_gfx9_header_t._anonymous_ = ['_0']
 union_rocprof_trace_decoder_gfx9_header_t._fields_ = [
-  ('_0', _anonstruct0),
+  ('_0', union_rocprof_trace_decoder_gfx9_header_t_0),
   ('raw', uint64_t),
 ]
 rocprof_trace_decoder_gfx9_header_t = union_rocprof_trace_decoder_gfx9_header_t
 class union_rocprof_trace_decoder_instrument_enable_t(ctypes.Union): pass
-class _anonstruct1(ctypes.Structure): pass
-_anonstruct1._fields_ = [
+class union_rocprof_trace_decoder_instrument_enable_t_0(Struct): pass
+union_rocprof_trace_decoder_instrument_enable_t_0._fields_ = [
   ('char1', ctypes.c_uint,8),
   ('char2', ctypes.c_uint,8),
   ('char3', ctypes.c_uint,8),
@@ -92,20 +94,20 @@ _anonstruct1._fields_ = [
 ]
 union_rocprof_trace_decoder_instrument_enable_t._anonymous_ = ['_0']
 union_rocprof_trace_decoder_instrument_enable_t._fields_ = [
-  ('_0', _anonstruct1),
+  ('_0', union_rocprof_trace_decoder_instrument_enable_t_0),
   ('u32All', ctypes.c_uint),
 ]
 rocprof_trace_decoder_instrument_enable_t = union_rocprof_trace_decoder_instrument_enable_t
 class union_rocprof_trace_decoder_packet_header_t(ctypes.Union): pass
-class _anonstruct2(ctypes.Structure): pass
-_anonstruct2._fields_ = [
+class union_rocprof_trace_decoder_packet_header_t_0(Struct): pass
+union_rocprof_trace_decoder_packet_header_t_0._fields_ = [
   ('opcode', ctypes.c_uint,8),
   ('type', ctypes.c_uint,4),
   ('data20', ctypes.c_uint,20),
 ]
 union_rocprof_trace_decoder_packet_header_t._anonymous_ = ['_0']
 union_rocprof_trace_decoder_packet_header_t._fields_ = [
-  ('_0', _anonstruct2),
+  ('_0', union_rocprof_trace_decoder_packet_header_t_0),
   ('u32All', ctypes.c_uint),
 ]
 rocprof_trace_decoder_packet_header_t = union_rocprof_trace_decoder_packet_header_t
@@ -122,16 +124,16 @@ ROCPROF_TRACE_DECODER_AGENT_INFO_TYPE_LAST = enum_rocprof_trace_decoder_agent_in
 
 rocprof_trace_decoder_agent_info_type_t = enum_rocprof_trace_decoder_agent_info_type_t
 class union_rocprof_trace_decoder_codeobj_marker_tail_t(ctypes.Union): pass
-class _anonstruct3(ctypes.Structure): pass
+class union_rocprof_trace_decoder_codeobj_marker_tail_t_0(Struct): pass
 uint32_t = ctypes.c_uint
-_anonstruct3._fields_ = [
+union_rocprof_trace_decoder_codeobj_marker_tail_t_0._fields_ = [
   ('isUnload', uint32_t,1),
   ('bFromStart', uint32_t,1),
   ('legacy_id', uint32_t,30),
 ]
 union_rocprof_trace_decoder_codeobj_marker_tail_t._anonymous_ = ['_0']
 union_rocprof_trace_decoder_codeobj_marker_tail_t._fields_ = [
-  ('_0', _anonstruct3),
+  ('_0', union_rocprof_trace_decoder_codeobj_marker_tail_t_0),
   ('raw', uint32_t),
 ]
 rocprof_trace_decoder_codeobj_marker_tail_t = union_rocprof_trace_decoder_codeobj_marker_tail_t
@@ -147,7 +149,7 @@ ROCPROF_TRACE_DECODER_CODEOBJ_MARKER_TYPE_LAST = enum_rocprof_trace_decoder_code
 
 rocprof_trace_decoder_codeobj_marker_type_t = enum_rocprof_trace_decoder_codeobj_marker_type_t
 rocprofiler_thread_trace_decoder_pc_t = struct_rocprofiler_thread_trace_decoder_pc_t
-class struct_rocprofiler_thread_trace_decoder_perfevent_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_perfevent_t(Struct): pass
 int64_t = ctypes.c_long
 uint16_t = ctypes.c_ushort
 uint8_t = ctypes.c_ubyte
@@ -161,7 +163,7 @@ struct_rocprofiler_thread_trace_decoder_perfevent_t._fields_ = [
   ('bank', uint8_t),
 ]
 rocprofiler_thread_trace_decoder_perfevent_t = struct_rocprofiler_thread_trace_decoder_perfevent_t
-class struct_rocprofiler_thread_trace_decoder_occupancy_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_occupancy_t(Struct): pass
 struct_rocprofiler_thread_trace_decoder_occupancy_t._fields_ = [
   ('pc', rocprofiler_thread_trace_decoder_pc_t),
   ('time', uint64_t),
@@ -182,7 +184,7 @@ ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_STALL = enum_rocprofiler_thread_trace_de
 ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST = enum_rocprofiler_thread_trace_decoder_wstate_type_t.define('ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST', 5)
 
 rocprofiler_thread_trace_decoder_wstate_type_t = enum_rocprofiler_thread_trace_decoder_wstate_type_t
-class struct_rocprofiler_thread_trace_decoder_wave_state_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_wave_state_t(Struct): pass
 int32_t = ctypes.c_int
 struct_rocprofiler_thread_trace_decoder_wave_state_t._fields_ = [
   ('type', int32_t),
@@ -206,7 +208,7 @@ ROCPROFILER_THREAD_TRACE_DECODER_INST_BVH = enum_rocprofiler_thread_trace_decode
 ROCPROFILER_THREAD_TRACE_DECODER_INST_LAST = enum_rocprofiler_thread_trace_decoder_inst_category_t.define('ROCPROFILER_THREAD_TRACE_DECODER_INST_LAST', 13)
 
 rocprofiler_thread_trace_decoder_inst_category_t = enum_rocprofiler_thread_trace_decoder_inst_category_t
-class struct_rocprofiler_thread_trace_decoder_inst_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_inst_t(Struct): pass
 struct_rocprofiler_thread_trace_decoder_inst_t._fields_ = [
   ('category', uint32_t,8),
   ('stall', uint32_t,24),
@@ -215,7 +217,7 @@ struct_rocprofiler_thread_trace_decoder_inst_t._fields_ = [
   ('pc', rocprofiler_thread_trace_decoder_pc_t),
 ]
 rocprofiler_thread_trace_decoder_inst_t = struct_rocprofiler_thread_trace_decoder_inst_t
-class struct_rocprofiler_thread_trace_decoder_wave_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_wave_t(Struct): pass
 struct_rocprofiler_thread_trace_decoder_wave_t._fields_ = [
   ('cu', uint8_t),
   ('simd', uint8_t),
@@ -232,7 +234,7 @@ struct_rocprofiler_thread_trace_decoder_wave_t._fields_ = [
   ('instructions_array', ctypes.POINTER(rocprofiler_thread_trace_decoder_inst_t)),
 ]
 rocprofiler_thread_trace_decoder_wave_t = struct_rocprofiler_thread_trace_decoder_wave_t
-class struct_rocprofiler_thread_trace_decoder_realtime_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_realtime_t(Struct): pass
 struct_rocprofiler_thread_trace_decoder_realtime_t._fields_ = [
   ('shader_clock', int64_t),
   ('realtime_clock', uint64_t),
@@ -244,7 +246,7 @@ ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_IMM = enum_rocprofiler_thread_
 ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_PRIV = enum_rocprofiler_thread_trace_decoder_shaderdata_flags_t.define('ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_PRIV', 1)
 
 rocprofiler_thread_trace_decoder_shaderdata_flags_t = enum_rocprofiler_thread_trace_decoder_shaderdata_flags_t
-class struct_rocprofiler_thread_trace_decoder_shaderdata_t(ctypes.Structure): pass
+class struct_rocprofiler_thread_trace_decoder_shaderdata_t(Struct): pass
 struct_rocprofiler_thread_trace_decoder_shaderdata_t._fields_ = [
   ('time', int64_t),
   ('value', uint64_t),
@@ -256,3 +258,4 @@ struct_rocprofiler_thread_trace_decoder_shaderdata_t._fields_ = [
 ]
 rocprofiler_thread_trace_decoder_shaderdata_t = struct_rocprofiler_thread_trace_decoder_shaderdata_t
 rocprofiler_thread_trace_decoder_record_type_t = enum_rocprofiler_thread_trace_decoder_record_type_t
+
