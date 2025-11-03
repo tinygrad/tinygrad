@@ -199,7 +199,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   rctx = decode(profile)
   steps = [{"name":x[0], "depth":0, "data":{"src":json.dumps({k:asdict(v) for k,v in x[1].items()}, indent=2), "lang":"txt", "device":"AMD"},
             "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
-  ctxs.append({"name":"Counters", "steps":steps})
+  if steps: ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
