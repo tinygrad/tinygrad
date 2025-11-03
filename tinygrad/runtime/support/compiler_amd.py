@@ -3,7 +3,7 @@ import tinygrad.runtime.autogen.comgr as comgr
 
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
-  assert comgr.AMD_COMGR_LANGUAGE_HIP == 3 if major.version >= 3 else 4
+  assert comgr.AMD_COMGR_LANGUAGE_HIP == 3 if major.value >= 3 else 4
 except AttributeError: assert comgr.AMD_COMGR_LANGUAGE_HIP == 3 # if rocm is not installed, use old values
 from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
