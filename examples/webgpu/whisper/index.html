@@ -164,6 +164,8 @@
         }
         const model_metadata = await fetch('./model_metadata.json', {cache: 'no-cache'}).then(x => x.json());
         setModelName(model_metadata.model_name);
+
+        await window.moduleReady;
         nets.model_metadata = model_metadata;
 
         let pendingText = null, lastDisplayed = '', lastUpdateTime = 0, inferenceDone = false;
