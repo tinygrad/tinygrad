@@ -82,7 +82,7 @@ def hand_spec_kernel3():
   c_regs = UOp.placeholder((ITERS_PER_WAVE_M, TM, ITERS_PER_WAVE_N, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
 
   i = UOp.range(c_regs.size, 16)
-  c_regs = c_regs.after(c_regs.flatten()[i].store(UOp.const(dtypes.float, 0.0)).end(i))
+  c_regs = c_regs.after(c_regs.flatten()[i].store(0.0).end(i))
 
   # pre-index the global tensors based on the global ranges
   c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[blockIdx_y, :, blockIdx_x, :]
