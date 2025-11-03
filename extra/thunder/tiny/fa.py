@@ -32,50 +32,46 @@ def zero(reg:UOp):
 LOAD_INNER = 1
 load_rid = 100
 def load(dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
-  assert len(idxs) == len(src.shape)
-
   global load_rid
 
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
-  laneid = threadIdx_x
-
-  src_last_i = idxs[-2] * src.shape[-1] + idxs[-1]
+  warpid = threadIdx_x // WARP_THREADS
+  laneid = threadIdx_x % WARP_THREADS
 
   # permute src so that axis and axis + 1 and last
   perm = list(range(len(src.shape)))
   src_axis = perm.pop(axis)
   src_axis1 = perm.pop(axis)
   perm += [src_axis, src_axis1]
-  src = src.permute(tuple(perm))
-  src = src.reshape(src.shape[:-2] + (prod(src.shape[-2:]),))
+  srcp = src.permute(tuple(perm))
+  srcp = srcp.reshape(srcp.shape[:-2] + (prod(srcp.shape[-2:]),))
 
   # flatten dst
-  dst = dst.reshape(dst.shape[:-2] + (prod(dst.shape[-2:]),))
+  dstf = dst.reshape(dst.shape[:-2] + (prod(dst.shape[-2:]),))
 
   load_i_outer = UOp.range(dst.size // (WARP_THREADS * LOAD_INNER), load_rid)
   load_i_inner = UOp.range(LOAD_INNER, load_rid+1, AxisType.UPCAST)
   load_rid += 2
 
-  dst_i = load_i_outer * (WARP_THREADS * LOAD_INNER) + laneid * LOAD_INNER + load_i_inner
-  src_last_i = src_last_i + dst_i
+  dst_i = warpid * (WARP_THREADS * LOAD_INNER) + laneid * LOAD_INNER + load_i_outer * (WARP_THREADS * LOAD_INNER) + load_i_inner
+  src_last_i = dst_i
+  if len(dst.shape) != len(src.shape):
+    src_last_i += idxs[-2] * src.shape[-1] + idxs[-1]
 
-  dst_store = dst[*dst_idxs, dst_i].store(src[*idxs[:-2], src_last_i]).end(load_i_outer, load_i_inner)
+  dst_store = dstf[*dst_idxs, dst_i].store(src[*idxs[:-2], src_last_i]).end(load_i_outer, load_i_inner)
 
   barrier = UOp.barrier(dst_store)
 
-  return dst.after(barrier)
+  return dst.after(barrier).reshape(dst.shape)
 
 STORE_INNER = 1
 store_rid = 200
-def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0):
-  assert len(idxs) == len(dst.shape)
-
+def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
   global store_rid
 
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
-  laneid = threadIdx_x
-
-  dst_last_i = idxs[-2] * dst.shape[-1] + idxs[-1]
+  warpid = threadIdx_x // WARP_THREADS
+  laneid = threadIdx_x % WARP_THREADS
 
   perm = list(range(len(dst.shape)))
   dst_axis = perm.pop(axis)
@@ -85,25 +81,27 @@ def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,.
   dstp = dstp.reshape(dstp.shape[:-2] + (prod(dstp.shape[-2:]),))
 
   # flatten src
-  src = src.reshape(src.shape[:-2] + (prod(src.shape[-2:]),))
+  srcf = src.reshape(src.shape[:-2] + (prod(src.shape[-2:]),))
 
   store_i_outer = UOp.range(dst.size // (WARP_THREADS * STORE_INNER), store_rid)
   store_i_inner = UOp.range(STORE_INNER, store_rid+1, AxisType.UPCAST)
   store_rid += 2
 
-  src_i = store_i_outer * (WARP_THREADS * LOAD_INNER) + laneid * LOAD_INNER + store_i_inner
-  dst_last_i = dst_last_i + src_i
+  src_i = warpid * (WARP_THREADS * LOAD_INNER) + laneid * LOAD_INNER + store_i_outer * (WARP_THREADS * LOAD_INNER) + store_i_inner
+  dst_last_i = src_i
+  if len(dst.shape) != len(src.shape):
+    dst_last_i += idxs[-2] * dst.shape[-1] + idxs[-1]
 
-  dst_store = dstp[*idxs[:-2], dst_last_i].store(src[*src_idxs, src_i]).end(store_i_outer, store_i_inner)
+  dst_store = dstp[*idxs[:-2], dst_last_i].store(srcf[*src_idxs, src_i]).end(store_i_outer, store_i_inner)
 
-  return dst_store
+  return dst.after(dst_store).reshape(dst.shape) if after else dst_store
 
 WARP_THREADS = 32
 
 NUM_WORKERS = 1
 PIPE_STAGES = 3
 
-B, N, H, D = 1, 32, 1, 64
+B, N, H, D = 1, 64, 1, 64
 
 ROWS = 16 * (128 // D)
 
@@ -129,7 +127,7 @@ def ker():
 
   k_smem = st((ROWS, D), dtypes.bfloat16)
   v_smem = st((ROWS, D), dtypes.bfloat16)
-  qo_smem = st((NUM_WORKERS, ROWS, D), dtypes.bfloat16)
+  qo_smem = st((ROWS, D), dtypes.bfloat16)
 
   q_reg = rt((ROWS, D), dtypes.bfloat16)
   k_reg = rt((ROWS, D), dtypes.bfloat16)
@@ -146,9 +144,13 @@ def ker():
 
   outer_kv_rng = UOp.range(N // ROWS, 0)
 
-  qo_smem = load(qo_smem, q, (workerid,), (batch, q_seq, head, 0), axis=1)
+  qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
 
-  o = store(o, qo_smem, (batch, q_seq, head, 0), (workerid,), axis=1)
+  q_reg = load(q_reg, qo_smem)
+
+  qo_smem = store(qo_smem, q_reg)
+
+  o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
 
   # q_reg = q_reg.set(qo_smem[workerid])
   #
@@ -167,14 +169,14 @@ if __name__ == "__main__":
     Tensor.realize(q, k, v, out)
 
   sink = ker()
-  ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (q, k, v, out)])
+  ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
 
   GlobalCounters.reset()
   times = []
-  with Context(DEBUG=2):
-    for _ in range(5):
-      et = ei.run(wait=True)
-      times.append(et)
+  for _ in range(5):
+    et = ei.run(wait=True)
+    print(ei.prg)
+    times.append(et)
   attn_flops = 2 * B * H * N * N * D + \
                4 * B * H * N * N + \
                2 * B * H * N * N * D
