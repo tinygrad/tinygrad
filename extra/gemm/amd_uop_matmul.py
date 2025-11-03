@@ -57,20 +57,6 @@ def copy(dest:UOp, src:UOp, rng:int, set=False, upcast=False):
 
 def hand_spec_kernel3():
   # ---------------------------
-  # per-thread read mapping
-  # ---------------------------
-  # A: read BK x BN tiles; B: read BN x BK tiles
-  tid = UOp.special(THREADS_PER_BLOCK, "lidx0")
-
-  waveIdx = (tid // WARP_SIZE) % WAVES_IN_BLOCK_X
-  waveIdy = (tid // WARP_SIZE) // WAVES_IN_BLOCK_X
-  assert waveIdy.vmax+1 == WAVES_IN_BLOCK_Y
-
-  idxInWave = (tid % WARP_SIZE) % LANES_PER_WAVE_X
-  idyInWave = (tid % WARP_SIZE) // LANES_PER_WAVE_X
-  assert idyInWave.vmax+1 == LANES_PER_WAVE_Y
-
-  # ---------------------------
   # block indices & placeholders
   # ---------------------------
   blockIdx_x = UOp.special(N // BLOCK_N, "gidx0")
@@ -80,33 +66,34 @@ def hand_spec_kernel3():
   b = UOp.placeholder((N, N), dtypes.float, slot=2)
   c = UOp.placeholder((N, N), dtypes.float, slot=0)
 
-  BM_As_stride = (BLOCK_M + 4) if is_kernel5 else BLOCK_M
-  As = UOp.placeholder((BLOCK_K, BM_As_stride), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL).shrink_to((BLOCK_K, BLOCK_M))
-  Bs = UOp.placeholder((BLOCK_K, BLOCK_N), dtypes.float, slot=1, addrspace=AddrSpace.LOCAL)
-
-  A_col = UOp.placeholder((ITERS_PER_WAVE_M, TM), dtypes.float, slot=0, addrspace=AddrSpace.REG)
-  B_row = UOp.placeholder((ITERS_PER_WAVE_N, TN), dtypes.float, slot=1, addrspace=AddrSpace.REG)
-  c_regs = UOp.placeholder((ITERS_PER_WAVE_M, TM, ITERS_PER_WAVE_N, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
-
-  i = UOp.range(c_regs.size, 16)
-  c_regs = c_regs.after(c_regs.flatten()[i].store(0.0).end(i))
-
-  # pre-index the global tensors based on the global ranges
+  # index the output with the globals
   c = c.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_N, BLOCK_N)[blockIdx_y, :, blockIdx_x, :]
+
+  # open the main reduction range
   k_tile_range = UOp.range(N // BLOCK_K, 0, AxisType.REDUCE)
   a = a.reshape(M // BLOCK_M, BLOCK_M, N // BLOCK_K, BLOCK_K)[blockIdx_y, :, k_tile_range, :]
   b = b.reshape(N // BLOCK_K, BLOCK_K, N // BLOCK_N, BLOCK_N)[k_tile_range, :, blockIdx_x, :]
 
+  # globals are no longer used, they are already in the indexes
+  del blockIdx_y, blockIdx_x
+
   # ---------------------------
   # GLOBAL -> LOCAL (As, Bs)
   # ---------------------------
-  Bs_store = copy(Bs.reshape(-1, THREADS_PER_BLOCK)[:, tid], b.reshape(-1, THREADS_PER_BLOCK)[:, tid], rng=100)
-  As_store = copy(As.permute((1,0)).reshape(-1, THREADS_PER_BLOCK)[:, tid], a.reshape(-1, THREADS_PER_BLOCK)[:, tid], rng=200)
+  tid = UOp.special(THREADS_PER_BLOCK, "lidx0")
+
+  # A: read BM x BK tiles (permute on store into locals)
+  BM_As_stride = (BLOCK_M + 4) if is_kernel5 else BLOCK_M
+  As = UOp.placeholder((BLOCK_K, BM_As_stride), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL).shrink_to((BLOCK_K, BLOCK_M))
+  As_store = copy(As.permute((1,0)).reshape(-1, THREADS_PER_BLOCK)[:, tid], a.reshape(-1, THREADS_PER_BLOCK)[:, tid], rng=100)
+
+  # B: read BK x BN tiles
+  Bs = UOp.placeholder((BLOCK_K, BLOCK_N), dtypes.float, slot=1, addrspace=AddrSpace.LOCAL)
+  Bs_store = copy(Bs.reshape(-1, THREADS_PER_BLOCK)[:, tid], b.reshape(-1, THREADS_PER_BLOCK)[:, tid], rng=200)
 
   # TODO: can we automate barrier?
   barrier = UOp.barrier(As_store, Bs_store)
-  Bs = Bs.after(barrier)
-  As = As.after(barrier)
+  As, Bs = As.after(barrier), Bs.after(barrier)
 
   # open inner k range
   k = UOp.range(BLOCK_K, 3, AxisType.REDUCE)
@@ -114,20 +101,33 @@ def hand_spec_kernel3():
   # ---------------------------
   # LOCAL -> REG (per-wave tiles)
   # ---------------------------
-  Bs_view = Bs.reshape(BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)[k, waveIdx, :, idxInWave, :]
-  B_row = copy(B_row, Bs_view, 300, set=True, upcast=True)
+  waveIdx = (tid // WARP_SIZE) % WAVES_IN_BLOCK_X
+  waveIdy = (tid // WARP_SIZE) // WAVES_IN_BLOCK_X
+  assert waveIdy.vmax+1 == WAVES_IN_BLOCK_Y
+
+  idxInWave = (tid % WARP_SIZE) % LANES_PER_WAVE_X
+  idyInWave = (tid % WARP_SIZE) // LANES_PER_WAVE_X
+  assert idyInWave.vmax+1 == LANES_PER_WAVE_Y
 
   As_view = As.reshape(BLOCK_K, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM)[k, waveIdy, :, idyInWave, :]
-  A_col = copy(A_col, As_view, 400, set=True, upcast=True)
+  A_col = UOp.placeholder((ITERS_PER_WAVE_M, TM), dtypes.float, slot=0, addrspace=AddrSpace.REG)
+  A_col = copy(A_col, As_view, 300, set=True, upcast=True)
+
+  Bs_view = Bs.reshape(BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)[k, waveIdx, :, idxInWave, :]
+  B_row = UOp.placeholder((ITERS_PER_WAVE_N, TN), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+  B_row = copy(B_row, Bs_view, 400, set=True, upcast=True)
 
   # ---------------------------
   # FMA: c_regs += A_col * B_row
   # ---------------------------
+  c_regs = UOp.placeholder((ITERS_PER_WAVE_M, TM, ITERS_PER_WAVE_N, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
+  i = UOp.range(c_regs.size, 16)
+  c_regs = c_regs.after(c_regs.flatten()[i].store(0.0).end(i))
+
   # TODO: why don't these work as upcast?
+  # why if the ranges merge is it slow?!? (if you change the order on end, they will merge. big slowdown on METAL)
   iterWaveM, yt, iterWaveN, xt = rngs = rngs_for_shape(c_regs.shape, 500)
-  c_idx = c_regs.after(k, k_tile_range)[*rngs]
-  # why if the ranges merge is it slow?!?
-  sink = c_idx.store(c_idx + A_col[iterWaveM, yt] * B_row[iterWaveN, xt]).end(iterWaveM, iterWaveN, yt, xt)
+  sink = c_regs[*rngs].store(c_regs.after(k)[*rngs] + A_col[iterWaveM, yt] * B_row[iterWaveN, xt]).end(iterWaveM, iterWaveN, yt, xt)
 
   # Close k, sync, and close K tiles
   sink = sink.end(k).barrier().end(k_tile_range)
