@@ -1,12 +1,14 @@
 # mypy: ignore-errors
 import ctypes, os
 from ctypes.util import find_library
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+
 def dll():
-  try: return ctypes.CDLL(os.getenv('LIBUSB_PATH', find_library('usb-1.0')))
+  try: return ctypes.CDLL(unwrap(os.getenv('LIBUSB_PATH', find_library('usb-1.0'))))
   except: pass
   return None
 dll = dll()
+
 class _anonunion0(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte
 uint16_t = ctypes.c_ushort
@@ -119,7 +121,7 @@ LIBUSB_BT_SS_USB_DEVICE_CAPABILITY = enum_libusb_bos_type.define('LIBUSB_BT_SS_U
 LIBUSB_BT_CONTAINER_ID = enum_libusb_bos_type.define('LIBUSB_BT_CONTAINER_ID', 4)
 LIBUSB_BT_PLATFORM_DESCRIPTOR = enum_libusb_bos_type.define('LIBUSB_BT_PLATFORM_DESCRIPTOR', 5)
 
-class struct_libusb_device_descriptor(ctypes.Structure): pass
+class struct_libusb_device_descriptor(Struct): pass
 struct_libusb_device_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -136,7 +138,7 @@ struct_libusb_device_descriptor._fields_ = [
   ('iSerialNumber', uint8_t),
   ('bNumConfigurations', uint8_t),
 ]
-class struct_libusb_endpoint_descriptor(ctypes.Structure): pass
+class struct_libusb_endpoint_descriptor(Struct): pass
 struct_libusb_endpoint_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -149,7 +151,7 @@ struct_libusb_endpoint_descriptor._fields_ = [
   ('extra', ctypes.POINTER(ctypes.c_ubyte)),
   ('extra_length', ctypes.c_int),
 ]
-class struct_libusb_interface_association_descriptor(ctypes.Structure): pass
+class struct_libusb_interface_association_descriptor(Struct): pass
 struct_libusb_interface_association_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -160,12 +162,12 @@ struct_libusb_interface_association_descriptor._fields_ = [
   ('bFunctionProtocol', uint8_t),
   ('iFunction', uint8_t),
 ]
-class struct_libusb_interface_association_descriptor_array(ctypes.Structure): pass
+class struct_libusb_interface_association_descriptor_array(Struct): pass
 struct_libusb_interface_association_descriptor_array._fields_ = [
   ('iad', ctypes.POINTER(struct_libusb_interface_association_descriptor)),
   ('length', ctypes.c_int),
 ]
-class struct_libusb_interface_descriptor(ctypes.Structure): pass
+class struct_libusb_interface_descriptor(Struct): pass
 struct_libusb_interface_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -180,12 +182,12 @@ struct_libusb_interface_descriptor._fields_ = [
   ('extra', ctypes.POINTER(ctypes.c_ubyte)),
   ('extra_length', ctypes.c_int),
 ]
-class struct_libusb_interface(ctypes.Structure): pass
+class struct_libusb_interface(Struct): pass
 struct_libusb_interface._fields_ = [
   ('altsetting', ctypes.POINTER(struct_libusb_interface_descriptor)),
   ('num_altsetting', ctypes.c_int),
 ]
-class struct_libusb_config_descriptor(ctypes.Structure): pass
+class struct_libusb_config_descriptor(Struct): pass
 struct_libusb_config_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -199,7 +201,7 @@ struct_libusb_config_descriptor._fields_ = [
   ('extra', ctypes.POINTER(ctypes.c_ubyte)),
   ('extra_length', ctypes.c_int),
 ]
-class struct_libusb_ss_endpoint_companion_descriptor(ctypes.Structure): pass
+class struct_libusb_ss_endpoint_companion_descriptor(Struct): pass
 struct_libusb_ss_endpoint_companion_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -207,14 +209,14 @@ struct_libusb_ss_endpoint_companion_descriptor._fields_ = [
   ('bmAttributes', uint8_t),
   ('wBytesPerInterval', uint16_t),
 ]
-class struct_libusb_bos_dev_capability_descriptor(ctypes.Structure): pass
+class struct_libusb_bos_dev_capability_descriptor(Struct): pass
 struct_libusb_bos_dev_capability_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
   ('bDevCapabilityType', uint8_t),
   ('dev_capability_data', (uint8_t * 0)),
 ]
-class struct_libusb_bos_descriptor(ctypes.Structure): pass
+class struct_libusb_bos_descriptor(Struct): pass
 struct_libusb_bos_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -222,7 +224,7 @@ struct_libusb_bos_descriptor._fields_ = [
   ('bNumDeviceCaps', uint8_t),
   ('dev_capability', (ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor) * 0)),
 ]
-class struct_libusb_usb_2_0_extension_descriptor(ctypes.Structure): pass
+class struct_libusb_usb_2_0_extension_descriptor(Struct): pass
 uint32_t = ctypes.c_uint
 struct_libusb_usb_2_0_extension_descriptor._fields_ = [
   ('bLength', uint8_t),
@@ -230,7 +232,7 @@ struct_libusb_usb_2_0_extension_descriptor._fields_ = [
   ('bDevCapabilityType', uint8_t),
   ('bmAttributes', uint32_t),
 ]
-class struct_libusb_ss_usb_device_capability_descriptor(ctypes.Structure): pass
+class struct_libusb_ss_usb_device_capability_descriptor(Struct): pass
 struct_libusb_ss_usb_device_capability_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -241,7 +243,7 @@ struct_libusb_ss_usb_device_capability_descriptor._fields_ = [
   ('bU1DevExitLat', uint8_t),
   ('bU2DevExitLat', uint16_t),
 ]
-class struct_libusb_container_id_descriptor(ctypes.Structure): pass
+class struct_libusb_container_id_descriptor(Struct): pass
 struct_libusb_container_id_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -249,7 +251,7 @@ struct_libusb_container_id_descriptor._fields_ = [
   ('bReserved', uint8_t),
   ('ContainerID', (uint8_t * 16)),
 ]
-class struct_libusb_platform_descriptor(ctypes.Structure): pass
+class struct_libusb_platform_descriptor(Struct): pass
 struct_libusb_platform_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -258,7 +260,8 @@ struct_libusb_platform_descriptor._fields_ = [
   ('PlatformCapabilityUUID', (uint8_t * 16)),
   ('CapabilityData', (uint8_t * 0)),
 ]
-class struct_libusb_control_setup(ctypes.Structure): pass
+class struct_libusb_control_setup(Struct): pass
+struct_libusb_control_setup._packed_ = True
 struct_libusb_control_setup._fields_ = [
   ('bmRequestType', uint8_t),
   ('bRequest', uint8_t),
@@ -266,13 +269,10 @@ struct_libusb_control_setup._fields_ = [
   ('wIndex', uint16_t),
   ('wLength', uint16_t),
 ]
-class struct_libusb_context(ctypes.Structure): pass
-struct_libusb_context._fields_ = []
-class struct_libusb_device(ctypes.Structure): pass
-struct_libusb_device._fields_ = []
-class struct_libusb_device_handle(ctypes.Structure): pass
-struct_libusb_device_handle._fields_ = []
-class struct_libusb_version(ctypes.Structure): pass
+class struct_libusb_context(Struct): pass
+class struct_libusb_device(Struct): pass
+class struct_libusb_device_handle(Struct): pass
+class struct_libusb_version(Struct): pass
 struct_libusb_version._fields_ = [
   ('major', uint16_t),
   ('minor', uint16_t),
@@ -330,13 +330,13 @@ LIBUSB_TRANSFER_FREE_BUFFER = enum_libusb_transfer_flags.define('LIBUSB_TRANSFER
 LIBUSB_TRANSFER_FREE_TRANSFER = enum_libusb_transfer_flags.define('LIBUSB_TRANSFER_FREE_TRANSFER', 4)
 LIBUSB_TRANSFER_ADD_ZERO_PACKET = enum_libusb_transfer_flags.define('LIBUSB_TRANSFER_ADD_ZERO_PACKET', 8)
 
-class struct_libusb_iso_packet_descriptor(ctypes.Structure): pass
+class struct_libusb_iso_packet_descriptor(Struct): pass
 struct_libusb_iso_packet_descriptor._fields_ = [
   ('length', ctypes.c_uint),
   ('actual_length', ctypes.c_uint),
   ('status', enum_libusb_transfer_status),
 ]
-class struct_libusb_transfer(ctypes.Structure): pass
+class struct_libusb_transfer(Struct): pass
 libusb_transfer_cb_fn = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_transfer))
 struct_libusb_transfer._fields_ = [
   ('dev_handle', ctypes.POINTER(libusb_device_handle)),
@@ -378,7 +378,7 @@ LIBUSB_OPTION_LOG_CB = enum_libusb_option.define('LIBUSB_OPTION_LOG_CB', 3)
 LIBUSB_OPTION_MAX = enum_libusb_option.define('LIBUSB_OPTION_MAX', 4)
 
 libusb_log_cb = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_context), enum_libusb_log_level, ctypes.POINTER(ctypes.c_char))
-class struct_libusb_init_option(ctypes.Structure): pass
+class struct_libusb_init_option(Struct): pass
 class struct_libusb_init_option_value(ctypes.Union): pass
 struct_libusb_init_option_value._fields_ = [
   ('ival', ctypes.c_int),
@@ -719,7 +719,7 @@ except AttributeError: pass
 try: (libusb_unlock_event_waiters:=dll.libusb_unlock_event_waiters).restype, libusb_unlock_event_waiters.argtypes = None, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-class struct_timeval(ctypes.Structure): pass
+class struct_timeval(Struct): pass
 __time_t = ctypes.c_long
 __suseconds_t = ctypes.c_long
 struct_timeval._fields_ = [
@@ -758,7 +758,7 @@ except AttributeError: pass
 try: (libusb_get_next_timeout:=dll.libusb_get_next_timeout).restype, libusb_get_next_timeout.argtypes = ctypes.c_int, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
-class struct_libusb_pollfd(ctypes.Structure): pass
+class struct_libusb_pollfd(Struct): pass
 struct_libusb_pollfd._fields_ = [
   ('fd', ctypes.c_int),
   ('events', ctypes.c_short),

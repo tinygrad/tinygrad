@@ -83,8 +83,6 @@ hipErrorStreamCaptureImplicit = hipError_t.define('hipErrorStreamCaptureImplicit
 hipErrorCapturedEvent = hipError_t.define('hipErrorCapturedEvent', 907)
 hipErrorStreamCaptureWrongThread = hipError_t.define('hipErrorStreamCaptureWrongThread', 908)
 hipErrorGraphExecUpdateFailure = hipError_t.define('hipErrorGraphExecUpdateFailure', 910)
-hipErrorInvalidChannelDescriptor = hipError_t.define('hipErrorInvalidChannelDescriptor', 911)
-hipErrorInvalidTexture = hipError_t.define('hipErrorInvalidTexture', 912)
 hipErrorUnknown = hipError_t.define('hipErrorUnknown', 999)
 hipErrorRuntimeMemory = hipError_t.define('hipErrorRuntimeMemory', 1052)
 hipErrorRuntimeOther = hipError_t.define('hipErrorRuntimeOther', 1053)
@@ -130,6 +128,49 @@ HIPRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION = hiprtcResult.define('HIPRTC_E
 HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID = hiprtcResult.define('HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID', 10)
 HIPRTC_ERROR_INTERNAL_ERROR = hiprtcResult.define('HIPRTC_ERROR_INTERNAL_ERROR', 11)
 HIPRTC_ERROR_LINKING = hiprtcResult.define('HIPRTC_ERROR_LINKING', 100)
+
+hiprtcJIT_option = CEnum(ctypes.c_uint)
+HIPRTC_JIT_MAX_REGISTERS = hiprtcJIT_option.define('HIPRTC_JIT_MAX_REGISTERS', 0)
+HIPRTC_JIT_THREADS_PER_BLOCK = hiprtcJIT_option.define('HIPRTC_JIT_THREADS_PER_BLOCK', 1)
+HIPRTC_JIT_WALL_TIME = hiprtcJIT_option.define('HIPRTC_JIT_WALL_TIME', 2)
+HIPRTC_JIT_INFO_LOG_BUFFER = hiprtcJIT_option.define('HIPRTC_JIT_INFO_LOG_BUFFER', 3)
+HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES = hiprtcJIT_option.define('HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES', 4)
+HIPRTC_JIT_ERROR_LOG_BUFFER = hiprtcJIT_option.define('HIPRTC_JIT_ERROR_LOG_BUFFER', 5)
+HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = hiprtcJIT_option.define('HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES', 6)
+HIPRTC_JIT_OPTIMIZATION_LEVEL = hiprtcJIT_option.define('HIPRTC_JIT_OPTIMIZATION_LEVEL', 7)
+HIPRTC_JIT_TARGET_FROM_HIPCONTEXT = hiprtcJIT_option.define('HIPRTC_JIT_TARGET_FROM_HIPCONTEXT', 8)
+HIPRTC_JIT_TARGET = hiprtcJIT_option.define('HIPRTC_JIT_TARGET', 9)
+HIPRTC_JIT_FALLBACK_STRATEGY = hiprtcJIT_option.define('HIPRTC_JIT_FALLBACK_STRATEGY', 10)
+HIPRTC_JIT_GENERATE_DEBUG_INFO = hiprtcJIT_option.define('HIPRTC_JIT_GENERATE_DEBUG_INFO', 11)
+HIPRTC_JIT_LOG_VERBOSE = hiprtcJIT_option.define('HIPRTC_JIT_LOG_VERBOSE', 12)
+HIPRTC_JIT_GENERATE_LINE_INFO = hiprtcJIT_option.define('HIPRTC_JIT_GENERATE_LINE_INFO', 13)
+HIPRTC_JIT_CACHE_MODE = hiprtcJIT_option.define('HIPRTC_JIT_CACHE_MODE', 14)
+HIPRTC_JIT_NEW_SM3X_OPT = hiprtcJIT_option.define('HIPRTC_JIT_NEW_SM3X_OPT', 15)
+HIPRTC_JIT_FAST_COMPILE = hiprtcJIT_option.define('HIPRTC_JIT_FAST_COMPILE', 16)
+HIPRTC_JIT_GLOBAL_SYMBOL_NAMES = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_NAMES', 17)
+HIPRTC_JIT_GLOBAL_SYMBOL_ADDRESS = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_ADDRESS', 18)
+HIPRTC_JIT_GLOBAL_SYMBOL_COUNT = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_COUNT', 19)
+HIPRTC_JIT_LTO = hiprtcJIT_option.define('HIPRTC_JIT_LTO', 20)
+HIPRTC_JIT_FTZ = hiprtcJIT_option.define('HIPRTC_JIT_FTZ', 21)
+HIPRTC_JIT_PREC_DIV = hiprtcJIT_option.define('HIPRTC_JIT_PREC_DIV', 22)
+HIPRTC_JIT_PREC_SQRT = hiprtcJIT_option.define('HIPRTC_JIT_PREC_SQRT', 23)
+HIPRTC_JIT_FMA = hiprtcJIT_option.define('HIPRTC_JIT_FMA', 24)
+HIPRTC_JIT_NUM_OPTIONS = hiprtcJIT_option.define('HIPRTC_JIT_NUM_OPTIONS', 25)
+HIPRTC_JIT_IR_TO_ISA_OPT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_EXT', 10000)
+HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT', 10001)
+
+hiprtcJITInputType = CEnum(ctypes.c_uint)
+HIPRTC_JIT_INPUT_CUBIN = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_CUBIN', 0)
+HIPRTC_JIT_INPUT_PTX = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_PTX', 1)
+HIPRTC_JIT_INPUT_FATBINARY = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_FATBINARY', 2)
+HIPRTC_JIT_INPUT_OBJECT = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_OBJECT', 3)
+HIPRTC_JIT_INPUT_LIBRARY = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LIBRARY', 4)
+HIPRTC_JIT_INPUT_NVVM = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_NVVM', 5)
+HIPRTC_JIT_NUM_LEGACY_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_LEGACY_INPUT_TYPES', 6)
+HIPRTC_JIT_INPUT_LLVM_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_BITCODE', 100)
+HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE', 101)
+HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE', 102)
+HIPRTC_JIT_NUM_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_INPUT_TYPES', 9)
 
 class ihiprtcLinkState(Struct): pass
 hiprtcLinkState = ctypes.POINTER(ihiprtcLinkState)
@@ -187,64 +228,16 @@ except AttributeError: pass
 try: (hiprtcGetBitcodeSize:=dll.hiprtcGetBitcodeSize).restype, hiprtcGetBitcodeSize.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-hipJitOption = CEnum(ctypes.c_uint)
-hipJitOptionMaxRegisters = hipJitOption.define('hipJitOptionMaxRegisters', 0)
-hipJitOptionThreadsPerBlock = hipJitOption.define('hipJitOptionThreadsPerBlock', 1)
-hipJitOptionWallTime = hipJitOption.define('hipJitOptionWallTime', 2)
-hipJitOptionInfoLogBuffer = hipJitOption.define('hipJitOptionInfoLogBuffer', 3)
-hipJitOptionInfoLogBufferSizeBytes = hipJitOption.define('hipJitOptionInfoLogBufferSizeBytes', 4)
-hipJitOptionErrorLogBuffer = hipJitOption.define('hipJitOptionErrorLogBuffer', 5)
-hipJitOptionErrorLogBufferSizeBytes = hipJitOption.define('hipJitOptionErrorLogBufferSizeBytes', 6)
-hipJitOptionOptimizationLevel = hipJitOption.define('hipJitOptionOptimizationLevel', 7)
-hipJitOptionTargetFromContext = hipJitOption.define('hipJitOptionTargetFromContext', 8)
-hipJitOptionTarget = hipJitOption.define('hipJitOptionTarget', 9)
-hipJitOptionFallbackStrategy = hipJitOption.define('hipJitOptionFallbackStrategy', 10)
-hipJitOptionGenerateDebugInfo = hipJitOption.define('hipJitOptionGenerateDebugInfo', 11)
-hipJitOptionLogVerbose = hipJitOption.define('hipJitOptionLogVerbose', 12)
-hipJitOptionGenerateLineInfo = hipJitOption.define('hipJitOptionGenerateLineInfo', 13)
-hipJitOptionCacheMode = hipJitOption.define('hipJitOptionCacheMode', 14)
-hipJitOptionSm3xOpt = hipJitOption.define('hipJitOptionSm3xOpt', 15)
-hipJitOptionFastCompile = hipJitOption.define('hipJitOptionFastCompile', 16)
-hipJitOptionGlobalSymbolNames = hipJitOption.define('hipJitOptionGlobalSymbolNames', 17)
-hipJitOptionGlobalSymbolAddresses = hipJitOption.define('hipJitOptionGlobalSymbolAddresses', 18)
-hipJitOptionGlobalSymbolCount = hipJitOption.define('hipJitOptionGlobalSymbolCount', 19)
-hipJitOptionLto = hipJitOption.define('hipJitOptionLto', 20)
-hipJitOptionFtz = hipJitOption.define('hipJitOptionFtz', 21)
-hipJitOptionPrecDiv = hipJitOption.define('hipJitOptionPrecDiv', 22)
-hipJitOptionPrecSqrt = hipJitOption.define('hipJitOptionPrecSqrt', 23)
-hipJitOptionFma = hipJitOption.define('hipJitOptionFma', 24)
-hipJitOptionPositionIndependentCode = hipJitOption.define('hipJitOptionPositionIndependentCode', 25)
-hipJitOptionMinCTAPerSM = hipJitOption.define('hipJitOptionMinCTAPerSM', 26)
-hipJitOptionMaxThreadsPerBlock = hipJitOption.define('hipJitOptionMaxThreadsPerBlock', 27)
-hipJitOptionOverrideDirectiveValues = hipJitOption.define('hipJitOptionOverrideDirectiveValues', 28)
-hipJitOptionNumOptions = hipJitOption.define('hipJitOptionNumOptions', 29)
-hipJitOptionIRtoISAOptExt = hipJitOption.define('hipJitOptionIRtoISAOptExt', 10000)
-hipJitOptionIRtoISAOptCountExt = hipJitOption.define('hipJitOptionIRtoISAOptCountExt', 10001)
-
-# hiprtcResult hiprtcLinkCreate(unsigned int num_options, hipJitOption *option_ptr, void **option_vals_pptr, hiprtcLinkState *hip_link_state_ptr)
-try: (hiprtcLinkCreate:=dll.hiprtcLinkCreate).restype, hiprtcLinkCreate.argtypes = hiprtcResult, [ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(hiprtcLinkState)]
+# hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option *option_ptr, void **option_vals_pptr, hiprtcLinkState *hip_link_state_ptr)
+try: (hiprtcLinkCreate:=dll.hiprtcLinkCreate).restype, hiprtcLinkCreate.argtypes = hiprtcResult, [ctypes.c_uint, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(hiprtcLinkState)]
 except AttributeError: pass
 
-hipJitInputType = CEnum(ctypes.c_uint)
-hipJitInputCubin = hipJitInputType.define('hipJitInputCubin', 0)
-hipJitInputPtx = hipJitInputType.define('hipJitInputPtx', 1)
-hipJitInputFatBinary = hipJitInputType.define('hipJitInputFatBinary', 2)
-hipJitInputObject = hipJitInputType.define('hipJitInputObject', 3)
-hipJitInputLibrary = hipJitInputType.define('hipJitInputLibrary', 4)
-hipJitInputNvvm = hipJitInputType.define('hipJitInputNvvm', 5)
-hipJitNumLegacyInputTypes = hipJitInputType.define('hipJitNumLegacyInputTypes', 6)
-hipJitInputLLVMBitcode = hipJitInputType.define('hipJitInputLLVMBitcode', 100)
-hipJitInputLLVMBundledBitcode = hipJitInputType.define('hipJitInputLLVMBundledBitcode', 101)
-hipJitInputLLVMArchivesOfBundledBitcode = hipJitInputType.define('hipJitInputLLVMArchivesOfBundledBitcode', 102)
-hipJitInputSpirv = hipJitInputType.define('hipJitInputSpirv', 103)
-hipJitNumInputTypes = hipJitInputType.define('hipJitNumInputTypes', 10)
-
-# hiprtcResult hiprtcLinkAddFile(hiprtcLinkState hip_link_state, hipJitInputType input_type, const char *file_path, unsigned int num_options, hipJitOption *options_ptr, void **option_values)
-try: (hiprtcLinkAddFile:=dll.hiprtcLinkAddFile).restype, hiprtcLinkAddFile.argtypes = hiprtcResult, [hiprtcLinkState, hipJitInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
+# hiprtcResult hiprtcLinkAddFile(hiprtcLinkState hip_link_state, hiprtcJITInputType input_type, const char *file_path, unsigned int num_options, hiprtcJIT_option *options_ptr, void **option_values)
+try: (hiprtcLinkAddFile:=dll.hiprtcLinkAddFile).restype, hiprtcLinkAddFile.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hipJitInputType input_type, void *image, size_t image_size, const char *name, unsigned int num_options, hipJitOption *options_ptr, void **option_values)
-try: (hiprtcLinkAddData:=dll.hiprtcLinkAddData).restype, hiprtcLinkAddData.argtypes = hiprtcResult, [hiprtcLinkState, hipJitInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
+# hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputType input_type, void *image, size_t image_size, const char *name, unsigned int num_options, hiprtcJIT_option *options_ptr, void **option_values)
+try: (hiprtcLinkAddData:=dll.hiprtcLinkAddData).restype, hiprtcLinkAddData.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hiprtcResult hiprtcLinkComplete(hiprtcLinkState hip_link_state, void **bin_out, size_t *size_out)
@@ -575,8 +568,6 @@ hipIpcEventHandle_st._fields_ = [
 hipIpcEventHandle_t = hipIpcEventHandle_st
 class ihipModule_t(Struct): pass
 hipModule_t = ctypes.POINTER(ihipModule_t)
-class ihipLinkState_t(Struct): pass
-hipLinkState_t = ctypes.POINTER(ihipLinkState_t)
 class ihipMemPoolHandle_t(Struct): pass
 hipMemPool_t = ctypes.POINTER(ihipMemPoolHandle_t)
 class hipFuncAttributes(Struct): pass
@@ -598,71 +589,6 @@ hipLimitPrintfFifoSize = hipLimit_t.define('hipLimitPrintfFifoSize', 1)
 hipLimitMallocHeapSize = hipLimit_t.define('hipLimitMallocHeapSize', 2)
 hipLimitRange = hipLimit_t.define('hipLimitRange', 3)
 
-hipStreamBatchMemOpType = CEnum(ctypes.c_uint)
-hipStreamMemOpWaitValue32 = hipStreamBatchMemOpType.define('hipStreamMemOpWaitValue32', 1)
-hipStreamMemOpWriteValue32 = hipStreamBatchMemOpType.define('hipStreamMemOpWriteValue32', 2)
-hipStreamMemOpWaitValue64 = hipStreamBatchMemOpType.define('hipStreamMemOpWaitValue64', 4)
-hipStreamMemOpWriteValue64 = hipStreamBatchMemOpType.define('hipStreamMemOpWriteValue64', 5)
-hipStreamMemOpBarrier = hipStreamBatchMemOpType.define('hipStreamMemOpBarrier', 6)
-hipStreamMemOpFlushRemoteWrites = hipStreamBatchMemOpType.define('hipStreamMemOpFlushRemoteWrites', 3)
-
-class hipStreamBatchMemOpParams_union(ctypes.Union): pass
-class hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t(Struct): pass
-hipDeviceptr_t = ctypes.c_void_p
-class hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t_0(ctypes.Union): pass
-uint64_t = ctypes.c_ulong
-hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t_0._fields_ = [
-  ('value', uint32_t),
-  ('value64', uint64_t),
-]
-hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t._anonymous_ = ['_0']
-hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t._fields_ = [
-  ('operation', hipStreamBatchMemOpType),
-  ('address', hipDeviceptr_t),
-  ('_0', hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t_0),
-  ('flags', ctypes.c_uint),
-  ('alias', hipDeviceptr_t),
-]
-class hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t(Struct): pass
-class hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t_0(ctypes.Union): pass
-hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t_0._fields_ = [
-  ('value', uint32_t),
-  ('value64', uint64_t),
-]
-hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t._anonymous_ = ['_0']
-hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t._fields_ = [
-  ('operation', hipStreamBatchMemOpType),
-  ('address', hipDeviceptr_t),
-  ('_0', hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t_0),
-  ('flags', ctypes.c_uint),
-  ('alias', hipDeviceptr_t),
-]
-class hipStreamBatchMemOpParams_union_hipStreamMemOpFlushRemoteWritesParams_t(Struct): pass
-hipStreamBatchMemOpParams_union_hipStreamMemOpFlushRemoteWritesParams_t._fields_ = [
-  ('operation', hipStreamBatchMemOpType),
-  ('flags', ctypes.c_uint),
-]
-class hipStreamBatchMemOpParams_union_hipStreamMemOpMemoryBarrierParams_t(Struct): pass
-hipStreamBatchMemOpParams_union_hipStreamMemOpMemoryBarrierParams_t._fields_ = [
-  ('operation', hipStreamBatchMemOpType),
-  ('flags', ctypes.c_uint),
-]
-hipStreamBatchMemOpParams_union._fields_ = [
-  ('operation', hipStreamBatchMemOpType),
-  ('waitValue', hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t),
-  ('writeValue', hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t),
-  ('flushRemoteWrites', hipStreamBatchMemOpParams_union_hipStreamMemOpFlushRemoteWritesParams_t),
-  ('memoryBarrier', hipStreamBatchMemOpParams_union_hipStreamMemOpMemoryBarrierParams_t),
-  ('pad', (uint64_t * 6)),
-]
-hipStreamBatchMemOpParams = hipStreamBatchMemOpParams_union
-class hipBatchMemOpNodeParams(Struct): pass
-hipBatchMemOpNodeParams._fields_ = [
-  ('ctx', hipCtx_t),
-  ('count', ctypes.c_uint),
-  ('paramArray', ctypes.POINTER(hipStreamBatchMemOpParams)),
-  ('flags', ctypes.c_uint),
-]
 hipMemoryAdvise = CEnum(ctypes.c_uint)
 hipMemAdviseSetReadMostly = hipMemoryAdvise.define('hipMemAdviseSetReadMostly', 1)
 hipMemAdviseUnsetReadMostly = hipMemoryAdvise.define('hipMemAdviseUnsetReadMostly', 2)
@@ -738,6 +664,26 @@ class hipMemPoolPtrExportData(Struct): pass
 hipMemPoolPtrExportData._fields_ = [
   ('reserved', (ctypes.c_ubyte * 64)),
 ]
+hipJitOption = CEnum(ctypes.c_uint)
+hipJitOptionMaxRegisters = hipJitOption.define('hipJitOptionMaxRegisters', 0)
+hipJitOptionThreadsPerBlock = hipJitOption.define('hipJitOptionThreadsPerBlock', 1)
+hipJitOptionWallTime = hipJitOption.define('hipJitOptionWallTime', 2)
+hipJitOptionInfoLogBuffer = hipJitOption.define('hipJitOptionInfoLogBuffer', 3)
+hipJitOptionInfoLogBufferSizeBytes = hipJitOption.define('hipJitOptionInfoLogBufferSizeBytes', 4)
+hipJitOptionErrorLogBuffer = hipJitOption.define('hipJitOptionErrorLogBuffer', 5)
+hipJitOptionErrorLogBufferSizeBytes = hipJitOption.define('hipJitOptionErrorLogBufferSizeBytes', 6)
+hipJitOptionOptimizationLevel = hipJitOption.define('hipJitOptionOptimizationLevel', 7)
+hipJitOptionTargetFromContext = hipJitOption.define('hipJitOptionTargetFromContext', 8)
+hipJitOptionTarget = hipJitOption.define('hipJitOptionTarget', 9)
+hipJitOptionFallbackStrategy = hipJitOption.define('hipJitOptionFallbackStrategy', 10)
+hipJitOptionGenerateDebugInfo = hipJitOption.define('hipJitOptionGenerateDebugInfo', 11)
+hipJitOptionLogVerbose = hipJitOption.define('hipJitOptionLogVerbose', 12)
+hipJitOptionGenerateLineInfo = hipJitOption.define('hipJitOptionGenerateLineInfo', 13)
+hipJitOptionCacheMode = hipJitOption.define('hipJitOptionCacheMode', 14)
+hipJitOptionSm3xOpt = hipJitOption.define('hipJitOptionSm3xOpt', 15)
+hipJitOptionFastCompile = hipJitOption.define('hipJitOptionFastCompile', 16)
+hipJitOptionNumOptions = hipJitOption.define('hipJitOptionNumOptions', 17)
+
 hipFuncAttribute = CEnum(ctypes.c_uint)
 hipFuncAttributeMaxDynamicSharedMemorySize = hipFuncAttribute.define('hipFuncAttributeMaxDynamicSharedMemorySize', 8)
 hipFuncAttributePreferredSharedMemoryCarveout = hipFuncAttribute.define('hipFuncAttributePreferredSharedMemoryCarveout', 9)
@@ -972,8 +918,7 @@ hipGraphNodeTypeMemAlloc = hipGraphNodeType.define('hipGraphNodeTypeMemAlloc', 1
 hipGraphNodeTypeMemFree = hipGraphNodeType.define('hipGraphNodeTypeMemFree', 11)
 hipGraphNodeTypeMemcpyFromSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyFromSymbol', 12)
 hipGraphNodeTypeMemcpyToSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyToSymbol', 13)
-hipGraphNodeTypeBatchMemOp = hipGraphNodeType.define('hipGraphNodeTypeBatchMemOp', 14)
-hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 15)
+hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 14)
 
 hipHostFn_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 class hipHostNodeParams(Struct): pass
@@ -1032,6 +977,7 @@ hipLaunchAttributeValue._fields_ = [
   ('priority', ctypes.c_int),
 ]
 class HIP_MEMSET_NODE_PARAMS(Struct): pass
+hipDeviceptr_t = ctypes.c_void_p
 HIP_MEMSET_NODE_PARAMS._fields_ = [
   ('dst', hipDeviceptr_t),
   ('pitch', size_t),
@@ -1404,10 +1350,6 @@ except AttributeError: pass
 try: (hipGetDevicePropertiesR0600:=dll.hipGetDevicePropertiesR0600).restype, hipGetDevicePropertiesR0600.argtypes = hipError_t, [ctypes.POINTER(hipDeviceProp_tR0600), ctypes.c_int]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetTexture1DLinearMaxWidth(hipMemPool_t *mem_pool, int device)
-try: (hipDeviceGetTexture1DLinearMaxWidth:=dll.hipDeviceGetTexture1DLinearMaxWidth).restype, hipDeviceGetTexture1DLinearMaxWidth.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_int]
-except AttributeError: pass
-
 # hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig)
 try: (hipDeviceSetCacheConfig:=dll.hipDeviceSetCacheConfig).restype, hipDeviceSetCacheConfig.argtypes = hipError_t, [hipFuncCache_t]
 except AttributeError: pass
@@ -1569,6 +1511,7 @@ except AttributeError: pass
 try: (hipStreamWaitValue32:=dll.hipStreamWaitValue32).restype, hipStreamWaitValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint, uint32_t]
 except AttributeError: pass
 
+uint64_t = ctypes.c_ulong
 # hipError_t hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags, uint64_t mask = 18446744073709551615UL)
 try: (hipStreamWaitValue64:=dll.hipStreamWaitValue64).restype, hipStreamWaitValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint, uint64_t]
 except AttributeError: pass
@@ -1581,36 +1524,12 @@ except AttributeError: pass
 try: (hipStreamWriteValue64:=dll.hipStreamWriteValue64).restype, hipStreamWriteValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint]
 except AttributeError: pass
 
-# hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count, hipStreamBatchMemOpParams *paramArray, unsigned int flags)
-try: (hipStreamBatchMemOp:=dll.hipStreamBatchMemOp).restype, hipStreamBatchMemOp.argtypes = hipError_t, [hipStream_t, ctypes.c_uint, ctypes.POINTER(hipStreamBatchMemOpParams), ctypes.c_uint]
-except AttributeError: pass
-
-# hipError_t hipGraphAddBatchMemOpNode(hipGraphNode_t *phGraphNode, hipGraph_t hGraph, const hipGraphNode_t *dependencies, size_t numDependencies, const hipBatchMemOpNodeParams *nodeParams)
-try: (hipGraphAddBatchMemOpNode:=dll.hipGraphAddBatchMemOpNode).restype, hipGraphAddBatchMemOpNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipBatchMemOpNodeParams)]
-except AttributeError: pass
-
-# hipError_t hipGraphBatchMemOpNodeGetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams *nodeParams_out)
-try: (hipGraphBatchMemOpNodeGetParams:=dll.hipGraphBatchMemOpNodeGetParams).restype, hipGraphBatchMemOpNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipBatchMemOpNodeParams)]
-except AttributeError: pass
-
-# hipError_t hipGraphBatchMemOpNodeSetParams(hipGraphNode_t hNode, hipBatchMemOpNodeParams *nodeParams)
-try: (hipGraphBatchMemOpNodeSetParams:=dll.hipGraphBatchMemOpNodeSetParams).restype, hipGraphBatchMemOpNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipBatchMemOpNodeParams)]
-except AttributeError: pass
-
-# hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipBatchMemOpNodeParams *nodeParams)
-try: (hipGraphExecBatchMemOpNodeSetParams:=dll.hipGraphExecBatchMemOpNodeSetParams).restype, hipGraphExecBatchMemOpNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipBatchMemOpNodeParams)]
-except AttributeError: pass
-
 # hipError_t hipEventCreateWithFlags(hipEvent_t *event, unsigned int flags)
 try: (hipEventCreateWithFlags:=dll.hipEventCreateWithFlags).restype, hipEventCreateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipEvent_t), ctypes.c_uint]
 except AttributeError: pass
 
 # hipError_t hipEventCreate(hipEvent_t *event)
 try: (hipEventCreate:=dll.hipEventCreate).restype, hipEventCreate.argtypes = hipError_t, [ctypes.POINTER(hipEvent_t)]
-except AttributeError: pass
-
-# hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream = 0, unsigned int flags = 0)
-try: (hipEventRecordWithFlags:=dll.hipEventRecordWithFlags).restype, hipEventRecordWithFlags.argtypes = hipError_t, [hipEvent_t, hipStream_t, ctypes.c_uint]
 except AttributeError: pass
 
 # hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream = __null)
@@ -1801,7 +1720,7 @@ except AttributeError: pass
 try: (hipMemPoolImportPointer:=dll.hipMemPoolImportPointer).restype, hipMemPoolImportPointer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), hipMemPool_t, ctypes.POINTER(hipMemPoolPtrExportData)]
 except AttributeError: pass
 
-# hipError_t hipHostAlloc(void **ptr, size_t size, unsigned int flags)
+# __attribute__((deprecated("use hipHostMalloc instead"))) hipError_t hipHostAlloc(void **ptr, size_t size, unsigned int flags)
 try: (hipHostAlloc:=dll.hipHostAlloc).restype, hipHostAlloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint]
 except AttributeError: pass
 
@@ -1833,7 +1752,7 @@ except AttributeError: pass
 try: (hipFree:=dll.hipFree).restype, hipFree.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipFreeHost(void *ptr)
+# __attribute__((deprecated("use hipHostFree instead"))) hipError_t hipFreeHost(void *ptr)
 try: (hipFreeHost:=dll.hipFreeHost).restype, hipFreeHost.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
@@ -2090,11 +2009,11 @@ hipArray_const_t = ctypes.POINTER(const_hipArray)
 try: (hipMemcpy2DArrayToArray:=dll.hipMemcpy2DArrayToArray).restype, hipMemcpy2DArrayToArray.argtypes = hipError_t, [hipArray_t, size_t, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t count, hipMemcpyKind kind)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t count, hipMemcpyKind kind)
 try: (hipMemcpyToArray:=dll.hipMemcpyToArray).restype, hipMemcpyToArray.argtypes = hipError_t, [hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipMemcpyFromArray(void *dst, hipArray_const_t srcArray, size_t wOffset, size_t hOffset, size_t count, hipMemcpyKind kind)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipMemcpyFromArray(void *dst, hipArray_const_t srcArray, size_t wOffset, size_t hOffset, size_t count, hipMemcpyKind kind)
 try: (hipMemcpyFromArray:=dll.hipMemcpyFromArray).restype, hipMemcpyFromArray.argtypes = hipError_t, [ctypes.c_void_p, hipArray_const_t, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
@@ -2180,87 +2099,87 @@ except AttributeError: pass
 try: (hipMemcpyPeerAsync:=dll.hipMemcpyPeerAsync).restype, hipMemcpyPeerAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, size_t, hipStream_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxCreate(hipCtx_t *ctx, unsigned int flags, hipDevice_t device)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxCreate(hipCtx_t *ctx, unsigned int flags, hipDevice_t device)
 try: (hipCtxCreate:=dll.hipCtxCreate).restype, hipCtxCreate.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t), ctypes.c_uint, hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDestroy(hipCtx_t ctx)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDestroy(hipCtx_t ctx)
 try: (hipCtxDestroy:=dll.hipCtxDestroy).restype, hipCtxDestroy.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxPopCurrent(hipCtx_t *ctx)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxPopCurrent(hipCtx_t *ctx)
 try: (hipCtxPopCurrent:=dll.hipCtxPopCurrent).restype, hipCtxPopCurrent.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxPushCurrent(hipCtx_t ctx)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxPushCurrent(hipCtx_t ctx)
 try: (hipCtxPushCurrent:=dll.hipCtxPushCurrent).restype, hipCtxPushCurrent.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetCurrent(hipCtx_t ctx)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetCurrent(hipCtx_t ctx)
 try: (hipCtxSetCurrent:=dll.hipCtxSetCurrent).restype, hipCtxSetCurrent.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetCurrent(hipCtx_t *ctx)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetCurrent(hipCtx_t *ctx)
 try: (hipCtxGetCurrent:=dll.hipCtxGetCurrent).restype, hipCtxGetCurrent.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetDevice(hipDevice_t *device)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetDevice(hipDevice_t *device)
 try: (hipCtxGetDevice:=dll.hipCtxGetDevice).restype, hipCtxGetDevice.argtypes = hipError_t, [ctypes.POINTER(hipDevice_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetApiVersion(hipCtx_t ctx, int *apiVersion)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetApiVersion(hipCtx_t ctx, int *apiVersion)
 try: (hipCtxGetApiVersion:=dll.hipCtxGetApiVersion).restype, hipCtxGetApiVersion.argtypes = hipError_t, [hipCtx_t, ctypes.POINTER(ctypes.c_int)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetCacheConfig(hipFuncCache_t *cacheConfig)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetCacheConfig(hipFuncCache_t *cacheConfig)
 try: (hipCtxGetCacheConfig:=dll.hipCtxGetCacheConfig).restype, hipCtxGetCacheConfig.argtypes = hipError_t, [ctypes.POINTER(hipFuncCache_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetCacheConfig(hipFuncCache_t cacheConfig)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetCacheConfig(hipFuncCache_t cacheConfig)
 try: (hipCtxSetCacheConfig:=dll.hipCtxSetCacheConfig).restype, hipCtxSetCacheConfig.argtypes = hipError_t, [hipFuncCache_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config)
 try: (hipCtxSetSharedMemConfig:=dll.hipCtxSetSharedMemConfig).restype, hipCtxSetSharedMemConfig.argtypes = hipError_t, [hipSharedMemConfig]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig *pConfig)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig *pConfig)
 try: (hipCtxGetSharedMemConfig:=dll.hipCtxGetSharedMemConfig).restype, hipCtxGetSharedMemConfig.argtypes = hipError_t, [ctypes.POINTER(hipSharedMemConfig)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSynchronize()
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSynchronize()
 try: (hipCtxSynchronize:=dll.hipCtxSynchronize).restype, hipCtxSynchronize.argtypes = hipError_t, []
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetFlags(unsigned int *flags)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetFlags(unsigned int *flags)
 try: (hipCtxGetFlags:=dll.hipCtxGetFlags).restype, hipCtxGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags)
 try: (hipCtxEnablePeerAccess:=dll.hipCtxEnablePeerAccess).restype, hipCtxEnablePeerAccess.argtypes = hipError_t, [hipCtx_t, ctypes.c_uint]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx)
 try: (hipCtxDisablePeerAccess:=dll.hipCtxDisablePeerAccess).restype, hipCtxDisablePeerAccess.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int *flags, int *active)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int *flags, int *active)
 try: (hipDevicePrimaryCtxGetState:=dll.hipDevicePrimaryCtxGetState).restype, hipDevicePrimaryCtxGetState.argtypes = hipError_t, [hipDevice_t, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_int)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev)
 try: (hipDevicePrimaryCtxRelease:=dll.hipDevicePrimaryCtxRelease).restype, hipDevicePrimaryCtxRelease.argtypes = hipError_t, [hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxRetain(hipCtx_t *pctx, hipDevice_t dev)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxRetain(hipCtx_t *pctx, hipDevice_t dev)
 try: (hipDevicePrimaryCtxRetain:=dll.hipDevicePrimaryCtxRetain).restype, hipDevicePrimaryCtxRetain.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t), hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev)
 try: (hipDevicePrimaryCtxReset:=dll.hipDevicePrimaryCtxReset).restype, hipDevicePrimaryCtxReset.argtypes = hipError_t, [hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags)
 try: (hipDevicePrimaryCtxSetFlags:=dll.hipDevicePrimaryCtxSetFlags).restype, hipDevicePrimaryCtxSetFlags.argtypes = hipError_t, [hipDevice_t, ctypes.c_uint]
 except AttributeError: pass
 
@@ -2344,26 +2263,6 @@ except AttributeError: pass
 
 # hipError_t hipModuleLoadDataEx(hipModule_t *module, const void *image, unsigned int numOptions, hipJitOption *options, void **optionValues)
 try: (hipModuleLoadDataEx:=dll.hipModuleLoadDataEx).restype, hipModuleLoadDataEx.argtypes = hipError_t, [ctypes.POINTER(hipModule_t), ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
-except AttributeError: pass
-
-# hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void *data, size_t size, const char *name, unsigned int numOptions, hipJitOption *options, void **optionValues)
-try: (hipLinkAddData:=dll.hipLinkAddData).restype, hipLinkAddData.argtypes = hipError_t, [hipLinkState_t, hipJitInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
-except AttributeError: pass
-
-# hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char *path, unsigned int numOptions, hipJitOption *options, void **optionValues)
-try: (hipLinkAddFile:=dll.hipLinkAddFile).restype, hipLinkAddFile.argtypes = hipError_t, [hipLinkState_t, hipJitInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
-except AttributeError: pass
-
-# hipError_t hipLinkComplete(hipLinkState_t state, void **hipBinOut, size_t *sizeOut)
-try: (hipLinkComplete:=dll.hipLinkComplete).restype, hipLinkComplete.argtypes = hipError_t, [hipLinkState_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-# hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption *options, void **optionValues, hipLinkState_t *stateOut)
-try: (hipLinkCreate:=dll.hipLinkCreate).restype, hipLinkCreate.argtypes = hipError_t, [ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(hipLinkState_t)]
-except AttributeError: pass
-
-# hipError_t hipLinkDestroy(hipLinkState_t state)
-try: (hipLinkDestroy:=dll.hipLinkDestroy).restype, hipLinkDestroy.argtypes = hipError_t, [hipLinkState_t]
 except AttributeError: pass
 
 # hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void **kernelParams, void **extra)
@@ -2768,131 +2667,131 @@ except AttributeError: pass
 try: (hipMipmappedArrayGetLevel:=dll.hipMipmappedArrayGetLevel).restype, hipMipmappedArrayGetLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_t, ctypes.c_uint]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTextureToMipmappedArray(const textureReference *tex, hipMipmappedArray_const_t mipmappedArray, const hipChannelFormatDesc *desc)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTextureToMipmappedArray(const textureReference *tex, hipMipmappedArray_const_t mipmappedArray, const hipChannelFormatDesc *desc)
 try: (hipBindTextureToMipmappedArray:=dll.hipBindTextureToMipmappedArray).restype, hipBindTextureToMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipMipmappedArray_const_t, ctypes.POINTER(hipChannelFormatDesc)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipGetTextureReference(const textureReference **texref, const void *symbol)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipGetTextureReference(const textureReference **texref, const void *symbol)
 try: (hipGetTextureReference:=dll.hipGetTextureReference).restype, hipGetTextureReference.argtypes = hipError_t, [ctypes.POINTER(ctypes.POINTER(textureReference)), ctypes.c_void_p]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetBorderColor(float *pBorderColor, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetBorderColor(float *pBorderColor, const textureReference *texRef)
 try: (hipTexRefGetBorderColor:=dll.hipTexRefGetBorderColor).restype, hipTexRefGetBorderColor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetArray(hipArray_t *pArray, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetArray(hipArray_t *pArray, const textureReference *texRef)
 try: (hipTexRefGetArray:=dll.hipTexRefGetArray).restype, hipTexRefGetArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddressMode(textureReference *texRef, int dim, enum hipTextureAddressMode am)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddressMode(textureReference *texRef, int dim, enum hipTextureAddressMode am)
 try: (hipTexRefSetAddressMode:=dll.hipTexRefSetAddressMode).restype, hipTexRefSetAddressMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_int, hipTextureAddressMode]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetArray(textureReference *tex, hipArray_const_t array, unsigned int flags)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetArray(textureReference *tex, hipArray_const_t array, unsigned int flags)
 try: (hipTexRefSetArray:=dll.hipTexRefSetArray).restype, hipTexRefSetArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_const_t, ctypes.c_uint]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFilterMode(textureReference *texRef, enum hipTextureFilterMode fm)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFilterMode(textureReference *texRef, enum hipTextureFilterMode fm)
 try: (hipTexRefSetFilterMode:=dll.hipTexRefSetFilterMode).restype, hipTexRefSetFilterMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipTextureFilterMode]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFlags(textureReference *texRef, unsigned int Flags)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFlags(textureReference *texRef, unsigned int Flags)
 try: (hipTexRefSetFlags:=dll.hipTexRefSetFlags).restype, hipTexRefSetFlags.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFormat(textureReference *texRef, hipArray_Format fmt, int NumPackedComponents)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFormat(textureReference *texRef, hipArray_Format fmt, int NumPackedComponents)
 try: (hipTexRefSetFormat:=dll.hipTexRefSetFormat).restype, hipTexRefSetFormat.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_Format, ctypes.c_int]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTexture(size_t *offset, const textureReference *tex, const void *devPtr, const hipChannelFormatDesc *desc, size_t size = (2147483647 * 2U + 1U))
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTexture(size_t *offset, const textureReference *tex, const void *devPtr, const hipChannelFormatDesc *desc, size_t size = (2147483647 * 2U + 1U))
 try: (hipBindTexture:=dll.hipBindTexture).restype, hipBindTexture.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference), ctypes.c_void_p, ctypes.POINTER(hipChannelFormatDesc), size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTexture2D(size_t *offset, const textureReference *tex, const void *devPtr, const hipChannelFormatDesc *desc, size_t width, size_t height, size_t pitch)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTexture2D(size_t *offset, const textureReference *tex, const void *devPtr, const hipChannelFormatDesc *desc, size_t width, size_t height, size_t pitch)
 try: (hipBindTexture2D:=dll.hipBindTexture2D).restype, hipBindTexture2D.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference), ctypes.c_void_p, ctypes.POINTER(hipChannelFormatDesc), size_t, size_t, size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTextureToArray(const textureReference *tex, hipArray_const_t array, const hipChannelFormatDesc *desc)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTextureToArray(const textureReference *tex, hipArray_const_t array, const hipChannelFormatDesc *desc)
 try: (hipBindTextureToArray:=dll.hipBindTextureToArray).restype, hipBindTextureToArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_const_t, ctypes.POINTER(hipChannelFormatDesc)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipGetTextureAlignmentOffset(size_t *offset, const textureReference *texref)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipGetTextureAlignmentOffset(size_t *offset, const textureReference *texref)
 try: (hipGetTextureAlignmentOffset:=dll.hipGetTextureAlignmentOffset).restype, hipGetTextureAlignmentOffset.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipUnbindTexture(const textureReference *tex)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipUnbindTexture(const textureReference *tex)
 try: (hipUnbindTexture:=dll.hipUnbindTexture).restype, hipUnbindTexture.argtypes = hipError_t, [ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetAddress(hipDeviceptr_t *dev_ptr, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetAddress(hipDeviceptr_t *dev_ptr, const textureReference *texRef)
 try: (hipTexRefGetAddress:=dll.hipTexRefGetAddress).restype, hipTexRefGetAddress.argtypes = hipError_t, [ctypes.POINTER(hipDeviceptr_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetAddressMode(enum hipTextureAddressMode *pam, const textureReference *texRef, int dim)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetAddressMode(enum hipTextureAddressMode *pam, const textureReference *texRef, int dim)
 try: (hipTexRefGetAddressMode:=dll.hipTexRefGetAddressMode).restype, hipTexRefGetAddressMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureAddressMode), ctypes.POINTER(textureReference), ctypes.c_int]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
 try: (hipTexRefGetFilterMode:=dll.hipTexRefGetFilterMode).restype, hipTexRefGetFilterMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureFilterMode), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFlags(unsigned int *pFlags, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFlags(unsigned int *pFlags, const textureReference *texRef)
 try: (hipTexRefGetFlags:=dll.hipTexRefGetFlags).restype, hipTexRefGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFormat(hipArray_Format *pFormat, int *pNumChannels, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFormat(hipArray_Format *pFormat, int *pNumChannels, const textureReference *texRef)
 try: (hipTexRefGetFormat:=dll.hipTexRefGetFormat).restype, hipTexRefGetFormat.argtypes = hipError_t, [ctypes.POINTER(hipArray_Format), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMaxAnisotropy(int *pmaxAnsio, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMaxAnisotropy(int *pmaxAnsio, const textureReference *texRef)
 try: (hipTexRefGetMaxAnisotropy:=dll.hipTexRefGetMaxAnisotropy).restype, hipTexRefGetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
 try: (hipTexRefGetMipmapFilterMode:=dll.hipTexRefGetMipmapFilterMode).restype, hipTexRefGetMipmapFilterMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureFilterMode), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapLevelBias(float *pbias, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapLevelBias(float *pbias, const textureReference *texRef)
 try: (hipTexRefGetMipmapLevelBias:=dll.hipTexRefGetMipmapLevelBias).restype, hipTexRefGetMipmapLevelBias.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapLevelClamp(float *pminMipmapLevelClamp, float *pmaxMipmapLevelClamp, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapLevelClamp(float *pminMipmapLevelClamp, float *pmaxMipmapLevelClamp, const textureReference *texRef)
 try: (hipTexRefGetMipmapLevelClamp:=dll.hipTexRefGetMipmapLevelClamp).restype, hipTexRefGetMipmapLevelClamp.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t *pArray, const textureReference *texRef)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t *pArray, const textureReference *texRef)
 try: (hipTexRefGetMipMappedArray:=dll.hipTexRefGetMipMappedArray).restype, hipTexRefGetMipMappedArray.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddress(size_t *ByteOffset, textureReference *texRef, hipDeviceptr_t dptr, size_t bytes)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddress(size_t *ByteOffset, textureReference *texRef, hipDeviceptr_t dptr, size_t bytes)
 try: (hipTexRefSetAddress:=dll.hipTexRefSetAddress).restype, hipTexRefSetAddress.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference), hipDeviceptr_t, size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddress2D(textureReference *texRef, const HIP_ARRAY_DESCRIPTOR *desc, hipDeviceptr_t dptr, size_t Pitch)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddress2D(textureReference *texRef, const HIP_ARRAY_DESCRIPTOR *desc, hipDeviceptr_t dptr, size_t Pitch)
 try: (hipTexRefSetAddress2D:=dll.hipTexRefSetAddress2D).restype, hipTexRefSetAddress2D.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(HIP_ARRAY_DESCRIPTOR), hipDeviceptr_t, size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMaxAnisotropy(textureReference *texRef, unsigned int maxAniso)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMaxAnisotropy(textureReference *texRef, unsigned int maxAniso)
 try: (hipTexRefSetMaxAnisotropy:=dll.hipTexRefSetMaxAnisotropy).restype, hipTexRefSetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetBorderColor(textureReference *texRef, float *pBorderColor)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetBorderColor(textureReference *texRef, float *pBorderColor)
 try: (hipTexRefSetBorderColor:=dll.hipTexRefSetBorderColor).restype, hipTexRefSetBorderColor.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(ctypes.c_float)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapFilterMode(textureReference *texRef, enum hipTextureFilterMode fm)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapFilterMode(textureReference *texRef, enum hipTextureFilterMode fm)
 try: (hipTexRefSetMipmapFilterMode:=dll.hipTexRefSetMipmapFilterMode).restype, hipTexRefSetMipmapFilterMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipTextureFilterMode]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapLevelBias(textureReference *texRef, float bias)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapLevelBias(textureReference *texRef, float bias)
 try: (hipTexRefSetMipmapLevelBias:=dll.hipTexRefSetMipmapLevelBias).restype, hipTexRefSetMipmapLevelBias.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_float]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapLevelClamp(textureReference *texRef, float minMipMapLevelClamp, float maxMipMapLevelClamp)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapLevelClamp(textureReference *texRef, float minMipMapLevelClamp, float maxMipMapLevelClamp)
 try: (hipTexRefSetMipmapLevelClamp:=dll.hipTexRefSetMipmapLevelClamp).restype, hipTexRefSetMipmapLevelClamp.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_float, ctypes.c_float]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and might not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmappedArray(textureReference *texRef, struct hipMipmappedArray *mipmappedArray, unsigned int Flags)
+# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmappedArray(textureReference *texRef, struct hipMipmappedArray *mipmappedArray, unsigned int Flags)
 try: (hipTexRefSetMipmappedArray:=dll.hipTexRefSetMipmappedArray).restype, hipTexRefSetMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(hipMipmappedArray), ctypes.c_uint]
 except AttributeError: pass
 
@@ -3018,18 +2917,6 @@ except AttributeError: pass
 
 # hipError_t hipGraphAddNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, hipGraphNodeParams *nodeParams)
 try: (hipGraphAddNode:=dll.hipGraphAddNode).restype, hipGraphAddNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipGraphNodeParams)]
-except AttributeError: pass
-
-# hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long *flags)
-try: (hipGraphExecGetFlags:=dll.hipGraphExecGetFlags).restype, hipGraphExecGetFlags.argtypes = hipError_t, [hipGraphExec_t, ctypes.POINTER(ctypes.c_ulonglong)]
-except AttributeError: pass
-
-# hipError_t hipGraphNodeSetParams(hipGraphNode_t node, hipGraphNodeParams *nodeParams)
-try: (hipGraphNodeSetParams:=dll.hipGraphNodeSetParams).restype, hipGraphNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipGraphNodeParams)]
-except AttributeError: pass
-
-# hipError_t hipGraphExecNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node, hipGraphNodeParams *nodeParams)
-try: (hipGraphExecNodeSetParams:=dll.hipGraphExecNodeSetParams).restype, hipGraphExecNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipGraphNodeParams)]
 except AttributeError: pass
 
 # hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec)
@@ -3296,28 +3183,8 @@ except AttributeError: pass
 try: (hipGraphExecExternalSemaphoresWaitNodeSetParams:=dll.hipGraphExecExternalSemaphoresWaitNodeSetParams).restype, hipGraphExecExternalSemaphoresWaitNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipDrvGraphMemcpyNodeGetParams(hipGraphNode_t hNode, HIP_MEMCPY3D *nodeParams)
-try: (hipDrvGraphMemcpyNodeGetParams:=dll.hipDrvGraphMemcpyNodeGetParams).restype, hipDrvGraphMemcpyNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(HIP_MEMCPY3D)]
-except AttributeError: pass
-
-# hipError_t hipDrvGraphMemcpyNodeSetParams(hipGraphNode_t hNode, const HIP_MEMCPY3D *nodeParams)
-try: (hipDrvGraphMemcpyNodeSetParams:=dll.hipDrvGraphMemcpyNodeSetParams).restype, hipDrvGraphMemcpyNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(HIP_MEMCPY3D)]
-except AttributeError: pass
-
 # hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t *phGraphNode, hipGraph_t hGraph, const hipGraphNode_t *dependencies, size_t numDependencies, const HIP_MEMSET_NODE_PARAMS *memsetParams, hipCtx_t ctx)
 try: (hipDrvGraphAddMemsetNode:=dll.hipDrvGraphAddMemsetNode).restype, hipDrvGraphAddMemsetNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(HIP_MEMSET_NODE_PARAMS), hipCtx_t]
-except AttributeError: pass
-
-# hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t *phGraphNode, hipGraph_t hGraph, const hipGraphNode_t *dependencies, size_t numDependencies, hipDeviceptr_t dptr)
-try: (hipDrvGraphAddMemFreeNode:=dll.hipDrvGraphAddMemFreeNode).restype, hipDrvGraphAddMemFreeNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, hipDeviceptr_t]
-except AttributeError: pass
-
-# hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMCPY3D *copyParams, hipCtx_t ctx)
-try: (hipDrvGraphExecMemcpyNodeSetParams:=dll.hipDrvGraphExecMemcpyNodeSetParams).restype, hipDrvGraphExecMemcpyNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(HIP_MEMCPY3D), hipCtx_t]
-except AttributeError: pass
-
-# hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const HIP_MEMSET_NODE_PARAMS *memsetParams, hipCtx_t ctx)
-try: (hipDrvGraphExecMemsetNodeSetParams:=dll.hipDrvGraphExecMemsetNodeSetParams).restype, hipDrvGraphExecMemsetNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(HIP_MEMSET_NODE_PARAMS), hipCtx_t]
 except AttributeError: pass
 
 # hipError_t hipMemAddressFree(void *devPtr, size_t size)
@@ -3408,57 +3275,11 @@ except AttributeError: pass
 
 hipmipmappedArray = ctypes.POINTER(hipMipmappedArray)
 hipResourcetype = HIPresourcetype_enum
-hiprtcJIT_option = hipJitOption
-HIPRTC_JIT_MAX_REGISTERS = hipJitOptionMaxRegisters
-HIPRTC_JIT_THREADS_PER_BLOCK = hipJitOptionThreadsPerBlock
-HIPRTC_JIT_WALL_TIME = hipJitOptionWallTime
-HIPRTC_JIT_INFO_LOG_BUFFER = hipJitOptionInfoLogBuffer
-HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES = hipJitOptionInfoLogBufferSizeBytes
-HIPRTC_JIT_ERROR_LOG_BUFFER = hipJitOptionErrorLogBuffer
-HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = hipJitOptionErrorLogBufferSizeBytes
-HIPRTC_JIT_OPTIMIZATION_LEVEL = hipJitOptionOptimizationLevel
-HIPRTC_JIT_TARGET_FROM_HIPCONTEXT = hipJitOptionTargetFromContext
-HIPRTC_JIT_TARGET = hipJitOptionTarget
-HIPRTC_JIT_FALLBACK_STRATEGY = hipJitOptionFallbackStrategy
-HIPRTC_JIT_GENERATE_DEBUG_INFO = hipJitOptionGenerateDebugInfo
-HIPRTC_JIT_LOG_VERBOSE = hipJitOptionLogVerbose
-HIPRTC_JIT_GENERATE_LINE_INFO = hipJitOptionGenerateLineInfo
-HIPRTC_JIT_CACHE_MODE = hipJitOptionCacheMode
-HIPRTC_JIT_NEW_SM3X_OPT = hipJitOptionSm3xOpt
-HIPRTC_JIT_FAST_COMPILE = hipJitOptionFastCompile
-HIPRTC_JIT_GLOBAL_SYMBOL_NAMES = hipJitOptionGlobalSymbolNames
-HIPRTC_JIT_GLOBAL_SYMBOL_ADDRESS = hipJitOptionGlobalSymbolAddresses
-HIPRTC_JIT_GLOBAL_SYMBOL_COUNT = hipJitOptionGlobalSymbolCount
-HIPRTC_JIT_LTO = hipJitOptionLto
-HIPRTC_JIT_FTZ = hipJitOptionFtz
-HIPRTC_JIT_PREC_DIV = hipJitOptionPrecDiv
-HIPRTC_JIT_PREC_SQRT = hipJitOptionPrecSqrt
-HIPRTC_JIT_FMA = hipJitOptionFma
-HIPRTC_JIT_POSITION_INDEPENDENT_CODE = hipJitOptionPositionIndependentCode
-HIPRTC_JIT_MIN_CTA_PER_SM = hipJitOptionMinCTAPerSM
-HIPRTC_JIT_MAX_THREADS_PER_BLOCK = hipJitOptionMaxThreadsPerBlock
-HIPRTC_JIT_OVERRIDE_DIRECT_VALUES = hipJitOptionOverrideDirectiveValues
-HIPRTC_JIT_NUM_OPTIONS = hipJitOptionNumOptions
-HIPRTC_JIT_IR_TO_ISA_OPT_EXT = hipJitOptionIRtoISAOptExt
-HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT = hipJitOptionIRtoISAOptCountExt
-hiprtcJITInputType = hipJitInputType
-HIPRTC_JIT_INPUT_CUBIN = hipJitInputCubin
-HIPRTC_JIT_INPUT_PTX = hipJitInputPtx
-HIPRTC_JIT_INPUT_FATBINARY = hipJitInputFatBinary
-HIPRTC_JIT_INPUT_OBJECT = hipJitInputObject
-HIPRTC_JIT_INPUT_LIBRARY = hipJitInputLibrary
-HIPRTC_JIT_INPUT_NVVM = hipJitInputNvvm
-HIPRTC_JIT_NUM_LEGACY_INPUT_TYPES = hipJitNumLegacyInputTypes
-HIPRTC_JIT_INPUT_LLVM_BITCODE = hipJitInputLLVMBitcode
-HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE = hipJitInputLLVMBundledBitcode
-HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE = hipJitInputLLVMArchivesOfBundledBitcode
-HIPRTC_JIT_INPUT_SPIRV = hipJitInputSpirv
-HIPRTC_JIT_NUM_INPUT_TYPES = hipJitNumInputTypes
 hipGetDeviceProperties = hipGetDevicePropertiesR0600
 hipDeviceProp_t = hipDeviceProp_tR0600
 hipChooseDevice = hipChooseDeviceR0600
 GENERIC_GRID_LAUNCH = 1
-HIP_DEPRECATED = lambda msg: __attribute__ ((deprecated(msg)))
+DEPRECATED = lambda msg: __attribute__ ((deprecated(msg)))
 hipIpcMemLazyEnablePeerAccess = 0x01
 HIP_IPC_HANDLE_SIZE = 64
 hipStreamDefault = 0x00
@@ -3467,20 +3288,12 @@ hipEventDefault = 0x0
 hipEventBlockingSync = 0x1
 hipEventDisableTiming = 0x2
 hipEventInterprocess = 0x4
-hipEventRecordDefault = 0x00
-hipEventRecordExternal = 0x01
-hipEventWaitDefault = 0x00
-hipEventWaitExternal = 0x01
 hipEventDisableSystemFence = 0x20000000
 hipEventReleaseToDevice = 0x40000000
 hipEventReleaseToSystem = 0x80000000
-hipHostAllocDefault = 0x0
 hipHostMallocDefault = 0x0
-hipHostAllocPortable = 0x1
 hipHostMallocPortable = 0x1
-hipHostAllocMapped = 0x2
 hipHostMallocMapped = 0x2
-hipHostAllocWriteCombined = 0x4
 hipHostMallocWriteCombined = 0x4
 hipHostMallocNumaUser = 0x20000000
 hipHostMallocCoherent = 0x40000000

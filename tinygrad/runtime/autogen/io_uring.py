@@ -22,16 +22,9 @@ struct_io_uring_sqe_0._fields_ = [
   ('_0', struct_io_uring_sqe_0_0),
 ]
 class struct_io_uring_sqe_1(ctypes.Union): pass
-class struct_io_uring_sqe_1_0(Struct): pass
-struct_io_uring_sqe_1_0._fields_ = [
-  ('level', ctypes.c_uint),
-  ('optname', ctypes.c_uint),
-]
-struct_io_uring_sqe_1._anonymous_ = ['_0']
 struct_io_uring_sqe_1._fields_ = [
   ('addr', ctypes.c_ulonglong),
   ('splice_off_in', ctypes.c_ulonglong),
-  ('_0', struct_io_uring_sqe_1_0),
 ]
 class struct_io_uring_sqe_2(ctypes.Union): pass
 __kernel_rwf_t = ctypes.c_int
@@ -55,10 +48,6 @@ struct_io_uring_sqe_2._fields_ = [
   ('xattr_flags', ctypes.c_uint),
   ('msg_ring_flags', ctypes.c_uint),
   ('uring_cmd_flags', ctypes.c_uint),
-  ('waitid_flags', ctypes.c_uint),
-  ('futex_flags', ctypes.c_uint),
-  ('install_fd_flags', ctypes.c_uint),
-  ('nop_flags', ctypes.c_uint),
 ]
 class struct_io_uring_sqe_3(ctypes.Union): pass
 struct_io_uring_sqe_3._packed_ = True
@@ -76,8 +65,6 @@ struct_io_uring_sqe_4._anonymous_ = ['_0']
 struct_io_uring_sqe_4._fields_ = [
   ('splice_fd_in', ctypes.c_int),
   ('file_index', ctypes.c_uint),
-  ('zcrx_ifq_idx', ctypes.c_uint),
-  ('optlen', ctypes.c_uint),
   ('_0', struct_io_uring_sqe_4_0),
 ]
 class struct_io_uring_sqe_5(ctypes.Union): pass
@@ -89,7 +76,6 @@ struct_io_uring_sqe_5_0._fields_ = [
 struct_io_uring_sqe_5._anonymous_ = ['_0']
 struct_io_uring_sqe_5._fields_ = [
   ('_0', struct_io_uring_sqe_5_0),
-  ('optval', ctypes.c_ulonglong),
   ('cmd', (ctypes.c_ubyte * 0)),
 ]
 struct_io_uring_sqe._anonymous_ = ['_0', '_1', '_2', '_3', '_4', '_5']
@@ -160,32 +146,41 @@ struct_io_uring._fields_ = [
   ('pad', (ctypes.c_ubyte * 3)),
   ('pad2', ctypes.c_uint),
 ]
-class struct_io_uring_zcrx_rq(Struct): pass
-class struct_io_uring_zcrx_rqe(Struct): pass
-struct_io_uring_zcrx_rqe._fields_ = [
-  ('off', ctypes.c_ulonglong),
-  ('len', ctypes.c_uint),
-  ('__pad', ctypes.c_uint),
+class struct_statx(Struct): pass
+class struct_statx_timestamp(Struct): pass
+__s64 = ctypes.c_longlong
+struct_statx_timestamp._fields_ = [
+  ('tv_sec', ctypes.c_longlong),
+  ('tv_nsec', ctypes.c_uint),
+  ('__reserved', ctypes.c_int),
 ]
-struct_io_uring_zcrx_rq._fields_ = [
-  ('khead', ctypes.POINTER(ctypes.c_uint)),
-  ('ktail', ctypes.POINTER(ctypes.c_uint)),
-  ('rq_tail', ctypes.c_uint),
-  ('ring_entries', ctypes.c_uint),
-  ('rqes', ctypes.POINTER(struct_io_uring_zcrx_rqe)),
-  ('ring_ptr', ctypes.c_void_p),
-]
-class struct_io_uring_cqe_iter(Struct): pass
-struct_io_uring_cqe_iter._fields_ = [
-  ('cqes', ctypes.POINTER(struct_io_uring_cqe)),
-  ('mask', ctypes.c_uint),
-  ('shift', ctypes.c_uint),
-  ('head', ctypes.c_uint),
-  ('tail', ctypes.c_uint),
+struct_statx._fields_ = [
+  ('stx_mask', ctypes.c_uint),
+  ('stx_blksize', ctypes.c_uint),
+  ('stx_attributes', ctypes.c_ulonglong),
+  ('stx_nlink', ctypes.c_uint),
+  ('stx_uid', ctypes.c_uint),
+  ('stx_gid', ctypes.c_uint),
+  ('stx_mode', ctypes.c_ushort),
+  ('__spare0', (ctypes.c_ushort * 1)),
+  ('stx_ino', ctypes.c_ulonglong),
+  ('stx_size', ctypes.c_ulonglong),
+  ('stx_blocks', ctypes.c_ulonglong),
+  ('stx_attributes_mask', ctypes.c_ulonglong),
+  ('stx_atime', struct_statx_timestamp),
+  ('stx_btime', struct_statx_timestamp),
+  ('stx_ctime', struct_statx_timestamp),
+  ('stx_mtime', struct_statx_timestamp),
+  ('stx_rdev_major', ctypes.c_uint),
+  ('stx_rdev_minor', ctypes.c_uint),
+  ('stx_dev_major', ctypes.c_uint),
+  ('stx_dev_minor', ctypes.c_uint),
+  ('stx_mnt_id', ctypes.c_ulonglong),
+  ('stx_dio_mem_align', ctypes.c_uint),
+  ('stx_dio_offset_align', ctypes.c_uint),
+  ('__spare3', (ctypes.c_ulonglong * 12)),
 ]
 class struct_epoll_event(Struct): pass
-class struct_statx(Struct): pass
-class struct_futex_waitv(Struct): pass
 class _anonunion0(ctypes.Union): pass
 class _anonunion0_0(Struct): pass
 _anonunion0_0._fields_ = [
@@ -567,12 +562,15 @@ SOCKET_URING_OP_SIOCOUTQ = _anonenum13.define('SOCKET_URING_OP_SIOCOUTQ', 1)
 SOCKET_URING_OP_GETSOCKOPT = _anonenum13.define('SOCKET_URING_OP_GETSOCKOPT', 2)
 SOCKET_URING_OP_SETSOCKOPT = _anonenum13.define('SOCKET_URING_OP_SETSOCKOPT', 3)
 
+_XOPEN_SOURCE = 500
 uring_unlikely = lambda cond: __builtin_expect( not  not (cond), 0)
 uring_likely = lambda cond: __builtin_expect( not  not (cond), 1)
 NR_io_uring_setup = 425
 NR_io_uring_enter = 426
 NR_io_uring_register = 427
-IO_URING_CHECK_VERSION = lambda major,minor: (major > IO_URING_VERSION_MAJOR or (major == IO_URING_VERSION_MAJOR and minor > IO_URING_VERSION_MINOR))
+io_uring_cqe_index = lambda ring,ptr,mask: (((ptr) & (mask)) << io_uring_cqe_shift(ring))
+UNUSED = lambda x: (void)(x)
+IO_URING_CHECK_VERSION = lambda major,minor: (major > IO_URING_VERSION_MAJOR or (major == IO_URING_VERSION_MAJOR and minor >= IO_URING_VERSION_MINOR))
 IORING_FILE_INDEX_ALLOC = (~0)
 IOSQE_FIXED_FILE = (1 << IOSQE_FIXED_FILE_BIT)
 IOSQE_IO_DRAIN = (1 << IOSQE_IO_DRAIN_BIT)
