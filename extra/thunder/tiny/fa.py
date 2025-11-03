@@ -2,7 +2,7 @@ from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import AxisType, UOp, KernelInfo
 from tinygrad.engine.realize import ExecItem, get_runner
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, prod
 
 global_slot = 0
 def gl(shape, dtype):
@@ -29,15 +29,81 @@ def zero(reg:UOp):
   zero_rid += 1
   return reg[i].set(0, end=i)
 
-def load(dst:UOp, src:UOp, idxs:tuple[UOp,...]=()):
-  pass
+LOAD_INNER = 1
+load_rid = 100
+def load(dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
+  assert len(idxs) == len(src.shape)
+
+  global load_rid
+
+  threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
+  laneid = threadIdx_x
+
+  src_last_i = idxs[-2] * src.shape[-1] + idxs[-1]
+
+  # permute src so that axis and axis + 1 and last
+  perm = list(range(len(src.shape)))
+  src_axis = perm.pop(axis)
+  src_axis1 = perm.pop(axis)
+  perm += [src_axis, src_axis1]
+  src = src.permute(tuple(perm))
+  src = src.reshape(src.shape[:-2] + (prod(src.shape[-2:]),))
+
+  # flatten dst
+  dst = dst.reshape(dst.shape[:-2] + (prod(dst.shape[-2:]),))
+
+  load_i_outer = UOp.range(dst.size // (WARP_THREADS * LOAD_INNER), load_rid)
+  load_i_inner = UOp.range(LOAD_INNER, load_rid+1, AxisType.UPCAST)
+  load_rid += 2
+
+  dst_i = load_i_outer * (WARP_THREADS * LOAD_INNER) + laneid * LOAD_INNER + load_i_inner
+  src_last_i = src_last_i + dst_i
+
+  dst_store = dst[*dst_idxs, dst_i].store(src[*idxs[:-2], src_last_i]).end(load_i_outer, load_i_inner)
+
+  barrier = UOp.barrier(dst_store)
+
+  return dst.after(barrier)
+
+STORE_INNER = 1
+store_rid = 200
+def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0):
+  assert len(idxs) == len(dst.shape)
+
+  global store_rid
+
+  threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
+  laneid = threadIdx_x
+
+  dst_last_i = idxs[-2] * dst.shape[-1] + idxs[-1]
+
+  perm = list(range(len(dst.shape)))
+  dst_axis = perm.pop(axis)
+  dst_axis1 = perm.pop(axis)
+  perm += [dst_axis, dst_axis1]
+  dstp = dst.permute(tuple(perm))
+  dstp = dstp.reshape(dstp.shape[:-2] + (prod(dstp.shape[-2:]),))
+
+  # flatten src
+  src = src.reshape(src.shape[:-2] + (prod(src.shape[-2:]),))
+
+  store_i_outer = UOp.range(dst.size // (WARP_THREADS * STORE_INNER), store_rid)
+  store_i_inner = UOp.range(STORE_INNER, store_rid+1, AxisType.UPCAST)
+  store_rid += 2
+
+  src_i = store_i_outer * (WARP_THREADS * LOAD_INNER) + laneid * LOAD_INNER + store_i_inner
+  dst_last_i = dst_last_i + src_i
+
+  dst_store = dstp[*idxs[:-2], dst_last_i].store(src[*src_idxs, src_i]).end(store_i_outer, store_i_inner)
+
+  return dst_store
 
 WARP_THREADS = 32
 
 NUM_WORKERS = 1
 PIPE_STAGES = 3
 
-B, N, H, D = 16, 1024, 16, 64
+B, N, H, D = 1, 32, 1, 64
 
 ROWS = 16 * (128 // D)
 
@@ -80,23 +146,21 @@ def ker():
 
   outer_kv_rng = UOp.range(N // ROWS, 0)
 
-  q_loads_per_thread = (ROWS * D) // WARP_THREADS
-  q_loads_per_thread_i = UOp.range(q_loads_per_thread, 16)
-  q_glb_seq_i = q_seq * ROWS + (laneid * WARP_THREADS + q_loads_per_thread_i)
-  qo_smem_store = qo_smem[workerid, ].store(q[batch, q_glb_seq_i, head, 0]).end()
+  qo_smem = load(qo_smem, q, (workerid,), (batch, q_seq, head, 0), axis=1)
 
-  barrier = UOp.barrier(qo_smem_store)
-  qo_smem = qo_smem.after(barrier)
+  o = store(o, qo_smem, (batch, q_seq, head, 0), (workerid,), axis=1)
 
-  q_reg = q_reg.set(qo_smem[workerid]).end(i)
+  # q_reg = q_reg.set(qo_smem[workerid])
+  #
+  # sink = o[batch, q_seq, head, 0].store(q_reg)
 
-  sink = o[batch, q_seq, head, 0].store(q_reg)
+  sink = o
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
 if __name__ == "__main__":
   with Context(DEBUG=0):
-    q = Tensor.randn(B, N, H, D, dtype="bfloat16")
+    q = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
     k = Tensor.randn(B, N, H, D, dtype="bfloat16")
     v = Tensor.randn(B, N, H, D, dtype="bfloat16")
     out = Tensor.empty(B, N, H, D, dtype="bfloat16")
@@ -115,3 +179,5 @@ if __name__ == "__main__":
                4 * B * H * N * N + \
                2 * B * H * N * N * D
   print(f"{attn_flops/(min(times)*1e12):2f} TFLOPS")
+
+  print(out.tolist())
