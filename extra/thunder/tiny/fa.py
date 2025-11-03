@@ -1,3 +1,4 @@
+import math
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import AxisType, UOp, KernelInfo
 from tinygrad.engine.realize import ExecItem, get_runner
@@ -22,12 +23,15 @@ def rt(shape, dtype):
   register_slot += 1
   return UOp.placeholder(shape, dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
 
-zero_rid = 16
-def zero(reg:UOp):
-  global zero_rid
-  i = UOp.range(reg.size, zero_rid)
-  zero_rid += 1
-  return reg[i].set(0, end=i)
+clear_rid = 16
+def clear(reg:UOp, value:float=0):
+  global clear_rid
+  i = UOp.range(reg.size, clear_rid)
+  clear_rid += 1
+  return reg[i].set(value, end=i)
+
+def zero(reg:UOp): return clear(reg, 0)
+def neg_inf(reg:UOp): return clear(reg, -math.inf)
 
 LOAD_INNER = 1
 load_rid = 100
@@ -103,7 +107,7 @@ PIPE_STAGES = 3
 
 B, N, H, D = 1, 64, 1, 64
 
-ROWS = 16 * (128 // D)
+ROWS = 16 * (64 // D)
 
 def ker():
   # define special indices
@@ -139,17 +143,17 @@ def ker():
   max_vec = rt((ROWS,), dtypes.float32)
   norm_vec = rt((ROWS,), dtypes.float32)
 
-  q_reg = zero(q_reg)
+  max_vec = neg_inf(max_vec)
+  norm_vec = zero(norm_vec)
   o_reg = zero(o_reg)
 
   outer_kv_rng = UOp.range(N // ROWS, 0)
 
+  # load q tile
   qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
-
   q_reg = load(q_reg, qo_smem)
 
   qo_smem = store(qo_smem, q_reg)
-
   o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
 
   # q_reg = q_reg.set(qo_smem[workerid])
