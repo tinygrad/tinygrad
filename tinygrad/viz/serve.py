@@ -212,7 +212,7 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
     if d == "AMD": device_decoders[d] = load_sqtt
   for fxn in device_decoders.values():
     try: fxn(profile)
-    except: continue
+    except Exception: continue
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
