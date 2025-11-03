@@ -35,10 +35,10 @@ class _ROCParseCtx:
   def find_program(self, addr): return self.addr2prg[addr]
 
   def on_occupancy_ev(self, ev):
-    if DEBUG >= 4: print("OCC", ev.time, self.active_se, ev.cu, ev.simd, ev.wave_id, ev.start)
+    if DEBUG >= 5: print("OCC", ev.time, self.active_se, ev.cu, ev.simd, ev.wave_id, ev.start)
 
   def on_wave_ev(self, ev):
-    if DEBUG >= 4: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
+    if DEBUG >= 5: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
     asm = {}
     for j in range(ev.instructions_size):
