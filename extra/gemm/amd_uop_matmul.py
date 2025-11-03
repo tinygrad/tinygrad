@@ -1,5 +1,5 @@
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import UOp, KernelInfo
+from tinygrad.uop.ops import UOp, KernelInfo, sint
 from tinygrad.engine.realize import ExecItem, get_runner
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import getenv
@@ -48,10 +48,12 @@ M_PER_ITER = WAVE_TILE_M // ITERS_PER_WAVE_M
 assert WAVE_TILE_N % (LANES_PER_WAVE_X * TN) == 0, "WAVE_TILE_N must be divisible by LANES_PER_WAVE_X*TN"
 assert WAVE_TILE_M % (LANES_PER_WAVE_Y * TM) == 0, "WAVE_TILE_M must be divisible by LANES_PER_WAVE_Y*TM"
 
-def copy(dest:UOp, src:UOp, rng:int):
+def rngs_for_shape(shape:tuple[sint, ...], rng:int): return [UOp.range(s, rng+i) for i,s in enumerate(shape)]
+def copy(dest:UOp, src:UOp, rng:int, set=True):
   assert dest.shape == src.shape
-  rngs = [UOp.range(s, rng+i) for i,s in enumerate(src.shape)]
-  return dest[*rngs].store(src[*rngs]).end(*rngs)
+  rngs = rngs_for_shape(src.shape, rng)
+  copy = dest[*rngs].store(src[*rngs]).end(*rngs)
+  return dest.after(copy) if set else copy
 
 def hand_spec_kernel3():
   # ---------------------------
@@ -120,19 +122,17 @@ def hand_spec_kernel3():
   # LOCAL -> REG (per-wave tiles)
   # ---------------------------
   Bs_view = Bs.reshape(BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)[k, waveIdx, :, idxInWave, :]
-  B_row = B_row.after(copy(B_row, Bs_view, 4))
+  B_row = copy(B_row, Bs_view, 4)
 
   As_view = As.reshape(BLOCK_K, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM)[k, waveIdy, :, idyInWave, :]
-  A_col = A_col.after(copy(A_col, As_view, 6))
+  A_col = copy(A_col, As_view, 6)
 
   # ---------------------------
   # FMA: c_regs += A_col * B_row
   # ---------------------------
-  iterWaveM = UOp.range(ITERS_PER_WAVE_M, 8)
-  yt = UOp.range(TM, 9)
-  iterWaveN = UOp.range(ITERS_PER_WAVE_N, 10)
-  xt = UOp.range(TN, 12)
-  c_idx = c_regs.after(k, k_tile_range)[iterWaveM, yt, iterWaveN, xt]
+  iterWaveM, yt, iterWaveN, xt = rngs = rngs_for_shape(c_regs.shape, 8)
+  c_idx = c_regs.after(k, k_tile_range)[*rngs]
+  # NOTE: if the order of this ends changes, the ranges merge and it's slow!
   sink = c_idx.store(c_idx + A_col[iterWaveM, yt] * B_row[iterWaveN, xt]).end(iterWaveM, iterWaveN, yt, xt)
 
   # Close k, sync, and close K tiles
@@ -143,7 +143,7 @@ def hand_spec_kernel3():
   # ---------------------------
   c = c.reshape(WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)
   c = c[waveIdy, :, idyInWave, :, waveIdx, :, idxInWave, :]  # select locals
-  sink = copy(c, c_regs.after(sink), rng=1000)
+  sink = copy(c, c_regs.after(sink), rng=1000, set=False)
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
