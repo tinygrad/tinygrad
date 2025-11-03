@@ -791,7 +791,7 @@ class UOp(MathMixin, MovementMixin, metaclass=UOpMetaClass):
     return UOp.placeholder(self.shape, self.dtype, slot)
 
   # set is store+end+after
-  def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]=()) -> UOp:
+  def set(self:UOp, val:UOp|ConstType, end:UOp|tuple[UOp, ...]|list[UOp]=()) -> UOp:
     return self.src[0].after(self.store(val).end(*argfix(end)))
 
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:

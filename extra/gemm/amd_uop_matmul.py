@@ -48,6 +48,11 @@ M_PER_ITER = WAVE_TILE_M // ITERS_PER_WAVE_M
 assert WAVE_TILE_N % (LANES_PER_WAVE_X * TN) == 0, "WAVE_TILE_N must be divisible by LANES_PER_WAVE_X*TN"
 assert WAVE_TILE_M % (LANES_PER_WAVE_Y * TM) == 0, "WAVE_TILE_M must be divisible by LANES_PER_WAVE_Y*TM"
 
+def copy(dest:UOp, src:UOp, rng:int):
+  assert dest.shape == src.shape
+  rngs = [UOp.range(s, rng+i) for i,s in enumerate(src.shape)]
+  return dest[*rngs].store(src[*rngs]).end(*rngs)
+
 def hand_spec_kernel3():
   # ---------------------------
   # per-thread read mapping
@@ -115,14 +120,10 @@ def hand_spec_kernel3():
   # LOCAL -> REG (per-wave tiles)
   # ---------------------------
   Bs_view = Bs.reshape(BLOCK_K, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)[k, waveIdx, :, idxInWave, :]
-  iterWaveN = UOp.range(ITERS_PER_WAVE_N, 4)
-  i = UOp.range(TN, 5)
-  B_row = B_row[iterWaveN, i].set(Bs_view[iterWaveN, i], end=(iterWaveN, i))
+  B_row = B_row.after(copy(B_row, Bs_view, 4))
 
   As_view = As.reshape(BLOCK_K, WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM)[k, waveIdy, :, idyInWave, :]
-  iterWaveM = UOp.range(ITERS_PER_WAVE_M, 6)
-  i = UOp.range(TM, 7)
-  A_col = A_col[iterWaveM, i].set(As_view[iterWaveM, i], end=(iterWaveM, i))
+  A_col = A_col.after(copy(A_col, As_view, 6))
 
   # ---------------------------
   # FMA: c_regs += A_col * B_row
@@ -142,12 +143,7 @@ def hand_spec_kernel3():
   # ---------------------------
   c = c.reshape(WAVES_IN_BLOCK_Y, ITERS_PER_WAVE_M, LANES_PER_WAVE_Y, TM, WAVES_IN_BLOCK_X, ITERS_PER_WAVE_N, LANES_PER_WAVE_X, TN)
   c = c[waveIdy, :, idyInWave, :, waveIdx, :, idxInWave, :]  # select locals
-  iterWaveM = UOp.range(ITERS_PER_WAVE_M, 1000)
-  yt = UOp.range(TM, 1001)
-  iterWaveN = UOp.range(ITERS_PER_WAVE_N, 1002)
-  xt = UOp.range(TN, 1003)
-  sink = c[iterWaveM, yt, iterWaveN, xt].store(c_regs.after(sink)[iterWaveM, yt, iterWaveN, xt])
-  sink = sink.end(iterWaveM, iterWaveN, yt, xt)
+  sink = copy(c, c_regs.after(sink), rng=1000)
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
