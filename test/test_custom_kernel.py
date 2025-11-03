@@ -50,12 +50,12 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   return store.end(i).sink(arg=KernelInfo(name=f"flip_contract_{dest.size}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
-  G = UOp.range(src.shape[0], 0, AxisType.GLOBAL)
+  G = UOp.range(src.shape[0], 0)
   slice_src = src[G, :]
   reg = UOp.placeholder((1,), dest.dtype.base, 0, addrspace=AddrSpace.REG)
   reg = reg.after(G)[0].set(0)
   R = UOp.range(src.shape[1], 1, AxisType.REDUCE)
-  reg = reg[0].set(reg[0] + slice_src[R], end=R)
+  reg = reg[0].set(reg.after(R)[0] + slice_src[R], end=R)
   ast = dest[G].set(reg[0], end=G)
   return ast.sink(arg=KernelInfo(name=f"slice_sum_{src.shape[0]}_{src.shape[1]}", opts_to_apply=()))
 
@@ -125,7 +125,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(b.item(), 15)
 
   def test_slice_sum(self):
-    A = Tensor.randn(16, 16)
+    A = Tensor.randn(16, 16).contiguous()
     B = Tensor.empty(16)
     B = Tensor.custom_kernel(B, A, fxn=slice_sum_kernel)[0]
     self.assertTrue(B.allclose(A.sum(1)))
