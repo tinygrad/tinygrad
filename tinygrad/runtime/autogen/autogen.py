@@ -13,10 +13,6 @@ def readext(f, fst, snd=None):
     f.seek(start:=(fst.start.offset if isinstance(fst, SourceRange) else fst))
     return f.read((fst.end.offset if isinstance(fst, SourceRange) else snd)-start)
 
-def until(pred, f, x):
-  while not pred(x): x = f(x)
-  return x
-
 base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b', r'\1'),
               (r'\b0+(?=\d)', ''), (r'\s*&&\s*', r' and '), (r'\s*\|\|\s*', r' or '), (r'\s*!\s*', ' not '),
               (r'(struct|union|enum)\s*([a-zA-Z_][a-zA-Z0-9_]*\b)', r'\1_\2'),
