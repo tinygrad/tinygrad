@@ -929,7 +929,8 @@ class AMDDevice(HCQCompiled):
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
-      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", -1 if SQTT >= 2 else (1 << 1)) # se bitmask: -1 enable all, 0 disable all
+      default_mask = functools.reduce(int.__or__, (1<<i for i in range(self.se_cnt) if self.target[0] > 9 or i % 2 == 0)) if SQTT >= 2 else (1 << 1)
+      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", default_mask)
       self.sqtt_next_cmd_id = itertools.count(0)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
