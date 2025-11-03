@@ -81,7 +81,7 @@ def hand_spec_kernel3():
   c_regs = UOp.placeholder((ITERS_PER_WAVE_M, TM, ITERS_PER_WAVE_N, TN), dtypes.float, slot=2, addrspace=AddrSpace.REG)
 
   i = UOp.range(c_regs.size, 16)
-  c_regs = c_regs[i].set(0.0, end=i)
+  c_regs = c_regs.after(c_regs.flatten()[i].store(UOp.const(dtypes.float, 0.0)).end(i))
 
   k_tile_range = UOp.range(N // BLOCK_K, 0)
 
