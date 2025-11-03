@@ -467,7 +467,7 @@ def _IOW(base, nr, typ): return functools.partial(_do_ioctl, 1, ord(base) if isi
 def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, typ)
 def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, typ)
 
-def CEnum(typ: type):
+def CEnum(typ: type[ctypes._SimpleCData]):
   class _CEnum(typ):
     _val_to_name_: dict[int,str] = {}
 
@@ -487,8 +487,9 @@ def CEnum(typ: type):
 
   return _CEnum
 
+PyCStructType = type(ctypes.Structure)
 # supports gcc (C11) __attribute__((packed))
-class MetaStruct(type(ctypes.Structure)): # type: ignore
+class MetaStruct(PyCStructType):
   def __new__(mcs, name, bases, dct):
     fields = dct.pop("_fields_", None)
     cls = super().__new__(mcs, name, bases, dct)
@@ -503,7 +504,6 @@ class MetaStruct(type(ctypes.Structure)): # type: ignore
 
   @staticmethod
   def _build(cls, fields):
-    print(fields)
     o = 0
     for n,t,b in [(f[0], f[1], f[2] if len(f) == 3 else 0) for f in fields]:
       if b == 0: o = (o + 7) & ~7
@@ -513,8 +513,8 @@ class MetaStruct(type(ctypes.Structure)): # type: ignore
                                functools.partial(_s,m=m,s=o,b=b)))
       o += sz
 
-    type(ctypes.Structure).__setattr__(cls, '_fields_', [('_data', ctypes.c_ubyte * ((o + 7) // 8))])
-    type(ctypes.Structure).__setattr__(cls, '_packed_', True)
+    PyCStructType.__setattr__(cls, '_fields_', [('_data', ctypes.c_ubyte * ((o + 7) // 8))])
+    PyCStructType.__setattr__(cls, '_packed_', True)
     setattr(cls, '_packed_fields_', fields)
 
 class Struct(ctypes.Structure, metaclass=MetaStruct):
