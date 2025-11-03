@@ -1,7 +1,8 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
-class struct_v11_gfx_mqd(ctypes.Structure): pass
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+
+class struct_v11_gfx_mqd(Struct): pass
 struct_v11_gfx_mqd._fields_ = [
   ('shadow_base_lo', ctypes.c_uint),
   ('shadow_base_hi', ctypes.c_uint),
@@ -516,7 +517,7 @@ struct_v11_gfx_mqd._fields_ = [
   ('reserved_510', ctypes.c_uint),
   ('reserved_511', ctypes.c_uint),
 ]
-class struct_v11_sdma_mqd(ctypes.Structure): pass
+class struct_v11_sdma_mqd(Struct): pass
 struct_v11_sdma_mqd._fields_ = [
   ('sdmax_rlcx_rb_cntl', ctypes.c_uint),
   ('sdmax_rlcx_rb_base', ctypes.c_uint),
@@ -647,7 +648,7 @@ struct_v11_sdma_mqd._fields_ = [
   ('sdma_engine_id', ctypes.c_uint),
   ('sdma_queue_id', ctypes.c_uint),
 ]
-class struct_v11_compute_mqd(ctypes.Structure): pass
+class struct_v11_compute_mqd(Struct): pass
 struct_v11_compute_mqd._fields_ = [
   ('header', ctypes.c_uint),
   ('compute_dispatch_initiator', ctypes.c_uint),
@@ -1162,12 +1163,9 @@ struct_v11_compute_mqd._fields_ = [
   ('gws_62_val', ctypes.c_uint),
   ('gws_63_val', ctypes.c_uint),
 ]
-class struct_v12_gfx_mqd(ctypes.Structure): pass
-struct_v12_gfx_mqd._fields_ = []
-class struct_v12_sdma_mqd(ctypes.Structure): pass
-struct_v12_sdma_mqd._fields_ = []
-class struct_v12_compute_mqd(ctypes.Structure): pass
-struct_v12_compute_mqd._fields_ = []
+class struct_v12_gfx_mqd(Struct): pass
+class struct_v12_sdma_mqd(Struct): pass
+class struct_v12_compute_mqd(Struct): pass
 enum_amdgpu_vm_level = CEnum(ctypes.c_uint)
 AMDGPU_VM_PDB2 = enum_amdgpu_vm_level.define('AMDGPU_VM_PDB2', 0)
 AMDGPU_VM_PDB1 = enum_amdgpu_vm_level.define('AMDGPU_VM_PDB1', 1)
@@ -1183,38 +1181,28 @@ MALL_INFO = table.define('MALL_INFO', 4)
 NPS_INFO = table.define('NPS_INFO', 5)
 TOTAL_TABLES = table.define('TOTAL_TABLES', 6)
 
-class struct_table_info(ctypes.Structure): pass
-struct_table_info._fields_ = []
+class struct_table_info(Struct): pass
 table_info = struct_table_info
-class struct_binary_header(ctypes.Structure): pass
-struct_binary_header._fields_ = []
+class struct_binary_header(Struct): pass
 binary_header = struct_binary_header
-class struct_die_info(ctypes.Structure): pass
-struct_die_info._fields_ = []
+class struct_die_info(Struct): pass
 die_info = struct_die_info
-class struct_ip_discovery_header(ctypes.Structure): pass
-struct_ip_discovery_header._fields_ = []
+class struct_ip_discovery_header(Struct): pass
 class _anonunion0(ctypes.Union): pass
-_anonunion0._fields_ = []
-class _anonstruct1(ctypes.Structure): pass
-_anonstruct1._fields_ = []
+class _anonstruct1(Struct): pass
 ip_discovery_header = struct_ip_discovery_header
-class struct_ip(ctypes.Structure): pass
-struct_ip._fields_ = []
+class struct_ip(Struct): pass
 ip = struct_ip
-class struct_ip_v3(ctypes.Structure): pass
-struct_ip_v3._fields_ = []
+class struct_ip_v3(Struct): pass
 ip_v3 = struct_ip_v3
-class struct_ip_v4(ctypes.Structure): pass
-struct_ip_v4._fields_ = []
+class struct_ip_v4(Struct): pass
 ip_v4 = struct_ip_v4
-class struct_die_header(ctypes.Structure): pass
-struct_die_header._fields_ = []
+class struct_die_header(Struct): pass
 die_header = struct_die_header
-class struct_ip_structure(ctypes.Structure): pass
-class struct_die(ctypes.Structure): pass
-class _anonunion2(ctypes.Union): pass
-_anonunion2._fields_ = [
+class struct_ip_structure(Struct): pass
+class struct_die(Struct): pass
+class struct_die_0(ctypes.Union): pass
+struct_die_0._fields_ = [
   ('ip_list', ctypes.POINTER(ip)),
   ('ip_v3_list', ctypes.POINTER(ip_v3)),
   ('ip_v4_list', ctypes.POINTER(ip_v4)),
@@ -1222,58 +1210,37 @@ _anonunion2._fields_ = [
 struct_die._anonymous_ = ['_0']
 struct_die._fields_ = [
   ('die_header', ctypes.POINTER(die_header)),
-  ('_0', _anonunion2),
+  ('_0', struct_die_0),
 ]
 struct_ip_structure._fields_ = [
   ('header', ctypes.POINTER(ip_discovery_header)),
   ('die', struct_die),
 ]
 ip_structure = struct_ip_structure
-class struct_gpu_info_header(ctypes.Structure): pass
-struct_gpu_info_header._fields_ = []
-class struct_gc_info_v1_0(ctypes.Structure): pass
-struct_gc_info_v1_0._fields_ = []
-class struct_gc_info_v1_1(ctypes.Structure): pass
-struct_gc_info_v1_1._fields_ = []
-class struct_gc_info_v1_2(ctypes.Structure): pass
-struct_gc_info_v1_2._fields_ = []
-class struct_gc_info_v1_3(ctypes.Structure): pass
-struct_gc_info_v1_3._fields_ = []
-class struct_gc_info_v2_0(ctypes.Structure): pass
-struct_gc_info_v2_0._fields_ = []
-class struct_gc_info_v2_1(ctypes.Structure): pass
-struct_gc_info_v2_1._fields_ = []
-class struct_harvest_info_header(ctypes.Structure): pass
-struct_harvest_info_header._fields_ = []
+class struct_gpu_info_header(Struct): pass
+class struct_gc_info_v1_0(Struct): pass
+class struct_gc_info_v1_1(Struct): pass
+class struct_gc_info_v1_2(Struct): pass
+class struct_gc_info_v1_3(Struct): pass
+class struct_gc_info_v2_0(Struct): pass
+class struct_gc_info_v2_1(Struct): pass
+class struct_harvest_info_header(Struct): pass
 harvest_info_header = struct_harvest_info_header
-class struct_harvest_info(ctypes.Structure): pass
-struct_harvest_info._fields_ = []
+class struct_harvest_info(Struct): pass
 harvest_info = struct_harvest_info
-class struct_harvest_table(ctypes.Structure): pass
-struct_harvest_table._fields_ = []
+class struct_harvest_table(Struct): pass
 harvest_table = struct_harvest_table
-class struct_mall_info_header(ctypes.Structure): pass
-struct_mall_info_header._fields_ = []
-class struct_mall_info_v1_0(ctypes.Structure): pass
-struct_mall_info_v1_0._fields_ = []
-class struct_mall_info_v2_0(ctypes.Structure): pass
-struct_mall_info_v2_0._fields_ = []
-class struct_vcn_info_header(ctypes.Structure): pass
-struct_vcn_info_header._fields_ = []
-class struct_vcn_instance_info_v1_0(ctypes.Structure): pass
-struct_vcn_instance_info_v1_0._fields_ = []
+class struct_mall_info_header(Struct): pass
+class struct_mall_info_v1_0(Struct): pass
+class struct_mall_info_v2_0(Struct): pass
+class struct_vcn_info_header(Struct): pass
+class struct_vcn_instance_info_v1_0(Struct): pass
 class union__fuse_data(ctypes.Union): pass
-union__fuse_data._fields_ = []
-class _anonstruct3(ctypes.Structure): pass
-_anonstruct3._fields_ = []
-class struct_vcn_info_v1_0(ctypes.Structure): pass
-struct_vcn_info_v1_0._fields_ = []
-class struct_nps_info_header(ctypes.Structure): pass
-struct_nps_info_header._fields_ = []
-class struct_nps_instance_info_v1_0(ctypes.Structure): pass
-struct_nps_instance_info_v1_0._fields_ = []
-class struct_nps_info_v1_0(ctypes.Structure): pass
-struct_nps_info_v1_0._fields_ = []
+class _anonstruct2(Struct): pass
+class struct_vcn_info_v1_0(Struct): pass
+class struct_nps_info_header(Struct): pass
+class struct_nps_instance_info_v1_0(Struct): pass
+class struct_nps_info_v1_0(Struct): pass
 enum_amd_hw_ip_block_type = CEnum(ctypes.c_uint)
 GC_HWIP = enum_amd_hw_ip_block_type.define('GC_HWIP', 1)
 HDP_HWIP = enum_amd_hw_ip_block_type.define('HDP_HWIP', 2)
@@ -1313,7 +1280,7 @@ PCIE_HWIP = enum_amd_hw_ip_block_type.define('PCIE_HWIP', 33)
 ISP_HWIP = enum_amd_hw_ip_block_type.define('ISP_HWIP', 34)
 MAX_HWIP = enum_amd_hw_ip_block_type.define('MAX_HWIP', 35)
 
-class struct_common_firmware_header(ctypes.Structure): pass
+class struct_common_firmware_header(Struct): pass
 struct_common_firmware_header._fields_ = [
   ('size_bytes', ctypes.c_uint),
   ('header_size_bytes', ctypes.c_uint),
@@ -1326,59 +1293,59 @@ struct_common_firmware_header._fields_ = [
   ('ucode_array_offset_bytes', ctypes.c_uint),
   ('crc32', ctypes.c_uint),
 ]
-class struct_mc_firmware_header_v1_0(ctypes.Structure): pass
+class struct_mc_firmware_header_v1_0(Struct): pass
 struct_mc_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('io_debug_size_bytes', ctypes.c_uint),
   ('io_debug_array_offset_bytes', ctypes.c_uint),
 ]
-class struct_smc_firmware_header_v1_0(ctypes.Structure): pass
+class struct_smc_firmware_header_v1_0(Struct): pass
 struct_smc_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_start_addr', ctypes.c_uint),
 ]
-class struct_smc_firmware_header_v2_0(ctypes.Structure): pass
+class struct_smc_firmware_header_v2_0(Struct): pass
 struct_smc_firmware_header_v2_0._fields_ = [
   ('v1_0', struct_smc_firmware_header_v1_0),
   ('ppt_offset_bytes', ctypes.c_uint),
   ('ppt_size_bytes', ctypes.c_uint),
 ]
-class struct_smc_soft_pptable_entry(ctypes.Structure): pass
+class struct_smc_soft_pptable_entry(Struct): pass
 struct_smc_soft_pptable_entry._fields_ = [
   ('id', ctypes.c_uint),
   ('ppt_offset_bytes', ctypes.c_uint),
   ('ppt_size_bytes', ctypes.c_uint),
 ]
-class struct_smc_firmware_header_v2_1(ctypes.Structure): pass
+class struct_smc_firmware_header_v2_1(Struct): pass
 struct_smc_firmware_header_v2_1._fields_ = [
   ('v1_0', struct_smc_firmware_header_v1_0),
   ('pptable_count', ctypes.c_uint),
   ('pptable_entry_offset', ctypes.c_uint),
 ]
-class struct_psp_fw_legacy_bin_desc(ctypes.Structure): pass
+class struct_psp_fw_legacy_bin_desc(Struct): pass
 struct_psp_fw_legacy_bin_desc._fields_ = [
   ('fw_version', ctypes.c_uint),
   ('offset_bytes', ctypes.c_uint),
   ('size_bytes', ctypes.c_uint),
 ]
-class struct_psp_firmware_header_v1_0(ctypes.Structure): pass
+class struct_psp_firmware_header_v1_0(Struct): pass
 struct_psp_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('sos', struct_psp_fw_legacy_bin_desc),
 ]
-class struct_psp_firmware_header_v1_1(ctypes.Structure): pass
+class struct_psp_firmware_header_v1_1(Struct): pass
 struct_psp_firmware_header_v1_1._fields_ = [
   ('v1_0', struct_psp_firmware_header_v1_0),
   ('toc', struct_psp_fw_legacy_bin_desc),
   ('kdb', struct_psp_fw_legacy_bin_desc),
 ]
-class struct_psp_firmware_header_v1_2(ctypes.Structure): pass
+class struct_psp_firmware_header_v1_2(Struct): pass
 struct_psp_firmware_header_v1_2._fields_ = [
   ('v1_0', struct_psp_firmware_header_v1_0),
   ('res', struct_psp_fw_legacy_bin_desc),
   ('kdb', struct_psp_fw_legacy_bin_desc),
 ]
-class struct_psp_firmware_header_v1_3(ctypes.Structure): pass
+class struct_psp_firmware_header_v1_3(Struct): pass
 struct_psp_firmware_header_v1_3._fields_ = [
   ('v1_1', struct_psp_firmware_header_v1_1),
   ('spl', struct_psp_fw_legacy_bin_desc),
@@ -1386,7 +1353,7 @@ struct_psp_firmware_header_v1_3._fields_ = [
   ('sys_drv_aux', struct_psp_fw_legacy_bin_desc),
   ('sos_aux', struct_psp_fw_legacy_bin_desc),
 ]
-class struct_psp_fw_bin_desc(ctypes.Structure): pass
+class struct_psp_fw_bin_desc(Struct): pass
 struct_psp_fw_bin_desc._fields_ = [
   ('fw_type', ctypes.c_uint),
   ('fw_version', ctypes.c_uint),
@@ -1408,20 +1375,20 @@ PSP_FW_TYPE_PSP_RAS_DRV = enum_psp_fw_type.define('PSP_FW_TYPE_PSP_RAS_DRV', 10)
 PSP_FW_TYPE_PSP_IPKEYMGR_DRV = enum_psp_fw_type.define('PSP_FW_TYPE_PSP_IPKEYMGR_DRV', 11)
 PSP_FW_TYPE_MAX_INDEX = enum_psp_fw_type.define('PSP_FW_TYPE_MAX_INDEX', 12)
 
-class struct_psp_firmware_header_v2_0(ctypes.Structure): pass
+class struct_psp_firmware_header_v2_0(Struct): pass
 struct_psp_firmware_header_v2_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('psp_fw_bin_count', ctypes.c_uint),
   ('psp_fw_bin', (struct_psp_fw_bin_desc * 1)),
 ]
-class struct_psp_firmware_header_v2_1(ctypes.Structure): pass
+class struct_psp_firmware_header_v2_1(Struct): pass
 struct_psp_firmware_header_v2_1._fields_ = [
   ('header', struct_common_firmware_header),
   ('psp_fw_bin_count', ctypes.c_uint),
   ('psp_aux_fw_bin_index', ctypes.c_uint),
   ('psp_fw_bin', (struct_psp_fw_bin_desc * 1)),
 ]
-class struct_ta_firmware_header_v1_0(ctypes.Structure): pass
+class struct_ta_firmware_header_v1_0(Struct): pass
 struct_ta_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('xgmi', struct_psp_fw_legacy_bin_desc),
@@ -1441,20 +1408,20 @@ TA_FW_TYPE_PSP_RAP = enum_ta_fw_type.define('TA_FW_TYPE_PSP_RAP', 6)
 TA_FW_TYPE_PSP_SECUREDISPLAY = enum_ta_fw_type.define('TA_FW_TYPE_PSP_SECUREDISPLAY', 7)
 TA_FW_TYPE_MAX_INDEX = enum_ta_fw_type.define('TA_FW_TYPE_MAX_INDEX', 8)
 
-class struct_ta_firmware_header_v2_0(ctypes.Structure): pass
+class struct_ta_firmware_header_v2_0(Struct): pass
 struct_ta_firmware_header_v2_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ta_fw_bin_count', ctypes.c_uint),
   ('ta_fw_bin', (struct_psp_fw_bin_desc * 1)),
 ]
-class struct_gfx_firmware_header_v1_0(ctypes.Structure): pass
+class struct_gfx_firmware_header_v1_0(Struct): pass
 struct_gfx_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
   ('jt_offset', ctypes.c_uint),
   ('jt_size', ctypes.c_uint),
 ]
-class struct_gfx_firmware_header_v2_0(ctypes.Structure): pass
+class struct_gfx_firmware_header_v2_0(Struct): pass
 struct_gfx_firmware_header_v2_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
@@ -1465,7 +1432,7 @@ struct_gfx_firmware_header_v2_0._fields_ = [
   ('ucode_start_addr_lo', ctypes.c_uint),
   ('ucode_start_addr_hi', ctypes.c_uint),
 ]
-class struct_mes_firmware_header_v1_0(ctypes.Structure): pass
+class struct_mes_firmware_header_v1_0(Struct): pass
 struct_mes_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('mes_ucode_version', ctypes.c_uint),
@@ -1479,7 +1446,7 @@ struct_mes_firmware_header_v1_0._fields_ = [
   ('mes_data_start_addr_lo', ctypes.c_uint),
   ('mes_data_start_addr_hi', ctypes.c_uint),
 ]
-class struct_rlc_firmware_header_v1_0(ctypes.Structure): pass
+class struct_rlc_firmware_header_v1_0(Struct): pass
 struct_rlc_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
@@ -1488,7 +1455,7 @@ struct_rlc_firmware_header_v1_0._fields_ = [
   ('avail_scratch_ram_locations', ctypes.c_uint),
   ('master_pkt_description_offset', ctypes.c_uint),
 ]
-class struct_rlc_firmware_header_v2_0(ctypes.Structure): pass
+class struct_rlc_firmware_header_v2_0(Struct): pass
 struct_rlc_firmware_header_v2_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
@@ -1510,7 +1477,7 @@ struct_rlc_firmware_header_v2_0._fields_ = [
   ('reg_list_separate_size_bytes', ctypes.c_uint),
   ('reg_list_separate_array_offset_bytes', ctypes.c_uint),
 ]
-class struct_rlc_firmware_header_v2_1(ctypes.Structure): pass
+class struct_rlc_firmware_header_v2_1(Struct): pass
 struct_rlc_firmware_header_v2_1._fields_ = [
   ('v2_0', struct_rlc_firmware_header_v2_0),
   ('reg_list_format_direct_reg_list_length', ctypes.c_uint),
@@ -1527,7 +1494,7 @@ struct_rlc_firmware_header_v2_1._fields_ = [
   ('save_restore_list_srm_size_bytes', ctypes.c_uint),
   ('save_restore_list_srm_offset_bytes', ctypes.c_uint),
 ]
-class struct_rlc_firmware_header_v2_2(ctypes.Structure): pass
+class struct_rlc_firmware_header_v2_2(Struct): pass
 struct_rlc_firmware_header_v2_2._fields_ = [
   ('v2_1', struct_rlc_firmware_header_v2_1),
   ('rlc_iram_ucode_size_bytes', ctypes.c_uint),
@@ -1535,7 +1502,7 @@ struct_rlc_firmware_header_v2_2._fields_ = [
   ('rlc_dram_ucode_size_bytes', ctypes.c_uint),
   ('rlc_dram_ucode_offset_bytes', ctypes.c_uint),
 ]
-class struct_rlc_firmware_header_v2_3(ctypes.Structure): pass
+class struct_rlc_firmware_header_v2_3(Struct): pass
 struct_rlc_firmware_header_v2_3._fields_ = [
   ('v2_2', struct_rlc_firmware_header_v2_2),
   ('rlcp_ucode_version', ctypes.c_uint),
@@ -1547,7 +1514,7 @@ struct_rlc_firmware_header_v2_3._fields_ = [
   ('rlcv_ucode_size_bytes', ctypes.c_uint),
   ('rlcv_ucode_offset_bytes', ctypes.c_uint),
 ]
-class struct_rlc_firmware_header_v2_4(ctypes.Structure): pass
+class struct_rlc_firmware_header_v2_4(Struct): pass
 struct_rlc_firmware_header_v2_4._fields_ = [
   ('v2_3', struct_rlc_firmware_header_v2_3),
   ('global_tap_delays_ucode_size_bytes', ctypes.c_uint),
@@ -1561,7 +1528,7 @@ struct_rlc_firmware_header_v2_4._fields_ = [
   ('se3_tap_delays_ucode_size_bytes', ctypes.c_uint),
   ('se3_tap_delays_ucode_offset_bytes', ctypes.c_uint),
 ]
-class struct_sdma_firmware_header_v1_0(ctypes.Structure): pass
+class struct_sdma_firmware_header_v1_0(Struct): pass
 struct_sdma_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
@@ -1569,12 +1536,12 @@ struct_sdma_firmware_header_v1_0._fields_ = [
   ('jt_offset', ctypes.c_uint),
   ('jt_size', ctypes.c_uint),
 ]
-class struct_sdma_firmware_header_v1_1(ctypes.Structure): pass
+class struct_sdma_firmware_header_v1_1(Struct): pass
 struct_sdma_firmware_header_v1_1._fields_ = [
   ('v1_0', struct_sdma_firmware_header_v1_0),
   ('digest_size', ctypes.c_uint),
 ]
-class struct_sdma_firmware_header_v2_0(ctypes.Structure): pass
+class struct_sdma_firmware_header_v2_0(Struct): pass
 struct_sdma_firmware_header_v2_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
@@ -1586,7 +1553,7 @@ struct_sdma_firmware_header_v2_0._fields_ = [
   ('ctl_jt_offset', ctypes.c_uint),
   ('ctl_jt_size', ctypes.c_uint),
 ]
-class struct_vpe_firmware_header_v1_0(ctypes.Structure): pass
+class struct_vpe_firmware_header_v1_0(Struct): pass
 struct_vpe_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
@@ -1598,7 +1565,7 @@ struct_vpe_firmware_header_v1_0._fields_ = [
   ('ctl_jt_offset', ctypes.c_uint),
   ('ctl_jt_size', ctypes.c_uint),
 ]
-class struct_umsch_mm_firmware_header_v1_0(ctypes.Structure): pass
+class struct_umsch_mm_firmware_header_v1_0(Struct): pass
 struct_umsch_mm_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('umsch_mm_ucode_version', ctypes.c_uint),
@@ -1614,14 +1581,14 @@ struct_umsch_mm_firmware_header_v1_0._fields_ = [
   ('umsch_mm_data_start_addr_lo', ctypes.c_uint),
   ('umsch_mm_data_start_addr_hi', ctypes.c_uint),
 ]
-class struct_sdma_firmware_header_v3_0(ctypes.Structure): pass
+class struct_sdma_firmware_header_v3_0(Struct): pass
 struct_sdma_firmware_header_v3_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('ucode_feature_version', ctypes.c_uint),
   ('ucode_offset_bytes', ctypes.c_uint),
   ('ucode_size_bytes', ctypes.c_uint),
 ]
-class struct_gpu_info_firmware_v1_0(ctypes.Structure): pass
+class struct_gpu_info_firmware_v1_0(Struct): pass
 struct_gpu_info_firmware_v1_0._fields_ = [
   ('gc_num_se', ctypes.c_uint),
   ('gc_num_cu_per_sh', ctypes.c_uint),
@@ -1639,31 +1606,31 @@ struct_gpu_info_firmware_v1_0._fields_ = [
   ('gc_max_scratch_slots_per_cu', ctypes.c_uint),
   ('gc_lds_size', ctypes.c_uint),
 ]
-class struct_gpu_info_firmware_v1_1(ctypes.Structure): pass
+class struct_gpu_info_firmware_v1_1(Struct): pass
 struct_gpu_info_firmware_v1_1._fields_ = [
   ('v1_0', struct_gpu_info_firmware_v1_0),
   ('num_sc_per_sh', ctypes.c_uint),
   ('num_packer_per_sc', ctypes.c_uint),
 ]
-class struct_gpu_info_firmware_header_v1_0(ctypes.Structure): pass
+class struct_gpu_info_firmware_header_v1_0(Struct): pass
 struct_gpu_info_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('version_major', ctypes.c_ushort),
   ('version_minor', ctypes.c_ushort),
 ]
-class struct_dmcu_firmware_header_v1_0(ctypes.Structure): pass
+class struct_dmcu_firmware_header_v1_0(Struct): pass
 struct_dmcu_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('intv_offset_bytes', ctypes.c_uint),
   ('intv_size_bytes', ctypes.c_uint),
 ]
-class struct_dmcub_firmware_header_v1_0(ctypes.Structure): pass
+class struct_dmcub_firmware_header_v1_0(Struct): pass
 struct_dmcub_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('inst_const_bytes', ctypes.c_uint),
   ('bss_data_bytes', ctypes.c_uint),
 ]
-class struct_imu_firmware_header_v1_0(ctypes.Structure): pass
+class struct_imu_firmware_header_v1_0(Struct): pass
 struct_imu_firmware_header_v1_0._fields_ = [
   ('header', struct_common_firmware_header),
   ('imu_iram_ucode_size_bytes', ctypes.c_uint),
@@ -1787,9 +1754,8 @@ AMDGPU_FW_LOAD_PSP = enum_amdgpu_firmware_load_type.define('AMDGPU_FW_LOAD_PSP',
 AMDGPU_FW_LOAD_SMU = enum_amdgpu_firmware_load_type.define('AMDGPU_FW_LOAD_SMU', 2)
 AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO = enum_amdgpu_firmware_load_type.define('AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO', 3)
 
-class struct_amdgpu_firmware_info(ctypes.Structure): pass
-class struct_firmware(ctypes.Structure): pass
-struct_firmware._fields_ = []
+class struct_amdgpu_firmware_info(Struct): pass
+class struct_firmware(Struct): pass
 struct_amdgpu_firmware_info._fields_ = [
   ('ucode_id', enum_AMDGPU_UCODE_ID),
   ('fw', ctypes.POINTER(struct_firmware)),
@@ -1812,7 +1778,7 @@ GFX_CTRL_CMD_ID_CONSUME_CMD = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_C
 GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING', 786432)
 GFX_CTRL_CMD_ID_MAX = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_MAX', 983040)
 
-class struct_psp_gfx_ctrl(ctypes.Structure): pass
+class struct_psp_gfx_ctrl(Struct): pass
 struct_psp_gfx_ctrl._fields_ = [
   ('cmd_resp', ctypes.c_uint),
   ('rbi_wptr', ctypes.c_uint),
@@ -1849,7 +1815,7 @@ BOOTCFG_CMD_INVALIDATE = enum_psp_gfx_boot_config_cmd.define('BOOTCFG_CMD_INVALI
 enum_psp_gfx_boot_config = CEnum(ctypes.c_uint)
 BOOT_CONFIG_GECC = enum_psp_gfx_boot_config.define('BOOT_CONFIG_GECC', 1)
 
-class struct_psp_gfx_cmd_load_ta(ctypes.Structure): pass
+class struct_psp_gfx_cmd_load_ta(Struct): pass
 struct_psp_gfx_cmd_load_ta._fields_ = [
   ('app_phy_addr_lo', ctypes.c_uint),
   ('app_phy_addr_hi', ctypes.c_uint),
@@ -1858,38 +1824,38 @@ struct_psp_gfx_cmd_load_ta._fields_ = [
   ('cmd_buf_phy_addr_hi', ctypes.c_uint),
   ('cmd_buf_len', ctypes.c_uint),
 ]
-class struct_psp_gfx_cmd_unload_ta(ctypes.Structure): pass
+class struct_psp_gfx_cmd_unload_ta(Struct): pass
 struct_psp_gfx_cmd_unload_ta._fields_ = [
   ('session_id', ctypes.c_uint),
 ]
-class struct_psp_gfx_buf_desc(ctypes.Structure): pass
+class struct_psp_gfx_buf_desc(Struct): pass
 struct_psp_gfx_buf_desc._fields_ = [
   ('buf_phy_addr_lo', ctypes.c_uint),
   ('buf_phy_addr_hi', ctypes.c_uint),
   ('buf_size', ctypes.c_uint),
 ]
-class struct_psp_gfx_buf_list(ctypes.Structure): pass
+class struct_psp_gfx_buf_list(Struct): pass
 struct_psp_gfx_buf_list._fields_ = [
   ('num_desc', ctypes.c_uint),
   ('total_size', ctypes.c_uint),
   ('buf_desc', (struct_psp_gfx_buf_desc * 64)),
 ]
-class struct_psp_gfx_cmd_invoke_cmd(ctypes.Structure): pass
+class struct_psp_gfx_cmd_invoke_cmd(Struct): pass
 struct_psp_gfx_cmd_invoke_cmd._fields_ = [
   ('session_id', ctypes.c_uint),
   ('ta_cmd_id', ctypes.c_uint),
   ('buf', struct_psp_gfx_buf_list),
 ]
-class struct_psp_gfx_cmd_setup_tmr(ctypes.Structure): pass
-class _anonunion4(ctypes.Union): pass
-class _anonunion4_bitfield(ctypes.Structure): pass
-_anonunion4_bitfield._fields_ = [
+class struct_psp_gfx_cmd_setup_tmr(Struct): pass
+class struct_psp_gfx_cmd_setup_tmr_0(ctypes.Union): pass
+class struct_psp_gfx_cmd_setup_tmr_0_bitfield(Struct): pass
+struct_psp_gfx_cmd_setup_tmr_0_bitfield._fields_ = [
   ('sriov_enabled', ctypes.c_uint,1),
   ('virt_phy_addr', ctypes.c_uint,1),
   ('reserved', ctypes.c_uint,30),
 ]
-_anonunion4._fields_ = [
-  ('bitfield', _anonunion4_bitfield),
+struct_psp_gfx_cmd_setup_tmr_0._fields_ = [
+  ('bitfield', struct_psp_gfx_cmd_setup_tmr_0_bitfield),
   ('tmr_flags', ctypes.c_uint),
 ]
 struct_psp_gfx_cmd_setup_tmr._anonymous_ = ['_0']
@@ -1897,7 +1863,7 @@ struct_psp_gfx_cmd_setup_tmr._fields_ = [
   ('buf_phy_addr_lo', ctypes.c_uint),
   ('buf_phy_addr_hi', ctypes.c_uint),
   ('buf_size', ctypes.c_uint),
-  ('_0', _anonunion4),
+  ('_0', struct_psp_gfx_cmd_setup_tmr_0),
   ('system_phy_addr_lo', ctypes.c_uint),
   ('system_phy_addr_hi', ctypes.c_uint),
 ]
@@ -2002,14 +1968,14 @@ GFX_FW_TYPE_JPEG_RAM = enum_psp_gfx_fw_type.define('GFX_FW_TYPE_JPEG_RAM', 128)
 GFX_FW_TYPE_P2S_TABLE = enum_psp_gfx_fw_type.define('GFX_FW_TYPE_P2S_TABLE', 129)
 GFX_FW_TYPE_MAX = enum_psp_gfx_fw_type.define('GFX_FW_TYPE_MAX', 130)
 
-class struct_psp_gfx_cmd_load_ip_fw(ctypes.Structure): pass
+class struct_psp_gfx_cmd_load_ip_fw(Struct): pass
 struct_psp_gfx_cmd_load_ip_fw._fields_ = [
   ('fw_phy_addr_lo', ctypes.c_uint),
   ('fw_phy_addr_hi', ctypes.c_uint),
   ('fw_size', ctypes.c_uint),
   ('fw_type', enum_psp_gfx_fw_type),
 ]
-class struct_psp_gfx_cmd_save_restore_ip_fw(ctypes.Structure): pass
+class struct_psp_gfx_cmd_save_restore_ip_fw(Struct): pass
 struct_psp_gfx_cmd_save_restore_ip_fw._fields_ = [
   ('save_fw', ctypes.c_uint),
   ('save_restore_addr_lo', ctypes.c_uint),
@@ -2017,25 +1983,25 @@ struct_psp_gfx_cmd_save_restore_ip_fw._fields_ = [
   ('buf_size', ctypes.c_uint),
   ('fw_type', enum_psp_gfx_fw_type),
 ]
-class struct_psp_gfx_cmd_reg_prog(ctypes.Structure): pass
+class struct_psp_gfx_cmd_reg_prog(Struct): pass
 struct_psp_gfx_cmd_reg_prog._fields_ = [
   ('reg_value', ctypes.c_uint),
   ('reg_id', ctypes.c_uint),
 ]
-class struct_psp_gfx_cmd_load_toc(ctypes.Structure): pass
+class struct_psp_gfx_cmd_load_toc(Struct): pass
 struct_psp_gfx_cmd_load_toc._fields_ = [
   ('toc_phy_addr_lo', ctypes.c_uint),
   ('toc_phy_addr_hi', ctypes.c_uint),
   ('toc_size', ctypes.c_uint),
 ]
-class struct_psp_gfx_cmd_boot_cfg(ctypes.Structure): pass
+class struct_psp_gfx_cmd_boot_cfg(Struct): pass
 struct_psp_gfx_cmd_boot_cfg._fields_ = [
   ('timestamp', ctypes.c_uint),
   ('sub_cmd', enum_psp_gfx_boot_config_cmd),
   ('boot_config', ctypes.c_uint),
   ('boot_config_valid', ctypes.c_uint),
 ]
-class struct_psp_gfx_cmd_sriov_spatial_part(ctypes.Structure): pass
+class struct_psp_gfx_cmd_sriov_spatial_part(Struct): pass
 struct_psp_gfx_cmd_sriov_spatial_part._fields_ = [
   ('mode', ctypes.c_uint),
   ('override_ips', ctypes.c_uint),
@@ -2056,16 +2022,16 @@ union_psp_gfx_commands._fields_ = [
   ('boot_cfg', struct_psp_gfx_cmd_boot_cfg),
   ('cmd_spatial_part', struct_psp_gfx_cmd_sriov_spatial_part),
 ]
-class struct_psp_gfx_uresp_reserved(ctypes.Structure): pass
+class struct_psp_gfx_uresp_reserved(Struct): pass
 struct_psp_gfx_uresp_reserved._fields_ = [
   ('reserved', (ctypes.c_uint * 8)),
 ]
-class struct_psp_gfx_uresp_fwar_db_info(ctypes.Structure): pass
+class struct_psp_gfx_uresp_fwar_db_info(Struct): pass
 struct_psp_gfx_uresp_fwar_db_info._fields_ = [
   ('fwar_db_addr_lo', ctypes.c_uint),
   ('fwar_db_addr_hi', ctypes.c_uint),
 ]
-class struct_psp_gfx_uresp_bootcfg(ctypes.Structure): pass
+class struct_psp_gfx_uresp_bootcfg(Struct): pass
 struct_psp_gfx_uresp_bootcfg._fields_ = [
   ('boot_cfg', ctypes.c_uint),
 ]
@@ -2075,7 +2041,7 @@ union_psp_gfx_uresp._fields_ = [
   ('boot_cfg', struct_psp_gfx_uresp_bootcfg),
   ('fwar_db_info', struct_psp_gfx_uresp_fwar_db_info),
 ]
-class struct_psp_gfx_resp(ctypes.Structure): pass
+class struct_psp_gfx_resp(Struct): pass
 struct_psp_gfx_resp._fields_ = [
   ('status', ctypes.c_uint),
   ('session_id', ctypes.c_uint),
@@ -2085,7 +2051,7 @@ struct_psp_gfx_resp._fields_ = [
   ('reserved', (ctypes.c_uint * 11)),
   ('uresp', union_psp_gfx_uresp),
 ]
-class struct_psp_gfx_cmd_resp(ctypes.Structure): pass
+class struct_psp_gfx_cmd_resp(Struct): pass
 struct_psp_gfx_cmd_resp._fields_ = [
   ('buf_size', ctypes.c_uint),
   ('buf_version', ctypes.c_uint),
@@ -2099,7 +2065,7 @@ struct_psp_gfx_cmd_resp._fields_ = [
   ('resp', struct_psp_gfx_resp),
   ('reserved_2', (ctypes.c_ubyte * 64)),
 ]
-class struct_psp_gfx_rb_frame(ctypes.Structure): pass
+class struct_psp_gfx_rb_frame(Struct): pass
 struct_psp_gfx_rb_frame._fields_ = [
   ('cmd_buf_addr_lo', ctypes.c_uint),
   ('cmd_buf_addr_hi', ctypes.c_uint),
@@ -2136,14 +2102,10 @@ TA_TYPE_RAP = enum_ta_type_id.define('TA_TYPE_RAP', 5)
 TA_TYPE_SECUREDISPLAY = enum_ta_type_id.define('TA_TYPE_SECUREDISPLAY', 6)
 TA_TYPE_MAX_INDEX = enum_ta_type_id.define('TA_TYPE_MAX_INDEX', 7)
 
-class struct_psp_context(ctypes.Structure): pass
-struct_psp_context._fields_ = []
-class struct_psp_xgmi_node_info(ctypes.Structure): pass
-struct_psp_xgmi_node_info._fields_ = []
-class struct_psp_xgmi_topology_info(ctypes.Structure): pass
-struct_psp_xgmi_topology_info._fields_ = []
-class struct_psp_bin_desc(ctypes.Structure): pass
-struct_psp_bin_desc._fields_ = []
+class struct_psp_context(Struct): pass
+class struct_psp_xgmi_node_info(Struct): pass
+class struct_psp_xgmi_topology_info(Struct): pass
+class struct_psp_bin_desc(Struct): pass
 enum_psp_bootloader_cmd = CEnum(ctypes.c_uint)
 PSP_BL__LOAD_SYSDRV = enum_psp_bootloader_cmd.define('PSP_BL__LOAD_SYSDRV', 65536)
 PSP_BL__LOAD_SOSDRV = enum_psp_bootloader_cmd.define('PSP_BL__LOAD_SOSDRV', 131072)
@@ -2202,13 +2164,12 @@ SCPM_DISABLE = enum_psp_runtime_scpm_authentication.define('SCPM_DISABLE', 0)
 SCPM_ENABLE = enum_psp_runtime_scpm_authentication.define('SCPM_ENABLE', 1)
 SCPM_ENABLE_WITH_SCPM_ERR = enum_psp_runtime_scpm_authentication.define('SCPM_ENABLE_WITH_SCPM_ERR', 2)
 
-class struct_amdgpu_device(ctypes.Structure): pass
-struct_amdgpu_device._fields_ = []
+class struct_amdgpu_device(Struct): pass
 enum_amdgpu_interrupt_state = CEnum(ctypes.c_uint)
 AMDGPU_IRQ_STATE_DISABLE = enum_amdgpu_interrupt_state.define('AMDGPU_IRQ_STATE_DISABLE', 0)
 AMDGPU_IRQ_STATE_ENABLE = enum_amdgpu_interrupt_state.define('AMDGPU_IRQ_STATE_ENABLE', 1)
 
-class struct_amdgpu_iv_entry(ctypes.Structure): pass
+class struct_amdgpu_iv_entry(Struct): pass
 struct_amdgpu_iv_entry._fields_ = [
   ('client_id', ctypes.c_uint),
   ('src_id', ctypes.c_uint),

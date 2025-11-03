@@ -1,59 +1,36 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
-union_PM4_MES_TYPE_3_HEADER._fields_ = []
-class _anonstruct0(ctypes.Structure): pass
-_anonstruct0._fields_ = []
+class _anonstruct0(Struct): pass
 enum_mes_set_resources_queue_type_enum = CEnum(ctypes.c_uint)
 queue_type__mes_set_resources__kernel_interface_queue_kiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__kernel_interface_queue_kiq', 0)
 queue_type__mes_set_resources__hsa_interface_queue_hiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_interface_queue_hiq', 1)
 queue_type__mes_set_resources__hsa_debug_interface_queue = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_debug_interface_queue', 4)
 
-class struct_pm4_mes_set_resources(ctypes.Structure): pass
-struct_pm4_mes_set_resources._fields_ = []
+class struct_pm4_mes_set_resources(Struct): pass
 class _anonunion1(ctypes.Union): pass
-_anonunion1._fields_ = []
 class _anonunion2(ctypes.Union): pass
-_anonunion2._fields_ = []
-class _anonstruct3(ctypes.Structure): pass
-_anonstruct3._fields_ = []
+class _anonstruct3(Struct): pass
 class _anonunion4(ctypes.Union): pass
-_anonunion4._fields_ = []
-class _anonstruct5(ctypes.Structure): pass
-_anonstruct5._fields_ = []
+class _anonstruct5(Struct): pass
 class _anonunion6(ctypes.Union): pass
-_anonunion6._fields_ = []
-class _anonstruct7(ctypes.Structure): pass
-_anonstruct7._fields_ = []
-class struct_pm4_mes_runlist(ctypes.Structure): pass
-struct_pm4_mes_runlist._fields_ = []
+class _anonstruct7(Struct): pass
+class struct_pm4_mes_runlist(Struct): pass
 class _anonunion8(ctypes.Union): pass
-_anonunion8._fields_ = []
 class _anonunion9(ctypes.Union): pass
-_anonunion9._fields_ = []
-class _anonstruct10(ctypes.Structure): pass
-_anonstruct10._fields_ = []
+class _anonstruct10(Struct): pass
 class _anonunion11(ctypes.Union): pass
-_anonunion11._fields_ = []
-class _anonstruct12(ctypes.Structure): pass
-_anonstruct12._fields_ = []
-class struct_pm4_mes_map_process(ctypes.Structure): pass
-struct_pm4_mes_map_process._fields_ = []
+class _anonstruct12(Struct): pass
+class struct_pm4_mes_map_process(Struct): pass
 class _anonunion13(ctypes.Union): pass
-_anonunion13._fields_ = []
 class _anonunion14(ctypes.Union): pass
-_anonunion14._fields_ = []
-class _anonstruct15(ctypes.Structure): pass
-_anonstruct15._fields_ = []
+class _anonstruct15(Struct): pass
 class _anonunion16(ctypes.Union): pass
-_anonunion16._fields_ = []
-class _anonstruct17(ctypes.Structure): pass
-_anonstruct17._fields_ = []
-class struct_PM4_MES_MAP_PROCESS_VM(ctypes.Structure): pass
-struct_PM4_MES_MAP_PROCESS_VM._fields_ = []
+class _anonstruct17(Struct): pass
+class struct_PM4_MES_MAP_PROCESS_VM(Struct): pass
 class _anonunion18(ctypes.Union): pass
-_anonunion18._fields_ = []
 enum_mes_map_queues_queue_sel_enum = CEnum(ctypes.c_uint)
 queue_sel__mes_map_queues__map_to_specified_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_specified_queue_slots_vi', 0)
 queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi', 1)
@@ -74,18 +51,12 @@ extended_engine_sel__mes_map_queues__legacy_engine_sel = enum_mes_map_queues_ext
 extended_engine_sel__mes_map_queues__sdma0_to_7_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__sdma0_to_7_sel', 1)
 extended_engine_sel__mes_map_queues__sdma8_to_15_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__sdma8_to_15_sel', 2)
 
-class struct_pm4_mes_map_queues(ctypes.Structure): pass
-struct_pm4_mes_map_queues._fields_ = []
+class struct_pm4_mes_map_queues(Struct): pass
 class _anonunion19(ctypes.Union): pass
-_anonunion19._fields_ = []
 class _anonunion20(ctypes.Union): pass
-_anonunion20._fields_ = []
-class _anonstruct21(ctypes.Structure): pass
-_anonstruct21._fields_ = []
+class _anonstruct21(Struct): pass
 class _anonunion22(ctypes.Union): pass
-_anonunion22._fields_ = []
-class _anonstruct23(ctypes.Structure): pass
-_anonstruct23._fields_ = []
+class _anonstruct23(Struct): pass
 enum_mes_query_status_interrupt_sel_enum = CEnum(ctypes.c_uint)
 interrupt_sel__mes_query_status__completion_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__completion_status', 0)
 interrupt_sel__mes_query_status__process_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__process_status', 1)
@@ -102,20 +73,13 @@ engine_sel__mes_query_status__compute = enum_mes_query_status_engine_sel_enum.de
 engine_sel__mes_query_status__sdma0_queue = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__sdma0_queue', 2)
 engine_sel__mes_query_status__sdma1_queue = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__sdma1_queue', 3)
 
-class struct_pm4_mes_query_status(ctypes.Structure): pass
-struct_pm4_mes_query_status._fields_ = []
+class struct_pm4_mes_query_status(Struct): pass
 class _anonunion24(ctypes.Union): pass
-_anonunion24._fields_ = []
 class _anonunion25(ctypes.Union): pass
-_anonunion25._fields_ = []
-class _anonstruct26(ctypes.Structure): pass
-_anonstruct26._fields_ = []
+class _anonstruct26(Struct): pass
 class _anonunion27(ctypes.Union): pass
-_anonunion27._fields_ = []
-class _anonstruct28(ctypes.Structure): pass
-_anonstruct28._fields_ = []
-class _anonstruct29(ctypes.Structure): pass
-_anonstruct29._fields_ = []
+class _anonstruct28(Struct): pass
+class _anonstruct29(Struct): pass
 enum_mes_unmap_queues_action_enum = CEnum(ctypes.c_uint)
 action__mes_unmap_queues__preempt_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__preempt_queues', 0)
 action__mes_unmap_queues__reset_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__reset_queues', 1)
@@ -137,32 +101,19 @@ enum_mes_unmap_queues_extended_engine_sel_enum = CEnum(ctypes.c_uint)
 extended_engine_sel__mes_unmap_queues__legacy_engine_sel = enum_mes_unmap_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_unmap_queues__legacy_engine_sel', 0)
 extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel = enum_mes_unmap_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel', 1)
 
-class struct_pm4_mes_unmap_queues(ctypes.Structure): pass
-struct_pm4_mes_unmap_queues._fields_ = []
+class struct_pm4_mes_unmap_queues(Struct): pass
 class _anonunion30(ctypes.Union): pass
-_anonunion30._fields_ = []
 class _anonunion31(ctypes.Union): pass
-_anonunion31._fields_ = []
-class _anonstruct32(ctypes.Structure): pass
-_anonstruct32._fields_ = []
+class _anonstruct32(Struct): pass
 class _anonunion33(ctypes.Union): pass
-_anonunion33._fields_ = []
-class _anonstruct34(ctypes.Structure): pass
-_anonstruct34._fields_ = []
-class _anonstruct35(ctypes.Structure): pass
-_anonstruct35._fields_ = []
+class _anonstruct34(Struct): pass
+class _anonstruct35(Struct): pass
 class _anonunion36(ctypes.Union): pass
-_anonunion36._fields_ = []
-class _anonstruct37(ctypes.Structure): pass
-_anonstruct37._fields_ = []
+class _anonstruct37(Struct): pass
 class _anonunion38(ctypes.Union): pass
-_anonunion38._fields_ = []
-class _anonstruct39(ctypes.Structure): pass
-_anonstruct39._fields_ = []
+class _anonstruct39(Struct): pass
 class _anonunion40(ctypes.Union): pass
-_anonunion40._fields_ = []
-class _anonstruct41(ctypes.Structure): pass
-_anonstruct41._fields_ = []
+class _anonstruct41(Struct): pass
 enum_mec_release_mem_event_index_enum = CEnum(ctypes.c_uint)
 event_index__mec_release_mem__end_of_pipe = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__end_of_pipe', 5)
 event_index__mec_release_mem__shader_done = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__shader_done', 6)
@@ -198,32 +149,19 @@ data_sel__mec_release_mem__send_gpu_clock_counter = enum_mec_release_mem_data_se
 data_sel__mec_release_mem__send_cp_perfcounter_hi_lo = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__send_cp_perfcounter_hi_lo', 4)
 data_sel__mec_release_mem__store_gds_data_to_memory = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__store_gds_data_to_memory', 5)
 
-class struct_pm4_mec_release_mem(ctypes.Structure): pass
-struct_pm4_mec_release_mem._fields_ = []
+class struct_pm4_mec_release_mem(Struct): pass
 class _anonunion42(ctypes.Union): pass
-_anonunion42._fields_ = []
 class _anonunion43(ctypes.Union): pass
-_anonunion43._fields_ = []
-class _anonstruct44(ctypes.Structure): pass
-_anonstruct44._fields_ = []
+class _anonstruct44(Struct): pass
 class _anonunion45(ctypes.Union): pass
-_anonunion45._fields_ = []
-class _anonstruct46(ctypes.Structure): pass
-_anonstruct46._fields_ = []
+class _anonstruct46(Struct): pass
 class _anonunion47(ctypes.Union): pass
-_anonunion47._fields_ = []
-class _anonstruct48(ctypes.Structure): pass
-_anonstruct48._fields_ = []
-class _anonstruct49(ctypes.Structure): pass
-_anonstruct49._fields_ = []
+class _anonstruct48(Struct): pass
+class _anonstruct49(Struct): pass
 class _anonunion50(ctypes.Union): pass
-_anonunion50._fields_ = []
 class _anonunion51(ctypes.Union): pass
-_anonunion51._fields_ = []
-class _anonstruct52(ctypes.Structure): pass
-_anonstruct52._fields_ = []
+class _anonstruct52(Struct): pass
 class _anonunion53(ctypes.Union): pass
-_anonunion53._fields_ = []
 enum_WRITE_DATA_dst_sel_enum = CEnum(ctypes.c_uint)
 dst_sel___write_data__mem_mapped_register = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__mem_mapped_register', 0)
 dst_sel___write_data__tc_l2 = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__tc_l2', 2)
@@ -243,12 +181,10 @@ enum_WRITE_DATA_cache_policy_enum = CEnum(ctypes.c_uint)
 cache_policy___write_data__lru = enum_WRITE_DATA_cache_policy_enum.define('cache_policy___write_data__lru', 0)
 cache_policy___write_data__stream = enum_WRITE_DATA_cache_policy_enum.define('cache_policy___write_data__stream', 1)
 
-class struct_pm4_mec_write_data_mmio(ctypes.Structure): pass
-struct_pm4_mec_write_data_mmio._fields_ = []
+class struct_pm4_mec_write_data_mmio(Struct): pass
 class _anonunion54(ctypes.Union): pass
-_anonunion54._fields_ = []
 class _anonunion55(ctypes.Union): pass
-class _anonunion55_bitfields2(ctypes.Structure): pass
+class _anonunion55_bitfields2(Struct): pass
 _anonunion55_bitfields2._fields_ = [
   ('reserved1', ctypes.c_uint,8),
   ('dst_sel', ctypes.c_uint,4),
@@ -266,7 +202,7 @@ _anonunion55._fields_ = [
   ('ordinal2', ctypes.c_uint),
 ]
 class _anonunion56(ctypes.Union): pass
-class _anonunion56_bitfields3(ctypes.Structure): pass
+class _anonunion56_bitfields3(Struct): pass
 _anonunion56_bitfields3._fields_ = [
   ('dst_mmreg_addr', ctypes.c_uint,18),
   ('reserved6', ctypes.c_uint,14),

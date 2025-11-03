@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+
 FEATURE_PWR_DOMAIN_e = CEnum(ctypes.c_uint)
 FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0)
 FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1)
@@ -76,8 +77,7 @@ I2C_CONTROLLER_PROTOCOL_INA3221 = I2cControllerProtocol_e.define('I2C_CONTROLLER
 I2C_CONTROLLER_PROTOCOL_TMP_MAX6604 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_TMP_MAX6604', 4)
 I2C_CONTROLLER_PROTOCOL_COUNT = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_COUNT', 5)
 
-class _anonstruct0(ctypes.Structure): pass
-_anonstruct0._fields_ = []
+class _anonstruct0(Struct): pass
 I2cControllerConfig_t = _anonstruct0
 I2cPort_e = CEnum(ctypes.c_uint)
 I2C_PORT_SVD_SCL = I2cPort_e.define('I2C_PORT_SVD_SCL', 0)
@@ -97,20 +97,15 @@ I2C_CMD_READ = I2cCmdType_e.define('I2C_CMD_READ', 0)
 I2C_CMD_WRITE = I2cCmdType_e.define('I2C_CMD_WRITE', 1)
 I2C_CMD_COUNT = I2cCmdType_e.define('I2C_CMD_COUNT', 2)
 
-class _anonstruct1(ctypes.Structure): pass
-_anonstruct1._fields_ = []
+class _anonstruct1(Struct): pass
 SwI2cCmd_t = _anonstruct1
-class _anonstruct2(ctypes.Structure): pass
-_anonstruct2._fields_ = []
+class _anonstruct2(Struct): pass
 SwI2cRequest_t = _anonstruct2
-class _anonstruct3(ctypes.Structure): pass
-_anonstruct3._fields_ = []
+class _anonstruct3(Struct): pass
 SwI2cRequestExternal_t = _anonstruct3
-class _anonstruct4(ctypes.Structure): pass
-_anonstruct4._fields_ = []
+class _anonstruct4(Struct): pass
 EccInfo_t = _anonstruct4
-class _anonstruct5(ctypes.Structure): pass
-_anonstruct5._fields_ = []
+class _anonstruct5(Struct): pass
 EccInfoTable_t = _anonstruct5
 D3HOTSequence_e = CEnum(ctypes.c_uint)
 BACO_SEQUENCE = D3HOTSequence_e.define('BACO_SEQUENCE', 0)
@@ -127,14 +122,11 @@ PowerGatingSettings_e = CEnum(ctypes.c_uint)
 PG_POWER_DOWN = PowerGatingSettings_e.define('PG_POWER_DOWN', 0)
 PG_POWER_UP = PowerGatingSettings_e.define('PG_POWER_UP', 1)
 
-class _anonstruct6(ctypes.Structure): pass
-_anonstruct6._fields_ = []
+class _anonstruct6(Struct): pass
 QuadraticInt_t = _anonstruct6
-class _anonstruct7(ctypes.Structure): pass
-_anonstruct7._fields_ = []
+class _anonstruct7(Struct): pass
 LinearInt_t = _anonstruct7
-class _anonstruct8(ctypes.Structure): pass
-_anonstruct8._fields_ = []
+class _anonstruct8(Struct): pass
 DroopInt_t = _anonstruct8
 DCS_ARCH_e = CEnum(ctypes.c_uint)
 DCS_ARCH_DISABLED = DCS_ARCH_e.define('DCS_ARCH_DISABLED', 0)
@@ -194,8 +186,7 @@ PWR_CONFIG_TGP = PwrConfig_e.define('PWR_CONFIG_TGP', 1)
 PWR_CONFIG_TCP_ESTIMATED = PwrConfig_e.define('PWR_CONFIG_TCP_ESTIMATED', 2)
 PWR_CONFIG_TCP_MEASURED = PwrConfig_e.define('PWR_CONFIG_TCP_MEASURED', 3)
 
-class _anonstruct9(ctypes.Structure): pass
-_anonstruct9._fields_ = []
+class _anonstruct9(Struct): pass
 DpmDescriptor_t = _anonstruct9
 PPT_THROTTLER_e = CEnum(ctypes.c_uint)
 PPT_THROTTLER_PPT0 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT0', 0)
@@ -341,21 +332,17 @@ PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_3 = PP_GRTAVFS_FW_SEP_FUSE_e.de
 PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4', 18)
 PP_GRTAVFS_FW_SEP_FUSE_COUNT = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_COUNT', 19)
 
-class _anonstruct10(ctypes.Structure): pass
-_anonstruct10._fields_ = []
+class _anonstruct10(Struct): pass
 SviTelemetryScale_t = _anonstruct10
 FanMode_e = CEnum(ctypes.c_uint)
 FAN_MODE_AUTO = FanMode_e.define('FAN_MODE_AUTO', 0)
 FAN_MODE_MANUAL_LINEAR = FanMode_e.define('FAN_MODE_MANUAL_LINEAR', 1)
 
-class _anonstruct11(ctypes.Structure): pass
-_anonstruct11._fields_ = []
+class _anonstruct11(Struct): pass
 OverDriveTable_t = _anonstruct11
-class _anonstruct12(ctypes.Structure): pass
-_anonstruct12._fields_ = []
+class _anonstruct12(Struct): pass
 OverDriveTableExternal_t = _anonstruct12
-class _anonstruct13(ctypes.Structure): pass
-_anonstruct13._fields_ = []
+class _anonstruct13(Struct): pass
 OverDriveLimits_t = _anonstruct13
 BOARD_GPIO_TYPE_e = CEnum(ctypes.c_uint)
 BOARD_GPIO_SMUIO_0 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_0', 0)
@@ -403,47 +390,33 @@ BOARD_GPIO_DC_GENLK_VSYNC = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GENLK_VSYNC'
 BOARD_GPIO_DC_SWAPLOCK_A = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_SWAPLOCK_A', 42)
 BOARD_GPIO_DC_SWAPLOCK_B = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_SWAPLOCK_B', 43)
 
-class _anonstruct14(ctypes.Structure): pass
-_anonstruct14._fields_ = []
+class _anonstruct14(Struct): pass
 BootValues_t = _anonstruct14
-class _anonstruct15(ctypes.Structure): pass
-_anonstruct15._fields_ = []
+class _anonstruct15(Struct): pass
 MsgLimits_t = _anonstruct15
-class _anonstruct16(ctypes.Structure): pass
-_anonstruct16._fields_ = []
+class _anonstruct16(Struct): pass
 DriverReportedClocks_t = _anonstruct16
-class _anonstruct17(ctypes.Structure): pass
-_anonstruct17._fields_ = []
+class _anonstruct17(Struct): pass
 AvfsDcBtcParams_t = _anonstruct17
-class _anonstruct18(ctypes.Structure): pass
-_anonstruct18._fields_ = []
+class _anonstruct18(Struct): pass
 AvfsFuseOverride_t = _anonstruct18
-class _anonstruct19(ctypes.Structure): pass
-_anonstruct19._fields_ = []
+class _anonstruct19(Struct): pass
 SkuTable_t = _anonstruct19
-class _anonstruct20(ctypes.Structure): pass
-_anonstruct20._fields_ = []
+class _anonstruct20(Struct): pass
 BoardTable_t = _anonstruct20
-class _anonstruct21(ctypes.Structure): pass
-_anonstruct21._fields_ = []
+class _anonstruct21(Struct): pass
 PPTable_t = _anonstruct21
-class _anonstruct22(ctypes.Structure): pass
-_anonstruct22._fields_ = []
+class _anonstruct22(Struct): pass
 DriverSmuConfig_t = _anonstruct22
-class _anonstruct23(ctypes.Structure): pass
-_anonstruct23._fields_ = []
+class _anonstruct23(Struct): pass
 DriverSmuConfigExternal_t = _anonstruct23
-class _anonstruct24(ctypes.Structure): pass
-_anonstruct24._fields_ = []
+class _anonstruct24(Struct): pass
 DriverInfoTable_t = _anonstruct24
-class _anonstruct25(ctypes.Structure): pass
-_anonstruct25._fields_ = []
+class _anonstruct25(Struct): pass
 SmuMetrics_t = _anonstruct25
-class _anonstruct26(ctypes.Structure): pass
-_anonstruct26._fields_ = []
+class _anonstruct26(Struct): pass
 SmuMetricsExternal_t = _anonstruct26
-class _anonstruct27(ctypes.Structure): pass
-_anonstruct27._fields_ = []
+class _anonstruct27(Struct): pass
 WatermarkRowGeneric_t = _anonstruct27
 WATERMARKS_FLAGS_e = CEnum(ctypes.c_uint)
 WATERMARKS_CLOCK_RANGE = WATERMARKS_FLAGS_e.define('WATERMARKS_CLOCK_RANGE', 0)
@@ -451,30 +424,23 @@ WATERMARKS_DUMMY_PSTATE = WATERMARKS_FLAGS_e.define('WATERMARKS_DUMMY_PSTATE', 1
 WATERMARKS_MALL = WATERMARKS_FLAGS_e.define('WATERMARKS_MALL', 2)
 WATERMARKS_COUNT = WATERMARKS_FLAGS_e.define('WATERMARKS_COUNT', 3)
 
-class _anonstruct28(ctypes.Structure): pass
-_anonstruct28._fields_ = []
+class _anonstruct28(Struct): pass
 Watermarks_t = _anonstruct28
-class _anonstruct29(ctypes.Structure): pass
-_anonstruct29._fields_ = []
+class _anonstruct29(Struct): pass
 WatermarksExternal_t = _anonstruct29
-class _anonstruct30(ctypes.Structure): pass
-_anonstruct30._fields_ = []
+class _anonstruct30(Struct): pass
 AvfsDebugTable_t = _anonstruct30
-class _anonstruct31(ctypes.Structure): pass
-_anonstruct31._fields_ = []
+class _anonstruct31(Struct): pass
 AvfsDebugTableExternal_t = _anonstruct31
-class _anonstruct32(ctypes.Structure): pass
-_anonstruct32._fields_ = []
+class _anonstruct32(Struct): pass
 DpmActivityMonitorCoeffInt_t = _anonstruct32
-class _anonstruct33(ctypes.Structure): pass
-_anonstruct33._fields_ = []
+class _anonstruct33(Struct): pass
 DpmActivityMonitorCoeffIntExternal_t = _anonstruct33
-class struct_smu_hw_power_state(ctypes.Structure): pass
+class struct_smu_hw_power_state(Struct): pass
 struct_smu_hw_power_state._fields_ = [
   ('magic', ctypes.c_uint),
 ]
-class struct_smu_power_state(ctypes.Structure): pass
-struct_smu_power_state._fields_ = []
+class struct_smu_power_state(Struct): pass
 enum_smu_state_ui_label = CEnum(ctypes.c_uint)
 SMU_STATE_UI_LABEL_NONE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_NONE', 0)
 SMU_STATE_UI_LABEL_BATTERY = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BATTERY', 1)
@@ -507,7 +473,7 @@ SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE2 = enum_smu_state_classificati
 SMU_STATE_CLASSIFICATION_FLAG_ULV = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_ULV', 524288)
 SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC', 1048576)
 
-class struct_smu_state_classification_block(ctypes.Structure): pass
+class struct_smu_state_classification_block(Struct): pass
 struct_smu_state_classification_block._fields_ = [
   ('ui_label', enum_smu_state_ui_label),
   ('flags', enum_smu_state_classification_flag),
@@ -515,7 +481,7 @@ struct_smu_state_classification_block._fields_ = [
   ('temporary_state', ctypes.c_bool),
   ('to_be_deleted', ctypes.c_bool),
 ]
-class struct_smu_state_pcie_block(ctypes.Structure): pass
+class struct_smu_state_pcie_block(Struct): pass
 struct_smu_state_pcie_block._fields_ = [
   ('lanes', ctypes.c_uint),
 ]
@@ -523,7 +489,7 @@ enum_smu_refreshrate_source = CEnum(ctypes.c_uint)
 SMU_REFRESHRATE_SOURCE_EDID = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EDID', 0)
 SMU_REFRESHRATE_SOURCE_EXPLICIT = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EXPLICIT', 1)
 
-class struct_smu_state_display_block(ctypes.Structure): pass
+class struct_smu_state_display_block(Struct): pass
 struct_smu_state_display_block._fields_ = [
   ('disable_frame_modulation', ctypes.c_bool),
   ('limit_refreshrate', ctypes.c_bool),
@@ -532,18 +498,18 @@ struct_smu_state_display_block._fields_ = [
   ('edid_refreshrate_index', ctypes.c_int),
   ('enable_vari_bright', ctypes.c_bool),
 ]
-class struct_smu_state_memory_block(ctypes.Structure): pass
+class struct_smu_state_memory_block(Struct): pass
 struct_smu_state_memory_block._fields_ = [
   ('dll_off', ctypes.c_bool),
   ('m3arb', ctypes.c_ubyte),
   ('unused', (ctypes.c_ubyte * 3)),
 ]
-class struct_smu_state_software_algorithm_block(ctypes.Structure): pass
+class struct_smu_state_software_algorithm_block(Struct): pass
 struct_smu_state_software_algorithm_block._fields_ = [
   ('disable_load_balancing', ctypes.c_bool),
   ('enable_sleep_for_timestamps', ctypes.c_bool),
 ]
-class struct_smu_temperature_range(ctypes.Structure): pass
+class struct_smu_temperature_range(Struct): pass
 struct_smu_temperature_range._fields_ = [
   ('min', ctypes.c_int),
   ('max', ctypes.c_int),
@@ -557,13 +523,13 @@ struct_smu_temperature_range._fields_ = [
   ('software_shutdown_temp', ctypes.c_int),
   ('software_shutdown_temp_offset', ctypes.c_int),
 ]
-class struct_smu_state_validation_block(ctypes.Structure): pass
+class struct_smu_state_validation_block(Struct): pass
 struct_smu_state_validation_block._fields_ = [
   ('single_display_only', ctypes.c_bool),
   ('disallow_on_dc', ctypes.c_bool),
   ('supported_power_levels', ctypes.c_ubyte),
 ]
-class struct_smu_uvd_clocks(ctypes.Structure): pass
+class struct_smu_uvd_clocks(Struct): pass
 struct_smu_uvd_clocks._fields_ = [
   ('vclk', ctypes.c_uint),
   ('dclk', ctypes.c_uint),
@@ -621,7 +587,7 @@ SMU_OD_FAN_TARGET_TEMPERATURE = enum_smu_clk_type.define('SMU_OD_FAN_TARGET_TEMP
 SMU_OD_FAN_MINIMUM_PWM = enum_smu_clk_type.define('SMU_OD_FAN_MINIMUM_PWM', 27)
 SMU_CLK_COUNT = enum_smu_clk_type.define('SMU_CLK_COUNT', 28)
 
-class struct_smu_user_dpm_profile(ctypes.Structure): pass
+class struct_smu_user_dpm_profile(Struct): pass
 struct_smu_user_dpm_profile._fields_ = [
   ('fan_mode', ctypes.c_uint),
   ('power_limit', ctypes.c_uint),
@@ -632,9 +598,8 @@ struct_smu_user_dpm_profile._fields_ = [
   ('clk_mask', (ctypes.c_uint * 28)),
   ('clk_dependency', ctypes.c_uint),
 ]
-class struct_smu_table(ctypes.Structure): pass
-class struct_amdgpu_bo(ctypes.Structure): pass
-struct_amdgpu_bo._fields_ = []
+class struct_smu_table(Struct): pass
+class struct_amdgpu_bo(Struct): pass
 struct_smu_table._fields_ = [
   ('size', ctypes.c_ulonglong),
   ('align', ctypes.c_uint),
@@ -648,7 +613,7 @@ enum_smu_perf_level_designation = CEnum(ctypes.c_uint)
 PERF_LEVEL_ACTIVITY = enum_smu_perf_level_designation.define('PERF_LEVEL_ACTIVITY', 0)
 PERF_LEVEL_POWER_CONTAINMENT = enum_smu_perf_level_designation.define('PERF_LEVEL_POWER_CONTAINMENT', 1)
 
-class struct_smu_performance_level(ctypes.Structure): pass
+class struct_smu_performance_level(Struct): pass
 struct_smu_performance_level._fields_ = [
   ('core_clock', ctypes.c_uint),
   ('memory_clock', ctypes.c_uint),
@@ -657,7 +622,7 @@ struct_smu_performance_level._fields_ = [
   ('non_local_mem_freq', ctypes.c_uint),
   ('non_local_mem_width', ctypes.c_uint),
 ]
-class struct_smu_clock_info(ctypes.Structure): pass
+class struct_smu_clock_info(Struct): pass
 struct_smu_clock_info._fields_ = [
   ('min_mem_clk', ctypes.c_uint),
   ('max_mem_clk', ctypes.c_uint),
@@ -666,7 +631,7 @@ struct_smu_clock_info._fields_ = [
   ('min_bus_bandwidth', ctypes.c_uint),
   ('max_bus_bandwidth', ctypes.c_uint),
 ]
-class struct_smu_bios_boot_up_values(ctypes.Structure): pass
+class struct_smu_bios_boot_up_values(Struct): pass
 struct_smu_bios_boot_up_values._fields_ = [
   ('revision', ctypes.c_uint),
   ('gfxclk', ctypes.c_uint),
