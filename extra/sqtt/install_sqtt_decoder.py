@@ -8,8 +8,8 @@ DEST.mkdir(exist_ok=True)
 
 if __name__ == "__main__":
   if OSX:
-    fp = fetch("https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.3/rocprof-trace-decoder-macos-arm64-0.1.3-Darwin.sh")
-    lib = fp.parent/"rocprof-trace-decoder-macos-arm64-0.1.3-Darwin"/"lib"/"librocprof-trace-decoder.dylib"
+    fp = fetch("https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.4/rocprof-trace-decoder-macos-arm64-0.1.4-Darwin.sh")
+    lib = fp.parent/"rocprof-trace-decoder-macos-arm64-0.1.4-Darwin"/"lib"/"librocprof-trace-decoder.dylib"
     os.chmod(fp, 0o755)
     os.system(f"sudo {fp} --prefix={fp.parent} --include-subdir")
   else:
