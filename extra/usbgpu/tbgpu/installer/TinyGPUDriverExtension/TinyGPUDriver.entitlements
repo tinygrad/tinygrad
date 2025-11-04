@@ -9,6 +9,8 @@
 			<string>0xFFFFFFFF&amp;0x00000000</string>
 		</dict>
 	</array>
+	<key>com.apple.developer.driverkit.allow-third-party-userclients</key>
+	<true/>
 	<key>com.apple.developer.driverkit</key>
 	<true/>
 </dict>
