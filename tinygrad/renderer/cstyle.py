@@ -322,7 +322,7 @@ class MetalRenderer(CStyleLanguage):
   arg_int_prefix = "constant int&"
   barrier = "threadgroup_barrier(mem_flags::mem_threadgroup);"
   float4 = "float4"
-  code_for_workitem = {"g": lambda x: f"gid.{chr(120+int(x))}", "l": lambda x: f"lid.{chr(120+int(x))}"}
+  code_for_workitem = {"g": lambda x: workitem("gid",x), "l": lambda x: workitem("lid",x)}
   # uint3 used for gid/lid - TODO: this should probably be `ushort3 lid [[thread_position_in_threadgroup]]`
   extra_args = ['uint3 gid [[threadgroup_position_in_grid]]', 'uint3 lid [[thread_position_in_threadgroup]]']
   type_map = {dtypes.bfloat16: "bfloat"}
@@ -351,6 +351,12 @@ class MetalRenderer(CStyleLanguage):
   mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dstr_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
+def workitem(prefix: str, x: str) -> str:
+  idx = int(x)
+  assert 0 <= idx <= 2, f"Invalid Metal coordinate index {idx}, must be in range [0,2] for x/y/z position components"
+  return f"{prefix}.{chr(120+idx)}"
+
 
 _nms = "xyzwabcdefghijkl"
 
