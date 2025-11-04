@@ -116,12 +116,14 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
 
-  py::list views = py_obj.attr("uop").attr("st").attr("views");
-  std::vector<int64_t> strides = views[views.size() - 1].attr("strides").cast<std::vector<int64_t>>();
-  int64_t storage_offset = 0;
-  for (auto& v: views) {
-    storage_offset += v.attr("offset").cast<int64_t>(); // TODO: is this correct?
+  // compute contiguous strides from shape
+  std::vector<int64_t> strides(sizes.size());
+  int64_t stride = 1;
+  for (int i = sizes.size() - 1; i >= 0; i--) {
+    strides[i] = sizes[i] == 1 ? 0 : stride;
+    stride *= sizes[i];
   }
+  int64_t storage_offset = 0;
 
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),

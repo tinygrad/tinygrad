@@ -54,6 +54,7 @@ view_ops = {
   "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
   "aten.view.dtype": lambda self,dtype: self.bitcast(_from_torch_dtype(dtype)),
   "aten.expand": Tensor.expand,
+  "aten.permute": Tensor.permute,
   "aten.t": Tensor.transpose,
   "aten.transpose.int": Tensor.transpose,
   "aten.squeeze.dim": Tensor.squeeze,
@@ -65,14 +66,31 @@ view_ops = {
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
 # in place operations with views
-def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.st.contiguous: self.replace(self.contiguous())
-  self.replace(self.clone().realize())
+def realize_with_views(self: Tensor, views: list[Tensor]):
+  original_base_uop = self.uop  # save original base UOp before realizing
+  self.replace(self.contiguous().clone().realize())
   for v in views:
     if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
+    # extract movement ops from view's UOp graph until we reach the original base
+    mops = []
+    current = v.uop
+    while current is not original_base_uop:
+      if current.op in {Ops.RESHAPE, Ops.PERMUTE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.FLIP}:
+        arg = current.arg if current.arg is not None else getattr(current, 'marg', current.shape)
+        mops.append((current.op, arg))
+      if len(current.src) > 0:
+        current = current.src[0]
+      else:
+        break
+    # apply movement ops in reverse order to reconstruct view
     ret = self
-    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
+    for op, arg in reversed(mops):
+      if op == Ops.RESHAPE: ret = ret.reshape(arg)
+      elif op == Ops.PERMUTE: ret = ret.permute(arg)
+      elif op == Ops.EXPAND: ret = ret.expand(arg)
+      elif op == Ops.PAD: ret = ret.pad(arg)
+      elif op == Ops.SHRINK: ret = ret.shrink(arg)
+      elif op == Ops.FLIP: ret = ret.flip(arg)
     v.replace(ret)
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
@@ -134,6 +152,14 @@ def _linalg_det(self: torch.Tensor):
   result = aten._linalg_det(self.cpu())
   return result[0].tiny(), result[1].tiny(), result[2].tiny()
 
+@torch.library.impl("aten::diag_embed", "privateuseone")
+def diag_embed(input, offset=0, dim1=-2, dim2=-1):
+  # For the simple case of 1-D input with offset=0, use tinygrad's diag
+  if input.ndim == 1 and offset == 0 and dim1 == -2 and dim2 == -1:
+    return wrap(unwrap(input).diag())
+  # For other cases, fall back to CPU
+  return aten.diag_embed(input.cpu(), offset, dim1, dim2).tiny()
+
 def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
 
 for i in [
@@ -167,35 +193,77 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-@functools.cache
-def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-  return mops
-
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
-
-@wrap_view_op
-def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
-  # multiple as_strided do not compound
-  base = canonical_base(tensor)
-  # TODO: this is heavyweight
-  st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
-  ret = base
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-  for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-  return ret
-
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  storage_offset = storage_offset or tensor.storage_offset()
-  return _as_strided(tensor, size, stride, storage_offset)
+  if storage_offset is None: storage_offset = tensor.storage_offset()
+  if TORCH_DEBUG >= 1: print(f"**** as_strided {tensor.shape=} {size=} {stride=} {storage_offset=}")
+  
+  tiny_tensor = unwrap(tensor)
+  size = tuple(size)
+  stride = tuple(stride)
+  
+  # Get or compute the base tensor (original contiguous storage)
+  if hasattr(tiny_tensor, '_strided_base'):
+    base = tiny_tensor._strided_base
+    base_size = tiny_tensor._base_size
+  else:
+    # First as_strided call - current tensor is the base
+    base = tiny_tensor.contiguous()
+    base_size = prod(base.shape)
+    
+  # Flatten the base to 1D for easier indexing
+  flat_base = base.reshape(base_size)
+  
+  # Calculate the slice bounds we need from the flattened tensor
+  if len(size) == 0:
+    # Scalar case
+    result = flat_base[storage_offset]
+  else:
+    # Compute the maximum offset needed
+    # For each dimension i, we access indices 0..size[i]-1 with stride[i]
+    # Max offset = storage_offset + sum((size[i]-1) * stride[i] for all i)
+    max_offset = storage_offset + sum((s-1) * st for s, st in zip(size, stride) if s > 0)
+    
+    # Extract the needed slice from flat base
+    if max_offset + 1 > base_size:
+      # Need to handle out of bounds - pad the base
+      flat_base = flat_base.pad(((0, max_offset + 1 - base_size),))
+    
+    # Now we need to create the strided view
+    # We'll use a series of reshapes and slicing operations
+    
+    # Simple case: contiguous with offset
+    if stride == tuple(functools.reduce(lambda acc, x: [x] + [acc[0]*x] + acc[1:], reversed(size[1:]), [1])[::-1]):
+      # This is just a contiguous slice with offset
+      result = flat_base[storage_offset:storage_offset + prod(size)].reshape(size)
+    else:
+      # Complex strided case - need to use advanced indexing
+      # Create index tensors for each dimension
+      indices = []
+      for i, (sz, st) in enumerate(zip(size, stride)):
+        idx_shape = [1] * len(size)
+        idx_shape[i] = sz
+        indices.append(Tensor.arange(sz, device=base.device).reshape(idx_shape) * st)
+      
+      # Compute flat indices: offset + sum(indices[i] * stride[i])
+      flat_idx = storage_offset
+      for idx in indices:
+        flat_idx = flat_idx + idx
+      
+      # Gather from flat base
+      result = flat_base[flat_idx.cast(dtypes.int).flatten()].reshape(size)
+  
+  # Track the base for future as_strided calls
+  result._strided_base = base
+  result._base_size = base_size
+  
+  return wrap(result)
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
 def _reshape_alias(tensor:torch.Tensor, size, stride):
-  return _as_strided(tensor, size, stride)
+  # _reshape_alias is like as_strided but without storage_offset
+  if TORCH_DEBUG >= 1: print(f"**** _reshape_alias {tensor.shape=} {size=} {stride=}")
+  return as_strided(tensor, size, stride, storage_offset=0)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -329,7 +397,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
+    if dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:

@@ -4,7 +4,6 @@ from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from tinygrad.helpers import prod, tqdm
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import sym_infer
 from tinygrad.tensor import Tensor
 
