@@ -40,15 +40,14 @@ class TestVminVmaxProperties(unittest.TestCase):
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 5)
 
-    # this can be improved
     uop = x & 15
     self.assertEqual(uop.vmin, 0)
     self.assertEqual(uop.vmax, 15)
 
-    # this can be improved
+    # TODO: this can be improved
     uop = x & 32
     self.assertEqual(uop.vmin, 0)
-    self.assertEqual(uop.vmax, 20)
+    self.assertEqual(uop.vmax, 20) # shoud be 0
 
   def test_vmin_vmax_multiplication_with_variable(self):
     # vmin and vmax for multiplication with a variable

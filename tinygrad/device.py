@@ -5,7 +5,7 @@ from typing import Any, Generic, TypeVar, Iterator, Sequence, cast, Generator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
 from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, AMD_LLVM
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -54,7 +54,7 @@ atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices]
 
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
-  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
+  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0); arch:str="" # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
@@ -333,6 +333,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     return device in {"AMD", "PYTHON", "NULL"}
   if dtype in dtypes.fp8s:
     if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX") and not getenv("NV_NAK")
+    if device == "AMD": return not CI and not AMD_LLVM and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
     return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]

@@ -2,7 +2,7 @@ name: Autogen
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '12'
-  PYTHON_CACHE_VERSION: '3'
+  PYTHON_CACHE_VERSION: '4'
   APT_CACHE_VERSION: '1'
   BUILD_CACHE_VERSION: '1'
   CAPTURE_PROCESS_REPLAY: 1

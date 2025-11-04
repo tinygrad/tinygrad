@@ -3,8 +3,8 @@ from tinygrad import Tensor, nn, Device
 from tinygrad.helpers import Profiling, Timing, getenv
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen import full_rewrite_to_sink
-from tinygrad.codegen.late.control_flow import linearize
-from tinygrad.uop.spec import type_verify
+from tinygrad.codegen.late.linearizer import linearize
+from tinygrad.uop.spec import type_verify, program_spec
 
 if __name__ == "__main__":
   mdl = ResNet50()
@@ -41,5 +41,5 @@ if __name__ == "__main__":
             for u in rewritten_uops:
               uops_line.append(linearize(u))
           with Timing("***** model verify in    "):
-            for u in uops_line: type_verify(u)
+            for u in uops_line: type_verify(u, program_spec)
           print(sum(len(u) for u in uops_line))

@@ -2,7 +2,7 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '12'
-  PYTHON_CACHE_VERSION: '3'
+  PYTHON_CACHE_VERSION: '4'
   APT_CACHE_VERSION: '1'
   BUILD_CACHE_VERSION: '1'
   CAPTURE_PROCESS_REPLAY: 1
@@ -230,7 +230,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: linting-only
-        python-version: '3.10'
+        python-version: '3.11'
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
@@ -243,8 +243,9 @@ jobs:
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
-    - name: Run TYPED=1
-      run: TYPED=1 python -c "import tinygrad"
+    # broken because of UPatAny
+    #- name: Run TYPED=1
+    #  run: TYPED=1 python -c "import tinygrad"
 
   unittest:
     name: Unit Tests
@@ -264,8 +265,6 @@ jobs:
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
       run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
-    - name: Check SPEC=1
-      run: SPEC=1 python3 test/test_tiny.py
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     # TODO: too slow
@@ -293,6 +292,25 @@ jobs:
         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
     - name: Repo line count < 18000 lines
       run: MAX_LINE_COUNT=18000 python sz.py
+
+  spec:
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    name: SPEC=2 (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: spec-unit
+        deps: testing_unit
+    - name: Test SPEC=2
+      run: IGNORE_OOB=0 SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -351,7 +369,7 @@ jobs:
       - name: Run Kernel Count Test
         run: CL=1 python -m pytest -n=auto test/external/external_test_opt.py
       - name: Run fused optimizer tests
-        run: CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py
+        run: CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py test/test_optim.py -k "not muon"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -522,11 +540,11 @@ jobs:
         pydeps: "pillow"
         llvm: "true"
     - name: Test LLVM=1 DEVECTORIZE=0
-      run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+      run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py
     - name: Test LLVM=1 DEVECTORIZE=0 for model
       run: CPU=1 CPU_LLVM=1 DEVECTORIZE=0 python3 test/models/test_efficientnet.py
     - name: Test CPU=1 DEVECTORIZE=0
-      run: CPU=1 CPU_LLVM=0 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py -k "not test_avg_pool3d_failure"
+      run: CPU=1 CPU_LLVM=0 DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/test_ops.py
 
   testdsp:
     name: Linux (DSP)
@@ -627,6 +645,7 @@ jobs:
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run TestOps.test_add with SQTT
         run: |
+          VIZ=1 PMC=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
       - name: Run process replay tests

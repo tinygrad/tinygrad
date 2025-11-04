@@ -157,11 +157,11 @@ class TestViz(BaseTestViz):
     self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
 
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10, dtype=dtypes.int)
-    b = a.replace(op=Ops.CONST)
+    a = UOp.const(dtypes.int, 3)
+    b = UOp.const(dtypes.int, 4)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
-      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
     graphs = flatten(x["graph"].values() for x in get_viz_details(0, 0))

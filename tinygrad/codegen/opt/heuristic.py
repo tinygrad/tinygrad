@@ -27,15 +27,15 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # NOTE: unless TC_OPT is > 0, we only trigger tensor cores if there's only one reduce axis
   if USE_TC > 0 and (len(k.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE)) == 1 or (TC_OPT.value >= 1)):
     good_tc_opt = False
+    tk = k.copy()
     try: # check TC first and apply hand-coded opts if successful
-      tk = k.copy()
       rngs = tk.apply_opt(Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, USE_TC.value)))
       good_tc_opt = True
     except KernelOptError:
       pass
-    if good_tc_opt:
-      # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-      if rngs is not None and not AMX:
+    # skip hand-coded TC opts if AMX, upcasting will make kernel slower
+    if good_tc_opt and not AMX:
+      if rngs is not None:
         for tc_dim in [1,0]: # attempt to upcast M and N
           szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
           if szs:
@@ -64,8 +64,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.ren.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \
     k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and k.ren.has_shared and \
-    (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.LOAD and mulop.src[1].op is Ops.LOAD:
-    idx0, idx1 = mulop.src[0].src[0].src[1].get_idx(), mulop.src[1].src[0].src[1].get_idx()
+    (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX:
+    idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()
     if k.ranges_of(AxisType.REDUCE):
       first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
       if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges):
@@ -73,7 +73,9 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3:
               print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
-            if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+            try:
+              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+            except KernelOptError: pass
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return k
@@ -149,7 +151,6 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:
-    # TODO: somehow this never hits a reduce
     if not k.upcasted and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
       k.apply_opt(Opt(OptOps.UPCAST, k.upcastable_dims[-1], splits))
 
@@ -182,7 +183,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if threads > k.ren.global_max[0] or resolve(prod(k.full_shape) // (128 << 10) < threads): continue
       for axis in k.axes_of(AxisType.LOOP):
         if k.full_shape[axis] % threads == 0:
-          k.apply_opt(Opt(OptOps.THREAD, axis, threads))
+          try: k.apply_opt(Opt(OptOps.THREAD, axis, threads))
+          except KernelOptError: pass
           break
       if k.applied_opts and k.applied_opts[-1].op is OptOps.THREAD: break
 

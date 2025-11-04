@@ -14,6 +14,8 @@ from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 # TODO: write a clean version of this
 from test.test_linearizer import helper_realized_ast, helper_linearizer_opt
 
+# NOTE: get_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
+
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
   a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
@@ -41,7 +43,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
-  prg = CompiledRunner(replace(get_program(realized_ast, opts=opts), device=Device.DEFAULT))
+  prg = CompiledRunner(replace(get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts), device=Device.DEFAULT))
   if use_tensor_cores == 1: assert len([uop for uop in prg.p.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
   assert len([x for x in prg.p.uops[-1].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
@@ -68,7 +70,7 @@ class TestTensorCores(unittest.TestCase):
       n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
-      prg = get_program(r.schedule()[-1].ast, opts=[Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))])
+      prg = get_program(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))])
       if Device.DEFAULT == "CPU" and CPU_LLVM:
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and AMD_LLVM:
@@ -154,7 +156,7 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.UNROLL, 0, 4)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in get_program(ast, opts=opts).uops:
+    for u in get_program(ast, Device[Device.DEFAULT].renderer, opts=opts).uops:
       if u.op is Ops.WMMA:
         assert u.src[-1].src[0].op != Ops.STORE
 
@@ -167,7 +169,7 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.UNROLL, 0, 4)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in get_program(ast, opts=opts).uops:
+    for u in get_program(ast, Device[Device.DEFAULT].renderer, opts=opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
@@ -182,7 +184,7 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     opts = [Opt(OptOps.UNROLL, 0, 4)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in get_program(ast, opts=opts).uops:
+    for u in get_program(ast, Device[Device.DEFAULT].renderer, opts=opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
