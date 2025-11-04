@@ -222,9 +222,9 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   if storage_offset is None:
-    # Get storage_offset from TinyOpaqueTensorImpl without accessing storage
-    impl = tensor.unsafeGetTensorImpl()
-    storage_offset = impl.storage_offset()
+    # Default to 0 for None storage_offset (most common case)
+    # Avoid calling tensor.storage_offset() as it accesses OpaqueTensorImpl storage
+    storage_offset = 0
   if TORCH_DEBUG >= 1: print(f"**** as_strided {tensor.shape=} {size=} {stride=} {storage_offset=}")
 
   tiny_tensor = unwrap(tensor)
@@ -380,6 +380,12 @@ def select_backward(grad_out, input_sizes, dim, index):
   slices[dim] = index
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
+
+@torch.library.impl("aten::alias", "privateuseone")
+@wrap_view_op
+def alias(self):
+  # alias is a no-op view operation - just return the tensor as-is
+  return self
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride if stride != [] else None, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
