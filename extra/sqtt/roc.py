@@ -1,12 +1,12 @@
 import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
-from tinygrad.helpers import temp, DEBUG
+from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
 from tinygrad.runtime.autogen import llvm, rocprof
 from tinygrad.runtime.support.elf import elf_loader
 
 # to pass NULL to callbacks
-llvm.LLVMCreateDisasmCPUFeatures.argtypes = llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5] + [ctypes.c_void_p, ctypes.c_void_p]
+llvm.LLVMCreateDisasmCPUFeatures.argtypes = tuple(llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5]) + (ctypes.c_void_p, ctypes.c_void_p)
 def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
   llvm.LLVMInitializeAMDGPUTargetInfo()
   llvm.LLVMInitializeAMDGPUTargetMC()
@@ -15,8 +15,8 @@ def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
   ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, None, None)
 
   image, sections, relocs = elf_loader(lib)
-  text = next((sh.header for sh in sections if sh.name == ".text"), -1)
-  off, sz = text.sh_addr, text.sh_size
+  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  off, sz = unwrap(text).sh_addr, unwrap(text).sh_size
 
   addr_table:dict[int, tuple[str, int]] = {}
   out = ctypes.create_string_buffer(128)
@@ -43,12 +43,14 @@ class InstInfo:
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
-    self.wave_events, self.disasms, self.addr2prg = {}, {}, {}
+    self.wave_events:dict[tuple[str, int, int, int], dict[int, InstInfo]] = {}
+    self.disasms:dict[int, tuple[str, int]] = {}
+    self.addr2prg:dict[int, ProfileProgramEvent] = {}
 
     for prog in prog_evs:
-      for addr, info in llvm_disasm(dev_evs[prog.device].arch, prog.lib).items():
-        self.disasms[prog.base + addr] = info
-        self.addr2prg[prog.base + addr] = prog
+      for addr, info in llvm_disasm(dev_evs[prog.device].arch, unwrap(prog.lib)).items():
+        self.disasms[unwrap(prog.base) + addr] = info
+        self.addr2prg[unwrap(prog.base) + addr] = prog
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
@@ -63,14 +65,15 @@ class _ROCParseCtx:
   def on_wave_ev(self, ev):
     if DEBUG >= 5: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
-    asm = {}
+    asm:dict[int, InstInfo] = {}
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
       asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.disasms[inst_ev.pc.address][0]))
       asm[inst_ev.pc.address].on_ev(inst_ev)
 
-    self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
+    if ev.instructions_size > 0:
+      self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}
@@ -103,9 +106,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
-    try:
-      instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
-    except: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0
