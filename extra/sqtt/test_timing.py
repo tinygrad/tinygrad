@@ -15,17 +15,19 @@ from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.roc import decode, InstExec
 
-def get_sqtt(asm:list[str]) -> list[InstExec]:
+def get_sqtt(asm:list[str], l:int=1, g:int=1) -> list[InstExec]:
   # clear the old traces
   dev = Device["AMD"]
   dev.profile_events.clear()
   # setup custom_kernel
   name = sys._getframe(1).f_code.co_name
   def fxn(_):
+    L = UOp.special(l, "lidx0")
+    G = UOp.special(g, "gidx0")
     ops:list[str] = [UOp(Ops.CUSTOM, arg="asm volatile (")]
     for inst in asm: ops.append(UOp(Ops.CUSTOM, src=(ops[-1],), arg=f'  "{inst}\\n\\t"'))
     ops.append(UOp(Ops.CUSTOM, src=(ops[-1],), arg=");"))
-    return UOp.sink(*ops, arg=KernelInfo(name=name))
+    return UOp.sink(*ops, L, G, arg=KernelInfo(name=name))
   k = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   # exec and decode sqtt
   k.realize()
@@ -62,6 +64,15 @@ class TestTiming(unittest.TestCase):
     # why doesn't this work?
     print(mul.time, mul.stall, mul.dur, rcp.time, rcp.dur, rcp.stall)
     #self.assertGreaterEqual(mul.time + mul.stall, rcp.time + rcp.dur)
+
+  def test_fmac(self):
+    sqtt = get_sqtt([
+      "v_fmac_f32_e32 v5, v29, v41",
+      "v_dual_fmac_f32 v7, v28, v39 :: v_dual_fmac_f32 v4, v29, v0",
+      "v_dual_fmac_f32 v6, v28, v38 :: v_dual_fmac_f32 v11, v26, v47",
+      "v_dual_fmac_f32 v8, v27, v48 :: v_dual_fmac_f32 v7, v29, v43",
+      "v_dual_fmac_f32 v1, v32, v37 :: v_dual_fmac_f32 v6, v29, v42",
+    ], l=32*4)
 
 if __name__ == "__main__":
   unittest.main()
