@@ -43,7 +43,7 @@ class InstInfo:
 
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
-    self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
+    self.dev_evs, self.sqtt_evs, self.prog_evs, self.sqtt_cnt = dev_evs, iter(sqtt_evs), prog_evs, len(sqtt_evs)
     self.wave_events:dict[tuple[str, int, int, int], dict[int, InstInfo]] = {}
     self.disasms:dict[int, tuple[str, int]] = {}
     self.addr2prg:dict[int, ProfileProgramEvent] = {}
@@ -75,7 +75,7 @@ class _ROCParseCtx:
 
     self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
 
-def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
+def decode(profile:list[ProfileEvent]) -> _ROCParseCtx|None:
   dev_events:dict[str, ProfileDeviceEvent] = {}
   sqtt_events:list[ProfileSQTTEvent] = []
   prog_events:list[ProfileProgramEvent] = []
@@ -83,6 +83,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
     if isinstance(e, ProfileSQTTEvent): sqtt_events.append(e)
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD"): prog_events.append(e)
+  if not sqtt_events: return None
 
   ROCParseCtx = _ROCParseCtx(dev_events, sqtt_events, prog_events)
 
@@ -121,9 +122,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
-  try:
-    rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  except Exception as e: print("Error in sqtt decoder:", e)
+  rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
   return ROCParseCtx
 
 if __name__ == "__main__":
@@ -132,8 +131,10 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
-  rctx = decode(profile)
-  print('SQTT:', rctx.wave_events.keys())
+  try:
+    rctx = decode(profile)
+    if rctx is not None: print('SQTT:', rctx.wave_events.keys())
+  except Exception as e: print("Error in sqtt decoder:", e)
 
   for ev in profile:
     if not isinstance(ev, ProfilePMCEvent): continue

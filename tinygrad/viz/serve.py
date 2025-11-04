@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
-import subprocess, ctypes, pathlib
+import subprocess, ctypes, pathlib, traceback
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -195,11 +195,15 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from extra.sqtt.roc import decode
-  rctx = decode(profile)
-  steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.hit, e.lat, e.stall, str(e.typ).split("_")[-1]) for e in x[1].values()],
-                                            "cols":["Instruction", "Hit Count", "Latency", "Stall", "Type"], "summary":[]},
-            "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
-  if steps: ctxs.append({"name":"Counters", "steps":steps})
+  steps:list[dict] = []
+  try:
+    if (rctx:=decode(profile)) is None: return None  # no sqtt events were captured
+    steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.hit, e.lat, e.stall, str(e.typ).split("_")[-1]) for e in x[1].values()],
+                                              "cols":["Instruction", "Hit Count", "Latency", "Stall", "Type"], "summary":[]},
+              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
+    if not steps: steps = [{"name":"EMPTY SQTT OUTPUT", "src":f"{rctx.sqtt_cnt} SQTT events recorded, none were decoded", "lang":"txt"}]
+  except Exception: steps = [{"name":"DECODER ERROR", "src":traceback.format_exc(), "lang":"txt"}]
+  ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
