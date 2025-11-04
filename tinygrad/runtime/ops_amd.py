@@ -197,11 +197,11 @@ class AMDComputeQueue(HWQueue):
       _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
       _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=next(prg.dev.sqtt_next_cmd_id))), *global_size)
 
+    se_cap = max(prod([x if isinstance(x, int) else 1 for x in global_size]) // 4, 1) // 32
     for xcc in range(self.dev.xccs):
       with self.pred_exec(xcc_mask=1 << xcc):
         for i in range(8 if prg.dev.target >= (11,0,0) else 4):
-          self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'),
-            ((prg.dev.sqtt_itrace_se_mask >> ((self.dev.se_cnt // self.dev.xccs) * xcc + i)) & 0b1) if SQTT >= 2 else 0xffffffff)
+          self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), min(0xffffffff, (1 << (se_cap + (1 if i == 0 else 0))) - 1))
 
   def sqtt_userdata(self, data, *extra_dwords):
     data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
@@ -929,8 +929,7 @@ class AMDDevice(HCQCompiled):
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
-      default_mask = functools.reduce(int.__or__, (1<<i for i in range(self.se_cnt) if self.target[0] > 9 or i % 2 == 0)) if SQTT >= 2 else (1 << 1)
-      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", default_mask)
+      self.sqtt_itrace_se_mask = getenv("SQTT_ITRACE_SE_MASK", 0b11)
       self.sqtt_next_cmd_id = itertools.count(0)
       cast(AMDComputeQueue, self.hw_compute_queue_t()).sqtt_start(self.sqtt_buffers, self.sqtt_itrace_se_mask).submit(self)
 
