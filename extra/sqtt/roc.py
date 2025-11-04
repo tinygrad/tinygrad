@@ -121,9 +121,8 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
-  try:
-    rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  except Exception as e: print("Error in sqtt decoder:", e)
+  return ROCParseCtx
+  rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
   return ROCParseCtx
 
 if __name__ == "__main__":
@@ -132,8 +131,10 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
-  rctx = decode(profile)
-  print('SQTT:', rctx.wave_events.keys())
+  try:
+    rctx = decode(profile)
+    print('SQTT:', rctx.wave_events.keys())
+  except Exception as e: print("Error in sqtt decoder:", e)
 
   for ev in profile:
     if not isinstance(ev, ProfilePMCEvent): continue

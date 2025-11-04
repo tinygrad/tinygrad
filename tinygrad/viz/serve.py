@@ -195,19 +195,20 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-  sqtt_events = [e for e in profile if isinstance(e, ProfileSQTTEvent)]
+  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
   steps:list[dict] = []
   try: from extra.sqtt.roc import decode
-  except ImportError:
-    steps = [{"name":"DECODER IMPORT ISSUE", "src":"decoder needs PYTHONPATH=., use PYTHONPATH=. tinygrad/viz/serve.py to view the current trace."}]
+  except Exception:
+    steps = [{"name":"DECODER IMPORT ISSUE", "depth":0, "data":{"src":traceback.format_exc()}, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}]
     return ctxs.append({"name":"Counters", "steps":steps})
   try:
     rctx = decode(profile)
     steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.hit, e.lat, e.stall, str(e.typ).split("_")[-1]) for e in x[1].values()],
                                               "cols":["Instruction", "Hit Count", "Latency", "Stall", "Type"], "summary":[]},
               "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
-    if not steps: steps = [{"name":"EMPTY SQTT OUTPUT", "src":f"{len(sqtt_events)} SQTT events recorded, none were decoded"}]
-  except Exception: steps = [{"name":"DECODER ERROR", "src":traceback.format_exc()}]
+    if not steps:
+      steps = [{"name":"EMPTY SQTT OUTPUT", "depth":0, "data":{"src":f"{len(sqtt_events)} SQTT events recorded, none got decoded"}, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}]
+  except Exception: steps = [{"name":"DECODER ERROR", "depth":0, "data":{"src":traceback.format_exc()}, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}]
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
