@@ -1,9 +1,8 @@
 import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
-from extra.sqtt.rocprof import rocprof
 from tinygrad.helpers import temp, DEBUG
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-from tinygrad.runtime.autogen import llvm
+from tinygrad.runtime.autogen import llvm, rocprof
 from tinygrad.runtime.support.elf import elf_loader
 
 # to pass NULL to callbacks
