@@ -9,12 +9,12 @@
 #
 import ctypes, ctypes.util
 PATHS_TO_TRY = [
-  '/usr/local/lib/rocprof-trace-decoder.so',
-  '/usr/local/lib/rocprof-trace-decoder.dylib',
+  '/usr/local/lib/librocprof-trace-decoder.so',
+  '/usr/local/lib/librocprof-trace-decoder.dylib',
 ]
 def _try_dlopen_rocprof_trace_decoder():
-  library = ctypes.util.find_library("rocprof-trace-decoder")
-  if library: return ctypes.CDLL(library)
+  try: return ctypes.CDLL(ctypes.util.find_library("rocprof-trace-decoder"))
+  except OSError: pass
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass
