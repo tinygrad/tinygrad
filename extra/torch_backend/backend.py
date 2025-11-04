@@ -221,7 +221,10 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  if storage_offset is None: storage_offset = tensor.storage_offset()
+  if storage_offset is None:
+    # Get storage_offset from TinyOpaqueTensorImpl without accessing storage
+    impl = tensor.unsafeGetTensorImpl()
+    storage_offset = impl.storage_offset()
   if TORCH_DEBUG >= 1: print(f"**** as_strided {tensor.shape=} {size=} {stride=} {storage_offset=}")
 
   tiny_tensor = unwrap(tensor)
