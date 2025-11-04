@@ -73,7 +73,8 @@ class _ROCParseCtx:
       asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.disasms[inst_ev.pc.address][0]))
       asm[inst_ev.pc.address].on_ev(inst_ev)
 
-    self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
+    if ev.instructions_size > 0:
+      self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}
@@ -106,9 +107,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
-    try:
-      instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
-    except: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0
