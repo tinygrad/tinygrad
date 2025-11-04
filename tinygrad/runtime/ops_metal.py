@@ -109,10 +109,73 @@ class MetalCompiler(Compiler):
   def __init__(self):
     self.cgs = ctypes.c_void_p(MetalCompiler.support.MTLCodeGenServiceCreate(b"tinygrad"))
     super().__init__("compile_metal_direct")
-  def __reduce__(self): return (MetalCompiler,()) # force pickle to create new instance for each multiprocessing fork
-  def compile(self, src:str) -> bytes:
+  def ____(self): return (MetalCompiler,()) # force pickle to create new instance for each multiprocessing fork
+  def compile  def reduce(self, op:str, axis:int):
+    assert op in ["SUM", "MAX"], f"op {op} not supported"
+    from tinygrad.runtime.lib import RawMetalBuffer
+    from tinygrad.helpers import prod
+
+    # Output buffer
+    out_shape = list(self.shape)
+    out_shape[axis] = 1
+    out = RawMetalBuffer(prod(out_shape), self.dtype)
+
+    # Metal kernel
+    kernel_name = f"reduce_{op.lower()}"
+    kernel_code = f"""
+    kernel void {kernel_name}(
+        const device {self.dtype.name}* in [[buffer(0)]],
+        device {self.dtype.name}* out [[buffer(1)]],
+        uint3 gid [[thread_position_in_grid]]) {{
+      uint idx = gid.x;
+      {self.dtype.name} acc = {'-{float("inf")}' if op == "MAX" else '0'};
+      for (uint i = 0; i < {self.shape[axis]}; i++) {{
+        {self.dtype.name} val = in[idx * {self.shape[axis]} + i];
+        acc = {f'max(acc, val)' if op == "MAX" else 'acc + val'};
+      }}
+      out[idx] = acc;
+    }}
+    """
+
+    # Compila e run
+    from tinygrad.runtime.ops_metal import MetalProgram
+    prog = MetalProgram(kernel_code, kernel_name)
+    prog(out, self._buf, grid=(prod(out_shape), 1, 1))
+
+    return Tensor(out, device="METAL").reshape(out_shape)(self, src:str) -> bytes:
     ret: Exception|bytes = CompileError("MTLCodeGenServiceBuildRequest returned without calling the callback")
-    @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p)
+    @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p)  def reduce(self, op:str, axis:int):
+    assert op in ["SUM", "MAX"], f"op {op} not supported on Metal"
+    from tinygrad.runtime.lib import RawMetalBuffer
+    from tinygrad.helpers import prod
+
+    # Output buffer
+    out_shape = list(self.shape)
+    out_shape[axis] = 1
+    out = RawMetalBuffer(prod(out_shape), self.dtype)
+
+    # Metal kernel
+    kernel_name = f"reduce_{op.lower()}"
+    kernel_code = f"""
+    kernel void {kernel_name}(
+        const device {self.dtype.name}* in [[buffer(0)]],
+        device {self.dtype.name}* out [[buffer(1)]],
+        uint3 gid [[thread_position_in_grid]]) {{
+      uint idx = gid.x;
+      {self.dtype.name} acc = {'-{float("inf")}' if op == "MAX" else '0.0'};
+      for (uint i = 0; i < {self.shape[axis]}; i++) {{
+        {self.dtype.name} val = in[idx * {self.shape[axis]} + i];
+        acc = {'max(acc, val)' if op == "MAX" else 'acc + val'};
+      }}
+      out[idx] = acc;
+    }}
+    """
+
+    # Compile and run kernel
+    prog = MetalProgram(kernel_code, kernel_name)
+    prog(out, self._buf, grid=(prod(out_shape), 1, 1))
+
+    return Tensor(out, device="METAL").reshape(out_shape)
     def callback(blockptr, error, dataPtr, dataLen, errorMessage):
       nonlocal ret
       if error == 0:
