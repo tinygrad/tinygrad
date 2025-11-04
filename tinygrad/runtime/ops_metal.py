@@ -110,7 +110,10 @@ class MetalCompiler(Compiler):
     self.cgs = ctypes.c_void_p(MetalCompiler.support.MTLCodeGenServiceCreate(b"tinygrad"))
     super().__init__("compile_metal_direct")
   def ____(self): return (MetalCompiler,()) # force pickle to create new instance for each multiprocessing fork
-  def compile  def reduce(self, op:str, axis:int):
+  def compile  def reduce   def cumsum(self, dim):
+    # Cumsum = reduce + scan
+    # Usa reduce per prefix sum
+    return self.reduce("SUM", dim)(self, op:str, axis:int):
     assert op in ["SUM", "MAX"], f"op {op} not supported"
     from tinygrad.runtime.lib import RawMetalBuffer
     from tinygrad.helpers import prod
