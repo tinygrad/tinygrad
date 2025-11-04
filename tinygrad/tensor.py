@@ -1794,7 +1794,12 @@ class Tensor(MathMixin, MovementMixin):
     """
     return self.cast(dtype if dtype is not None else self.dtype)._reduce(Ops.MUL, axis, keepdim)
 
-  def max(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
+  def max   def argmax(self, dim=None, keepdim=False):
+    return self.max(dim, keepdim)[1]
+
+  def argmin(self, dim=None, keepdim=False):
+    return self.min(dim, keepdim)[1]
+(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Returns the maximum value of the tensor along the specified axis or axes.
 
