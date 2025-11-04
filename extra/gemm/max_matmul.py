@@ -1,17 +1,11 @@
 import numpy as np, os
 from tinygrad.helpers import getenv, flat_mv
 from tinygrad import dtypes
-from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Self
 from tinygrad.engine.realize import get_program
 
 # for copied uops
-from tinygrad.codegen.opt.kernel import Kernel, KernelOptError
-from tinygrad.uop.ops import UOp, Ops, BinaryOps, UnaryOps, TernaryOps, KernelInfo
-from tinygrad.codegen.opt.search import Opt, OptOps
-from tinygrad import Device, dtypes, Tensor
-from tinygrad.dtype import PtrDType, DType, DTYPES_DICT
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
+from tinygrad import dtypes
+from tinygrad.dtype import DTYPES_DICT
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,12 +46,6 @@ def randoms():
   if DTYPE_OUT != dtypes.float:
     nc = nc.astype(np.bfloat16 if DTYPE_IN == dtypes.bfloat16 else np.float16)
   return na, nb, nc
-
-def ast_to_cuda_prog(compiler, ast, opts):
-  k = Kernel(ast)
-  k.apply_opts(opts)
-  p = get_program(k.ast, k.opts, k.applied_opts)
-  return CUDAProgram(device, p.function_name, compiler.compile(p.src))
 
 if __name__ == "__main__":
   print(f"gemm variation: {GEMM_VARIATION=} {M=} {N=} {K=} {DTYPE_IN=} {DTYPE_OUT=} {DTYPE_ACC=}")
@@ -189,11 +177,11 @@ if __name__ == "__main__":
 
     tms = []
     na, nb, nc = randoms()
-    cudaalloc.copyin(a, bytearray(na))
-    cudaalloc.copyin(b, bytearray(nb))
+    cudaalloc._copyin(a, memoryview(bytearray(na)))
+    cudaalloc._copyin(b, memoryview(bytearray(nb)))
     for i in range(CNT):
       tms.append(prog(*args, **kwargs))
-    cudaalloc.copyout(flat_mv(nc.data), c)
+    cudaalloc._copyout(flat_mv(nc.data), c)
     comp = na.astype(np.float32) @ nb.astype(np.float32)
     result = nc.reshape(M, N).astype(np.float32)
 

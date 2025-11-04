@@ -432,11 +432,13 @@ generate_sqtt() {
     $ROCPROF_SRC/include/rocprof_trace_decoder.h \
     $ROCPROF_SRC/include/trace_decoder_instrument.h \
     $ROCPROF_SRC/include/trace_decoder_types.h \
-    -o extra/sqtt/rocprof/rocprof.py
-  fixup extra/sqtt/rocprof/rocprof.py
-  sed -i '1s/^/# pylint: skip-file\n/' extra/sqtt/rocprof/rocprof.py
-  sed -i "s/import ctypes/import ctypes, ctypes.util/g" extra/sqtt/rocprof/rocprof.py
-  sed -i "s|FunctionFactoryStub()|ctypes.CDLL(ctypes.util.find_library('rocprof-trace-decoder'))|g" extra/sqtt/rocprof/rocprof.py
+    -o $BASE/rocprof.py
+  fixup $BASE/rocprof.py
+  sed -i '1s/^/# pylint: skip-file\n/' $BASE/rocprof.py
+  sed -i "s/import ctypes/import ctypes, ctypes.util/g" $BASE/rocprof.py
+  patch_dlopen $BASE/rocprof.py rocprof-trace-decoder "'/usr/local/lib/rocprof-trace-decoder.so'" "'/usr/local/lib/rocprof-trace-decoder.dylib'"
+  sed -i "s/def _try_dlopen_rocprof-trace-decoder():/def _try_dlopen_rocprof_trace_decoder():/g" $BASE/rocprof.py
+  sed -i "s|FunctionFactoryStub()|_try_dlopen_rocprof_trace_decoder()|g" $BASE/rocprof.py
 }
 
 generate_webgpu() {

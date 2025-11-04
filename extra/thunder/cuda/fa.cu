@@ -10,7 +10,7 @@ constexpr int ATTN_N = 1024;
 constexpr int ATTN_H = 16;
 constexpr int ATTN_D = 64;
 
-template<int D> constexpr size_t ROWS = 16*(128/D); // height of each worker tile (rows)
+template<int D> constexpr size_t ROWS = 16*(64/D); // height of each worker tile (rows)
 template<int D, typename T=bf16, typename L=row_l> using qkvo_tile = rt<T, ROWS<D>, D, L>;
 template<int D, typename T=float> using attn_tile = rt<T, ROWS<D>, ROWS<D>>;
 template<int D> using shared_tile = st_bf<ROWS<D>, D>;
