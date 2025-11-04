@@ -103,6 +103,7 @@
             <option value="https://raw.githubusercontent.com/openai/whisper/master/tests/jfk.flac">jfk.flac</option>
         </datalist>
 
+        <div id="progressbar"></div>
         <div id="transcription-container">
             <div id="transcription-log"></div>
             <div id="current-transcription"></div>
@@ -194,6 +195,26 @@
             if (!inferenceDone) requestAnimationFrame(updateLoop);
         };
 
+        let chunkCount = 0;
+        let chunksRemaining = 0;
+        let encodingAudio = false;
+
+        function updateProgress(data) {
+            let progress = document.getElementById("progressbar");
+            let chunksDecoded = chunkCount - chunksRemaining;
+            let currentToken = 0;
+            if (data) {
+                chunksDecoded += data.sequenceStatus.filter(x => x == "done").length;
+                currentToken = data.currentTokenIndex;
+            }
+            let percent = (chunksDecoded / Math.max(chunkCount, 1.0)) * 100;
+            let text = `chunks decoded: ${chunksDecoded} / ${chunkCount} (${percent.toFixed(0).padStart(3, ' ')}%), current token: ${currentToken} / 224`;
+            if (encodingAudio) {
+                text += " encoding audio features...";
+            }
+            progress.innerText = text;
+        }
+
         function onTranscriptionEvent(event, data) {
             if (event === "cancel") {
                 currentTranscription.style.display = 'none';
@@ -202,11 +223,17 @@
                 inferenceDone = true;
                 currentTranscription.style.display = 'none';
             } else if (event === "inferenceBegin") {
+                chunkCount = data.chunkCount;
+                chunksRemaining = chunkCount;
                 inferenceDone = false;
                 pendingText = '';
                 currentTranscription.style.display = 'block';
                 requestAnimationFrame(updateLoop);
+            } else if (event === "audioEncode") {
+                encodingAudio = true;
+                updateProgress();
             } else if (event === "chunkUpdate") {
+                encodingAudio = false;
                 pendingTexts = data.pendingTexts;
                 pendingText = data.pendingTexts[0];
 
@@ -224,6 +251,7 @@
                 if (transcriptionContainer.scrollHeight > height) {
                     transcriptionContainer.scrollTo({ top: transcriptionContainer.scrollHeight, behavior: "instant" });
                 }
+                updateProgress(data);
             } else if (event === "chunkDone") {
                 let current = Array.from(document.querySelectorAll("div#current-transcription"));
                 current[data.index].style.display = 'none';
@@ -235,6 +263,7 @@
                 transcriptionLog.appendChild(newChunk);
                 currentTranscription.innerText = '';
                 pendingText = '';
+                --chunksRemaining;
             }
         }
 

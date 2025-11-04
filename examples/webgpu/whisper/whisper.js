@@ -502,7 +502,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
 
             // if (!keep_going) break;
         }
-        updatedCallback(pendingTexts.slice());
+        updatedCallback(pendingTexts.slice(), {currentTokenIndex: i, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
     }
 
     for (let seq of sequences) {
@@ -524,6 +524,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
     await loadAndInitializeModels();
     const { sampleRate, samples } = await audioFetcher();
 
+    let chunkCount = 0;
     let log_specs_full = new Float32Array(Math.ceil(samples.length / SAMPLES_PER_SEGMENT) * MEL_SPEC_CHUNK_LENGTH);
     for (let i = 0; i < samples.length; i += SAMPLES_PER_SEGMENT) {
         let chunk = samples.slice(i, i + SAMPLES_PER_SEGMENT);
@@ -536,11 +537,13 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         }
         let [mel_spec] = await nets.mel(chunk);
         log_specs_full.set(mel_spec, (MEL_SPEC_CHUNK_LENGTH) * (i / SAMPLES_PER_SEGMENT));
+
+        ++chunkCount;
     }
 
     let pendingTexts = [];
 
-    onEvent("inferenceBegin");
+    onEvent("inferenceBegin", {chunkCount, sampleCount: samples.length});
     console.log("begin new transcription");
 
     let previous_context = [];
@@ -554,6 +557,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
     const batch_size = nets.model_metadata.decoder_batch_size;
     for (let seek_index = 0; seek_index < seek_ranges.length;) {
         let audio_features_batch = [];
+        onEvent("audioEncode");
         for (let i = 0; (i < batch_size) && (seek_index + i < seek_ranges.length); ++i) {
             let seek = seek_ranges[seek_index + i];
 
@@ -572,9 +576,9 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             audio_features_batch.push(audio_features);
         }
 
-        function updateCallback(pds) {
+        function updateCallback(pds, data) {
             pendingTexts = pds;
-            onEvent("chunkUpdate", { pendingTexts: pendingTexts });
+            onEvent("chunkUpdate", { pendingTexts: pendingTexts, ...data });
         }
 
         let seeks_batch = [];
