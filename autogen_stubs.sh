@@ -31,7 +31,9 @@ $(for p in "$@"; do echo "  $p,"; done)
 ]
 def _try_dlopen_$name():
   library = ctypes.util.find_library("$name")
-  if library: return ctypes.CDLL(library)
+  if library:
+    try: return ctypes.CDLL(library)
+    except OSError: pass
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass
@@ -436,7 +438,7 @@ generate_sqtt() {
   fixup $BASE/rocprof.py
   sed -i '1s/^/# pylint: skip-file\n/' $BASE/rocprof.py
   sed -i "s/import ctypes/import ctypes, ctypes.util/g" $BASE/rocprof.py
-  patch_dlopen $BASE/rocprof.py rocprof-trace-decoder "'/usr/local/lib/rocprof-trace-decoder.so'" "'/usr/local/lib/rocprof-trace-decoder.dylib'"
+  patch_dlopen $BASE/rocprof.py rocprof-trace-decoder "'/usr/local/lib/librocprof-trace-decoder.so'" "'/usr/local/lib/librocprof-trace-decoder.dylib'"
   sed -i "s/def _try_dlopen_rocprof-trace-decoder():/def _try_dlopen_rocprof_trace_decoder():/g" $BASE/rocprof.py
   sed -i "s|FunctionFactoryStub()|_try_dlopen_rocprof_trace_decoder()|g" $BASE/rocprof.py
 }
