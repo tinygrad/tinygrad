@@ -717,7 +717,7 @@ async function main() {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "24px").style("height", "100%");
         return [s.label.trim(), div.node()];
       })).node());
-    } else root.appendChild(codeBlock(ret.src, ret.lang));
+    } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
     return document.querySelector("#custom").replaceChildren(root);
   }
   // ** UOp view (default)

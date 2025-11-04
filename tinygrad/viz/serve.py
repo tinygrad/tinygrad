@@ -206,8 +206,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.hit, e.lat, e.stall, str(e.typ).split("_")[-1]) for e in x[1].values()],
                                               "cols":["Instruction", "Hit Count", "Latency", "Stall", "Type"], "summary":[]},
               "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
-    if not steps: steps = [{"name":"EMPTY SQTT OUTPUT", "src":f"{len(sqtt_events)} SQTT events recorded, none were decoded", "lang":"txt"}]
-  except Exception: steps = [{"name":"DECODER ERROR", "src":traceback.format_exc(), "lang":"txt"}]
+    if not steps: steps = [{"name":"EMPTY SQTT OUTPUT", "src":f"{len(sqtt_events)} SQTT events recorded, none were decoded"}]
+  except Exception: steps = [{"name":"DECODER ERROR", "src":traceback.format_exc()}]
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
