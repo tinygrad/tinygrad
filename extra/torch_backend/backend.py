@@ -411,12 +411,25 @@ for dim in [1, 2, 3]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
 
-def circular_pad(self, padding): return wrap(unwrap(self).pad(padding, mode="circular"))
+class CircularPadFunction(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, input, padding):
+    ctx.save_for_backward(input)
+    ctx.padding = padding
+    return wrap(unwrap(input).pad(padding, mode="circular"))
 
-def circular_pad_backward(grad_out, self, padding):
-  self, grad_out = unwrap(self), unwrap(grad_out)
-  out = self.pad(padding, mode="circular")
-  return wrap(out.gradient(self, gradient=grad_out)[0])
+  @staticmethod
+  def backward(ctx, grad_out):
+    input, = ctx.saved_tensors
+    padding = ctx.padding
+    tiny_input = unwrap(input)
+    tiny_grad_out = unwrap(grad_out)
+    out = tiny_input.pad(padding, mode="circular")
+    grad_input = out.gradient(tiny_input, gradient=tiny_grad_out)[0]
+    return wrap(grad_input), None
+
+def circular_pad(input, padding):
+  return CircularPadFunction.apply(input, padding)
 
 # Implement torch._C._nn.pad to handle circular mode directly
 _original_torch_pad = torch._C._nn.pad
