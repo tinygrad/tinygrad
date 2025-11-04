@@ -79,13 +79,13 @@ class _ROCParseCtx:
     if DEBUG >= 5: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
     asm:dict[int, InstInfo] = {}
-    inst_execs:list[InstrExec] = []
+    inst_execs:list[InstExec] = []
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
-      asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.disasms[inst_ev.pc.address][0]))
+      info = asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.disasms[inst_ev.pc.address][0]))
       asm[inst_ev.pc.address].on_ev(inst_ev)
-      inst_execs.append(InstExec(inst_typ, inst_ev.stall, inst_ev.duration, inst_ev.time, ""))
+      inst_execs.append(InstExec(inst_typ, info.inst, inst_ev.stall, inst_ev.duration, inst_ev.time))
 
     if ev.instructions_size > 0:
       self.wave_events[key:=(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
