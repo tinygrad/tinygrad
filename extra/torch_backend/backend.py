@@ -49,6 +49,31 @@ def wrap_view_op(fn):
     return wrap(ret)
   return _wrap
 
+def _diagonal(self, offset=0, dim1=0, dim2=1):
+  # Simple case: 2D tensor, main diagonal
+  if offset == 0 and dim1 == 0 and dim2 == 1 and self.ndim == 2 and self.shape[0] == self.shape[1]:
+    return self.diagonal()
+  # General case: use slicing to extract diagonal
+  # Move dim1 and dim2 to the last two dimensions
+  ndim = self.ndim
+  dim1, dim2 = dim1 % ndim, dim2 % ndim
+  if dim1 > dim2: dim1, dim2 = dim2, dim1
+  # Create permutation to move dim1 and dim2 to the end
+  perm = [i for i in range(ndim) if i not in (dim1, dim2)] + [dim1, dim2]
+  x = self.permute(perm)
+  # Now extract diagonal from the last two dimensions
+  h, w = x.shape[-2], x.shape[-1]
+  if offset >= 0:
+    diag_size = min(h, w - offset) if offset < w else 0
+    if diag_size <= 0: return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device)
+    indices = Tensor.arange(diag_size, device=self.device)
+    return x[..., indices, indices + offset]
+  else:
+    diag_size = min(h + offset, w) if -offset < h else 0
+    if diag_size <= 0: return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device)
+    indices = Tensor.arange(diag_size, device=self.device)
+    return x[..., indices - offset, indices]
+
 view_ops = {
   "aten.view": Tensor.reshape,
   "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
@@ -61,6 +86,7 @@ view_ops = {
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
+  "aten.diagonal": _diagonal,
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
