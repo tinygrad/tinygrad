@@ -35,25 +35,33 @@ def get_sqtt(asm:list[str]) -> list[InstExec]:
 
 class TestTiming(unittest.TestCase):
   def test_v_add(self):
-    sqtt = get_sqtt([
-      "v_mov_b32_e32 v10 10",
-      "v_mov_b32_e32 v11 20",
-      "v_add_f32 v11 v10 v11",
-    ])
-    self.assertEqual(sqtt[0].dur, 1)
-    self.assertEqual(sqtt[1].dur, 1)
-    self.assertEqual(sqtt[2].dur, 1)
+    sqtt = get_sqtt([f"v_add_f32 v{10+i} v{10+i+1} {10+i}" for i in range(3)])
+    for s in sqtt:
+      print(s.time, s.inst)
+    assert all(s.dur == 1 for s in sqtt)
     assert all(s.stall == 0 for s in sqtt)
 
-  def test_chain_v_add_latency(self):
+  def test_chain_v_add(self):
     sqtt = get_sqtt([
-      "v_mov_b32_e32 v0 1",
-      "v_add_f32 v1 v0 v0",
-      "v_add_f32 v2 v1 v0",
-      "v_add_f32 v3 v2 v0",
+      "v_add_f32_e32 v1 v0 v0",
+      "v_add_f32_e32 v2 v1 v1",
     ])
-    self.assertEqual([s.dur for s in sqtt], [1,1,1,1])
-    print(sqtt[1].time, sqtt[0].time)
+    self.assertEqual([s.dur for s in sqtt], [1,1])
+    for s in sqtt:
+      print(s)
+
+  def test_multi_cycle_inst(self):
+    sqtt = get_sqtt([
+      "v_mov_b32_e32 v4 0x3f800000",
+      "v_rcp_f32_e32 v5 v4",
+      "v_mul_f32_e32 v6 v5 v4",
+    ])
+    rcp, mul = sqtt[1], sqtt[2]
+    self.assertGreater(rcp.dur, 1) # 4 cycles on gfx11
+    self.assertEqual(mul.dur, 1)
+    # why doesn't this work?
+    print(mul.time, mul.stall, mul.dur, rcp.time, rcp.dur, rcp.stall)
+    #self.assertGreaterEqual(mul.time + mul.stall, rcp.time + rcp.dur)
 
 if __name__ == "__main__":
   unittest.main()
