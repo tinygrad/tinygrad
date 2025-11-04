@@ -120,7 +120,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   try:
     rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  except Exception as e: print("Error in sqtt decoder:", e)
+  except AttributeError as e: raise RuntimeError("Failed to find rocprof-trace-decoder. Run ./extra/sqtt/install_sqtt_decoder.py to install") from e
   return ROCParseCtx
 
 if __name__ == "__main__":
