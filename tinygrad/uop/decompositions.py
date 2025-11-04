@@ -318,7 +318,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental=False):
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental):
   pat: list[tuple[UPat, Callable]] = []
   for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
     if op not in ops or force_transcendental:
