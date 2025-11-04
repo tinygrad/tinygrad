@@ -43,14 +43,13 @@ class TestTiming(unittest.TestCase):
     assert all(s.dur == 1 for s in sqtt)
     assert all(s.stall == 0 for s in sqtt)
 
-  def test_chain_v_add(self):
+  def test_chain_v_add_1l(self):
     sqtt = get_sqtt([
       "v_add_f32_e32 v1 v0 v0",
       "v_add_f32_e32 v2 v1 v1",
     ])
-    self.assertEqual([s.dur for s in sqtt], [1,1])
-    for s in sqtt:
-      print(s)
+    assert all(s.dur == 1 for s in sqtt)
+    assert all(s.stall == 0 for s in sqtt)
 
   def test_multi_cycle_inst(self):
     sqtt = get_sqtt([
@@ -61,18 +60,6 @@ class TestTiming(unittest.TestCase):
     rcp, mul = sqtt[1], sqtt[2]
     self.assertGreater(rcp.dur, 1) # 4 cycles on gfx11
     self.assertEqual(mul.dur, 1)
-    # why doesn't this work?
-    print(mul.time, mul.stall, mul.dur, rcp.time, rcp.dur, rcp.stall)
-    #self.assertGreaterEqual(mul.time + mul.stall, rcp.time + rcp.dur)
-
-  def test_fmac(self):
-    sqtt = get_sqtt([
-      "v_fmac_f32_e32 v5, v29, v41",
-      "v_dual_fmac_f32 v7, v28, v39 :: v_dual_fmac_f32 v4, v29, v0",
-      "v_dual_fmac_f32 v6, v28, v38 :: v_dual_fmac_f32 v11, v26, v47",
-      "v_dual_fmac_f32 v8, v27, v48 :: v_dual_fmac_f32 v7, v29, v43",
-      "v_dual_fmac_f32 v1, v32, v37 :: v_dual_fmac_f32 v6, v29, v42",
-    ], l=32*4)
 
 if __name__ == "__main__":
   unittest.main()
