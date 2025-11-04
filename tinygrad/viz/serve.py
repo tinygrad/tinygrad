@@ -194,14 +194,19 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
-  from extra.sqtt.roc import decode
+  from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+  sqtt_events = [e for e in profile if isinstance(e, ProfileSQTTEvent)]
   steps:list[dict] = []
+  try: from extra.sqtt.roc import decode
+  except ImportError:
+    steps = [{"name":"DECODER IMPORT ISSUE", "src":"decoder needs PYTHONPATH=., use PYTHONPATH=. tinygrad/viz/serve.py to view the current trace."}]
+    return ctxs.append({"name":"Counters", "steps":steps})
   try:
-    if (rctx:=decode(profile)) is None: return None  # no sqtt events were captured
+    rctx = decode(profile)
     steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.hit, e.lat, e.stall, str(e.typ).split("_")[-1]) for e in x[1].values()],
                                               "cols":["Instruction", "Hit Count", "Latency", "Stall", "Type"], "summary":[]},
               "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
-    if not steps: steps = [{"name":"EMPTY SQTT OUTPUT", "src":f"{rctx.sqtt_cnt} SQTT events recorded, none were decoded", "lang":"txt"}]
+    if not steps: steps = [{"name":"EMPTY SQTT OUTPUT", "src":f"{len(sqtt_events)} SQTT events recorded, none were decoded", "lang":"txt"}]
   except Exception: steps = [{"name":"DECODER ERROR", "src":traceback.format_exc(), "lang":"txt"}]
   ctxs.append({"name":"Counters", "steps":steps})
 
@@ -214,9 +219,7 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   for device in device_ts_diffs:
     d = device.split(":")[0]
     if d == "AMD": device_decoders[d] = load_sqtt
-  for fxn in device_decoders.values():
-    try: fxn(profile)
-    except Exception: continue
+  for fxn in device_decoders.values(): fxn(profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
