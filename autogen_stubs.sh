@@ -30,8 +30,10 @@ PATHS_TO_TRY = [
 $(for p in "$@"; do echo "  $p,"; done)
 ]
 def _try_dlopen_$name():
-  try: return ctypes.CDLL(ctypes.util.find_library("$name"))
-  except OSError: pass
+  library = ctypes.util.find_library("$name")
+  if library:
+    try: return ctypes.CDLL(library)
+    except OSError: pass
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass

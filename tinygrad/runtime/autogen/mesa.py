@@ -14,8 +14,10 @@ PATHS_TO_TRY = [
   '/opt/homebrew/lib/libtinymesa.dylib',
 ]
 def _try_dlopen_tinymesa_cpu():
-  try: return ctypes.CDLL(ctypes.util.find_library("tinymesa_cpu"))
-  except OSError: pass
+  library = ctypes.util.find_library("tinymesa_cpu")
+  if library:
+    try: return ctypes.CDLL(library)
+    except OSError: pass
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass

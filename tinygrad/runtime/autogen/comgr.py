@@ -14,8 +14,10 @@ PATHS_TO_TRY = [
   '/opt/homebrew/lib/libamd_comgr.dylib',
 ]
 def _try_dlopen_amd_comgr():
-  try: return ctypes.CDLL(ctypes.util.find_library("amd_comgr"))
-  except OSError: pass
+  library = ctypes.util.find_library("amd_comgr")
+  if library:
+    try: return ctypes.CDLL(library)
+    except OSError: pass
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass
