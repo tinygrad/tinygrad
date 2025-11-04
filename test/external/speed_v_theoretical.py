@@ -85,7 +85,6 @@ class TestKernelSpeed(unittest.TestCase):
     gbs = mems / tm / 1e9
     self._compare(tm, tflops, gbs, nv_tflops, nv_gbs, amd_tflops, amd_gbs)
 
-  # NOTE: tiny7 was slower than tiny12
   # TODO: why are convs so slow?!?
   def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=14)
 
