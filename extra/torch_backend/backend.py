@@ -402,6 +402,21 @@ for dim in [1, 2, 3]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
 
+def circular_pad(self, padding): return wrap(unwrap(self).pad(padding, mode="circular"))
+
+def circular_pad_backward(grad_out, self, padding):
+  self, grad_out = unwrap(self), unwrap(grad_out)
+  out = self.pad(padding, mode="circular")
+  return wrap(out.gradient(self, gradient=grad_out)[0])
+
+# Implement torch._C._nn.pad to handle circular mode directly
+_original_torch_pad = torch._C._nn.pad
+def _custom_pad(input, pad, mode='constant', value=0):
+  if mode == 'circular' and hasattr(input, 'is_tiny') and input.is_tiny:
+    return circular_pad(input, pad)
+  return _original_torch_pad(input, pad, mode, value)
+torch._C._nn.pad = _custom_pad
+
 def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
