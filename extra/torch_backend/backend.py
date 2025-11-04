@@ -197,11 +197,11 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   if storage_offset is None: storage_offset = tensor.storage_offset()
   if TORCH_DEBUG >= 1: print(f"**** as_strided {tensor.shape=} {size=} {stride=} {storage_offset=}")
-  
+
   tiny_tensor = unwrap(tensor)
   size = tuple(size)
   stride = tuple(stride)
-  
+
   # Get or compute the base tensor (original contiguous storage)
   if hasattr(tiny_tensor, '_strided_base'):
     base = tiny_tensor._strided_base
@@ -210,10 +210,10 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
     # First as_strided call - current tensor is the base
     base = tiny_tensor.contiguous()
     base_size = prod(base.shape)
-    
+
   # Flatten the base to 1D for easier indexing
   flat_base = base.reshape(base_size)
-  
+
   # Calculate the slice bounds we need from the flattened tensor
   if len(size) == 0:
     # Scalar case
@@ -223,15 +223,15 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
     # For each dimension i, we access indices 0..size[i]-1 with stride[i]
     # Max offset = storage_offset + sum((size[i]-1) * stride[i] for all i)
     max_offset = storage_offset + sum((s-1) * st for s, st in zip(size, stride) if s > 0)
-    
+
     # Extract the needed slice from flat base
     if max_offset + 1 > base_size:
       # Need to handle out of bounds - pad the base
       flat_base = flat_base.pad(((0, max_offset + 1 - base_size),))
-    
+
     # Now we need to create the strided view
     # We'll use a series of reshapes and slicing operations
-    
+
     # Simple case: contiguous with offset
     if stride == tuple(functools.reduce(lambda acc, x: [x] + [acc[0]*x] + acc[1:], reversed(size[1:]), [1])[::-1]):
       # This is just a contiguous slice with offset
@@ -244,19 +244,19 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
         idx_shape = [1] * len(size)
         idx_shape[i] = sz
         indices.append(Tensor.arange(sz, device=base.device).reshape(idx_shape) * st)
-      
+
       # Compute flat indices: offset + sum(indices[i] * stride[i])
       flat_idx = storage_offset
       for idx in indices:
         flat_idx = flat_idx + idx
-      
+
       # Gather from flat base
       result = flat_base[flat_idx.cast(dtypes.int).flatten()].reshape(size)
-  
+
   # Track the base for future as_strided calls
   result._strided_base = base
   result._base_size = base_size
-  
+
   return wrap(result)
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
