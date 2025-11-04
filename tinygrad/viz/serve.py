@@ -193,22 +193,22 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent
   if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
-  steps:list[dict] = []
+  def err(name:str, msg:str|None=None) -> None:
+    step = {"name":name, "data":{"src":msg or traceback.format_exc()}, "depth":0, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}
+    return ctxs.append({"name":"Counters", "steps":[step]})
   try: from extra.sqtt.roc import decode
-  except Exception:
-    steps = [{"name":"DECODER IMPORT ISSUE", "depth":0, "data":{"src":traceback.format_exc()}, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}]
-    return ctxs.append({"name":"Counters", "steps":steps})
+  except Exception: return err("DECODER IMPORT ISSUE")
   try:
     rctx = decode(profile)
     steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.hit, e.lat, e.stall, str(e.typ).split("_")[-1]) for e in x[1].values()],
                                               "cols":["Instruction", "Hit Count", "Latency", "Stall", "Type"], "summary":[]},
               "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
-    if not steps:
-      steps = [{"name":"EMPTY SQTT OUTPUT", "depth":0, "data":{"src":f"{len(sqtt_events)} SQTT events recorded, none got decoded"}, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}]
-  except Exception: steps = [{"name":"DECODER ERROR", "depth":0, "data":{"src":traceback.format_exc()}, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}]
+    if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  except Exception: return err("DECODER ERROR")
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
