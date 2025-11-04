@@ -522,6 +522,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
 async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAndInitializeModels, initial_temperature = 0) {
     let before = performance.now();
     await loadAndInitializeModels();
+    onEvent("audioDecode");
     const { sampleRate, samples } = await audioFetcher();
 
     let chunkCount = 0;

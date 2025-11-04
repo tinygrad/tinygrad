@@ -103,7 +103,7 @@
             <option value="https://raw.githubusercontent.com/openai/whisper/master/tests/jfk.flac">jfk.flac</option>
         </datalist>
 
-        <div id="progressbar"></div>
+        <div id="progressbar">Transcription status: idle</div>
         <div id="transcription-container">
             <div id="transcription-log"></div>
             <div id="current-transcription"></div>
@@ -197,7 +197,13 @@
 
         let chunkCount = 0;
         let chunksRemaining = 0;
-        let encodingAudio = false;
+
+        const STATUS_IDLE = 0;
+        const STATUS_AUDIO_DECODING = 1;
+        const STATUS_AUDIO_ENCODING = 2;
+        const STATUS_DECODING = 3;
+
+        let transcriptionStatus = STATUS_IDLE;
 
         function updateProgress(data) {
             let progress = document.getElementById("progressbar");
@@ -209,8 +215,10 @@
             }
             let percent = (chunksDecoded / Math.max(chunkCount, 1.0)) * 100;
             let text = `chunks decoded: ${chunksDecoded} / ${chunkCount} (${percent.toFixed(0).padStart(3, ' ')}%), current token: ${currentToken} / 224`;
-            if (encodingAudio) {
+            if (transcriptionStatus === STATUS_AUDIO_ENCODING) {
                 text += " encoding audio features...";
+            } else if (transcriptionStatus === STATUS_AUDIO_DECODING) {
+                text += " fetching and decoding audio...";
             }
             progress.innerText = text;
         }
@@ -219,9 +227,11 @@
             if (event === "cancel") {
                 currentTranscription.style.display = 'none';
                 inferenceDone = true;
+                transcriptionStatus = STATUS_IDLE;
             } else if (event === "inferenceDone") {
                 inferenceDone = true;
                 currentTranscription.style.display = 'none';
+                transcriptionStatus = STATUS_IDLE;
             } else if (event === "inferenceBegin") {
                 chunkCount = data.chunkCount;
                 chunksRemaining = chunkCount;
@@ -229,11 +239,15 @@
                 pendingText = '';
                 currentTranscription.style.display = 'block';
                 requestAnimationFrame(updateLoop);
+                updateProgress();
+            } else if (event === "audioDecode") {
+                transcriptionStatus = STATUS_AUDIO_DECODING;
+                updateProgress();
             } else if (event === "audioEncode") {
-                encodingAudio = true;
+                transcriptionStatus = STATUS_AUDIO_ENCODING;
                 updateProgress();
             } else if (event === "chunkUpdate") {
-                encodingAudio = false;
+                transcriptionStatus = STATUS_DECODING;
                 pendingTexts = data.pendingTexts;
                 pendingText = data.pendingTexts[0];
 
