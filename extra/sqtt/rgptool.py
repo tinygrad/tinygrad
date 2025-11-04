@@ -154,6 +154,20 @@ class RGP:
       if device not in device_events: raise RuntimeError(f"Device {device} not found in profile, devices in profile: {', '.join(device_events.keys())} ")
       device_event = device_events[device]
     sqtt_events = [x for x in profile if isinstance(x, ProfileSQTTEvent) and x.device == device_event.device]
+    # merge events per SE
+    merged_sqtt_events:dict[int, ProfileSQTTEvent] = {}
+    for ev in sqtt_events:
+      if ev.se not in merged_sqtt_events: merged_sqtt_events[ev.se] = ev
+      else:
+        merged_sqtt_events[ev.se] = ProfileSQTTEvent(
+          device=ev.device,
+          se=ev.se,
+          itrace=merged_sqtt_events[ev.se].itrace or ev.itrace,
+          blob=merged_sqtt_events[ev.se].blob + ev.blob,
+          props=ev.props,
+        )
+    sqtt_events = list(merged_sqtt_events.values())
+
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
     device_props = sqtt_events[0].props
     gfx_ver = device_props['gfx_target_version'] // 10000

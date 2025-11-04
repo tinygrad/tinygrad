@@ -23,7 +23,7 @@ if __name__ == "__main__":
   Tensor.realize(q, k, v, out)
 
   NUM_WORKERS = 4
-  ROWS = 16 * (128 // D)
+  ROWS = 16 * (64 // D)
 
   gsz = (N // (ROWS*NUM_WORKERS), H, B)
   for _ in range(5):
