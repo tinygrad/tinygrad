@@ -32,7 +32,7 @@ def get_sqtt(asm:list[str], l:int=1, g:int=1) -> list[InstExec]:
   # exec and decode sqtt
   k.realize()
   rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", arch=dev.device_info())])
-  assert len(rctx.inst_execs) == 1, f"expected one trace event, got {len(rctx.inst_execs)}"
+  assert len(rctx.inst_execs) > 0, "empty sqtt output"
   return list(rctx.inst_execs.values())[0][:-1]
 
 class TestTiming(unittest.TestCase):
@@ -61,13 +61,13 @@ class TestTiming(unittest.TestCase):
     self.assertGreater(rcp.dur, 1) # 4 cycles on gfx11
     self.assertEqual(mul.dur, 1)
 
-  def test_sleep(self):
+  def test_wmma(self):
     sqtt = get_sqtt([
-      "s_sleep 100",
-      "v_mov_b32_e32 v4 1"
-    ])
-    sleep, mov = sqtt
-    self.assertGreaterEqual(mov.time-sleep.time, 100)
+      "v_wmma_f32_16x16x16_f16 v[16:23], v[0:7], v[8:15], v[16:23]",
+      "v_add_f32_e32 v0 v16 v0",
+    ], 32*4)
+    wmma = sqtt[0]
+    self.assertGreater(wmma.dur, 1) # rgp says 64 clocks
 
 if __name__ == "__main__":
   unittest.main()
