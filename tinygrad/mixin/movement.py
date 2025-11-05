@@ -58,7 +58,29 @@ class MovementMixin:
     if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
     if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
     if prod(self.shape) != prod(new_shape): raise ValueError(f"size mismatch, can't reshape ({self.shape}) -> ({new_shape})")
-    return self._mop(Ops.RESHAPE, arg=new_shape) if new_shape != self.shape else self
+    ret = self._mop(Ops.RESHAPE, arg=new_shape)
+    return self if ret.shape == self.shape else ret
+
+  def shrink(self, arg:tuple[tuple["sint", "sint"]|None, ...]) -> Self:
+    """
+    Returns a tensor that shrinks the each axis based on input arg.
+    `arg` must have the same length as `self.ndim`.
+    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as Python slice.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.shrink(((None, (1, 3)))).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.shrink((((0, 2), (0, 2)))).numpy())
+    ```
+    """
+    if self.ndim != len(arg): raise ValueError(f"{self.ndim=} != {len(arg)=}")
+    ret = self._mop(Ops.SHRINK, arg=[x if x is not None else (0,s) for x,s in zip(arg, self.shape)])
+    return self if ret.shape == self.shape else ret
 
   def permute(self, order, *args) -> Self:
     """
@@ -98,27 +120,6 @@ class MovementMixin:
     if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
     flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
-
-  def shrink(self, arg:tuple[tuple["sint", "sint"]|None, ...]) -> Self:
-    """
-    Returns a tensor that shrinks the each axis based on input arg.
-    `arg` must have the same length as `self.ndim`.
-    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as Python slice.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(3, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.shrink(((None, (1, 3)))).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.shrink((((0, 2), (0, 2)))).numpy())
-    ```
-    """
-    if self.ndim != len(arg): raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    if (shrink_arg:=[x if x is not None else (0,s) for x,s in zip(arg, self.shape)]) == [(0,s) for s in self.shape]: return self
-    return self._mop(Ops.SHRINK, arg=shrink_arg)
 
   # **** high level ****
 
