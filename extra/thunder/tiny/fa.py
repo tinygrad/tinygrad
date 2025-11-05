@@ -44,94 +44,107 @@ def clear(reg:UOp, value:float=0):
 def zero(reg:UOp): return clear(reg, 0)
 def neg_inf(reg:UOp): return clear(reg, -math.inf)
 
-LOAD_INNER = 1
+LOAD_INNER = 8
 load_rid = 100
 def load(dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
   global load_rid
 
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
-  warpid = threadIdx_x // WARP_THREADS
-  laneid = threadIdx_x % WARP_THREADS
-
-  # permute src so that axis and axis + 1 and last
-  perm = list(range(len(src.shape)))
-  src_axis = perm.pop(axis)
-  src_axis1 = perm.pop(axis)
-  perm += [src_axis, src_axis1]
-  srcp = src.permute(tuple(perm))
-  srcp = srcp.reshape(srcp.shape[:-2] + (prod(srcp.shape[-2:]),))
+  warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
+  laneid = threadIdx_x % (NUM_WORKERS * WARP_THREADS)
 
   # flatten dst
   if cast(PtrDType, dst.dtype).addrspace == AddrSpace.REG:
+    srcf = src.flatten(-2)
+
     load_i_height = UOp.range(dst.shape[-3], load_rid)
     load_i_width = UOp.range(dst.shape[-2], load_rid+1)
-    load_i_inner = UOp.range(RT_BASE_TILE_NEPT, load_rid+2, AxisType.UPCAST)
+    load_i_inner = UOp.range(RT_BASE_TILE_NEPT, load_rid+2)
     load_rid += 3
 
     row = (warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + (laneid % 16)
     col = load_i_width * TILE_COL_DIM + (laneid // 16) * 8
     src_i_last = row * src.shape[-1] + col + load_i_inner
 
-    dst_store = dst[*dst_idxs, load_i_height, load_i_width, load_i_inner].store(srcp[*idxs[:-2], src_i_last]).end(load_i_height, load_i_width, load_i_inner)
+    dst_store = dst[*dst_idxs, load_i_height, load_i_width, load_i_inner].store(srcf[*idxs[:-2], src_i_last]).end(load_i_height, load_i_width, load_i_inner)
   else:
-    dstf = dst.reshape(dst.shape[:-2] + (prod(dst.shape[-2:]),))
+    dstf = dst.flatten(-2)
 
-    load_i_outer = UOp.range(dst.size // (WARP_THREADS * LOAD_INNER), load_rid)
-    load_i_inner = UOp.range(LOAD_INNER, load_rid+1, AxisType.UPCAST)
+    srcf = src.flatten()
+    row_stride = prod(src.shape[axis+1:])
+
+    idxs = tuple(idx * dst.shape[-2] if i == axis else idx for i, idx in enumerate(idxs))
+    idxs = tuple(idx * dst.shape[-1] if i == 3 else idx for i, idx in enumerate(idxs))
+    src_i = ((idxs[0] * src.shape[-3] + idxs[1]) * src.shape[-2] + idxs[2]) * src.shape[-1] + idxs[3]
+
+    memcpy_per_row = dst.shape[-1] // LOAD_INNER
+    total_calls = prod(dst.shape[-2:]) // (NUM_WORKERS * WARP_THREADS * LOAD_INNER)
+
+    load_i_outer = UOp.range(total_calls, load_rid)
+    load_i_inner = UOp.range(LOAD_INNER, load_rid+1)
     load_rid += 2
 
-    dst_i = warpid * (WARP_THREADS * LOAD_INNER) + laneid * LOAD_INNER + load_i_outer * (WARP_THREADS * LOAD_INNER) + load_i_inner
-    src_i_last = dst_i
-    if len(dst.shape) < len(src.shape):
-      src_i_last += idxs[-2] * src.shape[-1] + idxs[-1]
+    load_idx = load_i_outer * (NUM_WORKERS * WARP_THREADS) + laneid
+    row = load_idx // memcpy_per_row
+    col = (load_idx * LOAD_INNER) % dst.shape[-1]
 
-    dst_store = dstf[*dst_idxs, dst_i].store(srcp[*idxs[:-2], src_i_last]).end(load_i_outer, load_i_inner)
+    dst_i = row * dst.shape[-1] + col + load_i_inner
+    src_i += row * row_stride + col + load_i_inner
+
+    dst_store = dstf[*dst_idxs, dst_i].store(srcf[src_i]).end(load_i_outer, load_i_inner)
 
   barrier = UOp.barrier(dst_store)
 
   return dst.after(barrier).reshape(dst.shape)
 
-STORE_INNER = 1
+STORE_INNER = 8
 store_rid = 200
 def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
   global store_rid
 
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
-  warpid = threadIdx_x // WARP_THREADS
-  laneid = threadIdx_x % WARP_THREADS
-
-  perm = list(range(len(dst.shape)))
-  dst_axis = perm.pop(axis)
-  dst_axis1 = perm.pop(axis)
-  perm += [dst_axis, dst_axis1]
-  dstp = dst.permute(tuple(perm))
-  dstp = dstp.reshape(dstp.shape[:-2] + (prod(dstp.shape[-2:]),))
+  warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
+  laneid = threadIdx_x % (NUM_WORKERS * WARP_THREADS)
 
   # flatten src
   if cast(PtrDType, src.dtype).addrspace == AddrSpace.REG:
+    dstf = dst.flatten(-2)
+
     store_i_height = UOp.range(src.shape[-3], store_rid)
     store_i_width = UOp.range(src.shape[-2], store_rid+1)
-    store_i_inner = UOp.range(RT_BASE_TILE_NEPT, store_rid+2, AxisType.UPCAST)
+    store_i_inner = UOp.range(RT_BASE_TILE_NEPT, store_rid+2)
     store_rid += 3
 
     row = (warpid * src.shape[-3] + store_i_height) * TILE_ROW_DIM + (laneid % 16)
     col = store_i_width * TILE_COL_DIM + (laneid // 16) * 8
     dst_i_last = row * dst.shape[-1] + col + store_i_inner
 
-    dst_store = dstp[*idxs[:-2], dst_i_last].store(src[*src_idxs, store_i_height, store_i_width, store_i_inner]).end(store_i_height, store_i_width, store_i_inner)
+    dst_store = dstf[*idxs[:-2], dst_i_last].store(src[*src_idxs, store_i_height, store_i_width, store_i_inner]).end(store_i_height, store_i_width, store_i_inner)
   else:
-    srcf = src.reshape(src.shape[:-2] + (prod(src.shape[-2:]),))
+    dstf = dst.flatten()
+    row_stride = prod(dst.shape[axis+1:])
 
-    store_i_outer = UOp.range(src.size // (WARP_THREADS * STORE_INNER), store_rid)
-    store_i_inner = UOp.range(STORE_INNER, store_rid+1, AxisType.UPCAST)
+    idxs = tuple(idx * src.shape[-2] if i == axis else idx for i, idx in enumerate(idxs))
+    idxs = tuple(idx * src.shape[-1] if i == 3 else idx for i, idx in enumerate(idxs))
+    dst_i = ((idxs[0] * dst.shape[-3] + idxs[1]) * dst.shape[-2] + idxs[2]) * dst.shape[-1] + idxs[3]
+
+    srcf = src.flatten(-2)
+
+    memcpy_per_row = src.shape[-1] // STORE_INNER
+    total_calls = prod(src.shape[-2:]) // (NUM_WORKERS * WARP_THREADS * STORE_INNER)
+
+    store_i_outer = UOp.range(total_calls, store_rid)
+    store_i_inner = UOp.range(STORE_INNER, store_rid+1)
     store_rid += 2
 
-    src_i = warpid * (WARP_THREADS * STORE_INNER) + laneid * STORE_INNER + store_i_outer * (WARP_THREADS * STORE_INNER) + store_i_inner
-    dst_last_i = src_i
-    if len(dst.shape) > len(src.shape):
-      dst_last_i += idxs[-2] * dst.shape[-1] + idxs[-1]
+    load_idx = store_i_outer * (NUM_WORKERS * WARP_THREADS) + laneid
+    row = load_idx // memcpy_per_row
+    col = (load_idx * STORE_INNER) % src.shape[-1]
 
-    dst_store = dstp[*idxs[:-2], dst_last_i].store(srcf[*src_idxs, src_i]).end(store_i_outer, store_i_inner)
+    src_i = row * src.shape[-1] + col + store_i_inner
+    dst_i += row * row_stride + col + store_i_inner
+
+    dst_store = dstf[dst_i].store(srcf[*src_idxs, src_i]).end(store_i_outer, store_i_inner)
 
   return dst.after(dst_store).reshape(dst.shape) if after else dst_store
 
@@ -145,7 +158,7 @@ def mma_AB(d:UOp, a:UOp, b:UOp, c:UOp):
 NUM_WORKERS = 1
 PIPE_STAGES = 3
 
-B, N, H, D = 1, 64, 1, 64
+B, N, H, D = 1, 16, 1, 64
 
 ROWS = 16 * (64 // D)
 
@@ -167,7 +180,7 @@ def ker():
 
   workerid = warpid
 
-  batch, head, q_seq = blockIdx_z, blockIdx_y, blockIdx_x * NUM_WORKERS + workerid
+  batch, head, q_seq = blockIdx_z, blockIdx_y, blockIdx_x# * NUM_WORKERS + workerid
 
   k_smem = st((ROWS, D), dtypes.bfloat16)
   v_smem = st((ROWS, D), dtypes.bfloat16)
@@ -191,11 +204,11 @@ def ker():
   qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
   q_reg = load(q_reg, qo_smem)
 
-  # height_rng = UOp.range(q_reg.shape[-3], 1)
-  # width_rng = UOp.range(q_reg.shape[-2], 2)
-  # subtile_rng = UOp.range(RT_BASE_TILE_NEPT, 3)
-  # q_reg_store = q_reg[height_rng, width_rng, subtile_rng].store(q_reg[height_rng, width_rng, subtile_rng] * UOp.const(dtypes.bfloat16, ((1.0 / math.sqrt(D)) * (1.0 / math.log(2))))).end(height_rng, width_rng, subtile_rng)
-  # q_reg = q_reg.after(q_reg_store).reshape(q_reg.shape)
+  height_rng = UOp.range(q_reg.shape[-3], 1)
+  width_rng = UOp.range(q_reg.shape[-2], 2)
+  subtile_rng = UOp.range(RT_BASE_TILE_NEPT, 3)
+  q_reg_store = q_reg[height_rng, width_rng, subtile_rng].store(q_reg[height_rng, width_rng, subtile_rng] * ((1.0 / math.sqrt(D)) * (1.0 / math.log(2)))).end(height_rng, width_rng, subtile_rng)
+  q_reg = q_reg.after(q_reg_store).reshape(q_reg.shape)
 
   outer_kv_rng = UOp.range(N // ROWS, 0)
 
@@ -213,10 +226,6 @@ def ker():
 
   qo_smem = store(qo_smem, q_reg)
   o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
-
-  # q_reg = q_reg.set(qo_smem[workerid])
-  #
-  # sink = o[batch, q_seq, head, 0].store(q_reg)
 
   sink = o
 
