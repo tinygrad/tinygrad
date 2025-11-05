@@ -203,9 +203,10 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   except Exception: return err("DECODER IMPORT ISSUE")
   try:
     rctx = decode(profile)
-    steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.hit, e.lat, e.stall, str(e.typ).split("_")[-1]) for e in x[1].values()],
-                                              "cols":["Instruction", "Hit Count", "Latency", "Stall", "Type"], "summary":[]},
-              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.wave_events.items())]
+    steps = [{"name":x[0], "depth":0, "data":{"rows":[(e.inst, e.time, e.time-x[1][i-1].time if i else 0, e.dur, e.stall, str(e.typ).split("_")[-1])
+                                                      for i,e in enumerate(x[1])],
+                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":[]},
+              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.inst_execs.items())]
     if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   except Exception: return err("DECODER ERROR")
   ctxs.append({"name":"Counters", "steps":steps})
