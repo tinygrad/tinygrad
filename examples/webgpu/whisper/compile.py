@@ -239,6 +239,13 @@ if __name__ == '__main__':
         out_tensors[k] = v
     return out_tensors
 
+  def safe_save_meta(tensors, fn, metadata=None):
+    fnp = Path(fn)
+    res = safe_save(tensors, fn, metadata)
+    fnp.with_suffix('.safetensors.version').write_text(str(fnp.stat().st_mtime_ns))
+
+    return res
+
   dirname = Path(__file__).parent
   # NOTE(irwin): force export as f32 as it's a little easier to validate
   # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
@@ -285,14 +292,16 @@ if __name__ == '__main__':
 
     prg, inp_sizes, out_sizes, state = export_model(prep_audio, Device.DEFAULT.lower(), Tensor.randn(1, SAMPLES_PER_SEGMENT), model_name="mel")
     (dirname / 'mel.js').write_text(prg)
-    safe_save(update_max_required_tensor_size(state), (dirname / 'mel.safetensors'))
+    fn = (dirname / 'mel.safetensors')
+    safe_save_meta(update_max_required_tensor_size(state), fn)
+    # fn.with_suffix('.safetensors.version').write_text(str(fn.stat().st_mtime_ns))
     return prg, inp_sizes, out_sizes, state
 
   def export_encoder():
     # reload(model.encoder, change_sd=change_sd)
     prg, inp_sizes, out_sizes, state = export_model(model.encoder, Device.DEFAULT.lower(), Tensor.randn(1,80,3000), model_name="encoder")
     (dirname / 'encoder.js').write_text(prg)
-    safe_save(update_max_required_tensor_size(state), (dirname / 'encoder.safetensors'))
+    safe_save_meta(update_max_required_tensor_size(state), (dirname / 'encoder.safetensors'))
     return prg, inp_sizes, out_sizes, state
 
   def export_decoder_2():
@@ -312,7 +321,7 @@ if __name__ == '__main__':
     )
     # print(out_sizes)
     (dirname / 'decoder.js').write_text(prg)
-    safe_save(update_max_required_tensor_size(state), (dirname / 'decoder.safetensors'))
+    safe_save_meta(update_max_required_tensor_size(state), (dirname / 'decoder.safetensors'))
     return prg, inp_sizes, out_sizes, state
 
   def export_vocab():

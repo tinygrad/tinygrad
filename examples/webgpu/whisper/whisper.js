@@ -43,13 +43,14 @@ async function fetchMonoFloat32ArrayFile(response, AudioContextImplementation = 
 // #endregion audio
 
 const getProgressDlForPart = async (part, progressCallback, lastModified) => {
-    const response = await fetch(part, {
-        headers: lastModified ? { "If-Modified-Since": lastModified } : {}
-    });
-    if (response.status === 304) return null; // not modified
+    const serverLastModified = await fetch(part + '.version', {cache: 'no-cache'}).then(r => r.ok ? r.text() : '');
+    if (lastModified) {
+        if (serverLastModified === lastModified) return null; // not modified
+    }
+    const response = await fetch(part);
 
     const total = parseInt(response.headers.get('content-length'), 10);
-    const newLastModified = response.headers.get('Last-Modified');
+    const newLastModified = serverLastModified;
 
     const res = new Response(new ReadableStream({
         async start(controller) {
