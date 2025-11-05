@@ -57,7 +57,7 @@ class _ROCParseCtx:
     self.inst_execs:dict[tuple[str, int, int, int], list[InstExec]] = {}
 
     for prog in prog_evs:
-      arch = "gfx%d%x%x" % ((trgt:=dev_evs[prog.device].props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
+      arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
       for addr, info in llvm_disasm(arch, unwrap(prog.lib)).items():
         self.disasms[unwrap(prog.base) + addr] = info
         self.addr2prg[unwrap(prog.base) + addr] = prog

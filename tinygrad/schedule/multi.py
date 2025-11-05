@@ -68,7 +68,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # allgather
   copied_chunks = []
   for i,c in enumerate(reduced_chunks):
-    this_chunk = [None] * len(buf.device)
+    this_chunk: list[UOp|None] = [None] * len(buf.device)
     this_chunk[(i+len(buf.device)-1)%n_lbs] = c
     for step in range(n_lbs-1):
       dest = (i+step)%n_lbs
