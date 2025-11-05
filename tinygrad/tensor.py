@@ -1517,80 +1517,6 @@ class Tensor(OpMixin):
     output_shape = _broadcast_shape(*(t.shape for t in tensors))
     return tuple(t._broadcast_to(output_shape) for t in tensors)
 
-  def squeeze(self, dim:int|None=None) -> Tensor:
-    """
-    Returns a tensor with specified dimensions of input of size 1 removed.
-    If `dim` is not specified, all dimensions with size 1 are removed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.zeros(2, 1, 2, 1, 2)
-    print(t.squeeze().shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.squeeze(0).shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.squeeze(1).shape)
-    ```
-    """
-    if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
-    dim = self._resolve_dim(dim)
-    return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
-
-  def unsqueeze(self, dim:int) -> Tensor:
-    """
-    Returns a tensor with a new dimension of size 1 inserted at the specified `dim`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4])
-    print(t.unsqueeze(0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.unsqueeze(1).numpy())
-    ```
-    """
-    dim = self._resolve_dim(dim, extra=True)
-    return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
-
-  @property
-  def T(self) -> Tensor:
-    """`.T` is an alias for `.transpose()`."""
-    return self.transpose()
-
-  def transpose(self, dim0=1, dim1=0) -> Tensor:
-    """
-    Returns a tensor that is a transposed version of the original tensor.
-    The given dimensions `dim0` and `dim1` are swapped.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.transpose(0, 1).numpy())
-    ```
-    """
-    order = list(range(self.ndim))
-    order[dim0], order[dim1] = order[dim1], order[dim0]
-    return self.permute(order)
-
-  def unflatten(self, dim:int, sizes:tuple[int,...]) -> Tensor:
-    """
-    Unflattens dimension `dim` of the tensor into multiple dimensions specified by `sizes`. `Tensor.flatten()` is the inverse of this function.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(3, 4, 1).unflatten(1, (2, 2)).shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(3, 4, 1).unflatten(1, (-1, 2)).shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(5, 12, 3).unflatten(-2, (2, 2, 3, 1, 1)).shape)
-    ```
-    """
-    dim = self._resolve_dim(dim)
-    return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
-
   def diag(self) -> Tensor:
     """
     Returns a 2-D square tensor with the elements of input as the main diagonal.
@@ -1635,46 +1561,6 @@ class Tensor(OpMixin):
     if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
     for dim, shift in zip(dims, shifts): slices[dim] = slice(delta:=self.shape[dim]-shift%self.shape[dim], delta+self.shape[dim])
     return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim)))[slices]
-
-  def rearrange(self, formula:str, **sizes) -> Tensor:
-    """
-    Rearranges input according to formula
-
-    See: https://einops.rocks/api/rearrange/
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    x = Tensor([[1, 2], [3, 4]])
-    print(Tensor.rearrange(x, "batch channel -> (batch channel)").numpy())
-    ```
-    """
-    def parse_formula(formula: str):
-      tokens = f" {formula} ".replace("…", "...").replace("(", " ( ").replace(")", " ) ").replace(" ", "  ").replace(" 1 ", " ( ) ").split()
-      lparens, rparens = map(lambda x: [i for i, ch in enumerate(tokens) if ch == x], ("(", ")"))
-      pairs = list(zip(lparens, rparens))
-      assert len(lparens) == len(rparens) and sorted(flatten(pairs)) == flatten(pairs), "bracket mismatch"
-      return [name for name in tokens if name not in ("(", ")")], [(s - 2*i, e - 1 - 2*i) for i, (s, e) in enumerate(pairs)]
-
-    assert formula.count("->") == 1, 'need exactly one "->" in formula'
-
-    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.split("->"))
-
-    for name in sizes: assert name in lhs, f"axis {name} is not used in transform"
-    assert sorted(lhs) == sorted(rhs) and len(lhs) == len(set(lhs)), f"name mismatch in {formula}"
-    for name in flatten((lhs, rhs)): assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
-    assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), f"cannot have collapsed ellipsis (...) in lhs of {formula}"
-    assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
-
-    # resolve ellipsis
-    if "..." in lhs: ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims)
-    lhs, rhs = map(lambda l: l[:(i:=l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
-    unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0)) for s, e in unflatten_dims]
-    flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0)) for s, e in flatten_dims]
-
-    # apply movement ops in order unflatten -> permute -> flatten/unsqueeze
-    t = functools.reduce(lambda x, dims: x.unflatten(dims[0], tuple(sizes.get(lhs[d], -1) for d in range(*dims))), unflatten_dims, self)
-    for i, name in enumerate(lhs): assert (name not in sizes) or sizes[name] == t.shape[i], f"size provided for dimension {name} incorrect"
-    t = t.permute([lhs.index(name) for name in rhs])
-    return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
 
   def masked_select(self, mask):
     """
