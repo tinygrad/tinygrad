@@ -8,6 +8,7 @@ os.environ["AMD_LLVM"] = "0"
 import unittest
 import sys
 from tinygrad import Tensor
+from tinygrad.dtype import dtypes
 from tinygrad.renderer import ProgramSpec
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import CompiledRunner
@@ -15,9 +16,9 @@ from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.roc import decode, InstExec
 
+dev = Device["AMD"]
 def get_sqtt(asm:list[str], l:int=1, g:int=1) -> list[InstExec]:
   # clear the old traces
-  dev = Device["AMD"]
   dev.profile_events.clear()
   # setup custom_kernel
   name = sys._getframe(1).f_code.co_name
@@ -70,12 +71,21 @@ class TestTiming(unittest.TestCase):
     self.assertGreater(wmma.dur, 1) # rgp says 32 clocks
 
   def test_sleep(self):
-    sqtt = get_sqtt([
-      "s_sleep 10",
-      "v_mov_b32_e32 v1 0"
-    ])
-    sleep, mov = sqtt
-    self.assertGreater(mov.time-sleep.time, 1) # rgp says 10 clocks
+    n = 1
+    def sleep_kernel(data0):
+      assert data0.dtype.base == dtypes.ulong
+      ops:list[UOp] = []
+      ops.append(UOp(Ops.CUSTOM, arg="unsigned long long t0 = __builtin_readcyclecounter();"))
+      ops.append(UOp(Ops.CUSTOM, arg=f"__builtin_amdgcn_s_sleep({n});", src=(ops[-1],)))
+      ops.append(UOp(Ops.CUSTOM, arg="unsigned long long t1 = __builtin_readcyclecounter();", src=(ops[-1],)))
+      ops.append(UOp(Ops.CUSTOM, arg=f"data0_{data0.size}[0] = t1 - t0;", src=(ops[-1],)))
+      return UOp.sink(data0, *ops, arg=KernelInfo(name=f"sleep_{n}"))
+    diff_hw_reg = Tensor.empty(1, dtype=dtypes.ulong)
+    diff_hw_reg = Tensor.custom_kernel(diff_hw_reg, fxn=sleep_kernel)[0]
+    diff_hw_reg.realize()
+    rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", arch=dev.device_info())])
+    diff_sqtt = list(rctx.inst_execs.values())[0][2]
+    self.assertEqual(diff_sqtt.dur, diff_hw_reg.item()-1) # 1 cycle for reading the counter register
 
 if __name__ == "__main__":
   unittest.main()
