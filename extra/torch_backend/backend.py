@@ -285,7 +285,7 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   # Track the base for future as_strided calls
   result._strided_base = base
   result._base_size = base_size
-  
+
   # Store stride metadata for wrap_tensor to use
   result._torch_strides = stride
   result._torch_offset = storage_offset
@@ -301,33 +301,33 @@ def _reshape_alias(tensor:torch.Tensor, size, stride):
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  
+
   size = tuple(size)
   stride = tuple(stride)
-  
+
   # Calculate minimum storage size needed for this strided layout
   # storage_size = 1 + sum((size[i] - 1) * stride[i] for all i where size[i] > 0)
   if len(size) == 0:
     storage_size = 1
   else:
     storage_size = 1 + sum((s - 1) * st for s, st in zip(size, stride) if s > 0)
-  
+
   # Create a 1D base tensor with the required storage
   base = Tensor.empty(storage_size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device)).contiguous()
-  
+
   # Reshape to the requested size - this creates a view
   # Note: this will only work if the requested shape is compatible with storage_size
   # For non-contiguous strides, we just create a tensor with the right shape
   result = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device)).contiguous()
-  
+
   # Store stride metadata on the tensor for wrap_tensor to use
   result._torch_strides = stride
   result._torch_offset = 0
-  
+
   # We need to track the base for as_strided operations
   result._strided_base = base
   result._base_size = storage_size
-  
+
   return wrap(result)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
