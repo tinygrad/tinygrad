@@ -4,10 +4,11 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, prod, strides_for_shape, flatten, make_tuple
+from tinygrad.tensor import canonicalize_device
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect
+import torch, pathlib, math, operator, functools, inspect, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -159,10 +160,8 @@ def _linalg_det(self: torch.Tensor):
 
 @torch.library.impl("aten::diag_embed", "privateuseone")
 def diag_embed(input, offset=0, dim1=-2, dim2=-1):
-  # For the simple case of 1-D input with offset=0, use tinygrad's diag
   if input.ndim == 1 and offset == 0 and dim1 == -2 and dim2 == -1:
     return wrap(unwrap(input).diag())
-  # For other cases, fall back to CPU
   return aten.diag_embed(input.cpu(), offset, dim1, dim2).tiny()
 
 def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
@@ -198,77 +197,59 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
+def _is_permutation(stride:tuple, size:tuple) -> tuple[int,...]|None:
+  """Check if strides represent a permutation of contiguous layout. Returns permutation order or None."""
+  if not size: return ()
+  expected = strides_for_shape(size)
+  # Build mapping from stride value to dimension (ignore size-1 dims as they have stride 0)
+  stride_to_dim = {st: i for i, st in enumerate(stride) if size[i] > 1}
+  expected_to_dim = {st: i for i, st in enumerate(expected) if size[i] > 1}
+  # Check if same strides exist (just in different order)
+  if set(stride_to_dim.keys()) != set(expected_to_dim.keys()): return None
+  # Build permutation: where each dimension should go
+  return tuple(stride_to_dim[expected[expected_to_dim[st]]] if size[i] > 1 else i for i, st in enumerate(expected))
+
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  if storage_offset is None:
-    # Default to 0 for None storage_offset (most common case)
-    # Avoid calling tensor.storage_offset() as it accesses OpaqueTensorImpl storage
-    storage_offset = 0
+  storage_offset = storage_offset or 0
   if TORCH_DEBUG >= 1: print(f"**** as_strided {tensor.shape=} {size=} {stride=} {storage_offset=}")
 
   tiny_tensor = unwrap(tensor)
-  size = tuple(size)
-  stride = tuple(stride)
+  size, stride = tuple(size), tuple(stride)
 
-  # Get or compute the base tensor (original contiguous storage)
   if hasattr(tiny_tensor, '_strided_base'):
-    base = tiny_tensor._strided_base
-    base_size = tiny_tensor._base_size
+    base, base_size = tiny_tensor._strided_base, tiny_tensor._base_size
   else:
-    # First as_strided call - current tensor is the base
     base = tiny_tensor.contiguous()
     base_size = prod(base.shape)
 
-  # Flatten the base to 1D for easier indexing
   flat_base = base.reshape(base_size)
 
-  # Calculate the slice bounds we need from the flattened tensor
-  if len(size) == 0:
-    # Scalar case
+  if not size:
     result = flat_base[storage_offset]
   else:
-    # Compute the maximum offset needed
-    # For each dimension i, we access indices 0..size[i]-1 with stride[i]
-    # Max offset = storage_offset + sum((size[i]-1) * stride[i] for all i)
     max_offset = storage_offset + sum((s-1) * st for s, st in zip(size, stride) if s > 0)
+    if max_offset + 1 > base_size: flat_base = flat_base.pad(((0, max_offset + 1 - base_size),))
 
-    # Extract the needed slice from flat base
-    if max_offset + 1 > base_size:
-      # Need to handle out of bounds - pad the base
-      flat_base = flat_base.pad(((0, max_offset + 1 - base_size),))
-
-    # Now we need to create the strided view
-    # We'll use a series of reshapes and slicing operations
-
-    # Simple case: contiguous with offset
-    if stride == tuple(functools.reduce(lambda acc, x: [x] + [acc[0]*x] + acc[1:], reversed(size[1:]), [1])[::-1]):
-      # This is just a contiguous slice with offset
+    expected_strides = strides_for_shape(size)
+    if stride == expected_strides:
+      # Fast path 1: Contiguous strides
       result = flat_base[storage_offset:storage_offset + prod(size)].reshape(size)
+    elif (perm := _is_permutation(stride, size)) is not None:
+      # Fast path 2: Permutation (transpose) of contiguous
+      result = flat_base[storage_offset:storage_offset + prod(size)].reshape(size).permute(perm)
+    elif all(st == 0 or st == expected_strides[i] for i, st in enumerate(stride)):
+      # Fast path 3: Broadcasting (stride=0) with contiguous base
+      non_broadcast = tuple(s for s, st in zip(size, stride) if st != 0) or (1,)
+      result = flat_base[storage_offset:storage_offset + prod(non_broadcast)].reshape(non_broadcast).expand(size)
     else:
-      # Complex strided case - need to use advanced indexing
-      # Create index tensors for each dimension
-      indices = []
-      for i, (sz, st) in enumerate(zip(size, stride)):
-        idx_shape = [1] * len(size)
-        idx_shape[i] = sz
-        indices.append(Tensor.arange(sz, device=base.device).reshape(idx_shape) * st)
-
-      # Compute flat indices: offset + sum(indices[i] * stride[i])
-      flat_idx = storage_offset
-      for idx in indices:
-        flat_idx = flat_idx + idx
-
-      # Gather from flat base
+      # General case: use advanced indexing (slow but correct)
+      flat_idx = sum((Tensor.arange(sz, device=base.device).reshape([sz if i==j else 1 for j in range(len(size))]) * st
+                      for i, (sz, st) in enumerate(zip(size, stride))), storage_offset)
       result = flat_base[flat_idx.cast(dtypes.int).flatten()].reshape(size)
 
-  # Track the base for future as_strided calls
-  result._strided_base = base
-  result._base_size = base_size
-
-  # Store stride metadata for wrap_tensor to use
-  result._torch_strides = stride
-  result._torch_offset = storage_offset
-
+  result._strided_base, result._base_size = base, base_size
+  result._torch_strides, result._torch_offset = stride, storage_offset
   return wrap(result)
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
@@ -280,33 +261,19 @@ def _reshape_alias(tensor:torch.Tensor, size, stride):
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-
-  size = tuple(size)
-  stride = tuple(stride)
-
-  # Calculate minimum storage size needed for this strided layout
-  # storage_size = 1 + sum((size[i] - 1) * stride[i] for all i where size[i] > 0)
-  if len(size) == 0:
-    storage_size = 1
-  else:
-    storage_size = 1 + sum((s - 1) * st for s, st in zip(size, stride) if s > 0)
-
-  # Create a 1D base tensor with the required storage
-  base = Tensor.empty(storage_size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device)).contiguous()
-
-  # Reshape to the requested size - this creates a view
-  # Note: this will only work if the requested shape is compatible with storage_size
-  # For non-contiguous strides, we just create a tensor with the right shape
-  result = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device)).contiguous()
-
-  # Store stride metadata on the tensor for wrap_tensor to use
-  result._torch_strides = stride
-  result._torch_offset = 0
-
-  # We need to track the base for as_strided operations
-  result._strided_base = base
-  result._base_size = storage_size
-
+  size, stride = tuple(size), tuple(stride)
+  
+  # Calculate minimum storage size: 1 + sum((size[i]-1) * stride[i])
+  storage_size = 1 if not size else 1 + sum((s - 1) * st for s, st in zip(size, stride) if s > 0)
+  
+  # Create base storage and result tensor
+  _dtype, _device = _from_torch_dtype(dtype), _from_torch_device(device)
+  base = Tensor.empty(storage_size, dtype=_dtype, device=_device).contiguous()
+  result = Tensor.empty(*size, dtype=_dtype, device=_device).contiguous()
+  
+  # Track base and stride metadata
+  result._strided_base, result._base_size = base, storage_size
+  result._torch_strides, result._torch_offset = stride, 0
   return wrap(result)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
@@ -778,7 +745,6 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
-import weakref
 _torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
 def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
 def get_real_tinygrad_buffers():
