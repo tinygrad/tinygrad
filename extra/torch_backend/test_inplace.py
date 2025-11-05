@@ -55,7 +55,7 @@ class TestTorchBackendInplace(unittest.TestCase):
 
   def test_noncontig(self):
     a = torch.empty_strided((4,4),(1,4), dtype=torch.int64)
-    # self.assertFalse(a.is_contiguous()) # TODO: we are contiguous when it's not required
+    self.assertFalse(a.is_contiguous())
     a.zero_()
     b = a.view((4,4))
     b[1:3,:] += 1
