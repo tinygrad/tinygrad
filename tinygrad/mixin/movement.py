@@ -2,7 +2,7 @@
 import functools
 from typing import TypeAlias, TYPE_CHECKING, Self
 from tinygrad.uop import Ops
-from tinygrad.helpers import prod, argfix, flatten
+from tinygrad.helpers import prod, argfix, flatten, dedup
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
   sint:TypeAlias = UOp|int
@@ -42,10 +42,6 @@ class MovementMixin:
     if not -max(1, total) <= dim <= max(1, total)-1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total)-1]}")
     return dim + total if dim < 0 else dim
 
-  def view(self, shape, *args) -> Self:
-    """`.view` is an alias for `.reshape`."""
-    return self.reshape(shape, *args)
-
   def reshape(self, shape, *args) -> Self:
     """
     Returns a tensor with the same data as the original tensor but with a different shape.
@@ -81,6 +77,54 @@ class MovementMixin:
     order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
     if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
     return self._mop(Ops.PERMUTE, arg=order_arg) if order_arg != tuple(range(self.ndim)) else self
+
+  def flip(self, axis, *args) -> Self:
+    """
+    Returns a tensor that reverses the order of the original tensor along given `axis`.
+    `axis` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(6).reshape(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.flip(0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.flip((0, 1)).numpy())
+    ```
+    """
+    axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
+    if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
+    flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
+    return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
+
+  def shrink(self, arg:tuple[tuple["sint", "sint"]|None, ...]) -> Self:
+    """
+    Returns a tensor that shrinks the each axis based on input arg.
+    `arg` must have the same length as `self.ndim`.
+    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as Python slice.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.shrink(((None, (1, 3)))).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.shrink((((0, 2), (0, 2)))).numpy())
+    ```
+    """
+    if self.ndim != len(arg): raise ValueError(f"{self.ndim=} != {len(arg)=}")
+    if (shrink_arg:=[x if x is not None else (0,s) for x,s in zip(arg, self.shape)]) == [(0,s) for s in self.shape]: return self
+    return self._mop(Ops.SHRINK, arg=shrink_arg)
+
+  # **** high level ****
+
+  def view(self, shape, *args) -> Self:
+    """`.view` is an alias for `.reshape`."""
+    return self.reshape(shape, *args)
 
   def squeeze(self, dim:int|None=None) -> Self:
     """
