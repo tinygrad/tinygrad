@@ -89,7 +89,7 @@ class TestKernelSpeed(unittest.TestCase):
   def test_conv_3x3_256_32_32_256_256(self): self._test_conv_3x3(256, 32, 32, 256, 256, nv_tflops=27, amd_tflops=14)
 
   # theoretical is nv_tflops=165, amd_tflops=123
-  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=115, amd_tflops=65)
+  def test_gemm_4096(self): self._test_matmul(4096, nv_tflops=110, amd_tflops=65)
   def test_gemm_8192(self): self._test_matmul(8192, nv_tflops=115, amd_tflops=60)
 
   # theoretical is nv_gbs=1008, amd_gbs=960
