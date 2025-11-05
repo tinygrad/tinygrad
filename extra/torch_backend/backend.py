@@ -82,6 +82,7 @@ view_ops = {
   "aten.permute": Tensor.permute,
   "aten.t": Tensor.transpose,
   "aten.transpose.int": Tensor.transpose,
+  "aten.squeeze": Tensor.squeeze,
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
@@ -345,7 +346,16 @@ def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stri
 
 @torch.library.impl("aten::max_pool2d_with_indices_backward", "privateuseone")
 def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
-  return wrap(Tensor.max_unpool2d(unwrap(grad_out), unwrap(indices), output_size=unwrap(self).shape))
+  # TODO: support stride [] in tinygrad?
+  if stride is not None and len(stride) == 0: stride = None
+  tiny_grad_out = unwrap(grad_out)
+  tiny_indices = unwrap(indices)
+  # Force realize the inputs and result to avoid lazy evaluation issues
+  tiny_grad_out.realize()
+  tiny_indices.realize()
+  result = Tensor.max_unpool2d(tiny_grad_out, tiny_indices, kernel_size=kernel_size, stride=stride, dilation=dilation, padding=padding, output_size=unwrap(self).shape)
+  result.realize()
+  return wrap(result)
 
 @torch.library.impl("aten::max_unpool2d", "privateuseone")
 def max_unpool2d(self:torch.Tensor, indices:torch.Tensor, output_size):
@@ -483,15 +493,16 @@ def scatter_add(self, dim, index, src, out):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
+  tiny_dest = unwrap(dest) if dest.is_tiny else None
+  if tiny_dest is not None: maybe_realize_storage(tiny_dest)
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    src,dest = unwrap(src),unwrap(dest)
+    tiny_src = unwrap(src)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
-    dest.assign(src.cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(dest)
+    if tiny_dest.uop.is_contiguous() or tiny_dest.uop.is_realized: tiny_src = tiny_src.contiguous() # this only solves some cases
+    tiny_dest.assign(tiny_src.cast(cast_dtype).to(to_device))
+    Tensor.realize(tiny_dest)
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
@@ -499,8 +510,8 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(unwrap(dest))
+    tiny_dest.assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
+    Tensor.realize(tiny_dest)
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
