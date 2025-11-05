@@ -1551,8 +1551,10 @@ class TestOps(unittest.TestCase):
                                 lambda x: Tensor.stack(*x.std_mean(axis=(1,2))))
 
   def test_std_mean_loaded_nan(self):
-    helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
-                                  lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
+    with warnings.catch_warnings():
+      warnings.filterwarnings("ignore", message="std_mean\\(\\): degrees of freedom is <= 0")
+      helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
+                                    lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
   def test_softmax(self):
     helper_test_op([(45,65)], torch.nn.Softmax(dim=1), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45)], torch.nn.Softmax(dim=0), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
