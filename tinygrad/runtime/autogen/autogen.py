@@ -1,10 +1,10 @@
-import ctypes.util, glob, importlib.metadata, itertools, re, functools, tarfile
+import ctypes.util, glob, importlib.metadata, itertools, re, functools, tarfile, os
 from tinygrad.helpers import fetch, flatten, unwrap
 from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, TypeKind as TK
 from clang.cindex import PrintingPolicy as PP, PrintingPolicyProperty as PPP, SourceRange
 
 assert importlib.metadata.version('clang')[:2] == "20"
-if not Config.loaded: Config.set_library_file(ctypes.util.find_library("clang-20"))
+if not Config.loaded: Config.set_library_file(os.getenv("LIBCLANG_PATH", ctypes.util.find_library("clang-20")))
 
 def fst(c): return next(c.get_children())
 def last(c): return list(c.get_children())[-1]
@@ -12,6 +12,7 @@ def readext(f, fst, snd=None):
   with open(f, "r") as f:
     f.seek(start:=(fst.start.offset if isinstance(fst, SourceRange) else fst))
     return f.read((fst.end.offset if isinstance(fst, SourceRange) else snd)-start)
+def attrs(c): return list(filter(lambda k: (v:=k.value) >= 400 and v < 500, map(lambda c: c.kind, c.get_children())))
 
 base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b', r'\1'),
               (r'\b0+(?=\d)', ''), (r'\s*&&\s*', r' and '), (r'\s*\|\|\s*', r' or '), (r'\s*!\s*', ' not '),
@@ -20,7 +21,7 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
 
 ints = (TK.INT, TK.UINT, TK.LONG, TK.ULONG, TK.LONGLONG, TK.ULONGLONG)
 
-def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None, epilog="", recsym=False, use_errno=False, anon_names={}):
+def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None, epilog="", recsym=False, use_errno=False, anon_names={}, types={}):
   files, args = files() if callable(files) else files, args() if callable(args) else args
   if tarball:
     # dangerous for arbitrary urls!
@@ -32,16 +33,8 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
   files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
   epilog = (epilog(base) if tarball else epilog()) if callable(epilog) else epilog
 
-  idx, lines = Index.create(), ["# mypy: ignore-errors", "import ctypes"+(', os' if any('os' in s for s in dll) else ''),
-                                *(["from ctypes.util import find_library"] if any('find_library' in s for s in dll) else []),
-                                "from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR", *prolog, ""]
-  if dll: lines.extend(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass']
-                                                for d in dll]), "  return None", "dll = dll()\n"])
-  macros = []
-  types:dict[str,tuple[str,bool]] = {}
-
-  anoncnt = itertools.count().__next__
-  def tname(t, suggested_name=None, typedef=None) -> str:
+  macros, lines, anoncnt, types = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}
+  def tname(t, suggested_name=None, typedef=None, attrs=[]) -> str:
     suggested_name = anon_names.get(f"{(decl:=t.get_declaration()).location.file}:{decl.location.line}", suggested_name)
     nonlocal lines, types, anoncnt
     tmap = {TK.VOID:"None", TK.CHAR_U:"ctypes.c_ubyte", TK.UCHAR:"ctypes.c_ubyte", TK.CHAR_S:"ctypes.c_char", TK.SCHAR:"ctypes.c_char",
@@ -52,6 +45,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
     if t.spelling in types and types[t.spelling][1]: return types[t.spelling][0]
     if ((f:=t).kind in (fks:=(TK.FUNCTIONPROTO, TK.FUNCTIONNOPROTO))) or (t.kind == TK.POINTER and (f:=t.get_pointee()).kind in fks):
       return f"ctypes.CFUNCTYPE({tname(f.get_result())}{(', '+', '.join(map(tname, f.argument_types()))) if f.kind==TK.FUNCTIONPROTO else ''})"
+    if t.get_canonical().kind == TK.OBJCOBJECTPOINTER: return "objc_instance" if CK.NS_RETURNS_RETAINED in attrs else "objc_id"
     match t.kind:
       case TK.POINTER: return "ctypes.c_void_p" if t.get_pointee().kind == TK.VOID else f"ctypes.POINTER({tname(t.get_pointee())})"
       case TK.ELABORATED: return tname(t.get_named_type(), suggested_name)
@@ -77,7 +71,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
         lines.extend(([f"{nm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
-          ([f"{nm}._packed_ = True"] * any(c.kind==CK.PACKED_ATTR for c in decl.get_children()))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
+          ([f"{nm}._packed_ = True"] * (CK.PACKED_ATTR in attrs))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
         return nm
       case TK.ENUM:
         # TODO: C++ and GNU C have forward declared enums
@@ -93,17 +87,19 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
       case _: raise NotImplementedError(f"unsupported type {t.kind}")
 
   for f in files:
-    tu = idx.parse(f, args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
+    tu = Index.create().parse(f, args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
     (pp:=PP.create(tu.cursor)).set_property(PPP.TerseOutput, 1)
     for c in tu.cursor.walk_preorder():
       if str(c.location.file) != str(f) and (not recsym or c.kind not in (CK.FUNCTION_DECL,)): continue
+      rollback = lines, types
       try:
         match c.kind:
           case CK.FUNCTION_DECL if c.linkage == LK.EXTERNAL and dll:
             # TODO: we could support name-mangling
+            if c.spelling == "dispatch_data_create": print(attrs(c), c.result_type.get_named_type().kind, c.result_type.get_canonical().kind)
             lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype, {c.spelling}.argtypes = "
-              f"{tname(c.result_type)}, [{', '.join(tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
-          case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: tname(c.type)
+              f"{tname(c.result_type, attrs=attrs(c))}, [{', '.join(tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
+          case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: tname(c.type, attrs=attrs(c))
           case CK.MACRO_DEFINITION if len(toks:=list(c.get_tokens())) > 1:
             if toks[1].spelling == '(' and toks[0].extent.end.column == toks[1].extent.start.column:
               it = iter(toks[1:])
@@ -118,16 +114,24 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
             elif c.type.get_canonical().kind in ints: macros += [f"{c.spelling} = {readext(f, last(c).extent)}"]
             else: macros += [f"{c.spelling} = {tname(c.type)}({readext(f, last(c).extent)})"]
           case CK.VAR_DECL if c.linkage == LK.EXTERNAL and dll:
-            lines.append(f"try: {c.spelling} = {tname(c.type)}.in_dll(dll, '{c.mangled_name}')\nexcept (ValueError,AttributeError): pass")
-      except Exception as e: raise Exception(f"parsing failed at {c.location.file}:{c.location.line}") from e
-  main, macros = '\n'.join(lines) + '\n', [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
+            lines.append(f"try: {c.spelling} = {tname(c.type)}.in_dll(dll, '{c.spelling}')\nexcept (ValueError,AttributeError): pass")
+      except NotImplementedError as e:
+        print(f"Skipping {c.spelling}: {e}")
+        lines, types = rollback
+      except Exception as e: raise Exception(f"error parsing at {c.location}") from e
+  main = (f"# mypy: ignore-errors\nimport ctypes{', os' if any('os' in s for s in dll) else ''}\n"
+    "from tinygrad.helpers import Struct, CEnum, objc_id, objc_instance, _IO, _IOW, _IOR, _IOWR, unwrap\n" + '\n'.join([*prolog,
+      *(["from ctypes.util import find_library"]*any('find_library' in s for s in dll)),
+      *(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass'] for d in dll]),
+         "  return None", "dll = dll()\n"]*bool(dll)), *lines]) + '\n')
+  macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:
       exec(main + '\n'.join(macros), {})
       break
     except (SyntaxError, NameError, TypeError) as e:
       macrono = unwrap(e.lineno if isinstance(e, SyntaxError) else unwrap(unwrap(e.__traceback__).tb_next).tb_lineno) - main.count('\n') - 1
-      assert macrono >= 0 and macrono < len(macros)
+      assert macrono >= 0 and macrono < len(macros), f"error outside macro range: {e}"
       print(f"Skipping {macros[macrono]}: {e}")
       del macros[macrono]
     except Exception as e: raise e

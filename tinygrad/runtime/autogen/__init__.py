@@ -4,6 +4,7 @@ def sys(cmd): return subprocess.check_output(cmd.split()).decode().strip()
 
 root = (here:=pathlib.Path(__file__).parent).parent.parent.parent
 nv_src = "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8ac3b9bdcc1d56827d116743892a5.tar.gz"
+macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 def load(name, *args, **kwargs):
   path = kwargs.pop("path", __name__)
@@ -95,4 +96,8 @@ python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h
 python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
 python3 src/compiler/builtin_types_h.py gen/builtin_types.h""", cwd=path, shell=True, check=True),
   prolog=["import gzip, base64", "from tinygrad.helpers import OSX"], epilog=lambda path: sys(f"{root}/extra/mesa/lvp_nir_options.sh {path}"))
+    case "metal": return load("metal", ["find_library('Metal')"],[f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in [
+                              "Device", "Resource", "IndirectCommandBuffer", "CommandEncoder"]], ["-xobjective-c", "-isysroot", macossdk])
+    case "libsystem": return load("libsystem", ["find_library('System')"], [f"{macossdk}/usr/include/dispatch/dispatch.h"],
+                                  ["-xobjective-c", "-isysroot", macossdk], recsym=True, types={"dispatch_block_t":"ctypes.c_void_p"})
     case _: raise AttributeError(f"no such autogen: {nm}")

@@ -1,19 +1,12 @@
 from typing import Any, cast
 import ctypes, re, decimal
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
+from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE, libobjc, objc_id, objc_instance
 from tinygrad.device import Buffer, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.runtime.ops_metal import wait_check, msg, libobjc, to_struct, objc_instance,\
-  MTLResourceOptions, cmdbuf_st_time, cmdbuf_en_time, objc_id, to_ns_str
-
-class MTLIndirectCommandType:
-  MTLIndirectCommandTypeConcurrentDispatch = (1 << 5)
-
-class MTLResourceUsage:
-  MTLResourceUsageRead = 0b01
-  MTLResourceUsageWrite = 0b10
+from tinygrad.runtime.ops_metal import wait_check, msg, to_struct, cmdbuf_st_time, cmdbuf_en_time, to_ns_str
+from tinygrad.runtime.autogen import metal
 
 class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
@@ -22,13 +15,13 @@ class MetalGraph(GraphRunner):
 
     # create metal batch exec
     icb_descriptor = msg("new", objc_instance)(libobjc.objc_getClass(b"MTLIndirectCommandBufferDescriptor"))
-    msg("setCommandTypes:")(icb_descriptor, MTLIndirectCommandType.MTLIndirectCommandTypeConcurrentDispatch)
+    msg("setCommandTypes:")(icb_descriptor, metal.MTLIndirectCommandTypeConcurrentDispatch)
     msg("setInheritBuffers:")(icb_descriptor, False)
     msg("setInheritPipelineState:")(icb_descriptor, False)
     msg("setMaxKernelBufferBindCount:")(icb_descriptor, 31)
 
     self.icb = msg("newIndirectCommandBufferWithDescriptor:maxCommandCount:options:", objc_instance)(self.dev.sysdevice,
-      icb_descriptor, len(jit_cache), MTLResourceOptions.MTLResourceCPUCacheModeDefaultCache)
+      icb_descriptor, len(jit_cache), metal.MTLResourceCPUCacheModeDefaultCache)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     icb_label = bytes(msg("UTF8String", ctypes.c_char_p)(msg("description", objc_instance)(self.icb))).decode()
     self.needs_icb_fix = int((m := re.search(r'AGXG(\d+)XFamily', icb_label)) is None or int(m.group(1)) < 15) # not required on M3+
@@ -79,7 +72,7 @@ class MetalGraph(GraphRunner):
     command_buffer = msg("commandBuffer", objc_instance)(self.dev.mtl_queue)
     encoder = msg("computeCommandEncoder", objc_instance)(command_buffer)
     msg("useResources:count:usage:")(encoder, (objc_id * len(all_resources))(*all_resources), len(all_resources),
-        MTLResourceUsage.MTLResourceUsageRead | MTLResourceUsage.MTLResourceUsageWrite)
+        metal.MTLResourceUsageRead | metal.MTLResourceUsageWrite)
 
     # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
     # this is a O(n) hack to get them used. what should work is:

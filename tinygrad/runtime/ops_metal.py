@@ -1,47 +1,18 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform
+import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, sys
 from typing import Any, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, T, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, objc_id
+from tinygrad.helpers import msg, libobjc, objc_instance
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
-
-class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
-  def __hash__(self): return hash(self.value)
-  def __eq__(self, other): return self.value == other.value
-
-class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
-  def __del__(self):
-    # CPython doesn't make any guarantees about order in which globals (like `msg` or `libobjc`) are destroyed when the interpreter shuts down
-    # https://github.com/tinygrad/tinygrad/pull/8949 triggered the unlucky ordering which lead to a bunch of errors at exit
-    # TODO: Why isn't `sys.is_finalizing` working?
-    if msg is not None and libobjc is not None: msg("release")(self)
-
-class MTLResourceOptions:
-  MTLResourceCPUCacheModeDefaultCache = 0
-  MTLResourceStorageModeShared = 0 << 4
-
-class MTLPipelineOption:
-  MTLPipelineOptionNone = 0
+from tinygrad.runtime.autogen import metal, libsystem
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
 REQUEST_TYPE_COMPILE = 13
 
-libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
-libmetal = ctypes.CDLL("/System/Library/Frameworks/Metal.framework/Metal")
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-libdispatch = ctypes.CDLL("/usr/lib/libSystem.dylib") # libdispatch is part of libSystem on mac
 libobjc.objc_getClass.restype = objc_id
 libobjc.sel_registerName.restype = objc_id
-libmetal.MTLCreateSystemDefaultDevice.restype = objc_instance
-libdispatch.dispatch_data_create.restype = objc_instance
-
-@functools.cache
-def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
-  resname = libobjc.sel_registerName(selector.encode())
-  sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
-  sender.restype = restype
-  def _msg(ptr: objc_id, *args: Any) -> T: return sender(ptr, resname, *args)
-  return _msg
 
 @functools.cache
 def to_ns_str(s: str): return msg("stringWithUTF8String:", objc_instance)(libobjc.objc_getClass(b"NSString"), s.encode())
@@ -64,7 +35,7 @@ def error_check(error: objc_instance, error_constructor: type[Exception] = Runti
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
-    self.sysdevice = libmetal.MTLCreateSystemDefaultDevice()
+    self.sysdevice = metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = msg("newCommandQueueWithMaxCommandBufferCount:", objc_instance)(self.sysdevice, 1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
     self.mtl_buffers_in_flight: list[Any] = []
@@ -155,7 +126,7 @@ class MetalProgram:
     self.dev, self.name, self.lib = dev, name, lib
     if lib[:4] == b"MTLB":
       # binary metal library
-      data = libdispatch.dispatch_data_create(lib, len(lib), None, None)
+      data = libsystem.dispatch_data_create(lib, len(lib), None, None)
       self.library = msg("newLibraryWithData:error:", objc_instance)(self.dev.sysdevice, data, ctypes.byref(error_lib:=objc_instance()))
       error_check(error_lib)
     else:
@@ -167,7 +138,7 @@ class MetalProgram:
     msg("setComputeFunction:")(descriptor, self.fxn)
     msg("setSupportIndirectCommandBuffers:")(descriptor, True)
     self.pipeline_state = msg("newComputePipelineStateWithDescriptor:options:reflection:error:", objc_instance)(self.dev.sysdevice,
-      descriptor, MTLPipelineOption.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
+      descriptor, metal.MTLPipelineOptionNone, None, ctypes.byref(error_pipeline_creation:=objc_instance()))
     error_check(error_pipeline_creation)
     # cache these msg calls
     self.max_total_threads: int = cast(int, msg("maxTotalThreadsPerThreadgroup", ctypes.c_ulong)(self.pipeline_state))
@@ -199,11 +170,11 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     if options.external_ptr: return MetalBuffer(objc_id(options.external_ptr), size)
 
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
-    ret = msg("newBufferWithLength:options:", objc_id)(self.dev.sysdevice, ctypes.c_ulong(size), MTLResourceOptions.MTLResourceStorageModeShared)
+    ret = msg("newBufferWithLength:options:", objc_id)(self.dev.sysdevice, ctypes.c_ulong(size), metal.MTLResourceStorageModeShared)
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options):
-    if msg is not None and libobjc is not None: msg("release")(opaque.buf)
+    if not sys.is_finalizing(): msg("release")(opaque.buf)
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = msg("commandBuffer", objc_instance)(src_dev.mtl_queue)
