@@ -26,7 +26,7 @@ def linearize(u:UOp) -> list[UOp]:
     priorities[u] = min(priority)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)))}
 
   # then force then to be toposorted in as close to the ideal order as possible
   heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
