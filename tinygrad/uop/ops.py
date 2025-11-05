@@ -1322,7 +1322,8 @@ renderer_infer = PatternMatcher([
 
 def srcs(ctx, src): return f"({ctx[src[0]]},)" if len(src) == 1 else f"({', '.join([ctx[x] for x in src])})"
 def render_marg(ctx,x:UOp):
-  if x.op in {Ops.PERMUTE, Ops.FLIP}: return str(x.marg)
+  if x.op is Ops.PERMUTE: return str(x.marg)
+  if x.op is Ops.FLIP: return str(tuple([i for i,x in enumerate(x.marg) if x]))
   pieces = []
   if x.op in {Ops.RESHAPE, Ops.EXPAND}:
     pieces = [f"{ctx[a] if isinstance(a, UOp) else str(a)}" for a in x.marg]
