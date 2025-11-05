@@ -83,7 +83,7 @@ class TestTiming(unittest.TestCase):
     diff_hw_reg = Tensor.empty(1, dtype=dtypes.ulong)
     diff_hw_reg = Tensor.custom_kernel(diff_hw_reg, fxn=sleep_kernel)[0]
     diff_hw_reg.realize()
-    rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", arch=dev.device_info())])
+    rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
     diff_sqtt = list(rctx.inst_execs.values())[0][2]
     self.assertEqual(diff_sqtt.dur, diff_hw_reg.item()-1) # 1 cycle for reading the counter register
 
