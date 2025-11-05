@@ -61,5 +61,13 @@ class TestTiming(unittest.TestCase):
     self.assertGreater(rcp.dur, 1) # 4 cycles on gfx11
     self.assertEqual(mul.dur, 1)
 
+  def test_sleep(self):
+    sqtt = get_sqtt([
+      "s_sleep 100",
+      "v_mov_b32_e32 v4 1"
+    ])
+    sleep, mov = sqtt
+    self.assertGreaterEqual(mov.time-sleep.time, 100)
+
 if __name__ == "__main__":
   unittest.main()
