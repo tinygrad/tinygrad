@@ -97,7 +97,6 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
     this->storage_offset_ = storage_offset;
-    // Refresh contiguity and other cached metadata after setting custom strides
     this->refresh_numel();
     this->refresh_contiguous();
   }
@@ -117,8 +116,6 @@ int temp_register_hook = register_hook();
 
 at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
-  
-  // Check if the tensor has custom strides stored (from as_strided/empty_strided)
   std::vector<int64_t> strides;
   int64_t storage_offset = 0;
   
@@ -126,7 +123,6 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
     strides = py_obj.attr("_torch_strides").cast<std::vector<int64_t>>();
     storage_offset = py_obj.attr("_torch_offset").cast<int64_t>();
   } else {
-    // Compute contiguous strides from shape (default case)
     strides.resize(sizes.size());
     int64_t stride = 1;
     for (int i = sizes.size() - 1; i >= 0; i--) {

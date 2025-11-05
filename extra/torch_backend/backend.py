@@ -50,29 +50,12 @@ def wrap_view_op(fn):
   return _wrap
 
 def _diagonal(self, offset=0, dim1=0, dim2=1):
-  # Simple case: 2D tensor, main diagonal
-  if offset == 0 and dim1 == 0 and dim2 == 1 and self.ndim == 2 and self.shape[0] == self.shape[1]:
-    return self.diagonal()
-  # General case: use slicing to extract diagonal
-  # Move dim1 and dim2 to the last two dimensions
-  ndim = self.ndim
-  dim1, dim2 = dim1 % ndim, dim2 % ndim
-  if dim1 > dim2: dim1, dim2 = dim2, dim1
-  # Create permutation to move dim1 and dim2 to the end
-  perm = [i for i in range(ndim) if i not in (dim1, dim2)] + [dim1, dim2]
-  x = self.permute(perm)
-  # Now extract diagonal from the last two dimensions
-  h, w = x.shape[-2], x.shape[-1]
-  if offset >= 0:
-    diag_size = min(h, w - offset) if offset < w else 0
-    if diag_size <= 0: return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device)
-    indices = Tensor.arange(diag_size, device=self.device)
-    return x[..., indices, indices + offset]
-  else:
-    diag_size = min(h + offset, w) if -offset < h else 0
-    if diag_size <= 0: return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device)
-    indices = Tensor.arange(diag_size, device=self.device)
-    return x[..., indices - offset, indices]
+  if offset == 0 and dim1 == 0 and dim2 == 1 and self.ndim == 2 and self.shape[0] == self.shape[1]: return self.diagonal()
+  d1, d2 = sorted((dim1 % self.ndim, dim2 % self.ndim))
+  x = self.permute([i for i in range(self.ndim) if i not in (d1, d2)] + [d1, d2])
+  size = max(0, min(x.shape[-2] - max(0, -offset), x.shape[-1] - max(0, offset)))
+  return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device) if size == 0 else \
+         x[..., (idx := Tensor.arange(size, device=self.device)) + max(0, -offset), idx + max(0, offset)]
 
 view_ops = {
   "aten.view": Tensor.reshape,
@@ -92,32 +75,27 @@ view_ops = {
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
-# in place operations with views
+_movement_ops = {Ops.RESHAPE, Ops.PERMUTE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.FLIP}
+_pad_shrink_ops = {Ops.PAD, Ops.SHRINK}
+_op_to_method = {
+  Ops.RESHAPE: Tensor.reshape, Ops.PERMUTE: Tensor.permute, Ops.EXPAND: Tensor.expand,
+  Ops.PAD: Tensor.pad, Ops.SHRINK: Tensor.shrink, Ops.FLIP: Tensor.flip
+}
 def realize_with_views(self: Tensor, views: list[Tensor]):
-  original_base_uop = self.uop  # save original base UOp before realizing
+  original_base_uop = self.uop
   self.replace(self.contiguous().clone().realize())
   for v in views:
-    if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
-    # extract movement ops from view's UOp graph until we reach the original base
-    mops = []
-    current = v.uop
-    while current is not original_base_uop:
-      if current.op in {Ops.RESHAPE, Ops.PERMUTE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.FLIP}:
-        arg = current.arg if current.arg is not None else getattr(current, 'marg', current.shape)
-        mops.append((current.op, arg))
-      if len(current.src) > 0:
-        current = current.src[0]
-      else:
-        break
-    # apply movement ops in reverse order to reconstruct view
+    v_uop = v.uop
+    if v_uop.base.op is Ops.BUFFER_VIEW: continue
+    # extract movement ops from view's UOp graph
+    mops, current = [], v_uop
+    while current is not original_base_uop and len(current.src) > 0:
+      if current.op in _movement_ops:
+        mops.append((current.op, current.marg if current.op in _pad_shrink_ops else (current.arg if current.arg is not None else current.shape)))
+      current = current.src[0]
+    # reconstruct view from realized base
     ret = self
-    for op, arg in reversed(mops):
-      if op == Ops.RESHAPE: ret = ret.reshape(arg)
-      elif op == Ops.PERMUTE: ret = ret.permute(arg)
-      elif op == Ops.EXPAND: ret = ret.expand(arg)
-      elif op == Ops.PAD: ret = ret.pad(arg)
-      elif op == Ops.SHRINK: ret = ret.shrink(arg)
-      elif op == Ops.FLIP: ret = ret.flip(arg)
+    for op, arg in reversed(mops): ret = _op_to_method[op](ret, arg)
     v.replace(ret)
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
