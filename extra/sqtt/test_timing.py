@@ -38,8 +38,6 @@ def get_sqtt(asm:list[str], l:int=1, g:int=1) -> list[InstExec]:
 class TestTiming(unittest.TestCase):
   def test_v_add(self):
     sqtt = get_sqtt([f"v_add_f32 v{10+i} v{10+i+1} {10+i}" for i in range(3)])
-    for s in sqtt:
-      print(s.time, s.inst)
     assert all(s.dur == 1 for s in sqtt)
     assert all(s.stall == 0 for s in sqtt)
 
@@ -60,6 +58,8 @@ class TestTiming(unittest.TestCase):
     rcp, mul = sqtt[1], sqtt[2]
     self.assertGreater(rcp.dur, 1) # 4 cycles on gfx11
     self.assertEqual(mul.dur, 1)
+    # mul depends on v5, how can it run before rcp is done?
+    self.assertGreaterEqual(mul.time, rcp.time+rcp.dur)
 
   def test_wmma(self):
     sqtt = get_sqtt([
@@ -67,7 +67,15 @@ class TestTiming(unittest.TestCase):
       "v_add_f32_e32 v0 v16 v0",
     ], 32*4)
     wmma = sqtt[0]
-    self.assertGreater(wmma.dur, 1) # rgp says 64 clocks
+    self.assertGreater(wmma.dur, 1) # rgp says 32 clocks
+
+  def test_sleep(self):
+    sqtt = get_sqtt([
+      "s_sleep 10",
+      "v_mov_b32_e32 v1 0"
+    ])
+    sleep, mov = sqtt
+    self.assertGreater(mov.time-sleep.time, 1) # rgp says 10 clocks
 
 if __name__ == "__main__":
   unittest.main()

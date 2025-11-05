@@ -40,10 +40,6 @@ class InstInfo:
   def on_ev(self, ev):
     self.hit, self.lat, self.stall = self.hit + 1, self.lat + ev.duration, self.stall + ev.stall
 
-
-# (time + dur) = execution completion time
-# (time + stall) = successful issue time
-# (dur - stall) = execution time
 @dataclasses.dataclass(frozen=True)
 class InstExec:
   typ:str
@@ -83,9 +79,10 @@ class _ROCParseCtx:
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
-      info = asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.disasms[inst_ev.pc.address][0]))
+      inst_disasm = self.disasms[inst_ev.pc.address][0]
+      asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=inst_disasm))
       asm[inst_ev.pc.address].on_ev(inst_ev)
-      inst_execs.append(InstExec(inst_typ, info.inst, inst_ev.stall, inst_ev.duration, inst_ev.time))
+      inst_execs.append(InstExec(inst_typ, inst_disasm, inst_ev.stall, inst_ev.duration, inst_ev.time))
 
     if ev.instructions_size > 0:
       self.wave_events[key:=(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
