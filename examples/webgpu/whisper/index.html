@@ -358,7 +358,7 @@
             }
         }
 
-        const mapping = await fetch(`${BASE_URL}/vocab.json`).then(res => res.json());
+        const mapping = await fetch('./vocab.json').then(res => res.json());
         nets.mapping = mapping;
 
         let currentCancel = null;
