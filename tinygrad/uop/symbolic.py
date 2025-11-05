@@ -298,7 +298,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.cvar("c")), lambda x,c: (-x)+(-c)),  # -(x+c) -> -x + -c
   (UPat.cvar("y") * (UPat.var("x", dtype=dtypes.index) + UPat.cvar("c")), lambda x,y,c: (y*x)+(y*c)),  # -(x+c) -> -x + -c
   # MUL casted bool # NOTE: inf * 0 = nan so we should not use mul to represent where in the first place
-  ((UPat.var("x",  dtype=dtypes.ints+(dtypes.index,)) * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
+  ((UPat.var("x") * UPat.var("gate", dtype=dtypes.bool).cast()), lambda x,gate: gate.where(x, 0)),
   # ** where folding **
   (UPat.var("cond", dtype=dtypes.bool).logical_not().where(UPat.var("t"), UPat.var("f")), lambda cond, t, f: cond.where(f,t)
     if f.arg is not Invalid else None),
