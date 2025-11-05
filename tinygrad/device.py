@@ -54,7 +54,7 @@ atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices]
 
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
-  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0); arch:str="" # noqa: E702
+  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0); props:dict[str,Any]|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
