@@ -32,7 +32,7 @@ def get_sqtt(asm:list[str], l:int=1, g:int=1) -> list[InstExec]:
   k = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   # exec and decode sqtt
   k.realize()
-  rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", arch=dev.device_info())])
+  rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
   assert len(rctx.inst_execs) > 0, "empty sqtt output"
   return list(rctx.inst_execs.values())[0][:-1]
 
