@@ -117,6 +117,7 @@ class MovementMixin:
     ```
     """
     axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
+    assert all(not isinstance(x, bool) and x >= 0 and x < self.ndim for x in axis_arg), f"flip args must be axis ints {axis_arg}"
     if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
     flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
