@@ -262,15 +262,15 @@ def _reshape_alias(tensor:torch.Tensor, size, stride):
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
   size, stride = tuple(size), tuple(stride)
-  
+
   # Calculate minimum storage size: 1 + sum((size[i]-1) * stride[i])
   storage_size = 1 if not size else 1 + sum((s - 1) * st for s, st in zip(size, stride) if s > 0)
-  
+
   # Create base storage and result tensor
   _dtype, _device = _from_torch_dtype(dtype), _from_torch_device(device)
   base = Tensor.empty(storage_size, dtype=_dtype, device=_device).contiguous()
   result = Tensor.empty(*size, dtype=_dtype, device=_device).contiguous()
-  
+
   # Track base and stride metadata
   result._strided_base, result._base_size = base, storage_size
   result._torch_strides, result._torch_offset = stride, 0
