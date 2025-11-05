@@ -281,6 +281,7 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
   assert False
 
 def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
+  assert device != '', device
   # If d is a power of two this is not valid for signed ints!
   is_unsigned = True if x.vmin>=0 or x.dtype in dtypes.uints else False
   assert d>0, "Sign should have been taken out of divisor"
