@@ -63,6 +63,24 @@ class MovementMixin:
     if prod(self.shape) != prod(new_shape): raise ValueError(f"size mismatch, can't reshape ({self.shape}) -> ({new_shape})")
     return self._mop(Ops.RESHAPE, arg=new_shape) if new_shape != self.shape else self
 
+  def permute(self, order, *args) -> Self:
+    """
+    Returns a tensor that is a permutation of the original tensor.
+    The new tensor has the same data as the original tensor but with the dimensions permuted according to the order specified.
+    `order` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.empty(2, 3, 5)
+    print(t.shape)
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.permute(2, 0, 1).shape)
+    ```
+    """
+    order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
+    if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
+    return self._mop(Ops.PERMUTE, arg=order_arg) if order_arg != tuple(range(self.ndim)) else self
+
   def flatten(self, start_dim=0, end_dim=-1) -> Self:
     """
     Flattens the tensor by reshaping it into a one-dimensional tensor.
