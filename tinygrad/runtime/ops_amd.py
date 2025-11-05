@@ -28,7 +28,7 @@ AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << 
         | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
 
 @dataclass(frozen=True)
-class ProfileSQTTEvent(ProfileEvent): device:str; se:int; props:dict; blob:bytes; itrace:bool # noqa: E702
+class ProfileSQTTEvent(ProfileEvent): device:str; se:int; blob:bytes; itrace:bool # noqa: E702
 
 @dataclass(frozen=True)
 class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; regsample:str # noqa: E702
@@ -605,7 +605,7 @@ class AMDProgram(HCQProgram):
 
         self.dev.allocator._copyout(sqtt_mv:=memoryview(bytearray(wptr)), buf)
         resbuf = (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + bytes(sqtt_mv)) if self.dev.target[0] == 9 else bytes(sqtt_mv)
-        Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, se, self.dev.iface.props, resbuf, bool((SQTT_ITRACE_SE_MASK.value >> se) & 1))]
+        Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, se, resbuf, bool((SQTT_ITRACE_SE_MASK.value >> se) & 1))]
     return res
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
@@ -999,4 +999,4 @@ class AMDDevice(HCQCompiled):
 
   def on_device_hang(self): self.iface.on_device_hang()
 
-  def device_info(self): return self.arch
+  def device_props(self): return self.iface.props

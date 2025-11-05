@@ -48,7 +48,8 @@ class _ROCParseCtx:
     self.addr2prg:dict[int, ProfileProgramEvent] = {}
 
     for prog in prog_evs:
-      for addr, info in llvm_disasm(dev_evs[prog.device].arch, unwrap(prog.lib)).items():
+      arch = "gfx%d%x%x" % ((trgt:=dev_evs[prog.device].props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
+      for addr, info in llvm_disasm(arch, unwrap(prog.lib)).items():
         self.disasms[unwrap(prog.base) + addr] = info
         self.addr2prg[unwrap(prog.base) + addr] = prog
 

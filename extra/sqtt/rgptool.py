@@ -164,12 +164,11 @@ class RGP:
           se=ev.se,
           itrace=merged_sqtt_events[ev.se].itrace or ev.itrace,
           blob=merged_sqtt_events[ev.se].blob + ev.blob,
-          props=ev.props,
         )
     sqtt_events = list(merged_sqtt_events.values())
 
     if len(sqtt_events) == 0: raise RuntimeError(f"Device {device_event.device} doesn't contain SQTT data")
-    device_props = sqtt_events[0].props
+    device_props = device_events[sqtt_events[0].device].props
     gfx_ver = device_props['gfx_target_version'] // 10000
     gfx_iplvl = getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}_{(device_props['gfx_target_version']//100)%100}",
                         getattr(sqtt, f"SQTT_GFXIP_LEVEL_GFXIP_{device_props['gfx_target_version']//10000}", None))
