@@ -148,12 +148,26 @@ def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,.
 
   return dst.after(dst_store).reshape(dst.shape) if after else dst_store
 
-# does one 16x16 mma
 def mma_ABt_base(d:UOp, a:UOp, b:UOp, c:UOp):
   pass
 
-def mma_AB(d:UOp, a:UOp, b:UOp, c:UOp):
+def mma_ABt(d:UOp, a:UOp, b:UOp, c:UOp):
+  return d
+
+def mma_AB_base(d:UOp, a:UOp, b:UOp, c:UOp):
   pass
+
+def mma_AB(d:UOp, a:UOp, b:UOp, c:UOp):
+  return d
+
+def row_reduce(row_accum:UOp, src:UOp, src_accum:UOp):
+  threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
+  warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
+  laneid = threadIdx_x % (NUM_WORKERS * WARP_THREADS)
+
+  leader = threadIdx_x & 0x1C
+
+
 
 NUM_WORKERS = 1
 PIPE_STAGES = 3
@@ -218,11 +232,22 @@ def ker():
   k_reg = load(k_reg, k_smem)
   att_block = zero(att_block)
   # TODO: mma_ABt
+  att_block = mma_ABt(att_block, q_reg, k_reg, att_block)
 
   max_vec_last = max_vec # TODO: need copy?
   # max_vec = max(att_block, max_vec)
-  # att_block = att_block.sub(max_vec).exp2()
-  # max_vec_last = max_vec_last.sub(max_vec).exp2()
+  # att_block = (att_block + max_vec * UOp.const(dtypes.float32, -1.)).exp2() # TODO: that is stupid
+  # max_vec_last = (max_vec_last + max_vec * UOp.const(dtypes.float32, -1.)).exp2()
+  # norm_vec = norm_vec * max_vec_last
+  # norm_vec = norm_vec + att_block.sum()
+
+  att_block_mma = att_block # TODO: def need copy
+  v_reg = load(v_reg, v_smem)
+
+  # o_reg = o_reg * max_vec_last
+  o_reg = mma_AB(o_reg, att_block_mma, v_reg, o_reg)
+
+  # o_reg = o_reg / norm_vec
 
   qo_smem = store(qo_smem, q_reg)
   o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
