@@ -281,7 +281,7 @@ if __name__ == '__main__':
         return log_spec
 
     prep_audio = AudioPrep(N_FFT, stride=HOP_LENGTH, pad=(200, 200))
-    reload(prep_audio, change_sd=change_sd)
+    # reload(prep_audio, change_sd=change_sd)
 
     prg, inp_sizes, out_sizes, state = export_model(prep_audio, Device.DEFAULT.lower(), Tensor.randn(1, SAMPLES_PER_SEGMENT), model_name="mel")
     (dirname / 'mel.js').write_text(prg)
@@ -289,7 +289,7 @@ if __name__ == '__main__':
     return prg, inp_sizes, out_sizes, state
 
   def export_encoder():
-    reload(model.encoder, change_sd=change_sd)
+    # reload(model.encoder, change_sd=change_sd)
     prg, inp_sizes, out_sizes, state = export_model(model.encoder, Device.DEFAULT.lower(), Tensor.randn(1,80,3000), model_name="encoder")
     (dirname / 'encoder.js').write_text(prg)
     safe_save(update_max_required_tensor_size(state), (dirname / 'encoder.safetensors'))
