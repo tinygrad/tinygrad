@@ -323,7 +323,7 @@ class Embedding:
     if not dtypes.is_int(idx.dtype): raise TypeError(f"Expected integer dtype for index in embedding, got {idx.dtype}")
     big_shp = idx.shape+(self.vocab_sz, self.embed_sz)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1)).expand(big_shp), self.weight.expand(big_shp)
-    return (arange == idx).mul(vals).sum(-2, dtype=vals.dtype)
+    return (arange == idx).where(vals, 0).sum(-2, dtype=vals.dtype)
 
 class LSTMCell:
   """
