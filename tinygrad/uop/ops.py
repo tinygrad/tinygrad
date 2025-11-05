@@ -4,7 +4,7 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.mixins import MathMixin, MovementMixin
+from tinygrad.mixin import OpMixin
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
@@ -104,7 +104,7 @@ class recursive_property(property):
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
-class UOp(MathMixin, MovementMixin, metaclass=UOpMetaClass):
+class UOp(OpMixin, metaclass=UOpMetaClass):
   op:Ops
   dtype:DType = dtypes.void
   src:tuple[UOp, ...] = tuple()
@@ -867,7 +867,7 @@ def printable(loc:tuple[str, int]) -> str:
   try: return lines(loc[0])[loc[1]-1].strip()
   except FileNotFoundError: return "<missing>"
 
-class UPat(MathMixin, MovementMixin):
+class UPat(OpMixin):
   __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
