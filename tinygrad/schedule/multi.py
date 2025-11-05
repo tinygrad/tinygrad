@@ -186,7 +186,7 @@ def shrink_multi(root:UOp, multi:UOp):
 
 def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
-  return multi.src[0].flip(root.marg).multi(multi.axis)
+  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).multi(multi.axis)
 
 # from multiple devices -> one
 def copy_multi(multi:UOp, device:UOp):
