@@ -1,5 +1,5 @@
 import math
-from typing import cast
+from typing import cast, Callable
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import AxisType, UOp, KernelInfo
 from tinygrad.engine.realize import ExecItem, get_runner
@@ -34,6 +34,20 @@ def rt(shape, dtype):
   register_slot += 1
   return UOp.placeholder((height, width, RT_BASE_TILE_NEPT), dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
 
+def rv(length, dtype, layout="naive"):
+  tiles = length // TILE_ROW_DIM
+  match layout:
+    case "naive":
+      inner_dim = 1
+      outer_dim = (tiles + 1) // 2
+    case "ortho":
+      inner_dim = 1
+      outer_dim = tiles
+
+  global register_slot
+  register_slot += 1
+  return UOp.placeholder((outer_dim, inner_dim), dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
+
 clear_rid = 16
 def clear(reg:UOp, value:float=0):
   global clear_rid
@@ -47,13 +61,11 @@ def neg_inf(reg:UOp): return clear(reg, -math.inf)
 LOAD_INNER = 8
 load_rid = 100
 def load(dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
-  global load_rid
-
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
   warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
   laneid = threadIdx_x % (NUM_WORKERS * WARP_THREADS)
 
-  # flatten dst
+  global load_rid
   if cast(PtrDType, dst.dtype).addrspace == AddrSpace.REG:
     srcf = src.flatten(-2)
 
@@ -93,20 +105,16 @@ def load(dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,..
 
     dst_store = dstf[*dst_idxs, dst_i].store(srcf[src_i]).end(load_i_outer, load_i_inner)
 
-  barrier = UOp.barrier(dst_store)
-
-  return dst.after(barrier).reshape(dst.shape)
+  return dst.after(dst_store.barrier()).reshape(dst.shape)
 
 STORE_INNER = 8
 store_rid = 200
 def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
-  global store_rid
-
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
   warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
   laneid = threadIdx_x % (NUM_WORKERS * WARP_THREADS)
 
-  # flatten src
+  global store_rid
   if cast(PtrDType, src.dtype).addrspace == AddrSpace.REG:
     dstf = dst.flatten(-2)
 
@@ -148,6 +156,20 @@ def store(dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,.
 
   return dst.after(dst_store).reshape(dst.shape) if after else dst_store
 
+copy_rid = 300
+def copy(dst:UOp, src:UOp):
+  assert dst.shape == src.shape
+  assert cast(PtrDType, dst.dtype).addrspace == AddrSpace.REG
+  assert cast(PtrDType, src.dtype).addrspace == AddrSpace.REG
+
+  global copy_rid
+  rngs_for_shape = tuple(UOp.range(dim, copy_rid + i) for i, dim in enumerate(dst.shape))
+  copy_rid += len(dst.shape)
+
+  dst_store = dst[*rngs_for_shape].store(src[*rngs_for_shape].cast(dst.dtype.base)).end(*rngs_for_shape)
+
+  return dst.after(dst_store).reshape(dst.shape)
+
 def mma_ABt_base(d:UOp, a:UOp, b:UOp, c:UOp):
   pass
 
@@ -160,14 +182,49 @@ def mma_AB_base(d:UOp, a:UOp, b:UOp, c:UOp):
 def mma_AB(d:UOp, a:UOp, b:UOp, c:UOp):
   return d
 
-def row_reduce(row_accum:UOp, src:UOp, src_accum:UOp):
+map_rid = 400
+def map(a:UOp, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
+  global map_rid
+  rngs_for_shape = tuple(UOp.range(dim, map_rid + i) for i, dim in enumerate(a.shape))
+  map_rid += len(a.shape)
+
+  if op.__code__.co_argcount == 1:
+    to_store = op(a[*rngs_for_shape])
+  else:
+    to_store = op(a[*rngs_for_shape], rngs_for_shape)
+
+  a_store = a[*rngs_for_shape].store(to_store).end(*rngs_for_shape)
+  return a.after(a_store).reshape(a.shape)
+
+red_rid = 500
+def row_reduce(vec:UOp, src:UOp, op:Callable[[UOp, UOp], UOp]):
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
-  warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
   laneid = threadIdx_x % (NUM_WORKERS * WARP_THREADS)
 
-  leader = threadIdx_x & 0x1C
+  global red_rid
+  red_i_height = UOp.range(src.shape[-3], red_rid)
+  red_i_width = UOp.range(src.shape[-2], red_rid+1)
+  red_i_inner = UOp.range(RT_BASE_TILE_NEPT, red_rid+2, AxisType.REDUCE)
+  red_rid += 3
 
+  global shared_slot
+  red_local = UOp.placeholder((NUM_WORKERS * WARP_THREADS,), src.dtype.base, addrspace=AddrSpace.LOCAL, slot=shared_slot)
+  shared_slot += 1
 
+  # initial reduce in registers
+  vec_store = vec[red_i_height, 0].store(op(vec.after(UOp.group(red_i_width, red_i_inner))[red_i_height, 0], src[red_i_height, red_i_width, red_i_inner])).end(red_i_height, red_i_width, red_i_inner)
+  vec = vec.after(vec_store).reshape(vec.shape)
+
+  # store to shared memory
+  red_local_store = red_local[laneid].store(vec[red_i_height, 0])
+  red_local = red_local.after(red_local_store).reshape(red_local.shape)
+
+  # final reduce from shared memory
+  offset = (laneid + 16) % 32
+  red_local_i = (offset // 16) * 16 + (offset % 16)
+  vec_store = vec[red_i_height, 0].store(op(vec[red_i_height, 0], red_local[red_local_i])).end(red_i_height)
+
+  return vec.after(vec_store).reshape(vec.shape)
 
 NUM_WORKERS = 1
 PIPE_STAGES = 3
@@ -176,15 +233,15 @@ B, N, H, D = 1, 16, 1, 64
 
 ROWS = 16 * (64 // D)
 
-def ker():
+def test_ker():
   # define special indices
   blockIdx_x = UOp.special(N // (ROWS*NUM_WORKERS), "gidx0")
   blockIdx_y = UOp.special(H, "gidx1")
   blockIdx_z = UOp.special(B, "gidx2")
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
 
-  warpid = threadIdx_x // WARP_THREADS
-  laneid = threadIdx_x % WARP_THREADS
+  warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
+  laneid = threadIdx_x % (NUM_WORKERS % WARP_THREADS)
 
   # kernel
   o = gl((B, N, H, D), dtypes.bfloat16)
@@ -194,7 +251,62 @@ def ker():
 
   workerid = warpid
 
-  batch, head, q_seq = blockIdx_z, blockIdx_y, blockIdx_x# * NUM_WORKERS + workerid
+  batch, head, q_seq = blockIdx_z, blockIdx_y, blockIdx_x * NUM_WORKERS + workerid
+
+  k_smem = st((ROWS, D), dtypes.bfloat16)
+  v_smem = st((ROWS, D), dtypes.bfloat16)
+  qo_smem = st((ROWS, D), dtypes.bfloat16)
+
+  q_reg = rt((ROWS, D), dtypes.bfloat16)
+  q_reg_float = rt((ROWS, D), dtypes.float32)
+  k_reg = rt((ROWS, D), dtypes.bfloat16)
+  v_reg = rt((D, ROWS), dtypes.bfloat16)
+  o_reg = rt((ROWS, D), dtypes.float32)
+  att_block = rt((ROWS, ROWS), dtypes.float32)
+  att_block_mma = rt((ROWS, ROWS), dtypes.bfloat16)
+  max_vec_last = rv(ROWS, dtypes.float32, "ortho")
+  max_vec = rv(ROWS, dtypes.float32, "ortho")
+  norm_vec = rv(ROWS, dtypes.float32, "ortho")
+
+  max_vec = neg_inf(max_vec)
+  norm_vec = zero(norm_vec)
+  o_reg = zero(o_reg)
+
+  # load q tile
+  qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
+  q_reg = load(q_reg, qo_smem)
+
+  q_reg_float = copy(q_reg_float, q_reg)
+
+  norm_vec = row_reduce(norm_vec, q_reg_float, lambda a, b: a.maximum(b))
+
+  o_reg = map(o_reg, lambda x, idx: x + norm_vec[idx[0], 0])
+
+  qo_smem = store(qo_smem, o_reg)
+  o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
+
+  sink = o
+  return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
+
+def ker():
+  # define special indices
+  blockIdx_x = UOp.special(N // (ROWS*NUM_WORKERS), "gidx0")
+  blockIdx_y = UOp.special(H, "gidx1")
+  blockIdx_z = UOp.special(B, "gidx2")
+  threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
+
+  warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
+  laneid = threadIdx_x % (NUM_WORKERS % WARP_THREADS)
+
+  # kernel
+  o = gl((B, N, H, D), dtypes.bfloat16)
+  q = gl((B, N, H, D), dtypes.bfloat16)
+  k = gl((B, N, H, D), dtypes.bfloat16)
+  v = gl((B, N, H, D), dtypes.bfloat16)
+
+  workerid = warpid
+
+  batch, head, q_seq = blockIdx_z, blockIdx_y, blockIdx_x * NUM_WORKERS + workerid
 
   k_smem = st((ROWS, D), dtypes.bfloat16)
   v_smem = st((ROWS, D), dtypes.bfloat16)
@@ -206,9 +318,9 @@ def ker():
   o_reg = rt((ROWS, D), dtypes.float32)
   att_block = rt((ROWS, ROWS), dtypes.float32)
   att_block_mma = rt((ROWS, ROWS), dtypes.bfloat16)
-  max_vec_last = rt((ROWS, 1), dtypes.float32)
-  max_vec = rt((ROWS, 1), dtypes.float32)
-  norm_vec = rt((ROWS, 1), dtypes.float32)
+  max_vec_last = rv(ROWS, dtypes.float32, "ortho")
+  max_vec = rv(ROWS, dtypes.float32, "ortho")
+  norm_vec = rv(ROWS, dtypes.float32, "ortho")
 
   max_vec = neg_inf(max_vec)
   norm_vec = zero(norm_vec)
@@ -218,11 +330,7 @@ def ker():
   qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
   q_reg = load(q_reg, qo_smem)
 
-  height_rng = UOp.range(q_reg.shape[-3], 1)
-  width_rng = UOp.range(q_reg.shape[-2], 2)
-  subtile_rng = UOp.range(RT_BASE_TILE_NEPT, 3)
-  q_reg_store = q_reg[height_rng, width_rng, subtile_rng].store(q_reg[height_rng, width_rng, subtile_rng] * ((1.0 / math.sqrt(D)) * (1.0 / math.log(2)))).end(height_rng, width_rng, subtile_rng)
-  q_reg = q_reg.after(q_reg_store).reshape(q_reg.shape)
+  q_reg = map(q_reg, lambda x: x * ((1.0 / math.sqrt(D)) * (1.0 / math.log(2))))
 
   outer_kv_rng = UOp.range(N // ROWS, 0)
 
@@ -231,29 +339,29 @@ def ker():
 
   k_reg = load(k_reg, k_smem)
   att_block = zero(att_block)
-  # TODO: mma_ABt
   att_block = mma_ABt(att_block, q_reg, k_reg, att_block)
 
-  max_vec_last = max_vec # TODO: need copy?
-  # max_vec = max(att_block, max_vec)
-  # att_block = (att_block + max_vec * UOp.const(dtypes.float32, -1.)).exp2() # TODO: that is stupid
-  # max_vec_last = (max_vec_last + max_vec * UOp.const(dtypes.float32, -1.)).exp2()
-  # norm_vec = norm_vec * max_vec_last
-  # norm_vec = norm_vec + att_block.sum()
+  max_vec_last = copy(max_vec_last, max_vec)
+  max_vec = row_reduce(max_vec, att_block, lambda a, b: a.maximum(b))
+  att_block = map(att_block, lambda x, idx: (x + max_vec[idx[0], 0] * UOp.const(dtypes.float32, -1.)).exp2())
+  max_vec_last = map(max_vec_last, lambda x, idx: (x + max_vec[*idx] * UOp.const(dtypes.float32, -1.)).exp2())
+  norm_vec = map(norm_vec, lambda x, idx: x * max_vec_last[*idx])
+  norm_vec = row_reduce(norm_vec, att_block, lambda a, b: a + b)
 
-  att_block_mma = att_block # TODO: def need copy
+  att_block_mma = copy(att_block_mma, att_block)
   v_reg = load(v_reg, v_smem)
 
-  # o_reg = o_reg * max_vec_last
+  o_reg = map(o_reg, lambda x, idx: x * max_vec_last[idx[0], 0])
   o_reg = mma_AB(o_reg, att_block_mma, v_reg, o_reg)
 
-  # o_reg = o_reg / norm_vec
+  o_reg = o_reg.after(o_reg.end(outer_kv_rng)).reshape(o_reg.shape)
 
-  qo_smem = store(qo_smem, q_reg)
+  o_reg = map(o_reg, lambda x, idx: x / norm_vec[idx[0], 0])
+
+  qo_smem = store(qo_smem, o_reg)
   o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
 
   sink = o
-
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
 if __name__ == "__main__":
@@ -265,7 +373,7 @@ if __name__ == "__main__":
     out = Tensor.empty(B, N, H, D, dtype="bfloat16")
     Tensor.realize(q, k, v, out)
 
-  sink = ker()
+  sink = test_ker()
   ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
 
   GlobalCounters.reset()
