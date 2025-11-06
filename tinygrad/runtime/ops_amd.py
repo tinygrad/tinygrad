@@ -831,7 +831,7 @@ class PCIIface(PCIIfaceBase):
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
-    self.dev, self.pci_dev = dev, USBPCIDevice(f"usb:{dev_id}", bars=[0, 2, 5])
+    self.dev, self.pci_dev = dev, USBPCIDevice(dev.__class__.__name__[:2], f"usb:{dev_id}", bars=[0, 2, 5])
     self._setup_adev(self.pci_dev, dma_regions=[(0x200000, self.pci_dev.dma_view(0xf000, 0x80000))])
     self.pci_dev.usb._pci_cacheable += [(self.pci_dev.bar_info[2].addr, self.pci_dev.bar_info[2].size)] # doorbell region is cacheable
 
