@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.gpudims import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops, GroupOp
+from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
@@ -37,6 +37,22 @@ class TestLinearizer(unittest.TestCase):
     tb = Tensor.where(Tensor(False), a, b).numpy()
     np.testing.assert_equal(a.numpy(), ta)
     np.testing.assert_equal(b.numpy(), tb)
+
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx")
+  def test_late_bias_load(self):
+    img = Tensor.empty(1, 3, 16, 16)
+    w = Tensor.empty(16, 3, 3, 3)
+    b = Tensor.empty(16)
+    out = img.conv2d(w, b)
+    ast = helper_linearizer_opt(out)
+    uops = get_program(ast, opts=[]).uops
+    # slice at the last loop end
+    uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
+    # only valid test if outermost range is the reduce
+    if uops[uslice].src[-1].arg[-1] == AxisType.REDUCE:
+      load_types = [u.src[0].dtype for u in uops[uslice+1:] if u.op == Ops.LOAD]
+      # assert that there is a global load after the reduce ends
+      assert any(dt.addrspace == AddrSpace.GLOBAL for dt in load_types)
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
@@ -432,6 +448,8 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # now all input buffers in s[-1] should be realized
   # create fresh buffers for the outputs
   bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
+  # ensure buffers are allocated
+  for b in bufs: b.ensure_allocated()
   return s[-1].ast, bufs
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):

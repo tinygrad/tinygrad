@@ -8,6 +8,7 @@ def linearize(sink:UOp) -> list[UOp]:
   lst = list(sink.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
+  out_degree:dict[UOp, int] = {}
   priorities:dict[UOp, tuple[int, int]] = {}
 
   # get consumers and assign priorities
@@ -15,34 +16,35 @@ def linearize(sink:UOp) -> list[UOp]:
   for u in reversed(lst):
     for s in u.src: consumers[s].append(u)
     in_degree[u] = len(u.src)
+    out_degree[u] = len(consumers[u])
 
     # we place UOps with higher run_counts later
-    # this will cause ranges to be placed late and ends to be placed early
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
-    # simple priority override
+    # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     match u.op:
       # the order and placement of these defines is important
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG | Ops.DEFINE_VAR: priority = -20
       case Ops.CONST: priority = -10  # early consts
       case Ops.LOAD: priority = -1    # place loads early
-      case Ops.RANGE|Ops.END|Ops.IF|Ops.ENDIF: priority = 0 # control flow resets priority
-      case _: priority = min([0]+[priorities[x][1] for x in consumers[u]]) # prevent priority inversion
-
+      case Ops.STORE: priority = 1    # place stores late
+      case Ops.RANGE: priority = 5    # placing RANGE is good
+      case Ops.END: priority = -5     # placing END is bad
+      case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority)
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+x.tuplize))}
 
   # then force then to be toposorted in as close to the ideal order as possible
-  heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
+  heap = [(-nkey[sink], sink)]
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in consumers[u]:
-      in_degree[v] -= 1
-      if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
-  assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
+    for v in u.src:
+      out_degree[v] -= 1
+      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
+  newlst = newlst[::-1]
 
   if getenv("DEBUG_LINEARIZE"):
     for i,u in enumerate(newlst):
