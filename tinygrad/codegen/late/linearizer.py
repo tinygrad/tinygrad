@@ -1,7 +1,7 @@
 import heapq
 from collections import defaultdict
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
-from tinygrad.helpers import prod
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.helpers import prod, getenv
 
 def linearize(u:UOp) -> list[UOp]:
   # this is a toposort with priority
@@ -43,6 +43,10 @@ def linearize(u:UOp) -> list[UOp]:
       in_degree[v] -= 1
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
   assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
+
+  if getenv("DEBUG_LINEARIZE"):
+    for i,u in enumerate(newlst):
+      print(f"{i:4d} {str(u.op):20s} {multirange_str(u.ranges, color=True, pad=10)} {priorities[u]}")
   return newlst
 
 class CFGContext:
