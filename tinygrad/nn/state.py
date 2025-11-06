@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, strides_for_shape, strides_to_permutation
+from tinygrad.helpers import prod, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, strides_to_permutation
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
