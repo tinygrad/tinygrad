@@ -8,7 +8,7 @@ def linearize(u:UOp) -> list[UOp]:
   lst = list(u.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
-  priorities:dict[UOp, int] = {}
+  priorities:dict[UOp, tuple[int, int]] = {}
 
   for u in reversed(lst):
     # for toposort
@@ -17,7 +17,7 @@ def linearize(u:UOp) -> list[UOp]:
 
     # we place UOps with higher run_counts later
     # this will cause ranges to be placed late and ends to be placed early
-    run_count = prod([r.vmax+1 for r in u.ranges])
+    run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
     # here we have some op specific mods
     mod_priority = [0] + [priorities[x][-1] for x in consumers[u]]
