@@ -19,8 +19,7 @@ def linearize(sink:UOp) -> list[UOp]:
     out_degree[u] = len(consumers[u])
 
     # we place UOps with higher run_counts later
-    ranges = u.ranges if u.op is not Ops.END else (u.ranges | {u.src[1]:None})
-    run_count = prod([int(r.vmax)+1 for r in ranges])
+    run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
     # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     match u.op:
