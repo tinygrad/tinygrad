@@ -48,6 +48,11 @@ def range_str(u:UOp, color=False) -> str:
   ret = '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
   return colored(ret, axis_colors[u.arg[-1]]) if color else ret
 
+def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
+  ret = ','.join([range_str(x, color=color) for x in sorted(rngs, key=lambda x: x.arg)])
+  if pad is not None: ret += " " * (pad-ansilen(ret))
+  return ret
+
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
   for u in lst:
@@ -853,8 +858,7 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 def print_uops(uops:list[UOp]):
   for i,u in enumerate(uops):
     formatted_srcs = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    formatted_range = ','.join([range_str(r, color=True) for r in sorted(u.ranges, key=lambda x: x.arg)])
-    print(f"{i:4d} {str(u.op):20s}: {(formatted_range)+' '*(10-ansilen(formatted_range))} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
+    print(f"{i:4d} {str(u.op):20s}: {multirange_str(u.ranges, color=True, pad=10)} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # ***** pattern matcher *****
 
