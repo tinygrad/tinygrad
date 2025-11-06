@@ -275,7 +275,7 @@ def get_stdout(f:Callable) -> str:
 def get_render(i:int, j:int, fmt:str) -> dict|None:
   if fmt == "counters": return ctxs[i]["steps"][j]["data"]
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
   if fmt == "src": return {"src":prg.src, "lang":"cpp"}
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   disasm_str = get_stdout(lambda: compiler.disassemble(lib))

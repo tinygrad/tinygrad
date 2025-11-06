@@ -44,7 +44,7 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
   # print and render
-  if DEBUG >= 6: print_uops(uops, True)
+  if DEBUG >= 6: print_uops(uops)
   src = renderer.render(uops)
 
   return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
