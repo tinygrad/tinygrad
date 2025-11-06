@@ -8,7 +8,7 @@ from tinygrad.mixin import OpMixin
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
-from tinygrad.helpers import strip_parens, colored
+from tinygrad.helpers import strip_parens, colored, ansilen
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
@@ -844,10 +844,12 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 # ***** uop helpers *****
 
-def print_uops(uops:list[UOp]):
+# TODO: make range_color work in VIZ and remove this arg
+def print_uops(uops:list[UOp], range_color=False):
   for i,u in enumerate(uops):
     formatted_srcs = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
+    formatted_range = ','.join([range_str(r, color=range_color) for r in sorted(u.ranges, key=lambda x: x.arg)])
+    print(f"{i:4d} {str(u.op):20s}: {(formatted_range)+' '*(10-ansilen(formatted_range))} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # ***** pattern matcher *****
 

@@ -20,13 +20,19 @@ def linearize(u:UOp) -> list[UOp]:
     run_count = prod([r.vmax+1 for r in u.ranges])
 
     # here we have some op specific mods
+    mod_priority = [0] + [priorities[x][-1] for x in consumers[u]]
     match u.op:
       # DEFINE_GLOBAL must be placed before DEFINE_VAR. This is a quirk of the cstyle Renderer
-      case Ops.DEFINE_GLOBAL: mods = -1
-      case _: mods = 0
+      case Ops.DEFINE_GLOBAL: mod_priority.append(-2)
+      # prefer placing load early
+      case Ops.LOAD: mod_priority.append(-1)
+      # RANGE/END reset this
+      case Ops.END|Ops.RANGE: mod_priority = [0]
 
     # set priority. lower number priority means we prefer to place this before others
-    priorities[u] = (run_count, mods)
+    priorities[u] = (run_count, min(mod_priority))
+
+  #for i,u in enumerate(lst): print(f"{i:3d} {str(u.op):30s} {priorities[u]}")
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]))}
