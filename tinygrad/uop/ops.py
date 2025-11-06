@@ -4,11 +4,11 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.uop.mixins import MathMixin, MovementMixin
+from tinygrad.mixin import OpMixin
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
-from tinygrad.helpers import strip_parens, colored
+from tinygrad.helpers import strip_parens, colored, ansilen
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
@@ -104,7 +104,7 @@ class recursive_property(property):
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
-class UOp(MathMixin, MovementMixin, metaclass=UOpMetaClass):
+class UOp(OpMixin, metaclass=UOpMetaClass):
   op:Ops
   dtype:DType = dtypes.void
   src:tuple[UOp, ...] = tuple()
@@ -295,14 +295,20 @@ class UOp(MathMixin, MovementMixin, metaclass=UOpMetaClass):
   def _ranges(self) -> dict[UOp, None]:
     ret: dict[UOp, None] = {}
     for s in self.src: ret.update(s.ranges)
-    if (er:=self.ended_ranges):
-      for s in UOp.sink(*er).ranges:
-        if s in ret: del ret[s]
+    for er in self.ended_ranges:
+      if er.op is Ops.RANGE:
+        # if it's a single RANGE, we don't flow through it.
+        if er in ret: del ret[er]
+      else:
+        # if it's not a RANGE, we include all ranges in srcs.
+        # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
+        for s in er.ranges:
+          if s in ret: del ret[s]
     return ret
 
   @property
   def ranges(self) -> dict[UOp, None]:
-    if self.op is Ops.RANGE: return {self:None}
+    if self.op is Ops.RANGE: return {self:None} | self._ranges
     return self._ranges
 
   # *** uop evaluation ***
@@ -549,12 +555,12 @@ class UOp(MathMixin, MovementMixin, metaclass=UOpMetaClass):
   def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=False)
   #def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=True)
   def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
-  def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
+  #def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, same_shape_noop=True)
 
   # in these two, we have custom logic to check if they are a no-op
-  def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg, same_shape_noop=False) if arg != tuple(range(len(self.shape))) else self
-  def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg, same_shape_noop=False) if any(arg) and len(arg) == len(self.shape) else self
+  #def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg, same_shape_noop=False) if arg != tuple(range(len(self.shape))) else self
+  #def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg, same_shape_noop=False) if any(arg) and len(arg) == len(self.shape) else self
 
   # *** uop UNIQUE ***
 
@@ -847,7 +853,8 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 def print_uops(uops:list[UOp]):
   for i,u in enumerate(uops):
     formatted_srcs = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
+    formatted_range = ','.join([range_str(r, color=True) for r in sorted(u.ranges, key=lambda x: x.arg)])
+    print(f"{i:4d} {str(u.op):20s}: {(formatted_range)+' '*(10-ansilen(formatted_range))} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # ***** pattern matcher *****
 
@@ -867,7 +874,7 @@ def printable(loc:tuple[str, int]) -> str:
   try: return lines(loc[0])[loc[1]-1].strip()
   except FileNotFoundError: return "<missing>"
 
-class UPat(MathMixin, MovementMixin):
+class UPat(OpMixin):
   __slots__ = ("op", "dtype", "arg", "name", "src")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
@@ -1322,7 +1329,8 @@ renderer_infer = PatternMatcher([
 
 def srcs(ctx, src): return f"({ctx[src[0]]},)" if len(src) == 1 else f"({', '.join([ctx[x] for x in src])})"
 def render_marg(ctx,x:UOp):
-  if x.op in {Ops.PERMUTE, Ops.FLIP}: return str(x.marg)
+  if x.op is Ops.PERMUTE: return str(x.marg)
+  if x.op is Ops.FLIP: return str(tuple([i for i,x in enumerate(x.marg) if x]))
   pieces = []
   if x.op in {Ops.RESHAPE, Ops.EXPAND}:
     pieces = [f"{ctx[a] if isinstance(a, UOp) else str(a)}" for a in x.marg]

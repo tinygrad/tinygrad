@@ -162,6 +162,7 @@ class RGP:
       else:
         merged_sqtt_events[ev.se] = ProfileSQTTEvent(
           device=ev.device,
+          kern=ev.kern,
           se=ev.se,
           itrace=merged_sqtt_events[ev.se].itrace or ev.itrace,
           blob=merged_sqtt_events[ev.se].blob + ev.blob,

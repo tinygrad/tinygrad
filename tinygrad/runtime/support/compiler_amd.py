@@ -13,8 +13,9 @@ from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
 
 def amdgpu_disassemble(lib:bytes):
-  asm = subprocess.check_output(["llvm-objdump" if OSX else "/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
-  print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
+  asm = subprocess.check_output(["llvm-objdump" if OSX else "/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib).decode("utf-8").splitlines()
+  while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
+  print("\n".join(asm))
 
 def check(status):
   if status != 0:

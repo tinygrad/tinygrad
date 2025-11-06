@@ -1,21 +1,27 @@
 import heapq
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
+from tinygrad.helpers import prod
 
 def linearize(u:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(u.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
-  priorities:dict[UOp, int] = {}
+  priorities:dict[UOp, tuple[int, int]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
     for s in u.src: consumers[s].append(u)
     in_degree[u] = len(u.src)
+
+    # we place UOps with higher run_counts later
+    # this will cause ranges to be placed late and ends to be placed early
+    run_count = prod([int(r.vmax)+1 for r in u.ranges])
+
     # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x] for x in consumers[u]]
+    priority = [0] + [priorities[x][1] for x in consumers[u]]
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
@@ -23,7 +29,7 @@ def linearize(u:UOp) -> list[UOp]:
     if u.op is Ops.END: priority = [-1000]
     # move defines and consts to the top
     if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
-    priorities[u] = min(priority)
+    priorities[u] = (run_count, min(priority))
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
