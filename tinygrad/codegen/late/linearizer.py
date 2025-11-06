@@ -20,18 +20,20 @@ def linearize(u:UOp) -> list[UOp]:
     # this will cause ranges to be placed late and ends to be placed early
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
-    # simple priority
+    # simple priority override
     match u.op:
-      case Ops.CONST: priority = -1
-      case _: priority = 0
-
-    # prevent priority inversion
-    priority = min([priority]+[priorities[x][1] for x in consumers[u]])
+      case Ops.CONST: priority = -10
+      # place loads early
+      #case Ops.LOAD: priority = -1
+      # control flow resets priority
+      case Ops.RANGE|Ops.END|Ops.IF|Ops.ENDIF: priority = 0
+      # prevent priority inversion
+      case _: priority = min([0]+[priorities[x][1] for x in consumers[u]])
 
     priorities[u] = (run_count, priority)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+x.tuplize))}
 
   # then force then to be toposorted in as close to the ideal order as possible
   heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
