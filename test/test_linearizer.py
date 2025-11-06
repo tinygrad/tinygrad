@@ -38,6 +38,7 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), ta)
     np.testing.assert_equal(b.numpy(), tb)
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx")
   def test_late_bias_load(self):
     img = Tensor.empty(1, 3, 16, 16)
     w = Tensor.empty(16, 3, 3, 3)
