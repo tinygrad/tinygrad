@@ -290,16 +290,7 @@ def max_pool2d_with_indices(self:torch.Tensor, kernel_size:tuple[int, ...], stri
 
 @torch.library.impl("aten::max_pool2d_with_indices_backward", "privateuseone")
 def max_pool2d_with_indices_backward(grad_out:torch.Tensor, self:torch.Tensor, kernel_size:tuple[int, ...], stride=None, padding=0, dilation=1, ceil_mode=False, indices=None):
-  # TODO: support stride [] in tinygrad?
-  if stride is not None and len(stride) == 0: stride = None
-  tiny_grad_out = unwrap(grad_out)
-  tiny_indices = unwrap(indices)
-  # Force realize the inputs and result to avoid lazy evaluation issues
-  tiny_grad_out.realize()
-  tiny_indices.realize()
-  result = Tensor.max_unpool2d(tiny_grad_out, tiny_indices, kernel_size=kernel_size, stride=stride, dilation=dilation, padding=padding, output_size=unwrap(self).shape)
-  result.realize()
-  return wrap(result)
+  return wrap(Tensor.max_unpool2d(unwrap(grad_out), unwrap(indices), output_size=unwrap(self).shape))
 
 @torch.library.impl("aten::max_unpool2d", "privateuseone")
 def max_unpool2d(self:torch.Tensor, indices:torch.Tensor, output_size):
