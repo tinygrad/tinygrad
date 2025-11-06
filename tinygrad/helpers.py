@@ -105,7 +105,7 @@ def strides_to_permutation(size:tuple[int, ...], stride:tuple[int, ...]) -> tupl
   shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
   if not shape_strides: return None
   permute_indexes = [len(shape_strides)-1-y for y in argsort([x[1] for x in shape_strides])]
-  if tuple(permute_indexes) == tuple(range(len(permute_indexes))): return None 
+  if tuple(permute_indexes) == tuple(range(len(permute_indexes))): return None
   intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
   if tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) != strides_for_shape(intermediate_shape): return None
   return (tuple(permute_indexes), intermediate_shape)

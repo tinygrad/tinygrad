@@ -192,42 +192,17 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   storage_offset = storage_offset or 0
   if TORCH_DEBUG >= 1: print(f"**** as_strided {tensor.shape=} {size=} {stride=} {storage_offset=}")
-
   tiny_tensor = unwrap(tensor)
   size, stride = tuple(size), tuple(stride)
-
   if hasattr(tiny_tensor, '_strided_base'):
     base, base_size = tiny_tensor._strided_base, tiny_tensor._base_size
   else:
     base = tiny_tensor.contiguous()
     base_size = prod(base.shape)
-
   flat_base = base.reshape(base_size)
-
-  if not size:
-    result = flat_base[storage_offset]
-  else:
-    max_offset = storage_offset + sum((s-1) * st for s, st in zip(size, stride) if s > 0)
-    if max_offset + 1 > base_size: flat_base = flat_base.pad(((0, max_offset + 1 - base_size),))
-
-    expected_strides = strides_for_shape(size)
-    if stride == expected_strides:
-      # Fast path 1: Contiguous strides
-      result = flat_base[storage_offset:storage_offset + prod(size)].reshape(size)
-    elif (perm_result := strides_to_permutation(size, stride)) is not None:
-      # Fast path 2: Permutation (transpose) of contiguous
-      permute_indexes, intermediate_shape = perm_result
-      result = flat_base[storage_offset:storage_offset + prod(size)].reshape(intermediate_shape).permute(permute_indexes)
-    elif all(st == 0 or st == expected_strides[i] for i, st in enumerate(stride)):
-      # Fast path 3: Broadcasting (stride=0) with contiguous base
-      non_broadcast = tuple(s for s, st in zip(size, stride) if st != 0) or (1,)
-      result = flat_base[storage_offset:storage_offset + prod(non_broadcast)].reshape(non_broadcast).expand(size)
-    else:
-      # General case: use advanced indexing (slow but correct)
-      flat_idx = sum((Tensor.arange(sz, device=base.device).reshape([sz if i==j else 1 for j in range(len(size))]) * st
-                      for i, (sz, st) in enumerate(zip(size, stride))), storage_offset)
-      result = flat_base[flat_idx.cast(dtypes.int).flatten()].reshape(size)
-
+  flat_idx = sum((Tensor.arange(sz, device=base.device).reshape([sz if i==j else 1 for j in range(len(size))]) * st
+                  for i, (sz, st) in enumerate(zip(size, stride))), storage_offset)
+  result = flat_base[flat_idx.cast(dtypes.int).flatten()].reshape(size)
   result._strided_base, result._base_size = base, base_size
   result._torch_strides, result._torch_offset = stride, storage_offset
   return wrap(result)
