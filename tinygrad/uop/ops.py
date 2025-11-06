@@ -850,11 +850,10 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 # ***** uop helpers *****
 
-# TODO: make range_color work in VIZ and remove this arg
-def print_uops(uops:list[UOp], range_color=False):
+def print_uops(uops:list[UOp]):
   for i,u in enumerate(uops):
     formatted_srcs = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    formatted_range = ','.join([range_str(r, color=range_color) for r in sorted(u.ranges, key=lambda x: x.arg)])
+    formatted_range = ','.join([range_str(r, color=True) for r in sorted(u.ranges, key=lambda x: x.arg)])
     print(f"{i:4d} {str(u.op):20s}: {(formatted_range)+' '*(10-ansilen(formatted_range))} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # ***** pattern matcher *****
