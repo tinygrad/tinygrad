@@ -96,6 +96,9 @@ python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h
 python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
 python3 src/compiler/builtin_types_h.py gen/builtin_types.h""", cwd=path, shell=True, check=True),
   prolog=["import gzip, base64", "from tinygrad.helpers import OSX"], epilog=lambda path: sys(f"{root}/extra/mesa/lvp_nir_options.sh {path}"))
+    case "libclang": return load("libclang", ["os.getenv('LIBCLANG_PATH', find_library('clang-20'))"],
+                                 lambda: [sys("llvm-config-20 --includedir")+"/clang-c/Index.h"], lambda: sys("llvm-config-20 --cflags").split(),
+                                 types={"CXString":"ci._CXString","CXType":"ci.Type"}, prolog=["import clang.cindex as ci"])
     case "metal": return load("metal", ["find_library('Metal')"],[f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in [
                               "Device", "Resource", "IndirectCommandBuffer", "CommandEncoder"]], ["-xobjective-c", "-isysroot", macossdk])
     case "libsystem": return load("libsystem", ["find_library('System')"], [f"{macossdk}/usr/include/dispatch/dispatch.h"],
