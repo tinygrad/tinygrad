@@ -1,7 +1,7 @@
 import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, sys
 from typing import Any, cast
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, objc_id
-from tinygrad.helpers import msg, libobjc, objc_instance
+from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
+from tinygrad.runtime.support.objc import msg
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal, libsystem
@@ -11,11 +11,9 @@ REQUEST_TYPE_COMPILE = 13
 
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
 ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
-libobjc.objc_getClass.restype = objc_id
-libobjc.sel_registerName.restype = objc_id
 
 @functools.cache
-def to_ns_str(s: str): return msg("stringWithUTF8String:", objc_instance)(libobjc.objc_getClass(b"NSString"), s.encode())
+def to_ns_str(s: str): return msg("stringWithUTF8String:")(libobjc.objc_getClass(b"NSString"), s.encode())
 def from_ns_str(s): return bytes(msg("UTF8String", ctypes.c_char_p)(s)).decode()
 
 def to_struct(*t: int, _type: type[ctypes._SimpleCData] = ctypes.c_ulong):

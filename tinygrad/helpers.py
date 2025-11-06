@@ -525,23 +525,3 @@ else:
         for k,v in kwargs.items(): setattr(self, k, v)
       else: super().__init__(*args, **kwargs)
 
-class objc_id(ctypes.c_void_p): # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
-  def __hash__(self): return hash(self.value)
-  def __eq__(self, other): return self.value == other.value
-
-class objc_instance(objc_id): # method with name "new", "alloc" should be freed after use
-  def __del__(self):
-    # CPython doesn't make any guarantees about order in which globals (like `msg` or `libobjc`) are destroyed when the interpreter shuts down
-    # https://github.com/tinygrad/tinygrad/pull/8949 triggered the unlucky ordering which lead to a bunch of errors at exit
-    # TODO: Why isn't `sys.is_finalizing` working?
-    if not sys.is_finalizing(): msg("release")(self)
-    # if msg is not None and objc is not None: msg("release")(self)
-
-libobjc = ctypes.CDLL("/usr/lib/libobjc.dylib")
-@functools.cache
-def msg(selector: str, restype: type[T] = objc_id):  # type: ignore [assignment]
-  resname = libobjc.sel_registerName(selector.encode())
-  sender = libobjc["objc_msgSend"] # Using attribute access returns a new reference so setting restype is safe
-  sender.restype = restype
-  def _msg(ptr: objc_id, *args: Any) -> T: return sender(ptr, resname, *args)
-  return _msg

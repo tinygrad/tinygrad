@@ -20,6 +20,7 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
               (r'\((unsigned )?(char|uint64_t)\)', ''), (r'^.*\d+:\d+.*$', ''), (r'^.*\w##\w.*$', '')]
 
 ints = (TK.INT, TK.UINT, TK.LONG, TK.ULONG, TK.LONGLONG, TK.ULONGLONG)
+specs = (CK.OBJC_SUPER_CLASS_REF,)
 
 def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None, epilog="", recsym=False, use_errno=False, anon_names={}, types={}):
   files, args = files() if callable(files) else files, args() if callable(args) else args
@@ -33,10 +34,10 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
   files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
   epilog = (epilog(base) if tarball else epilog()) if callable(epilog) else epilog
 
-  macros, lines, anoncnt, types = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}
-  def tname(t, suggested_name=None, typedef=None, attrs=[]) -> str:
+  macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
+  def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{(decl:=t.get_declaration()).location.file}:{decl.location.line}", suggested_name)
-    nonlocal lines, types, anoncnt
+    nonlocal lines, types, anoncnt, objc
     tmap = {TK.VOID:"None", TK.CHAR_U:"ctypes.c_ubyte", TK.UCHAR:"ctypes.c_ubyte", TK.CHAR_S:"ctypes.c_char", TK.SCHAR:"ctypes.c_char",
             **{getattr(TK, k):f"ctypes.c_{k.lower()}" for k in
             ["BOOL", "USHORT", "UINT", "ULONG", "ULONGLONG", "WCHAR", "SHORT", "INT", "LONG", "LONGLONG", "FLOAT", "DOUBLE", "LONGDOUBLE"]}}
@@ -45,7 +46,6 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
     if t.spelling in types and types[t.spelling][1]: return types[t.spelling][0]
     if ((f:=t).kind in (fks:=(TK.FUNCTIONPROTO, TK.FUNCTIONNOPROTO))) or (t.kind == TK.POINTER and (f:=t.get_pointee()).kind in fks):
       return f"ctypes.CFUNCTYPE({tname(f.get_result())}{(', '+', '.join(map(tname, f.argument_types()))) if f.kind==TK.FUNCTIONPROTO else ''})"
-    if t.get_canonical().kind == TK.OBJCOBJECTPOINTER: return "objc_instance" if CK.NS_RETURNS_RETAINED in attrs else "objc_id"
     match t.kind:
       case TK.POINTER: return "ctypes.c_void_p" if t.get_pointee().kind == TK.VOID else f"ctypes.POINTER({tname(t.get_pointee())})"
       case TK.ELABORATED: return tname(t.get_named_type(), suggested_name)
@@ -71,7 +71,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
         lines.extend(([f"{nm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
-          ([f"{nm}._packed_ = True"] * (CK.PACKED_ATTR in attrs))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
+          ([f"{nm}._packed_ = True"] * (CK.PACKED_ATTR in attrs(decl)))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
         return nm
       case TK.ENUM:
         # TODO: C++ and GNU C have forward declared enums
@@ -84,6 +84,22 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
       case TK.CONSTANTARRAY:
         return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * {t.get_array_size()})"
       case TK.INCOMPLETEARRAY: return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * 0)"
+      case TK.OBJCINTERFACE:
+        if t.spelling in types: return t.spelling
+        lines.append(f"class {t.spelling}({', '.join([tname(b.type) for b in decl.get_children() if b.kind in specs] or ['objc.Spec'])}): pass")
+        types[t.spelling] = (nm:=t.spelling), False
+        m = {CK.OBJC_INSTANCE_METHOD_DECL:[], CK.OBJC_CLASS_METHOD_DECL:[]}
+        for d in filter(lambda d: d.kind in (CK.OBJC_INSTANCE_METHOD_DECL, CK.OBJC_CLASS_METHOD_DECL), decl.get_children()):
+          try: m[d.kind].append(f"  ('{d.spelling}', {tname(d.result_type)}, [{', '.join(tname(a.type) for a in d.get_arguments())}]),")
+          except NotImplementedError as e: print(f"skipping {t.spelling}.{d.spelling}: {e}")
+        lines.extend([*([f"{nm}._methods_ = [", *ims, ']'] if (ims:=m[CK.OBJC_INSTANCE_METHOD_DECL]) else []),
+                      *([f"{nm}._classmethods_ = [", *cms, ']'] if (cms:=m[CK.OBJC_CLASS_METHOD_DECL]) else [])])
+        types[t.spelling] = nm, True
+        return t.spelling
+      case TK.OBJCSEL: return "objc.id_"
+      case TK.OBJCID: return (objc:=True, "objc.id_")[1]
+      case TK.OBJCOBJECT: return "objc.id_" # FIXME: requires clang_Type_getObjCObjectBaseType
+      case TK.OBJCOBJECTPOINTER: return "objc.id_" if t.spelling == "id" else tname(t.get_pointee())
       case _: raise NotImplementedError(f"unsupported type {t.kind}")
 
   for f in files:
@@ -96,10 +112,10 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         match c.kind:
           case CK.FUNCTION_DECL if c.linkage == LK.EXTERNAL and dll:
             # TODO: we could support name-mangling
-            if c.spelling == "dispatch_data_create": print(attrs(c), c.result_type.get_named_type().kind, c.result_type.get_canonical().kind)
             lines.append(f"# {c.pretty_printed(pp)}\ntry: ({c.spelling}:=dll.{c.spelling}).restype, {c.spelling}.argtypes = "
-              f"{tname(c.result_type, attrs=attrs(c))}, [{', '.join(tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
-          case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL: tname(c.type, attrs=attrs(c))
+              f"{tname(c.result_type)}, [{', '.join(tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
+            if CK.NS_RETURNS_RETAINED in attrs(c): lines.append(f"{c.spelling} = objc.returns_retained({c.spelling})")
+          case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL | CK.OBJC_INTERFACE_DECL: tname(c.type)
           case CK.MACRO_DEFINITION if len(toks:=list(c.get_tokens())) > 1:
             if toks[1].spelling == '(' and toks[0].extent.end.column == toks[1].extent.start.column:
               it = iter(toks[1:])
@@ -118,10 +134,10 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
       except NotImplementedError as e:
         print(f"Skipping {c.spelling}: {e}")
         lines, types = rollback
-      except Exception as e: raise Exception(f"error parsing at {c.location}") from e
+      except Exception as e: raise Exception(f"error parsing {c.spelling} ({c.kind}) at {c.location}") from e
   main = (f"# mypy: ignore-errors\nimport ctypes{', os' if any('os' in s for s in dll) else ''}\n"
-    "from tinygrad.helpers import Struct, CEnum, objc_id, objc_instance, _IO, _IOW, _IOR, _IOWR, unwrap\n" + '\n'.join([*prolog,
-      *(["from ctypes.util import find_library"]*any('find_library' in s for s in dll)),
+    "from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap\n" + '\n'.join([*prolog,
+      *(["from ctypes.util import find_library"]*any('find_library' in s for s in dll)), *(["from tinygrad.runtime.support import objc"]*objc),
       *(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass'] for d in dll]),
          "  return None", "dll = dll()\n"]*bool(dll)), *lines]) + '\n')
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
@@ -134,5 +150,5 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
       assert macrono >= 0 and macrono < len(macros), f"error outside macro range: {e}"
       print(f"Skipping {macros[macrono]}: {e}")
       del macros[macrono]
-    except Exception as e: raise e
+    except Exception as e: raise Exception("parsing failed") from e
   return main + '\n'.join(macros) + '\n' + epilog
