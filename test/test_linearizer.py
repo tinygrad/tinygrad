@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.gpudims import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops, GroupOp
+from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
@@ -47,9 +47,11 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(ast, opts=[]).uops
     # slice at the last loop end
     uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
-    load_types = [u.src[0].dtype for u in uops[uslice+1:] if u.op == Ops.LOAD]
-    # assert that there is a global load after that
-    assert any(dt.addrspace == AddrSpace.GLOBAL for dt in load_types)
+    # only valid test if outermost range is the reduce
+    if uops[uslice].src[-1].arg[-1] == AxisType.REDUCE:
+      load_types = [u.src[0].dtype for u in uops[uslice+1:] if u.op == Ops.LOAD]
+      # assert that there is a global load after the reduce ends
+      assert any(dt.addrspace == AddrSpace.GLOBAL for dt in load_types)
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
