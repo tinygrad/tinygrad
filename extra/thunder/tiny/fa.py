@@ -1,7 +1,7 @@
 import math
 from typing import cast, Callable
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo
+from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
 from tinygrad.engine.realize import ExecItem, get_runner
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import getenv, prod
@@ -48,7 +48,7 @@ def rv(length, dtype, layout="naive"):
   register_slot += 1
   return UOp.placeholder((outer_dim, inner_dim), dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
 
-clear_rid = 16
+clear_rid = 1000
 def clear(reg:UOp, value:float=0):
   global clear_rid
   i = UOp.range(reg.size, clear_rid)
@@ -170,17 +170,50 @@ def copy(dst:UOp, src:UOp):
 
   return dst.after(dst_store).reshape(dst.shape)
 
-def mma_ABt_base(d:UOp, a:UOp, b:UOp, c:UOp):
-  pass
+mma_rid = 600
+def mma_AB(c:UOp, a:UOp, b:UOp, after=True):
+  global mma_rid
+  mma_i_height = UOp.range(c.shape[-3], mma_rid)
+  mma_i_width = UOp.range(c.shape[-2], mma_rid+1)
+  mma_i_inner = UOp.range(a.shape[-2], mma_rid+2, AxisType.REDUCE)
+  mma_rid += 3
 
-def mma_ABt(d:UOp, a:UOp, b:UOp, c:UOp):
-  return d
+  wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
 
-def mma_AB_base(d:UOp, a:UOp, b:UOp, c:UOp):
-  pass
+  a_in = UOp.vectorize(*[a[mma_i_height, mma_i_inner, i] for i in range(8)])
+  b_in1 = UOp.vectorize(*([b[mma_i_inner, mma_i_width, i] for i in range(2)] + [b[mma_i_inner, mma_i_width, 4+i] for i in range(2)]))
+  c_out1 = UOp.vectorize(*[c[mma_i_height, mma_i_width, i] for i in range(4)])
+  b_in2 = UOp.vectorize(*([b[mma_i_inner, mma_i_width, 2+i] for i in range(2)] + [b[mma_i_inner, mma_i_width, 6+i] for i in range(2)]))
+  c_out2 = UOp.vectorize(*[c[mma_i_height, mma_i_width, 4+i] for i in range(4)])
 
-def mma_AB(d:UOp, a:UOp, b:UOp, c:UOp):
-  return d
+  out1 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in1, c_out1), arg=wmma_arg)
+  out2 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in2, c_out2), arg=wmma_arg)
+  c_i = [c[mma_i_height, mma_i_width, i].store(out1.gep(i)) for i in range(4)] + [c[mma_i_height, mma_i_width, 4+i].store(out2.gep(i)) for i in range(4)]
+  c_store = UOp.group(*c_i).end(mma_i_height, mma_i_width, mma_i_inner)
+
+  return c.after(c_store).reshape(c.shape) if after else c_store
+
+def mma_ABt(c:UOp, a:UOp, b:UOp, after=True):
+  global mma_rid
+  mma_i_height = UOp.range(c.shape[-3], mma_rid)
+  mma_i_width = UOp.range(c.shape[-2], mma_rid+1)
+  mma_i_inner = UOp.range(a.shape[-2], mma_rid+2, AxisType.REDUCE)
+  mma_rid += 3
+
+  wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+
+  a_in = UOp.vectorize(*[a[mma_i_height, mma_i_inner, i] for i in range(8)])
+  b_in1 = UOp.vectorize(*([b[mma_i_width, mma_i_inner, i] for i in range(2)] + [b[mma_i_width, mma_i_inner, 4+i] for i in range(2)]))
+  c_out1 = UOp.vectorize(*[c[mma_i_height, mma_i_width, i] for i in range(4)])
+  b_in2 = UOp.vectorize(*([b[mma_i_width, mma_i_inner, 2+i] for i in range(2)] + [b[mma_i_width, mma_i_inner, 6+i] for i in range(2)]))
+  c_out2 = UOp.vectorize(*[c[mma_i_height, mma_i_width, 4+i] for i in range(4)])
+
+  out1 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in1, c_out1), arg=wmma_arg)
+  out2 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in2, c_out2), arg=wmma_arg)
+  c_i = [c[mma_i_height, mma_i_width, i].store(out1.gep(i)) for i in range(4)] + [c[mma_i_height, mma_i_width, 4+i].store(out2.gep(i)) for i in range(4)]
+  c_store = UOp.group(*c_i).end(mma_i_height, mma_i_width, mma_i_inner)
+
+  return c.after(c_store).reshape(c.shape) if after else c_store
 
 map_rid = 400
 def map(a:UOp, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
@@ -232,60 +265,49 @@ PIPE_STAGES = 3
 B, N, H, D = 1, 16, 1, 64
 
 ROWS = 16 * (64 // D)
+BLOCK_SIZE=16
 
 def test_ker():
   # define special indices
-  blockIdx_x = UOp.special(N // (ROWS*NUM_WORKERS), "gidx0")
-  blockIdx_y = UOp.special(H, "gidx1")
-  blockIdx_z = UOp.special(B, "gidx2")
+  blockIdx_x = UOp.special(N // BLOCK_SIZE, "gidx0")
+  blockIdx_y = UOp.special(N // BLOCK_SIZE, "gidx1")
+  blockIdx_z = UOp.special(1, "gidx2")
   threadIdx_x = UOp.special(NUM_WORKERS * WARP_THREADS, "lidx0")
 
   warpid = threadIdx_x // (NUM_WORKERS * WARP_THREADS)
   laneid = threadIdx_x % (NUM_WORKERS % WARP_THREADS)
 
   # kernel
-  o = gl((B, N, H, D), dtypes.bfloat16)
-  q = gl((B, N, H, D), dtypes.bfloat16)
-  k = gl((B, N, H, D), dtypes.bfloat16)
-  v = gl((B, N, H, D), dtypes.bfloat16)
+  c = gl((1, 1, N, N), dtypes.float32)
+  a = gl((1, 1, N, N), dtypes.bfloat16)
+  b = gl((1, 1, N, N), dtypes.bfloat16)
 
-  workerid = warpid
+  a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+  b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+  c_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-  batch, head, q_seq = blockIdx_z, blockIdx_y, blockIdx_x * NUM_WORKERS + workerid
+  a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+  b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+  c_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-  k_smem = st((ROWS, D), dtypes.bfloat16)
-  v_smem = st((ROWS, D), dtypes.bfloat16)
-  qo_smem = st((ROWS, D), dtypes.bfloat16)
+  col, row = blockIdx_x, blockIdx_y
 
-  q_reg = rt((ROWS, D), dtypes.bfloat16)
-  q_reg_float = rt((ROWS, D), dtypes.float32)
-  k_reg = rt((ROWS, D), dtypes.bfloat16)
-  v_reg = rt((D, ROWS), dtypes.bfloat16)
-  o_reg = rt((ROWS, D), dtypes.float32)
-  att_block = rt((ROWS, ROWS), dtypes.float32)
-  att_block_mma = rt((ROWS, ROWS), dtypes.bfloat16)
-  max_vec_last = rv(ROWS, dtypes.float32, "ortho")
-  max_vec = rv(ROWS, dtypes.float32, "ortho")
-  norm_vec = rv(ROWS, dtypes.float32, "ortho")
+  c_reg = zero(c_reg)
 
-  max_vec = neg_inf(max_vec)
-  norm_vec = zero(norm_vec)
-  o_reg = zero(o_reg)
+  outer_k_rng = UOp.range(N // BLOCK_SIZE, 0)
+  a_smem = load(a_smem, a, (), (0, 0, row, outer_k_rng), axis=2)
+  b_smem = load(b_smem, b, (), (0, 0, outer_k_rng, col), axis=2)
 
-  # load q tile
-  qo_smem = load(qo_smem, q, (), (batch, q_seq, head, 0), axis=1)
-  q_reg = load(q_reg, qo_smem)
+  a_reg = load(a_reg, a_smem)
+  b_reg = load(b_reg, b_smem)
 
-  q_reg_float = copy(q_reg_float, q_reg)
+  c_reg_store = mma_AB(c_reg, a_reg, b_reg, after=False).end(outer_k_rng).barrier()
+  c_reg = c_reg.after(c_reg_store).reshape(c_reg.shape)
 
-  norm_vec = row_reduce(norm_vec, q_reg_float, lambda a, b: a.maximum(b))
+  c_smem = store(c_smem, c_reg)
+  c = store(c, c_smem, (0, 0, row, col), (), axis=2, after=False)
 
-  o_reg = map(o_reg, lambda x, idx: x + norm_vec[idx[0], 0])
-
-  qo_smem = store(qo_smem, o_reg)
-  o = store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1, after=False)
-
-  sink = o
+  sink = c
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
 def ker():
@@ -338,8 +360,8 @@ def ker():
   v_smem = load(v_smem, v, (), (batch, outer_kv_rng, head, 0), axis=1)
 
   k_reg = load(k_reg, k_smem)
-  att_block = zero(att_block)
-  att_block = mma_ABt(att_block, q_reg, k_reg, att_block)
+  att_block = zero(att_block).after(outer_kv_rng)
+  att_block = mma_ABt(att_block, q_reg, k_reg)
 
   max_vec_last = copy(max_vec_last, max_vec)
   max_vec = row_reduce(max_vec, att_block, lambda a, b: a.maximum(b))
@@ -352,7 +374,7 @@ def ker():
   v_reg = load(v_reg, v_smem)
 
   o_reg = map(o_reg, lambda x, idx: x * max_vec_last[idx[0], 0])
-  o_reg = mma_AB(o_reg, att_block_mma, v_reg, o_reg)
+  o_reg = mma_AB(o_reg, att_block_mma, v_reg)
 
   o_reg = o_reg.after(o_reg.end(outer_kv_rng)).reshape(o_reg.shape)
 
@@ -366,15 +388,21 @@ def ker():
 
 if __name__ == "__main__":
   with Context(DEBUG=0):
-    q = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
-    # q = Tensor.arange(B * N * H * D).reshape(B, N, H, D).cast(dtypes.bfloat16).contiguous()
-    k = Tensor.randn(B, N, H, D, dtype="bfloat16")
-    v = Tensor.randn(B, N, H, D, dtype="bfloat16")
-    out = Tensor.empty(B, N, H, D, dtype="bfloat16")
-    Tensor.realize(q, k, v, out)
+    # q = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
+    # v = Tensor.arange(B * N * H * D).reshape(B, N, H, D).cast(dtypes.bfloat16).contiguous()
+    # k = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
+    # # v = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
+    # out = Tensor.empty(B, N, H, D, dtype="bfloat16")
+    # Tensor.realize(q, k, v, out)
+
+    a = Tensor.ones(1, 1, N, N, dtype="bfloat16").contiguous()
+    b = Tensor.ones(1, 1, N, N, dtype="bfloat16").contiguous()
+    c = Tensor.empty(1, 1, N, N, dtype="float32")
+    Tensor.realize(a, b, c)
 
   sink = test_ker()
-  ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
+  # ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
+  ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (c, a, b)])
 
   GlobalCounters.reset()
   times = []
@@ -386,4 +414,9 @@ if __name__ == "__main__":
                2 * B * H * N * N * D
   print(f"{attn_flops/(min(times)*1e12):2f} TFLOPS")
 
-  print(out.tolist())
+  # print(out.tolist())
+  print(c.tolist())
+
+  # ref = q.scaled_dot_product_attention(k, v)
+  # print(ref.tolist())
+
