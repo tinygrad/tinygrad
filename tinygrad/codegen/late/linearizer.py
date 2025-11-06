@@ -23,7 +23,7 @@ def linearize(u:UOp) -> list[UOp]:
     # simple priority override
     match u.op:
       # the order and placement of these is important
-      case Ops.DEFINE_GLOBAL | Ops.DEFINE_VAR: priority = -20
+      case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG | Ops.DEFINE_VAR: priority = -20
       # early consts
       case Ops.CONST: priority = -10
       # place loads early
