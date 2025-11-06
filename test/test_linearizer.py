@@ -42,7 +42,14 @@ class TestLinearizer(unittest.TestCase):
     img = Tensor.empty(1, 3, 16, 16)
     w = Tensor.empty(16, 3, 3, 3)
     b = Tensor.empty(16)
-    img.conv2d(w, b).realize()
+    out = img.conv2d(w, b)
+    ast = helper_linearizer_opt(out)
+    uops = get_program(ast, opts=[]).uops
+    # slice at the last loop end
+    uslice = [i for i,u in enumerate(uops) if u.op == Ops.END][-1]
+    load_types = [u.src[0].dtype for u in uops[uslice+1:] if u.op == Ops.LOAD]
+    # assert that there is a global load after that
+    assert any(dt.addrspace == AddrSpace.GLOBAL for dt in load_types)
 
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
@@ -438,6 +445,8 @@ def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   # now all input buffers in s[-1] should be realized
   # create fresh buffers for the outputs
   bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
+  # ensure buffers are allocated
+  for b in bufs: b.ensure_allocated()
   return s[-1].ast, bufs
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
