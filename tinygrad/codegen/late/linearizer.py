@@ -1,6 +1,7 @@
 import heapq
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
+from tinygrad.helpers import prod
 
 def linearize(u:UOp) -> list[UOp]:
   # this is a toposort with priority
@@ -14,38 +15,21 @@ def linearize(u:UOp) -> list[UOp]:
     for s in u.src: consumers[s].append(u)
     in_degree[u] = len(u.src)
 
-    # compute priority (simple)
-    priority = []
+    # we place UOps with higher run_counts later
+    # this will cause ranges to be placed late and ends to be placed early
+    run_count = prod([r.vmax+1 for r in u.ranges])
+
+    # here we have some op specific mods
     match u.op:
       # DEFINE_GLOBAL must be placed before DEFINE_VAR. This is a quirk of the cstyle Renderer
-      case Ops.DEFINE_GLOBAL: priority.append(-1)
-      # RANGEs should be placed as late as possible
-      case Ops.RANGE: priority.append(10000)
-      # END should be placed as early as possible. NOTE: without priority inheritence, this might not work
-      case Ops.END: priority.append(-10000)
-      case _: priority.append(0)
-    priorities[u] = min(priority)
+      case Ops.DEFINE_GLOBAL: mods = -1
+      case _: mods = 0
 
-  """
-  # get consumers and assign priorities
-  # NOTE: this requires the lst be locally toposorted
-  for u in reversed(lst):
-    for s in u.src: consumers[s].append(u)
-    in_degree[u] = len(u.src)
-    # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x] for x in consumers[u]]
-    if u.op is Ops.LOAD: priority.append(-1000)
-    if u.op is Ops.BARRIER: priority.append(-1500)
-    # ranges are scheduled as late as possible so anything that can be outside is
-    if u.op is Ops.RANGE: priority = [2000]
-    if u.op is Ops.END: priority = [-1000]
-    # move defines and consts to the top
-    if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
-    priorities[u] = min(priority)
-  """
+    # set priority. lower number priority means we prefer to place this before others
+    priorities[u] = (run_count, mods)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]))}
 
   # then force then to be toposorted in as close to the ideal order as possible
   heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
