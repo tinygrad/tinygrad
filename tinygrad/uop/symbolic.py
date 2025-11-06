@@ -382,13 +382,6 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
 ])+gep_pushing
 
-symbolic_flat = symbolic+PatternMatcher([
-  # ** combine terms (opinionated) **
-  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
-  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
-])
-
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 
 def parse_valid(valid:UOp) -> tuple[UOp, bool, int]|None:
@@ -503,7 +496,7 @@ pm_simplify_valid = PatternMatcher([
 
 # this is symbolic 2.0
 REMOVE_FROM_SINK_LIKE = {Ops.UNROLL, Ops.NOOP, Ops.VECTORIZE, Ops.SINK}
-sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
+sym = symbolic+pm_simplify_valid+PatternMatcher([
   # LOAD/STORE -> NOOP
   (UPat.var('x').store(UPat.var('x').load(), allow_any_len=True), lambda x: None if x.dtype.addrspace != AddrSpace.REG else x.src[0].src[0]),
   (UPat(Ops.LOAD, src=(UPat.cvar('c'))), lambda c: c),
@@ -553,4 +546,8 @@ sym = symbolic_flat+pm_simplify_valid+PatternMatcher([
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
   # remove END with empty NOOP
   (UPat(Ops.END, src=(UPat(Ops.NOOP, src=(), name="noop"),), allow_any_len=True), lambda noop:noop),
+  # ** combine terms (opinionated) **
+  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
+  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])

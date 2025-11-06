@@ -37,11 +37,11 @@ WARPGROUP_SIZE = 1
 BLOCK_M = BLOCK_M * WARPGROUP_SIZE
 
 # TODO: improve the syntax of this. better syntax, faster iteration
-#  -- add working slice a[gx, :, i] -> shape of the : (aka (16,16,32) becomes (16,))
-#  -- add argfix to movement (traits shared with Tensor)
+#  -- DONE: add working slice a[gx, :, i] -> shape of the : (aka (16,16,32) becomes (16,))
+#  -- DONE(ish): add argfix to movement (traits shared with Tensor)
 #  -- fix WMMA to not require all the junk
 #  -- improve syntax for vectorized loads/stores (both with DEVECTORIZE and without)
-#  -- be able to use CONTRACT on a range
+#  -- DONE: be able to use CONTRACT on a range
 #  -- fix upcasted RANGE on an already vectorized buffer
 #  -- improve "all ranges not ended error" / fix the bug with after on ended ranges (if you are after end of range, range is closed)
 

@@ -8,11 +8,22 @@
 # LONGDOUBLE_SIZE is: 16
 #
 import ctypes, ctypes.util
+PATHS_TO_TRY = [
+  '/usr/local/lib/librocprof-trace-decoder.so',
+  '/usr/local/lib/librocprof-trace-decoder.dylib',
+]
+def _try_dlopen_rocprof_trace_decoder():
+  library = ctypes.util.find_library("rocprof-trace-decoder")
+  if library:
+    try: return ctypes.CDLL(library)
+    except OSError: pass
+  for candidate in PATHS_TO_TRY:
+    try: return ctypes.CDLL(candidate)
+    except OSError: pass
+  return None
 
 
 class AsDictMixin:
-    import sys
-    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}
@@ -157,7 +168,7 @@ class FunctionFactoryStub:
 # You can either re-run clan2py with -l /path/to/library.so
 # Or manually fix this by comment the ctypes.CDLL loading
 _libraries = {}
-_libraries['FIXME_STUB'] = ctypes.CDLL(ctypes.util.find_library('rocprof-trace-decoder')) #  ctypes.CDLL('FIXME_STUB')
+_libraries['FIXME_STUB'] = _try_dlopen_rocprof_trace_decoder() #  ctypes.CDLL('FIXME_STUB')
 
 
 
