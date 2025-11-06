@@ -19,24 +19,18 @@ def linearize(sink:UOp) -> list[UOp]:
     out_degree[u] = len(consumers[u])
 
     # we place UOps with higher run_counts later
-    # this will cause ranges to be placed late and ends to be placed early
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
-    # simple priority override
+    # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
     match u.op:
-      # the order and placement of these is important
+      # the order and placement of these defines is important
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG | Ops.DEFINE_VAR: priority = -20
-      # early consts
-      case Ops.CONST: priority = -10
-      # place loads early
-      case Ops.LOAD: priority = -1
-      # place stores late
-      case Ops.STORE: priority = 1
-      # control flow resets priority
-      case Ops.RANGE|Ops.END|Ops.IF|Ops.ENDIF: priority = 0
-      # prevent priority inversion
-      case _: priority = min([0]+[priorities[x][1] for x in consumers[u]])
-
+      case Ops.CONST: priority = -10  # early consts
+      case Ops.LOAD: priority = -1    # place loads early
+      case Ops.STORE: priority = 1    # place stores late
+      case Ops.RANGE: priority = 5    # placing RANGE is good
+      case Ops.END: priority = -5     # placing END is bad
+      case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority)
 
   # number the uops in "ideal" order
@@ -51,17 +45,6 @@ def linearize(sink:UOp) -> list[UOp]:
       out_degree[v] -= 1
       if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
   newlst = newlst[::-1]
-
-  """
-  heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
-  newlst = []
-  while heap:
-    newlst.append(u:=heapq.heappop(heap)[1])
-    for v in consumers[u]:
-      in_degree[v] -= 1
-      if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
-  assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
-  """
 
   if getenv("DEBUG_LINEARIZE"):
     for i,u in enumerate(newlst):
