@@ -9,6 +9,24 @@ def linearize(u:UOp) -> list[UOp]:
   in_degree:dict[UOp, int] = {}
   priorities:dict[UOp, int] = {}
 
+  for u in reversed(lst):
+    # for toposort
+    for s in u.src: consumers[s].append(u)
+    in_degree[u] = len(u.src)
+
+    # compute priority (simple)
+    priority = []
+    match u.op:
+      # DEFINE_GLOBAL must be placed before DEFINE_VAR. This is a quirk of the cstyle Renderer
+      case Ops.DEFINE_GLOBAL: priority.append(-1)
+      # RANGEs should be placed as late as possible
+      case Ops.RANGE: priority.append(10000)
+      # END should be placed as early as possible. NOTE: without priority inheritence, this might not work
+      case Ops.END: priority.append(-10000)
+      case _: priority.append(0)
+    priorities[u] = min(priority)
+
+  """
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
@@ -19,11 +37,12 @@ def linearize(u:UOp) -> list[UOp]:
     if u.op is Ops.LOAD: priority.append(-1000)
     if u.op is Ops.BARRIER: priority.append(-1500)
     # ranges are scheduled as late as possible so anything that can be outside is
-    # if u.op is Ops.RANGE: priority = [2000]
+    if u.op is Ops.RANGE: priority = [2000]
     if u.op is Ops.END: priority = [-1000]
     # move defines and consts to the top
     if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
     priorities[u] = min(priority)
+  """
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)))}
