@@ -33,7 +33,7 @@ def linearize(u:UOp) -> list[UOp]:
         mod_priority.append(-10)
         extra = u.arg
       # prefer placing load early
-      case Ops.LOAD: mod_priority.append(-1)
+      #case Ops.LOAD: mod_priority.append(-1)
       # RANGE/END reset this
       case Ops.END|Ops.RANGE: mod_priority = [0]
 
