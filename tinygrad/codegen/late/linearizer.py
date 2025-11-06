@@ -3,11 +3,12 @@ from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.helpers import prod, getenv
 
-def linearize(u:UOp) -> list[UOp]:
+def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(u.toposort())
+  lst = list(sink.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
+  out_degree:dict[UOp, int] = {}
   priorities:dict[UOp, tuple[int, int]] = {}
 
   # get consumers and assign priorities
@@ -15,6 +16,7 @@ def linearize(u:UOp) -> list[UOp]:
   for u in reversed(lst):
     for s in u.src: consumers[s].append(u)
     in_degree[u] = len(u.src)
+    out_degree[u] = len(consumers[u])
 
     # we place UOps with higher run_counts later
     # this will cause ranges to be placed late and ends to be placed early
@@ -39,6 +41,16 @@ def linearize(u:UOp) -> list[UOp]:
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+x.tuplize))}
 
   # then force then to be toposorted in as close to the ideal order as possible
+  heap = [(-nkey[sink], sink)]
+  newlst = []
+  while heap:
+    newlst.append(u:=heapq.heappop(heap)[1])
+    for v in u.src:
+      out_degree[v] -= 1
+      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
+  newlst = newlst[::-1]
+
+  """
   heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
   newlst = []
   while heap:
@@ -47,6 +59,7 @@ def linearize(u:UOp) -> list[UOp]:
       in_degree[v] -= 1
       if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
   assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
+  """
 
   if getenv("DEBUG_LINEARIZE"):
     for i,u in enumerate(newlst):
