@@ -9,7 +9,7 @@ from tinygrad.helpers import getenv
 def run_test(i, full_run=False, force_ok=False):
   print(f"\rRunning iteration {i}...", end=" ", flush=True)
 
-  p = subprocess.Popen(["python3", "test/test_tiny.py", "TestTiny.test_plus"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, )
+  p = subprocess.Popen(["python3", "test/test_tiny.py", "TestTiny.test_plus"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
   if not full_run:
     time.sleep(random.uniform(0, 1200) / 1000.0)
