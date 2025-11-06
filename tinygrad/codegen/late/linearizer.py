@@ -30,6 +30,8 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.CONST: priority = -10
       # place loads early
       case Ops.LOAD: priority = -1
+      # place stores late
+      case Ops.STORE: priority = 1
       # control flow resets priority
       case Ops.RANGE|Ops.END|Ops.IF|Ops.ENDIF: priority = 0
       # prevent priority inversion
