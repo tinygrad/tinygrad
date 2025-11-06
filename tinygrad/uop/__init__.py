@@ -13,11 +13,8 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # TODO: unify these ops into the levels of the memory hierarchy. depends on ASSIGN is STORE
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto()
-
-  # this is for symbolic shapes
-  DEFINE_VAR = auto(); BIND = auto()
+  # TODO: unify these ops into the levels of the memory hierarchy
+  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto(); DEFINE_VAR = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
@@ -43,7 +40,6 @@ class Ops(FastEnum):
 
   # load/store before math
   LOAD = auto(); STORE = auto()
-  ASSIGN = auto()  # TODO: ASSIGN is STORE, remove ASSIGN
 
   # ** 4 -- math **
 
@@ -77,7 +73,8 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto(); KERNEL = auto()
+  UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); BIND = auto()
+  ASSIGN = auto()
 
   # buffer ops
   BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto()
