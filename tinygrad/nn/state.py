@@ -3,7 +3,7 @@ from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, strides_for_shape
+from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, strides_for_shape, strides_to_permutation
 
 class TensorIO(io.RawIOBase, BinaryIO):
   def __init__(self, t: Tensor):
@@ -201,12 +201,9 @@ def torch_load(t:Tensor) -> dict[str, Tensor]:
     byte_offset = offsets[storage[2]]+storage_offset*storage[1].itemsize
     ret = t[byte_offset:byte_offset+prod(size)*storage[1].itemsize].bitcast(storage[1])
 
-    # 7 lines to deal with permuted tensors. NOTE: this currently requires reading off the disk
-    shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
-    permute_indexes = [len(shape_strides)-1-y for y in argsort([x[1] for x in shape_strides])]
-    if tuple(permute_indexes) != tuple(range(len(permute_indexes))):
-      intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
-      assert tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) == strides_for_shape(intermediate_shape), "nonpermutable strides"
+    # Deal with permuted tensors. NOTE: this currently requires reading off the disk
+    if (perm_result := strides_to_permutation(size, stride)) is not None:
+      permute_indexes, intermediate_shape = perm_result
       if DEBUG >= 3: print(f"WARNING: this torch load is slow. to permute {intermediate_shape} with {permute_indexes}")
       assert storage[1] != dtypes.bfloat16, "can't permute BF16"
       # TODO: find a nice way to support all movement ops on disktensors

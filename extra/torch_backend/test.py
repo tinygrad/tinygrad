@@ -219,7 +219,6 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     print(str(a))
 
-  @unittest.skip("failed")
   def test_floor_div(self):
     a = torch.tensor([10., 7., 5.], device=device)
     b = torch.tensor([3., 2., 2.], device=device)

@@ -4,7 +4,7 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import getenv, prod, strides_for_shape
+from tinygrad.helpers import getenv, prod, strides_for_shape, strides_to_permutation
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect, weakref
@@ -188,18 +188,6 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-def _is_permutation(stride:tuple, size:tuple) -> tuple[int,...]|None:
-  """Check if strides represent a permutation of contiguous layout. Returns permutation order or None."""
-  if not size: return ()
-  expected = strides_for_shape(size)
-  # Build mapping from stride value to dimension (ignore size-1 dims as they have stride 0)
-  stride_to_dim = {st: i for i, st in enumerate(stride) if size[i] > 1}
-  expected_to_dim = {st: i for i, st in enumerate(expected) if size[i] > 1}
-  # Check if same strides exist (just in different order)
-  if set(stride_to_dim.keys()) != set(expected_to_dim.keys()): return None
-  # Build permutation: where each dimension should go
-  return tuple(stride_to_dim[expected[expected_to_dim[st]]] if size[i] > 1 else i for i, st in enumerate(expected))
-
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   storage_offset = storage_offset or 0
@@ -226,9 +214,10 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
     if stride == expected_strides:
       # Fast path 1: Contiguous strides
       result = flat_base[storage_offset:storage_offset + prod(size)].reshape(size)
-    elif (perm := _is_permutation(stride, size)) is not None:
+    elif (perm_result := strides_to_permutation(size, stride)) is not None:
       # Fast path 2: Permutation (transpose) of contiguous
-      result = flat_base[storage_offset:storage_offset + prod(size)].reshape(size).permute(perm)
+      permute_indexes, intermediate_shape = perm_result
+      result = flat_base[storage_offset:storage_offset + prod(size)].reshape(intermediate_shape).permute(permute_indexes)
     elif all(st == 0 or st == expected_strides[i] for i, st in enumerate(stride)):
       # Fast path 3: Broadcasting (stride=0) with contiguous base
       non_broadcast = tuple(s for s, st in zip(size, stride) if st != 0) or (1,)

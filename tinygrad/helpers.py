@@ -100,6 +100,16 @@ def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
 
+def strides_to_permutation(size:tuple[int, ...], stride:tuple[int, ...]) -> tuple[tuple[int, ...], tuple[int, ...]]|None:
+  if not size: return ((), ())
+  shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
+  if not shape_strides: return None
+  permute_indexes = [len(shape_strides)-1-y for y in argsort([x[1] for x in shape_strides])]
+  if tuple(permute_indexes) == tuple(range(len(permute_indexes))): return None 
+  intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
+  if tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) != strides_for_shape(intermediate_shape): return None
+  return (tuple(permute_indexes), intermediate_shape)
+
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
   acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))

@@ -1509,7 +1509,7 @@ class Tensor(OpMixin):
     x = self.permute([i for i in range(self.ndim) if i not in (d1, d2)] + [d1, d2])
     size = smax(0, smin(x.shape[-2] - smax(0, -offset), x.shape[-1] - smax(0, offset)))
     return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device) if size == 0 else \
-           x[..., (idx := Tensor.arange(size, device=self.device)) + smax(0, -offset), idx + smax(0, offset)]
+           x[..., (idx := Tensor.arange(size, device=self.device)) + smax(0, -offset), idx + smax(0, offset)]  # type: ignore[operator]
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """
