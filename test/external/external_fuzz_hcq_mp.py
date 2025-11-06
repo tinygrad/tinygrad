@@ -37,7 +37,7 @@ if __name__ == "__main__":
         # do a full run in the main proc
         run_test(i, True)
       else:
-        futures.append(executor.submit(run_test, i, True))
+        futures.append(executor.submit(run_test, i, bool(getenv("FULL_RUN", 0))))
 
       # keep list small
       if len(futures) > max_workers * 2:
