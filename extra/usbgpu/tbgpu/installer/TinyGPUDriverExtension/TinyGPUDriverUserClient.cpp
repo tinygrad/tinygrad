@@ -7,26 +7,40 @@
 struct TinyGPUDriverUserClient_IVars
 {
 	OSSharedPtr<TinyGPUDriver> provider = nullptr;
+
+	static constexpr uint32_t kMaxDMAs = 1024;
+	uint32_t dmaCount = 0;
+	TinyGPUCreateDMAResp dmas[kMaxDMAs]; // each has sharedBuf + dmaCmd
 };
 
 bool TinyGPUDriverUserClient::init()
 {
-	auto theAnswer = super::init();
-	if (!theAnswer) {
-		return false;
-	}
+	auto ok = super::init();
+	if (!ok) return false;
 
 	ivars = IONewZero(TinyGPUDriverUserClient_IVars, 1);
-	if (ivars == nullptr) {
-		return false;
-	}
-
+	if (!ivars) return false;
 	return true;
 }
 
 void TinyGPUDriverUserClient::free()
 {
-	if (ivars != nullptr) {
+	// release all DMA allocations for this client
+	if (ivars) {
+		for (uint32_t i = 0; i < ivars->dmaCount; i++) {
+			auto &d = ivars->dmas[i];
+			if (d.dmaCmd) {
+				d.dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions);
+				d.dmaCmd->release();
+				d.dmaCmd = nullptr;
+			}
+			if (d.sharedBuf) {
+				d.sharedBuf->release();
+				d.sharedBuf = nullptr;
+			}
+		}
+		ivars->dmaCount = 0;
+
 		ivars->provider.reset();
 	}
 
@@ -102,26 +116,28 @@ kern_return_t TinyGPUDriverUserClient::ExternalMethod(uint64_t selector, IOUserC
 
 kern_return_t IMPL(TinyGPUDriverUserClient, CopyClientMemoryForType)
 {
-	if (!memory) {
-		return kIOReturnBadArgument;
-	}
+	if (!memory) return kIOReturnBadArgument;
+	if (!ivars->provider.get()) return kIOReturnNotAttached;
 
-	if (ivars->provider.get() == nullptr) {
-		return kIOReturnNotAttached;
-	}
-
+	// BARs: we just forward to the provider, framework will unmap later
 	if (type < 6) {
 		uint32_t bar = (uint32_t)type;
 		return ivars->provider->MapBar(bar, memory);
 	}
 
-	// dma page buffer
-	TinyGPUCreateDMAResp buf;
-	kern_return_t err = ivars->provider->CreateDMA(type, &buf);
-	if (err) {
-		return err;
+	// DMA buffer: we must remember what we allocated
+	if (ivars->dmaCount >= TinyGPUDriverUserClient_IVars::kMaxDMAs) {
+		os_log(OS_LOG_DEFAULT, "tinygpu: too many DMA allocations for this client");
+		return kIOReturnNoMemory;
 	}
 
+	TinyGPUCreateDMAResp buf{};
+	kern_return_t err = ivars->provider->CreateDMA(type, &buf);
+	if (err) return err;
+
+	// store it so we can free on disconnect
+	ivars->dmas[ivars->dmaCount++] = buf;
+
 	*memory = buf.sharedBuf;
-	return 0;
+	return kIOReturnSuccess;
 }
