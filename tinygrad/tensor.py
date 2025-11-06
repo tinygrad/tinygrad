@@ -1487,9 +1487,9 @@ class Tensor(OpMixin):
     if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
     return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
 
-  def diagonal(self) -> Tensor:
+  def diagonal(self, offset=0, dim1=0, dim2=1) -> Tensor:
     """
-    Returns a view of input tensor with its main diagonal elements.
+    Returns a view of input tensor with its diagonal elements from the specified 2D plane.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(3, 3)
@@ -1498,9 +1498,18 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.diagonal().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(12).reshape(3, 4)
+    print(t.diagonal(offset=1).numpy())
+    ```
     """
-    if self.ndim != 2 or (n:=self.shape[0]) != self.shape[1]: raise ValueError(f"only 2-D square tensor is supported, getting {self.shape=}")
-    return self.flatten().pad(((0, n))).reshape(n, n+1)[:, 0]
+    if offset == 0 and dim1 == 0 and dim2 == 1 and self.ndim == 2 and self.shape[0] == self.shape[1]:
+      return self.flatten().pad(((0, self.shape[0]))).reshape(self.shape[0], self.shape[0]+1)[:, 0]
+    d1, d2 = sorted((dim1 % self.ndim, dim2 % self.ndim))
+    x = self.permute([i for i in range(self.ndim) if i not in (d1, d2)] + [d1, d2])
+    size = max(0, min(x.shape[-2] - max(0, -offset), x.shape[-1] - max(0, offset)))
+    return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device) if size == 0 else \
+           x[..., (idx := Tensor.arange(size, device=self.device)) + max(0, -offset), idx + max(0, offset)]
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """

@@ -49,14 +49,6 @@ def wrap_view_op(fn):
     return wrap(ret)
   return _wrap
 
-def _diagonal(self, offset=0, dim1=0, dim2=1):
-  if offset == 0 and dim1 == 0 and dim2 == 1 and self.ndim == 2 and self.shape[0] == self.shape[1]: return self.diagonal()
-  d1, d2 = sorted((dim1 % self.ndim, dim2 % self.ndim))
-  x = self.permute([i for i in range(self.ndim) if i not in (d1, d2)] + [d1, d2])
-  size = max(0, min(x.shape[-2] - max(0, -offset), x.shape[-1] - max(0, offset)))
-  return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device) if size == 0 else \
-         x[..., (idx := Tensor.arange(size, device=self.device)) + max(0, -offset), idx + max(0, offset)]
-
 view_ops = {
   "aten.view": Tensor.reshape,
   "aten._unsafe_view": Tensor.reshape,  # when are views unsafe, and do we care?
@@ -70,7 +62,7 @@ view_ops = {
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
-  "aten.diagonal": _diagonal,
+  "aten.diagonal": Tensor.diagonal,
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
