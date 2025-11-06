@@ -302,7 +302,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       else:
         # if it's not a RANGE, we include all ranges in srcs.
         # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
-        for s in UOp.sink(*er).ranges:
+        for s in er.ranges:
           if s in ret: del ret[s]
     return ret
 
