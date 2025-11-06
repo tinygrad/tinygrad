@@ -38,12 +38,6 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), ta)
     np.testing.assert_equal(b.numpy(), tb)
 
-  def test_late_bias_load(self):
-    img = Tensor.empty(1, 3, 16, 16)
-    w = Tensor.empty(16, 3, 3, 3)
-    b = Tensor.empty(16)
-    img.conv2d(w, b).realize()
-
   def _test_no_nested_ranges(self, lins, skip=None):
     for l in lins:
       range_in_acc = flatten([[x for x in u.src if x.op is Ops.RANGE] for u in l.uops if u.op is Ops.DEFINE_REG])

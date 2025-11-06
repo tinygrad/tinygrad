@@ -94,6 +94,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # **** below this line need to be optional and benchmarked ****
 
   # if there are small dims with lots of valid masks, upcast them (they might be from Tensor.stack)
+  """
   to_upcast: list[int] = []
   # upcast leading axes first (hack-ish for winograd; we actually want to upcast masked axes with low stride first)
   for axis in k.upcastable_dims:
@@ -103,6 +104,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
+  """
 
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.ren is not None and k.ren.device == "DSP"
