@@ -22,8 +22,8 @@ def linearize(u:UOp) -> list[UOp]:
     # here we have some op specific mods
     mod_priority = [0] + [priorities[x][-1] for x in consumers[u]]
     match u.op:
-      # DEFINE_GLOBAL must be placed before DEFINE_VAR. This is a quirk of the cstyle Renderer
-      case Ops.DEFINE_GLOBAL: mod_priority.append(-2)
+      # DEFINE_GLOBAL must be placed before DEFINE_VAR and in order. This is a quirk of Renderers
+      case Ops.DEFINE_GLOBAL: mod_priority.append(-100+u.arg)
       # prefer placing load early
       case Ops.LOAD: mod_priority.append(-1)
       # RANGE/END reset this
