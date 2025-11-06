@@ -1,49 +1,32 @@
 import heapq
-from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
-from tinygrad.helpers import prod
 
 def linearize(u:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(u.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
-  priorities:dict[UOp, tuple[int, int, Any]] = {}
+  priorities:dict[UOp, int] = {}
 
+  # get consumers and assign priorities
+  # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    # for toposort
     for s in u.src: consumers[s].append(u)
     in_degree[u] = len(u.src)
-
-    # we place UOps with higher run_counts later
-    # this will cause ranges to be placed late and ends to be placed early
-    run_count = prod([int(r.vmax)+1 for r in u.ranges])
-
-    # here we have some op specific mods
-    mod_priority = [0] + [priorities[x][1] for x in consumers[u]]
-    extra = None
-    match u.op:
-      # DEFINE_GLOBAL must be placed before DEFINE_VAR and in order. This is a quirk of Renderers
-      case Ops.DEFINE_GLOBAL:
-        mod_priority.append(-20)
-        extra = u.arg
-      # DEFINE_VAR must also be placed in order (sorted by u.arg)
-      case Ops.DEFINE_VAR:
-        mod_priority.append(-10)
-        extra = u.arg
-      # prefer placing load early
-      #case Ops.LOAD: mod_priority.append(-1)
-      # RANGE/END reset this
-      case Ops.END|Ops.RANGE: mod_priority = [0]
-
-    # set priority. lower number priority means we prefer to place this before others
-    priorities[u] = (run_count, min(mod_priority), extra)
-
-  #for i,u in enumerate(lst): print(f"{i:3d} {str(u.op):30s} {priorities[u]}")
+    # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
+    priority = [0] + [priorities[x] for x in consumers[u]]
+    if u.op is Ops.LOAD: priority.append(-1000)
+    if u.op is Ops.BARRIER: priority.append(-1500)
+    # ranges are scheduled as late as possible so anything that can be outside is
+    # if u.op is Ops.RANGE: priority = [2000]
+    if u.op is Ops.END: priority = [-1000]
+    # move defines and consts to the top
+    if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
+    priorities[u] = min(priority)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
 
   # then force then to be toposorted in as close to the ideal order as possible
   heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
