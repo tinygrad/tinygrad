@@ -1,4 +1,5 @@
 import heapq
+from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
 from tinygrad.helpers import prod
@@ -8,7 +9,7 @@ def linearize(u:UOp) -> list[UOp]:
   lst = list(u.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
-  priorities:dict[UOp, tuple[int, int]] = {}
+  priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   for u in reversed(lst):
     # for toposort
@@ -20,17 +21,24 @@ def linearize(u:UOp) -> list[UOp]:
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
     # here we have some op specific mods
-    mod_priority = [0] + [priorities[x][-1] for x in consumers[u]]
+    mod_priority = [0] + [priorities[x][1] for x in consumers[u]]
+    extra = None
     match u.op:
       # DEFINE_GLOBAL must be placed before DEFINE_VAR and in order. This is a quirk of Renderers
-      case Ops.DEFINE_GLOBAL: mod_priority.append(-100+u.arg)
+      case Ops.DEFINE_GLOBAL:
+        mod_priority.append(-20)
+        extra = u.arg
+      # DEFINE_VAR must also be placed in order (sorted by u.arg)
+      case Ops.DEFINE_VAR:
+        mod_priority.append(-10)
+        extra = u.arg
       # prefer placing load early
       case Ops.LOAD: mod_priority.append(-1)
       # RANGE/END reset this
       case Ops.END|Ops.RANGE: mod_priority = [0]
 
     # set priority. lower number priority means we prefer to place this before others
-    priorities[u] = (run_count, min(mod_priority))
+    priorities[u] = (run_count, min(mod_priority), extra)
 
   #for i,u in enumerate(lst): print(f"{i:3d} {str(u.op):30s} {priorities[u]}")
 
