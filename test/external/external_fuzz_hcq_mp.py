@@ -6,7 +6,7 @@ from tinygrad.helpers import getenv
 
 # checks that HCQ drivers can be killed during operation without causing issues
 
-def run_test(i, full_run=False):
+def run_test(i, full_run=False, force_ok=False):
   print(f"\rRunning iteration {i}...", end=" ", flush=True)
 
   p = subprocess.Popen(["python3", "test/test_tiny.py", "TestTiny.test_plus"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, )
@@ -18,7 +18,7 @@ def run_test(i, full_run=False):
   else:
     _, stderr = p.communicate()
     stderr_text = stderr.decode()
-    assert ("Ran 1 test in" in stderr_text and "OK" in stderr_text) or ("Failed to take lock file" in stderr_text), stderr_text
+    assert ("Ran 1 test in" in stderr_text and "OK" in stderr_text) or (not force_ok and "Failed to take lock file" in stderr_text), stderr_text
 
 if __name__ == "__main__":
   max_workers = getenv("MAX_WORKERS", 4)
@@ -35,7 +35,7 @@ if __name__ == "__main__":
         futures = []
 
         # do a full run in the main proc
-        run_test(i, True)
+        run_test(i, True, force_ok=True)
       else:
         futures.append(executor.submit(run_test, i, bool(getenv("FULL_RUN", 0))))
 
