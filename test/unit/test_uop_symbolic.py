@@ -643,6 +643,10 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(lidx+(gidx//4)*8+2*(gidx%4), 0, 372, "(lidx+(gidx*2))")
     self.helper_test_variable(lidx+2*(gidx%4)+(gidx//4)*8, 0, 372, "(lidx+(gidx*2))")
 
+  def test_div_mod_recombine_partial(self):
+    gidx = Variable("gidx", 0, 15)
+    self.helper_test_variable((gidx//2)%4+(gidx//8)*4, 0, 7, "gidx//2")
+
   def test_div_mod_recombine_folded_mod(self):
     a = Variable("a", 0, 2)
     b = Variable("b", 0, 100)
