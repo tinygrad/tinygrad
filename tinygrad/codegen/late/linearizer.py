@@ -20,19 +20,20 @@ def linearize(u:UOp) -> list[UOp]:
     # this will cause ranges to be placed late and ends to be placed early
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
 
-    # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x][1] for x in consumers[u]]
-    if u.op is Ops.LOAD: priority.append(-1000)
-    if u.op is Ops.BARRIER: priority.append(-1500)
-    # ranges are scheduled as late as possible so anything that can be outside is
-    # if u.op is Ops.RANGE: priority = [2000]
-    if u.op is Ops.END: priority = [-1000]
-    # move defines and consts to the top
-    if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
-    priorities[u] = (run_count, min(priority))
+    # simple priority override
+    match u.op:
+      case Ops.CONST: priority = -10
+      # place loads early
+      #case Ops.LOAD: priority = -1
+      # control flow resets priority
+      case Ops.RANGE|Ops.END|Ops.IF|Ops.ENDIF: priority = 0
+      # prevent priority inversion
+      case _: priority = min([0]+[priorities[x][1] for x in consumers[u]])
+
+    priorities[u] = (run_count, priority)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+x.tuplize))}
 
   # then force then to be toposorted in as close to the ideal order as possible
   heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
