@@ -8,17 +8,21 @@ from tinygrad.helpers import getenv, prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
 
-global_slot = 0
+class _Slots:
+  def __init__(self):
+    self.global_slot = 0
+    self.shared_slot = 0
+    self.register_slot = 0
+slots = _Slots()
+
 def gl(shape, dtype):
-  global global_slot
-  global_slot += 1
-  return UOp.placeholder(shape, dtype, slot=global_slot-1)
+  slots.global_slot += 1
+  return UOp.placeholder(shape, dtype, slot=slots.global_slot-1)
 
 shared_slot = 0
 def st(shape, dtype):
-  global shared_slot
-  shared_slot += 1
-  return UOp.placeholder(shape, dtype, addrspace=AddrSpace.LOCAL, slot=shared_slot-1)
+  slots.shared_slot += 1
+  return UOp.placeholder(shape, dtype, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot-1)
 
 TILE_ROW_DIM, TILE_COL_DIM = 16, 16
 RT_BASE_TILE_NE = TILE_ROW_DIM * TILE_COL_DIM
@@ -30,9 +34,8 @@ def rt(shape, dtype):
   height = shape[0] // TILE_ROW_DIM
   width = shape[1] // TILE_COL_DIM
 
-  global register_slot
-  register_slot += 1
-  return UOp.placeholder((height, width, RT_BASE_TILE_NEPT), dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
+  slots.register_slot += 1
+  return UOp.placeholder((height, width, RT_BASE_TILE_NEPT), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)
 
 def rv(length, dtype, layout="naive"):
   tiles = length // TILE_ROW_DIM
@@ -45,6 +48,5 @@ def rv(length, dtype, layout="naive"):
       outer_dim = tiles
     case _: raise NotImplementedError(f"rv layout {layout} not implemented")
 
-  global register_slot
-  register_slot += 1
-  return UOp.placeholder((outer_dim, inner_dim), dtype, addrspace=AddrSpace.REG, slot=register_slot-1)
+  slots.register_slot += 1
+  return UOp.placeholder((outer_dim, inner_dim), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)
