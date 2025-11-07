@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
-import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent
@@ -436,12 +436,6 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     try: buf, realloced = self.allocator.alloc(new_size, options=options), True
     except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
-
-  # def _make_no_iface_error(self, errs:str, err_short:str) -> RuntimeError:
-  #   # Keep it in a separate function to avoid creating a traceback <-> locals ref cycle
-  #   e = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
-  #   e.add_note(errs + err_short)
-  #   return e
 
   def _select_iface(self, *ifaces:Type):
     excs = []
