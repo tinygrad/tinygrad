@@ -3,8 +3,6 @@ import random
 from pathlib import Path
 from typing import Dict, List, Iterator
 from tinygrad import Tensor
-from tinygrad.helpers import getenv
-from tinygrad.apps.llm import SimpleTokenizer
 
 LABEL_IGNORE_INDEX = -100
 INSTRUCTION_PROMPT_TEMPLATE = "Summarize the following government document:\n\n{input}\n\nSummary:"
