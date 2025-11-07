@@ -538,7 +538,9 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
-  code.innerHTML = hljs.highlight(st, { language }).value;
+  // plaintext renders like a terminal print, otherwise render with syntax highlighting
+  if (language === "txt") code.appendChild(colored(st));
+  else code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
   const ret = document.createElement("pre");
   if (wrap) ret.className = "wrap";
@@ -717,7 +719,7 @@ async function main() {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "24px").style("height", "100%");
         return [s.label.trim(), div.node()];
       })).node());
-    } else root.appendChild(codeBlock(ret.src, ret.lang));
+    } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
     return document.querySelector("#custom").replaceChildren(root);
   }
   // ** UOp view (default)

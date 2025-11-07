@@ -15,7 +15,9 @@ PATHS_TO_TRY = [
 ]
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
-  if library: return ctypes.CDLL(library)
+  if library:
+    try: return ctypes.CDLL(library)
+    except OSError: pass
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass

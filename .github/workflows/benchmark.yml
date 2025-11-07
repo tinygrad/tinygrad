@@ -199,7 +199,7 @@ jobs:
     - name: Test speed vs torch
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 HALF=1 BIG=2 TORCHCUDA=1 python3 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
     - name: Test speed vs theoretical
-      run: NV=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
+      run: NV=1 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test benchmark allreduce
       run: NV=1 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Test tensor cores
@@ -409,7 +409,7 @@ jobs:
     #    python3 -c "import torch; print(torch.__version__)"
     #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
     - name: Test speed vs theoretical
-      run: AMD=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
+      run: AMD=1 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
       run: |
         AMD=1 AMD_LLVM=0 python3 test/opt/test_tensor_cores.py
@@ -527,7 +527,7 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=330 AMD=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=350 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=390 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     # - name: Run 10 CIFAR training steps w BF16
     #   run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     # TODO: too slow

@@ -1,42 +1,59 @@
 import heapq
+from typing import Any
 from collections import defaultdict
-from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
+from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
-def linearize(u:UOp) -> list[UOp]:
+def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
-  lst = list(u.toposort())
+  lst = list(sink.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree:dict[UOp, int] = {}
-  priorities:dict[UOp, int] = {}
+  out_degree:dict[UOp, int] = {}
+  priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
     for s in u.src: consumers[s].append(u)
     in_degree[u] = len(u.src)
-    # put loads in the beginning of the block and prevent priority inversion. hack for BARRIER grouping too
-    priority = [0] + [priorities[x] for x in consumers[u]]
-    if u.op is Ops.LOAD: priority.append(-1000)
-    if u.op is Ops.BARRIER: priority.append(-1500)
-    # ranges are scheduled as late as possible so anything that can be outside is
-    # if u.op is Ops.RANGE: priority = [2000]
-    if u.op is Ops.END: priority = [-1000]
-    # move defines and consts to the top
-    if u.op in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.CONST}: priority.append(-2000)
-    priorities[u] = min(priority)
+    out_degree[u] = len(consumers[u])
+
+    # we place UOps with higher run_counts later
+    run_count = prod([int(r.vmax)+1 for r in u.ranges])
+
+    # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
+    extra = None
+    match u.op:
+      # the order and placement of these defines is important
+      case Ops.DEFINE_GLOBAL: priority, extra = -20, u.arg
+      case Ops.DEFINE_VAR: priority, extra = -19, u.arg
+      case Ops.DEFINE_LOCAL: priority = -18
+      case Ops.DEFINE_REG: priority = -17
+      case Ops.CONST: priority = -10  # early consts
+      case Ops.LOAD: priority = -1    # place loads early
+      case Ops.STORE: priority = 1    # place stores late
+      case Ops.RANGE: priority = 5    # placing RANGE is good
+      case Ops.END: priority = -5     # placing END is bad
+      case _: priority = 0            # everything else has priority 0
+    priorities[u] = (run_count, priority, extra)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: (priorities[x],)+x.tuplize))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
 
   # then force then to be toposorted in as close to the ideal order as possible
-  heapq.heapify(heap:=[(nkey[u],u) for u in lst if in_degree[u] == 0])
+  heap = [(-nkey[sink], sink)]
   newlst = []
   while heap:
     newlst.append(u:=heapq.heappop(heap)[1])
-    for v in consumers[u]:
-      in_degree[v] -= 1
-      if in_degree[v] == 0: heapq.heappush(heap, (nkey[v],v))
-  assert len(newlst) == len(lst), f"len mismatch {len(newlst)} != {len(lst)}"
+    for v in u.src:
+      out_degree[v] -= 1
+      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
+  newlst = newlst[::-1]
+
+  if getenv("DEBUG_LINEARIZE"):
+    for i,u in enumerate(newlst):
+      print(f"{i:4d} {str(u.op):20s} {multirange_str(u.ranges, color=True, pad=10)} {priorities[u]}")
   return newlst
 
 class CFGContext:
