@@ -244,6 +244,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
 
   log_spec = prep_audio(waveforms, model.batch_size, truncate)
   nsample = model.decoder.max_tokens_to_sample
+  nctx = model.decoder.max_self_attn_cache_len
 
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
     pos, next_tokens = 0, ctx
@@ -252,7 +253,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
       next_tokens[ctx[:, -1] == eot] = eot
       ctx = np.concatenate((ctx, next_tokens), axis=1)
       pos = ctx.shape[-1] - 1
-      if (next_tokens == eot).all(): break
+      if (next_tokens == eot).all() or pos == nctx: break
     return ctx
 
   def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens["<|notimestamps|>"]][-nsample+len(start_tokens):]
