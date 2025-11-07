@@ -17,7 +17,7 @@ M = getenv("M", N)
 K = getenv("K", N)
 CNT = getenv("CNT", 10)
 
-atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1)}.get(dtype_in, (1e-4, 3e-2))
+atol, rtol = {dtypes.half:{1e-3, 1e-2}, dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1)}.get(dtype_in, (1e-4, 3e-2))
 ATOL, RTOL = getenv("ATOL", atol), getenv("RTOL", rtol)
 
 INT_LOW = getenv("INT_LOW", 0)

@@ -1,13 +1,34 @@
 import os, numpy as np
 from tinygrad import Tensor, nn, Device
-
+import torch
 np.random.seed(42)
 
 BACKEND1 = "METAL"
 BACKEND2 = "WEBGPU"
 
+def test_simpler():
+  BS, N, C, G =  1, 164, 5, 5
+  # create in torch
+  torch_layer = torch.nn.GroupNorm(G, C).eval()
+
+  # create in tinygrad
+  layer = nn.GroupNorm(G, C)
+  layer.weight = Tensor(torch_layer.weight.detach().numpy(), requires_grad=True)
+  layer.bias = Tensor(torch_layer.bias.detach().numpy(), requires_grad=True)
+
+  x = Tensor.randn(BS, C, N, N, N, requires_grad=False)
+  z = layer(x)
+
+  torch_x = torch.tensor(x.numpy(), requires_grad=False)
+  torch_z = torch_layer(torch_x)
+
+
+  np.testing.assert_allclose(z.numpy(), torch_z.detach().numpy(), atol=5e-6, rtol=5e-6)
+
+    #torch_x = torch.tensor(x.numpy(), requires_grad=True)
+    #torch_z = torch_layer(torch_x)
 def test_groupnorm(b,c1,c2,N):
-  print("Channels", b,c1,c2, "Dims", N)
+  '''print("Channels", b,c1,c2, "Dims", N)
   data = np.random.randn(b, c1, N,N,N).astype(np.float32)
   weights = np.random.randn(c1, c2, 3, 3, 3).astype(np.float32)# * 0.1
 
@@ -43,4 +64,6 @@ print("="*80)
 print("sweep over inner channels") # ==============
 print("="*80)
 b,c1,c2,N = [1,5,5,128+34] # channels [5,10,15,30] break
-test_groupnorm(b,c1,c2,N)
+test_groupnorm(b,c1,c2,N)'''
+
+test_simpler()

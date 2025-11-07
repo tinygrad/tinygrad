@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
-import subprocess, ctypes, pathlib
+import subprocess, ctypes, pathlib, traceback
 from contextlib import redirect_stdout
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str, pyrender
-from tinygrad.uop.ops import print_uops, range_start
+from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
@@ -78,11 +78,14 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += f"\n{x.op.name}{idx} {arg}" + (f" {x.src[0].op}" if len(x.src) else "")
     try:
       if len(rngs:=u.ranges):
-        label += f"\n({','.join([range_str(x, color=True) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
+        label += f"\n({multirange_str(rngs, color=True)})"
       if u.op not in {Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
+        ranges: list[UOp] = []
+        for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
+        if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
       if u.op in {Ops.END, Ops.REDUCE} and len(trngs:=list(UOp.sink(*u.src[range_start[u.op]:]).ranges)):
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
@@ -193,10 +196,34 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+def load_sqtt(profile:list[ProfileEvent]) -> None:
+  from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
+  def err(name:str, msg:str|None=None) -> None:
+    step = {"name":name, "data":{"src":msg or traceback.format_exc()}, "depth":0, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}
+    return ctxs.append({"name":"Counters", "steps":[step]})
+  try: from extra.sqtt.roc import decode
+  except Exception: return err("DECODER IMPORT ISSUE")
+  try:
+    rctx = decode(profile)
+    steps = [{"name":str(x[0]), "depth":0, "data":{"rows":[(e.inst, e.time, e.time-x[1][i-1].time if i else 0, e.dur, e.stall,
+                                                            str(e.typ).split("_")[-1]) for i,e in enumerate(x[1])],
+                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":[]},
+              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.inst_execs.items())]
+    if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  except Exception: return err("DECODER ERROR")
+  ctxs.append({"name":"Counters", "steps":steps})
+
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
+  # load device specific counters
+  device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
+  for device in device_ts_diffs:
+    d = device.split(":")[0]
+    if d == "AMD": device_decoders[d] = load_sqtt
+  for fxn in device_decoders.values(): fxn(profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
@@ -248,9 +275,10 @@ def get_stdout(f:Callable) -> str:
   with redirect_stdout(buf:=io.StringIO()): f()
   return buf.getvalue()
 
-def get_render(i:int, fmt:str) -> dict|None:
+def get_render(i:int, j:int, fmt:str) -> dict|None:
+  if fmt == "counters": return ctxs[i]["steps"][j]["data"]
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
   if fmt == "src": return {"src":prg.src, "lang":"cpp"}
   lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
   disasm_str = get_stdout(lambda: compiler.disassemble(lib))
@@ -264,7 +292,7 @@ def get_render(i:int, fmt:str) -> dict|None:
 
 # ** HTTP server
 
-def get_int(query:dict[str, list[str]], k:str) -> int: return int(query[k][0])
+def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -279,7 +307,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/render": ret, content_type = json.dumps(get_render(get_int(query, "ctx"), query["fmt"][0])).encode(), "application/json"
+      if url.path == "/render":
+        render_src = get_render(get_int(query, "ctx"), get_int(query, "step"), query["fmt"][0])
+        ret, content_type = json.dumps(render_src).encode(), "application/json"
       else:
         try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
         except (KeyError, IndexError): status_code = 404
