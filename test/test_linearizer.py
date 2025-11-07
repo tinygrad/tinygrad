@@ -278,6 +278,8 @@ class TestLinearizer(unittest.TestCase):
     _assert_grouped_dims("gidx", (65536,), (16,16,256), False, [16,16,256], False)
     #                              2             ->             3
     _assert_grouped_dims("gidx", (128,128), (16,16,256), False, [16,16,64], False)
+    #                              2             ->             2
+    _assert_grouped_dims("gidx", (65536,2), (65535,65535,65535), False, [32768,4], False)
     # test when the only divisor is the square root of dim
     _assert_grouped_dims("gidx", (121,), (12,12,12), False, [11,11], False)
 
