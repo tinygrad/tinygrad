@@ -1,7 +1,8 @@
 import ctypes.util, glob, importlib.metadata, itertools, re, functools, tarfile, os
-from tinygrad.helpers import fetch, flatten, unwrap
-from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, TypeKind as TK
+from tinygrad.helpers import fetch, flatten, unwrap, fromimport
+from clang.cindex import Config, Index, Cursor, Type, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, TypeKind as TK
 from clang.cindex import PrintingPolicy as PP, PrintingPolicyProperty as PPP, SourceRange
+libclang = functools.partial(fromimport, "tinygrad.runtime.autogen.libclang") # we can't actually import this, because then we can't generate it
 
 assert importlib.metadata.version('clang')[:2] == "20"
 if not Config.loaded: Config.set_library_file(os.getenv("LIBCLANG_PATH", ctypes.util.find_library("clang-20")))
@@ -13,6 +14,11 @@ def readext(f, fst, snd=None):
     f.seek(start:=(fst.start.offset if isinstance(fst, SourceRange) else fst))
     return f.read((fst.end.offset if isinstance(fst, SourceRange) else snd)-start)
 def attrs(c): return list(filter(lambda k: (v:=k.value) >= 400 and v < 500, map(lambda c: c.kind, c.get_children())))
+
+def protocols(t): yield from (Cursor.from_result(libclang("clang_Type_getObjCProtocolDecl")(t, i), t)
+                              for i in range(libclang("clang_Type_getNumObjCProtocolRefs")(t)))
+def basetype(t): return Type.from_result(libclang("clang_Type_getObjCObjectBaseType")(t), (t,))
+
 
 base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?\*/', ''), (r'\b(0[xX][0-9a-fA-F]+|\d+)[uUlL]+\b', r'\1'),
               (r'\b0+(?=\d)', ''), (r'\s*&&\s*', r' and '), (r'\s*\|\|\s*', r' or '), (r'\s*!\s*', ' not '),
@@ -47,7 +53,8 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
     if ((f:=t).kind in (fks:=(TK.FUNCTIONPROTO, TK.FUNCTIONNOPROTO))) or (t.kind == TK.POINTER and (f:=t.get_pointee()).kind in fks):
       return f"ctypes.CFUNCTYPE({tname(f.get_result())}{(', '+', '.join(map(tname, f.argument_types()))) if f.kind==TK.FUNCTIONPROTO else ''})"
     match t.kind:
-      case TK.POINTER: return "ctypes.c_void_p" if t.get_pointee().kind == TK.VOID else f"ctypes.POINTER({tname(t.get_pointee())})"
+      case TK.POINTER: return "ctypes.c_void_p" if (ptr:=t.get_pointee()).kind == TK.VOID else f"ctypes.POINTER({tname(ptr)})"
+      case TK.OBJCOBJECTPOINTER: return tname(t.get_pointee()) # TODO: this seems wrong
       case TK.ELABORATED: return tname(t.get_named_type(), suggested_name)
       case TK.TYPEDEF if t.spelling == t.get_canonical().spelling: return tname(t.get_canonical())
       case TK.TYPEDEF:
@@ -87,20 +94,38 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
       case TK.OBJCINTERFACE:
         if t.spelling in types: return t.spelling
         lines.append(f"class {t.spelling}({', '.join([tname(b.type) for b in decl.get_children() if b.kind in specs] or ['objc.Spec'])}): pass")
-        types[t.spelling] = (nm:=t.spelling), False
-        m = {CK.OBJC_INSTANCE_METHOD_DECL:[], CK.OBJC_CLASS_METHOD_DECL:[]}
-        for d in filter(lambda d: d.kind in (CK.OBJC_INSTANCE_METHOD_DECL, CK.OBJC_CLASS_METHOD_DECL), decl.get_children()):
-          try: m[d.kind].append(f"  ('{d.spelling}', {tname(d.result_type)}, [{', '.join(tname(a.type) for a in d.get_arguments())}]),")
-          except NotImplementedError as e: print(f"skipping {t.spelling}.{d.spelling}: {e}")
-        lines.extend([*([f"{nm}._methods_ = [", *ims, ']'] if (ims:=m[CK.OBJC_INSTANCE_METHOD_DECL]) else []),
-                      *([f"{nm}._classmethods_ = [", *cms, ']'] if (cms:=m[CK.OBJC_CLASS_METHOD_DECL]) else [])])
-        types[t.spelling] = nm, True
+        types[t.spelling] = (nm:=t.spelling), True
+        ims, cms = parse_objc_spec(decl, t.spelling, CK.OBJC_INSTANCE_METHOD_DECL), parse_objc_spec(decl, t.spelling, CK.OBJC_CLASS_METHOD_DECL)
+        lines.extend([*([f"{nm}._methods_ = [", *ims, ']'] if ims else []),
+                      *([f"{nm}._classmethods_ = [", *cms, ']'] if cms else [])])
         return t.spelling
       case TK.OBJCSEL: return "objc.id_"
       case TK.OBJCID: return (objc:=True, "objc.id_")[1]
-      case TK.OBJCOBJECT: return "objc.id_" # FIXME: requires clang_Type_getObjCObjectBaseType
-      case TK.OBJCOBJECTPOINTER: return "objc.id_" if t.spelling == "id" else tname(t.get_pointee())
+      case TK.OBJCOBJECT:
+        if basetype(t).kind != TK.OBJCID: raise NotImplementedError("generics unsupported")
+        types[t.spelling] = (nm:=f"_anondynamic{anoncnt()}"), True
+        lines.append(f"class {nm}(objc.Spec): pass")
+        ims, cms = [], []
+        for p in protocols(t):
+          try:
+            ims.extend(parse_objc_spec(defn:=p.get_definition(), nm, CK.OBJC_INSTANCE_METHOD_DECL))
+            cms.extend(parse_objc_spec(defn, nm, CK.OBJC_CLASS_METHOD_DECL))
+          except Exception as e: raise Exception(f"at {p.spelling}") from e
+        lines.extend([*([f"{nm}._methods_ = [", *ims, "]"] if ims else []), *([f"{nm}._classmethods_ = [", *cms, "]"] if cms else [])])
+        return nm
+      case TK.INVALID: raise Exception("invalid!!!!")
       case _: raise NotImplementedError(f"unsupported type {t.kind}")
+
+  # parses an objc @interface or @protocol, returning a list of (instance) methods or class methods
+  def parse_objc_spec(decl:Cursor, nm:str, kind:CK) -> list[str]:
+    if decl is None: return []
+    ms = []
+    for d in filter(lambda d: d.kind == kind, decl.get_children()):
+      try: ms.append(f"  ('{d.spelling}', {nm if (rt:=d.result_type).spelling=='instancetype' else tname(rt)}, "
+                     f"[{', '.join(tname(a.type) for a in d.get_arguments())}]),")
+      except NotImplementedError as e: print(f"skipping {nm}.{d.spelling}: {e}")
+      except Exception as e: raise Exception(f"error while parsing {d.spelling}") from e
+    return ms
 
   for f in files:
     tu = Index.create().parse(f, args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
