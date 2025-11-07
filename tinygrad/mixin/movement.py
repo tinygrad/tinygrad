@@ -54,7 +54,9 @@ class MovementMixin:
     # for each dimension, check either dim is 1, or it does not change
     if not all(s == ns or s == 1 for s,ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    return self.reshape(shape)._mop(Ops.EXPAND, arg=new_shape)
+    reshaped = self.reshape(shape)
+    ret = reshaped._mop(Ops.EXPAND, arg=new_shape)
+    return reshaped if ret.shape == reshaped.shape else ret
 
   def expand(self, shape, *args) -> Self:
     """
