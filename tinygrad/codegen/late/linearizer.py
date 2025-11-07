@@ -2,7 +2,7 @@ import heapq
 from typing import Any
 from collections import defaultdict
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
-from tinygrad.helpers import prod, getenv
+from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
@@ -39,7 +39,7 @@ def linearize(sink:UOp) -> list[UOp]:
     priorities[u] = (run_count, priority, extra)
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
 
   # then force then to be toposorted in as close to the ideal order as possible
   heap = [(-nkey[sink], sink)]
