@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
-import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent
+from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -437,19 +437,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
-  def _make_no_iface_error(self, errs:str, err_short:str) -> RuntimeError:
-    # Keep it in a separate function to avoid creating a traceback <-> locals ref cycle
-    e = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
-    if hasattr(e, "add_note"): e.add_note(errs + err_short)
-    return e
-
   def _select_iface(self, *ifaces:Type):
-    errs, err_short = "", ""
     if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val.upper()))
-    for iface_t in ifaces:
-      try: return iface_t(self, self.device_id)
-      except Exception as e: errs, err_short = errs + f"\n{iface_t.__name__}: {traceback.format_exc()}", err_short + f"\n{iface_t.__name__}: {e}."
-    raise self._make_no_iface_error(errs, err_short)
+    return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in ifaces],
+                               f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
