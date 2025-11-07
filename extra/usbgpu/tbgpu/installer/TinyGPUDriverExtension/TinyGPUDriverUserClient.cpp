@@ -147,7 +147,7 @@ kern_return_t IMPL(TinyGPUDriverUserClient, CopyClientMemoryForType)
 	}
 
 	// dma handling, type is size
-	if (!ivars->ensureDMACap(ivars->dmaCount + 1)) {
+	if (ivars->ensureDMACap(ivars->dmaCount + 1)) {
 		os_log(OS_LOG_DEFAULT, "tinygpu: cannot grow dma array");
 		return kIOReturnNoMemory;
 	}
