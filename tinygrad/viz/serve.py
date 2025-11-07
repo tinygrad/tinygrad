@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import subprocess, ctypes, pathlib, traceback
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -271,8 +271,11 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
-def get_stdout(f:Callable) -> str:
-  with redirect_stdout(buf:=io.StringIO()): f()
+def get_stdout(f: Callable) -> str:
+  buf = io.StringIO()
+  try:
+    with redirect_stdout(buf), redirect_stderr(buf): f()
+  except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
 def get_render(i:int, j:int, fmt:str) -> dict|None:
@@ -280,8 +283,8 @@ def get_render(i:int, j:int, fmt:str) -> dict|None:
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
   if fmt == "src": return {"src":prg.src, "lang":"cpp"}
-  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
-  disasm_str = get_stdout(lambda: compiler.disassemble(lib))
+  compiler = Device[prg.device].compiler
+  disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(prg.src)))
   from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
   if isinstance(compiler, LLVMCompiler):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
