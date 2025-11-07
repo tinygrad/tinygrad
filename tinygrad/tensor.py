@@ -3413,10 +3413,9 @@ class Tensor(OpMixin):
     # for each dimension, check either dim is 1, or it does not change
     if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
       raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
-    return self.reshape(shape).cast(sum_acc_dtype(self.dtype))._apply_uop(UOp.expand, arg=new_shape).cast(self.dtype)
+    return self.reshape(shape)._apply_uop(UOp.expand, arg=new_shape)
 
-  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True) -> tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True, backward_cast:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
@@ -3433,7 +3432,9 @@ class Tensor(OpMixin):
     if reverse: x, y = y, x
 
     # broadcast
-    return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
+    # NOTE: the backward cast is no-op in forward and uses sum_acc_dtype in the backward sum
+    return x.cast(sum_acc_dtype(x.dtype) if backward_cast else x.dtype)._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)).cast(x.dtype), \
+           y.cast(sum_acc_dtype(y.dtype) if backward_cast else y.dtype)._broadcast_to(out_shape).cast(y.dtype)
 
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
