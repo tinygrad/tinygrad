@@ -1,0 +1,65 @@
+# MLPerf Training Llama2 70B LoRA Default Configuration
+# Compatible with Accelerate configuration format
+
+compute_environment: LOCAL_MACHINE
+distributed_type: MULTI_GPU
+downcast_bf16: 'no'
+gpu_ids: all
+machine_rank: 0
+main_training_function: main
+mixed_precision: 'no'
+num_machines: 1
+num_processes: 1
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false
+
+# Training specific parameters
+model:
+  name: "llama2-70b"
+  max_context: 8192
+  rope_theta: 10000.0
+
+lora:
+  r: 16
+  alpha: 32.0
+  dropout: 0.1
+  target_modules: ["wq", "wk", "wv", "wo"]
+
+training:
+  batch_size: 1
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  num_epochs: 3
+  max_length: 8192
+  eval_steps: 500
+  save_steps: 1000
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+
+dataset:
+  name: "scrolls_gov_report"
+  max_samples_train: null  # Use all training samples
+  max_samples_eval: 1000   # Limit eval for speed
+
+optimization:
+  optimizer: "adamw"
+  scheduler: "linear"
+  warmup_steps: 100
+
+evaluation:
+  target_rouge_l: 0.270
+  rouge_types: ["rouge-1", "rouge-2", "rouge-l"]
+  max_eval_batches: 100
+
+logging:
+  log_level: "INFO"
+  log_steps: 100
+  mlperf_logging: true
+
+hardware:
+  mixed_precision: false  # Set to true for fp16 training
+  loss_scaling: 1.0       # Increase for fp16 training

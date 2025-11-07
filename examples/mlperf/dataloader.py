@@ -538,6 +538,107 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
     assert all(isinstance(caption, str) for caption in x["txt"])
     yield x
 
+def filter_govreport_dataset(sample: dict) -> dict:
+  """Filter GovReport dataset sample to keep only required fields.
+
+  Declared at module level for pickle compatibility with multiprocessing.
+  Matches MLPerf reference implementation filtering strategy.
+
+  Args:
+    sample: Raw dataset sample dictionary
+
+  Returns:
+    Filtered sample containing only input, output, and id fields
+  """
+  return {k: v for k, v in sample.items() if k in {'input', 'output', 'id'}}
+
+
+def collate_govreport(batch: list[dict]) -> dict:
+  """Collate GovReport batch samples into structured format.
+
+  Implements MLPerf reference style collation for text data by grouping
+  samples by field type into lists for batch processing.
+
+  Args:
+    batch: List of sample dictionaries to collate
+
+  Returns:
+    Dictionary with input, output, and id lists
+  """
+  ret = {"input": [], "output": [], "id": []}
+  for sample in batch:
+    for k, v in sample.items():
+      ret[k].append(v)
+  return ret
+
+
+def collate_govreport_fn(batch: list) -> list:
+  """Pass-through collation function for GovReport dataset.
+
+  Simple identity function that returns batch unchanged.
+  Used when no special collation logic is required.
+
+  Args:
+    batch: Input batch to pass through
+
+  Returns:
+    Unmodified batch
+  """
+  return batch
+
+def batch_load_llama2_lora(*, data_dir: str, batch_size: int, max_length: int = 8192, split: str = "train"):
+  """Load SCROLLS GovReport dataset for Llama2 70B LoRA training.
+
+  Implements MLPerf reference implementation for document summarization task
+  following the training patterns from the official MLCommons repository.
+  Creates appropriate data loaders for training or validation splits and
+  yields batches with proper tensor formatting and validation.
+
+  Args:
+    data_dir: Path to GovReport dataset directory
+    batch_size: Number of samples per batch
+    max_length: Maximum sequence length for tokenization
+    split: Dataset split to load, either 'train' or 'validation'
+
+  Yields:
+    Dictionary containing input_ids, attention_mask, and labels tensors
+    with shape (batch_size, max_length) for each batch
+
+  Raises:
+    AssertionError: If batch format doesn't match MLPerf requirements
+
+  References:
+    https://github.com/mlcommons/training/blob/master/llama2_70b_lora/scripts/train.py
+  """
+  from examples.mlperf.llama2_70b_lora.dataset import create_data_loaders, get_tokenizer
+
+  tokenizer = get_tokenizer()
+
+  if split == "train":
+    train_loader, _ = create_data_loaders(
+      data_dir=data_dir,
+      tokenizer=tokenizer,
+      batch_size=batch_size,
+      max_length=max_length
+    )
+    dataloader = train_loader
+  else:
+    _, val_loader = create_data_loaders(
+      data_dir=data_dir,
+      tokenizer=tokenizer,
+      batch_size=batch_size,
+      max_length=max_length
+    )
+    dataloader = val_loader
+
+  for batch in dataloader:
+    assert isinstance(batch, dict) and all(isinstance(k, str) for k in batch.keys()) and all(isinstance(v, Tensor) for v in batch.values())
+    assert all(tensor.shape[0] == batch_size for tensor in batch.values())
+    assert batch["input_ids"].shape == (batch_size, max_length)
+    assert batch["attention_mask"].shape == (batch_size, max_length)
+    assert batch["labels"].shape == (batch_size, max_length)
+    yield batch
+
 # llama3
 
 class BinIdxDataset:
@@ -846,6 +947,32 @@ if __name__ == "__main__":
     print(f"max seq length: {max_}")
     print(f"min seq length: {min_}")
 
-  load_fn_name = f"load_{getenv('MODEL', 'resnet')}"
-  if load_fn_name in globals():
-    globals()[load_fn_name](getenv("VAL", 1))
+  def load_llama2_lora(val: bool) -> None:
+    """Load and test Llama2 70B LoRA dataset batches.
+    
+    Args:
+      val: Whether to load validation split (True) or training split (False)
+    """
+    batch_size: int = getenv("BS", 1)
+    data_directory: str = getenv("DATADIR", "./dataset/govreport")
+    maximum_length: int = getenv("MAX_LENGTH", 8192)
+    dataset_split: str = "validation" if val else "train"
+    
+    print(f"Loading Llama2 70B LoRA dataset: {dataset_split}, bs={batch_size}, max_length={maximum_length}")
+    
+    batch_count: int = 0
+    batch_limit: int = 10
+    
+    for _ in tqdm(batch_load_llama2_lora(data_directory, batch_size, maximum_length, dataset_split)):
+      batch_count += 1
+      if batch_count >= batch_limit:
+        break
+    
+    print(f"Successfully loaded {batch_count} batches from {dataset_split} split")
+
+  model_name: str = getenv('MODEL', 'resnet')
+  load_function_name: str = f"load_{model_name}"
+  validation_flag: int = getenv("VAL", 1)
+  
+  if load_function_name in globals():
+    globals()[load_function_name](validation_flag)
