@@ -11,7 +11,7 @@ class TestTranscendentalFunctions(unittest.TestCase):
     # TODO: Test constant input when constant folding is fixed (or maybe test both variants)
     # Load input value from a buffer to prevent constant folding
     input_buf = UOp(Ops.DEFINE_GLOBAL, dtypes.double.ptr(), arg=1, src=())
-    loaded_value = UOp.load(input_buf.index(UOp.const(dtypes.int, 0)), dtype=dtypes.double)
+    loaded_value = input_buf.index(UOp.const(dtypes.int, 0))
     def eval_payne_hanek_reduction(v:float) -> tuple[float, int]:
       return tuple(eval_uop(u, [(dtypes.float64, [v])]) for u in payne_hanek_reduction(loaded_value))
 

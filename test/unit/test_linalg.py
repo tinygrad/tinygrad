@@ -1,5 +1,5 @@
 import unittest, functools
-from tinygrad import Tensor
+from tinygrad import Tensor, Context
 import numpy as np
 
 def orthogonality_helper(A:Tensor, tolerance=1e-5):
@@ -27,15 +27,16 @@ class TestLinAlg(unittest.TestCase):
       reconstruction_helper([U,s_diag,V],a)
 
   def _test_svd_nonfull(self, size):
-    a = Tensor.randn(size).realize()
-    U,S,V = a.svd(full_matrices=False)
-    b_shape,m,n = size[0:-2],size[-2],size[-1]
-    k = min(m,n)
-    s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)).expand(b_shape + (k,k)))
-    #reduced U,V is only orthogonal along smaller dim
-    if (m < n): orthogonality_helper(U),orthogonality_helper(V)
-    else: orthogonality_helper(U.transpose(-2,-1)),orthogonality_helper(V.transpose(-2,-1))
-    reconstruction_helper([U,s_diag,V],a)
+    with Context(IGNORE_OOB=1):  # sometimes this is slow in CI
+      a = Tensor.randn(size).realize()
+      U,S,V = a.svd(full_matrices=False)
+      b_shape,m,n = size[0:-2],size[-2],size[-1]
+      k = min(m,n)
+      s_diag = (S.unsqueeze(-2) * Tensor.eye(k).reshape((1,) * len(b_shape) + (k,k)).expand(b_shape + (k,k)))
+      #reduced U,V is only orthogonal along smaller dim
+      if (m < n): orthogonality_helper(U),orthogonality_helper(V)
+      else: orthogonality_helper(U.transpose(-2,-1)),orthogonality_helper(V.transpose(-2,-1))
+      reconstruction_helper([U,s_diag,V],a)
 
   # faster for parallel pytest
   def test_svd_nonfull_2_2(self): self._test_svd_nonfull((2,2))

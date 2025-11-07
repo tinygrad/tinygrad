@@ -2,11 +2,14 @@ import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys,
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
 from tinygrad.runtime.autogen import libc, vfio, pci
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer
+from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
+
+@dataclasses.dataclass(frozen=True)
+class PCIBarInfo: addr:int; size:int # noqa: E702
 
 class _System:
   @functools.cached_property
@@ -87,10 +90,6 @@ class _System:
     if data is not None: sysmem_view[:len(data)] = data
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
 
-  def pci_reset(self, gpu):
-    if OSX: System.iokit_pci_rpc(__TinyGPURPCReset:=2)
-    else: os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{gpu}/reset'")
-
   def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
     result = []
     for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
@@ -99,7 +98,7 @@ class _System:
       if vendor == target_vendor and device in target_devices: result.append(pcibus)
     return sorted(result)
 
-  def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
+  def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
     for bus in range(gpu_bus):
       # All 3 values must be written at the same time.
       buses = (0 << 0) | ((bus+1) << 8) | ((gpu_bus) << 16)
@@ -141,7 +140,7 @@ class _System:
         usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] & 0xffffffff, size=4)
         if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] >> 32, size=4)
 
-        bars[bar_off // 4] = (mem_space_addr[bar_mem], bar_size)
+        bars[bar_off // 4] = PCIBarInfo(mem_space_addr[bar_mem], bar_size)
         mem_space_addr[bar_mem] += round_up(bar_size, 2 << 20)
 
       bar_off += 8 if bar_64 else 4
@@ -166,7 +165,8 @@ class _System:
 System = _System()
 
 class PCIDevice:
-  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.irq_poller = pcibus, None
 
     if FileIOInterface.exists(f"/sys/bus/pci/devices/{self.pcibus}/driver"):
@@ -204,29 +204,34 @@ class PCIDevice:
     self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
     self.bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{b}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for b in bars}
 
-    bar_info = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
-    self.bar_info = {j:(int(start,16), int(end,16), int(flgs,16)) for j,(start,end,flgs) in enumerate(l.split() for l in bar_info)}
+    res = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
+    self.bar_info = {j:PCIBarInfo(int(s,16), int(e,16)-int(s,16)+1) for j,(s,e,_) in enumerate(l.split() for l in res)}
 
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
   def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
-    fd, sz = self.bar_fds[bar], size or (self.bar_info[bar][1] - self.bar_info[bar][0] + 1)
+    fd, sz = self.bar_fds[bar], size or (self.bar_info[bar].size - off)
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
+  def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
 
 class APLPCIDevice(PCIDevice):
-  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.bars = pcibus, {b: System.iokit_pci_memmap(b) for b in bars}
-    self.bar_info = {b:(0, self.bars[b].nbytes-1 if b in self.bars else 0, 0) for b in range(6)} # NOTE: fake bar info for nv.
+    self.bar_info = {b:PCIBarInfo(0, self.bars[b].nbytes-1 if b in self.bars else 0) for b in range(6)} # NOTE: fake bar info for nv.
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(off, size, fmt)
   def read_config(self, offset:int, size:int): return System.iokit_pci_rpc(__TinyGPURPCReadCfg:=0, offset, size)[0]
   def write_config(self, offset:int, value:int, size:int): System.iokit_pci_rpc(__TinyGPURPCWriteCfg:=1, offset, size, value)
+  def reset(self): System.iokit_pci_rpc(__TinyGPURPCReset:=2)
 
 class USBPCIDevice(PCIDevice):
-  def __init__(self, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.usb = ASM24Controller()
-    self.pcibus, self.bars = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
-  def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'): return USBMMIOInterface(self.usb, self.bars[bar][0]+off, size or self.bars[bar][1], fmt)
+    self.pcibus, self.bar_info = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
+  def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):
+    return USBMMIOInterface(self.usb, self.bar_info[bar].addr + off, size or self.bar_info[bar].size, fmt)
   def dma_view(self, ctrl_addr, size): return USBMMIOInterface(self.usb, ctrl_addr, size, fmt='B', pcimem=False)
 
 class PCIDevImplBase:
@@ -241,18 +246,16 @@ class LNXPCIIfaceBase:
 
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
     if len((cls:=type(self)).gpus) == 0:
-      cls.gpus = System.pci_scan_bus(vendor, devices)
-      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', '')).split(',') if x.strip()]
-      cls.gpus = [cls.gpus[x] for x in visible_devices] if visible_devices else cls.gpus
+      cls.gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices))
 
       # Acquire va range to avoid collisions.
       FileIOInterface.anon_mmap(va_start, va_size, 0, mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, 0)
-    self.pci_dev, self.dev, self.vram_bar = PCIDevice(cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
-    self.p2p_base_addr = self.pci_dev.bar_info[vram_bar][0]
+    self.pci_dev, self.dev, self.vram_bar = PCIDevice(dev.__class__.__name__[:2], cls.gpus[dev_id], bars=bars, resize_bars=[vram_bar]), dev, vram_bar
+    self.p2p_base_addr = self.pci_dev.bar_info[vram_bar].addr
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     # NOTE: logic on macos is different, since bar is small
-    should_use_sysmem = host or (((uncached or cpu_access) if OSX else (uncached and cpu_access)) and not force_devmem)
+    should_use_sysmem = host or ((cpu_access if OSX else (uncached and cpu_access)) and not force_devmem)
     if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
       memview, paddrs = System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
@@ -281,7 +284,7 @@ class LNXPCIIfaceBase:
 
 class APLPCIIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
-    self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
+    self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(dev.__class__.__name__[:2], pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
 PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase

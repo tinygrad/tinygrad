@@ -1,6 +1,6 @@
 indent-width = 2
 preview = true
-target-version = "py310"
+target-version = "py311"
 
 lint.select = [
   "F",  # Pyflakes

@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
-import subprocess, ctypes, pathlib
-from contextlib import redirect_stdout
+import subprocess, ctypes, pathlib, traceback
+from contextlib import redirect_stdout, redirect_stderr
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str, pyrender
-from tinygrad.uop.ops import print_uops, range_start
+from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
-from tinygrad.codegen.opt import axis_colors
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.VCONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
-               Ops.DEFINE_GLOBAL: "#ffe0b0", Ops.DEFINE_LOCAL: "#ffe0d0", Ops.DEFINE_REG: "#f0ffe0", Ops.REDUCE_AXIS: "#FF6B6B",
+               Ops.DEFINE_GLOBAL:"#cb9037", **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.REDUCE_AXIS: "#FF6B6B",
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
-               Ops.INDEX: "#e8ffa0", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
+               Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.FUSE: "#FFa500",
+               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
 
@@ -53,12 +52,10 @@ class GraphRewriteDetails(TypedDict):
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
 def pystr(u:UOp, i:int) -> str:
-  if isinstance(trace.keys[i].ret, ProgramSpec):
-    try: return "\n".join(pyrender(u))
-    except Exception: pass
-  return str(u)
+  try: return pyrender(u)
+  except Exception: return str(u)
 
-def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
+def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
@@ -66,11 +63,13 @@ def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
     # always exclude DEVICE/CONST/UNIQUE
     if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
     if u.op is Ops.VCONST and u.dtype.scalar() == dtypes.index and u is not x: excluded.add(u)
-    if u.dtype.scalar() is dtypes.index and ignore_indexing: excluded.update(u.backward_slice_with_self)
   for u in toposort:
     if u in excluded: continue
     argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
+    if u.op is Ops.KERNEL:
+      ast_str = f"SINK{tuple(s.op for s in u.arg.ast.src)}" if u.arg.ast.op is Ops.SINK else repr(u.arg.ast.op)
+      argst = f"<Kernel {len(list(u.arg.ast.toposort()))} {ast_str} {[str(m) for m in u.arg.metadata]}>"
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''))) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
     for idx,x in enumerate(u.src[:1] if u.op in {Ops.BUFFERIZE, Ops.INDEX} else (u.src if u.op is not Ops.END else [])):
@@ -79,18 +78,21 @@ def uop_to_json(x:UOp, ignore_indexing=False) -> dict[int, dict]:
         label += f"\n{x.op.name}{idx} {arg}" + (f" {x.src[0].op}" if len(x.src) else "")
     try:
       if len(rngs:=u.ranges):
-        label += f"\n({','.join([colored(range_str(x), axis_colors[x.arg[-1]]) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
+        label += f"\n({multirange_str(rngs, color=True)})"
       if u.op not in {Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
+        ranges: list[UOp] = []
+        for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
+        if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
       if u.op in {Ops.END, Ops.REDUCE} and len(trngs:=list(UOp.sink(*u.src[range_start[u.op]:]).ranges)):
-        label += "\n"+' '.join([f"{colored(s.arg[0], axis_colors[s.arg[-1]])}({s.vmax+1})" for s in trngs])
+        label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
     if (ref:=ref_map.get(u.arg.ast) if u.op is Ops.KERNEL else None) is not None: label += f"\ncodegen@{ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+repr(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.KERNEL: label += "\n"+str(u.metadata)
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src) if x not in excluded], "color":uops_colors.get(u.op, "#ffffff"),
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None}
   return graph
@@ -104,16 +106,14 @@ def _reconstruct(a:int):
 def get_full_rewrite(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
   # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
-  ignore_indexing = trace.keys[i].display_name.startswith("Schedule") and not (ctx.name in {"kernel split"} or \
-      any(s.dtype is dtypes.index for s in next_sink.src+(next_sink,)))
-  yield {"graph":uop_to_json(next_sink, ignore_indexing), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(new_sink, ignore_indexing)), "uop":pystr(new_sink,i),
+    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink,i),
            "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pystr(u0,i).splitlines(),pystr(u1,i).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
@@ -155,7 +155,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
         info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
-               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{ei.arg['metadata']}"
+               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{[str(m) for m in (ei.arg['metadata'] or ())]}"
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
@@ -196,10 +196,34 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+def load_sqtt(profile:list[ProfileEvent]) -> None:
+  from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
+  def err(name:str, msg:str|None=None) -> None:
+    step = {"name":name, "data":{"src":msg or traceback.format_exc()}, "depth":0, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}
+    return ctxs.append({"name":"Counters", "steps":[step]})
+  try: from extra.sqtt.roc import decode
+  except Exception: return err("DECODER IMPORT ISSUE")
+  try:
+    rctx = decode(profile)
+    steps = [{"name":str(x[0]), "depth":0, "data":{"rows":[(e.inst, e.time, e.time-x[1][i-1].time if i else 0, e.dur, e.stall,
+                                                            str(e.typ).split("_")[-1]) for i,e in enumerate(x[1])],
+                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":[]},
+              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.inst_execs.items())]
+    if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  except Exception: return err("DECODER ERROR")
+  ctxs.append({"name":"Counters", "steps":steps})
+
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
+  # load device specific counters
+  device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
+  for device in device_ts_diffs:
+    d = device.split(":")[0]
+    if d == "AMD": device_decoders[d] = load_sqtt
+  for fxn in device_decoders.values(): fxn(profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
@@ -247,25 +271,31 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
-def get_stdout(f:Callable) -> str:
-  with redirect_stdout(buf:=io.StringIO()): f()
+def get_stdout(f: Callable) -> str:
+  buf = io.StringIO()
+  try:
+    with redirect_stdout(buf), redirect_stderr(buf): f()
+  except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
-def get_render(ctx:list[str], fmt:list[str]):
-  if not isinstance(prg:=trace.keys[int(ctx[0])].ret, ProgramSpec): return
-  if fmt[0] == "uops": return json.dumps({"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"python"}).encode()
-  if fmt[0] == "src": return json.dumps({"src":prg.src, "lang":"cpp"}).encode()
-  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
-  disasm_str = get_stdout(lambda: compiler.disassemble(lib))
+def get_render(i:int, j:int, fmt:str) -> dict|None:
+  if fmt == "counters": return ctxs[i]["steps"][j]["data"]
+  if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
+  if fmt == "src": return {"src":prg.src, "lang":"cpp"}
+  compiler = Device[prg.device].compiler
+  disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(prg.src)))
   from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
   if isinstance(compiler, LLVMCompiler):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
     mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
     ret = get_llvm_mca(disasm_str, mtriple, mcpu)
   else: ret = {"src":disasm_str, "lang":"x86asm"}
-  return json.dumps(ret).encode()
+  return ret
 
 # ** HTTP server
+
+def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
 class Handler(BaseHTTPRequestHandler):
   def do_GET(self):
@@ -280,10 +310,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/render": ret, content_type = get_render(**query), "application/json"
+      if url.path == "/render":
+        render_src = get_render(get_int(query, "ctx"), get_int(query, "step"), query["fmt"][0])
+        ret, content_type = json.dumps(render_src).encode(), "application/json"
       else:
-        try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=int(query["ctx"][0])][int(query["idx"][0])], i))
-        except KeyError: status_code = 404
+        try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
+        except (KeyError, IndexError): status_code = 404
     elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
