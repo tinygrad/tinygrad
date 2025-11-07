@@ -2153,16 +2153,19 @@ class Tensor(OpMixin):
     noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
-    # input size scaling factor to make sure shrink for stride is possible
-    f_ = [1 + int(resolve(o*s > (i - d*(k-1)))) for o,s,i,d,k in zip(o_,s_,i_,d_,k_)]
-    # # repeats such that we don't need padding
-    x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
-    # handle dilation
+    # compute scaling factor for repeat: handles both overlapping and non-overlapping cases
+    # ensure i*f+d >= o*s to have enough space for stride extraction
+    f_ = [max(1 + int(resolve(o*s > (i - d*(k-1)))), ceildiv(max(0, o*s - d), i)) for o,s,i,d,k in zip(o_,s_,i_,d_,k_)]
+    # repeat input to create enough space
+    repeat_amt = [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)]
+    x = self.repeat([1]*len(noop) + repeat_amt)
+    # handle dilation: extract kernel-sized elements and reshape
     x = x.shrink(tuple(noop + [(0,k*(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)])).reshape(noop + flatten((k,(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)))
-    # handle stride
+    # handle stride: extract stride-sized windows containing kernel elements
     x = x.shrink(tuple(noop + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_,o_,s_)))).reshape(noop + flatten((k,o,s) for k,o,s in zip(k_,o_,s_)))
+    # extract the kernel from each stride window
     x = x.shrink(tuple(noop + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_,o_)))).reshape(noop + flatten((k,o) for k,o in zip(k_,o_)))
-    # permute to move reduce to the end
+    # permute to final shape: (..., o, k) where o is number of windows and k is kernel size
     return x.permute(*range(len(noop)), *[len(noop)+i*2+1 for i in range(len(i_))], *[len(noop)+i*2 for i in range(len(i_))])
 
   def _resolve_pool_pads(self, padding:int|Sequence[int], dims:int) -> Sequence[int]:
