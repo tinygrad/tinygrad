@@ -1122,8 +1122,6 @@ class Tensor(OpMixin):
   def pad_to(self, shape, *args):
     if len(new_shape := argfix(shape, *args)) != self.ndim: raise ValueError(f"dim mismatch, cannot pad {self.shape} to {new_shape}")
     return self.pad(tuple([None if ns is None else (0, ns-s) for s,ns in zip(self.shape, new_shape)]))
-  def shrink_to(self, shape, *args):
-    return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   # ***** movement high level ops *****
 
