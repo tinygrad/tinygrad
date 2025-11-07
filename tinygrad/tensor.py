@@ -10,6 +10,7 @@ from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, p
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
+from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
@@ -79,10 +80,6 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
-  # unsqueeze left to make every shape same length
-  max_dim = max(len(shape) for shape in shapes)
-  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
@@ -1040,21 +1037,6 @@ class Tensor(OpMixin):
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
 
-  def expand(self, shape, *args) -> Tensor:
-    """
-    Returns a tensor that is expanded to the shape that is specified.
-    Expand can also increase the number of dimensions that a tensor has.
-
-    Passing a `-1` or `None` to a dimension means that its size will not be changed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.expand(4, -1).numpy())
-    ```
-    """
-    new_shape = tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_align_left(self.shape, argfix(shape, *args)))))
-    return self._broadcast_to(new_shape)
-
   def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Tensor:
     """
     Returns a tensor with padding applied based on the input `padding`.
@@ -1340,39 +1322,6 @@ class Tensor(OpMixin):
     """
     # checks for shapes and number of dimensions delegated to cat
     return Tensor.cat(*[t.unsqueeze(dim) for t in argfix(self, *args)], dim=dim)
-
-  def repeat_interleave(self, repeats:int, dim:int|None=None) -> Tensor:
-    """
-    Repeats elements of a tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.repeat_interleave(2).numpy())
-    ```
-    """
-    x, dim = (self.flatten(), 0) if dim is None else (self, self._resolve_dim(dim))
-    shp = x.shape
-    return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
-
-  def repeat(self, repeats, *args) -> Tensor:
-    """
-    Repeats tensor number of times along each dimension specified by `repeats`.
-    `repeats` can be passed as a tuple or as separate arguments.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.repeat(4, 2).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.repeat(4, 2, 1).shape)
-    ```
-    """
-    repeats = argfix(repeats, *args)
-    base_shape = _align_left(self.shape, repeats)[0]
-    unsqueezed_shape = flatten([[1, s] for s in base_shape])
-    expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
-    final_shape = [r*s for r,s in zip(repeats, base_shape)]
-    return self.reshape(unsqueezed_shape).expand(expanded_shape).reshape(final_shape)
 
   def split(self, sizes:int|Sequence[int], dim:int=0) -> tuple[Tensor, ...]:
     """
@@ -3405,18 +3354,8 @@ class Tensor(OpMixin):
     return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
-  def _broadcast_to(self, new_shape:tuple[sint, ...]) -> Tensor:
-    if self.shape == new_shape: return self
-    if self.ndim > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
-    # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
-    shape, _ = _align_left(self.shape, new_shape)
-    # for each dimension, check either dim is 1, or it does not change
-    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
-      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
-    return self.reshape(shape).cast(sum_acc_dtype(self.dtype))._apply_uop(UOp.expand, arg=new_shape).cast(self.dtype)
 
-  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True) -> tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True, backward_cast:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
@@ -3432,8 +3371,13 @@ class Tensor(OpMixin):
 
     if reverse: x, y = y, x
 
+    # compute the output shape
+    out_shape = _broadcast_shape(x.shape, y.shape)
+
     # broadcast
-    return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
+    # NOTE: the backward cast is no-op in forward and uses sum_acc_dtype in the backward sum
+    return x.cast(sum_acc_dtype(x.dtype) if backward_cast else x.dtype)._broadcast_to(out_shape).cast(x.dtype), \
+           y.cast(sum_acc_dtype(y.dtype) if backward_cast else y.dtype)._broadcast_to(out_shape).cast(y.dtype)
 
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
