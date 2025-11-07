@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.gpudims import get_grouped_dims
-from tinygrad.uop.ops import UOp, Ops, GroupOp
+from tinygrad.uop.ops import UOp, Ops, GroupOp, PatternMatcher, graph_rewrite, UPat
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
@@ -285,6 +285,27 @@ class TestLinearizer(unittest.TestCase):
     # too large for sizes
     with self.assertRaises(RuntimeError):
       get_grouped_dims("gidx", (2,3,4,5,6), (16,16,16))
+
+    # TODO: In the above cases we only test if the shape after reshape is correct, never the indices.
+    # We should check if the returned indices are correct, for all cases.
+    # (65536, 2) -> (32768, 4)
+    dims, expected_limited_dims = (65536,2), (32768, 4)
+    idxs = get_grouped_dims("gidx", dims, (65535,65535,65535))
+    def match_div(): raise RuntimeError("match_div")
+    def match_mod(): raise RuntimeError("match_mod")
+    flat_idx_pattern = UPat(Ops.SPECIAL, arg='gidx0')*expected_limited_dims[1]+UPat(Ops.SPECIAL, arg='gidx1')
+    pm = PatternMatcher([
+      (flat_idx_pattern//dims[1], match_div),
+      (flat_idx_pattern%dims[1], match_mod)
+    ])
+
+    with self.assertRaises(RuntimeError) as error:
+      graph_rewrite(idxs[0], pm)
+    self.assertIn("match_div", str(error.exception))
+
+    with self.assertRaises(RuntimeError) as error:
+      graph_rewrite(idxs[1], pm)
+    self.assertIn("match_mod", str(error.exception))
 
     # # variable too large
     # with self.assertRaises(AssertionError):
