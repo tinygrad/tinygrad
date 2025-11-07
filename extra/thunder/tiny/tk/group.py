@@ -160,13 +160,16 @@ class Group:
       else: local_warpid = self.warpid
       warp_laneid = self.threadIdx_x % WARP_THREADS
 
-      row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
-      col = load_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
-
       if not transpose:
+        row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
+        col = load_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
+
         row_offset = ((load_i_inner % 4) // 2) * 8
         col_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
       else:
+        row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + 2 * (warp_laneid % 4)
+        col = load_i_width * TILE_COL_DIM + (warp_laneid // 4)
+
         row_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
         col_offset = ((load_i_inner % 4) // 2) * 8
 
