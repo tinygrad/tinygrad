@@ -18,42 +18,6 @@ B, N, H, D = 1, 16, 1, 64
 ROWS = 16 * (64 // D)
 BLOCK_SIZE=16
 
-def test_ker():
-  with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), NUM_WORKERS * WARP_THREADS) as ker:
-    warp = ker.warp
-
-    # kernel
-    c = gl((1, 1, N, N), dtypes.float32)
-    a = gl((1, 1, N, N), dtypes.bfloat16)
-    b = gl((1, 1, N, N), dtypes.bfloat16)
-
-    a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-    b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-    c_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-
-    a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-    b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-    c_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-
-    col, row = ker.blockIdx_x, ker.blockIdx_y
-
-    c_reg = warp.zero(c_reg)
-
-    for tile in ker.range(N // BLOCK_SIZE):
-      a_smem = warp.load(a_smem, a, (), (0, 0, row, tile), axis=2)
-      b_smem = warp.load(b_smem, b, (), (0, 0, tile, col), axis=2)
-
-      a_reg = warp.load(a_reg, a_smem)
-      b_reg = warp.load(b_reg, b_smem, transpose=True)
-
-      c_reg = warp.mma_AB(c_reg, a_reg, b_reg)
-    c_reg = ker.endrange()
-
-    c_smem = warp.store(c_smem, c_reg)
-    c = warp.store(c, c_smem, (0, 0, row, col), (), axis=2, after=False)
-
-    return ker.finish()
-
 def fa_ker():
   with Kernel((N // (ROWS*NUM_WORKERS), H, B), NUM_WORKERS * WARP_THREADS) as ker:
     warp = ker.warp
@@ -132,17 +96,8 @@ if __name__ == "__main__":
     out = Tensor.empty(B, N, H, D, dtype="bfloat16")
     Tensor.realize(q, k, v, out)
 
-    # a = Tensor.randn(1, 1, N, N, dtype="bfloat16").contiguous()
-    # a = Tensor.eye(N).reshape(1, 1, N, N).cast(dtypes.bfloat16).contiguous()
-    # b = Tensor.randn(1, 1, N, N, dtype="bfloat16").contiguous()
-    # # b = Tensor.arange(1 * 1 * N * N).reshape(1, 1, N, N).cast(dtypes.bfloat16).contiguous()
-    # c = Tensor.empty(1, 1, N, N, dtype="float32")
-    # Tensor.realize(a, b, c)
-
   sink = fa_ker()
-  # sink = test_ker()
   ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
-  # ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (c, a, b)])
 
   GlobalCounters.reset()
   times = []
@@ -153,17 +108,11 @@ if __name__ == "__main__":
                4 * B * H * N * N + \
                2 * B * H * N * N * D
   print(f"{attn_flops/(min(times)*1e12):3f} TFLOPS")
-  print(f"{N*N*N*2/(min(times)*1e12):3f} TFLOPS")
 
-  print(out.tolist())
-  # print(c.tolist())
-
-  ref = q.scaled_dot_product_attention(k, v)
-  print(ref.tolist())
-  # ref = a @ b
-  # ref = ref.float()
-  # print(ref.tolist())
   out = out.float()
-  # c = c.float()
+  print(out.tolist())
+
+  ref = q.scaled_dot_product_attention(k, v).float()
+  print(ref.tolist())
+
   print((ref - out).mean().item(), (ref - out).max().item())
-  # print((ref - c).mean().item(), (ref - c).max().item())
