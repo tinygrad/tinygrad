@@ -3,15 +3,19 @@ import functools
 from typing import TypeAlias, TYPE_CHECKING, Self
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, flatten, dedup
-if TYPE_CHECKING:
-  from tinygrad.uop.ops import UOp
-  sint:TypeAlias = UOp|int
+if TYPE_CHECKING: from tinygrad.uop.ops import UOp
+sint: TypeAlias = "UOp | int"
+
+def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
+  # unsqueeze left to make every shape same length
+  max_dim = max(len(shape) for shape in shapes)
+  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 
 class MovementMixin:
   # required to implement
   def _mop(self, op:Ops, arg) -> Self: raise NotImplementedError
   @property
-  def shape(self) -> tuple["sint", ...]: raise NotImplementedError
+  def shape(self) -> tuple[sint, ...]: raise NotImplementedError
 
   # great functions you get!
   @property
@@ -26,7 +30,7 @@ class MovementMixin:
     """
     return len(self.shape)
 
-  def numel(self) -> "sint":
+  def numel(self) -> sint:
     """
     Returns the total number of elements in the tensor.
 
@@ -41,6 +45,31 @@ class MovementMixin:
     total = self.ndim + int(extra)
     if not -max(1, total) <= dim <= max(1, total)-1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total)-1]}")
     return dim + total if dim < 0 else dim
+
+  def _broadcast_to(self, new_shape:tuple[sint, ...]) -> Self:
+    if self.shape == new_shape: return self
+    if self.ndim > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
+    # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
+    shape, _ = _align_left(self.shape, new_shape)
+    # for each dimension, check either dim is 1, or it does not change
+    if not all(s == ns or s == 1 for s,ns in zip(shape, new_shape)):
+      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
+    return self.reshape(shape)._mop(Ops.EXPAND, arg=new_shape)
+
+  def expand(self, shape, *args) -> Self:
+    """
+    Returns a tensor that is expanded to the shape that is specified.
+    Expand can also increase the number of dimensions that a tensor has.
+
+    Passing a `-1` or `None` to a dimension means that its size will not be changed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.expand(4, -1).numpy())
+    ```
+    """
+    new_shape = tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_align_left(self.shape, argfix(shape, *args)))))
+    return self._broadcast_to(new_shape)
 
   def reshape(self, shape, *args) -> Self:
     """
@@ -61,7 +90,7 @@ class MovementMixin:
     ret = self._mop(Ops.RESHAPE, arg=new_shape)
     return self if ret.shape == self.shape else ret
 
-  def shrink(self, arg:tuple[tuple["sint", "sint"]|None, ...]) -> Self:
+  def shrink(self, arg:tuple[tuple[sint, sint]|None, ...]) -> Self:
     """
     Returns a tensor that shrinks the each axis based on input arg.
     `arg` must have the same length as `self.ndim`.

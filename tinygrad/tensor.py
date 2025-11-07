@@ -10,6 +10,7 @@ from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, p
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
+from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
@@ -79,10 +80,6 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
-  # unsqueeze left to make every shape same length
-  max_dim = max(len(shape) for shape in shapes)
-  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
@@ -3405,15 +3402,6 @@ class Tensor(OpMixin):
     return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
-  def _broadcast_to(self, new_shape:tuple[sint, ...]) -> Tensor:
-    if self.shape == new_shape: return self
-    if self.ndim > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
-    # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
-    shape, _ = _align_left(self.shape, new_shape)
-    # for each dimension, check either dim is 1, or it does not change
-    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
-      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    return self.reshape(shape)._apply_uop(UOp.expand, arg=new_shape)
 
   def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True, backward_cast:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
@@ -3431,9 +3419,12 @@ class Tensor(OpMixin):
 
     if reverse: x, y = y, x
 
+    # compute the output shape
+    out_shape = _broadcast_shape(x.shape, y.shape)
+
     # broadcast
     # NOTE: the backward cast is no-op in forward and uses sum_acc_dtype in the backward sum
-    return x.cast(sum_acc_dtype(x.dtype) if backward_cast else x.dtype)._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)).cast(x.dtype), \
+    return x.cast(sum_acc_dtype(x.dtype) if backward_cast else x.dtype)._broadcast_to(out_shape).cast(x.dtype), \
            y.cast(sum_acc_dtype(y.dtype) if backward_cast else y.dtype)._broadcast_to(out_shape).cast(y.dtype)
 
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
