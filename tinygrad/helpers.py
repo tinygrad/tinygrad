@@ -114,10 +114,10 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:list[tuple[type[T], ...]|type[T]], err_msg:str) -> tuple[T, ...]|T:
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg: str) -> tuple[T,...]|T:
   excs = []
   for typ in candidates:
-    try: return tuple([t() for t in typ]) if isinstance(typ, (tuple, list)) else typ()
+    try: return tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
     except Exception as e: excs.append(e)
   raise ExceptionGroup(err_msg, excs)
 
