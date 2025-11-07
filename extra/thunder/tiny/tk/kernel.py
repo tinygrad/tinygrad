@@ -47,11 +47,11 @@ class Kernel(AbstractContextManager):
   def finish(self):
     # end all ranges
     rngs = []
-    while self.range_stack: rngs.append(self.range_stack.pop()._rng)
-    print(rngs)
+    while self.range_stack: rngs.append(self.range_stack.pop(0)._rng)
 
     return self.store_stack.pop()[0].end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
   def endrange(self):
     last_store = self.store_stack.pop()
-    return last_store[1].after(last_store[0].barrier().end(self.range_stack.pop()._rng)).reshape(last_store[1].shape)
+    last_range = self.range_stack.pop()
+    return last_store[1].after(last_store[0].barrier().end(last_range._rng)).reshape(last_store[1].shape)
