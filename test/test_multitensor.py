@@ -596,6 +596,12 @@ class TestMultiTensor(unittest.TestCase):
     # ast are the same on devices
     self.assertEqual(len(set(asts)), 1)
 
+  def test_flip(self):
+    rng = Tensor.rand((10, 10, 10))
+    t0 = rng.shard(devices_2, axis=1)
+    out = t0.flip(0) + 1
+    self.assertTrue((rng.flip(0)+1).allclose(out.to(rng.device)))
+
   def test_reshape_on_axis(self):
     t0 = Tensor.rand((26, 15, 7)).shard(devices_3, axis=1)
 
@@ -658,7 +664,7 @@ class TestMultiTensor(unittest.TestCase):
 
   # it doesn't work like this anymore
   # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
-  @unittest.expectedFailure
+  @unittest.skip("this test is broken")
   def test_mlb_assign_change_axis(self):
     t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
     t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)

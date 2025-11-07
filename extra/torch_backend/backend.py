@@ -155,16 +155,14 @@ def index_tensor(x, y):
 def zero_(x):
   if TORCH_DEBUG: print(f"zero_ {x.shape}")
   tt = unwrap(x)
-  # NOTE: unconditional contiguous covers if x is contiguous (match it) or if x is view (realize for inplace)
-  # TODO: consolidate
-  tt.assign(tt.zeros_like().contiguous())
+  tt.assign(tt.zeros_like())
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
 @inplace_fn("x")
 def fill_scalar(x, y):
   if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
   tt = unwrap(x)
-  tt.assign(tt.full_like(y).contiguous())
+  tt.assign(tt.full_like(y))
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
@@ -644,10 +642,11 @@ def get_real_tinygrad_buffers():
 torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
 
 from torch.nn.modules import Module
-def backward_hook(model:Module, _grad_input, _grad_out):
-  grads_to_realize = [unwrap(p.grad) for p in model.parameters() if p.grad is not None]
-  if len(grads_to_realize): Tensor.realize(*grads_to_realize)
-def module_hook(module:Module, _name, _submodule): module.register_backward_hook(backward_hook)
+def param_hook(_grad):
+  if _grad is not None and _grad.is_tiny: Tensor.realize(unwrap(_grad))
+def module_hook(module:Module, _name, _submodule):
+  for param in _submodule.parameters(recurse=False):
+    if param.requires_grad: param.register_hook(param_hook)
 torch.nn.modules.module.register_module_module_registration_hook(module_hook)
 
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):

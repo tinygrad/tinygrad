@@ -1,13 +1,12 @@
 from __future__ import annotations
-from typing import Callable, cast, TYPE_CHECKING
+from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, PtrDType
-if TYPE_CHECKING:
-  from tinygrad.codegen.opt.tc import TensorCore
-  from tinygrad.codegen.opt.kernel import Opt
+from tinygrad.codegen.opt.tc import TensorCore
+from tinygrad.codegen.opt import Opt
 
 @dataclass(frozen=True)
 class Estimates:
@@ -28,9 +27,12 @@ class Estimates:
     mult_stack: list[sint] = []
     dont_count: set[UOp] = set()
     if ignore_indexing:
+      def range_gate(x): return x.op is not Ops.RANGE
       for u in uops:
-        if u.op in {Ops.LOAD, Ops.STORE} and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
-          dont_count = dont_count.union(u.src[0].toposort())
+        if u.op in {Ops.LOAD, Ops.STORE}:
+          # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
+          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
+          # TODO: is this correct? this all needs to be cleaned up
           if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
@@ -45,7 +47,7 @@ class Estimates:
         mults *= cast(sint, u.src[0].ssimplify())
         # SPECIAL are already counted in mults
         mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
-      elif u.op is Ops.ENDRANGE: mults = mult_stack.pop(-1)
+      elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
       elif u.op is Ops.LOAD and (not isinstance(u.src[0].dtype, PtrDType) or u.src[0].dtype.addrspace != AddrSpace.REG):
         lds += u.dtype.itemsize * mults
@@ -78,12 +80,15 @@ class ProgramSpec:
       for u in self.uops:
         if u.op is Ops.DEFINE_VAR: self.vars.append(u)
         if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op is Ops.STORE: self.outs.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
-        if u.op is Ops.LOAD: self.ins.extend([x.arg for x in u.src[0].toposort() if x.op is Ops.DEFINE_GLOBAL])
+        if u.op in (Ops.STORE, Ops.LOAD):
+          if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+            if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: (self.outs if u.op is Ops.STORE else self.ins).append(buf.arg)
+          # TODO: can else happen?
         if u.op is Ops.SPECIAL:
           # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
           if u.arg[0] == 'i': self.local_size = None
           special_size = self.local_size if u.arg[0] == 'l' else self.global_size
+          # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
           if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       self.vars = sorted(self.vars, key=lambda v: v.arg)
       self.outs = sorted(dedup(self.outs))
@@ -98,8 +103,10 @@ class ProgramSpec:
   def function_name(self) -> str: return to_function_name(self.name)
 
   @property
-  def applied_opts(self) -> tuple[Opt, ...]|None: return self.uops[-1].arg.applied_opts if \
-    self.uops is not None and self.uops[-1].op is Ops.SINK and self.uops[-1].arg is not None else None
+  def applied_opts(self) -> tuple[Opt, ...]|None:
+    if self.uops is None: return None
+    assert self.uops[-1].op is Ops.SINK, self.uops[-1].op
+    return self.uops[-1].arg.applied_opts
 
   def launch_dims(self, var_vals:dict[str, int]):
     global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None

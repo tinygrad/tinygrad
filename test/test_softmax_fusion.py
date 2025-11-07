@@ -32,7 +32,7 @@ def run_one_schedule_item(out): lower_schedule_item(get_single_element(out.sched
 class TestFuse(unittest.TestCase):
   def _test_fuse(self, fxn, *args, atol=1e-6, allow_multiple=False, **kwargs):
     GlobalCounters.reset()
-    out_single = fxn(*args, **kwargs).fuse()
+    out_single = fxn(*args, **kwargs)
     if not allow_multiple: run_one_schedule_item(out_single)
     np_single = out_single.numpy()
     GlobalCounters.reset()
@@ -100,7 +100,7 @@ class TestFuse(unittest.TestCase):
     q = (x @ wq).contiguous()
     k = (x @ wk).contiguous()
     v = (x @ wv).contiguous()
-    attn = q.scaled_dot_product_attention(k, v).fuse()
+    attn = q.scaled_dot_product_attention(k, v)
     s = attn.schedule()
     self.assertEqual(len(s), 4) # 3 matmul and 1 attention
 
@@ -121,7 +121,7 @@ class TestFuse(unittest.TestCase):
   def test_mismatch_reduce(self):
     a = Tensor.ones(16, 10).contiguous().realize()
     b = Tensor.ones(16, 20).contiguous().realize()
-    c = (a.sum(axis=1) + b.sum(axis=1)).fuse()
+    c = (a.sum(axis=1) + b.sum(axis=1))
     self.assertListEqual(c.tolist(), [30]*16)
 
   @unittest.skipUnless(Device.DEFAULT == "METAL", "METAL TC")
@@ -129,7 +129,7 @@ class TestFuse(unittest.TestCase):
     A = Tensor.randn(8, 8).realize()
     B = Tensor.randn(8, 8).realize()
     C = Tensor.ones(1, 8, 8).pad(((1,1), None, None),).sum(0)
-    out = (C + (A @ B)).fuse()
+    out = (C + (A @ B))
     out.realize()
 
 class TestSoftmaxFusion(unittest.TestCase):
@@ -165,8 +165,7 @@ class TestSoftmaxFusion(unittest.TestCase):
       sout.realize()
 
     print("*** single kernel softmax ***")
-    # NOTE: DONT_GROUP_REDUCES is required here
-    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       out = single_kernel_softmax(self.test)
       out.realize()
 
@@ -181,12 +180,11 @@ class TestSoftmaxFusion(unittest.TestCase):
 
     print("*** auto single kernel softmax ***")
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
-      out = self.test.contiguous().softmax(-1).fuse()
+      out = self.test.contiguous().softmax(-1)
       run_one_schedule_item(out)
 
     np.testing.assert_allclose(sout.numpy(), out.numpy(), atol=3e-7)
 
-  @unittest.skip("recursion error no longer raised")
   def test_softmax_bw(self):
     print("*** softmax bw ***")
     self.test.requires_grad_()
@@ -197,14 +195,11 @@ class TestSoftmaxFusion(unittest.TestCase):
     self.test.grad = None
 
     print("*** single kernel softmax bw ***")
-    # NOTE: DONT_GROUP_REDUCES is required here
-    # TODO: fix RecursionError with DONT_GROUP_REDUCES
-    with self.assertRaises(RecursionError):
-      with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2), DONT_GROUP_REDUCES=1):
-        single_kernel_softmax(self.test).sum().backward()
-        g = self.test.grad.realize()
+    with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
+      single_kernel_softmax(self.test).sum().backward()
+      g = self.test.grad.realize()
 
-      np.testing.assert_allclose(sg.numpy(), g.numpy(), atol=1e-7)
+    np.testing.assert_allclose(sg.numpy(), g.numpy(), atol=1e-7)
 
 if __name__ == '__main__':
   unittest.main()

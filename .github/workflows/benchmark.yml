@@ -51,17 +51,18 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: python3.11 test/external/process_replay/reset.py
+    - name: Print macOS version
+      run: sw_vers
     - name: Run Stable Diffusion
-      run: BENCHMARK_LOG=stable_diffusion JIT=1 ASSERT_MIN_STEP_TIME=800 python3.11 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
+      run: BENCHMARK_LOG=stable_diffusion JIT=1 ASSERT_MIN_STEP_TIME=720 python3.11 examples/stable_diffusion.py --fp16 --seed 0 --noshow --timing | tee sd.txt
     - name: Run Stable Diffusion without fp16
-      run: BENCHMARK_LOG=stable_diffusion_fp32 JIT=1 ASSERT_MIN_STEP_TIME=900 python3.11 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd_no_fp16.txt
+      run: BENCHMARK_LOG=stable_diffusion_fp32 JIT=1 ASSERT_MIN_STEP_TIME=800 python3.11 examples/stable_diffusion.py --seed 0 --noshow --timing | tee sd_no_fp16.txt
     - name: Run Stable Diffusion v2
       # TODO: very slow step time
-      run: BENCHMARK_LOG=stable_diffusion_v2 JIT=1 ASSERT_MIN_STEP_TIME=10000 python3.11 examples/sdv2.py --fp16 --seed 0 --noshow --timing | tee sdv2.txt
+      run: BENCHMARK_LOG=stable_diffusion_v2 JIT=1 ASSERT_MIN_STEP_TIME=4500 python3.11 examples/sdv2.py --fp16 --seed 0 --noshow --timing | tee sdv2.txt
     # process replay can't capture this, the graph is too large
-    # TODO: too slow
-    # - name: Run SDXL
-    #   run: BENCHMARK_LOG=stable_diffusion_xl ASSERT_MIN_STEP_TIME=5000 CAPTURE_PROCESS_REPLAY=0 JIT=1 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
+    - name: Run SDXL
+      run: BENCHMARK_LOG=stable_diffusion_xl ASSERT_MIN_STEP_TIME=5000 CAPTURE_PROCESS_REPLAY=0 JIT=1 python3.11 examples/sdxl.py --seed 0 --noshow --timing | tee sdxl.txt
     - name: Run model inference benchmark
       run: METAL=1 python3.11 test/external/external_model_benchmark.py
     - name: Test speed vs torch
@@ -130,7 +131,7 @@ jobs:
     - name: UsbGPU copy speeds
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB NOLOCALS=0 IMAGE=0 GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    #  run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -198,7 +199,7 @@ jobs:
     - name: Test speed vs torch
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 HALF=1 BIG=2 TORCHCUDA=1 python3 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
     - name: Test speed vs theoretical
-      run: NV=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
+      run: NV=1 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test benchmark allreduce
       run: NV=1 python test/external/external_benchmark_multitensor_allreduce.py
     - name: Test tensor cores
@@ -210,6 +211,7 @@ jobs:
         CUDA=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul.txt
         CUDA=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_bfloat16.txt
         CUDA=1 SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_tf32.txt
+        CUDA=1 SHOULD_USE_TC=1 FP8E4M3=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_fp8.txt
     - name: Run Tensor Core GEMM (PTX)
       run: NV=1 NV_PTX=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py | tee matmul_ptx.txt
     - name: Run Tensor Core GEMM (NV)
@@ -237,6 +239,8 @@ jobs:
       run: BENCHMARK_LOG=llama3_beam NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/llama3.py --size 8B --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_beam.txt
     - name: Run LLaMA-3 8B on 4 GPUs with BEAM
       run: BENCHMARK_LOG=llama3_beam_4gpu NV=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 4 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_four_gpu.txt
+    - name: Run quantized LLaMA3
+      run: BENCHMARK_LOG=llama3_fp8 python3 examples/llama3.py --size 8B --model weights/LLaMA-3/8B-SF-DPO/ --temperature 0 --benchmark --quantize fp8 | tee llama3_fp8.txt
     # - name: Run LLaMA-3 8B on 6 GPUs
     #   run: NV=1 CAPTURE_PROCESS_REPLAY=0 python3 examples/llama3.py --size 8B --shard 6 --model weights/LLaMA-3/8B-SF-DPO/ --benchmark --temperature 0 | tee llama3_six_gpu.txt
     # - name: Run LLaMA-2 70B
@@ -270,6 +274,7 @@ jobs:
           llama3_beam.txt
           llama3_four_gpu.txt
           llama3_six_gpu.txt
+          llama3_fp8.txt
           llama_2_70B.txt
           mixtral.txt
           gpt2_unjitted.txt
@@ -318,9 +323,9 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=270 NV=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=310 NV=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=240 NV=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     - name: Run 10 CIFAR training steps w BF16
-      run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=310 NV=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
+      run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=270 NV=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     # TODO: too slow
     # - name: Run 10 CIFAR training steps w winograd
     #   run: BENCHMARK_LOG=cifar_10steps_half_wino ASSERT_MIN_STEP_TIME=350 NV=1 CAPTURE_PROCESS_REPLAY=0 WINO=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_wino.txt
@@ -404,7 +409,7 @@ jobs:
     #    python3 -c "import torch; print(torch.__version__)"
     #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
     - name: Test speed vs theoretical
-      run: AMD=1 IGNORE_BEAM_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
+      run: AMD=1 IGNORE_BEAM_CACHE=1 DISABLE_COMPILER_CACHE=1 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test tensor cores
       run: |
         AMD=1 AMD_LLVM=0 python3 test/opt/test_tensor_cores.py
@@ -522,7 +527,7 @@ jobs:
     - name: Run 10 CIFAR training steps
       run: BENCHMARK_LOG=cifar_10steps ASSERT_MIN_STEP_TIME=330 AMD=1 STEPS=10 python3 examples/hlb_cifar10.py | tee train_cifar.txt
     - name: Run 10 CIFAR training steps w HALF
-      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=330 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
+      run: BENCHMARK_LOG=cifar_10steps_half ASSERT_MIN_STEP_TIME=390 AMD=1 STEPS=10 DEFAULT_FLOAT=HALF python3 examples/hlb_cifar10.py | tee train_cifar_half.txt
     # - name: Run 10 CIFAR training steps w BF16
     #   run: BENCHMARK_LOG=cifar_10steps_bf16 ASSERT_MIN_STEP_TIME=288 AMD=1 STEPS=10 DEFAULT_FLOAT=BFLOAT16 python3 examples/hlb_cifar10.py | tee train_cifar_bf16.txt
     # TODO: too slow
@@ -618,22 +623,24 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
-    - name: benchmark openpilot 0.9.9 driving_vision
-      run: BENCHMARK_LOG=openpilot_0_9_9_vision PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_vision.onnx
-    - name: benchmark openpilot 0.9.9 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_9_9_policy PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
-    - name: benchmark openpilot 0.9.9 dmonitoring
-      run: BENCHMARK_LOG=openpilot_0_9_9_dmonitoring PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 test/external/external_benchmark_openpilot.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: openpilot compile3 0.9.9 driving_vision
-      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=18 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_vision.onnx
+      run: BENCHMARK_LOG=openpilot_0_9_9_vision PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot compile3 0.9.9 driving_policy
-      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=7 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
+      run: BENCHMARK_LOG=openpilot_0_9_9_policy PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.9.9 dmonitoring
-      run: PYTHONPATH="." ASSERT_MIN_STEP_TIME=12 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
-    - name: openpilot compile3 Space Lab policy + vision
-      run: |
-        PYTHONPATH="." ASSERT_MIN_STEP_TIME=4 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/22aec22a10ce09384d4a4af2a0bbff08d54af7e0c888503508f356fae4ff0e29
-        PYTHONPATH="." ASSERT_MIN_STEP_TIME=26 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/c824f68646a3b94f117f01c70dc8316fb466e05fbd42ccdba440b8a8dc86914b
+      run: BENCHMARK_LOG=openpilot_0_9_9_dmonitoring PYTHONPATH=. NOLOCALS=1 FLOAT16=1 IMAGE=2 QCOM=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.9.9/selfdrive/modeld/models/dmonitoring_model.onnx
+    - name: openpilot compile3 0.10.0 driving_policy
+      run: BENCHMARK_LOG=openpilot_0_10_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=5 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.10.0/selfdrive/modeld/models/driving_policy.onnx
+    - name: openpilot compile3 0.10.0 dmonitoring
+      run: BENCHMARK_LOG=openpilot_0_10_0_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=13 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.10.0/selfdrive/modeld/models/dmonitoring_model.onnx
+    - name: openpilot compile3 0.10.1 driving_vision
+      # TODO: ASSERT_MIN_STEP_TIME=17
+      run: BENCHMARK_LOG=openpilot_0_10_1_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=25 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+    - name: openpilot compile3 0.10.1 driving_policy
+      run: BENCHMARK_LOG=openpilot_0_10_1_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=5 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_policy.onnx
+    - name: openpilot compile3 0.10.1 dmonitoring
+      # TODO: ASSERT_MIN_STEP_TIME=10
+      run: BENCHMARK_LOG=openpilot_0_10_1_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=13 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: benchmark MobileNetV2 on DSP
       run: |
         # generate quantized weights
@@ -641,19 +648,9 @@ jobs:
         ln -s /data/home/tiny/tinygrad/testsig-*.so .
         PYTHONPATH=. CC=clang-19 CPU=1 CPU_LLVM=0 QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
-        PYTHONPATH=. CC=clang-19 DSP=1 DONT_REALIZE_EXPAND=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
+        PYTHONPATH=. CC=clang-19 DSP=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
-    - uses: actions/upload-artifact@v4
-      with:
-        name: Speed (comma)
-        path: |
-          openpilot_compile_0_9_4.txt
-          openpilot_compile_0_9_7.txt
-          openpilot_0_9_4.txt
-          openpilot_0_9_7.txt
-          openpilot_image_0_9_4.txt
-          openpilot_image_0_9_7.txt
 
   testreddriverbenchmark:
     name: AM Benchmark

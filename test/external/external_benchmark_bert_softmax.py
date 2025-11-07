@@ -1,4 +1,4 @@
-from tinygrad import Tensor, dtypes, Context, GlobalCounters
+from tinygrad import Tensor, dtypes, GlobalCounters
 dtypes.default_float = dtypes.float16
 from tinygrad.dtype import to_dtype
 from tinygrad.helpers import getenv
@@ -13,6 +13,5 @@ if __name__ == "__main__":
 
   # test single kernel softmax
   GlobalCounters.reset()
-  with Context(DONT_GROUP_REDUCES=1):
-    single_kernel_softmax(t, -1, acc_dtype).realize()
+  single_kernel_softmax(t, -1, acc_dtype).realize()
 

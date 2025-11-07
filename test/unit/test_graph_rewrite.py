@@ -1,11 +1,12 @@
 import unittest, math
 from tinygrad import dtypes
-from tinygrad.helpers import all_same
+from tinygrad.helpers import all_same, Context
 from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
 from tinygrad.codegen import full_rewrite_to_sink
 from hypothesis import given, strategies as strat
 
 # Helper function to apply the graph rewrite
+@Context(SPEC=0)
 def apply_rewrite(expr):
   return full_rewrite_to_sink(expr.sink()).src[0]
 
@@ -305,19 +306,19 @@ class TestRecurse(unittest.TestCase):
     graph_rewrite(a, pm, bottom_up=True)
 
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.const(dtypes.int, 3)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
-      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm)
 
   def test_inf_loop_bottom_up(self):
-    a = UOp.variable('a', 0, 10)
+    a = UOp.const(dtypes.int, 3)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
-      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     with self.assertRaises(RuntimeError):
       graph_rewrite(a, pm, bottom_up=True)
@@ -333,6 +334,20 @@ class TestBidirectional(unittest.TestCase):
     ctx_list = []
     graph_rewrite(c, pm, ctx=ctx_list, bpm=bpm)
     self.assertListEqual(ctx_list, [('+', True), (1, True), (1, False), (2, True), (2, False), ('+', False)])
+
+class TestStopEarly(unittest.TestCase):
+  def test_stop_early(self):
+    a = UOp.const(dtypes.int, 3)
+    b = UOp.const(dtypes.int, 4)
+    c = a+b
+    cn = UOp.const(dtypes.int, 7)
+    d = UOp.const(dtypes.int, 2)
+    def visit_const(c:UOp):
+      print(f"visit {c.arg}")
+      assert c.arg not in (3,4)
+    pm_cvisit = PatternMatcher([(UPat(Ops.CONST, name="c"), visit_const),])
+    ret = (c+d).substitute({c:cn}, extra_pm=pm_cvisit)
+    assert ret == cn+d
 
 if __name__ == '__main__':
   unittest.main()
