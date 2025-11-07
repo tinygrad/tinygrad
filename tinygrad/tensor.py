@@ -2100,7 +2100,7 @@ class Tensor(OpMixin):
     noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
-    if any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
+    if getenv("ONE_POOL") or any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
       # input size scaling factor to make sure shrink for stride is possible
       f_ = [smax(1, ceildiv(o*s - d, i)) for o,s,i,d in zip(o_,s_,i_,d_)]
       # repeats such that we don't need padding
