@@ -7,13 +7,14 @@ from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import getenv, prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import TILE_ROW_DIM, TILE_COL_DIM, RT_BASE_TILE_NEPT, shared_slot, register_slot
+from extra.thunder.tiny.tk.tiles import TILE_ROW_DIM, TILE_COL_DIM, RT_BASE_TILE_NEPT, slots
 
 class Group:
-  def __init__(self, warps:int, threadIdx_x:UOp):
+  def __init__(self, warps:int, ker):
     self.warps = warps
     self.group_threads = warps * WARP_THREADS
-    self.threadIdx_x = threadIdx_x
+    self.threadIdx_x = ker.threadIdx_x
+    self.ker = ker
 
   # helpers
   @property
@@ -49,6 +50,7 @@ class Group:
 
     dst_store = dst[*rngs_for_shape].store(src[*rngs_for_shape].cast(dst.dtype.base)).end(*rngs_for_shape)
 
+    self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
 
   mma_rid = 600
@@ -73,6 +75,7 @@ class Group:
     c_i = [c[mma_i_height, mma_i_width, i].store(out1.gep(i)) for i in range(4)] + [c[mma_i_height, mma_i_width, 4+i].store(out2.gep(i)) for i in range(4)]
     c_store = UOp.group(*c_i).end(mma_i_height, mma_i_width, mma_i_inner)
 
+    self.ker.push_store(c_store, c)
     return c.after(c_store).reshape(c.shape) if after else c_store
 
   def mma_ABt(self, c:UOp, a:UOp, b:UOp, after=True):
@@ -96,6 +99,7 @@ class Group:
     c_i = [c[mma_i_height, mma_i_width, i].store(out1.gep(i)) for i in range(4)] + [c[mma_i_height, mma_i_width, 4+i].store(out2.gep(i)) for i in range(4)]
     c_store = UOp.group(*c_i).end(mma_i_height, mma_i_width, mma_i_inner)
 
+    self.ker.push_store(c_store, c)
     return c.after(c_store).reshape(c.shape) if after else c_store
 
   map_rid = 400
@@ -111,6 +115,8 @@ class Group:
       to_store = op(a[*rngs_for_shape], rngs_for_shape)
 
     a_store = a[*rngs_for_shape].store(to_store).end(*rngs_for_shape)
+
+    self.ker.push_store(a_store, a)
     return a.after(a_store).reshape(a.shape)
 
   red_rid = 500
@@ -122,9 +128,8 @@ class Group:
     red_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.red_rid+2, AxisType.REDUCE)
     Group.red_rid += 3
 
-    global shared_slot
-    red_local = UOp.placeholder((self.group_threads,), src.dtype.base, addrspace=AddrSpace.LOCAL, slot=shared_slot)
-    shared_slot += 1
+    red_local = UOp.placeholder((self.group_threads,), src.dtype.base, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot)
+    slots.shared_slot += 1
 
     # initial reduce in registers
     vec_store = vec[red_i_height, 0].store(op(vec.after(UOp.group(red_i_width, red_i_inner))[red_i_height, 0], src[red_i_height, red_i_width, red_i_inner])).end(red_i_height, red_i_width, red_i_inner)
@@ -139,6 +144,7 @@ class Group:
     red_local_i = (offset // 16) * 16 + (offset % 16)
     vec_store = vec[red_i_height, 0].store(op(vec[red_i_height, 0], red_local[red_local_i])).end(red_i_height)
 
+    self.ker.push_store(vec_store, vec)
     return vec.after(vec_store).reshape(vec.shape)
 
   # ops that can work across multiple warps
@@ -262,7 +268,5 @@ class Group:
     else:
       raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
 
-    return dst.after(dst_store).reshape(dst.shape) if after else dst_store
-
-warp_ = functools.partial(Group, 1)
-warpgroup_ = functools.partial(Group, 4)
+    self.ker.push_store(dst_store, dst)
+    return dst.after(dst_store.barrier()).reshape(dst.shape) if after else dst_store
