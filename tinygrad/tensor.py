@@ -2160,7 +2160,8 @@ class Tensor(OpMixin):
     repeat_size = [i*f for i,f in zip(i_,f_)]
     x = self.repeat([1]*len(noop) + [ceildiv(k*(r+d),i) for k,r,i,d in zip(k_,repeat_size,i_,d_)])
     # handle dilation
-    x = x.shrink(tuple(noop + [(0,k*(r+d)) for k,r,d in zip(k_,repeat_size,d_)])).reshape(noop + flatten((k,(r+d)) for k,r,d in zip(k_,repeat_size,d_)))
+    x = x.shrink(tuple(noop + [(0,k*(r+d)) for k,r,d in zip(k_,repeat_size,d_)]))
+    x = x.reshape(noop + flatten((k,(r+d)) for k,r,d in zip(k_,repeat_size,d_)))
     # handle stride
     x = x.shrink(tuple(noop + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_,o_,s_)))).reshape(noop + flatten((k,o,s) for k,o,s in zip(k_,o_,s_)))
     # clamp o to actual achievable with buffer size i*f (no padding) to avoid invalid shrinks
