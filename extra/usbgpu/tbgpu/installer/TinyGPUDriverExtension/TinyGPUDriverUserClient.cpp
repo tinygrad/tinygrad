@@ -8,9 +8,30 @@ struct TinyGPUDriverUserClient_IVars
 {
 	OSSharedPtr<TinyGPUDriver> provider = nullptr;
 
-	static constexpr uint32_t kMaxDMAs = 1024;
-	uint32_t dmaCount = 0;
-	TinyGPUCreateDMAResp dmas[kMaxDMAs]; // each has sharedBuf + dmaCmd
+	TinyGPUCreateDMAResp *dmas = nullptr;
+	size_t dmaCount = 0;
+	size_t dmaCap = 0;
+
+	int ensureDMACap(size_t need)
+	{
+		// not thread-safe
+		if (need <= dmaCap) return 0;
+
+		size_t newCap = dmaCap ? dmaCap * 2 : 16;
+		while (newCap < need) newCap *= 2;
+
+		auto *newArr = IONewZero(TinyGPUCreateDMAResp, newCap);
+		if (!newArr) return -kIOReturnNoMemory;
+
+		if (dmas && dmaCount) {
+			memcpy(newArr, dmas, dmaCount * sizeof(TinyGPUCreateDMAResp));
+		}
+
+		IOSafeDeleteNULL(dmas, TinyGPUCreateDMAResp, dmaCap);
+		dmas = newArr;
+		dmaCap = newCap;
+		return 0;
+	}
 };
 
 bool TinyGPUDriverUserClient::init()
@@ -119,15 +140,15 @@ kern_return_t IMPL(TinyGPUDriverUserClient, CopyClientMemoryForType)
 	if (!memory) return kIOReturnBadArgument;
 	if (!ivars->provider.get()) return kIOReturnNotAttached;
 
-	// BARs: we just forward to the provider, framework will unmap later
+	// bar handling, type is bar num
 	if (type < 6) {
 		uint32_t bar = (uint32_t)type;
 		return ivars->provider->MapBar(bar, memory);
 	}
 
-	// DMA buffer: we must remember what we allocated
-	if (ivars->dmaCount >= TinyGPUDriverUserClient_IVars::kMaxDMAs) {
-		os_log(OS_LOG_DEFAULT, "tinygpu: too many DMA allocations for this client");
+	// dma handling, type is size
+	if (!ivars->ensureDMACap(ivars->dmaCount + 1)) {
+		os_log(OS_LOG_DEFAULT, "tinygpu: cannot grow dma array");
 		return kIOReturnNoMemory;
 	}
 
@@ -135,9 +156,7 @@ kern_return_t IMPL(TinyGPUDriverUserClient, CopyClientMemoryForType)
 	kern_return_t err = ivars->provider->CreateDMA(type, &buf);
 	if (err) return err;
 
-	// store it so we can free on disconnect
 	ivars->dmas[ivars->dmaCount++] = buf;
-
 	*memory = buf.sharedBuf;
-	return kIOReturnSuccess;
+	return 0;
 }
