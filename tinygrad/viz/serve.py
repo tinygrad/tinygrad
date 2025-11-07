@@ -84,7 +84,8 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
         ranges = []
-        for idx in u.src[1:]: ranges += [s for s in idx.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
+        for idx in u.src[1:]:
+          if isinstance(idx, UOp): ranges += [s for s in idx.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
       if u.op in {Ops.END, Ops.REDUCE} and len(trngs:=list(UOp.sink(*u.src[range_start[u.op]:]).ranges)):
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
