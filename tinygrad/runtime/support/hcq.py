@@ -1,9 +1,9 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
-import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent
+from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -438,12 +438,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     return buf, realloced
 
   def _select_iface(self, *ifaces:Type):
-    excs = []
     if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val.upper()))
-    for iface_t in ifaces:
-      try: return iface_t(self, self.device_id)
-      except Exception as e: excs.append(e)
-    raise ExceptionGroup(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available", excs)
+    return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in ifaces],
+                               f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
