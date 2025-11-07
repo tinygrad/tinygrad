@@ -175,14 +175,23 @@ def cached_to_movement_ops(shape, st) -> list:
   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
   return mops
 
-# function to extract views from uop graph of a tensor
-def _get_view_from_uop(tensor: Tensor):
-  # base_view = canonical_base(tensor)
-  base_uop = tensor.uop.base
-
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
+def curr_as_strided(tensor: Tensor, size, stride, storage_offset=None):
+  base_tensor = tensor.uop.base # canonicalise the current tensor to get the base tensor
+  # get all the movement ops in order to apply
+  ops_to_apply = calc_movement_ops(size, stride, storage_offest, base_tensor.shape)
+  ret = base_tensor
+  for op, arg in ops_to_apply:
+    match op:
+      case "reshape": ret = ret.reshape(arg)
+      case "permute": ret = ret.permute(arg)
+      case "shrink": ret = ret.shrink(arg)
+      case "pad": ret = ret.pad(arg)
+      case "flip": ret = ret.flip(arg)
+      case "expand": ret = ret.expand(arg)
+  return ret
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # multiple as_strided do not compound

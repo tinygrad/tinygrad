@@ -30,6 +30,9 @@ def apply_mop(st: Tensor|ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> Sh
 def make_scratch_st(st: ShapeTracker) -> ShapeTracker:
   return ShapeTracker.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
 
+def calc_movement_ops(size, stride, storage_offest, base_tensor.shape):
+  
+  pass
 # ShapeTracker to an equivalent series of MovementOps (https://github.com/tinygrad/tinygrad/pull/2216)
 def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []
