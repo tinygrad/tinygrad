@@ -2,6 +2,8 @@
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
+import sys
+sys.path.append("extra/")
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
@@ -173,6 +175,11 @@ def cached_to_movement_ops(shape, st) -> list:
   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
   return mops
 
+# function to extract views from uop graph of a tensor
+def _get_view_from_uop(tensor: Tensor):
+  # base_view = canonical_base(tensor)
+  base_uop = tensor.uop.base
+
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
@@ -188,6 +195,11 @@ def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
   return ret
 
+def traverse():
+  if isleaf: return "leaf found exit from here"
+  if curr.op == Ops.PERMUTE
+
+  
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   storage_offset = storage_offset or tensor.storage_offset()
