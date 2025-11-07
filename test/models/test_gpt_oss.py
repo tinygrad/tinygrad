@@ -128,21 +128,35 @@ class TestGPTOSS(unittest.TestCase):
     Tensor.manual_seed(42)
     np.random.seed(42)
 
-    # load mxfp4 weights in tinygrad
+    # load model weights
     model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
     weight_path = str(model_path / "model-00000-of-00002.safetensors")
     block_key, scale_key = 'model.layers.0.mlp.experts.gate_up_proj_blocks', 'model.layers.0.mlp.experts.gate_up_proj_scales'
+
+    # load mxfp4 weights in tinygrad
     weight_map = safe_load(weight_path)
     weight_map = {"blocks": weight_map[block_key], "scales": weight_map[scale_key]}
-
-    # the model
     class Proj:
       def __init__(self): self.blocks, self.scales = Tensor.empty(32, 5760, 90, 16, dtype=dtypes.uchar), Tensor.empty(32, 5760, 90, dtype=dtypes.uchar)
     proj = Proj()
-
-    # put it together
     load_state_dict(proj, weight_map)
     blocks, scales = proj.blocks, proj.scales
+
+    # load mxfp4 weights in torch
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
+
+    # instead of 90 expert "blocks" we have 1
+    n_experts = 1
+    blocks, torch_blocks = blocks[:, :, -n_experts:], torch_blocks[:, :, -n_experts:]
+    scales, torch_scales = scales[:, :, -n_experts:], torch_scales[:, :, -n_experts:]
+    ic(blocks.shape, scales.shape)
+
+    # check we are loading the same weights
+    assert scales.shape == torch_scales.shape
+    assert blocks.shape == torch_blocks.shape
+    np.testing.assert_allclose(blocks.numpy(), torch_blocks.cpu().numpy(), strict=True)
+    np.testing.assert_allclose(scales.numpy(), torch_scales.cpu().numpy(), strict=True)
 
     # dequantize
     MXFP4_ID = 39
@@ -152,11 +166,10 @@ class TestGPTOSS(unittest.TestCase):
     blocks_reshaped = blocks.reshape(rows_total, B)    # row-major
     scales_reshaped = scales.reshape(rows_total, 1)
     data = scales_reshaped.cat(blocks_reshaped, dim=-1).flatten()
+    ic(data.numpy()[:65])
     out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID).reshape(*prefix_shape, G, B * 2).transpose(1,2)
 
-    # load mxfp4 weights in torch
-    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
-    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
+    # dequantize in torch
     torch_out = convert_moe_packed_tensors(torch_blocks, torch_scales)
     ic(torch_out.shape, out.shape)
     ic(torch_out.dtype, out.dtype)

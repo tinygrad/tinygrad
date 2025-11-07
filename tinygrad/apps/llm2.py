@@ -1,6 +1,6 @@
 # install
-# pip install -e .["testing"]
-# pip install accelerate kernels # needed for mxfp4 quantization
+# uv pip install -e .["testing"]
+# uv pip install accelerate kernels # needed for mxfp4 quantization
 
 # implementations
 # openai - https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py
