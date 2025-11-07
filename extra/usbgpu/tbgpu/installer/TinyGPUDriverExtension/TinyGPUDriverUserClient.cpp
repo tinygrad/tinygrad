@@ -85,10 +85,6 @@ kern_return_t TinyGPUDriverUserClient::Stop_Impl(IOService* in_provider)
 				d.dmaCmd->release();
 				d.dmaCmd = nullptr;
 			}
-			if (d.sharedBuf) {
-				d.sharedBuf->release();
-				d.sharedBuf = nullptr;
-			}
 		}
 		ivars->dmaCount = 0;
 		IOSafeDeleteNULL(ivars->dmas, TinyGPUCreateDMAResp, ivars->dmaCap);
