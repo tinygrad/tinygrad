@@ -179,6 +179,8 @@ SPEC = ContextVar("SPEC", 1)
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
+# set to 1, this uses tuplize in the linearizer sort order
+TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 
 @dataclass(frozen=True)
 class Metadata:
