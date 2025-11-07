@@ -124,6 +124,9 @@ class MovementMixin:
 
   # **** high level ****
 
+  def shrink_to(self, shape, *args) -> Self:
+    return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
+
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""
     return self.reshape(shape, *args)
