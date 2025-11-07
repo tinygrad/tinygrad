@@ -289,3 +289,38 @@ class MovementMixin:
     for i, name in enumerate(lhs): assert (name not in sizes) or sizes[name] == t.shape[i], f"size provided for dimension {name} incorrect"
     t = t.permute([lhs.index(name) for name in rhs])
     return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
+
+  # *** movement ops with expand ***
+
+  def repeat_interleave(self, repeats:int, dim:int|None=None) -> Self:
+    """
+    Repeats elements of a tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.repeat_interleave(2).numpy())
+    ```
+    """
+    x, dim = (self.flatten(), 0) if dim is None else (self, self._resolve_dim(dim))
+    shp = x.shape
+    return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
+
+  def repeat(self, repeats, *args) -> Self:
+    """
+    Repeats tensor number of times along each dimension specified by `repeats`.
+    `repeats` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.repeat(4, 2).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.repeat(4, 2, 1).shape)
+    ```
+    """
+    repeats = argfix(repeats, *args)
+    base_shape = _align_left(self.shape, repeats)[0]
+    unsqueezed_shape = flatten([[1, s] for s in base_shape])
+    expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
+    final_shape = [r*s for r,s in zip(repeats, base_shape)]
+    return self.reshape(unsqueezed_shape).expand(expanded_shape).reshape(final_shape)
