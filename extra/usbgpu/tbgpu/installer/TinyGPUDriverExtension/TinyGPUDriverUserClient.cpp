@@ -82,6 +82,7 @@ kern_return_t TinyGPUDriverUserClient::Stop_Impl(IOService* in_provider)
 		for (size_t i = 0; i < ivars->dmaCount; i++) {
 			auto &d = ivars->dmas[i];
 			if (d.dmaCmd) {
+				d.dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions);
 				d.dmaCmd->release();
 				d.dmaCmd = nullptr;
 			}
