@@ -114,6 +114,13 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
+def select_first_inited(candidates:list[tuple[type[T], ...]|type[T]], err_msg:str) -> tuple[T, ...]|T:
+  excs = []
+  for typ in candidates:
+    try: return tuple([t() for t in typ]) if isinstance(typ, (tuple, list)) else typ()
+    except Exception as e: excs.append(e)
+  raise ExceptionGroup(err_msg, excs)
+
 def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
