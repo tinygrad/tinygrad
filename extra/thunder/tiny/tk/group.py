@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import getenv, prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import TILE_ROW_DIM, TILE_COL_DIM, RT_BASE_TILE_NEPT, shared_slot
+from extra.thunder.tiny.tk.tiles import TILE_ROW_DIM, TILE_COL_DIM, RT_BASE_TILE_NEPT, shared_slot, register_slot
 
 class Group:
   def __init__(self, warps:int, threadIdx_x:UOp):
@@ -145,8 +145,10 @@ class Group:
 
   LOAD_INNER = 8
   load_rid = 100
-  def load(self, dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
-    if cast(PtrDType, dst.dtype).addrspace == AddrSpace.REG:
+  def load(self, dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
+    assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
+    dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
+    if dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.LOCAL:
       srcf = src.flatten(-2)
 
       load_i_height = UOp.range(dst.shape[-3], Group.load_rid)
@@ -154,12 +156,25 @@ class Group:
       load_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.load_rid+2)
       Group.load_rid += 3
 
-      row = (self.warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + (self.laneid % 16)
-      col = load_i_width * TILE_COL_DIM + (self.laneid // 16) * 8
-      src_i_last = row * src.shape[-1] + col + load_i_inner
+      if self.warps % 4 == 0: local_warpid = (self.warpid // 4) + (self.warpid % 4) * (self.warps // 4)
+      else: local_warpid = self.warpid
+      warp_laneid = self.threadIdx_x % WARP_THREADS
 
-      dst_store = dst[*dst_idxs, load_i_height, load_i_width, load_i_inner].store(srcf[*idxs[:-2], src_i_last]).end(load_i_height, load_i_width, load_i_inner)
-    else:
+      row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
+      col = load_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
+
+      if not transpose:
+        row_offset = ((load_i_inner % 4) // 2) * 8
+        col_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
+      else:
+        row_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
+        col_offset = ((load_i_inner % 4) // 2) * 8
+
+      src_i_last = (row + row_offset) * src.shape[-1] + col + col_offset
+
+      dst_store = dst[*dst_idxs, load_i_height, load_i_width, load_i_inner].store(srcf[*idxs[:-2], src_i_last])
+      dst_store = dst_store.end(load_i_height, load_i_width, load_i_inner)
+    elif dst_dtype.addrspace == AddrSpace.LOCAL and src_dtype.addrspace == AddrSpace.GLOBAL:
       dstf = dst.flatten(-2)
 
       srcf = src.flatten()
@@ -184,13 +199,17 @@ class Group:
       src_i += row * row_stride + col + load_i_inner
 
       dst_store = dstf[*dst_idxs, dst_i].store(srcf[src_i]).end(load_i_outer, load_i_inner)
+    else:
+      raise NotImplementedError(f"load from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
 
     return dst.after(dst_store.barrier()).reshape(dst.shape)
 
   STORE_INNER = 8
   store_rid = 200
   def store(self, dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
-    if cast(PtrDType, src.dtype).addrspace == AddrSpace.REG:
+    assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
+    dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
+    if src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.LOCAL:
       dstf = dst.flatten(-2)
 
       store_i_height = UOp.range(src.shape[-3], Group.store_rid)
@@ -198,12 +217,21 @@ class Group:
       store_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.store_rid+2)
       Group.store_rid += 3
 
-      row = (self.warpid * src.shape[-3] + store_i_height) * TILE_ROW_DIM + (self.laneid % 16)
-      col = store_i_width * TILE_COL_DIM + (self.laneid // 16) * 8
-      dst_i_last = row * dst.shape[-1] + col + store_i_inner
+      if self.warps % 4 == 0: local_warpid = (self.warpid // 4) + (self.warpid % 4) * (self.warps // 4)
+      else: local_warpid = self.warpid
+      warp_laneid = self.threadIdx_x % WARP_THREADS
 
-      dst_store = dstf[*idxs[:-2], dst_i_last].store(src[*src_idxs, store_i_height, store_i_width, store_i_inner]).end(store_i_height, store_i_width, store_i_inner)
-    else:
+      row = (local_warpid * src.shape[-3] + store_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
+      col = store_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
+
+      row_offset = ((store_i_inner % 4) // 2) * 8
+      col_offset = (store_i_inner % 2) + (store_i_inner // 4) * 8
+
+      dst_i_last = (row + row_offset) * dst.shape[-1] + col + col_offset
+
+      dst_store = dstf[*idxs[:-2], dst_i_last].store(src[*src_idxs, store_i_height, store_i_width, store_i_inner])
+      dst_store = dst_store.end(store_i_height, store_i_width, store_i_inner)
+    elif src_dtype.addrspace == AddrSpace.LOCAL and dst_dtype.addrspace == AddrSpace.GLOBAL:
       dstf = dst.flatten()
       row_stride = prod(dst.shape[axis+1:])
 
@@ -228,6 +256,8 @@ class Group:
       dst_i += row * row_stride + col + store_i_inner
 
       dst_store = dstf[dst_i].store(srcf[*src_idxs, src_i]).end(store_i_outer, store_i_inner)
+    else:
+      raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
 
     return dst.after(dst_store).reshape(dst.shape) if after else dst_store
 
