@@ -112,16 +112,30 @@ int register_hook() {
 }
 int temp_register_hook = register_hook();
 
+
 at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
-  std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
+  std::vector<int64_t> sizes = py_obj.attr("uop").attr("_shape").cast<std::vector<int64_t>>();
+  std::vector<int64_t> strides(sizes.size());
 
-  py::list views = py_obj.attr("uop").attr("st").attr("views");
-  std::vector<int64_t> strides = views[views.size() - 1].attr("strides").cast<std::vector<int64_t>>();
-  int64_t storage_offset = 0;
-  for (auto& v: views) {
-    storage_offset += v.attr("offset").cast<int64_t>(); // TODO: is this correct?
+  int64_t acc = 1;
+  for (int i = sizes.size() - 1; i >= 0; --i) {
+    strides[i] = acc;
+    acc *= sizes[i];
   }
+
+  // storage offset is 0 by default
+  int64_t storage_offset = 0;
+  if (py::hasattr(py_obj, "storage_offset")) {
+    storage_offset = py_obj.attr("storage_offset").cast<int64_t>();
+  }
+  
+  // log debug info
+  std::cout << "[wrap_tensor] sizes = [";
+  for (auto s : sizes) std::cout << s << " ";
+  std::cout << "], strides = [";
+  for (auto s : strides) std::cout << s << " ";
+  std::cout << "], offset = " << storage_offset << std::endl;
 
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
