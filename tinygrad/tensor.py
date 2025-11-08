@@ -2099,9 +2099,9 @@ class Tensor(OpMixin):
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
-    o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
+    o_ = [(i-d*(k-1)+s-1)//s for i,d,k,s in zip(i_,d_,k_,s_)]
     # repeats such that we don't need padding
-    x = self.repeat([1]*len(noop) + [ceildiv(o*(s+i),i) for o,s,i in zip(o_,s_,i_)])
+    x = self.repeat([1]*len(noop) + [(o*(s+i)+i-1)//i for o,s,i in zip(o_,s_,i_)])
     # handle stride
     x = x.shrink_to(noop + [o*(s+i) for o,s,i in zip(o_,s_,i_)]).reshape(noop + flatten((o,s+i) for o,s,i in zip(o_,s_,i_)))
     # handle dilation

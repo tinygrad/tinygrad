@@ -296,9 +296,7 @@ class TestSymbolicOps(unittest.TestCase):
     result = x.conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
     var_val = {v.expr: val}
     shape = tuple(sym_infer(s, var_val) for s in result.shape)
-    with self.assertRaises(AssertionError):
-      self.assertEqual(shape, (1, 256, 6600))  # TODO: fails if ceildiv is incorrect
-    # TODO: test output is correct
+    self.assertEqual(shape, (1, 256, 6600))
 
 if __name__ == '__main__':
   unittest.main()
