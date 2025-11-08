@@ -3,7 +3,6 @@ import numpy as np
 
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device, dtypes
 from tinygrad.helpers import DEBUG, getenv
-from tinygrad.engine.realize import CompiledRunner
 from tinygrad.nn.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
@@ -38,17 +37,16 @@ def compile(onnx_file):
   np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
 
-  # checks from compile2
+  # check gated image usage
   kernel_count = 0
   read_image_count = 0
   gated_read_image_count = 0
   for ei in run_onnx_jit.captured.jit_cache:
-    if isinstance(ei.prg, CompiledRunner):
-      kernel_count += 1
-      read_image_count += ei.prg.p.src.count("read_image")
-      gated_read_image_count += ei.prg.p.src.count("?read_image")
-      for v in [m.group(1) for m in re.finditer(r'(val\d+)\s*=\s*read_imagef\(', ei.prg.p.src)]:
-        if len(re.findall(fr'[\?\:]{v}\.[xyzw]', ei.prg.p.src)) > 0: gated_read_image_count += 1
+    kernel_count += 1
+    read_image_count += ei.prg.p.src.count("read_image")
+    gated_read_image_count += ei.prg.p.src.count("?read_image")
+    for v in [m.group(1) for m in re.finditer(r'(val\d+)\s*=\s*read_imagef\(', ei.prg.p.src)]:
+      if len(re.findall(fr'[\?\:]{v}\.[xyzw]', ei.prg.p.src)) > 0: gated_read_image_count += 1
   print(f"{kernel_count=},  {read_image_count=}, {gated_read_image_count=}")
   if (allowed_kernel_count:=getenv("ALLOWED_KERNEL_COUNT", -1)) != -1:
     assert kernel_count == allowed_kernel_count, f"different kernels! {kernel_count=}, {allowed_kernel_count=}"
