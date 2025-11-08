@@ -247,16 +247,23 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)
-      disp = []
-      for i, (ri, ro) in enumerate(zip([r.render() for r in rngs], [r.render() for r in out_rngs])):
-        rng = f"{ri}" if ri == ro else f"{ri} -> {ro}"
-        if realized_ranges is not None and i in realized_ranges: rng = colored(rng, "yellow")
-        disp.append("["+rng+"]")
+      if len(rngs) != len(out_rngs):
+        disp = render_ranges(rngs, realized=realized_ranges) + " -> " + render_ranges(out_rngs, realized=realized_ranges)
+      else:
+        disp = render_ranges(rngs, out_rngs, realized=realized_ranges)
       ending_ranges_str = ','.join([r.render() for r in ending_ranges[x]])
-      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s} {ending_ranges_str:10s}", ''.join(disp))
+      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s} {ending_ranges_str:12s}", disp)
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
 
   tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   return tsink, rctx
+
+def render_ranges(*rngs_list, realized) -> str:
+  disp = []
+  for i, rs in enumerate(zip(*[[r.render() for r in rngs] for rngs in rngs_list])):
+    rng = rs[0] if all_same(rs) else " -> ".join(rs)
+    if realized is not None and i in realized: rng = colored(rng, "yellow")
+    disp.append("["+rng+"]")
+  return ''.join(disp)
