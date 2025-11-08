@@ -1,4 +1,4 @@
-# ruff: noqa: E501
+# ruff: noqa: E501 E712
 from tinygrad import dtypes, Device
 from tinygrad.uop.ops import UOp, AxisType, Ops, KernelInfo
 from tinygrad.codegen import full_rewrite
@@ -134,7 +134,7 @@ c323 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(1), (), 33)
 c328 = c290.where(UOp.const(dtypes.float, 0.0), (c317.index(c321)*c323.index(UOp.const(dtypes.index, 0)).reciprocal()))
 c329 = c34+c71+c100+c129+c164+c194+c225+c254+c286+c315+c328
 c331 = c0.index(c2, ptr=True).store(c329).end(c2)
-ast = c331.sink(arg=KernelInfo(name=f"cat", opts_to_apply=None))
+ast = c331.sink(arg=KernelInfo(name="cat", opts_to_apply=None))
 
 compiler = Device.default.compiler
 renderer = Device.default.renderer

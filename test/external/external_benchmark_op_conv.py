@@ -236,7 +236,7 @@ c52 = c0.index(c10, ptr=True).store(c50).end(c7, c2, c4)
 # NOLOCALS=1 IMAGE=2 DEV=CL
 opts = (Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.NOLOCALS, axis=None, arg=None))
 
-ast = c52.sink(arg=KernelInfo(name=f"conv", opts_to_apply=opts))
+ast = c52.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
 
 compiler = Device.default.compiler
 renderer = Device.default.renderer
