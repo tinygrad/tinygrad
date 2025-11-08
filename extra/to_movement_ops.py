@@ -4,13 +4,12 @@ from collections import defaultdict
 from typing import List, Tuple, DefaultDict
 from tinygrad.helpers import prod, tqdm
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.shape.shapetracker import ShapeTracker
 from tinygrad.uop.ops import sym_infer
 from tinygrad.tensor import Tensor
 
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 
-def apply_mop(st: Tensor|ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> ShapeTracker:
+def apply_mop(st: Tensor, mop_arg: Tuple[MovementOps, Tuple]) -> Tensor:
   mop, arg = mop_arg
   if mop == MovementOps.RESHAPE:
     # shapetracker doesn't allow flattening with -1 but required for MovementOps.RESHAPE
@@ -27,11 +26,11 @@ def apply_mop(st: Tensor|ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> Sh
     return st.flip(tuple(i for i,x in enumerate(arg) if x == -1))
   raise ValueError("invalid mop")
 
-def make_scratch_st(st: ShapeTracker) -> ShapeTracker:
-  return ShapeTracker.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
+def make_scratch_st(st: Tensor) -> Tensor:
+  return Tensor.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
 
 # ShapeTracker to an equivalent series of MovementOps (https://github.com/tinygrad/tinygrad/pull/2216)
-def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
+def to_movement_ops(st: Tensor) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []
   for i, v in enumerate(st.views):
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
@@ -102,7 +101,7 @@ def get_buffer_size(shape, strides, offset, mask):
   real_real_shape, strides, real_offset = get_real_view(shape, strides, offset, mask)
   return real_offset + sum((s-1)*st for s, st in zip(real_real_shape,strides)) + 1
 
-def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
+def st_equivalent(st1: Tensor, st2: Tensor):
   if (idxs1:=st1.expr_idxs()) == (idxs2:=st2.expr_idxs()): return True
   idx1, valid1 = idxs1
   idx2, valid2 = idxs2
@@ -128,7 +127,7 @@ def st_equivalent(st1: ShapeTracker, st2: ShapeTracker):
   return True
 
 c: DefaultDict[int,int] = defaultdict(int)
-def test_rebuild(st: ShapeTracker):
+def test_rebuild(st: Tensor):
   rebuilt_st = make_scratch_st(st)
   mops = to_movement_ops(st)
   c[len(mops)] += 1
