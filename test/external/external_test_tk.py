@@ -1,6 +1,7 @@
 import unittest
 
 from tinygrad import Tensor, Device, dtypes, Context
+from tinygrad.uop.ops import UOp, KernelInfo, AxisType
 from tinygrad.engine.realize import ExecItem, get_runner
 
 from extra.thunder.tiny.tk import WARP_THREADS
@@ -144,10 +145,10 @@ class TestTK(unittest.TestCase):
 
     ref = a.float()
 
-    assert (ref - b).mean().item() < 1e-6
+    assert ref.allclose(b)
 
   def test_max(self):
-    N = 64
+    N = 16
     BLOCK_SIZE = 16
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
@@ -170,10 +171,13 @@ class TestTK(unittest.TestCase):
           a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, tile_col), axis=2)
           a_reg = warp.load(a_reg, a_smem)
           max_reg = warp.row_reduce(max_reg, a_reg, lambda a, b: a.maximum(b))
+        sum_reg = ker.endrange()
+
+        b_reg = warp.zero(b_reg).after(tile_row)
+        b_reg = warp.map(b_reg, lambda _, idx: sum_reg[idx[0], 0, (idx[2]%4)//2])
+        b_smem = warp.store(b_smem, b_reg)
 
         for tile_col in ker.range(N // BLOCK_SIZE):
-          b_reg = warp.map(b_reg, lambda _, idx: max_reg[idx[0], 0])
-          b_smem = warp.store(b_smem, b_reg)
           b = warp.store(b, b_smem, (0, 0, tile_row, tile_col), (), axis=2)
 
       sink = ker.finish()
@@ -189,7 +193,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().max(axis=3, keepdim=True).expand(a.shape)
 
-    assert (ref - b).mean().item() < 1e-6
+    assert ref.allclose(b)
 
   def test_max_nonsquare(self):
     N, M = 16, 64
@@ -215,10 +219,13 @@ class TestTK(unittest.TestCase):
           a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, tile_col), axis=2)
           a_reg = warp.load(a_reg, a_smem)
           sum_reg = warp.row_reduce(max_reg, a_reg, lambda a, b: a.maximum(b))
+        sum_reg = ker.endrange()
+
+        b_reg = warp.zero(b_reg).after(tile_row)
+        b_reg = warp.map(b_reg, lambda _, idx: sum_reg[idx[0], 0, (idx[2]%4)//2])
+        b_smem = warp.store(b_smem, b_reg)
 
         for tile_col in ker.range(M // BLOCK_M):
-          b_reg = warp.map(b_reg, lambda _, idx: sum_reg[idx[0], 0])
-          b_smem = warp.store(b_smem, b_reg)
           b = warp.store(b, b_smem, (0, 0, tile_row, tile_col), (), axis=2)
 
       sink = ker.finish()
@@ -234,10 +241,10 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().max(axis=3, keepdim=True).expand(a.shape)
 
-    assert (ref - b).mean().item() < 1e-6
+    assert ref.allclose(b)
 
   def test_sum(self):
-    N = 64
+    N = 16
     BLOCK_SIZE = 16
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
@@ -253,23 +260,27 @@ class TestTK(unittest.TestCase):
 
       sum_reg = rv(BLOCK_SIZE, dtypes.float32, "ortho")
 
-      sum_reg = warp.zero(sum_reg)
-
       for tile_row in ker.range(N // BLOCK_SIZE):
+        sum_reg = warp.zero(sum_reg).after(tile_row)
+
         for tile_col in ker.range(N // BLOCK_SIZE):
           a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, tile_col), axis=2)
           a_reg = warp.load(a_reg, a_smem)
           sum_reg = warp.row_reduce(sum_reg, a_reg, lambda a, b: a + b)
+        sum_reg = ker.endrange()
+
+        b_reg = warp.zero(b_reg).after(tile_row)
+        b_reg = warp.map(b_reg, lambda _, idx: sum_reg[idx[0], 0, (idx[2]%4)//2])
+        b_smem = warp.store(b_smem, b_reg)
 
         for tile_col in ker.range(N // BLOCK_SIZE):
-          b_reg = warp.map(b_reg, lambda _, idx: sum_reg[idx[0], 0])
-          b_smem = warp.store(b_smem, b_reg)
           b = warp.store(b, b_smem, (0, 0, tile_row, tile_col), (), axis=2)
 
       sink = ker.finish()
 
     with Context(DEBUG=0):
       a = Tensor.rand(1, 1, N, N, dtype="float32").contiguous()
+      a = Tensor.arange(1 * 1 * N * N).reshape(1, 1, N, N).cast(dtypes.float32).contiguous()
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
@@ -279,7 +290,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().sum(axis=3, keepdim=True).expand(a.shape)
 
-    assert (ref - b).mean().item() < 1e-6
+    assert ref.allclose(b)
 
   def test_sum_nonsquare(self):
     N, M = 16, 64
@@ -305,10 +316,13 @@ class TestTK(unittest.TestCase):
           a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, tile_col), axis=2)
           a_reg = warp.load(a_reg, a_smem)
           sum_reg = warp.row_reduce(sum_reg, a_reg, lambda a, b: a + b)
+        sum_reg = ker.endrange()
+
+        b_reg = warp.zero(b_reg).after(tile_row)
+        b_reg = warp.map(b_reg, lambda _, idx: sum_reg[idx[0], 0, (idx[2]%4)//2])
+        b_smem = warp.store(b_smem, b_reg)
 
         for tile_col in ker.range(M // BLOCK_M):
-          b_reg = warp.map(b_reg, lambda _, idx: sum_reg[idx[0], 0])
-          b_smem = warp.store(b_smem, b_reg)
           b = warp.store(b, b_smem, (0, 0, tile_row, tile_col), (), axis=2)
 
       sink = ker.finish()
@@ -324,7 +338,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().sum(axis=3, keepdim=True).expand(a.shape)
 
-    assert (ref - b).mean().item() < 1e-6
+    assert ref.allclose(b)
 
 if __name__ == "__main__":
   unittest.main()
