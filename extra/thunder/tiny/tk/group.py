@@ -119,30 +119,30 @@ class Group:
     self.ker.push_store(a_store, a)
     return a.after(a_store).reshape(a.shape)
 
-  red_rid = 500
   def row_reduce(self, vec:UOp, src:UOp, op:Callable[[UOp, UOp], UOp]):
     assert self.warps == 1
 
-    red_i_height = UOp.range(src.shape[-3], Group.red_rid)
-    red_i_width = UOp.range(src.shape[-2], Group.red_rid+1)
-    red_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.red_rid+2, AxisType.REDUCE)
-    Group.red_rid += 3
-
-    red_local = UOp.placeholder((self.group_threads,), src.dtype.base, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot)
+    red_local = UOp.placeholder((self.group_threads, 2), src.dtype.base, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot)
     slots.shared_slot += 1
 
-    # initial reduce in registers
-    vec_store = vec[red_i_height, 0].store(op(vec.after(UOp.group(red_i_width, red_i_inner))[red_i_height, 0], src[red_i_height, red_i_width, red_i_inner])).end(red_i_height, red_i_width, red_i_inner)
-    vec = vec.after(vec_store).reshape(vec.shape)
+    for height in self.ker.range(src.shape[-3], track=False):
+      for i_outer in self.ker.range(2, track=False):
+        for width in self.ker.range(src.shape[-2], AxisType.REDUCE, track=False):
+          for i_inner in self.ker.range(4, AxisType.REDUCE, track=False):
+            elem_index = i_inner + 2 * (i_inner // 2) + i_outer * 2
+            vec_store = vec[height, 0, i_outer].store(op(vec[height, 0, i_outer], src[height, width, elem_index])).end(width, i_inner, i_outer)
+            vec = vec.after(vec_store).reshape(vec.shape)
 
-    # store to shared memory
-    red_local_store = red_local[self.laneid].store(vec[red_i_height, 0])
-    red_local = red_local.after(red_local_store).reshape(red_local.shape)
+      # store to shared memory
+      for i_outer in self.ker.range(2, track=False):
+        red_local_store = red_local[self.laneid, i_outer].store(vec[height, 0, i_outer]).end(i_outer)
+        red_local = red_local.after(red_local_store).reshape(red_local.shape)
 
-    # final reduce from shared memory
-    offset = (self.laneid + 16) % 32
-    red_local_i = (offset // 16) * 16 + (offset % 16)
-    vec_store = vec[red_i_height, 0].store(op(vec[red_i_height, 0], red_local[red_local_i])).end(red_i_height)
+      # reduce from shared memory
+      for i_outer in self.ker.range(2, track=False):
+        for i_inner in self.ker.range(3, AxisType.REDUCE, track=False):
+          offset = (self.laneid // 4) * 4 + ((self.laneid + 1 + i_inner) % 4)
+          vec_store = vec[height, 0, i_outer].store(op(vec[height, 0, i_outer], red_local[offset, i_outer])).end(i_inner, i_outer)
 
     self.ker.push_store(vec_store, vec)
     return vec.after(vec_store).reshape(vec.shape)
