@@ -103,21 +103,24 @@ class TestTiming(unittest.TestCase):
 
   def test_spilling(self):
     def custom_spill(data0):
-      # allocate scratch space
-      op = custom('asm volatile("s_mov_b32_e32 s10 0");')
-      for i in range(data0.size):
-        op = custom('asm volatile("s_add_u32 s10 s10 1;");', op)
-        op = custom(f'asm volatile("v_writelane_b32 v10 s10 {i};");', op)
-      #op = custom('"scratch_store_b32 off, v10, off offset:8;"', op)
-      for i in range(data0.size):
-        op = custom(f'asm volatile("v_readlane_b32 s11 v10 {i}");', op)
-        op = custom(f'asm volatile("v_mov_b32_e32 v11 s11");', op)
-        op = custom(f'asm volatile("global_store_b32 %0, v11 off offset:{i*4}" : : "v"(data0_{data0.size}) : "memory", "v11");', op)
+      # allocate scratch space (private_segment_size in the elf)
+      op = custom(f"char *scratch = (char *)__builtin_alloca(32);")
+      op = custom(f"*((volatile unsigned int*)scratch) = *((volatile unsigned int*)scratch);", op)
+      op = custom('asm volatile("" :: "v"(scratch) : "memory");', op)
+      # move v10's value to scratch
+      op = custom(f'asm volatile("v_mov_b32_e32 v10 100");', op)
+      op = custom(f'asm volatile("scratch_store_b32 off v10 off offset:0");', op)
+      op = custom(f'asm volatile("v_mov_b32_e32 v10 0");', op)
+      op = custom('asm volatile("s_waitcnt_vscnt null, 0");', op)
+      # read back and store
+      op = custom(f'asm volatile("scratch_load_b32 v10 off off offset:0");', op)
+      op = custom('asm volatile("s_waitcnt_vmcnt null, 0");', op) # important! without this it gives the wrong answer
+      op = custom(f'asm volatile("global_store_b32 %0, v10 off offset:0" : : "v"(data0_{data0.size}) : "memory", "v10");', op)
       return UOp.sink(data0, op, arg=KernelInfo(name="custom_spill"))
-    ret = Tensor.empty(4, dtype=dtypes.uint32).realize()
+    ret = Tensor([0,0,0,0], dtype=dtypes.uint32).realize()
     ret = Tensor.custom_kernel(ret, fxn=custom_spill)[0]
     ret.realize()
-    print(ret.tolist())
+    self.assertListEqual(ret.tolist(), [100, 0, 0, 0])
 
 if __name__ == "__main__":
   unittest.main()
