@@ -1,6 +1,5 @@
 import unittest
 from tinygrad import Tensor, Variable, GlobalCounters
-from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
 from tinygrad.device import is_dtype_supported
 from examples.gpt2 import Attention
