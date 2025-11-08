@@ -488,12 +488,15 @@ async function renderProfiler() {
     }
   }
 
-  canvas.addEventListener("click", e => {
+  const clickShape = (e) => {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.step != null && foundRect?.key == null) { return switchCtx(foundRect.ctx, foundRect.step); }
+    if (foundRect?.step != null && (foundRect?.key == null || e.type == "dblclick")) { return switchCtx(foundRect.ctx, foundRect.step); }
     if (foundRect?.key != focusedShape) { focusShape(foundRect); }
-  });
+  }
+  canvas.addEventListener("click", clickShape);
+
+  canvas.addEventListener("dblclick", clickShape);
 
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
