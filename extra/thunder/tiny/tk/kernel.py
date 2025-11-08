@@ -1,17 +1,17 @@
 from contextlib import AbstractContextManager
-from tinygrad.uop.ops import UOp, KernelInfo
+from tinygrad.uop.ops import UOp, KernelInfo, AxisType
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
 
 class _tk_range:
   user_rid = 0
-  def __init__(self, end:int): self.end, self.done = end, False
+  def __init__(self, end:int, axis_type:AxisType): self.end, self.axis_type, self.done = end, axis_type, False
   def __iter__(self): return self
   def __next__(self):
     if not self.done:
       self.done = True
       _tk_range.user_rid += 1
-      self._rng = UOp.range(self.end, _tk_range.user_rid-1)
+      self._rng = UOp.range(self.end, _tk_range.user_rid-1, axis_type=self.axis_type)
       return self._rng
     raise StopIteration
 
@@ -37,9 +37,9 @@ class Kernel(AbstractContextManager):
   @property
   def warpgroup(self): return self.group(4)
 
-  def range(self, end:int):
-    rng = _tk_range(end)
-    self.range_stack.append(rng)
+  def range(self, end:int, axis_type:AxisType=AxisType.LOOP, track:bool=True):
+    rng = _tk_range(end, axis_type)
+    if track: self.range_stack.append(rng)
     return rng
 
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
@@ -54,4 +54,4 @@ class Kernel(AbstractContextManager):
   def endrange(self):
     last_store = self.store_stack.pop()
     last_range = self.range_stack.pop()
-    return last_store[1].after(last_store[0].barrier().end(last_range._rng)).reshape(last_store[1].shape)
+    return last_store[1].after(last_store[0].end(last_range._rng)).reshape(last_store[1].shape)
