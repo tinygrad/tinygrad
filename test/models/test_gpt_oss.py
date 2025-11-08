@@ -146,17 +146,19 @@ class TestGPTOSS(unittest.TestCase):
     with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
     with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
 
-    # instead of 90 expert "blocks" we have 1
-    n_experts = 1
-    blocks, torch_blocks = blocks[:, :, -n_experts:], torch_blocks[:, :, -n_experts:]
-    scales, torch_scales = scales[:, :, -n_experts:], torch_scales[:, :, -n_experts:]
-    ic(blocks.shape, scales.shape)
+    # instead of 90 expert "blocks" we use 1
+    n_experts, n_dim = 1, 1
+    blocks, torch_blocks = blocks[:, -n_dim:, -n_experts:], torch_blocks[:, -n_dim:, -n_experts:]
+    scales, torch_scales = scales[:, -n_dim:, -n_experts:], torch_scales[:, -n_dim:, -n_experts:]
 
     # check we are loading the same weights
     assert scales.shape == torch_scales.shape
     assert blocks.shape == torch_blocks.shape
     np.testing.assert_allclose(blocks.numpy(), torch_blocks.cpu().numpy(), strict=True)
     np.testing.assert_allclose(scales.numpy(), torch_scales.cpu().numpy(), strict=True)
+
+    # dequantize in torch
+    torch_out = convert_moe_packed_tensors(torch_blocks, torch_scales)
 
     # dequantize
     MXFP4_ID = 39
@@ -166,15 +168,17 @@ class TestGPTOSS(unittest.TestCase):
     blocks_reshaped = blocks.reshape(rows_total, B)    # row-major
     scales_reshaped = scales.reshape(rows_total, 1)
     data = scales_reshaped.cat(blocks_reshaped, dim=-1).flatten()
-    ic(data.numpy()[:65])
-    out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID).reshape(*prefix_shape, G, B * 2).transpose(1,2)
+    ic(scales.numel() * 32)
+    out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID)
+    out = out.reshape(*prefix_shape, G, B * 2).transpose(1,2)
 
-    # dequantize in torch
-    torch_out = convert_moe_packed_tensors(torch_blocks, torch_scales)
+    o, torch_o = out.numpy().squeeze(), torch_out.float().detach().cpu().numpy().squeeze()
+    ic(o, torch_o)
+
+
+    out, torch_out = out.squeeze(), torch_out.squeeze()
     ic(torch_out.shape, out.shape)
-    ic(torch_out.dtype, out.dtype)
     np.testing.assert_allclose(out.float().numpy(), torch_out.float().detach().cpu().numpy(), atol=1e-6, rtol=1e-6)
-
 
 
 if __name__ == '__main__':

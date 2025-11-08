@@ -288,10 +288,10 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   if (dtype := { 0: dtypes.float32, 1: dtypes.float16, 16: dtypes.int8, 17: dtypes.int16, 18: dtypes.int32 }.get(ggml_type)) is not None:
     return t[:dtype.itemsize * n].bitcast(dtype)
 
-  def q_to_uint8(t: Tensor, b: int) -> Tensor:
+  def q_to_uint8(t:Tensor, b:int) -> Tensor:
     # TODO: rewrite with arange?
-    shift_tensor, bitmask = Tensor.stack(*[ Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b) ]), 0xff >> (8 - b)
-    return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
+    shift_tensor, bitmask = Tensor.stack(*[Tensor(2**(i*b), device=t.device, dtype=t.dtype) for i in range(8//b)]), 0xff >> (8 - b)
+    return t.unsqueeze(-1).expand((*t.shape, 8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
   if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34), 39: (32, 17) }.get(ggml_type)) is not None:
@@ -307,17 +307,30 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       d = blocks[:,-2:].bitcast(dtypes.float16).cast(dtypes.float32).expand((-1, 256))
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
     if ggml_type == 39:
-      scales = blocks[:, 0].cast(dtypes.int32)
+      scales, blocks = blocks[:, 0].cast(dtypes.int32), blocks[:, 1:17]
       ic(blocks.shape, scales.shape)
-      d = ((scales >= 2).cast(dtypes.float32) * (scales.cast(dtypes.float32) - 128).exp2() +
+      ic(scales.numpy())
+      d = ((scales >= 2).cast(dtypes.float32) * (scales.cast(dtypes.float32) - 127).exp2() +
            (scales == 1).cast(dtypes.float32) * 2.0**(-127) +
            (scales == 0).cast(dtypes.float32) * 2.0**(-128)).unsqueeze(-1)
-      codes = q_to_uint8(blocks[:, 1:17], 4)
+      codes = q_to_uint8(blocks, 4)
       sign = 1.0 - codes.rshift(3).cast(dtypes.float32) * 2.0
       exp, mant = codes.rshift(1).bitwise_and(0x3).cast(dtypes.float32), codes.bitwise_and(0x1).cast(dtypes.float32)
+      ic(exp.numpy())
       fp4_val = sign * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
                         (exp == 0).cast(dtypes.float32) * 0.5 * mant)
       return (fp4_val * d).flatten(-2)[:n]
+    # if ggml_type == 39:
+    #   scales, blocks = blocks[:, 0].cast(dtypes.int32) - 127, blocks[:, 1:17]
+    #   codes = q_to_uint8(blocks, 4)
+    #   sign = 1.0 - codes.rshift(3).cast(dtypes.float32) * 2.0
+    #   exp, mant = codes.rshift(1).bitwise_and(0x3).cast(dtypes.float32), codes.bitwise_and(0x1).cast(dtypes.float32)
+    #   fp4_val = sign * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
+    #                     (exp == 0).cast(dtypes.float32) * 0.5 * mant)
+    #   ic(blocks.shape, scales.shape)
+    #   ic(codes.shape, codes.numpy()[0])
+    #   fp4_val = sign * (exp)
+    #   return blocks
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 @accept_filename
