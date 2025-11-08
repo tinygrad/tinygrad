@@ -1521,15 +1521,11 @@ impl<'a> Thread<'a> {
                     match op {
                         // load
                         20..=23 => (0..op - 19).for_each(|i| {
-                            (0..32).for_each(|j| {
-                                self.vec_reg.get_lane_mut(j)[vdst + i] = self.sds.read(addr + 4 * i);
-                            })
+                            self.vec_reg[vdst + i] = self.sds.read(addr + 4 * i);
                         }),
                         // store
                         26..=29 => (0..op - 25).for_each(|i| {
-                            (0..32).for_each(|j| {
-                                self.sds.write(addr + 4 * i, self.vec_reg.get_lane(j)[data + i]);
-                            })
+                            self.sds.write(addr + 4 * i, self.vec_reg[data + i]);
                         }),
                         _ => todo_instr!(instruction)?,
                     }
