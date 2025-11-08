@@ -204,11 +204,6 @@ def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
   return ret
 
-def traverse():
-  if isleaf: return "leaf found exit from here"
-  if curr.op == Ops.PERMUTE
-
-  
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   storage_offset = storage_offset or tensor.storage_offset()
