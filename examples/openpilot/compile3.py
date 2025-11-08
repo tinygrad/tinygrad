@@ -4,8 +4,6 @@ import numpy as np
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device, dtypes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.engine.realize import CompiledRunner
-
-import onnx
 from tinygrad.nn.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
@@ -96,6 +94,7 @@ def test_vs_compile(run, inputs, test_val=None):
   return val
 
 def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
+  import onnx
   import onnxruntime as ort
   
   onnx_inputs = {k:v.numpy() for k,v in new_inputs.items()}
