@@ -2100,17 +2100,15 @@ class Tensor(OpMixin):
     noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
     assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
     o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
-    # input size scaling factor to make sure shrink for stride is possible
-    f_ = [smax(1, ceildiv(o*s - d, i)) for o,s,i,d in zip(o_,s_,i_,d_)]
     # repeats such that we don't need padding
-    x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
-    # handle dilation
-    x = x.shrink_to(noop + [k*(i*f+d) for k,i,d,f in zip(k_,i_,d_,f_)]).reshape(noop + flatten((k,(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)))
+    x = self.repeat([1]*len(noop) + [ceildiv(o*(s+i),i) for o,s,i in zip(o_,s_,i_)])
     # handle stride
-    x = x.shrink_to(noop + flatten((k,o*s) for k,o,s in zip(k_,o_,s_))).reshape(noop + flatten((k,o,s) for k,o,s in zip(k_,o_,s_)))
-    x = x.shrink_to(noop + flatten((k,o,1) for k,o in zip(k_,o_))).reshape(noop + flatten((k,o) for k,o in zip(k_,o_)))
+    x = x.shrink_to(noop + [o*(s+i) for o,s,i in zip(o_,s_,i_)]).reshape(noop + flatten((o,s+i) for o,s,i in zip(o_,s_,i_)))
+    # handle dilation
+    x = x.shrink_to(noop + flatten((o,k*d) for o,k,d in zip(o_,k_,d_))).reshape(noop + flatten(zip(o_,k_,d_)))
+    x = x.shrink_to(noop + flatten((o,k,1) for o,k in zip(o_,k_))).reshape(noop + flatten(zip(o_,k_)))
     # permute to move reduce to the end
-    return x.permute(*range(len(noop)), *[len(noop)+i*2+1 for i in range(len(i_))], *[len(noop)+i*2 for i in range(len(i_))])
+    return x.permute(*range(len(noop)), *[len(noop)+i*2+n for n in range(2) for i in range(len(i_))])
 
   def _resolve_pool_pads(self, padding:int|Sequence[int], dims:int) -> Sequence[int]:
     if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
