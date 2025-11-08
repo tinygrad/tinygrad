@@ -3,15 +3,19 @@ import functools
 from typing import TypeAlias, TYPE_CHECKING, Self
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, flatten, dedup
-if TYPE_CHECKING:
-  from tinygrad.uop.ops import UOp
-  sint:TypeAlias = UOp|int
+if TYPE_CHECKING: from tinygrad.uop.ops import UOp
+sint: TypeAlias = "UOp | int"
+
+def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
+  # unsqueeze left to make every shape same length
+  max_dim = max(len(shape) for shape in shapes)
+  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 
 class MovementMixin:
   # required to implement
   def _mop(self, op:Ops, arg) -> Self: raise NotImplementedError
   @property
-  def shape(self) -> tuple["sint", ...]: raise NotImplementedError
+  def shape(self) -> tuple[sint, ...]: raise NotImplementedError
 
   # great functions you get!
   @property
@@ -26,7 +30,7 @@ class MovementMixin:
     """
     return len(self.shape)
 
-  def numel(self) -> "sint":
+  def numel(self) -> sint:
     """
     Returns the total number of elements in the tensor.
 
@@ -41,6 +45,33 @@ class MovementMixin:
     total = self.ndim + int(extra)
     if not -max(1, total) <= dim <= max(1, total)-1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total)-1]}")
     return dim + total if dim < 0 else dim
+
+  def _broadcast_to(self, new_shape:tuple[sint, ...]) -> Self:
+    if self.shape == new_shape: return self
+    if self.ndim > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
+    # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
+    shape, _ = _align_left(self.shape, new_shape)
+    # for each dimension, check either dim is 1, or it does not change
+    if not all(s == ns or s == 1 for s,ns in zip(shape, new_shape)):
+      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
+    reshaped = self.reshape(shape)
+    ret = reshaped._mop(Ops.EXPAND, arg=new_shape)
+    return reshaped if ret.shape == reshaped.shape else ret
+
+  def expand(self, shape, *args) -> Self:
+    """
+    Returns a tensor that is expanded to the shape that is specified.
+    Expand can also increase the number of dimensions that a tensor has.
+
+    Passing a `-1` or `None` to a dimension means that its size will not be changed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.expand(4, -1).numpy())
+    ```
+    """
+    new_shape = tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_align_left(self.shape, argfix(shape, *args)))))
+    return self._broadcast_to(new_shape)
 
   def reshape(self, shape, *args) -> Self:
     """
@@ -61,7 +92,7 @@ class MovementMixin:
     ret = self._mop(Ops.RESHAPE, arg=new_shape)
     return self if ret.shape == self.shape else ret
 
-  def shrink(self, arg:tuple[tuple["sint", "sint"]|None, ...]) -> Self:
+  def shrink(self, arg:tuple[tuple[sint, sint]|None, ...]) -> Self:
     """
     Returns a tensor that shrinks the each axis based on input arg.
     `arg` must have the same length as `self.ndim`.
@@ -123,6 +154,9 @@ class MovementMixin:
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
 
   # **** high level ****
+
+  def shrink_to(self, shape, *args) -> Self:
+    return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""
@@ -257,3 +291,38 @@ class MovementMixin:
     for i, name in enumerate(lhs): assert (name not in sizes) or sizes[name] == t.shape[i], f"size provided for dimension {name} incorrect"
     t = t.permute([lhs.index(name) for name in rhs])
     return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
+
+  # *** movement ops with expand ***
+
+  def repeat_interleave(self, repeats:int, dim:int|None=None) -> Self:
+    """
+    Repeats elements of a tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.repeat_interleave(2).numpy())
+    ```
+    """
+    x, dim = (self.flatten(), 0) if dim is None else (self, self._resolve_dim(dim))
+    shp = x.shape
+    return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
+
+  def repeat(self, repeats, *args) -> Self:
+    """
+    Repeats tensor number of times along each dimension specified by `repeats`.
+    `repeats` can be passed as a tuple or as separate arguments.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.repeat(4, 2).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.repeat(4, 2, 1).shape)
+    ```
+    """
+    repeats = argfix(repeats, *args)
+    base_shape = _align_left(self.shape, repeats)[0]
+    unsqueezed_shape = flatten([[1, s] for s in base_shape])
+    expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
+    final_shape = [r*s for r,s in zip(repeats, base_shape)]
+    return self.reshape(unsqueezed_shape).expand(expanded_shape).reshape(final_shape)

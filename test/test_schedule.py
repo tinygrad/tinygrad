@@ -1573,6 +1573,13 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
   def test_conv2d_fused(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
 
+  def test_resnet_conv2d(self):
+    x = Tensor.empty(1, 8, 32, 32)
+    w1 = Tensor.empty(8, 8, 3, 3)
+    w2 = Tensor.empty(8, 8, 1, 1)
+    out = x.conv2d(w1).conv2d(w2)
+    check_schedule(out, 2)
+
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
