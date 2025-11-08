@@ -541,7 +541,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
     match op:
-      case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
+      case Ops.RESHAPE | Ops.EXPAND | Ops.STRIDE: src_args = [arg]
       case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case _: raise RuntimeError(f"{op} is not a MovementOp")

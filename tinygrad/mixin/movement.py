@@ -152,6 +152,14 @@ class MovementMixin:
     if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
     flip_arg = tuple([i in axis_arg for i in range(len(self.shape))])
     return self._mop(Ops.FLIP, arg=flip_arg) if any(flip_arg) else self
+  
+  def stride(self, stride: tuple[int, ...]) -> Self:
+    """
+    TODO: ... Write me ...
+    """
+    if self.ndim != len(stride): raise ValueError(f"{self.ndim=} != {len(stride)=}")
+    if any(s == 0 for s in stride): raise ValueError(f"stride cannot be zero, got {stride}")
+    return self._mop(Ops.STRIDE, arg=(stride, 0)) if any(s != 1 for s in stride) else self
 
   # **** high level ****
 

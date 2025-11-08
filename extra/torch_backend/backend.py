@@ -175,28 +175,18 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
-def _mock_from_as_strided(u: UOp) -> Tensor:
-  base = Tensor.from_uop(u.src[0])
-  size, stride, off = u.arg
-  t = base.reshape(size)
-  t._mock_as_strided_meta = dict(size=size, stride=stride, offset=off)
-  return t
-
-Tensor._mock_from_as_strided = staticmethod(_mock_from_as_strided)
-
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # multiple as_strided do not compound
   base = canonical_base(tensor)
   u = UOp(Ops.STRIDE, dtype=base.dtype, src=(base.uop,), arg=(tuple(size), tuple(stride), int(storage_offset or 0)))
+  ret = Tensor(u, requires_grad=False)
 
-  ret = Tensor._mock_from_as_strided(u)
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, ret)
   if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
   # No Longer Needed
   # for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
   return ret
-
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
