@@ -71,6 +71,17 @@ class TestTorchBackend(unittest.TestCase):
     a = a.as_strided((1,1,5,5), (50,50,7,1), storage_offset=21)
     np.testing.assert_equal(a.cpu().numpy().sum(-1), [[[115,150,185,220,255]]])
 
+  def test_as_strided_uop(self):
+    a = torch.arange(70, device=device).reshape(1,1,10,7)
+
+    v = a.as_strided((1,1,10,5), (0,0,7,1), storage_offset=0)
+    v = v.as_strided((1,1,5,5), (50,50,7,1), storage_offset=21)
+
+    np.testing.assert_equal(v.cpu().numpy().sum(-1), [[[115,150,185,220,255]]])
+
+    uops = str(v._mock_as_strided_meta)
+    assert "stride" in uops and "size" in uops
+
   def test_plus_inplace(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
