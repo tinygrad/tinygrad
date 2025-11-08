@@ -1,7 +1,6 @@
 import unittest
 
 from tinygrad import Tensor, Device, dtypes, Context
-from tinygrad.uop.ops import UOp, KernelInfo, AxisType
 from tinygrad.engine.realize import ExecItem, get_runner
 
 from extra.thunder.tiny.tk import WARP_THREADS
