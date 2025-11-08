@@ -239,7 +239,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      ending_ranges[x] = list(UOp.sink(*[ro for ri, ro in zip(rngs, out_rngs) if ri is not ro]).ranges.keys())
+      ending_ranges[x] += list(UOp.sink(*[ro for ri, ro in zip(rngs, out_rngs) if ri is not ro]).ranges.keys())
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
@@ -252,7 +252,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
         rng = f"{ri}" if ri == ro else f"{ri} -> {ro}"
         if realized_ranges is not None and i in realized_ranges: rng = colored(rng, "yellow")
         disp.append("["+rng+"]")
-      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}", ''.join(disp))
+      ending_ranges_str = ','.join([r.render() for r in ending_ranges[x]])
+      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s} {ending_ranges_str:10s}", ''.join(disp))
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)

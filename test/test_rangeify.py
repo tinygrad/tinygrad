@@ -301,7 +301,6 @@ class TestRangeify(unittest.TestCase):
     x.conv2d(w1).conv2d(w2).realize()
 
   def test_resnet_conv2d(self):
-    # this changes with ONE_POOL=1
     x = Tensor.empty(1, 8, 32, 32)
     w1 = Tensor.empty(8, 8, 3, 3)
     w2 = Tensor.empty(8, 8, 1, 1)
