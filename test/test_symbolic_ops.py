@@ -290,13 +290,14 @@ class TestSymbolicOps(unittest.TestCase):
   def test_conv2d_ceildiv_edge_case(self):
     v = Variable('v', 11, 50_000)
     val = 39601
-    x = Tensor.randn(1, 22, 50_000)[:, :, :v.bind(val)]
+    a = Tensor.randn(1, 22, 50_000)
+    x = a[:, :, :val]
+    vx = a[:, :, :v.bind(val)]
     weight = Tensor.randn(256, 22, 12)
 
-    result = x.conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
-    var_val = {v.expr: val}
-    shape = tuple(sym_infer(s, var_val) for s in result.shape)
-    self.assertEqual(shape, (1, 256, 6600))
+    expected = x.conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3)).numpy()
+    symbolic = vx.conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))[...,:expected.shape[-1]].numpy()
+    np.testing.assert_allclose(symbolic, expected, atol=1e-3, rtol=1e-3)
 
 if __name__ == '__main__':
   unittest.main()
