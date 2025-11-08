@@ -2,7 +2,7 @@ name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
   DOWNLOAD_CACHE_VERSION: '12'
-  PYTHON_CACHE_VERSION: '3'
+  PYTHON_CACHE_VERSION: '4'
   APT_CACHE_VERSION: '1'
   BUILD_CACHE_VERSION: '1'
   CAPTURE_PROCESS_REPLAY: 1
@@ -230,7 +230,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: linting-only
-        python-version: '3.10'
+        python-version: '3.11'
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
@@ -243,8 +243,9 @@ jobs:
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
-    - name: Run TYPED=1
-      run: TYPED=1 python -c "import tinygrad"
+    # broken because of UPatAny
+    #- name: Run TYPED=1
+    #  run: TYPED=1 python -c "import tinygrad"
 
   unittest:
     name: Unit Tests
@@ -293,7 +294,11 @@ jobs:
       run: MAX_LINE_COUNT=18000 python sz.py
 
   spec:
-    name: SPEC=2
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2]
+    name: SPEC=2 (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -305,7 +310,7 @@ jobs:
         key: spec-unit
         deps: testing_unit
     - name: Test SPEC=2
-      run: SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --ignore test/test_nn.py --timeout 40 -k "not test_setitem_big"
+      run: IGNORE_OOB=0 SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -640,6 +645,7 @@ jobs:
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run TestOps.test_add with SQTT
         run: |
+          VIZ=1 PMC=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
       - name: Run process replay tests

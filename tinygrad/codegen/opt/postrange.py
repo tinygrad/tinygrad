@@ -2,11 +2,11 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, axis_letters, axis_colors
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
-from tinygrad.codegen.opt import axis_colors, Opt, OptOps, KernelOptError, check, axis_letters
+from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 
@@ -63,8 +63,15 @@ class Scheduler:
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
     return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
 
+  def _output_rngs(self) -> list[UOp]:
+    return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
   def _globalizable_rngs(self) -> list[UOp]:
-    return flatten([list(UOp.sink(*s.src[1:]).ranges) for s in self.ast.src if s.op is Ops.END])
+    ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
+    # exclude any output ranges from global that don't appear in all BUFFERIZE
+    for x in self.ast.toposort():
+      if x.op is Ops.BUFFERIZE:
+        ret = [r for r in ret if r in x.ranges]
+    return ret
 
   def convert_loop_to_global(self):
     if not self.ren.has_local: return None
@@ -75,11 +82,13 @@ class Scheduler:
     self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
 
   def colors(self) -> list[str]:
-    output_rngs = self._globalizable_rngs()
+    output_rngs = self._output_rngs()
+    globalizible_rngs = self._globalizable_rngs()
     ret = []
     for x,r in zip(self.axis_types, self.rngs):
       if self.dont_use_locals and x == AxisType.GLOBAL: ret.append("BLUE")
       elif r not in output_rngs and x == AxisType.LOOP: ret.append("BLACK")
+      elif r not in globalizible_rngs and x == AxisType.LOOP: ret.append("white")
       else: ret.append(axis_colors[x])
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
@@ -95,6 +104,8 @@ class Scheduler:
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
+
+  def upcast_size(self) -> int: return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
   # copied from kernel.py
   @property
@@ -208,8 +219,7 @@ class Scheduler:
     return ret
 
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
-    reduceops = [x for x in self.ast.toposort() if x.op is Ops.REDUCE]
-    if not len(reduceops): raise KernelOptError("no reduce ops for TensorCore")
+    if not (reduceops := self.reduceops): raise KernelOptError("no reduce ops for TensorCore")
     reduceop = reduceops[0]
     if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
@@ -303,9 +313,10 @@ class Scheduler:
 
   # helpers for hand_coded_optimizations
   @property
+  def reduceops(self) -> list[UOp]: return [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
+  @property
   def reduceop(self) -> UOp|None:
-    red = [x for x in self.ast.backward_slice if x.op is Ops.REDUCE]
-    if not len(red): return None
+    if not (red := self.reduceops): return None
     return UOp(Ops.REDUCE_AXIS, red[0].dtype, red[0].src, (red[0].arg, ()))
   @property
   def bufs(self) -> list[UOp]: return [x for x in self.ast.toposort() if x.op is Ops.INDEX][::-1]
@@ -334,6 +345,6 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.AFTER and u.src[0].op is Ops.DEFINE_LOCAL for u in ast.backward_slice):
+    if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)

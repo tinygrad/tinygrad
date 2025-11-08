@@ -73,8 +73,6 @@ class NVDev(PCIDevImplBase):
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
 
-    self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
-
     self.smi_dev, self.is_booting = False, True
     self._early_init()
 

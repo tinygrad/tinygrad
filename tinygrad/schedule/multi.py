@@ -68,7 +68,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # allgather
   copied_chunks = []
   for i,c in enumerate(reduced_chunks):
-    this_chunk = [None] * len(buf.device)
+    this_chunk: list[UOp|None] = [None] * len(buf.device)
     this_chunk[(i+len(buf.device)-1)%n_lbs] = c
     for step in range(n_lbs-1):
       dest = (i+step)%n_lbs
@@ -186,7 +186,7 @@ def shrink_multi(root:UOp, multi:UOp):
 
 def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
-  return multi.src[0].flip(root.marg).multi(multi.axis)
+  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).multi(multi.axis)
 
 # from multiple devices -> one
 def copy_multi(multi:UOp, device:UOp):
@@ -214,7 +214,7 @@ multi_pm = PatternMatcher([
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])+replace_allreduce
 
