@@ -131,16 +131,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 
-ir_f32_to_fp8 = """define i8 @f32_to_fp8(float%v,i1%b){
- %i=bitcast float%v to i32 %e=and i32%i,2139095040
- %s=icmp eq i32%e,2139095040 br i1%b,label%B,label%F
-B: %cb=call float @llvm.amdgcn.fmed3.f32(float%v,float 57344.0,float -57344.0) br label%C
-F: %cf=call float @llvm.amdgcn.fmed3.f32(float%v,float 448.0,float -448.0) br label%C
-C: %c=phi float[%cb,%B],[%cf,%F] %x=select i1%s,float%v,float%c br i1%b,label%P,label%Q
-P: %pb=call i32 @llvm.amdgcn.cvt.pk.bf8.f32(float%x,float%x,i32 0,i1 false) br label%R
-Q: %pf=call i32 @llvm.amdgcn.cvt.pk.fp8.f32(float%x,float%x,i32 0,i1 false) br label%R
-R: %p=phi i32[%pb,%P],[%pf,%Q] %t=trunc i32%p to i8 ret i8%t}"""
-
 class LLVMRenderer(Renderer):
   device = "CPU"
   abi = 'win64cc' if sys.platform == 'win32' else None
@@ -152,16 +142,12 @@ class LLVMRenderer(Renderer):
   if AMX: tensor_cores = tc.amx
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))
-
-  def render(self, uops: list[UOp]) -> str:
-    return "\n".join((self._render_header(uops), *(k:=self._render_kernel(uops))[0], k[1], self._render_footer(uops)))
-  def _render_header(self, uops: list[UOp]) -> str: return ir_f32_to_fp8 if any(u.dtype in dtypes.fp8s for u in uops) else ""
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
-    sprefix = "".join([f" {x}" for x in (prefix or []) + [self.abi] if x is not None])
-    return "\n".join([f"define{sprefix} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
+    return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
     args: list[tuple[str, DType]] = []
@@ -246,6 +232,19 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
     (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
   ])
+  def render(self, uops: list[UOp]) -> str:
+    prefix = ["""define i8 @f32_to_fp8(float %val, i1 %is_bf8) {
+entry: %ival = bitcast float %val to i32\n  %exp = and i32 %ival, 2139095040\n  %is_special = icmp eq i32 %exp, 2139095040
+br i1 %is_special, label %select_clip, label %clip
+clip: br i1 %is_bf8, label %bf8_clip, label %fp8_clip
+bf8_clip: %clamped_bf8 = call float @llvm.amdgcn.fmed3.f32(float %val, float 57344.0, float -57344.0)\n  br label %select_clip
+fp8_clip: %clamped_fp8 = call float @llvm.amdgcn.fmed3.f32(float %val, float 448.0, float -448.0)    \n  br label %select_clip
+select_clip: %phi_val = phi float [%val, %entry], [%clamped_bf8, %bf8_clip], [%clamped_fp8, %fp8_clip]\n  br i1 %is_bf8, label %do_bf8, label %do_fp8
+do_bf8: %packed_bf8 = call i32 @llvm.amdgcn.cvt.pk.bf8.f32(float %phi_val, float %phi_val, i32 0, i1 false)\n  br label %exit
+do_fp8: %packed_fp8 = call i32 @llvm.amdgcn.cvt.pk.fp8.f32(float %phi_val, float %phi_val, i32 0, i1 false)\n  br label %exit
+exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc = trunc i32 %packed to i8\n  ret i8 %trunc
+}""".replace(": ", ":\n  ")] if any(u.dtype in dtypes.fp8s for u in uops) else []
+    return "\n".join((k:=self._render_kernel(uops, prefix))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     # TODO: this is copied from cstyle
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
