@@ -117,62 +117,37 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
-def close_buffer(branch, outer_axes, inner_axes, device, ctx:IndexingContext):
-  closing_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
-  return branch.substitute({R: r for R, r in zip(outer_axes, closing_outer_axes)})\
-  .bufferize(*closing_outer_axes, *inner_axes, arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
-
-def replace_loops(branch, outer_axes, inner_axes, device, ctx:IndexingContext):
-  closing_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
-  return branch.substitute({R: r for R, r in zip(outer_axes, closing_outer_axes)})
-
-def kron(buf, B, outer_axes, device, ctx):
-  outer_axes_shape = tuple((ax.vmax+1 for ax in outer_axes)) #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
-  inner_shape = buf.shape[len(outer_axes_shape):]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
-  T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I]) for I in product(*(range(s) for s in inner_shape))]
-  #convert to flat index
-  def idx(I, S): return sum(i * prod(S[j+1:]) for j, i in enumerate(I))
-  def tensordot(T, S, k, M): #k-mode tensor product
-    pre, post = S[:k], S[k+1:]
-    contract = lambda pr, j, su: sum(T[idx((*pr, i, *su), S)] * M[j][i] for i in range(S[k]))
-    return ([contract(pr, j, su) for pr in product(*map(range, pre)) for j in range(len(M)) for su in product(*map(range, post))], pre + (len(M),) + post)
-  #apply B/A/G along all dimensions - kron or n-mode product
-  acc, shp = T, tuple(inner_shape)
-  for k in range(len(inner_shape)): acc, shp = tensordot(acc, shp, k, B)
-  axes = [ctx.new_range(s, AxisType.LOOP) for s in shp]
-  #mask to correspond each coordinate asked by the buffer to the transformed element
-  def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0) #have to double check
-  #sum all wheres together, and return buffer
-  return sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))\
-    .bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
-
-
-def kron_nobuff(node, B, outer_axes, axes, device, ctx):
-  #outer_axes_shape = tuple((ax.vmax+1 for ax in outer_axes)) #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
-  #inner_shape = buf.shape[len(outer_axes_shape):]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
-  print("OUTER AXES", *[f"\n{k}" for k in outer_axes])
-  print("AXES", *[f"\n{k}" for k in axes])
+def kron(source, matrix, outer_axes, inner_axes, device, ctx):
+  """Unified Kronecker product applying n-mode tensor product along inner dimensions."""
+  # Create new outer ranges for output
   new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
-  inner_shape = [ax.vmax+1 for ax in axes]
-  print("NODE", node)
-  T = [UOp(Ops.SUBSTITUTE, dtype=node.dtype, src=(node, UOp(Ops.NOOP, src=tuple(outer_axes+axes)),UOp(Ops.NOOP, src=tuple(new_outer_axes+[UOp.const(dtypes.index, i) for i in I])))) \
-    for I in product(*(range(s) for s in inner_shape))]
-  #convert to flat index
+  inner_shape = [ax.vmax+1 for ax in inner_axes]
+
+  # Create element accessor based on source type
+  if source.op in {Ops.BUFFER, Ops.BUFFERIZE}:
+    # Buffer: index with new ranges
+    T = [source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in I]) for I in product(*(range(s) for s in inner_shape))]
+  else:
+    # Expression: use SUBSTITUTE to replace ranges
+    T = [UOp(Ops.SUBSTITUTE, dtype=source.dtype, src=(source, UOp(Ops.NOOP, src=tuple(outer_axes+inner_axes)),\
+         UOp(Ops.NOOP, src=tuple(new_outer_axes+[UOp.const(dtypes.index, i) for i in I])))) for I in product(*(range(s) for s in inner_shape))]
+
+  # Shared helpers for tensor product
   def idx(I, S): return sum(i * prod(S[j+1:]) for j, i in enumerate(I))
-  def tensordot(T, S, k, M): #k-mode tensor product
+  def tensordot(T, S, k, M):
     pre, post = S[:k], S[k+1:]
     contract = lambda pr, j, su: sum(T[idx((*pr, i, *su), S)] * M[j][i] for i in range(S[k]))
     return ([contract(pr, j, su) for pr in product(*map(range, pre)) for j in range(len(M)) for su in product(*map(range, post))], pre + (len(M),) + post)
-  #apply B/A/G along all dimensions - kron or n-mode product
+  def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0)
+
+  # Apply matrix along all dimensions
   acc, shp = T, tuple(inner_shape)
-  for k in range(len(inner_shape)): acc, shp = tensordot(acc, shp, k, B)
-  axes = [ctx.new_range(s, AxisType.LOOP) for s in shp] #we need new axes to do conditionals on
-  
-  #mask to correspond each coordinate asked by the buffer to the transformed element
-  def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0) #have to double check
-  #sum all wheres together, and return buffer
-  return sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))\
-    .bufferize(*(tuple(new_outer_axes)+tuple(axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+  for k in range(len(inner_shape)): acc, shp = tensordot(acc, shp, k, matrix)
+
+  # Assemble result with conditional selection
+  result_axes = [ctx.new_range(s, AxisType.LOOP) for s in shp]
+  return sum(acc[idx(I,shp)] * onehot(result_axes, I) for I in product(*(range(s) for s in shp)))\
+    .bufferize(*(tuple(new_outer_axes)+tuple(result_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
 def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
@@ -190,51 +165,33 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
 def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
   if not (g := winoguard(lhs, rhs, redu)): return None
-  print("LOOK HERE WINOGRAD REWRITE HAS BEEN CALLED! *******************************************************")
   act_like, w_like, k_axes, o_axes, o_adds = g
   reduce_ranges = list(redu.src[1:]); device = redu.device
-  other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
-  other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes] #all loop like axes not tied to our core conv
+  other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges]
+  other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes]
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
   tile_ranges, tile_ranges1 = [[ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_axes] for _ in range(2)]
   inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_axes] for _ in range(2)]
   other_loop_ranges_xhat, other_loop_ranges_ghat = [[ctx.new_range(r.vmax+1, AxisType.LOOP) for r in rs] for rs in (other_loops_x, other_loops_w)]
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
-  #Create input tiles by adding tile and inner tile axes and applying n-mode tensor product
-  X_vu = close_buffer(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, device, ctx)
-  XHAT = kron(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, device, ctx)
-  X_vu = replace_loops(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, device, ctx)
-  XHAT = kron_nobuff(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
-  #process kernel tiles
-  w = close_buffer(w_like.substitute({k: r for k, r in zip(k_axes, kranges)}), other_reduces+other_loops_w, kranges, device, ctx)
-  GHAT = kron(w, winograd_G, other_reduces+other_loops_w, device, ctx)
-  #hadamard multiply and reduce over other ranges like cin
-  mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1) * GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
-  MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges1, *inner6_1, arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL)) # which loops come first?
-  #output transform (inferring tile shape from tile_ranges_1 is a hack cuz those ranges are "dead")
 
-  #*********** TRYING WITHOUT A BUFFERIZE ***********
-  # outer_axes = other_loop_ranges_xhat + other_loop_ranges_ghat + tile_ranges1
-  # outer_axes_shape = tuple((ax.vmax+1 for ax in outer_axes)) #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
-  # inner_shape = [ax.vmax+1 for ax in inner6_1]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
-  # T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I]) for I in product(*(range(s) for s in inner_shape))]
-  # #convert to flat index
-  # def idx(I, S): return sum(i * prod(S[j+1:]) for j, i in enumerate(I))
-  # def tensordot(T, S, k, M): #k-mode tensor product
-  #   pre, post = S[:k], S[k+1:]
-  #   contract = lambda pr, j, su: sum(T[idx((*pr, i, *su), S)] * M[j][i] for i in range(S[k]))
-  #   return ([contract(pr, j, su) for pr in product(*map(range, pre)) for j in range(len(M)) for su in product(*map(range, post))], pre + (len(M),) + post)
-  # #apply B/A/G along all dimensions - kron or n-mode product
-  # acc, shp = T, tuple(inner_shape)
-  # for k in range(len(inner_shape)): acc, shp = tensordot(acc, shp, k, B)
-  # axes = [ctx.new_range(s, AxisType.LOOP) for s in shp]
-  # #mask to correspond each coordinate asked by the buffer to the transformed element
-  # def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0) #have to double check
-  # #sum all wheres together, and return buffer
-  # return sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))
-  return XHAT.index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes])
-  return kron(MHAT, winograd_At, other_loops_x+other_loops_w+tile_ranges1, device, ctx)\
-    .index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes]) #bring back the original loops like cout (Do we need to use simplify?)
+  # Transform activations (input tiles) - unified kron handles expression case
+  X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
+  XHAT = kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
+
+  # Transform weights - unified kron handles expression case
+  w_sub = w_like.substitute({k: r for k, r in zip(k_axes, kranges)})
+  GHAT = kron(w_sub, winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
+
+  # Hadamard multiply and reduce over other ranges like cin
+  mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1) *
+               GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
+  MHAT = mhat_redu.bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges1, *inner6_1,
+                             arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+
+  # Output transform - MHAT inner axes are the transformed 6's (now in inner6_1 positions)
+  return kron(MHAT, winograd_At, other_loop_ranges_xhat+other_loop_ranges_ghat+tile_ranges1, inner6_1, device, ctx)\
+    .index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes])
 
 winograd_rewrite = PatternMatcher([
  ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))
