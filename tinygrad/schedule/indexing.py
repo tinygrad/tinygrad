@@ -247,7 +247,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)
-      if len(rngs) != len(out_rngs):
+      if x.op is Ops.RESHAPE or len(rngs) != len(out_rngs):
         disp = render_ranges(rngs, realized=realized_ranges) + " -> " + render_ranges(out_rngs, realized=realized_ranges)
       else:
         disp = render_ranges(rngs, out_rngs, realized=realized_ranges)
