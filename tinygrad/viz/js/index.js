@@ -716,8 +716,8 @@ async function main() {
         }
       }
       metadata.appendChild(tabulate(ret.summary.map(s => {
-        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "24px").style("height", "100%");
-        return [s.label.trim(), div.node()];
+        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
+        return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
       })).node());
     } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
     return document.querySelector("#custom").replaceChildren(root);
