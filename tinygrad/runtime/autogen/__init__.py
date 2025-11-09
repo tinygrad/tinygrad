@@ -100,7 +100,8 @@ python3 src/compiler/builtin_types_h.py gen/builtin_types.h""", cwd=path, shell=
                                  lambda: [sys("llvm-config-20 --includedir")+"/clang-c/Index.h"], lambda: sys("llvm-config-20 --cflags").split(),
                                  types={"CXString":"ci._CXString","CXType":"ci.Type","CXCursor":"ci.Cursor"}, prolog=["import clang.cindex as ci"])
     case "metal": return load("metal", ["find_library('Metal')"],[f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in [
-                              "Device", "Resource", "IndirectCommandBuffer", "CommandEncoder"]], ["-xobjective-c", "-isysroot", macossdk])
+  "ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
+                              ["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
     case "libsystem": return load("libsystem", ["find_library('System')"], [f"{macossdk}/usr/include/dispatch/dispatch.h"],
                                   ["-xobjective-c", "-isysroot", macossdk], recsym=True, types={"dispatch_block_t":"ctypes.c_void_p"})
     case _: raise AttributeError(f"no such autogen: {nm}")

@@ -27,6 +27,8 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
 
 ints = (TK.INT, TK.UINT, TK.LONG, TK.ULONG, TK.LONGLONG, TK.ULONGLONG)
 specs = (CK.OBJC_SUPER_CLASS_REF,)
+# https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
+arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
 def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None, epilog="", recsym=False, use_errno=False, anon_names={}, types={}):
   files, args = files() if callable(files) else files, args() if callable(args) else args
@@ -92,40 +94,58 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * {t.get_array_size()})"
       case TK.INCOMPLETEARRAY: return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * 0)"
       case TK.OBJCINTERFACE:
-        if t.spelling in types: return t.spelling
-        lines.append(f"class {t.spelling}({', '.join([tname(b.type) for b in decl.get_children() if b.kind in specs] or ['objc.Spec'])}): pass")
-        types[t.spelling] = (nm:=t.spelling), True
-        ims, cms = parse_objc_spec(decl, t.spelling, CK.OBJC_INSTANCE_METHOD_DECL), parse_objc_spec(decl, t.spelling, CK.OBJC_CLASS_METHOD_DECL)
-        lines.extend([*([f"{nm}._methods_ = [", *ims, ']'] if ims else []),
-                      *([f"{nm}._classmethods_ = [", *cms, ']'] if cms else [])])
-        return t.spelling
+        is_defn = bool([f.kind for f in decl.get_children() if f.kind in (CK.OBJC_INSTANCE_METHOD_DECL, CK.OBJC_CLASS_METHOD_DECL)])
+        if (nm:=t.spelling) not in types: lines.append(f"class {nm}(objc.Spec): pass")
+        types[nm] = nm, is_defn
+        if is_defn:
+          ims, cms = parse_objc_spec(decl, t.spelling, CK.OBJC_INSTANCE_METHOD_DECL), parse_objc_spec(decl, t.spelling, CK.OBJC_CLASS_METHOD_DECL)
+          lines.extend([*([f"{nm}._bases_ = [{', '.join(bs)}]"] if (bs:=[tname(b.type) for b in decl.get_children() if b.kind in specs]) else []),
+                        *([f"{nm}._methods_ = [", *ims, ']'] if ims else []), *([f"{nm}._classmethods_ = [", *cms, ']'] if cms else [])])
+        return nm
       case TK.OBJCSEL: return "objc.id_"
       case TK.OBJCID: return (objc:=True, "objc.id_")[1]
       case TK.OBJCOBJECT:
-        if basetype(t).kind != TK.OBJCID: raise NotImplementedError("generics unsupported")
+        if basetype(t).kind != TK.OBJCID: raise NotImplementedError(f"generics unsupported: {t.spelling}")
+        ps = [proto(p) for p in protocols(t)]
+        if len(ps) == 0:
+          types[t.spelling] = "objc.id_", True
+          return "objc.id_"
+        if len(ps) == 1:
+          types[t.spelling] = ps[0], True
+          return ps[0]
         types[t.spelling] = (nm:=f"_anondynamic{anoncnt()}"), True
-        lines.append(f"class {nm}(objc.Spec): pass")
-        ims, cms = [], []
-        for p in protocols(t):
-          try:
-            ims.extend(parse_objc_spec(defn:=p.get_definition(), nm, CK.OBJC_INSTANCE_METHOD_DECL))
-            cms.extend(parse_objc_spec(defn, nm, CK.OBJC_CLASS_METHOD_DECL))
-          except Exception as e: raise Exception(f"at {p.spelling}") from e
-        lines.extend([*([f"{nm}._methods_ = [", *ims, "]"] if ims else []), *([f"{nm}._classmethods_ = [", *cms, "]"] if cms else [])])
+        lines.append(f"class {nm}({', '.join(p for p in ps)}): pass # {t.spelling}")
         return nm
       case TK.INVALID: raise Exception("invalid!!!!")
       case _: raise NotImplementedError(f"unsupported type {t.kind}")
 
-  # parses an objc @interface or @protocol, returning a list of (instance) methods or class methods
+  # parses an objc @interface or @protocol, returning a list of declerations that objc.Spec can parse, for the specified kind
+  # NB: ivars are unsupported
   def parse_objc_spec(decl:Cursor, nm:str, kind:CK) -> list[str]:
     if decl is None: return []
     ms = []
     for d in filter(lambda d: d.kind == kind, decl.get_children()):
-      try: ms.append(f"  ('{d.spelling}', {nm if (rt:=d.result_type).spelling=='instancetype' else tname(rt)}, "
-                     f"[{', '.join(tname(a.type) for a in d.get_arguments())}]),")
+      try: ms.append(f"  ('{d.spelling}', {repr('instancetype') if (rt:=d.result_type).spelling=='instancetype' else tname(rt)}, "
+                     f"[{', '.join('instancetype' if a.spelling == 'instancetype' else tname(a.type) for a in d.get_arguments())}]" +
+                     (", True" if CK.NS_RETURNS_RETAINED in attrs(d) or any(d.spelling.startswith(s) for s in arc_families) else "") + "),")
       except NotImplementedError as e: print(f"skipping {nm}.{d.spelling}: {e}")
       except Exception as e: raise Exception(f"error while parsing {d.spelling}") from e
     return ms
+
+  # libclang doesn't have a "type" for @protocol, so we have to do this here...
+  def proto(decl):
+    nonlocal lines, types
+    if (nm:=decl.spelling) in types and types[nm][1]: return types[nm][0]
+    # check if this is a forward declaration
+    is_defn = bool([f.kind for f in decl.get_children() if f.kind in (CK.OBJC_INSTANCE_METHOD_DECL, CK.OBJC_CLASS_METHOD_DECL)])
+    if nm not in types: lines.append(f"class {nm}(objc.Spec): pass")
+    types[nm] = nm, is_defn
+    if is_defn:
+      bs = [proto(b) for b in decl.get_children() if b.kind==CK.OBJC_PROTOCOL_REF and b.spelling != decl.spelling]
+      ims, cms = parse_objc_spec(decl, nm, CK.OBJC_INSTANCE_METHOD_DECL), parse_objc_spec(decl, nm, CK.OBJC_CLASS_METHOD_DECL)
+      lines.extend([*([f"{nm}._bases_ = [{', '.join(bs)}]"] if bs else []),
+                    *([f"{nm}._methods_ = [", *ims, "]"] if ims else []), *([f"{nm}._classmethods_ = [", *cms, "]"] if cms else [])])
+    return nm
 
   for f in files:
     tu = Index.create().parse(f, args, options=TU.PARSE_DETAILED_PROCESSING_RECORD)
@@ -156,6 +176,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
             else: macros += [f"{c.spelling} = {tname(c.type)}({readext(f, last(c).extent)})"]
           case CK.VAR_DECL if c.linkage == LK.EXTERNAL and dll:
             lines.append(f"try: {c.spelling} = {tname(c.type)}.in_dll(dll, '{c.spelling}')\nexcept (ValueError,AttributeError): pass")
+          case CK.OBJC_PROTOCOL_DECL: proto(c)
       except NotImplementedError as e:
         print(f"Skipping {c.spelling}: {e}")
         lines, types = rollback

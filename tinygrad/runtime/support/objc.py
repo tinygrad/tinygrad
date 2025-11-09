@@ -6,7 +6,8 @@ class id_(ctypes.c_void_p):
   def __hash__(self): return hash(self.value)
   def __eq__(self, other): return self.value == other.value
   def __del__(self):
-    if self.retain and not sys.is_finalizing(): msg("release")(self)
+    if self.retain and not sys.is_finalizing(): self.release()
+  def release(self): msg("release")(self)
   def retained(self): return (setattr(self, 'retain', True), self)[1]
 
 def returns_retained(f): return functools.wraps(f)(lambda *args, **kwargs: f(*args, **kwargs).retained())
@@ -18,13 +19,36 @@ lib.objc_getClass.restype = id_
 
 def msg(sel:str, restype=id_, argtypes=[], retain=False, clsmeth=False):
   # Using attribute access returns a new reference so setting restype is safe
-  (sender:=lib["objc_msgSend"]).restype, sender.argtypes = restype, argtypes
-  return (returns_retained if retain else lambda x:x)(lambda ptr, *args: sender(ptr._objc_class_ if clsmeth else ptr, getsel(sel.encode()), *args))
+  (sender:=lib["objc_msgSend"]).restype, sender.argtypes = restype, [id_, id_]+argtypes if argtypes else []
+  def f(ptr, *args): return sender(ptr._objc_class_ if clsmeth else ptr, getsel(sel.encode()), *args)
+  return returns_retained(f) if retain else f
 
 class MetaSpec(type(id_)):
   def __new__(mcs, name, bases, dct):
-    for m in dct.pop("_methods_", []): dct[m[0]] = msg(*m)
-    for cm in dct.pop("_classmethods_", []): dct[cm[0]] = classmethod(msg(*cm, clsmeth=True))
-    return super().__new__(mcs, name, bases, {'_objc_class_': lib.objc_getClass(name.encode()), **dct})
+    cls = super().__new__(mcs, name, bases, {'_objc_class_': lib.objc_getClass(name.encode()), '_children_': set(), **dct})
+    cls._methods_, cls._classmethods_ = dct.get('_methods_', []), dct.get('_classmethods_', [])
+    return cls
+
+  def __setattr__(cls, k, v):
+    super().__setattr__(k, v)
+    if k in ("_methods_", "_classmethods_"):
+      for m in v: cls._addmeth(m, clsmeth=(v=="_classmethods_"))
+      for c in cls._children_: c._inherit(cls)
+    if k == "_bases_":
+      for b in v:
+        b._children_.add(cls)
+        cls._inherit(b)
+
+  def _inherit(cls, b):
+    for _b in getattr(b, "_bases_", []): cls._inherit(_b)
+    for m in getattr(b, "_methods_", []): cls._addmeth(m)
+    for m in getattr(b, "_classmethods_", []): cls._addmeth(m, True)
+    for c in cls._children_: c._inherit(cls)
+
+  def _addmeth(cls, m, clsmeth=False):
+    nm = m[0].strip(':').replace(':', '_')
+    if clsmeth: setattr(cls, nm, classmethod(msg(m[0], cls if m[1] == 'instancetype' else m[1],
+                                                 [cls if a == 'instancetype' else a for a in m[2]], *m[3:], clsmeth=True)))
+    else: setattr(cls, nm, msg(m[0], cls if m[1] == 'instancetype' else m[1], [cls if a == 'instancetype' else a for a in m[2]], *m[3:]))
 
 class Spec(id_, metaclass=MetaSpec): pass
