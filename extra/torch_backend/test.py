@@ -41,7 +41,6 @@ class TestTorchBackend(unittest.TestCase):
     out = a.reshape(4,1).expand(4,4)
     np.testing.assert_equal(out.cpu().numpy(), [[1,1,1,1],[2,2,2,2],[3,3,3,3],[4,4,4,4]])
 
-  @unittest.skip("tiny backend view ops return same object for no-op views; violates PyTorch contract. WIP fix.")
   def test_reshape(self):
     a = torch.Tensor([[1,2],[3,4]]).to(device)
     np.testing.assert_equal(a.reshape(4).cpu().numpy(), [1,2,3,4])
@@ -50,7 +49,6 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(a.unsqueeze(1).unsqueeze(1).cpu().numpy(), [[[[1,2]]],[[[3,4]]]])
     np.testing.assert_equal(a.unsqueeze(1).unsqueeze(1).squeeze().cpu().numpy(), [[1,2],[3,4]])
 
-  @unittest.skip("tiny backend view ops return same object for no-op views; violates PyTorch contract. WIP fix.")
   def test_permute(self):
     a = torch.Tensor([[1,2],[3,4]]).to(device)
     print(a.stride())
@@ -148,7 +146,6 @@ class TestTorchBackend(unittest.TestCase):
     c = a == b
     print(c.cpu())
 
-  @unittest.skip("tiny backend view ops return same object for no-op views; violates PyTorch contract. WIP fix.")
   def test_maxpool2d_backward(self):
     x = torch.arange(3*3, dtype=torch.float32, device=device).reshape(1, 1, 3, 3).requires_grad_(True)
     torch.nn.functional.max_pool2d(x, kernel_size=2, stride=1).sum().backward()
@@ -206,7 +203,7 @@ class TestTorchBackend(unittest.TestCase):
     assert torch.equal(tensor_a, tensor_b)
     assert not torch.equal(tensor_a, tensor_c)
 
-  @unittest.skip("tiny backend view ops return same object for no-op views; violates PyTorch contract. WIP fix.")
+  @unittest.skip("Skipping for now.. WIP fix.")
   def test_linalg_eigh(self):
     a = torch.tensor([[1, 2], [2, 1]], dtype=torch.float32, device=device)
     w, v = torch.linalg.eigh(a)
