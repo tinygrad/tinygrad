@@ -175,6 +175,7 @@ jobs:
         deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.3 $(lsb_release -cs) main
         EOF
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+        sudo apt -qq update || true
         sudo apt-get install -y --no-install-recommends libclang-20-dev comgr
     - name: Verify comgr (3) autogen
       run: |
