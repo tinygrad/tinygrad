@@ -409,7 +409,8 @@ async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
 
 /** @param {float} temperature */
 /** @returns {Promise<Decode_Sequence[]|undefined>} */
-async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updatedCallback) {
+async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updatedCallback, inferLoopContext) {
+    if (inferLoopContext.is_done) return;
     // reuse_cache = 0;
     let context = [];
     if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
@@ -429,6 +430,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     const context_prompt_length = context.length;
     if (context_prompt_length > MAX_TOKENS_TO_DECODE) {
         console.error("Context prompt length exceeds 224");
+        inferLoopContext.is_done = true;
         return;
     }
 
@@ -480,11 +482,17 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     }
 
     for (let i = 0; i < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS); ++i) {
-        if (cancelToken.cancelled) return;
+        if (cancelToken.cancelled) {
+            inferLoopContext.is_done = true;
+            return;
+        }
 
         let decode_results = await decodeOne(nets, sequences, decoder_state, audio_features_batch);
         for (let idx = 0; idx < sequences.length; ++idx) {
-            if (cancelToken.cancelled) return;
+            if (cancelToken.cancelled) {
+                inferLoopContext.is_done = true;
+                return;
+            }
             if (sequences[idx].context.at(-1) === TOK_EOS) continue;
             let seek = seeks_batch[idx];
 
@@ -516,7 +524,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
     let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
     let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
 
-    // return sequences[idx];
+    inferLoopContext.is_done = true;
     return sequences;
 }
 
@@ -589,7 +597,13 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             seeks_batch.push(seek);
         }
 
-        let sequences = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updateCallback);
+        let inferLoopContext = {
+            is_done: false
+        };
+        let sequences;
+        while (!inferLoopContext.is_done) {
+            sequences = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updateCallback, inferLoopContext);
+        }
 
         for (let i = 0; i < batch_size && seek_index + i < seek_ranges.length;) {
             if (cancelToken.cancelled) {
