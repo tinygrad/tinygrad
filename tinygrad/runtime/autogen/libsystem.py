@@ -1713,21 +1713,22 @@ except AttributeError: pass
 try: (os_release:=dll.os_release).restype, os_release.argtypes = None, [ctypes.c_void_p]
 except AttributeError: pass
 
+class OS_os_workgroup(objc.Spec): pass
+class OS_object(objc.Spec): pass
 class NSObject(objc.Spec): pass
-instancetype = objc.id_
-class struct__NSZone(Struct): pass
-class Protocol(objc.Spec): pass
 IMP = ctypes.CFUNCTYPE(None, )
 class NSInvocation(objc.Spec): pass
 class NSMethodSignature(objc.Spec): pass
+class struct__NSZone(Struct): pass
+class Protocol(objc.Spec): pass
 NSUInteger = ctypes.c_ulong
 class NSString(objc.Spec): pass
 NSObject._methods_ = [
-  ('init', instancetype, []),
+  ('init', 'instancetype', []),
   ('dealloc', None, []),
   ('finalize', None, []),
-  ('copy', objc.id_, []),
-  ('mutableCopy', objc.id_, []),
+  ('copy', objc.id_, [], True),
+  ('mutableCopy', objc.id_, [], True),
   ('methodForSelector:', IMP, [objc.id_]),
   ('doesNotRecognizeSelector:', None, [objc.id_]),
   ('forwardingTargetForSelector:', objc.id_, [objc.id_]),
@@ -1739,11 +1740,11 @@ NSObject._methods_ = [
 NSObject._classmethods_ = [
   ('load', None, []),
   ('initialize', None, []),
-  ('new', instancetype, []),
-  ('allocWithZone:', instancetype, [ctypes.POINTER(struct__NSZone)]),
-  ('alloc', instancetype, []),
-  ('copyWithZone:', objc.id_, [ctypes.POINTER(struct__NSZone)]),
-  ('mutableCopyWithZone:', objc.id_, [ctypes.POINTER(struct__NSZone)]),
+  ('new', 'instancetype', [], True),
+  ('allocWithZone:', 'instancetype', [ctypes.POINTER(struct__NSZone)], True),
+  ('alloc', 'instancetype', [], True),
+  ('copyWithZone:', objc.id_, [ctypes.POINTER(struct__NSZone)], True),
+  ('mutableCopyWithZone:', objc.id_, [ctypes.POINTER(struct__NSZone)], True),
   ('instancesRespondToSelector:', BOOL, [objc.id_]),
   ('conformsToProtocol:', BOOL, [Protocol]),
   ('instanceMethodForSelector:', IMP, [objc.id_]),
@@ -1754,13 +1755,13 @@ NSObject._classmethods_ = [
   ('description', NSString, []),
   ('debugDescription', NSString, []),
 ]
-class OS_object(NSObject): pass
+OS_object._bases_ = [NSObject]
 OS_object._methods_ = [
-  ('init', instancetype, []),
+  ('init', 'instancetype', []),
 ]
-class OS_os_workgroup(OS_object): pass
+OS_os_workgroup._bases_ = [OS_object]
 OS_os_workgroup._methods_ = [
-  ('init', instancetype, []),
+  ('init', 'instancetype', []),
 ]
 os_workgroup_t = OS_os_workgroup
 mach_port_t = ctypes.c_uint
@@ -1816,37 +1817,6 @@ os_workgroup_mpt_attr_t = ctypes.POINTER(struct_os_workgroup_max_parallel_thread
 try: (os_workgroup_max_parallel_threads:=dll.os_workgroup_max_parallel_threads).restype, os_workgroup_max_parallel_threads.argtypes = ctypes.c_int, [os_workgroup_t, os_workgroup_mpt_attr_t]
 except AttributeError: pass
 
-os_workgroup_interval_t = objc.id_
-class struct_os_workgroup_interval_data_opaque_s(Struct): pass
-struct_os_workgroup_interval_data_opaque_s._fields_ = [
-  ('sig', uint32_t),
-  ('opaque', (ctypes.c_char * 56)),
-]
-os_workgroup_interval_data_t = ctypes.POINTER(struct_os_workgroup_interval_data_opaque_s)
-# __attribute__((availability(macos, introduced=11.0))) __attribute__((availability(ios, introduced=14.0))) __attribute__((availability(tvos, introduced=14.0))) __attribute__((availability(watchos, introduced=7.0))) __attribute__((swift_private)) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) extern int os_workgroup_interval_start(os_workgroup_interval_t  _Nonnull wg, uint64_t start, uint64_t deadline, os_workgroup_interval_data_t  _Nullable data)
-try: (os_workgroup_interval_start:=dll.os_workgroup_interval_start).restype, os_workgroup_interval_start.argtypes = ctypes.c_int, [os_workgroup_interval_t, uint64_t, uint64_t, os_workgroup_interval_data_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=11.0))) __attribute__((availability(ios, introduced=14.0))) __attribute__((availability(tvos, introduced=14.0))) __attribute__((availability(watchos, introduced=7.0))) __attribute__((swift_private)) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) extern int os_workgroup_interval_update(os_workgroup_interval_t  _Nonnull wg, uint64_t deadline, os_workgroup_interval_data_t  _Nullable data)
-try: (os_workgroup_interval_update:=dll.os_workgroup_interval_update).restype, os_workgroup_interval_update.argtypes = ctypes.c_int, [os_workgroup_interval_t, uint64_t, os_workgroup_interval_data_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=11.0))) __attribute__((availability(ios, introduced=14.0))) __attribute__((availability(tvos, introduced=14.0))) __attribute__((availability(watchos, introduced=7.0))) __attribute__((swift_private)) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) extern int os_workgroup_interval_finish(os_workgroup_interval_t  _Nonnull wg, os_workgroup_interval_data_t  _Nullable data)
-try: (os_workgroup_interval_finish:=dll.os_workgroup_interval_finish).restype, os_workgroup_interval_finish.argtypes = ctypes.c_int, [os_workgroup_interval_t, os_workgroup_interval_data_t]
-except AttributeError: pass
-
-os_workgroup_parallel_t = objc.id_
-class struct_os_workgroup_attr_opaque_s(Struct): pass
-struct_os_workgroup_attr_opaque_s._fields_ = [
-  ('sig', uint32_t),
-  ('opaque', (ctypes.c_char * 60)),
-]
-os_workgroup_attr_t = ctypes.POINTER(struct_os_workgroup_attr_opaque_s)
-# __attribute__((availability(macos, introduced=11.0))) __attribute__((availability(ios, introduced=14.0))) __attribute__((availability(tvos, introduced=14.0))) __attribute__((availability(watchos, introduced=7.0))) __attribute__((visibility("default"))) __attribute__((ns_returns_retained)) __attribute__((swift_name("WorkGroupParallel.init(__name:attr:)"))) __attribute__((ns_returns_retained)) extern os_workgroup_parallel_t  _Nullable os_workgroup_parallel_create(const char * _Nullable name, os_workgroup_attr_t  _Nullable attr)
-try: (os_workgroup_parallel_create:=dll.os_workgroup_parallel_create).restype, os_workgroup_parallel_create.argtypes = os_workgroup_parallel_t, [ctypes.POINTER(ctypes.c_char), os_workgroup_attr_t]
-except AttributeError: pass
-
-os_workgroup_parallel_create = objc.returns_retained(os_workgroup_parallel_create)
 dispatch_time_t = ctypes.c_ulonglong
 int64_t = ctypes.c_longlong
 # __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) extern dispatch_time_t dispatch_time(dispatch_time_t when, int64_t delta)
@@ -1873,52 +1843,9 @@ except AttributeError: pass
 try: (qos_class_main:=dll.qos_class_main).restype, qos_class_main.argtypes = qos_class_t, []
 except AttributeError: pass
 
-dispatch_object_t = objc.id_
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_retain(dispatch_object_t  _Nonnull object)
-try: (dispatch_retain:=dll.dispatch_retain).restype, dispatch_retain.argtypes = None, [dispatch_object_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_release(dispatch_object_t  _Nonnull object)
-try: (dispatch_release:=dll.dispatch_release).restype, dispatch_release.argtypes = None, [dispatch_object_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((pure)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void * _Nullable dispatch_get_context(dispatch_object_t  _Nonnull object)
-try: (dispatch_get_context:=dll.dispatch_get_context).restype, dispatch_get_context.argtypes = ctypes.c_void_p, [dispatch_object_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_set_context(dispatch_object_t  _Nonnull object, void * _Nullable context)
-try: (dispatch_set_context:=dll.dispatch_set_context).restype, dispatch_set_context.argtypes = None, [dispatch_object_t, ctypes.c_void_p]
-except AttributeError: pass
-
-dispatch_function_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_set_finalizer_f(dispatch_object_t  _Nonnull object, dispatch_function_t  _Nullable finalizer)
-try: (dispatch_set_finalizer_f:=dll.dispatch_set_finalizer_f).restype, dispatch_set_finalizer_f.argtypes = None, [dispatch_object_t, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.12))) __attribute__((availability(ios, introduced=10.0))) __attribute__((availability(tvos, introduced=10.0))) __attribute__((availability(watchos, introduced=3.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchObject.activate(self:)"))) extern void dispatch_activate(dispatch_object_t  _Nonnull object)
-try: (dispatch_activate:=dll.dispatch_activate).restype, dispatch_activate.argtypes = None, [dispatch_object_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchObject.suspend(self:)"))) extern void dispatch_suspend(dispatch_object_t  _Nonnull object)
-try: (dispatch_suspend:=dll.dispatch_suspend).restype, dispatch_suspend.argtypes = None, [dispatch_object_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchObject.resume(self:)"))) extern void dispatch_resume(dispatch_object_t  _Nonnull object)
-try: (dispatch_resume:=dll.dispatch_resume).restype, dispatch_resume.argtypes = None, [dispatch_object_t]
-except AttributeError: pass
-
-dispatch_qos_class_t = qos_class_t
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_set_qos_class_floor(dispatch_object_t  _Nonnull object, dispatch_qos_class_t qos_class, int relative_priority)
-try: (dispatch_set_qos_class_floor:=dll.dispatch_set_qos_class_floor).restype, dispatch_set_qos_class_floor.argtypes = None, [dispatch_object_t, dispatch_qos_class_t, ctypes.c_int]
-except AttributeError: pass
-
 intptr_t = ctypes.c_long
 # __attribute__((unavailable(""))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) extern intptr_t dispatch_wait(void * _Nonnull object, dispatch_time_t timeout)
 try: (dispatch_wait:=dll.dispatch_wait).restype, dispatch_wait.argtypes = intptr_t, [ctypes.c_void_p, dispatch_time_t]
-except AttributeError: pass
-
-# __attribute__((unavailable(""))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) extern void dispatch_notify(void * _Nonnull object, dispatch_object_t  _Nonnull queue, dispatch_block_t  _Nonnull notification_block)
-try: (dispatch_notify:=dll.dispatch_notify).restype, dispatch_notify.argtypes = None, [ctypes.c_void_p, dispatch_object_t, ctypes.c_void_p]
 except AttributeError: pass
 
 # __attribute__((unavailable(""))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) extern void dispatch_cancel(void * _Nonnull object)
@@ -1929,151 +1856,13 @@ except AttributeError: pass
 try: (dispatch_testcancel:=dll.dispatch_testcancel).restype, dispatch_testcancel.argtypes = intptr_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# __attribute__((availability(macos, introduced=10.6, deprecated=10.9))) __attribute__((availability(ios, introduced=4.0, deprecated=6.0))) __attribute__((visibility("default"))) __attribute__((nonnull(2))) __attribute__((nothrow)) __attribute__((cold)) __attribute__((format(printf, 2, 3))) extern void dispatch_debug(dispatch_object_t  _Nonnull object, const char * _Nonnull message, ...)
-try: (dispatch_debug:=dll.dispatch_debug).restype, dispatch_debug.argtypes = None, [dispatch_object_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6, deprecated=10.9))) __attribute__((availability(ios, introduced=4.0, deprecated=6.0))) __attribute__((visibility("default"))) __attribute__((nonnull(2))) __attribute__((nothrow)) __attribute__((cold)) __attribute__((format(printf, 2, 0))) extern void dispatch_debugv(dispatch_object_t  _Nonnull object, const char * _Nonnull message, int ap)
-try: (dispatch_debugv:=dll.dispatch_debugv).restype, dispatch_debugv.argtypes = None, [dispatch_object_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int]
-except AttributeError: pass
-
-dispatch_queue_t = objc.id_
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_async(dispatch_queue_t  _Nonnull queue, dispatch_block_t  _Nonnull block)
-try: (dispatch_async:=dll.dispatch_async).restype, dispatch_async.argtypes = None, [dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_async_f(dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_async_f:=dll.dispatch_async_f).restype, dispatch_async_f.argtypes = None, [dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchQueue.sync(self:execute:)"))) extern void dispatch_sync(dispatch_queue_t  _Nonnull queue, __attribute__((noescape)) dispatch_block_t  _Nonnull block)
-try: (dispatch_sync:=dll.dispatch_sync).restype, dispatch_sync.argtypes = None, [dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_sync_f(dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_sync_f:=dll.dispatch_sync_f).restype, dispatch_sync_f.argtypes = None, [dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchQueue.asyncAndWait(self:execute:)"))) extern void dispatch_async_and_wait(dispatch_queue_t  _Nonnull queue, __attribute__((noescape)) dispatch_block_t  _Nonnull block)
-try: (dispatch_async_and_wait:=dll.dispatch_async_and_wait).restype, dispatch_async_and_wait.argtypes = None, [dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_async_and_wait_f(dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_async_and_wait_f:=dll.dispatch_async_and_wait_f).restype, dispatch_async_and_wait_f.argtypes = None, [dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(4))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_apply_f(size_t iterations, dispatch_queue_t  _Nullable queue, void * _Nullable context, void (* _Nonnull work)(void * _Nullable, size_t))
-try: (dispatch_apply_f:=dll.dispatch_apply_f).restype, dispatch_apply_f.argtypes = None, [size_t, dispatch_queue_t, ctypes.c_void_p, ctypes.CFUNCTYPE(None, ctypes.c_void_p, size_t)]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6, deprecated=10.9))) __attribute__((availability(ios, introduced=4.0, deprecated=6.0))) __attribute__((visibility("default"))) __attribute__((pure)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) extern dispatch_queue_t  _Nonnull dispatch_get_current_queue(void)
-try: (dispatch_get_current_queue:=dll.dispatch_get_current_queue).restype, dispatch_get_current_queue.argtypes = dispatch_queue_t, []
-except AttributeError: pass
-
-dispatch_queue_global_t = objc.id_
-uintptr_t = ctypes.c_ulong
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((const)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) extern dispatch_queue_global_t  _Nonnull dispatch_get_global_queue(intptr_t identifier, uintptr_t flags)
-try: (dispatch_get_global_queue:=dll.dispatch_get_global_queue).restype, dispatch_get_global_queue.argtypes = dispatch_queue_global_t, [intptr_t, uintptr_t]
-except AttributeError: pass
-
-dispatch_queue_attr_t = objc.id_
-# __attribute__((availability(macos, introduced=10.12))) __attribute__((availability(ios, introduced=10.0))) __attribute__((availability(tvos, introduced=10.0))) __attribute__((availability(watchos, introduced=3.0))) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) __attribute__((pure)) __attribute__((nothrow)) __attribute__((swift_private)) extern dispatch_queue_attr_t  _Nonnull dispatch_queue_attr_make_initially_inactive(dispatch_queue_attr_t  _Nullable attr)
-try: (dispatch_queue_attr_make_initially_inactive:=dll.dispatch_queue_attr_make_initially_inactive).restype, dispatch_queue_attr_make_initially_inactive.argtypes = dispatch_queue_attr_t, [dispatch_queue_attr_t]
-except AttributeError: pass
-
-dispatch_autorelease_frequency_t = CEnum(ctypes.c_ulong)
-DISPATCH_AUTORELEASE_FREQUENCY_INHERIT = dispatch_autorelease_frequency_t.define('DISPATCH_AUTORELEASE_FREQUENCY_INHERIT', 0)
-DISPATCH_AUTORELEASE_FREQUENCY_WORK_ITEM = dispatch_autorelease_frequency_t.define('DISPATCH_AUTORELEASE_FREQUENCY_WORK_ITEM', 1)
-DISPATCH_AUTORELEASE_FREQUENCY_NEVER = dispatch_autorelease_frequency_t.define('DISPATCH_AUTORELEASE_FREQUENCY_NEVER', 2)
-
-# __attribute__((availability(macos, introduced=10.12))) __attribute__((availability(ios, introduced=10.0))) __attribute__((availability(tvos, introduced=10.0))) __attribute__((availability(watchos, introduced=3.0))) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) __attribute__((pure)) __attribute__((nothrow)) __attribute__((swift_private)) extern dispatch_queue_attr_t  _Nonnull dispatch_queue_attr_make_with_autorelease_frequency(dispatch_queue_attr_t  _Nullable attr, dispatch_autorelease_frequency_t frequency)
-try: (dispatch_queue_attr_make_with_autorelease_frequency:=dll.dispatch_queue_attr_make_with_autorelease_frequency).restype, dispatch_queue_attr_make_with_autorelease_frequency.argtypes = dispatch_queue_attr_t, [dispatch_queue_attr_t, dispatch_autorelease_frequency_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.10))) __attribute__((availability(ios, introduced=8.0))) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) __attribute__((pure)) __attribute__((nothrow)) __attribute__((swift_private)) extern dispatch_queue_attr_t  _Nonnull dispatch_queue_attr_make_with_qos_class(dispatch_queue_attr_t  _Nullable attr, dispatch_qos_class_t qos_class, int relative_priority)
-try: (dispatch_queue_attr_make_with_qos_class:=dll.dispatch_queue_attr_make_with_qos_class).restype, dispatch_queue_attr_make_with_qos_class.argtypes = dispatch_queue_attr_t, [dispatch_queue_attr_t, dispatch_qos_class_t, ctypes.c_int]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.12))) __attribute__((availability(ios, introduced=10.0))) __attribute__((availability(tvos, introduced=10.0))) __attribute__((availability(watchos, introduced=3.0))) __attribute__((visibility("default"))) __attribute__((malloc)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((swift_name("DispatchQueue.init(__label:attr:queue:)"))) __attribute__((ns_returns_retained)) extern dispatch_queue_t  _Nonnull dispatch_queue_create_with_target(const char * _Nullable label, dispatch_queue_attr_t  _Nullable attr, dispatch_queue_t  _Nullable target) asm("_dispatch_queue_create_with_target$V2")
-try: (dispatch_queue_create_with_target:=dll.dispatch_queue_create_with_target).restype, dispatch_queue_create_with_target.argtypes = dispatch_queue_t, [ctypes.POINTER(ctypes.c_char), dispatch_queue_attr_t, dispatch_queue_t]
-except AttributeError: pass
-
-dispatch_queue_create_with_target = objc.returns_retained(dispatch_queue_create_with_target)
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((malloc)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((swift_name("DispatchQueue.init(__label:attr:)"))) __attribute__((ns_returns_retained)) extern dispatch_queue_t  _Nonnull dispatch_queue_create(const char * _Nullable label, dispatch_queue_attr_t  _Nullable attr)
-try: (dispatch_queue_create:=dll.dispatch_queue_create).restype, dispatch_queue_create.argtypes = dispatch_queue_t, [ctypes.POINTER(ctypes.c_char), dispatch_queue_attr_t]
-except AttributeError: pass
-
-dispatch_queue_create = objc.returns_retained(dispatch_queue_create)
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((pure)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) extern const char * _Nonnull dispatch_queue_get_label(dispatch_queue_t  _Nullable queue)
-try: (dispatch_queue_get_label:=dll.dispatch_queue_get_label).restype, dispatch_queue_get_label.argtypes = ctypes.POINTER(ctypes.c_char), [dispatch_queue_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.10))) __attribute__((availability(ios, introduced=8.0))) __attribute__((visibility("default"))) __attribute__((warn_unused_result(""))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern dispatch_qos_class_t dispatch_queue_get_qos_class(dispatch_queue_t  _Nonnull queue, int * _Nullable relative_priority_ptr)
-try: (dispatch_queue_get_qos_class:=dll.dispatch_queue_get_qos_class).restype, dispatch_queue_get_qos_class.argtypes = dispatch_qos_class_t, [dispatch_queue_t, ctypes.POINTER(ctypes.c_int)]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nothrow)) __attribute__((swift_name("DispatchObject.setTarget(self:queue:)"))) extern void dispatch_set_target_queue(dispatch_object_t  _Nonnull object, dispatch_queue_t  _Nullable queue)
-try: (dispatch_set_target_queue:=dll.dispatch_set_target_queue).restype, dispatch_set_target_queue.argtypes = None, [dispatch_object_t, dispatch_queue_t]
-except AttributeError: pass
-
+dispatch_qos_class_t = qos_class_t
 # __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nothrow)) __attribute__((swift_name("dispatchMain()"))) extern void dispatch_main(void)
 try: (dispatch_main:=dll.dispatch_main).restype, dispatch_main.argtypes = None, []
 except AttributeError: pass
 
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(2))) __attribute__((nonnull(3))) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_after(dispatch_time_t when, dispatch_queue_t  _Nonnull queue, dispatch_block_t  _Nonnull block)
-try: (dispatch_after:=dll.dispatch_after).restype, dispatch_after.argtypes = None, [dispatch_time_t, dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(2))) __attribute__((nonnull(4))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_after_f(dispatch_time_t when, dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_after_f:=dll.dispatch_after_f).restype, dispatch_after_f.argtypes = None, [dispatch_time_t, dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=4.3))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_barrier_async(dispatch_queue_t  _Nonnull queue, dispatch_block_t  _Nonnull block)
-try: (dispatch_barrier_async:=dll.dispatch_barrier_async).restype, dispatch_barrier_async.argtypes = None, [dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=4.3))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_barrier_async_f(dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_barrier_async_f:=dll.dispatch_barrier_async_f).restype, dispatch_barrier_async_f.argtypes = None, [dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=4.3))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_barrier_sync(dispatch_queue_t  _Nonnull queue, __attribute__((noescape)) dispatch_block_t  _Nonnull block)
-try: (dispatch_barrier_sync:=dll.dispatch_barrier_sync).restype, dispatch_barrier_sync.argtypes = None, [dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=4.3))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_barrier_sync_f(dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_barrier_sync_f:=dll.dispatch_barrier_sync_f).restype, dispatch_barrier_sync_f.argtypes = None, [dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_barrier_async_and_wait(dispatch_queue_t  _Nonnull queue, __attribute__((noescape)) dispatch_block_t  _Nonnull block)
-try: (dispatch_barrier_async_and_wait:=dll.dispatch_barrier_async_and_wait).restype, dispatch_barrier_async_and_wait.argtypes = None, [dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_barrier_async_and_wait_f(dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_barrier_async_and_wait_f:=dll.dispatch_barrier_async_and_wait_f).restype, dispatch_barrier_async_and_wait_f.argtypes = None, [dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_queue_set_specific(dispatch_queue_t  _Nonnull queue, const void * _Nonnull key, void * _Nullable context, dispatch_function_t  _Nullable destructor)
-try: (dispatch_queue_set_specific:=dll.dispatch_queue_set_specific).restype, dispatch_queue_set_specific.argtypes = None, [dispatch_queue_t, ctypes.c_void_p, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((pure)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) extern void * _Nullable dispatch_queue_get_specific(dispatch_queue_t  _Nonnull queue, const void * _Nonnull key)
-try: (dispatch_queue_get_specific:=dll.dispatch_queue_get_specific).restype, dispatch_queue_get_specific.argtypes = ctypes.c_void_p, [dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
 # __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((pure)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) extern void * _Nullable dispatch_get_specific(const void * _Nonnull key)
 try: (dispatch_get_specific:=dll.dispatch_get_specific).restype, dispatch_get_specific.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.12))) __attribute__((availability(ios, introduced=10.0))) __attribute__((availability(tvos, introduced=10.0))) __attribute__((availability(watchos, introduced=3.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((swift_private)) extern void dispatch_assert_queue(dispatch_queue_t  _Nonnull queue) asm("_dispatch_assert_queue$V2")
-try: (dispatch_assert_queue:=dll.dispatch_assert_queue).restype, dispatch_assert_queue.argtypes = None, [dispatch_queue_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.12))) __attribute__((availability(ios, introduced=10.0))) __attribute__((availability(tvos, introduced=10.0))) __attribute__((availability(watchos, introduced=3.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((swift_private)) extern void dispatch_assert_queue_barrier(dispatch_queue_t  _Nonnull queue)
-try: (dispatch_assert_queue_barrier:=dll.dispatch_assert_queue_barrier).restype, dispatch_assert_queue_barrier.argtypes = None, [dispatch_queue_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.12))) __attribute__((availability(ios, introduced=10.0))) __attribute__((availability(tvos, introduced=10.0))) __attribute__((availability(watchos, introduced=3.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((swift_private)) extern void dispatch_assert_queue_not(dispatch_queue_t  _Nonnull queue) asm("_dispatch_assert_queue_not$V2")
-try: (dispatch_assert_queue_not:=dll.dispatch_assert_queue_not).restype, dispatch_assert_queue_not.argtypes = None, [dispatch_queue_t]
 except AttributeError: pass
 
 dispatch_block_flags_t = CEnum(ctypes.c_ulong)
@@ -2100,10 +1889,6 @@ except AttributeError: pass
 
 # __attribute__((availability(macos, introduced=10.10))) __attribute__((availability(ios, introduced=8.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern intptr_t dispatch_block_wait(dispatch_block_t  _Nonnull block, dispatch_time_t timeout)
 try: (dispatch_block_wait:=dll.dispatch_block_wait).restype, dispatch_block_wait.argtypes = intptr_t, [ctypes.c_void_p, dispatch_time_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.10))) __attribute__((availability(ios, introduced=8.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_block_notify(dispatch_block_t  _Nonnull block, dispatch_queue_t  _Nonnull queue, dispatch_block_t  _Nonnull notification_block)
-try: (dispatch_block_notify:=dll.dispatch_block_notify).restype, dispatch_block_notify.argtypes = None, [ctypes.c_void_p, dispatch_queue_t, ctypes.c_void_p]
 except AttributeError: pass
 
 # __attribute__((availability(macos, introduced=10.10))) __attribute__((availability(ios, introduced=8.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_block_cancel(dispatch_block_t  _Nonnull block)
@@ -2143,203 +1928,16 @@ kern_return_t = ctypes.c_int
 try: (mach_voucher_deallocate:=dll.mach_voucher_deallocate).restype, mach_voucher_deallocate.argtypes = kern_return_t, [mach_port_name_t]
 except AttributeError: pass
 
-dispatch_source_t = objc.id_
-class const_struct_dispatch_source_type_s(Struct): pass
-dispatch_source_type_t = ctypes.POINTER(const_struct_dispatch_source_type_s)
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((malloc)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((ns_returns_retained)) extern dispatch_source_t  _Nonnull dispatch_source_create(dispatch_source_type_t  _Nonnull type, uintptr_t handle, uintptr_t mask, dispatch_queue_t  _Nullable queue)
-try: (dispatch_source_create:=dll.dispatch_source_create).restype, dispatch_source_create.argtypes = dispatch_source_t, [dispatch_source_type_t, uintptr_t, uintptr_t, dispatch_queue_t]
-except AttributeError: pass
-
-dispatch_source_create = objc.returns_retained(dispatch_source_create)
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_source_set_event_handler(dispatch_source_t  _Nonnull source, dispatch_block_t  _Nullable handler)
-try: (dispatch_source_set_event_handler:=dll.dispatch_source_set_event_handler).restype, dispatch_source_set_event_handler.argtypes = None, [dispatch_source_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_source_set_event_handler_f(dispatch_source_t  _Nonnull source, dispatch_function_t  _Nullable handler)
-try: (dispatch_source_set_event_handler_f:=dll.dispatch_source_set_event_handler_f).restype, dispatch_source_set_event_handler_f.argtypes = None, [dispatch_source_t, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_source_set_cancel_handler(dispatch_source_t  _Nonnull source, dispatch_block_t  _Nullable handler)
-try: (dispatch_source_set_cancel_handler:=dll.dispatch_source_set_cancel_handler).restype, dispatch_source_set_cancel_handler.argtypes = None, [dispatch_source_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_source_set_cancel_handler_f(dispatch_source_t  _Nonnull source, dispatch_function_t  _Nullable handler)
-try: (dispatch_source_set_cancel_handler_f:=dll.dispatch_source_set_cancel_handler_f).restype, dispatch_source_set_cancel_handler_f.argtypes = None, [dispatch_source_t, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_source_cancel(dispatch_source_t  _Nonnull source)
-try: (dispatch_source_cancel:=dll.dispatch_source_cancel).restype, dispatch_source_cancel.argtypes = None, [dispatch_source_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((warn_unused_result(""))) __attribute__((pure)) __attribute__((nothrow)) __attribute__((swift_private)) extern intptr_t dispatch_source_testcancel(dispatch_source_t  _Nonnull source)
-try: (dispatch_source_testcancel:=dll.dispatch_source_testcancel).restype, dispatch_source_testcancel.argtypes = intptr_t, [dispatch_source_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((warn_unused_result(""))) __attribute__((pure)) __attribute__((nothrow)) __attribute__((swift_private)) extern uintptr_t dispatch_source_get_handle(dispatch_source_t  _Nonnull source)
-try: (dispatch_source_get_handle:=dll.dispatch_source_get_handle).restype, dispatch_source_get_handle.argtypes = uintptr_t, [dispatch_source_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((warn_unused_result(""))) __attribute__((pure)) __attribute__((nothrow)) __attribute__((swift_private)) extern uintptr_t dispatch_source_get_mask(dispatch_source_t  _Nonnull source)
-try: (dispatch_source_get_mask:=dll.dispatch_source_get_mask).restype, dispatch_source_get_mask.argtypes = uintptr_t, [dispatch_source_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((warn_unused_result(""))) __attribute__((pure)) __attribute__((nothrow)) __attribute__((swift_private)) extern uintptr_t dispatch_source_get_data(dispatch_source_t  _Nonnull source)
-try: (dispatch_source_get_data:=dll.dispatch_source_get_data).restype, dispatch_source_get_data.argtypes = uintptr_t, [dispatch_source_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_source_merge_data(dispatch_source_t  _Nonnull source, uintptr_t value)
-try: (dispatch_source_merge_data:=dll.dispatch_source_merge_data).restype, dispatch_source_merge_data.argtypes = None, [dispatch_source_t, uintptr_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_source_set_timer(dispatch_source_t  _Nonnull source, dispatch_time_t start, uint64_t interval, uint64_t leeway)
-try: (dispatch_source_set_timer:=dll.dispatch_source_set_timer).restype, dispatch_source_set_timer.argtypes = None, [dispatch_source_t, dispatch_time_t, uint64_t, uint64_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=4.3))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_source_set_registration_handler(dispatch_source_t  _Nonnull source, dispatch_block_t  _Nullable handler)
-try: (dispatch_source_set_registration_handler:=dll.dispatch_source_set_registration_handler).restype, dispatch_source_set_registration_handler.argtypes = None, [dispatch_source_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=4.3))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_source_set_registration_handler_f(dispatch_source_t  _Nonnull source, dispatch_function_t  _Nullable handler)
-try: (dispatch_source_set_registration_handler_f:=dll.dispatch_source_set_registration_handler_f).restype, dispatch_source_set_registration_handler_f.argtypes = None, [dispatch_source_t, dispatch_function_t]
-except AttributeError: pass
-
-dispatch_group_t = objc.id_
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((malloc)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_name("DispatchGroup.init()"))) __attribute__((ns_returns_retained)) extern dispatch_group_t  _Nonnull dispatch_group_create(void)
-try: (dispatch_group_create:=dll.dispatch_group_create).restype, dispatch_group_create.argtypes = dispatch_group_t, []
-except AttributeError: pass
-
-dispatch_group_create = objc.returns_retained(dispatch_group_create)
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_group_async(dispatch_group_t  _Nonnull group, dispatch_queue_t  _Nonnull queue, dispatch_block_t  _Nonnull block)
-try: (dispatch_group_async:=dll.dispatch_group_async).restype, dispatch_group_async.argtypes = None, [dispatch_group_t, dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(2))) __attribute__((nonnull(4))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_group_async_f(dispatch_group_t  _Nonnull group, dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_group_async_f:=dll.dispatch_group_async_f).restype, dispatch_group_async_f.argtypes = None, [dispatch_group_t, dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern intptr_t dispatch_group_wait(dispatch_group_t  _Nonnull group, dispatch_time_t timeout)
-try: (dispatch_group_wait:=dll.dispatch_group_wait).restype, dispatch_group_wait.argtypes = intptr_t, [dispatch_group_t, dispatch_time_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_group_notify(dispatch_group_t  _Nonnull group, dispatch_queue_t  _Nonnull queue, dispatch_block_t  _Nonnull block)
-try: (dispatch_group_notify:=dll.dispatch_group_notify).restype, dispatch_group_notify.argtypes = None, [dispatch_group_t, dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(2))) __attribute__((nonnull(4))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) extern void dispatch_group_notify_f(dispatch_group_t  _Nonnull group, dispatch_queue_t  _Nonnull queue, void * _Nullable context, dispatch_function_t  _Nonnull work)
-try: (dispatch_group_notify_f:=dll.dispatch_group_notify_f).restype, dispatch_group_notify_f.argtypes = None, [dispatch_group_t, dispatch_queue_t, ctypes.c_void_p, dispatch_function_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchGroup.enter(self:)"))) extern void dispatch_group_enter(dispatch_group_t  _Nonnull group)
-try: (dispatch_group_enter:=dll.dispatch_group_enter).restype, dispatch_group_enter.argtypes = None, [dispatch_group_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchGroup.leave(self:)"))) extern void dispatch_group_leave(dispatch_group_t  _Nonnull group)
-try: (dispatch_group_leave:=dll.dispatch_group_leave).restype, dispatch_group_leave.argtypes = None, [dispatch_group_t]
-except AttributeError: pass
-
-dispatch_semaphore_t = objc.id_
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((malloc)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_name("DispatchSemaphore.init(value:)"))) __attribute__((ns_returns_retained)) extern dispatch_semaphore_t  _Nonnull dispatch_semaphore_create(intptr_t value)
-try: (dispatch_semaphore_create:=dll.dispatch_semaphore_create).restype, dispatch_semaphore_create.argtypes = dispatch_semaphore_t, [intptr_t]
-except AttributeError: pass
-
-dispatch_semaphore_create = objc.returns_retained(dispatch_semaphore_create)
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern intptr_t dispatch_semaphore_wait(dispatch_semaphore_t  _Nonnull dsema, dispatch_time_t timeout)
-try: (dispatch_semaphore_wait:=dll.dispatch_semaphore_wait).restype, dispatch_semaphore_wait.argtypes = intptr_t, [dispatch_semaphore_t, dispatch_time_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern intptr_t dispatch_semaphore_signal(dispatch_semaphore_t  _Nonnull dsema)
-try: (dispatch_semaphore_signal:=dll.dispatch_semaphore_signal).restype, dispatch_semaphore_signal.argtypes = intptr_t, [dispatch_semaphore_t]
-except AttributeError: pass
-
+uintptr_t = ctypes.c_ulong
 dispatch_once_t = ctypes.c_long
 # __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) extern void dispatch_once(dispatch_once_t * _Nonnull predicate, __attribute__((noescape)) dispatch_block_t  _Nonnull block)
 try: (dispatch_once:=dll.dispatch_once).restype, dispatch_once.argtypes = None, [ctypes.POINTER(dispatch_once_t), ctypes.c_void_p]
 except AttributeError: pass
 
+dispatch_function_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 # __attribute__((availability(macos, introduced=10.6))) __attribute__((availability(ios, introduced=4.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((nothrow)) extern void dispatch_once_f(dispatch_once_t * _Nonnull predicate, void * _Nullable context, dispatch_function_t  _Nonnull function)
 try: (dispatch_once_f:=dll.dispatch_once_f).restype, dispatch_once_f.argtypes = None, [ctypes.POINTER(dispatch_once_t), ctypes.c_void_p, dispatch_function_t]
 except AttributeError: pass
 
-dispatch_data_t = objc.id_
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((availability(swift, unavailable))) __attribute__((ns_returns_retained)) extern dispatch_data_t  _Nonnull dispatch_data_create(const void * _Nonnull buffer, size_t size, dispatch_queue_t  _Nullable queue, dispatch_block_t  _Nullable destructor)
-try: (dispatch_data_create:=dll.dispatch_data_create).restype, dispatch_data_create.argtypes = dispatch_data_t, [ctypes.c_void_p, size_t, dispatch_queue_t, ctypes.c_void_p]
-except AttributeError: pass
-
-dispatch_data_create = objc.returns_retained(dispatch_data_create)
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((pure)) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern size_t dispatch_data_get_size(dispatch_data_t  _Nonnull data)
-try: (dispatch_data_get_size:=dll.dispatch_data_get_size).restype, dispatch_data_get_size.argtypes = size_t, [dispatch_data_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((ns_returns_retained)) extern dispatch_data_t  _Nonnull dispatch_data_create_map(dispatch_data_t  _Nonnull data, const void * _Nullable * _Nullable buffer_ptr, size_t * _Nullable size_ptr)
-try: (dispatch_data_create_map:=dll.dispatch_data_create_map).restype, dispatch_data_create_map.argtypes = dispatch_data_t, [dispatch_data_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-dispatch_data_create_map = objc.returns_retained(dispatch_data_create_map)
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((ns_returns_retained)) extern dispatch_data_t  _Nonnull dispatch_data_create_concat(dispatch_data_t  _Nonnull data1, dispatch_data_t  _Nonnull data2)
-try: (dispatch_data_create_concat:=dll.dispatch_data_create_concat).restype, dispatch_data_create_concat.argtypes = dispatch_data_t, [dispatch_data_t, dispatch_data_t]
-except AttributeError: pass
-
-dispatch_data_create_concat = objc.returns_retained(dispatch_data_create_concat)
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((ns_returns_retained)) extern dispatch_data_t  _Nonnull dispatch_data_create_subrange(dispatch_data_t  _Nonnull data, size_t offset, size_t length)
-try: (dispatch_data_create_subrange:=dll.dispatch_data_create_subrange).restype, dispatch_data_create_subrange.argtypes = dispatch_data_t, [dispatch_data_t, size_t, size_t]
-except AttributeError: pass
-
-dispatch_data_create_subrange = objc.returns_retained(dispatch_data_create_subrange)
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern int dispatch_data_apply(dispatch_data_t  _Nonnull data, int applier)
-try: (dispatch_data_apply:=dll.dispatch_data_apply).restype, dispatch_data_apply.argtypes = ctypes.c_int, [dispatch_data_t, ctypes.c_int]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nonnull(3))) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((ns_returns_retained)) extern dispatch_data_t  _Nonnull dispatch_data_copy_region(dispatch_data_t  _Nonnull data, size_t location, size_t * _Nonnull offset_ptr)
-try: (dispatch_data_copy_region:=dll.dispatch_data_copy_region).restype, dispatch_data_copy_region.argtypes = dispatch_data_t, [dispatch_data_t, size_t, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-dispatch_data_copy_region = objc.returns_retained(dispatch_data_copy_region)
 dispatch_fd_t = ctypes.c_int
-dispatch_io_t = objc.id_
-dispatch_io_type_t = ctypes.c_ulong
-dispatch_io_close_flags_t = ctypes.c_ulong
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_io_close(dispatch_io_t  _Nonnull channel, dispatch_io_close_flags_t flags)
-try: (dispatch_io_close:=dll.dispatch_io_close).restype, dispatch_io_close.argtypes = None, [dispatch_io_t, dispatch_io_close_flags_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_name("DispatchIO.barrier(self:execute:)"))) extern void dispatch_io_barrier(dispatch_io_t  _Nonnull channel, dispatch_block_t  _Nonnull barrier)
-try: (dispatch_io_barrier:=dll.dispatch_io_barrier).restype, dispatch_io_barrier.argtypes = None, [dispatch_io_t, ctypes.c_void_p]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_name("getter:DispatchIO.fileDescriptor(self:)"))) extern dispatch_fd_t dispatch_io_get_descriptor(dispatch_io_t  _Nonnull channel)
-try: (dispatch_io_get_descriptor:=dll.dispatch_io_get_descriptor).restype, dispatch_io_get_descriptor.argtypes = dispatch_fd_t, [dispatch_io_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_name("DispatchIO.setLimit(self:highWater:)"))) extern void dispatch_io_set_high_water(dispatch_io_t  _Nonnull channel, size_t high_water)
-try: (dispatch_io_set_high_water:=dll.dispatch_io_set_high_water).restype, dispatch_io_set_high_water.argtypes = None, [dispatch_io_t, size_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_name("DispatchIO.setLimit(self:lowWater:)"))) extern void dispatch_io_set_low_water(dispatch_io_t  _Nonnull channel, size_t low_water)
-try: (dispatch_io_set_low_water:=dll.dispatch_io_set_low_water).restype, dispatch_io_set_low_water.argtypes = None, [dispatch_io_t, size_t]
-except AttributeError: pass
-
-dispatch_io_interval_flags_t = ctypes.c_ulong
-# __attribute__((availability(macos, introduced=10.7))) __attribute__((availability(ios, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull(1))) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_io_set_interval(dispatch_io_t  _Nonnull channel, uint64_t interval, dispatch_io_interval_flags_t flags)
-try: (dispatch_io_set_interval:=dll.dispatch_io_set_interval).restype, dispatch_io_set_interval.argtypes = None, [dispatch_io_t, uint64_t, dispatch_io_interval_flags_t]
-except AttributeError: pass
-
-dispatch_workloop_t = objc.id_
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((malloc)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((ns_returns_retained)) extern dispatch_workloop_t  _Nonnull dispatch_workloop_create(const char * _Nullable label)
-try: (dispatch_workloop_create:=dll.dispatch_workloop_create).restype, dispatch_workloop_create.argtypes = dispatch_workloop_t, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-dispatch_workloop_create = objc.returns_retained(dispatch_workloop_create)
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((malloc)) __attribute__((ns_returns_retained)) __attribute__((warn_unused_result(""))) __attribute__((nothrow)) __attribute__((swift_private)) __attribute__((swift_name("DispatchWorkloop.init(__label:)"))) __attribute__((ns_returns_retained)) extern dispatch_workloop_t  _Nonnull dispatch_workloop_create_inactive(const char * _Nullable label)
-try: (dispatch_workloop_create_inactive:=dll.dispatch_workloop_create_inactive).restype, dispatch_workloop_create_inactive.argtypes = dispatch_workloop_t, [ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-dispatch_workloop_create_inactive = objc.returns_retained(dispatch_workloop_create_inactive)
-# __attribute__((availability(macos, introduced=10.14))) __attribute__((availability(ios, introduced=12.0))) __attribute__((availability(tvos, introduced=12.0))) __attribute__((availability(watchos, introduced=5.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_workloop_set_autorelease_frequency(dispatch_workloop_t  _Nonnull workloop, dispatch_autorelease_frequency_t frequency)
-try: (dispatch_workloop_set_autorelease_frequency:=dll.dispatch_workloop_set_autorelease_frequency).restype, dispatch_workloop_set_autorelease_frequency.argtypes = None, [dispatch_workloop_t, dispatch_autorelease_frequency_t]
-except AttributeError: pass
-
-# __attribute__((availability(macos, introduced=11.0))) __attribute__((availability(ios, introduced=14.0))) __attribute__((availability(tvos, introduced=14.0))) __attribute__((availability(watchos, introduced=7.0))) __attribute__((visibility("default"))) __attribute__((nonnull)) __attribute__((nothrow)) __attribute__((swift_private)) extern void dispatch_workloop_set_os_workgroup(dispatch_workloop_t  _Nonnull workloop, os_workgroup_t  _Nonnull workgroup)
-try: (dispatch_workloop_set_os_workgroup:=dll.dispatch_workloop_set_os_workgroup).restype, dispatch_workloop_set_os_workgroup.argtypes = None, [dispatch_workloop_t, os_workgroup_t]
-except AttributeError: pass
-
 DISPATCH_API_VERSION = 20181008
