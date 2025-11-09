@@ -141,18 +141,11 @@ class TestGPTOSS(unittest.TestCase):
     proj = Proj()
     load_state_dict(proj, weight_map)
     blocks, scales = proj.blocks, proj.scales
-    ic(blocks.shape)
+    ic(blocks.shape, scales.shape)
 
     # load mxfp4 weights in torch
     with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
     with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
-
-    # # instead of 90 expert "blocks" we use 1
-    # n_experts, n_blocks, block_size = 90, 4, 3
-    # blocks, torch_blocks = blocks[-block_size:, -n_blocks:, -n_experts:], torch_blocks[-block_size:, -n_blocks:, -n_experts:]
-    # scales, torch_scales = scales[-block_size:, -n_blocks:, -n_experts:], torch_scales[-block_size:, -n_blocks:, -n_experts:]
-    # block_size, n_experts, n_blocks = 32, 5760, 90
-    block_size, n_blocks, n_experts = blocks.shape[:-1]
 
     # check we are loading the same weights
     assert scales.shape == torch_scales.shape
@@ -162,34 +155,21 @@ class TestGPTOSS(unittest.TestCase):
 
     # dequantize in torch
     torch_out = convert_moe_packed_tensors(torch_blocks, torch_scales)
-    # ic(torch_out.shape, torch_out.float().cpu().numpy())
 
     # dequantize
     MXFP4_ID = 39
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
-    *prefix_shape, G, B = blocks.shape
-    rows_total = math.prod(prefix_shape) * G
-    blocks_reshaped = blocks.reshape(rows_total, B)
-    scales_reshaped = scales.reshape(rows_total, 1)
-    data = scales_reshaped.cat(blocks_reshaped, dim=-1).flatten()
+    data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()
     out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID)
-    # ic(out.shape, out.numpy())
-    # out = out.reshape(block_size, 2, 16, n_blocks).transpose(1, 2).reshape(block_size, 32, n_blocks)
-    out = out.reshape(block_size, n_blocks, n_experts, 2, 16)   # [3, 2, 16, 2_halves]
-    out = out.transpose(3, 4)                        # [3, 2, 16, 2_halves] - interleave
-    out = out.reshape(block_size, n_blocks, n_experts*32)      # [3, 2, 32] - merge to 32 positions
+
+    block_size, n_blocks, n_experts = blocks.shape[:-1]
+    out = out.reshape(block_size, n_blocks, n_experts, 2, blocks.shape[-1])   # [3, 2, 16, 2_halves]
+    out = out.transpose(3, 4)                                                 # [3, 2, 16, 2_halves] - interleave
+    out = out.reshape(block_size, n_blocks, 2*n_experts*blocks.shape[-1])     # [3, 2, 32] - merge to 32 positions
     out = out.transpose(1, 2)
 
-    # compare codes
-    code = np.load("results/codes.npy")
-    code_torch = np.load("results/codes_torch.npy")
-    np.testing.assert_allclose(code, code_torch, strict=True)
-
     # compare outputs
-    # o, torch_o = out.numpy().squeeze(), torch_out.float().detach().cpu().numpy().squeeze()
-    # ic(o, torch_o)
     out, torch_out = out.squeeze(), torch_out.squeeze()
-    ic(torch_out.shape, out.shape)
     np.testing.assert_allclose(out.float().numpy(), torch_out.float().detach().cpu().numpy(), atol=1e-6, rtol=1e-6)
 
 
