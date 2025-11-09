@@ -179,7 +179,12 @@ from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
 def curr_as_strided(tensor: Tensor, size, stride, storage_offset=None):
-  base_tensor = tensor.uop.base # canonicalise the current tensor to get the base tensor
+  base_tensor = Tensor(tensor.uop.base) # canonicalise the current tensor to get the base tensor
+
+  # get the buffer size : 
+  buffer_size = sum([(size[i]-1)*stride[i] for i in range(len(size))]) + 1
+  
+
   # get all the movement ops in order to apply
   ops_to_apply = calc_movement_ops(size, stride, storage_offest, base_tensor.shape)
   ret = base_tensor
