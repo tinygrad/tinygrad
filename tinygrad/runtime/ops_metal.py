@@ -29,7 +29,7 @@ def cmdbuf_label(cbuf:metal.MTLCommandBuffer) -> str|None: return from_ns_str(la
 
 def error_check(error: metal.NSError, error_constructor: type[Exception] = RuntimeError):
   if error.value is None: return None
-  raise error_constructor(from_ns_str(error.localizedDescription()).retained())
+  raise error_constructor(from_ns_str(error.localizedDescription().retained()))
 
 class MetalDevice(Compiled):
   def __init__(self, device:str):
@@ -180,9 +180,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     encoder.copyFromBuffer_sourceOffset_toBuffer_destinationOffset_size(src.buf, src.offset, dest.buf, dest.offset, sz)
     encoder.endEncoding()
     if src_dev != dest_dev:
-      src_command_buffer.encodeSignalEvent_value(src_dev.timeline_signal, src_dev.timeline_value)
+      src_command_buffer.encodeSignalEvent_value(ctypes.cast(src_dev.timeline_signal, metal.MTLEvent), src_dev.timeline_value)
       dest_command_buffer = dest_dev.mtl_queue.commandBuffer().retained()
-      dest_command_buffer.encodeWaitForEvent_value(src_dev.timeline_signal, src_dev.timeline_value)
+      dest_command_buffer.encodeWaitForEvent_value(ctypes.cast(src_dev.timeline_signal, metal.MTLEvent), src_dev.timeline_value)
       dest_command_buffer.commit()
       dest_dev.mtl_buffers_in_flight.append(dest_command_buffer)
       src_dev.timeline_value += 1

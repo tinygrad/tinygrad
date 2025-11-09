@@ -126,8 +126,8 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
     ms = []
     for d in filter(lambda d: d.kind == kind, decl.get_children()):
       try: ms.append(f"  ('{d.spelling}', {repr('instancetype') if (rt:=d.result_type).spelling=='instancetype' else tname(rt)}, "
-                     f"[{', '.join('instancetype' if a.spelling == 'instancetype' else tname(a.type) for a in d.get_arguments())}]" +
-                     (", True" if CK.NS_RETURNS_RETAINED in attrs(d) or any(d.spelling.startswith(s) for s in arc_families) else "") + "),")
+        f"[{', '.join('instancetype' if a.spelling == 'instancetype' else tname(a.type) for a in d.get_arguments())}]" +
+        (", True" if CK.NS_RETURNS_RETAINED in attrs(d) or (any(d.spelling.startswith(s) for s in arc_families) and rt.kind!=TK.VOID) else "") + "),")
       except NotImplementedError as e: print(f"skipping {nm}.{d.spelling}: {e}")
       except Exception as e: raise Exception(f"error while parsing {d.spelling}") from e
     return ms
