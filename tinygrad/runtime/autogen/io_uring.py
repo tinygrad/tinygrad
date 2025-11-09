@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 class struct_io_uring_sq(Struct): pass
 class struct_io_uring_sqe(Struct): pass
 __u8 = ctypes.c_ubyte

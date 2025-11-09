@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 class struct_v11_gfx_mqd(Struct): pass
 struct_v11_gfx_mqd._fields_ = [
   ('shadow_base_lo', ctypes.c_uint),

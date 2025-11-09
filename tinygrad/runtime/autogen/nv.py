@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 class _anonstruct0(Struct): pass
 MCTP_HEADER = _anonstruct0
 class _anonstruct1(Struct): pass
@@ -4436,19 +4435,19 @@ FWSECLIC_FRTS_REGION_DESC = _anonstruct17
 class _anonstruct18(Struct): pass
 _anonstruct18._packed_ = True
 FWSECLIC_FRTS_CMD = _anonstruct18
-class struct__PCI_EXP_ROM_STANDARD(ctypes.Structure): pass
+class struct__PCI_EXP_ROM_STANDARD(Struct): pass
 PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD
 PPCI_EXP_ROM_STANDARD = ctypes.POINTER(struct__PCI_EXP_ROM_STANDARD)
-class struct__PCI_EXP_ROM_NBSI(ctypes.Structure): pass
+class struct__PCI_EXP_ROM_NBSI(Struct): pass
 PCI_EXP_ROM_NBSI = struct__PCI_EXP_ROM_NBSI
 PPCI_EXP_ROM_NBSI = ctypes.POINTER(struct__PCI_EXP_ROM_NBSI)
 class union__PCI_EXP_ROM(ctypes.Union): pass
 PCI_EXP_ROM = union__PCI_EXP_ROM
 PPCI_EXP_ROM = ctypes.POINTER(union__PCI_EXP_ROM)
-class struct__PCI_DATA_STRUCT(ctypes.Structure): pass
+class struct__PCI_DATA_STRUCT(Struct): pass
 PCI_DATA_STRUCT = struct__PCI_DATA_STRUCT
 PPCI_DATA_STRUCT = ctypes.POINTER(struct__PCI_DATA_STRUCT)
-class struct__NV_PCI_DATA_EXT_STRUCT(ctypes.Structure): pass
+class struct__NV_PCI_DATA_EXT_STRUCT(Struct): pass
 NV_PCI_DATA_EXT_STRUCT = struct__NV_PCI_DATA_EXT_STRUCT
 PNV_PCI_DATA_EXT_STRUCT = ctypes.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0

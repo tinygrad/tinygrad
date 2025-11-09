@@ -1,8 +1,7 @@
 # mypy: ignore-errors
 import ctypes, os
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 from ctypes.util import find_library
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-
 def dll():
   try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so'))
   except: pass

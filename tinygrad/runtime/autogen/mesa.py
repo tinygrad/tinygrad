@@ -1,10 +1,9 @@
 # mypy: ignore-errors
 import ctypes, os
-from ctypes.util import find_library
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 import gzip, base64
 from tinygrad.helpers import OSX
-
+from ctypes.util import find_library
 def dll():
   try: return ctypes.CDLL(unwrap(find_library('tinymesa_cpu')))
   except: pass

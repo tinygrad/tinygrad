@@ -1,14 +1,13 @@
 # mypy: ignore-errors
 import ctypes
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 from ctypes.util import find_library
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-
 def dll():
   try: return ctypes.CDLL(unwrap(find_library('rocprof-trace-decoder')))
   except: pass
-  try: return ctypes.CDLL('/usr/local/lib/rocprof-trace-decoder.so')
+  try: return ctypes.CDLL(unwrap('/usr/local/lib/rocprof-trace-decoder.so'))
   except: pass
-  try: return ctypes.CDLL('/usr/local/lib/rocprof-trace-decoder.dylib')
+  try: return ctypes.CDLL(unwrap('/usr/local/lib/rocprof-trace-decoder.dylib'))
   except: pass
   return None
 dll = dll()

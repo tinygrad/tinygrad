@@ -1,8 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 from tinygrad.runtime.support.llvm import LLVM_PATH
-
 def dll():
   try: return ctypes.CDLL(unwrap(LLVM_PATH))
   except: pass

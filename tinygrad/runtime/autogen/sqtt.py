@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-
+from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 class struct_sqtt_data_info(Struct): pass
 uint32_t = ctypes.c_uint
 class struct_sqtt_data_info_0(ctypes.Union): pass
