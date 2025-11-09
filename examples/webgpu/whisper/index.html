@@ -287,7 +287,7 @@
             const url = document.getElementById("urlInput").value;
             try {
                 currentCancel = { cancelled: false };
-                await transcribeAudio(nets, async () => await fetchMonoFloat32Array(url), currentCancel, onTranscriptionEvent, loadAndInitializeModels);
+                await transcribeAudio(nets, async () => await fetchMonoFloat32Array(url, OfflineAudioContext), currentCancel, onTranscriptionEvent, loadAndInitializeModels);
             } catch (err) {
                 console.error("Fetch failed:", err);
             }
@@ -404,7 +404,7 @@
                         const file = item.getAsFile();
                         console.log(`... file[${i}].name = ${file.name}`);
                         currentCancel = { cancelled: false };
-                            await transcribeAudio(nets, async () => await fetchMonoFloat32ArrayFile(file), currentCancel, onTranscriptionEvent, loadAndInitializeModels);
+                            await transcribeAudio(nets, async () => await fetchMonoFloat32ArrayFile(file, OfflineAudioContext), currentCancel, onTranscriptionEvent, loadAndInitializeModels);
                     }
                 });
             } else {
