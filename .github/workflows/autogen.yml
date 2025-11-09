@@ -21,7 +21,7 @@ on:
     - 'tinygrad/runtime/autogen/**/*'
 
 jobs:
-  autogen-ng:
+  autogen:
     name: In-tree Autogen
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -39,7 +39,7 @@ jobs:
         mesa: 'true'
         pydeps: 'clang>=20 pyyaml mako'
     - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev
+      run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev
     - name: Verify OpenCL autogen
       run: |
         mv tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
@@ -60,7 +60,6 @@ jobs:
         diff /tmp/nv.py.bak tinygrad/runtime/autogen/nv.py
     - name: Verify AMD autogen
       run: |
-        sudo apt-get install -y --no-install-recommends hip-dev
         mv tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         mv tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
         mv tinygrad/runtime/autogen/hip.py /tmp/hip.py.bak
@@ -126,7 +125,6 @@ jobs:
         diff /tmp/qcom_dsp.py.bak tinygrad/runtime/autogen/qcom_dsp.py
     - name: Verify libusb autogen
       run: |
-        sudo apt-get install -y --no-install-recommends libusb-1.0-0-dev
         mv tinygrad/runtime/autogen/libusb.py /tmp/libusb.py.bak
         python3 -c "from tinygrad.runtime.autogen import libusb"
         diff /tmp/libusb.py.bak tinygrad/runtime/autogen/libusb.py
@@ -135,3 +133,51 @@ jobs:
         mv tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
         python3 -c "from tinygrad.runtime.autogen import mesa"
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
+    - name: Verify libclang autogen
+      run: |
+        mv tinygrad/runtime/autogen/libclang.py /tmp/libclang.py.bak
+        python3 -c "from tinygrad.runtime.autogen import libclang"
+        diff /tmp/libclang.py.bak tinygrad/runtime/autogen/libclang.py
+  autogen-mac:
+    name: In-tree Autogen (macos)
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        llvm: 'true'
+        pydeps: 'clang>=20'
+    - name: Verify macos autogen
+      run: |
+        mv tinygrad/runtime/autogen/libsystem.py /tmp/libsystem.py.bak
+        mv tinygrad/runtime/autogen/metal.py /tmp/metal.py.bak
+        python3 -c "from tinygrad.runtime.autogen import libsystem, metal"
+        diff /tmp/libsystem.py.bak tinygrad/runtime/autogen/libsystem.py
+        diff /tmp/metal.py.bak tinygrad/runtime/autogen/metal.py
+  autogen-comgr-3:
+    name: In-tree Autogen (comgr 3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        pydeps: 'clang>=20'
+    - name: Install autogen support packages
+      run: |
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        sudo tee /etc/apt/sources.list.d/rocm.list <<EOF
+        deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.3 $(lsb_release -cs) main
+        EOF
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
+        sudo apt-get install -y --no-install-recommends libclang-20-dev comgr
+    - name: Verify comgr (3) autogen
+      run: |
+        mv tinygrad/runtime/autogen/comgr_3.py /tmp/comgr_3.py.bak
+        python3 -c "from tinygrad.runtime.autogen import comgr"
+        diff /tmp/comgr_3.py.bak tinygrad/runtime/autogen/comgr_3.py
