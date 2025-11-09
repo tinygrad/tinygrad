@@ -25,7 +25,7 @@ def set_equal_weights(model, torch_model, fakeweights, num_blocks):
     if fakeweights: torch_v.copy_(torch.from_numpy(v.numpy()))
     # check dtype, shape, and value
     np.testing.assert_allclose(v.numpy(), torch_v.cpu().numpy(), strict=True,
-                               err_msg=f"tinygrad: {k=}, {v.dtype=}, {v.shape=}\npytorch:k={torch_k}, v.dtype={torch_v.dtype}, v.shape={torch_v.shape}\n{v=}\n{torch_v=}")
+                               err_msg=f"tinygrad: {k=}, {v.dtype=}, {v.shape=}\npytorch:k={torch_k}, v.dtype={torch_v.dtype}, v.shape={torch_v.shape}\n{v.numpy()=}\n{torch_v.cpu().numpy()=}")
     del k, v, torch_k, torch_v # todo: remove
   torch_model.eval()
   print("Weights are equal!")
@@ -117,7 +117,7 @@ class TestGPTOSS(unittest.TestCase):
   def test_mxfp4_weights(self):
     import json, math
     from pathlib import Path
-    from tinygrad import dtypes, Tensor
+    from tinygrad import dtypes, Tensor, Device
     from safetensors import safe_open
     from tinygrad.nn.state import safe_load, ggml_data_to_tensor, load_state_dict
     from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, MODELS
@@ -163,6 +163,93 @@ class TestGPTOSS(unittest.TestCase):
     data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()
     out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID)
     out = out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
+
+    # compare outputs
+    out, torch_out = out.squeeze(), torch_out.squeeze()
+    np.testing.assert_allclose(out.float().numpy(), torch_out.float().detach().cpu().numpy(), atol=1e-6, rtol=1e-6)
+
+  def test_mxfp4_weights2(self):
+    from safetensors import safe_open
+    from transformers.integrations.mxfp4 import convert_moe_packed_tensors
+    from tinygrad import dtypes
+    from tinygrad.apps.llm2 import download_weights, MODELS, fix_mxfp4
+    from tinygrad.nn.state import safe_load, load_state_dict
+
+    Tensor.manual_seed(42)
+    np.random.seed(42)
+
+    # load model weights
+    model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
+    weight_path = str(model_path / "model-00000-of-00002.safetensors")
+    block_key, scale_key = 'model.layers.0.mlp.experts.gate_up_proj_blocks', 'model.layers.0.mlp.experts.gate_up_proj_scales'
+
+    # load mxfp4 weights in torch
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
+
+    # load mxfp4 weights in tinygrad
+    weight_map = safe_load(weight_path)
+    weight_map = {"blocks": weight_map[block_key], "scales": weight_map[scale_key]}
+    class Proj:
+      def __init__(self): self.blocks, self.scales = Tensor.empty(32, 5760, 90, 16, dtype=dtypes.uchar), Tensor.empty(32, 5760, 90, dtype=dtypes.uchar)
+    proj = Proj()
+    load_state_dict(proj, weight_map)
+    blocks, scales = proj.blocks, proj.scales
+    blocks = blocks.to(Device.DEFAULT).realize()
+    scales = scales.to(Device.DEFAULT).realize()
+
+    # check we are loading the same weights
+    assert scales.shape == torch_scales.shape
+    assert blocks.shape == torch_blocks.shape
+    np.testing.assert_allclose(blocks.numpy(), torch_blocks.cpu().numpy(), strict=True)
+    np.testing.assert_allclose(scales.numpy(), torch_scales.cpu().numpy(), strict=True)
+
+    # dequantize
+    weight_map = {'blk.0.ffn_gate_up_proj_blocks': blocks, 'blk.0.ffn_gate_up_proj_scales': scales}
+    dequantized_dict = fix_mxfp4(weight_map, num_blocks=1)
+    weight_map = {'out': list(dequantized_dict.values())[0]}
+    class Proj:
+      def __init__(self): self.out = Tensor.empty(32, 2880, 5760, dtype=dtypes.float32)
+    proj = Proj()
+    load_state_dict(proj, weight_map)
+    out = proj.out
+
+    # dequantize in torch
+    torch_out = convert_moe_packed_tensors(torch_blocks, torch_scales)
+
+    # compare outputs
+    out, torch_out = out.squeeze(), torch_out.squeeze()
+    np.testing.assert_allclose(out.float().numpy(), torch_out.float().detach().cpu().numpy(), atol=1e-6, rtol=1e-6)
+
+
+  def test_mxfp4_weights3(self):
+    from safetensors import safe_open
+    from transformers.integrations.mxfp4 import convert_moe_packed_tensors
+    from tinygrad import dtypes
+    from tinygrad.apps.llm2 import Transformer as GptOSS, download_weights, MODELS, fix_mxfp4
+    from tinygrad.nn.state import safe_load, load_state_dict
+
+    Tensor.manual_seed(42)
+    np.random.seed(42)
+
+    # load model weights
+    model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
+    weight_path = str(model_path / "model-00000-of-00002.safetensors")
+    block_key, scale_key = 'model.layers.0.mlp.experts.gate_up_proj_blocks', 'model.layers.0.mlp.experts.gate_up_proj_scales'
+
+    # load mxfp4 weights in torch
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
+
+    # dequantize in torch
+    torch_out = convert_moe_packed_tensors(torch_blocks, torch_scales)
+
+    # load mxfp4 weights in tinygrad
+    params = MODELS["20B"]["params"]
+    params["num_blocks"] = 1
+    params["max_context"] = 4
+    model = GptOSS.from_pretrained(model_path, params)
+    out = model.blk[0].ffn_gate_up_proj
 
     # compare outputs
     out, torch_out = out.squeeze(), torch_out.squeeze()
