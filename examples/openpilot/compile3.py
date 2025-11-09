@@ -38,7 +38,7 @@ def compile(onnx_file):
   np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
 
-  # checks from compile2
+  # check gated read_image usage
   kernel_count = 0
   read_image_count = 0
   gated_read_image_count = 0
