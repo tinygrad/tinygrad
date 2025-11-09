@@ -61,6 +61,7 @@ view_ops = {
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
+  "aten.permute": Tensor.permute,
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
@@ -180,13 +181,14 @@ from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # multiple as_strided do not compound
   base = canonical_base(tensor)
-  ret = base._mop(Ops.STRIDE, arg=(tuple(size), tuple(stride), int(storage_offset or 0)))
+  # ret = base._mop(Ops.STRIDE, arg=(tuple(size), tuple(stride), int(storage_offset or 0)))
 
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, ret)
   if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
   # No Longer Needed
   # for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-  return ret
+  # return ret
+  return base
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
