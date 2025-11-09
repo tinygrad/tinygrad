@@ -16,6 +16,8 @@ lib = ctypes.CDLL(ctypes.util.find_library('objc'))
 lib.sel_registerName.restype = id_
 getsel = functools.cache(lib.sel_registerName)
 lib.objc_getClass.restype = id_
+dispatch_data_create = returns_retained(ctypes.CDLL("/usr/lib/libSystem.dylib").dispatch_data_create)
+dispatch_data_create.restype = id_
 
 def msg(sel:str, restype=id_, argtypes=[], retain=False, clsmeth=False):
   # Using attribute access returns a new reference so setting restype is safe

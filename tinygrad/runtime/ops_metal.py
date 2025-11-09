@@ -4,7 +4,7 @@ from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, init_c_st
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
-from tinygrad.runtime.autogen import metal, libsystem
+from tinygrad.runtime.autogen import metal
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
 REQUEST_TYPE_COMPILE = 13
@@ -123,7 +123,7 @@ class MetalProgram:
     self.dev, self.name, self.lib = dev, name, lib
     if lib[:4] == b"MTLB":
       # binary metal library
-      data = libsystem.dispatch_data_create(lib, len(lib), None, None)
+      data = objc.dispatch_data_create(lib, len(lib), None, None)
       self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
       error_check(error_lib)
     else:

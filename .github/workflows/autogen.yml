@@ -152,10 +152,8 @@ jobs:
         pydeps: 'clang>=20'
     - name: Verify macos autogen
       run: |
-        mv tinygrad/runtime/autogen/libsystem.py /tmp/libsystem.py.bak
         mv tinygrad/runtime/autogen/metal.py /tmp/metal.py.bak
-        LIBCLANG_PATH=/opt/homebrew/opt/llvm@20/lib/libclang.dylib python3 -c "from tinygrad.runtime.autogen import libsystem, metal"
-        diff /tmp/libsystem.py.bak tinygrad/runtime/autogen/libsystem.py
+        LIBCLANG_PATH=/opt/homebrew/opt/llvm@20/lib/libclang.dylib python3 -c "from tinygrad.runtime.autogen import metal"
         diff /tmp/metal.py.bak tinygrad/runtime/autogen/metal.py
   autogen-comgr-3:
     name: In-tree Autogen (comgr 3)
