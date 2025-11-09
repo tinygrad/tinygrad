@@ -56,6 +56,7 @@ view_ops = {
   "aten.expand": Tensor.expand,
   "aten.t": Tensor.transpose,
   "aten.transpose.int": Tensor.transpose,
+  "aten.squeeze": lambda self: self.squeeze(), 
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
@@ -66,7 +67,7 @@ for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "p
 
 # in place operations with views
 def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.st.contiguous: self.replace(self.contiguous())
+  if not self.uop.is_contiguous: self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
     if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
