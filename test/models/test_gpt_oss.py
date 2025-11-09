@@ -225,34 +225,27 @@ class TestGPTOSS(unittest.TestCase):
   def test_mxfp4_weights3(self):
     from safetensors import safe_open
     from transformers.integrations.mxfp4 import convert_moe_packed_tensors
-    from tinygrad import dtypes
-    from tinygrad.apps.llm2 import Transformer as GptOSS, download_weights, MODELS, fix_mxfp4
-    from tinygrad.nn.state import safe_load, load_state_dict
+    from tinygrad.apps.llm2 import Transformer as GptOSS, download_weights, MODELS
 
     Tensor.manual_seed(42)
     np.random.seed(42)
 
     # load model weights
     model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
-    weight_path = str(model_path / "model-00000-of-00002.safetensors")
-    block_key, scale_key = 'model.layers.0.mlp.experts.gate_up_proj_blocks', 'model.layers.0.mlp.experts.gate_up_proj_scales'
-
-    # load mxfp4 weights in torch
-    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
-    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
 
     # dequantize in torch
+    weight_path = str(model_path / "model-00000-of-00002.safetensors")
+    block_key, scale_key = 'model.layers.0.mlp.experts.gate_up_proj_blocks', 'model.layers.0.mlp.experts.gate_up_proj_scales'
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_blocks = f.get_tensor(block_key)
+    with safe_open(weight_path, framework="pt", device="cpu") as f: torch_scales = f.get_tensor(scale_key)
     torch_out = convert_moe_packed_tensors(torch_blocks, torch_scales)
 
-    # load mxfp4 weights in tinygrad
-    params = MODELS["20B"]["params"]
-    params["num_blocks"] = 1
-    params["max_context"] = 4
+    # dequantize in tinygrad (override with small params)
+    params = MODELS["20B"]["params"] | {'num_blocks': 1, 'max_context': 4}
     model = GptOSS.from_pretrained(model_path, params)
     out = model.blk[0].ffn_gate_up_proj
 
     # compare outputs
-    out, torch_out = out.squeeze(), torch_out.squeeze()
     np.testing.assert_allclose(out.float().numpy(), torch_out.float().detach().cpu().numpy(), atol=1e-6, rtol=1e-6)
 
 
