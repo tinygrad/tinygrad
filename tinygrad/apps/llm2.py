@@ -241,7 +241,7 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
 
   # dequantize only the ffn_gate_up_proj and ffn_down_proj
   for l in range(num_blocks):
-    for d in ['gate_up']: # ['gate_up', 'down']: # todo: fix
+    for d in ['gate_up', 'down']:
       blocks, scales = f'blk.{l}.ffn_{d}_proj_blocks', f'blk.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
       weights[f'blk.{l}.ffn_{d}_proj'] = proj
