@@ -234,19 +234,18 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
   def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
     """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
-    MXFP4_ID = 39
+    MXFP4_ID, MXFP4_NUM_ELEMENTS = 39, 32
     block_size, n_blocks = scales.shape[:2]
+    assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
     data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()
-    out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID)
+    out = ggml_data_to_tensor(data, scales.numel() * MXFP4_NUM_ELEMENTS, MXFP4_ID)
     return out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
 
   # dequantize only the ffn_gate_up_proj and ffn_down_proj
   for l in range(num_blocks):
     for d in ['gate_up', 'down']:
-      blocks = f'blk.{l}.ffn_{d}_proj_blocks'
-      scales = f'blk.{l}.ffn_{d}_proj_scales'
+      blocks, scales = f'blk.{l}.ffn_{d}_proj_blocks', f'blk.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
-      ic(proj, fix(proj))
       weights[f'layers.{l}.ffn_{d}_proj'] = proj
   return weights
 
