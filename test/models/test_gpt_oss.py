@@ -158,15 +158,11 @@ class TestGPTOSS(unittest.TestCase):
 
     # dequantize
     MXFP4_ID = 39
+    block_size, n_blocks = scales.shape[:2]
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
     data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()
     out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID)
-
-    block_size, n_blocks, n_experts = blocks.shape[:-1]
-    out = out.reshape(block_size, n_blocks, n_experts, 2, blocks.shape[-1])   # [3, 2, 16, 2_halves]
-    out = out.transpose(3, 4)                                                 # [3, 2, 16, 2_halves] - interleave
-    out = out.reshape(block_size, n_blocks, 2*n_experts*blocks.shape[-1])     # [3, 2, 32] - merge to 32 positions
-    out = out.transpose(1, 2)
+    out = out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
 
     # compare outputs
     out, torch_out = out.squeeze(), torch_out.squeeze()

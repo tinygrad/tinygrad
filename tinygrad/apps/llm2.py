@@ -235,8 +235,10 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
     """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
     MXFP4_ID = 39
-    mxfp4_data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()  # interleave and flatten to 1D
-    return ggml_data_to_tensor(mxfp4_data, scales.numel() * 32, MXFP4_ID).reshape(*scales.shape[:2], -1)
+    block_size, n_blocks = scales.shape[:2]
+    data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()
+    out = ggml_data_to_tensor(data, scales.numel() * 32, MXFP4_ID)
+    return out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
 
   # dequantize only the ffn_gate_up_proj and ffn_down_proj
   for l in range(num_blocks):
