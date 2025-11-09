@@ -409,8 +409,8 @@ async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
 
 /** @param {float} temperature */
 /** @returns {Promise<Decode_Sequence[]|undefined>} */
-async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updatedCallback, inferLoopContext) {
-    if (inferLoopContext.state == "INIT") {
+async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, inferLoopContext) {
+    if (inferLoopContext.state === "INIT") {
         let context = [];
         if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
             let prefix = [TOK_STARTOFPREV];
@@ -468,7 +468,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         inferLoopContext.state = "DECODE_INIT";
         return;
 
-    } else if (inferLoopContext.state == "DECODE_INIT") {
+    } else if (inferLoopContext.state === "DECODE_INIT") {
         let sequences = inferLoopContext.sequences;
 
         /** @type {Decoder_State} */
@@ -494,7 +494,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         inferLoopContext.state = "DECODE";
         return;
 
-    } else if (inferLoopContext.state == "DECODE") {
+    } else if (inferLoopContext.state === "DECODE") {
         let pendingTexts = inferLoopContext.pendingTexts;
         let sequences = inferLoopContext.sequences;
         let decoder_state = inferLoopContext.decoder_state;
@@ -528,7 +528,6 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
 
                 // if (!keep_going) break;
             }
-            updatedCallback(pendingTexts.slice(), {currentTokenIndex: inferLoopContext.currentTokenIndex, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
             ++inferLoopContext.currentTokenIndex;
             return;
 
@@ -537,7 +536,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
             return;
         }
 
-    } else if (inferLoopContext.state == "POST_DECODE") {
+    } else if (inferLoopContext.state === "POST_DECODE") {
         let sequences = inferLoopContext.sequences;
 
         for (let seq of sequences) {
@@ -554,7 +553,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         inferLoopContext.state = "DONE";
 
         return sequences;
-    } else if (inferLoopContext.state == "DONE") {
+    } else if (inferLoopContext.state === "DONE") {
         return inferLoopContext.sequences;
     }
 }
@@ -617,11 +616,6 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             audio_features_batch.push(audio_features);
         }
 
-        function updateCallback(pds, data) {
-            pendingTexts = pds;
-            onEvent("chunkUpdate", { pendingTexts: pendingTexts, ...data });
-        }
-
         let seeks_batch = [];
         for (let i = 0; (i < batch_size) && (seek_index + i < seek_ranges.length); ++i) {
             let seek = seek_ranges[seek_index + i];
@@ -634,7 +628,19 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         };
         let sequences;
         while (!inferLoopContext.is_done) {
-            sequences = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updateCallback, inferLoopContext);
+            sequences = await inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, inferLoopContext);
+            if (inferLoopContext.state === "INIT") {
+            } else if (inferLoopContext.state === "DECODE_INIT") {
+            } else if (inferLoopContext.state === "DECODE") {
+                if (inferLoopContext.currentTokenIndex !== 0) {
+                    // index was already incremented for the next decode iteration
+                    let currentTokenIndex = inferLoopContext.currentTokenIndex - 1;
+                    pendingTexts = inferLoopContext.pendingTexts.slice();
+                    onEvent("chunkUpdate", {pendingTexts, currentTokenIndex, sequenceStatus: inferLoopContext.sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+                }
+            } else if (inferLoopContext.state === "POST_DECODE") {
+            } else if (inferLoopContext.state === "DONE") {
+            }
         }
 
         for (let i = 0; i < batch_size && seek_index + i < seek_ranges.length;) {
