@@ -410,122 +410,150 @@ async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
 /** @param {float} temperature */
 /** @returns {Promise<Decode_Sequence[]|undefined>} */
 async function inferLoop(nets, log_specs_full, previous_context, temperature, audio_features_batch, seeks_batch, cancelToken, updatedCallback, inferLoopContext) {
-    if (inferLoopContext.is_done) return;
-    // reuse_cache = 0;
-    let context = [];
-    if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
-        let prefix = [TOK_STARTOFPREV];
-        let suffix = [TOK_BEGIN_TRANSCRIPTION];
-        if (NO_TIMESTAMPS) suffix.push(TOK_NO_TIMESTAMPS);
-        let max_context_to_take = MAX_TOKENS_TO_DECODE - prefix.length - suffix.length;
-        context.push(...prefix);
-        context.push(...previous_context.filter((tok) => tok < TOK_EOS /*|| (tok >= TOK_TS_FIRST && tok <= TOK_TS_LAST)*/).slice(-max_context_to_take));
-        context.push(...suffix);
-    } else {
-        context = [TOK_BEGIN_TRANSCRIPTION];
-        if (NO_TIMESTAMPS) context.push(TOK_NO_TIMESTAMPS);
-    }
-    // console.log(context);
+    if (inferLoopContext.state == "INIT") {
+        let context = [];
+        if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
+            let prefix = [TOK_STARTOFPREV];
+            let suffix = [TOK_BEGIN_TRANSCRIPTION];
+            if (NO_TIMESTAMPS) suffix.push(TOK_NO_TIMESTAMPS);
+            let max_context_to_take = MAX_TOKENS_TO_DECODE - prefix.length - suffix.length;
+            context.push(...prefix);
+            context.push(...previous_context.filter((tok) => tok < TOK_EOS /*|| (tok >= TOK_TS_FIRST && tok <= TOK_TS_LAST)*/).slice(-max_context_to_take));
+            context.push(...suffix);
+        } else {
+            context = [TOK_BEGIN_TRANSCRIPTION];
+            if (NO_TIMESTAMPS) context.push(TOK_NO_TIMESTAMPS);
+        }
+        // console.log(context);
 
-    const context_prompt_length = context.length;
-    if (context_prompt_length > MAX_TOKENS_TO_DECODE) {
-        console.error("Context prompt length exceeds 224");
-        inferLoopContext.is_done = true;
-        return;
-    }
-
-    /** @type {Decoder_State} */
-    let decoder_state = {
-        contexts: []
-    };
-
-    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
-        decoder_state.contexts.push([]);
-    }
-
-    const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
-
-    /** @type {Decode_Sequence[]} */
-    let sequences = [];
-    const default_sequence = {
-        index: 0,
-        context_prompt_length: 1,
-        max_context_length: 0,
-        segment_cumlogprob: 0,
-        avg_logprob: 0,
-        last_eos_logprob: -10,
-        context: undefined,
-        logprobs: undefined,
-        eos_logprobs: undefined
-    };
-
-    // const BEST_OF = 5;
-    // const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
-    const SEQUENCE_COUNT = audio_features_batch.length;
-    for (let i = 0; i < SEQUENCE_COUNT; ++i) {
-        /** @type {Decode_Sequence} */
-        let sequence = Object.create(default_sequence);
-        sequence.index = context_prompt_length;
-        sequence.context_prompt_length = context_prompt_length;
-        sequence.max_context_length = max_context_length;
-        sequence.context = context.slice();
-        sequence.logprobs = [];
-        sequence.eos_logprobs = [-10];
-        sequences.push(sequence);
-    }
-
-    await decoder_upload_audio_features(nets, audio_features_batch, decoder_state);
-
-    let pendingTexts = [];
-    for (let sequence_index = 0; sequence_index < sequences.length; ++sequence_index) {
-        pendingTexts.push('');
-    }
-
-    for (let i = 0; i < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS); ++i) {
-        if (cancelToken.cancelled) {
+        const context_prompt_length = context.length;
+        if (context_prompt_length > MAX_TOKENS_TO_DECODE) {
+            console.error("Context prompt length exceeds 224");
             inferLoopContext.is_done = true;
             return;
         }
 
-        let decode_results = await decodeOne(nets, sequences, decoder_state, audio_features_batch);
-        for (let idx = 0; idx < sequences.length; ++idx) {
+        const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
+
+        /** @type {Decode_Sequence[]} */
+        let sequences = [];
+        const default_sequence = {
+            index: 0,
+            context_prompt_length: 1,
+            max_context_length: 0,
+            segment_cumlogprob: 0,
+            avg_logprob: 0,
+            last_eos_logprob: -10,
+            context: undefined,
+            logprobs: undefined,
+            eos_logprobs: undefined
+        };
+
+        // const BEST_OF = 5;
+        // const SEQUENCE_COUNT = temperature > 0 ? BEST_OF : 1;
+        const SEQUENCE_COUNT = audio_features_batch.length;
+        for (let i = 0; i < SEQUENCE_COUNT; ++i) {
+            /** @type {Decode_Sequence} */
+            let sequence = Object.create(default_sequence);
+            sequence.index = context_prompt_length;
+            sequence.context_prompt_length = context_prompt_length;
+            sequence.max_context_length = max_context_length;
+            sequence.context = context.slice();
+            sequence.logprobs = [];
+            sequence.eos_logprobs = [-10];
+            sequences.push(sequence);
+        }
+
+        inferLoopContext.sequences = sequences;
+        inferLoopContext.state = "DECODE_INIT";
+        return;
+
+    } else if (inferLoopContext.state == "DECODE_INIT") {
+        let sequences = inferLoopContext.sequences;
+
+        /** @type {Decoder_State} */
+        let decoder_state = {
+            contexts: []
+        };
+
+        for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
+            decoder_state.contexts.push([]);
+        }
+
+        await decoder_upload_audio_features(nets, audio_features_batch, decoder_state);
+
+
+        let pendingTexts = [];
+        for (let sequence_index = 0; sequence_index < sequences.length; ++sequence_index) {
+            pendingTexts.push('');
+        }
+
+        inferLoopContext.decoder_state = decoder_state;
+        inferLoopContext.pendingTexts = pendingTexts;
+        inferLoopContext.state = "DECODE";
+        return;
+
+    } else if (inferLoopContext.state == "DECODE") {
+        let pendingTexts = inferLoopContext.pendingTexts;
+        let sequences = inferLoopContext.sequences;
+        let decoder_state = inferLoopContext.decoder_state;
+
+        for (let i = 0; i < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS); ++i) {
             if (cancelToken.cancelled) {
                 inferLoopContext.is_done = true;
                 return;
             }
-            if (sequences[idx].context.at(-1) === TOK_EOS) continue;
-            let seek = seeks_batch[idx];
 
-            let decode_result = await decodeOne2(sequences[idx], decode_results[idx], temperature);
-            let keep_going = decode_result.keep_going;
-            sequences[idx].context = decode_result.context;
-            sequences[idx].avg_logprob = decode_result.avg_logprob;
-            sequences[idx].segment_cumlogprob = decode_result.segment_cumlogprob;
-            sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
+            let decode_results = await decodeOne(nets, sequences, decoder_state, audio_features_batch);
+            for (let idx = 0; idx < sequences.length; ++idx) {
+                if (cancelToken.cancelled) {
+                    inferLoopContext.is_done = true;
+                    return;
+                }
+                if (sequences[idx].context.at(-1) === TOK_EOS) continue;
+                let seek = seeks_batch[idx];
 
-            const detokenized = tokensToText(sequences[idx].context.slice(context_prompt_length), nets.mapping);
-            const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
-            let pendingText = format_text(detokenized, sequences[idx].avg_logprob, seek, seek_end);
-            pendingTexts[idx] = pendingText;
-            // console.log(pendingText);
+                let decode_result = await decodeOne2(sequences[idx], decode_results[idx], temperature);
+                let keep_going = decode_result.keep_going;
+                sequences[idx].context = decode_result.context;
+                sequences[idx].avg_logprob = decode_result.avg_logprob;
+                sequences[idx].segment_cumlogprob = decode_result.segment_cumlogprob;
+                sequences[idx].last_eos_logprob = decode_result.last_eos_logprob;
 
-            // if (!keep_going) break;
+                const detokenized = tokensToText(sequences[idx].context.slice(sequences[idx].context_prompt_length), nets.mapping);
+                const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
+                let pendingText = format_text(detokenized, sequences[idx].avg_logprob, seek, seek_end);
+                pendingTexts[idx] = pendingText;
+                // console.log(pendingText);
+
+                // if (!keep_going) break;
+            }
+            updatedCallback(pendingTexts.slice(), {currentTokenIndex: i, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+
         }
-        updatedCallback(pendingTexts.slice(), {currentTokenIndex: i, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
-    }
+        inferLoopContext.state = "POST_DECODE";
+        return;
 
-    for (let seq of sequences) {
-        // console.log(seq.logprobs);
-        // console.log(seq.eos_logprobs);
-        let cumlogprob = seq.logprobs.reduce((a, b) => a + b);
-        console.log(cumlogprob);
-        console.log(cumlogprob / seq.logprobs.length);
-    }
-    let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
-    let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
+    } else if (inferLoopContext.state == "POST_DECODE") {
+        let sequences = inferLoopContext.sequences;
 
-    inferLoopContext.is_done = true;
-    return sequences;
+        for (let seq of sequences) {
+            // console.log(seq.logprobs);
+            // console.log(seq.eos_logprobs);
+            let cumlogprob = seq.logprobs.reduce((a, b) => a + b);
+            console.log(cumlogprob);
+            console.log(cumlogprob / seq.logprobs.length);
+        }
+        let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
+        let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
+
+        inferLoopContext.is_done = true;
+        inferLoopContext.state = "DONE";
+
+        return sequences;
+    } else if (inferLoopContext.state == "DONE") {
+        return inferLoopContext.sequences;
+    }
 }
 
 async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAndInitializeModels, initial_temperature = 0) {
@@ -598,6 +626,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         }
 
         let inferLoopContext = {
+            state: "INIT",
             is_done: false
         };
         let sequences;
