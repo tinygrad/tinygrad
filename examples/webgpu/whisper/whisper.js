@@ -490,6 +490,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
 
         inferLoopContext.decoder_state = decoder_state;
         inferLoopContext.pendingTexts = pendingTexts;
+        inferLoopContext.currentTokenIndex = 0;
         inferLoopContext.state = "DECODE";
         return;
 
@@ -497,8 +498,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
         let pendingTexts = inferLoopContext.pendingTexts;
         let sequences = inferLoopContext.sequences;
         let decoder_state = inferLoopContext.decoder_state;
-
-        for (let i = 0; i < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS); ++i) {
+        if (inferLoopContext.currentTokenIndex < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS)) {
             if (cancelToken.cancelled) {
                 inferLoopContext.is_done = true;
                 return;
@@ -528,11 +528,14 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
 
                 // if (!keep_going) break;
             }
-            updatedCallback(pendingTexts.slice(), {currentTokenIndex: i, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+            updatedCallback(pendingTexts.slice(), {currentTokenIndex: inferLoopContext.currentTokenIndex, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+            ++inferLoopContext.currentTokenIndex;
+            return;
 
+        } else {
+            inferLoopContext.state = "POST_DECODE";
+            return;
         }
-        inferLoopContext.state = "POST_DECODE";
-        return;
 
     } else if (inferLoopContext.state == "POST_DECODE") {
         let sequences = inferLoopContext.sequences;
