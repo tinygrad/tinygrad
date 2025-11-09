@@ -21,31 +21,26 @@ class TestTorchBackend(unittest.TestCase):
     res2 = torch.randperm(n).cpu().numpy()
     np.testing.assert_equal(set(res2), set(range(n)))
 
-  @unittest.skip("Temporarily skipping")
   def test_numpy_ones(self):
     a = torch.ones(4, device=device)
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
 
-  @unittest.skip("Temporarily skipping")
   def test_numpy_ones(self):
     a = torch.ones(4, dtype=torch.int32, device=device)
     assert a.dtype == torch.int32
     np.testing.assert_equal(a.cpu().numpy(), [1,1,1,1])
 
-  @unittest.skip("Temporarily skipping")
   def test_plus(self):
     a = torch.ones(4, device=device)
     b = torch.ones(4, device=device)
     c = a+b
     np.testing.assert_equal(c.cpu().numpy(), [2,2,2,2])
 
-  @unittest.skip("Temporarily skipping")
   def test_expand(self):
     a = torch.Tensor([1,2,3,4]).to(device)
     out = a.reshape(4,1).expand(4,4)
     np.testing.assert_equal(out.cpu().numpy(), [[1,1,1,1],[2,2,2,2],[3,3,3,3],[4,4,4,4]])
 
-  @unittest.skip("Temporarily skipping")
   def test_reshape(self):
     a = torch.Tensor([[1,2],[3,4]]).to(device)
     np.testing.assert_equal(a.reshape(4).cpu().numpy(), [1,2,3,4])
