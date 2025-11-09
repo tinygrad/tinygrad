@@ -179,8 +179,7 @@ from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # multiple as_strided do not compound
   base = canonical_base(tensor)
-  u = UOp(Ops.STRIDE, dtype=base.dtype, src=(base.uop,), arg=(tuple(size), tuple(stride), int(storage_offset or 0)))
-  ret = Tensor(u, requires_grad=False)
+  ret = base._mop(Ops.STRIDE, arg=(tuple(size), tuple(stride), int(storage_offset or 0)))
 
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, ret)
   if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
@@ -329,7 +328,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
+    if dest.uop.is_contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
