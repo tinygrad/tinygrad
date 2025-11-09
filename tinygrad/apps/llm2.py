@@ -181,10 +181,12 @@ class Transformer:
     # load weights
     if not fakeweights:
       weights = load(str(model_path / "model.safetensors.index.json"))
-      weights = convert_from_huggingface(weights, params["num_blocks"], params["n_heads"], params["n_kv_heads"], permute_layers=False)
+      weights = convert_from_huggingface(weights, params["num_blocks"])
+      ic(weights.keys())
       weights = fix_mxfp4(weights, params["num_blocks"])
       # weights = fix_bf16(weights) # todo: do we need ??
       load_state_dict(model, weights, strict=False, consume=True)
+      ic(weights.keys())
     return model
 
 # ***** model loading *****
@@ -213,19 +215,15 @@ def get_keymap(num_blocks):
     "lm_head.weight": "output.weight",
   }
 
-def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int, n_heads: int, n_kv_heads: int, permute_layers: bool = True):
+def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int):
 
   keymap = get_keymap(num_blocks) # map hf to tinygrad keys
   sd = {}
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
-    if "model.layers" in k:
-      if "q_proj" in k and permute_layers: v = permute(v, n_heads)
-      elif "k_proj" in k and permute_layers: v = permute(v, n_kv_heads)
-    # todo: remove
-    if k not in keymap:
-      if DEBUG >= 1: print(f"WARNING: {k} not in {keymap.keys()}")
+    if k not in keymap: # todo: remove
+      if DEBUG >= 1: print(f"WARNING: key {k} not in keymap")
       continue
     sd[keymap[k]] = v
   return sd
@@ -243,10 +241,10 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
 
   # dequantize only the ffn_gate_up_proj and ffn_down_proj
   for l in range(num_blocks):
-    for d in ['gate_up', 'down']:
+    for d in ['gate_up']: # ['gate_up', 'down']: # todo: fix
       blocks, scales = f'blk.{l}.ffn_{d}_proj_blocks', f'blk.{l}.ffn_{d}_proj_scales'
       proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
-      weights[f'layers.{l}.ffn_{d}_proj'] = proj
+      weights[f'blk.{l}.ffn_{d}_proj'] = proj
   return weights
 
 def main(args):
