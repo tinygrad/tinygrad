@@ -28,9 +28,9 @@ async function fetchMonoFloat32Array(url, AudioContextImplementation = globalThi
 
 async function fetchMonoFloat32ArrayFile(response, AudioContextImplementation = globalThis.AudioContext) {
     const arrayBuffer = await response.arrayBuffer();
-    const audioCtx = new AudioContextImplementation({ sampleRate: 16000, sinkId: 'none' });
+    const audioCtx = new AudioContextImplementation({ sampleRate: 16000, sinkId: 'none', numberOfChannels: 1, length: 16000 });
     const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    await audioCtx.close();
+    await audioCtx.close?.();
     const mono = new Float32Array(audioBuffer.length);
     for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
         // const data = audioBuffer.getChannelData(c);
