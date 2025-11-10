@@ -495,6 +495,9 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
 
 split_kernels = PatternMatcher([
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
+
+  # remove after on range
+  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.RANGE))), lambda x: x),
 ])
 
 def tag_uop(ctx:list[UOp], x:UOp):
