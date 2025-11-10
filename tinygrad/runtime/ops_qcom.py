@@ -403,7 +403,10 @@ class QCOMDevice(HCQCompiled):
     info = kgsl.struct_kgsl_devinfo()
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
     QCOMDevice.gpu_id = ((info.chip_id >> 24) & 0xFF) * 100 + ((info.chip_id >> 16) & 0xFF) * 10 + ((info.chip_id >>  8) & 0xFF)
-    # if QCOMDevice.gpu_id >= 800: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
+    print(hex(info.gpu_id), hex(info.chip_id))
+    print(hex(QCOMDevice.gpu_id))
+
+    if QCOMDevice.gpu_id >= 800: raise RuntimeError(f"Unsupported GPU: {QCOMDevice.gpu_id}")
 
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal, QCOMComputeQueue, None)
