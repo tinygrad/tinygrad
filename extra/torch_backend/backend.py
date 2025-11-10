@@ -185,7 +185,7 @@ def cached_to_movement_ops(shape, st) -> list:
   return mops
 
 # # Not sure if needed yet
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+from extra.to_movement_ops import to_movement_ops, MovementOps
 
 @wrap_view_op
 def _as_strided(tensor: Tensor, size, stride, storage_offset=None):
