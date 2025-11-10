@@ -8,16 +8,18 @@ from icecream import ic
 
 TORCH_PARAMS = {
   "20B": {
-    "architectures": ["GptOssForCausalLM"], "attention_bias": True, "attention_dropout": 0.0, "eos_token_id": 200002, "experts_per_token": 4, "head_dim": 64, "hidden_act": "silu",
-    "hidden_size": 2880, "initial_context_length": 4096, "initializer_range": 0.02, "intermediate_size": 2880, "layer_types": [
-      "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention",
-      "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention",
-      "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention"],
-    "max_position_embeddings": 131072, "model_type": "gpt_oss", "num_attention_heads": 64, "num_experts_per_tok": 4, "num_hidden_layers": 24, "num_key_value_heads": 8,
-    "num_local_experts": 32, "output_router_logits": False, "pad_token_id": 199999, "quantization_config": {"modules_to_not_convert": [
-      "model.layers.*.self_attn", "model.layers.*.mlp.router", "model.embed_tokens", "lm_head"], "quant_method": "mxfp4"}, "rms_norm_eps": 1e-05, "rope_scaling": {
-      "beta_fast": 32.0, "beta_slow": 1.0, "factor": 32.0, "original_max_position_embeddings": 4096, "rope_type": "yarn", "truncate": False}, "rope_theta": 150000,
-    "router_aux_loss_coef": 0.9, "sliding_window": 128, "swiglu_limit": 7.0, "tie_word_embeddings": False, "transformers_version": "4.57.0", "use_cache": True, "vocab_size": 201088},
+    "params": {
+      "architectures": ["GptOssForCausalLM"], "attention_bias": True, "attention_dropout": 0.0, "eos_token_id": 200002, "experts_per_token": 4, "head_dim": 64, "hidden_act": "silu",
+      "hidden_size": 2880, "initial_context_length": 4096, "initializer_range": 0.02, "intermediate_size": 2880, "layer_types": [
+        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention",
+        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention",
+        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention"],
+      "max_position_embeddings": 131072, "model_type": "gpt_oss", "num_attention_heads": 64, "num_experts_per_tok": 4, "num_hidden_layers": 24, "num_key_value_heads": 8,
+      "num_local_experts": 32, "output_router_logits": False, "pad_token_id": 199999, "quantization_config": {"modules_to_not_convert": [
+        "model.layers.*.self_attn", "model.layers.*.mlp.router", "model.embed_tokens", "lm_head"], "quant_method": "mxfp4"}, "rms_norm_eps": 1e-05, "rope_scaling": {
+        "beta_fast": 32.0, "beta_slow": 1.0, "factor": 32.0, "original_max_position_embeddings": 4096, "rope_type": "yarn", "truncate": False}, "rope_theta": 150000,
+      "router_aux_loss_coef": 0.9, "sliding_window": 128, "swiglu_limit": 7.0, "tie_word_embeddings": False, "transformers_version": "4.57.0", "use_cache": True, "vocab_size": 201088},
+  }
 }
 
 def compare_state_dicts(model, torch_model):
@@ -41,9 +43,9 @@ def compare_state_dicts(model, torch_model):
     del k, v, torch_k, torch_v
 
 class TestGptOss(unittest.TestCase):
-  def get_model(self, fakeweights:bool=False):
-    from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, MODELS
+  def get_model(self, fakeweights:bool):
     from transformers import logging as hf_logging, GptOssForCausalLM as TorchGptOss, GptOssConfig
+    from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, MODELS
     from tinygrad.nn.state import get_state_dict
     from tinygrad.apps.llm2 import get_keymap
 
@@ -56,14 +58,14 @@ class TestGptOss(unittest.TestCase):
 
     # params with smaller values for testing
     params = MODELS["20B"]["params"] | {'num_blocks': 1, 'max_context': 8}
-    torch_params = TORCH_PARAMS["20B"] | {'num_hidden_layers': 1, 'initial_context_length': 8}
+    torch_params = TORCH_PARAMS["20B"]["params"] | {'num_hidden_layers': 1, 'initial_context_length': 8}
     torch_params["layer_types"] = torch_params["layer_types"][:torch_params["num_hidden_layers"]]
 
     # tinygrad model
     model = GptOss.from_pretrained(model_path, params, fakeweights)
 
     # torch model
-    hf_logging.set_verbosity_error() # Suppress warning from loading smaller weights
+    hf_logging.set_verbosity_error() # Suppress warning from loading smaller params
     torch_config, torch_device = GptOssConfig(**torch_params), torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     torch_model = TorchGptOss(torch_config) if fakeweights else TorchGptOss.from_pretrained(model_path, config=torch_config, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
     torch_model = torch_model.to(torch_device).eval()
