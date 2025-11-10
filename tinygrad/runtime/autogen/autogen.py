@@ -30,7 +30,7 @@ specs = (CK.OBJC_SUPER_CLASS_REF,)
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
-def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_errno=False, anon_names={}, types={}):
+def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_errno=False, anon_names={}, types={}, parse_macros=True):
   macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{(decl:=t.get_declaration()).location.file}:{decl.location.line}", suggested_name)
@@ -153,7 +153,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
               f"{tname(c.result_type)}, [{', '.join(tname(arg.type) for arg in c.get_arguments())}]\nexcept AttributeError: pass\n")
             if CK.NS_RETURNS_RETAINED in attrs(c): lines.append(f"{c.spelling} = objc.returns_retained({c.spelling})")
           case CK.STRUCT_DECL | CK.UNION_DECL | CK.TYPEDEF_DECL | CK.ENUM_DECL | CK.OBJC_INTERFACE_DECL: tname(c.type)
-          case CK.MACRO_DEFINITION if len(toks:=list(c.get_tokens())) > 1:
+          case CK.MACRO_DEFINITION if parse_macros and len(toks:=list(c.get_tokens())) > 1:
             if toks[1].spelling == '(' and toks[0].extent.end.column == toks[1].extent.start.column:
               it = iter(toks[1:])
               _args = [t.spelling for t in itertools.takewhile(lambda t:t.spelling!=')', it) if t.kind == ToK.IDENTIFIER]
