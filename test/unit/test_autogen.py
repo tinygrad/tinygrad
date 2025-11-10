@@ -18,7 +18,7 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(ctypes.sizeof(Bar), 12)
     self.assertEqual(ctypes.sizeof(Baz), 8)
 
-  @unittest.skipIf(WIN)
+  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct_interop(self):
     class Baz(Struct): pass
     Baz._packed_ = True
