@@ -132,6 +132,19 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       upcasted_axis.add(xb_choices[0][2])
     else: break
 
+  # if last reduce dim is small(ish), loop unroll the reduce
+  # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
+  try:
+    if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
+      if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
+        k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
+      else:
+        for splits in [4]:
+          if k.full_shape[axis:=k.unrollable_dims[-1]]%splits == 0:
+            k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, splits))
+            break
+  except KernelOptError: pass
+
   # if nothing at all is upcasted and it's easy to, do an upcast
   for splits in [4]:
     if not k.upcasted and k.upcastable_dims and k.full_shape[k.upcastable_dims[-1]] % splits == 0:
