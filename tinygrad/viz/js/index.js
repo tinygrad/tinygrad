@@ -664,7 +664,7 @@ async function main() {
       }
       for (const l of ul.querySelectorAll("ul > ul > p")) {
         const subrewrites = getSubrewrites(l.parentElement);
-        if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
+        if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
     return setState({ currentCtx:-1 });
