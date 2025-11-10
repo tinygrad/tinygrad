@@ -158,6 +158,9 @@ if __name__ == "__main__":
   with args.profile.open("rb") as f: profile = pickle.load(f)
   rctx = decode(profile)
   print('SQTT:', rctx.wave_events.keys())
+  for prg, waves in rctx.inst_execs.items():
+    print(prg)
+    print([w.insts[-1].time for w in waves])
 
   for ev in profile:
     if not isinstance(ev, ProfilePMCEvent): continue
