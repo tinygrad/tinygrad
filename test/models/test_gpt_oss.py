@@ -95,7 +95,7 @@ class TestGptOss(unittest.TestCase):
     # compare model forward pass
     out = model(Tensor(input_ids))
     with torch.no_grad(): torch_logits = torch_model.forward(torch.from_numpy(input_ids).long().to(torch_model.device)).logits
-    torch_out = torch_logits[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
+    torch_out = torch_logits[:, -1:, :].argmax(-1)
     np.testing.assert_allclose(out.numpy(), torch_out.cpu().numpy(), atol=5e-4, rtol=5e-4)
 
 if __name__ == '__main__':

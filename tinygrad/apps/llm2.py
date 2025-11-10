@@ -14,13 +14,13 @@
 # https://cameronrwolfe.substack.com/p/gpt-oss
 
 from __future__ import annotations
-import argparse, functools, math, os
+import argparse, math, os
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
 from tinygrad.helpers import fetch, getenv, DEBUG
-from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters, get_state_dict
+from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
-from extra.models.llama import fix_bf16, sample
+from extra.models.llama import fix_bf16
 from transformers import AutoTokenizer
 
 from icecream import install, ic
@@ -103,7 +103,7 @@ class TransformerBlock:
     self.ffn_down_proj_bias     = Tensor.empty(n_experts, dim)                      # (E,D)
 
   def _feed_forward(self, x: Tensor) -> Tensor:
-    x_norm = self.ffn_norm(x)
+    x_norm = self.ffn_norm(x)               # (B,T,D) -> (B,T,D)
     (B, T, D), E = x.shape, self.n_experts
 
     # Select top-k experts
@@ -130,8 +130,8 @@ class TransformerBlock:
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)     # (B,T,D) -> (B,KvH,T,Hd)
     s = self.attn_sink.reshape(1, -1, 1, 1).expand(B, self.head_dim, T, 1)  # (B)     -> (B,H,T,1)
 
-    q = apply_rope(q, start_pos)
-    k = apply_rope(k, start_pos)
+    q = apply_rope(q, start_pos) # (B,H,T,Hd)   -> (B,H,T,Hd)
+    k = apply_rope(k, start_pos) # (B,KvH,T,Hd) -> (B,KvH,T,Hd)
 
     # TODO: remove these kv cache realizes
     if not hasattr(self, "cache_kv"):
@@ -145,10 +145,10 @@ class TransformerBlock:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
 
-    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)  #             -> (B,H,T,Hd)
-    attn = attn.transpose(1, 2).reshape(B, T, -1)                                         # (B,H,T,Hd)  -> (B,T,D)
-    attn = self.attn_o(attn)                                                              # (B,T,D)     -> (B,T,D)
-    return x + attn
+    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)  # (B,H,T,Hd) (B,KvH,T,Hd) (B,KvH,T,Hd) -> (B,H,T,Hd)
+    attn = attn.transpose(1, 2).reshape(B, T, -1)                                         # (B,H,T,Hd) -> (B,T,D)
+    attn = self.attn_o(attn)                                                              # (B,T,D)    -> (B,T,D)
+    return x + attn                                                                       # (B,T,D)    -> (B,T,D)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
@@ -164,10 +164,10 @@ class Transformer:
     self.forward_jit  = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float) -> Tensor:
-    x = self.token_embd(tokens)                                                             # (B,T)   -> (B,T,D)
-    for block in self.blk: x = block(x, start_pos)                                          # (B,T,D) -> (B,T,D)
-    logits = self.output(self.output_norm(x))                                               # (B,T,D) -> (B,T)
-    return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)  # (B,T)   -> (B)
+    x = self.token_embd(tokens)                     # (B,T)   -> (B,T,D)
+    for block in self.blk: x = block(x, start_pos)  # (B,T,D) -> (B,T,D)
+    logits = self.output(self.output_norm(x))       # (B,T,D) -> (B,T,V)
+    return logits[:, -1:, :].argmax(-1)             # (B,T,V) -> (B,)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0) -> Tensor:
     forward = self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward
@@ -275,6 +275,7 @@ def main(args):
   outputted = args.prompt
   start_pos, toks, tok_tensor = 0, tokenizer(outputted)["input_ids"], None
   print(outputted, end="", flush=True)
+
   for _ in range(args.count):
     # forward pass
     next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
@@ -287,8 +288,9 @@ def main(args):
     # display
     toks.append(tok)
     cur = tokenizer.decode(toks, skip_special_tokens=True)
-    print(cur[len(outputted):], flush=True)
+    print(cur[len(outputted):], flush=True, end="")
     outputted = cur
+  print()
 
   if args.temperature == 0:
     assert toks == expected, f"generated {toks} but expected {expected}"
