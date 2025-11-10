@@ -20,8 +20,6 @@ from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
-def fix(x): return x.shape, x.dtype, x.numpy()
-
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|None) -> str: return Device.canonicalize(device)
 
@@ -3743,7 +3741,7 @@ class Tensor(OpMixin):
       value = value.repeat_interleave(self.shape[-3] // value.shape[-3], dim=-3)
 
     q = self
-    qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1]) 
+    qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1])
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
@@ -3751,7 +3749,7 @@ class Tensor(OpMixin):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    # use attention sink # https://arxiv.org/abs/2309.17453
+    # attention sink https://arxiv.org/abs/2309.17453
     if sink is not None: return qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1)[..., :-1].dropout(dropout_p) @ value
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
