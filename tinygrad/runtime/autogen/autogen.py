@@ -30,18 +30,7 @@ specs = (CK.OBJC_SUPER_CLASS_REF,)
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
-def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None, epilog="", recsym=False, use_errno=False, anon_names={}, types={}):
-  files, args = files() if callable(files) else files, args() if callable(args) else args
-  if tarball:
-    # dangerous for arbitrary urls!
-    with tarfile.open(fetch(tarball, gunzip=tarball.endswith("gz"))) as tf:
-      tf.extractall("/tmp")
-      base = f"/tmp/{tf.getnames()[0]}"
-      files, args, anon_names = [str(f).format(base) for f in files], [a.format(base) for a in args], {k.format(base):v for k,v in anon_names.items()}
-    if preprocess: preprocess(base)
-  files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
-  epilog = (epilog(base) if tarball else epilog()) if callable(epilog) else epilog
-
+def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_errno=False, anon_names={}, types={}):
   macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{(decl:=t.get_declaration()).location.file}:{decl.location.line}", suggested_name)
@@ -81,15 +70,15 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
         lines.extend(([f"{nm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
-          ([f"{nm}._packed_ = True"] * (CK.PACKED_ATTR in attrs(decl)))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
+                     ([f"{nm}._packed_ = True"] * (CK.PACKED_ATTR in attrs(decl)))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
         return nm
       case TK.ENUM:
         # TODO: C++ and GNU C have forward declared enums
         if decl.is_anonymous(): types[t.spelling] = suggested_name or f"_anonenum{anoncnt()}", True
         else: types[t.spelling] = t.spelling.replace(' ', '_').replace('::', '_'), True
         lines.append(f"{types[t.spelling][0]} = CEnum({tname(decl.enum_type)})\n" +
-          "\n".join(f"{e.spelling} = {types[t.spelling][0]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()
-                    if e.kind == CK.ENUM_CONSTANT_DECL) + "\n")
+                     "\n".join(f"{e.spelling} = {types[t.spelling][0]}.define('{e.spelling}', {e.enum_value})" for e in decl.get_children()
+                     if e.kind == CK.ENUM_CONSTANT_DECL) + "\n")
         return types[t.spelling][0]
       case TK.CONSTANTARRAY:
         return f"({tname(t.get_array_element_type(), suggested_name.rstrip('s') if suggested_name else None)} * {t.get_array_size()})"
@@ -117,20 +106,22 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         types[t.spelling] = (nm:=f"_anondynamic{anoncnt()}"), True
         lines.append(f"class {nm}({', '.join(p for p in ps)}): pass # {t.spelling}")
         return nm
-      case TK.INVALID: raise Exception("invalid!!!!")
       case _: raise NotImplementedError(f"unsupported type {t.kind}")
 
   # parses an objc @interface or @protocol, returning a list of declerations that objc.Spec can parse, for the specified kind
   # NB: ivars are unsupported
   def parse_objc_spec(decl:Cursor, nm:str, kind:CK) -> list[str]:
+    nonlocal lines, types
     if decl is None: return []
     ms = []
     for d in filter(lambda d: d.kind == kind, decl.get_children()):
+      rollback = lines, types
       try: ms.append(f"  ('{d.spelling}', {repr('instancetype') if (rt:=d.result_type).spelling=='instancetype' else tname(rt)}, "
         f"[{', '.join('instancetype' if a.spelling == 'instancetype' else tname(a.type) for a in d.get_arguments())}]" +
         (", True" if CK.NS_RETURNS_RETAINED in attrs(d) or (any(d.spelling.startswith(s) for s in arc_families) and rt.kind!=TK.VOID) else "") + "),")
-      except NotImplementedError as e: print(f"skipping {nm}.{d.spelling}: {e}")
-      except Exception as e: raise Exception(f"error while parsing {d.spelling}") from e
+      except NotImplementedError as e:
+        print(f"skipping {nm}.{d.spelling}: {e}")
+        lines, types = rollback
     return ms
 
   # libclang doesn't have a "type" for @protocol, so we have to do this here...
@@ -179,9 +170,8 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
             lines.append(f"try: {c.spelling} = {tname(c.type)}.in_dll(dll, '{c.spelling}')\nexcept (ValueError,AttributeError): pass")
           case CK.OBJC_PROTOCOL_DECL: proto(c)
       except NotImplementedError as e:
-        print(f"Skipping {c.spelling}: {e}")
+        print(f"skipping {c.spelling}: {e}")
         lines, types = rollback
-      except Exception as e: raise Exception(f"error parsing {c.spelling} ({c.kind}) at {c.location}") from e
   main = (f"# mypy: ignore-errors\nimport ctypes{', os' if any('os' in s for s in dll) else ''}\n"
     "from tinygrad.helpers import unwrap\nfrom tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR\n" + '\n'.join([*prolog,
       *(["from ctypes.util import find_library"]*any('find_library' in s for s in dll)), *(["from tinygrad.runtime.support import objc"]*objc),
@@ -195,7 +185,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
     except (SyntaxError, NameError, TypeError) as e:
       macrono = unwrap(e.lineno if isinstance(e, SyntaxError) else unwrap(unwrap(e.__traceback__).tb_next).tb_lineno) - main.count('\n') - 1
       assert macrono >= 0 and macrono < len(macros), f"error outside macro range: {e}"
-      print(f"Skipping {macros[macrono]}: {e}")
+      print(f"skipping {macros[macrono]}: {e}")
       del macros[macrono]
     except Exception as e: raise Exception("parsing failed") from e
-  return main + '\n'.join(macros) + '\n' + epilog
+  return main + '\n'.join(macros + epilog)

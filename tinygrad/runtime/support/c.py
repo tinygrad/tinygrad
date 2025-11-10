@@ -43,7 +43,7 @@ else:
       return cls
 
     def __setattr__(cls, k, v):
-      # FIXME: _fields_ must be set after _packed_ because PyCStructType_setattro marks _fields_ as final.
+      # NB: _fields_ must be set after _packed_ because PyCStructType_setattro marks _fields_ as final.
       if k == "_fields_" and getattr(cls, "_packed_", False): type(cls)._build(cls, v)
       elif k == "_packed_" and hasattr(cls, "_fields_"): type(cls)._build(cls, cls._fields_)
       else: super().__setattr__(k, v)

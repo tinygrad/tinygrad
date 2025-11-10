@@ -38,7 +38,6 @@ exclude = [
   ".git/",
   "docs/",
   "extra/",
-  "tinygrad/runtime/autogen",
   "test/external/mlperf_resnet",
   "test/external/mlperf_unet3d",
 ]
@@ -51,6 +50,7 @@ exclude = [
   "W291", "W293", "UP039", "C416", "RET506", "RET507", "A",
   "FURB110", "RUF018", "F541", "F841"
 ]
+"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006"]
 
 [format]
 exclude = ["*"]
