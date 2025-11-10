@@ -653,7 +653,7 @@ async function main() {
         u.li = list.appendChild(document.createElement("ul"));
         u.li.id = `step-${i}-${j}`;
         const p = u.li.appendChild(document.createElement("p"));
-        p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
+        p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
         p.onclick = (e) => {
           e.stopPropagation();
           const subrewrites = getSubrewrites(e.currentTarget.parentElement);
