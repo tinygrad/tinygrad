@@ -342,7 +342,7 @@ class QCOMDevice(HCQCompiled):
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(self.info), sizebytes=ctypes.sizeof(self.info))
     self.gpu_id = (self.info.chip_id>>24, (self.info.chip_id>>16)&0xFF, (self.info.chip_id>>8)&0xFF)
 
-    # a7xx start with 730 or 'Cxxx', a8xx starts 'Exxx'
+    # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
     if self.gpu_id[:2] < (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={self.info.chip_id}")
 
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
