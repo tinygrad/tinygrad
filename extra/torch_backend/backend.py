@@ -170,12 +170,12 @@ def fill_scalar(x, y):
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 @functools.cache
-def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
+def cached_to_movement_ops(shape, t) -> list:
+  mops = to_movement_ops(t)
   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
   return mops
 
-from tinygrad.shape.shapetracker import ShapeTracker, View
+# from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
 def curr_as_strided(tensor: Tensor, size, stride, storage_offset=None):
@@ -183,8 +183,6 @@ def curr_as_strided(tensor: Tensor, size, stride, storage_offset=None):
 
   # get the buffer size : 
   buffer_size = sum([(size[i]-1)*stride[i] for i in range(len(size))]) + 1
-  
-
   # get all the movement ops in order to apply
   ops_to_apply = calc_movement_ops(size, stride, storage_offest, base_tensor.shape)
   ret = base_tensor
@@ -202,9 +200,9 @@ def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # multiple as_strided do not compound
   base = canonical_base(tensor)
   # TODO: this is heavyweight
-  st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
+  # st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
   ret = base
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
+  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride)
   if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
   for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
   return ret
