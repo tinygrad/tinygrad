@@ -1,7 +1,7 @@
 import unittest, pathlib
 import torch
 import numpy as np
-from tinygrad import Tensor, Device
+from tinygrad import Tensor
 from tinygrad.helpers import getenv, tqdm
 
 from icecream import ic
@@ -43,9 +43,8 @@ def compare_state_dicts(model, torch_model):
 class TestGptOss(unittest.TestCase):
   def get_model(self, fakeweights:bool=False):
     from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, MODELS
-    from transformers import GptOssForCausalLM as TorchGptOss, GptOssConfig
+    from transformers import logging as hf_logging, GptOssForCausalLM as TorchGptOss, GptOssConfig
     from tinygrad.nn.state import get_state_dict
-    from tinygrad.dtype import _from_torch_dtype
     from tinygrad.apps.llm2 import get_keymap
 
     print(f"Loading {'fake' if fakeweights else 'real'} weights for GptOss.")
@@ -64,6 +63,7 @@ class TestGptOss(unittest.TestCase):
     model = GptOss.from_pretrained(model_path, params, fakeweights)
 
     # torch model
+    hf_logging.set_verbosity_error() # Suppress warning from loading smaller weights
     torch_config, torch_device = GptOssConfig(**torch_params), torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     torch_model = TorchGptOss(torch_config) if fakeweights else TorchGptOss.from_pretrained(model_path, config=torch_config, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
     torch_model = torch_model.to(torch_device).eval()
@@ -83,7 +83,7 @@ class TestGptOss(unittest.TestCase):
 
   def test_model(self):
     # compare model architecture and weights (shape, dtype, values)
-    # if fakeweights, only compare  model architecture and weight shapes
+    # if fakeweights, only compare model architecture and weight shapes
     model, torch_model = self.get_model(getenv("FAKEWEIGHTS", 1))
     compare_state_dicts(model, torch_model)
 
@@ -92,11 +92,13 @@ class TestGptOss(unittest.TestCase):
     model, torch_model = self.get_model(getenv("FAKEWEIGHTS", 1))
     input_ids = np.random.randint(torch_model.vocab_size, size=(B, T))
 
-    # compare model forward pass
-    out = model(Tensor(input_ids))
-    with torch.no_grad(): torch_logits = torch_model.forward(torch.from_numpy(input_ids).long().to(torch_model.device)).logits
-    torch_out = torch_logits[:, -1:, :].argmax(-1)
-    np.testing.assert_allclose(out.numpy(), torch_out.cpu().numpy(), atol=5e-4, rtol=5e-4)
+    # two forward passes
+    for _ in range(2):
+      out = model(Tensor(input_ids))
+      with torch.no_grad(): torch_logits = torch_model.forward(torch.from_numpy(input_ids).long().to(torch_model.device)).logits
+      torch_out = torch_logits[:, -1:, :].argmax(-1)
+      np.testing.assert_allclose(out.numpy(), torch_out.cpu().numpy(), atol=5e-4, rtol=5e-4)
+      input_ids = np.concatenate((input_ids, out.numpy()), axis=-1)
 
 if __name__ == '__main__':
   unittest.main()

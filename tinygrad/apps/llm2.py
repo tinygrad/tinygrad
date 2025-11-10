@@ -163,15 +163,15 @@ class Transformer:
     # JIT is used if T=1 and start_pos is a UOp. TODO: make this not needed by including T in the JIT and making start_pos always a UOp
     self.forward_jit  = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float) -> Tensor:
+  def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                     # (B,T)   -> (B,T,D)
     for block in self.blk: x = block(x, start_pos)  # (B,T,D) -> (B,T,D)
     logits = self.output(self.output_norm(x))       # (B,T,D) -> (B,T,V)
     return logits[:, -1:, :].argmax(-1)             # (B,T,V) -> (B,)
 
-  def __call__(self, tokens:Tensor, start_pos:int|UOp=0, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0) -> Tensor:
+  def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     forward = self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward
-    return forward(tokens, start_pos, temperature, top_k, top_p, alpha_f, alpha_p)
+    return forward(tokens, start_pos)
 
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
@@ -279,7 +279,7 @@ def main(args):
   for _ in range(args.count):
     # forward pass
     next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
-    tok_tensor = model(next_tok, start_pos, temperature=args.temperature)
+    tok_tensor = model(next_tok, start_pos)
     tok = tok_tensor.item()
 
     # update the kv cache
@@ -292,8 +292,7 @@ def main(args):
     outputted = cur
   print()
 
-  if args.temperature == 0:
-    assert toks == expected, f"generated {toks} but expected {expected}"
+  assert toks == expected, f"generated {toks} but expected {expected}"
 
 
 if __name__ == "__main__":
@@ -304,7 +303,6 @@ if __name__ == "__main__":
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--prompt", type=str, default="Hi, how are you?", help="Phrase to start with")
   parser.add_argument("--count", type=int, default=4, help="Max number of tokens to generate")
-  parser.add_argument("--temperature", type=float, default=0.0, help="Temperature in the softmax")
   parser.add_argument("--timing", action="store_true", help="Print timing per token")
   args = parser.parse_args()
 
