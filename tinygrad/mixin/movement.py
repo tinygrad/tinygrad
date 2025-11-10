@@ -322,7 +322,7 @@ class MovementMixin:
     """
     repeats = argfix(repeats, *args)
     base_shape = _align_left(self.shape, repeats)[0]
-    unsqueezed_shape = flatten([[1, s] for s in base_shape])
-    expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
+    unsqueezed_shape = flatten([[s] if r == 1 else [1, s] for r,s in zip(repeats, base_shape)])
+    expanded_shape = flatten([[s] if r == 1 else [r, s] for r,s in zip(repeats, base_shape)])
     final_shape = [r*s for r,s in zip(repeats, base_shape)]
     return self.reshape(unsqueezed_shape).expand(expanded_shape).reshape(final_shape)
