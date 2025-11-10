@@ -1,10 +1,11 @@
 import ctypes, functools, sys
 from typing import TYPE_CHECKING
 
-def _do_ioctl(__idir, __base, __nr, __struct, __fd, **kwargs):
+def _do_ioctl(__idir, __base, __nr, __struct, __fd, __payload=None, **kwargs):
   import tinygrad.runtime.support.hcq as hcq, fcntl
   ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
-  if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=__struct(**kwargs))<<16)|(__base<<8)|__nr, out)): raise RuntimeError(f"ioctl returned {rc}")
+  if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=(__payload or __struct(**kwargs)))<<16)|(__base<<8)|__nr, out)):
+    raise RuntimeError(f"ioctl returned {rc}")
   return out
 
 def _IO(base, nr): return functools.partial(_do_ioctl, 0, ord(base) if isinstance(base, str) else base, nr, None)
