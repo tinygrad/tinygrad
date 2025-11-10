@@ -19,7 +19,7 @@ def __getattr__(nm):
     case "opencl": return load("opencl", ["find_library('OpenCL')"], ["/usr/include/CL/cl.h"])
     case "cuda": return load("cuda", ["find_library('cuda')"], ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"])
     case "nvrtc": return load("nvrtc", ["find_library('nvrtc')"], ["/usr/include/nvrtc.h"])
-    case "nvjitlink": load("nvjitlink", ["find_library('nvJitLink')"], ["/usr/include/nvJitLink.h"])
+    case "nvjitlink": load("nvjitlink", ["find_library('nvJitLink')"], [root/"extra/nvJitLink.h"])
     case "kfd": return load("kfd", [], ["/usr/include/linux/kfd_ioctl.h"])
     case "nv_gpu":
       return load("nv_gpu",[],[*[root/"extra/nv_gpu_driver"/s for s in ["clc6c0qmd.h","clcec0qmd.h"]],"{}/kernel-open/common/inc/nvmisc.h",*["{}"+

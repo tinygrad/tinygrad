@@ -30,57 +30,61 @@ NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6
 class struct_nvJitLink(Struct): pass
 nvJitLinkHandle = ctypes.POINTER(struct_nvJitLink)
 uint32_t = ctypes.c_uint32
-# extern nvJitLinkResult __nvJitLinkCreate_12_0(nvJitLinkHandle *handle, uint32_t numOptions, const char **options)
-try: (__nvJitLinkCreate_12_0:=dll.__nvJitLinkCreate_12_0).restype, __nvJitLinkCreate_12_0.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle), uint32_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+# nvJitLinkResult nvJitLinkCreate(nvJitLinkHandle *handle, uint32_t numOptions, const char **options)
+try: (nvJitLinkCreate:=dll.nvJitLinkCreate).restype, nvJitLinkCreate.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle), uint32_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkDestroy_12_0(nvJitLinkHandle *handle)
-try: (__nvJitLinkDestroy_12_0:=dll.__nvJitLinkDestroy_12_0).restype, __nvJitLinkDestroy_12_0.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle)]
+# nvJitLinkResult nvJitLinkDestroy(nvJitLinkHandle *handle)
+try: (nvJitLinkDestroy:=dll.nvJitLinkDestroy).restype, nvJitLinkDestroy.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle)]
 except AttributeError: pass
 
 size_t = ctypes.c_uint64
-# extern nvJitLinkResult __nvJitLinkAddData_12_0(nvJitLinkHandle handle, nvJitLinkInputType inputType, const void *data, size_t size, const char *name)
-try: (__nvJitLinkAddData_12_0:=dll.__nvJitLinkAddData_12_0).restype, __nvJitLinkAddData_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
+# nvJitLinkResult nvJitLinkAddData(nvJitLinkHandle handle, nvJitLinkInputType inputType, const void *data, size_t size, const char *name)
+try: (nvJitLinkAddData:=dll.nvJitLinkAddData).restype, nvJitLinkAddData.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkAddFile_12_0(nvJitLinkHandle handle, nvJitLinkInputType inputType, const char *fileName)
-try: (__nvJitLinkAddFile_12_0:=dll.__nvJitLinkAddFile_12_0).restype, __nvJitLinkAddFile_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.POINTER(ctypes.c_char)]
+# nvJitLinkResult nvJitLinkAddFile(nvJitLinkHandle handle, nvJitLinkInputType inputType, const char *fileName)
+try: (nvJitLinkAddFile:=dll.nvJitLinkAddFile).restype, nvJitLinkAddFile.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkComplete_12_0(nvJitLinkHandle handle)
-try: (__nvJitLinkComplete_12_0:=dll.__nvJitLinkComplete_12_0).restype, __nvJitLinkComplete_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle]
+# nvJitLinkResult nvJitLinkComplete(nvJitLinkHandle handle)
+try: (nvJitLinkComplete:=dll.nvJitLinkComplete).restype, nvJitLinkComplete.argtypes = nvJitLinkResult, [nvJitLinkHandle]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetLinkedCubinSize_12_0(nvJitLinkHandle handle, size_t *size)
-try: (__nvJitLinkGetLinkedCubinSize_12_0:=dll.__nvJitLinkGetLinkedCubinSize_12_0).restype, __nvJitLinkGetLinkedCubinSize_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
+# nvJitLinkResult nvJitLinkGetLinkedCubinSize(nvJitLinkHandle handle, size_t *size)
+try: (nvJitLinkGetLinkedCubinSize:=dll.nvJitLinkGetLinkedCubinSize).restype, nvJitLinkGetLinkedCubinSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetLinkedCubin_12_0(nvJitLinkHandle handle, void *cubin)
-try: (__nvJitLinkGetLinkedCubin_12_0:=dll.__nvJitLinkGetLinkedCubin_12_0).restype, __nvJitLinkGetLinkedCubin_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.c_void_p]
+# nvJitLinkResult nvJitLinkGetLinkedCubin(nvJitLinkHandle handle, void *cubin)
+try: (nvJitLinkGetLinkedCubin:=dll.nvJitLinkGetLinkedCubin).restype, nvJitLinkGetLinkedCubin.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.c_void_p]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetLinkedPtxSize_12_0(nvJitLinkHandle handle, size_t *size)
-try: (__nvJitLinkGetLinkedPtxSize_12_0:=dll.__nvJitLinkGetLinkedPtxSize_12_0).restype, __nvJitLinkGetLinkedPtxSize_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
+# nvJitLinkResult nvJitLinkGetLinkedPtxSize(nvJitLinkHandle handle, size_t *size)
+try: (nvJitLinkGetLinkedPtxSize:=dll.nvJitLinkGetLinkedPtxSize).restype, nvJitLinkGetLinkedPtxSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetLinkedPtx_12_0(nvJitLinkHandle handle, char *ptx)
-try: (__nvJitLinkGetLinkedPtx_12_0:=dll.__nvJitLinkGetLinkedPtx_12_0).restype, __nvJitLinkGetLinkedPtx_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
+# nvJitLinkResult nvJitLinkGetLinkedPtx(nvJitLinkHandle handle, char *ptx)
+try: (nvJitLinkGetLinkedPtx:=dll.nvJitLinkGetLinkedPtx).restype, nvJitLinkGetLinkedPtx.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetErrorLogSize_12_0(nvJitLinkHandle handle, size_t *size)
-try: (__nvJitLinkGetErrorLogSize_12_0:=dll.__nvJitLinkGetErrorLogSize_12_0).restype, __nvJitLinkGetErrorLogSize_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
+# nvJitLinkResult nvJitLinkGetErrorLogSize(nvJitLinkHandle handle, size_t *size)
+try: (nvJitLinkGetErrorLogSize:=dll.nvJitLinkGetErrorLogSize).restype, nvJitLinkGetErrorLogSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetErrorLog_12_0(nvJitLinkHandle handle, char *log)
-try: (__nvJitLinkGetErrorLog_12_0:=dll.__nvJitLinkGetErrorLog_12_0).restype, __nvJitLinkGetErrorLog_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
+# nvJitLinkResult nvJitLinkGetErrorLog(nvJitLinkHandle handle, char *log)
+try: (nvJitLinkGetErrorLog:=dll.nvJitLinkGetErrorLog).restype, nvJitLinkGetErrorLog.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetInfoLogSize_12_0(nvJitLinkHandle handle, size_t *size)
-try: (__nvJitLinkGetInfoLogSize_12_0:=dll.__nvJitLinkGetInfoLogSize_12_0).restype, __nvJitLinkGetInfoLogSize_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
+# nvJitLinkResult nvJitLinkGetInfoLogSize(nvJitLinkHandle handle, size_t *size)
+try: (nvJitLinkGetInfoLogSize:=dll.nvJitLinkGetInfoLogSize).restype, nvJitLinkGetInfoLogSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# extern nvJitLinkResult __nvJitLinkGetInfoLog_12_0(nvJitLinkHandle handle, char *log)
-try: (__nvJitLinkGetInfoLog_12_0:=dll.__nvJitLinkGetInfoLog_12_0).restype, __nvJitLinkGetInfoLog_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
+# nvJitLinkResult nvJitLinkGetInfoLog(nvJitLinkHandle handle, char *log)
+try: (nvJitLinkGetInfoLog:=dll.nvJitLinkGetInfoLog).restype, nvJitLinkGetInfoLog.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
+except AttributeError: pass
+
+# nvJitLinkResult nvJitLinkVersion(unsigned int *major, unsigned int *minor)
+try: (nvJitLinkVersion:=dll.nvJitLinkVersion).restype, nvJitLinkVersion.argtypes = nvJitLinkResult, [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 
