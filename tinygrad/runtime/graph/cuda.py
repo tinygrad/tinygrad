@@ -1,6 +1,6 @@
 import ctypes
 from typing import Any, cast
-import tinygrad.runtime.autogen.cuda as cuda
+from tinygrad.runtime.autogen import cuda
 from tinygrad.helpers import init_c_var, dedup
 from tinygrad.device import Buffer, Device
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution

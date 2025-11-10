@@ -1,5 +1,5 @@
 import ctypes, subprocess
-import tinygrad.runtime.autogen.comgr as comgr
+from tinygrad.runtime.autogen import comgr
 
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))

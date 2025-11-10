@@ -1,5 +1,6 @@
 from __future__ import annotations
-import resource, ctypes, weakref, functools, itertools, tinygrad.runtime.autogen.ib as ib
+import resource, ctypes, weakref, functools, itertools
+from tinygrad.runtime.autogen import ib
 from typing import Iterator
 from dataclasses import dataclass
 from weakref import WeakKeyDictionary
