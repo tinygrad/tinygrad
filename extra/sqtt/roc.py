@@ -40,24 +40,39 @@ class InstInfo:
   def on_ev(self, ev):
     self.hit, self.lat, self.stall = self.hit + 1, self.lat + ev.duration, self.stall + ev.stall
 
+@dataclasses.dataclass(frozen=True)
+class InstExec:
+  typ:str
+  inst:str
+  stall:int
+  dur:int
+  time:int
+
+@dataclasses.dataclass(frozen=True)
+class PrgExec:
+  name:str
+  wave:int
+  cu:int
+  simd:int
+  def __str__(self): return f"{self.name},{self.wave},{self.cu},{self.simd}"
+
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
-    self.wave_events:dict[tuple[str, int, int, int], dict[int, InstInfo]] = {}
+    self.wave_events:dict[PrgExec, dict[int, InstInfo]] = {}
     self.disasms:dict[int, tuple[str, int]] = {}
-    self.addr2prg:dict[int, ProfileProgramEvent] = {}
+    self.inst_execs:dict[PrgExec, list[InstExec]] = {}
 
     for prog in prog_evs:
-      for addr, info in llvm_disasm(dev_evs[prog.device].arch, unwrap(prog.lib)).items():
-        self.disasms[unwrap(prog.base) + addr] = info
-        self.addr2prg[unwrap(prog.base) + addr] = prog
+      arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
+      for addr, info in llvm_disasm(arch, unwrap(prog.lib)).items():
+        self.disasms[(prog.name, unwrap(prog.base) + addr)] = info
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
+    self.active_kern = x.kern if x is not None else None
     self.active_se = x.se if x is not None else None
     return x
-
-  def find_program(self, addr): return self.addr2prg[addr]
 
   def on_occupancy_ev(self, ev):
     if DEBUG >= 5: print("OCC", ev.time, self.active_se, ev.cu, ev.simd, ev.wave_id, ev.start)
@@ -66,14 +81,18 @@ class _ROCParseCtx:
     if DEBUG >= 5: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
     asm:dict[int, InstInfo] = {}
+    inst_execs:list[InstExec] = []
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
-      asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=self.disasms[inst_ev.pc.address][0]))
+      inst_disasm = self.disasms[(self.active_kern, inst_ev.pc.address)][0]
+      asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=inst_disasm))
       asm[inst_ev.pc.address].on_ev(inst_ev)
+      inst_execs.append(InstExec(inst_typ, inst_disasm, inst_ev.stall, inst_ev.duration, inst_ev.time))
 
     if ev.instructions_size > 0:
-      self.wave_events[(self.find_program(ev.instructions_array[0].pc.address).name, ev.wave_id, ev.cu, ev.simd)] = asm
+      self.wave_events[key:=PrgExec(self.active_kern, ev.wave_id, ev.cu, ev.simd)] = asm
+      self.inst_execs[key] = inst_execs
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}
@@ -106,7 +125,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
-    instr, mem_size_ptr[0] = ROCParseCtx.disasms[pc.address]
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[(ROCParseCtx.active_kern, pc.address)]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0

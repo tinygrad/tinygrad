@@ -114,6 +114,13 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg: str) -> tuple[T,...]|T:
+  excs = []
+  for typ in candidates:
+    try: return tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+    except Exception as e: excs.append(e)
+  raise ExceptionGroup(err_msg, excs)
+
 def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
@@ -179,6 +186,8 @@ SPEC = ContextVar("SPEC", 1)
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
+# set to 1, this uses tuplize in the linearizer sort order
+TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 
 @dataclass(frozen=True)
 class Metadata:
