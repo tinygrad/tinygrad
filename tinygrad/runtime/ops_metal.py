@@ -138,7 +138,7 @@ class MetalProgram:
       None, ctypes.byref(error_pipeline_creation:=metal.NSError().retained()))
     error_check(error_pipeline_creation)
     # cache these msg calls
-    self.max_total_threads: int = cast(int, self.pipeline_state.maxTotalThreadsPerThreadgroup()) # FIXME: cast
+    self.max_total_threads: int = self.pipeline_state.maxTotalThreadsPerThreadgroup()
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if prod(local_size) > self.max_total_threads:
@@ -196,7 +196,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:] # FIXME: cast
+    return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
   def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
   def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)

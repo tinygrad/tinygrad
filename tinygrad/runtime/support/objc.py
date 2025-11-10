@@ -1,4 +1,5 @@
 import ctypes, ctypes.util, functools, sys
+from typing import Any
 
 class id_(ctypes.c_void_p):
   retain: bool = False
@@ -8,7 +9,9 @@ class id_(ctypes.c_void_p):
   def __del__(self):
     if self.retain and not sys.is_finalizing(): self.release()
   def release(self): msg("release")(self)
-  def retained(self): return (setattr(self, 'retain', True), self)[1]
+  def retained(self):
+    setattr(self, 'retain', True)
+    return self
 
 def returns_retained(f): return functools.wraps(f)(lambda *args, **kwargs: f(*args, **kwargs).retained())
 
@@ -50,8 +53,7 @@ class MetaSpec(type(id_)):
 
   def _addmeth(cls, m, clsmeth=False):
     nm = m[0].strip(':').replace(':', '_')
-    if clsmeth: setattr(cls, nm, classmethod(msg(m[0], cls if m[1] == 'instancetype' else m[1],
-                                                 [cls if a == 'instancetype' else a for a in m[2]], *m[3:], clsmeth=True)))
-    else: setattr(cls, nm, msg(m[0], cls if m[1] == 'instancetype' else m[1], [cls if a == 'instancetype' else a for a in m[2]], *m[3:]))
+    m[1], m[2] = cls if m[1] == 'instancetype' else m[1], [cls if a == 'instancetype' else a for a in m[2]]
+    setattr(cls, nm, classmethod(msg(*m, clsmeth=clsmeth))) # type: ignore[misc]
 
 class Spec(id_, metaclass=MetaSpec): pass
