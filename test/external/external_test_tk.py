@@ -2,13 +2,13 @@ import unittest
 
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.engine.realize import ExecItem, get_runner
+import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import gl, st, rt, rv
 
 class TestTK(unittest.TestCase):
-  @unittest.skip("store from float rt is wrong")
   def test_simple_matmul(self):
     N = 32
     BLOCK_SIZE = 16
@@ -57,9 +57,8 @@ class TestTK(unittest.TestCase):
 
     ref = a.matmul(b, dtype=dtypes.float32).float()
 
-    assert ref.allclose(c)
+    np.testing.assert_allclose(ref.numpy(), c.numpy())
 
-  @unittest.skip("store from float rt is wrong")
   def test_simple_matmul_transposed(self):
     N = 32
     BLOCK_SIZE = 16
@@ -108,7 +107,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.matmul(b.transpose(2, 3), dtype=dtypes.float32).float()
 
-    assert ref.allclose(c)
+    np.testing.assert_allclose(ref.numpy(), c.numpy())
 
   def test_load_store(self):
     N = 32
@@ -146,7 +145,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float()
 
-    assert ref.allclose(b)
+    np.testing.assert_allclose(ref.numpy(), b.numpy())
 
   def test_max(self):
     N = 16
@@ -194,7 +193,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().max(axis=3, keepdim=True).expand(a.shape)
 
-    assert ref.allclose(b)
+    np.testing.assert_allclose(ref.numpy(), b.numpy())
 
   def test_max_nonsquare(self):
     N, M = 16, 64
@@ -242,7 +241,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().max(axis=3, keepdim=True).expand(a.shape)
 
-    assert ref.allclose(b)
+    np.testing.assert_allclose(ref.numpy(), b.numpy())
 
   def test_sum(self):
     N = 16
@@ -291,7 +290,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().sum(axis=3, keepdim=True).expand(a.shape)
 
-    assert ref.allclose(b)
+    np.testing.assert_allclose(ref.numpy(), b.numpy())
 
   def test_sum_nonsquare(self):
     N, M = 16, 64
@@ -339,7 +338,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.float().sum(axis=3, keepdim=True).expand(a.shape)
 
-    assert ref.allclose(b)
+    np.testing.assert_allclose(ref.numpy(), b.numpy())
 
 if __name__ == "__main__":
   unittest.main()
