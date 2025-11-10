@@ -67,14 +67,23 @@ view_ops = {
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
 # in place operations with views
-def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.is_contiguous: self.replace(self.contiguous())
-  self.replace(self.clone().realize())
+def realize_with_views(self: Tensor, views):
+  base = self.contiguous() if not self.uop.is_contiguous else self
+  base = base.clone().realize()
+  self.replace(base)
+
+  # rebuild each derived view by replaying its movement ops onto the realized base
   for v in views:
-    if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
+    # skip raw subbuffer shells; they just re-wrap the realized base
+    if getattr(v.uop, "base", None) is not None and v.uop.base.op is Ops.BUFFER_VIEW:
+      continue
     ret = self
-    # st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    # for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
+    st = getattr(v.uop, "st", None)
+    if st is not None:
+      for mop, arg in cached_to_movement_ops(self.shape, st):
+        ret = ret._mop(mop, arg)
+    else:
+      ret = v.contiguous().clone().realize()
     v.replace(ret)
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
@@ -169,14 +178,14 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-# @functools.cache
-# def cached_to_movement_ops(shape, st) -> list:
-#   mops = to_movement_ops(st)
-#   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-#   return mops
+@functools.cache
+def cached_to_movement_ops(shape, st) -> list:
+  mops = to_movement_ops(st)
+  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
+  return mops
 
 # # Not sure if needed yet
-# from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
 @wrap_view_op
 def _as_strided(tensor: Tensor, size, stride, storage_offset=None):
@@ -343,7 +352,6 @@ def scatter_add(self, dim, index, src, out):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  # realize = dest.is_tiny
   realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
