@@ -1,5 +1,6 @@
 import ctypes, subprocess, tempfile, unittest
-from tinygrad.helpers import Struct, WIN
+from tinygrad.helpers import WIN
+from tinygrad.runtime.support.c import Struct
 
 class TestAutogen(unittest.TestCase):
   def test_packed_struct_sizeof(self):
