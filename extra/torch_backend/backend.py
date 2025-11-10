@@ -178,17 +178,30 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
 @wrap_view_op
-def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
-  # multiple as_strided do not compound
+def _as_strided(tensor: Tensor, size, stride, storage_offset=None):
+  # do not compound; always attach to the base view
   base = canonical_base(tensor)
-  # ret = base._mop(Ops.STRIDE, arg=(tuple(size), tuple(stride), int(storage_offset or 0)))
+  size = tuple(int(x) for x in size); stride = tuple(int(x) for x in stride); off = int(storage_offset or 0)
 
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, ret)
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-  # No Longer Needed
-  # for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-  # return ret
-  return base
+  # Build linear indices idx = off + Σ_i coord_i * stride_i, broadcast across `size`
+  nd  = len(size); idx = None
+  for d, (sd, st) in enumerate(zip(size, stride)):
+    # trivial axis: coord is 0 everywhere
+    if sd == 1: coord = Tensor.zeros(*size, dtype=dtypes.int, device=base.device)
+    else:
+      ar = Tensor.arange(sd, dtype=dtypes.int, device=base.device)
+      shp = (1,)*d + (sd,) + (1,)*(nd-d-1)
+      coord = ar.reshape(shp).expand(*size)
+    term = coord * int(st); idx = term if idx is None else (idx + term)
+  if idx is None:
+    idx = Tensor.zeros(1, dtype=dtypes.int, device=base.device)
+  idx = idx + off
+
+  # Gather from a flattened base into the requested strided view
+  base_flat = base.reshape((prod(base.shape),))
+  out = base_flat.gather(0, idx.reshape((prod(size),))).reshape(size)
+  if TORCH_DEBUG >= 1: print("**** as_strided", tuple(tensor.shape), size, stride, off)
+  return out
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
@@ -325,7 +338,8 @@ def scatter_add(self, dim, index, src, out):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
+  # realize = dest.is_tiny
+  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest)) 
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)

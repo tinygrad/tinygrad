@@ -131,11 +131,11 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
   }
   
   // log debug info
-  std::cout << "[wrap_tensor] sizes = [";
-  for (auto s : sizes) std::cout << s << " ";
-  std::cout << "], strides = [";
-  for (auto s : strides) std::cout << s << " ";
-  std::cout << "], offset = " << storage_offset << std::endl;
+  // std::cout << "[wrap_tensor] sizes = [";
+  // for (auto s : sizes) std::cout << s << " ";
+  // std::cout << "], strides = [";
+  // for (auto s : strides) std::cout << s << " ";
+  // std::cout << "], offset = " << storage_offset << std::endl;
 
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),
