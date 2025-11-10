@@ -10,7 +10,7 @@ def dll():
 dll = dll()
 
 class MTLDispatchThreadgroupsIndirectArguments(Struct): pass
-uint32_t = ctypes.c_uint
+uint32_t = ctypes.c_uint32
 MTLDispatchThreadgroupsIndirectArguments._fields_ = [
   ('threadgroupsPerGrid', (uint32_t * 3)),
 ]
@@ -22,7 +22,7 @@ MTLStageInRegionIndirectArguments._fields_ = [
 class MTLComputeCommandEncoder(objc.Spec): pass
 class MTLCommandEncoder(objc.Spec): pass
 class MTLComputePipelineState(objc.Spec): pass
-NSUInteger = ctypes.c_ulong
+NSUInteger = ctypes.c_uint64
 class MTLBuffer(objc.Spec): pass
 class MTLResource(objc.Spec): pass
 class struct__NSRange(Struct): pass
@@ -229,8 +229,8 @@ MTLTextureUsagePixelFormatView = enum_MTLTextureUsage.define('MTLTextureUsagePix
 MTLTextureUsageShaderAtomic = enum_MTLTextureUsage.define('MTLTextureUsageShaderAtomic', 32)
 
 MTLTextureUsage = enum_MTLTextureUsage
-BOOL = ctypes.c_int
-NSInteger = ctypes.c_long
+BOOL = ctypes.c_int32
+NSInteger = ctypes.c_int64
 enum_MTLTextureCompressionType = CEnum(NSInteger)
 MTLTextureCompressionTypeLossless = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossless', 0)
 MTLTextureCompressionTypeLossy = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossy', 1)
@@ -292,7 +292,7 @@ NSInvocation._classmethods_ = [
 class struct__NSZone(Struct): pass
 class Protocol(objc.Spec): pass
 class NSString(objc.Spec): pass
-unichar = ctypes.c_ushort
+unichar = ctypes.c_uint16
 class NSCoder(objc.Spec): pass
 class NSData(objc.Spec): pass
 NSData._bases_ = [NSObject]
@@ -388,7 +388,7 @@ MTLTextureDescriptor._classmethods_ = [
   ('textureBufferDescriptorWithPixelFormat:width:resourceOptions:usage:', MTLTextureDescriptor, [MTLPixelFormat, NSUInteger, MTLResourceOptions, MTLTextureUsage]),
 ]
 class MTLDevice(objc.Spec): pass
-uint64_t = ctypes.c_ulonglong
+uint64_t = ctypes.c_uint64
 MTLBuffer._bases_ = [MTLResource]
 MTLBuffer._methods_ = [
   ('contents', ctypes.c_void_p, []),
@@ -436,15 +436,12 @@ MTLPurgeableStateVolatile = enum_MTLPurgeableState.define('MTLPurgeableStateVola
 MTLPurgeableStateEmpty = enum_MTLPurgeableState.define('MTLPurgeableStateEmpty', 4)
 
 MTLPurgeableState = enum_MTLPurgeableState
-kern_return_t = ctypes.c_int
-task_id_token_t = ctypes.c_uint
 class MTLHeap(objc.Spec): pass
 MTLResource._bases_ = [NSObject]
 MTLResource._methods_ = [
   ('setPurgeableState:', MTLPurgeableState, [MTLPurgeableState]),
   ('makeAliasable', None, []),
   ('isAliasable', BOOL, []),
-  ('setOwnerWithIdentity:', kern_return_t, [task_id_token_t]),
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
   ('device', MTLDevice, []),
@@ -1591,14 +1588,14 @@ NSNumber._methods_ = [
   ('initWithCoder:', 'instancetype', [NSCoder]),
   ('initWithChar:', NSNumber, [ctypes.c_char]),
   ('initWithUnsignedChar:', NSNumber, [ctypes.c_ubyte]),
-  ('initWithShort:', NSNumber, [ctypes.c_short]),
-  ('initWithUnsignedShort:', NSNumber, [ctypes.c_ushort]),
-  ('initWithInt:', NSNumber, [ctypes.c_int]),
-  ('initWithUnsignedInt:', NSNumber, [ctypes.c_uint]),
-  ('initWithLong:', NSNumber, [ctypes.c_long]),
-  ('initWithUnsignedLong:', NSNumber, [ctypes.c_ulong]),
-  ('initWithLongLong:', NSNumber, [ctypes.c_longlong]),
-  ('initWithUnsignedLongLong:', NSNumber, [ctypes.c_ulonglong]),
+  ('initWithShort:', NSNumber, [ctypes.c_int16]),
+  ('initWithUnsignedShort:', NSNumber, [ctypes.c_uint16]),
+  ('initWithInt:', NSNumber, [ctypes.c_int32]),
+  ('initWithUnsignedInt:', NSNumber, [ctypes.c_uint32]),
+  ('initWithLong:', NSNumber, [ctypes.c_int64]),
+  ('initWithUnsignedLong:', NSNumber, [ctypes.c_uint64]),
+  ('initWithLongLong:', NSNumber, [ctypes.c_int64]),
+  ('initWithUnsignedLongLong:', NSNumber, [ctypes.c_uint64]),
   ('initWithFloat:', NSNumber, [ctypes.c_float]),
   ('initWithDouble:', NSNumber, [ctypes.c_double]),
   ('initWithBool:', NSNumber, [BOOL]),
@@ -1609,14 +1606,14 @@ NSNumber._methods_ = [
   ('descriptionWithLocale:', NSString, [objc.id_]),
   ('charValue', ctypes.c_char, []),
   ('unsignedCharValue', ctypes.c_ubyte, []),
-  ('shortValue', ctypes.c_short, []),
-  ('unsignedShortValue', ctypes.c_ushort, []),
-  ('intValue', ctypes.c_int, []),
-  ('unsignedIntValue', ctypes.c_uint, []),
-  ('longValue', ctypes.c_long, []),
-  ('unsignedLongValue', ctypes.c_ulong, []),
-  ('longLongValue', ctypes.c_longlong, []),
-  ('unsignedLongLongValue', ctypes.c_ulonglong, []),
+  ('shortValue', ctypes.c_int16, []),
+  ('unsignedShortValue', ctypes.c_uint16, []),
+  ('intValue', ctypes.c_int32, []),
+  ('unsignedIntValue', ctypes.c_uint32, []),
+  ('longValue', ctypes.c_int64, []),
+  ('unsignedLongValue', ctypes.c_uint64, []),
+  ('longLongValue', ctypes.c_int64, []),
+  ('unsignedLongLongValue', ctypes.c_uint64, []),
   ('floatValue', ctypes.c_float, []),
   ('doubleValue', ctypes.c_double, []),
   ('boolValue', BOOL, []),
@@ -1624,7 +1621,7 @@ NSNumber._methods_ = [
   ('unsignedIntegerValue', NSUInteger, []),
   ('stringValue', NSString, []),
 ]
-NSURLBookmarkFileCreationOptions = ctypes.c_ulong
+NSURLBookmarkFileCreationOptions = ctypes.c_uint64
 NSURL._bases_ = [NSObject]
 NSURL._methods_ = [
   ('initWithScheme:host:path:', 'instancetype', [NSString, NSString, NSString]),
@@ -1639,6 +1636,7 @@ NSURL._methods_ = [
   ('initWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
   ('initAbsoluteURLWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
   ('getFileSystemRepresentation:maxLength:', BOOL, [ctypes.POINTER(ctypes.c_char), NSUInteger]),
+  ('checkResourceIsReachableAndReturnError:', BOOL, [ctypes.POINTER(NSError)]),
   ('isFileReferenceURL', BOOL, []),
   ('fileReferenceURL', NSURL, []),
   ('getResourceValue:forKey:error:', BOOL, [ctypes.POINTER(objc.id_), NSURLResourceKey, ctypes.POINTER(NSError)]),
@@ -1812,7 +1810,7 @@ MTLCounterSampleBufferDescriptor._methods_ = [
   ('sampleCount', NSUInteger, []),
   ('setSampleCount:', None, [NSUInteger]),
 ]
-MTLTimestamp = ctypes.c_ulonglong
+MTLTimestamp = ctypes.c_uint64
 class MTLBufferBinding(objc.Spec): pass
 class MTLBinding(objc.Spec): pass
 MTLBufferBinding._bases_ = [MTLBinding]
@@ -1942,8 +1940,6 @@ MTLIndirectCommandTypeDrawPatches = enum_MTLIndirectCommandType.define('MTLIndir
 MTLIndirectCommandTypeDrawIndexedPatches = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawIndexedPatches', 8)
 MTLIndirectCommandTypeConcurrentDispatch = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeConcurrentDispatch', 32)
 MTLIndirectCommandTypeConcurrentDispatchThreads = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeConcurrentDispatchThreads', 64)
-MTLIndirectCommandTypeDrawMeshThreadgroups = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawMeshThreadgroups', 128)
-MTLIndirectCommandTypeDrawMeshThreads = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawMeshThreads', 256)
 
 MTLIndirectCommandType = enum_MTLIndirectCommandType
 class MTLIndirectCommandBufferExecutionRange(Struct): pass
@@ -1967,12 +1963,6 @@ MTLIndirectCommandBufferDescriptor._methods_ = [
   ('setMaxKernelBufferBindCount:', None, [NSUInteger]),
   ('maxKernelThreadgroupMemoryBindCount', NSUInteger, []),
   ('setMaxKernelThreadgroupMemoryBindCount:', None, [NSUInteger]),
-  ('maxObjectBufferBindCount', NSUInteger, []),
-  ('setMaxObjectBufferBindCount:', None, [NSUInteger]),
-  ('maxMeshBufferBindCount', NSUInteger, []),
-  ('setMaxMeshBufferBindCount:', None, [NSUInteger]),
-  ('maxObjectThreadgroupMemoryBindCount', NSUInteger, []),
-  ('setMaxObjectThreadgroupMemoryBindCount:', None, [NSUInteger]),
   ('supportRayTracing', BOOL, []),
   ('setSupportRayTracing:', None, [BOOL]),
   ('supportDynamicAttributeStride', BOOL, []),
@@ -1997,13 +1987,6 @@ MTLIndirectRenderCommand._methods_ = [
   ('drawIndexedPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:controlPointIndexBuffer:controlPointIndexBufferOffset:instanceCount:baseInstance:tessellationFactorBuffer:tessellationFactorBufferOffset:tessellationFactorBufferInstanceStride:', None, [NSUInteger, NSUInteger, NSUInteger, MTLBuffer, NSUInteger, MTLBuffer, NSUInteger, NSUInteger, NSUInteger, MTLBuffer, NSUInteger, NSUInteger]),
   ('drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:', None, [MTLPrimitiveType, NSUInteger, NSUInteger, NSUInteger, NSUInteger]),
   ('drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:', None, [MTLPrimitiveType, NSUInteger, MTLIndexType, MTLBuffer, NSUInteger, NSUInteger, NSInteger, NSUInteger]),
-  ('setObjectThreadgroupMemoryLength:atIndex:', None, [NSUInteger, NSUInteger]),
-  ('setObjectBuffer:offset:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger]),
-  ('setMeshBuffer:offset:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger]),
-  ('drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:', None, [MTLSize, MTLSize, MTLSize]),
-  ('drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:', None, [MTLSize, MTLSize, MTLSize]),
-  ('setBarrier', None, []),
-  ('clearBarrier', None, []),
   ('reset', None, []),
 ]
 class MTLIndirectComputeCommand(objc.Spec): pass
