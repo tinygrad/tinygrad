@@ -389,12 +389,12 @@ class NVKIface:
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, cpu_addr=None, **kwargs) -> HCQBuffer:
     # Uncached memory is "system". Use huge pages only for gpu memory.
-    page_size = (4 << (12 if OSX else 10)) if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << (12 if OSX else 10)))
+    page_size = mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (mmap.PAGESIZE if MOCKGPU else 4 << 10))
     size = round_up(size, page_size)
-    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access)
+    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access) if (alloced:=cpu_addr is None) else cpu_addr
 
     if host:
-      va_addr = cpu_addr or FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
+      if alloced: va_addr = FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
 
       flags = (nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) \
             | (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30)
@@ -471,7 +471,7 @@ class PCIIface(PCIIfaceBase):
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
     # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
-    page_size = (2 << 20) if size >= (8 << 20) and not uncached and not host else (4 << 10)
+    page_size = mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << 10))
     return super().alloc(round_up(size, page_size), host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, **kwargs)
 
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)

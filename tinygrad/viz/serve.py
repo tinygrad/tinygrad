@@ -206,10 +206,16 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   except Exception: return err("DECODER IMPORT ISSUE")
   try:
     rctx = decode(profile)
-    steps = [{"name":str(x[0]), "depth":0, "data":{"rows":[(e.inst, e.time, e.time-x[1][i-1].time if i else 0, e.dur, e.stall,
-                                                            str(e.typ).split("_")[-1]) for i,e in enumerate(x[1])],
-                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":[]},
-              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.inst_execs.items())]
+    steps:list[dict] = []
+    for k,v in rctx.inst_execs.items():
+      if k.wave == 0:
+        if (r:=ref_map.get(name:=k.name)): name = ctxs[r]["name"]
+        steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                      "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
+      rows = [(e.inst, e.time, e.time-v[i-1].time if i else 0, e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(v)]
+      summary = [{"label":"Total Cycles", "value":v[-1].time-v[0].time if v else 0}, {"label":"CU", "value":k.cu}, {"label":"SIMD", "value":k.simd}]
+      steps.append({"name":f"Wave {k.wave}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
     if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   except Exception: return err("DECODER ERROR")
   ctxs.append({"name":"Counters", "steps":steps})
