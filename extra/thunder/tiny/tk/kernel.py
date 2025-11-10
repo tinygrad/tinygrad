@@ -54,4 +54,4 @@ class Kernel(AbstractContextManager):
   def endrange(self):
     last_store = self.store_stack.pop()
     last_range = self.range_stack.pop()
-    return last_store[1].after(last_store[0].end(last_range._rng)).reshape(last_store[1].shape)
+    return last_store[1].after(last_store[0].barrier().end(last_range._rng)).reshape(last_store[1].shape)
