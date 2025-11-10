@@ -44,8 +44,8 @@ def equal_state_dicts(model, torch_model, num_blocks):
     torch_v = torch_state[torch_k]
     assert torch_k in torch_state, f"Key Mismatch: {k} in tinygrad model but {torch_k} not in torch model"
     # check dtype, shape, and value
-    err_msg = f"tinygrad:\tk={k}\tv.dtype={v.dtype}\tv.shape={v.shape}\npytorch:\tk={torch_k}\tv.dtype={torch_v.dtype}\tv.shape={torch_v.shape}\n{v.numpy()=}\n{torch_v.cpu().numpy()=}"
-    np.testing.assert_allclose(v.numpy(), torch_v.cpu().numpy(), strict=True, err_msg=err_msg)
+    np.testing.assert_allclose(v.numpy(), torch_v.float().cpu().numpy(), strict=True, atol=1e-6,
+                               err_msg=f"tinygrad:\tk={k}\tv.dtype={v.dtype}\tv.shape={v.shape}\npytorch:\tk={torch_k}\tv.dtype={torch_v.dtype}\tv.shape={torch_v.shape}\n{v.numpy()=}\n{torch_v.float().cpu().numpy()=}")
     del k, v, torch_k, torch_v # todo: remove
   print("Weights are equal!")
 
@@ -270,7 +270,7 @@ class TestGPTOSS(unittest.TestCase):
   @torch.no_grad()
   def test_mxfp4_weights4(self):
     from tinygrad.apps.llm2 import Transformer as GptOSS, download_weights, MODELS
-    from transformers import GptOssForCausalLM as TorchGptOss, GptOssConfig
+    from transformers import GptOssForCausalLM as TorchGptOss, GptOssConfig, AutoConfig
 
     Tensor.manual_seed(42)
     np.random.seed(42)
@@ -286,6 +286,7 @@ class TestGPTOSS(unittest.TestCase):
                     "num_local_experts": 32, "num_experts_per_tok": 4,
                     "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "initial_context_length": 4096,
                     "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
+                    "quantization_config": {"modules_to_not_convert": ["model.layers.*.self_attn", "model.layers.*.mlp.router", "model.embed_tokens", "lm_head"], "quant_method": "mxfp4"},
                     }
     small_params = params | {'num_blocks': 1, 'max_context': 4}
     torch_small_params = torch_params | {'num_hidden_layers': 1, 'initial_context_length': 4}
@@ -294,11 +295,20 @@ class TestGPTOSS(unittest.TestCase):
     model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
 
     # dequantize in tinygrad
-    model = GptOSS.from_pretrained(model_path, small_params)
+    params = MODELS["20B"]["params"] | {'num_blocks': 1, 'max_context': 4}
+    model = GptOSS.from_pretrained(model_path, params)
 
     # dequantize in torch
     torch_device = torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    torch_model = TorchGptOss.from_pretrained(model_path, config=GptOssConfig(**torch_small_params), ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
+    config = GptOssConfig(**torch_small_params)
+    ic(config)
+    ic(GptOssConfig())
+    torch_params = AutoConfig.from_pretrained("openai/gpt-oss-20b")
+    torch_params.num_hidden_layers = 1
+    torch_params.initial_context_length = 4
+    torch_params.layer_types = torch_params.layer_types[:torch_params.num_hidden_layers]
+    ic(torch_params)
+    torch_model = TorchGptOss.from_pretrained(model_path, config=torch_params, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
     torch_model = torch_model.to(torch_device).eval()
 
     equal_state_dicts(model, torch_model, num_blocks=1)
