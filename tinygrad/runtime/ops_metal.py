@@ -1,5 +1,4 @@
 import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, sys
-from typing import Any, cast
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
@@ -36,7 +35,7 @@ class MetalDevice(Compiled):
     self.sysdevice = metal.MTLCreateSystemDefaultDevice()
     self.mtl_queue = self.sysdevice.newCommandQueueWithMaxCommandBufferCount(1024)
     if self.mtl_queue is None: raise RuntimeError("Cannot allocate a new command queue")
-    self.mtl_buffers_in_flight: list[Any] = []
+    self.mtl_buffers_in_flight: list[metal.MTLCommandBuffer] = []
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
 
