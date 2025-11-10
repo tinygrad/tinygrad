@@ -47,8 +47,9 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
     suggested_name = anon_names.get(f"{(decl:=t.get_declaration()).location.file}:{decl.location.line}", suggested_name)
     nonlocal lines, types, anoncnt, objc
     tmap = {TK.VOID:"None", TK.CHAR_U:"ctypes.c_ubyte", TK.UCHAR:"ctypes.c_ubyte", TK.CHAR_S:"ctypes.c_char", TK.SCHAR:"ctypes.c_char",
-            **{getattr(TK, k):f"ctypes.c_{k.lower()}" for k in
-            ["BOOL", "USHORT", "UINT", "ULONG", "ULONGLONG", "WCHAR", "SHORT", "INT", "LONG", "LONGLONG", "FLOAT", "DOUBLE", "LONGDOUBLE"]}}
+            **{getattr(TK, k):f"ctypes.c_{k.lower()}" for k in ["BOOL", "WCHAR", "FLOAT", "DOUBLE", "LONGDOUBLE"]},
+            **{getattr(TK, k):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
+               [(16, "USHORT"), (16, "SHORT"), (32, "UINT"), (32, "INT"), (64, "ULONG"), (64, "LONG"), (64, "ULONGLONG"), (64, "LONGLONG")]}}
 
     if t.kind in tmap: return tmap[t.kind]
     if t.spelling in types and types[t.spelling][1]: return types[t.spelling][0]

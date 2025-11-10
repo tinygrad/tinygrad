@@ -1,8 +1,8 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
-ion_user_handle_t = ctypes.c_int
-enum_ion_heap_type = CEnum(ctypes.c_uint)
+ion_user_handle_t = ctypes.c_int32
+enum_ion_heap_type = CEnum(ctypes.c_uint32)
 ION_HEAP_TYPE_SYSTEM = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM', 0)
 ION_HEAP_TYPE_SYSTEM_CONTIG = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM_CONTIG', 1)
 ION_HEAP_TYPE_CARVEOUT = enum_ion_heap_type.define('ION_HEAP_TYPE_CARVEOUT', 2)
@@ -12,18 +12,18 @@ ION_HEAP_TYPE_CUSTOM = enum_ion_heap_type.define('ION_HEAP_TYPE_CUSTOM', 5)
 ION_NUM_HEAPS = enum_ion_heap_type.define('ION_NUM_HEAPS', 16)
 
 class struct_ion_allocation_data(Struct): pass
-size_t = ctypes.c_ulong
+size_t = ctypes.c_uint64
 struct_ion_allocation_data._fields_ = [
   ('len', size_t),
   ('align', size_t),
-  ('heap_id_mask', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
+  ('heap_id_mask', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
   ('handle', ion_user_handle_t),
 ]
 class struct_ion_fd_data(Struct): pass
 struct_ion_fd_data._fields_ = [
   ('handle', ion_user_handle_t),
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
 ]
 class struct_ion_handle_data(Struct): pass
 struct_ion_handle_data._fields_ = [
@@ -31,16 +31,16 @@ struct_ion_handle_data._fields_ = [
 ]
 class struct_ion_custom_data(Struct): pass
 struct_ion_custom_data._fields_ = [
-  ('cmd', ctypes.c_uint),
-  ('arg', ctypes.c_ulong),
+  ('cmd', ctypes.c_uint32),
+  ('arg', ctypes.c_uint64),
 ]
-enum_msm_ion_heap_types = CEnum(ctypes.c_uint)
+enum_msm_ion_heap_types = CEnum(ctypes.c_uint32)
 ION_HEAP_TYPE_MSM_START = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_MSM_START', 6)
 ION_HEAP_TYPE_SECURE_DMA = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_SECURE_DMA', 6)
 ION_HEAP_TYPE_SYSTEM_SECURE = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_SYSTEM_SECURE', 7)
 ION_HEAP_TYPE_HYP_CMA = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_HYP_CMA', 8)
 
-enum_ion_heap_ids = CEnum(ctypes.c_int)
+enum_ion_heap_ids = CEnum(ctypes.c_int32)
 INVALID_HEAP_ID = enum_ion_heap_ids.define('INVALID_HEAP_ID', -1)
 ION_CP_MM_HEAP_ID = enum_ion_heap_ids.define('ION_CP_MM_HEAP_ID', 8)
 ION_SECURE_HEAP_ID = enum_ion_heap_ids.define('ION_SECURE_HEAP_ID', 9)
@@ -59,13 +59,13 @@ ION_AUDIO_HEAP_ID = enum_ion_heap_ids.define('ION_AUDIO_HEAP_ID', 28)
 ION_MM_FIRMWARE_HEAP_ID = enum_ion_heap_ids.define('ION_MM_FIRMWARE_HEAP_ID', 29)
 ION_HEAP_ID_RESERVED = enum_ion_heap_ids.define('ION_HEAP_ID_RESERVED', 31)
 
-enum_ion_fixed_position = CEnum(ctypes.c_uint)
+enum_ion_fixed_position = CEnum(ctypes.c_uint32)
 NOT_FIXED = enum_ion_fixed_position.define('NOT_FIXED', 0)
 FIXED_LOW = enum_ion_fixed_position.define('FIXED_LOW', 1)
 FIXED_MIDDLE = enum_ion_fixed_position.define('FIXED_MIDDLE', 2)
 FIXED_HIGH = enum_ion_fixed_position.define('FIXED_HIGH', 3)
 
-enum_cp_mem_usage = CEnum(ctypes.c_uint)
+enum_cp_mem_usage = CEnum(ctypes.c_uint32)
 VIDEO_BITSTREAM = enum_cp_mem_usage.define('VIDEO_BITSTREAM', 1)
 VIDEO_PIXEL = enum_cp_mem_usage.define('VIDEO_PIXEL', 2)
 VIDEO_NONPIXEL = enum_cp_mem_usage.define('VIDEO_NONPIXEL', 3)
@@ -77,34 +77,34 @@ UNKNOWN = enum_cp_mem_usage.define('UNKNOWN', 2147483647)
 class struct_ion_flush_data(Struct): pass
 struct_ion_flush_data._fields_ = [
   ('handle', ion_user_handle_t),
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('vaddr', ctypes.c_void_p),
-  ('offset', ctypes.c_uint),
-  ('length', ctypes.c_uint),
+  ('offset', ctypes.c_uint32),
+  ('length', ctypes.c_uint32),
 ]
 class struct_ion_prefetch_regions(Struct): pass
 struct_ion_prefetch_regions._fields_ = [
-  ('vmid', ctypes.c_uint),
+  ('vmid', ctypes.c_uint32),
   ('sizes', ctypes.POINTER(size_t)),
-  ('nr_sizes', ctypes.c_uint),
+  ('nr_sizes', ctypes.c_uint32),
 ]
 class struct_ion_prefetch_data(Struct): pass
 struct_ion_prefetch_data._fields_ = [
-  ('heap_id', ctypes.c_int),
-  ('len', ctypes.c_ulong),
+  ('heap_id', ctypes.c_int32),
+  ('len', ctypes.c_uint64),
   ('regions', ctypes.POINTER(struct_ion_prefetch_regions)),
-  ('nr_regions', ctypes.c_uint),
+  ('nr_regions', ctypes.c_uint32),
 ]
 class struct_remote_buf64(Struct): pass
-uint64_t = ctypes.c_ulong
+uint64_t = ctypes.c_uint64
 struct_remote_buf64._fields_ = [
   ('pv', uint64_t),
   ('len', uint64_t),
 ]
 class struct_remote_dma_handle64(Struct): pass
-uint32_t = ctypes.c_uint
+uint32_t = ctypes.c_uint32
 struct_remote_dma_handle64._fields_ = [
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('offset', uint32_t),
   ('len', uint32_t),
 ]
@@ -121,7 +121,7 @@ struct_remote_buf._fields_ = [
 ]
 class struct_remote_dma_handle(Struct): pass
 struct_remote_dma_handle._fields_ = [
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('offset', uint32_t),
 ]
 class union_remote_arg(ctypes.Union): pass
@@ -139,24 +139,24 @@ struct_fastrpc_ioctl_invoke._fields_ = [
 class struct_fastrpc_ioctl_invoke_fd(Struct): pass
 struct_fastrpc_ioctl_invoke_fd._fields_ = [
   ('inv', struct_fastrpc_ioctl_invoke),
-  ('fds', ctypes.POINTER(ctypes.c_int)),
+  ('fds', ctypes.POINTER(ctypes.c_int32)),
 ]
 class struct_fastrpc_ioctl_invoke_attrs(Struct): pass
 struct_fastrpc_ioctl_invoke_attrs._fields_ = [
   ('inv', struct_fastrpc_ioctl_invoke),
-  ('fds', ctypes.POINTER(ctypes.c_int)),
-  ('attrs', ctypes.POINTER(ctypes.c_uint)),
+  ('fds', ctypes.POINTER(ctypes.c_int32)),
+  ('attrs', ctypes.POINTER(ctypes.c_uint32)),
 ]
 class struct_fastrpc_ioctl_invoke_crc(Struct): pass
 struct_fastrpc_ioctl_invoke_crc._fields_ = [
   ('inv', struct_fastrpc_ioctl_invoke),
-  ('fds', ctypes.POINTER(ctypes.c_int)),
-  ('attrs', ctypes.POINTER(ctypes.c_uint)),
-  ('crc', ctypes.POINTER(ctypes.c_uint)),
+  ('fds', ctypes.POINTER(ctypes.c_int32)),
+  ('attrs', ctypes.POINTER(ctypes.c_uint32)),
+  ('crc', ctypes.POINTER(ctypes.c_uint32)),
 ]
 class struct_fastrpc_ioctl_init(Struct): pass
-uintptr_t = ctypes.c_ulong
-int32_t = ctypes.c_int
+uintptr_t = ctypes.c_uint64
+int32_t = ctypes.c_int32
 struct_fastrpc_ioctl_init._fields_ = [
   ('flags', uint32_t),
   ('file', uintptr_t),
@@ -169,8 +169,8 @@ struct_fastrpc_ioctl_init._fields_ = [
 class struct_fastrpc_ioctl_init_attrs(Struct): pass
 struct_fastrpc_ioctl_init_attrs._fields_ = [
   ('init', struct_fastrpc_ioctl_init),
-  ('attrs', ctypes.c_int),
-  ('siglen', ctypes.c_uint),
+  ('attrs', ctypes.c_int32),
+  ('siglen', ctypes.c_uint32),
 ]
 class struct_fastrpc_ioctl_munmap(Struct): pass
 struct_fastrpc_ioctl_munmap._fields_ = [
@@ -184,7 +184,7 @@ struct_fastrpc_ioctl_munmap_64._fields_ = [
 ]
 class struct_fastrpc_ioctl_mmap(Struct): pass
 struct_fastrpc_ioctl_mmap._fields_ = [
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('flags', uint32_t),
   ('vaddrin', uintptr_t),
   ('size', size_t),
@@ -192,16 +192,16 @@ struct_fastrpc_ioctl_mmap._fields_ = [
 ]
 class struct_fastrpc_ioctl_mmap_64(Struct): pass
 struct_fastrpc_ioctl_mmap_64._fields_ = [
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('flags', uint32_t),
   ('vaddrin', uint64_t),
   ('size', size_t),
   ('vaddrout', uint64_t),
 ]
 class struct_fastrpc_ioctl_munmap_fd(Struct): pass
-ssize_t = ctypes.c_long
+ssize_t = ctypes.c_int64
 struct_fastrpc_ioctl_munmap_fd._fields_ = [
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('flags', uint32_t),
   ('va', uintptr_t),
   ('len', ssize_t),
@@ -250,8 +250,8 @@ struct_smq_phy_page._fields_ = [
 ]
 class struct_smq_invoke_buf(Struct): pass
 struct_smq_invoke_buf._fields_ = [
-  ('num', ctypes.c_int),
-  ('pgidx', ctypes.c_int),
+  ('num', ctypes.c_int32),
+  ('pgidx', ctypes.c_int32),
 ]
 class struct_smq_invoke(Struct): pass
 struct_smq_invoke._fields_ = [
@@ -267,11 +267,11 @@ struct_smq_msg._fields_ = [
 class struct_smq_invoke_rsp(Struct): pass
 struct_smq_invoke_rsp._fields_ = [
   ('ctx', uint64_t),
-  ('retval', ctypes.c_int),
+  ('retval', ctypes.c_int32),
 ]
-remote_handle = ctypes.c_uint
-remote_handle64 = ctypes.c_ulong
-fastrpc_async_jobid = ctypes.c_ulong
+remote_handle = ctypes.c_uint32
+remote_handle64 = ctypes.c_uint64
+fastrpc_async_jobid = ctypes.c_uint64
 class remote_buf(Struct): pass
 remote_buf._fields_ = [
   ('pv', ctypes.c_void_p),
@@ -289,7 +289,7 @@ remote_arg._fields_ = [
   ('h64', remote_handle64),
   ('dma', remote_dma_handle),
 ]
-enum_fastrpc_async_notify_type = CEnum(ctypes.c_uint)
+enum_fastrpc_async_notify_type = CEnum(ctypes.c_uint32)
 FASTRPC_ASYNC_NO_SYNC = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_NO_SYNC', 0)
 FASTRPC_ASYNC_CALLBACK = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_CALLBACK', 1)
 FASTRPC_ASYNC_POLL = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_POLL', 2)
@@ -297,7 +297,7 @@ FASTRPC_ASYNC_TYPE_MAX = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_TY
 
 class struct_fastrpc_async_callback(Struct): pass
 struct_fastrpc_async_callback._fields_ = [
-  ('fn', ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int)),
+  ('fn', ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int32)),
   ('context', ctypes.c_void_p),
 ]
 fastrpc_async_callback_t = struct_fastrpc_async_callback
@@ -313,17 +313,17 @@ struct_fastrpc_async_descriptor._fields_ = [
   ('_0', struct_fastrpc_async_descriptor_0),
 ]
 fastrpc_async_descriptor_t = struct_fastrpc_async_descriptor
-enum_fastrpc_process_type = CEnum(ctypes.c_uint)
+enum_fastrpc_process_type = CEnum(ctypes.c_uint32)
 PROCESS_TYPE_SIGNED = enum_fastrpc_process_type.define('PROCESS_TYPE_SIGNED', 0)
 PROCESS_TYPE_UNSIGNED = enum_fastrpc_process_type.define('PROCESS_TYPE_UNSIGNED', 1)
 
-enum_handle_control_req_id = CEnum(ctypes.c_uint)
+enum_handle_control_req_id = CEnum(ctypes.c_uint32)
 DSPRPC_CONTROL_LATENCY = enum_handle_control_req_id.define('DSPRPC_CONTROL_LATENCY', 1)
 DSPRPC_GET_DSP_INFO = enum_handle_control_req_id.define('DSPRPC_GET_DSP_INFO', 2)
 DSPRPC_CONTROL_WAKELOCK = enum_handle_control_req_id.define('DSPRPC_CONTROL_WAKELOCK', 3)
 DSPRPC_GET_DOMAIN = enum_handle_control_req_id.define('DSPRPC_GET_DOMAIN', 4)
 
-enum_remote_rpc_latency_flags = CEnum(ctypes.c_uint)
+enum_remote_rpc_latency_flags = CEnum(ctypes.c_uint32)
 RPC_DISABLE_QOS = enum_remote_rpc_latency_flags.define('RPC_DISABLE_QOS', 0)
 RPC_PM_QOS = enum_remote_rpc_latency_flags.define('RPC_PM_QOS', 1)
 RPC_ADAPTIVE_QOS = enum_remote_rpc_latency_flags.define('RPC_ADAPTIVE_QOS', 2)
@@ -335,7 +335,7 @@ struct_remote_rpc_control_latency._fields_ = [
   ('enable', remote_rpc_control_latency_t),
   ('latency', uint32_t),
 ]
-enum_remote_dsp_attributes = CEnum(ctypes.c_uint)
+enum_remote_dsp_attributes = CEnum(ctypes.c_uint32)
 DOMAIN_SUPPORT = enum_remote_dsp_attributes.define('DOMAIN_SUPPORT', 0)
 UNSIGNED_PD_SUPPORT = enum_remote_dsp_attributes.define('UNSIGNED_PD_SUPPORT', 1)
 HVX_SUPPORT_64B = enum_remote_dsp_attributes.define('HVX_SUPPORT_64B', 2)
@@ -362,10 +362,10 @@ struct_remote_rpc_control_wakelock._fields_ = [
 ]
 class struct_remote_rpc_get_domain(Struct): pass
 struct_remote_rpc_get_domain._fields_ = [
-  ('domain', ctypes.c_int),
+  ('domain', ctypes.c_int32),
 ]
 remote_rpc_get_domain_t = struct_remote_rpc_get_domain
-enum_session_control_req_id = CEnum(ctypes.c_uint)
+enum_session_control_req_id = CEnum(ctypes.c_uint32)
 FASTRPC_THREAD_PARAMS = enum_session_control_req_id.define('FASTRPC_THREAD_PARAMS', 1)
 DSPRPC_CONTROL_UNSIGNED_MODULE = enum_session_control_req_id.define('DSPRPC_CONTROL_UNSIGNED_MODULE', 2)
 FASTRPC_RELATIVE_THREAD_PRIORITY = enum_session_control_req_id.define('FASTRPC_RELATIVE_THREAD_PRIORITY', 4)
@@ -378,40 +378,40 @@ FASTRPC_REGISTER_STATUS_NOTIFICATIONS = enum_session_control_req_id.define('FAST
 
 class struct_remote_rpc_thread_params(Struct): pass
 struct_remote_rpc_thread_params._fields_ = [
-  ('domain', ctypes.c_int),
-  ('prio', ctypes.c_int),
-  ('stack_size', ctypes.c_int),
+  ('domain', ctypes.c_int32),
+  ('prio', ctypes.c_int32),
+  ('stack_size', ctypes.c_int32),
 ]
 class struct_remote_rpc_control_unsigned_module(Struct): pass
 struct_remote_rpc_control_unsigned_module._fields_ = [
-  ('domain', ctypes.c_int),
-  ('enable', ctypes.c_int),
+  ('domain', ctypes.c_int32),
+  ('enable', ctypes.c_int32),
 ]
 class struct_remote_rpc_relative_thread_priority(Struct): pass
 struct_remote_rpc_relative_thread_priority._fields_ = [
-  ('domain', ctypes.c_int),
-  ('relative_thread_priority', ctypes.c_int),
+  ('domain', ctypes.c_int32),
+  ('relative_thread_priority', ctypes.c_int32),
 ]
 class struct_remote_rpc_process_clean_params(Struct): pass
 struct_remote_rpc_process_clean_params._fields_ = [
-  ('domain', ctypes.c_int),
+  ('domain', ctypes.c_int32),
 ]
 class struct_remote_rpc_session_close(Struct): pass
 struct_remote_rpc_session_close._fields_ = [
-  ('domain', ctypes.c_int),
+  ('domain', ctypes.c_int32),
 ]
 class struct_remote_rpc_control_pd_dump(Struct): pass
 struct_remote_rpc_control_pd_dump._fields_ = [
-  ('domain', ctypes.c_int),
-  ('enable', ctypes.c_int),
+  ('domain', ctypes.c_int32),
+  ('enable', ctypes.c_int32),
 ]
 class struct_remote_process_type(Struct): pass
 struct_remote_process_type._fields_ = [
-  ('domain', ctypes.c_int),
-  ('process_type', ctypes.c_int),
+  ('domain', ctypes.c_int32),
+  ('process_type', ctypes.c_int32),
 ]
 remote_rpc_process_exception = struct_remote_rpc_process_clean_params
-enum_remote_rpc_status_flags = CEnum(ctypes.c_uint)
+enum_remote_rpc_status_flags = CEnum(ctypes.c_uint32)
 FASTRPC_USER_PD_UP = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_UP', 0)
 FASTRPC_USER_PD_EXIT = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_EXIT', 1)
 FASTRPC_USER_PD_FORCE_KILL = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_FORCE_KILL', 2)
@@ -419,19 +419,19 @@ FASTRPC_USER_PD_EXCEPTION = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD
 FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
 remote_rpc_status_flags_t = enum_remote_rpc_status_flags
-fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, enum_remote_rpc_status_flags)
+fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, enum_remote_rpc_status_flags)
 class struct_remote_rpc_notif_register(Struct): pass
 struct_remote_rpc_notif_register._fields_ = [
   ('context', ctypes.c_void_p),
-  ('domain', ctypes.c_int),
+  ('domain', ctypes.c_int32),
   ('notifier_fn', fastrpc_notif_fn_t),
 ]
 remote_rpc_notif_register_t = struct_remote_rpc_notif_register
-enum_remote_mem_map_flags = CEnum(ctypes.c_uint)
+enum_remote_mem_map_flags = CEnum(ctypes.c_uint32)
 REMOTE_MAP_MEM_STATIC = enum_remote_mem_map_flags.define('REMOTE_MAP_MEM_STATIC', 0)
 REMOTE_MAP_MAX_FLAG = enum_remote_mem_map_flags.define('REMOTE_MAP_MAX_FLAG', 1)
 
-enum_remote_buf_attributes = CEnum(ctypes.c_uint)
+enum_remote_buf_attributes = CEnum(ctypes.c_uint32)
 FASTRPC_ATTR_NON_COHERENT = enum_remote_buf_attributes.define('FASTRPC_ATTR_NON_COHERENT', 2)
 FASTRPC_ATTR_COHERENT = enum_remote_buf_attributes.define('FASTRPC_ATTR_COHERENT', 4)
 FASTRPC_ATTR_KEEP_MAP = enum_remote_buf_attributes.define('FASTRPC_ATTR_KEEP_MAP', 8)
@@ -440,7 +440,7 @@ FASTRPC_ATTR_FORCE_NOFLUSH = enum_remote_buf_attributes.define('FASTRPC_ATTR_FOR
 FASTRPC_ATTR_FORCE_NOINVALIDATE = enum_remote_buf_attributes.define('FASTRPC_ATTR_FORCE_NOINVALIDATE', 64)
 FASTRPC_ATTR_TRY_MAP_STATIC = enum_remote_buf_attributes.define('FASTRPC_ATTR_TRY_MAP_STATIC', 128)
 
-enum_fastrpc_map_flags = CEnum(ctypes.c_uint)
+enum_fastrpc_map_flags = CEnum(ctypes.c_uint32)
 FASTRPC_MAP_STATIC = enum_fastrpc_map_flags.define('FASTRPC_MAP_STATIC', 0)
 FASTRPC_MAP_RESERVED = enum_fastrpc_map_flags.define('FASTRPC_MAP_RESERVED', 1)
 FASTRPC_MAP_FD = enum_fastrpc_map_flags.define('FASTRPC_MAP_FD', 2)
@@ -450,11 +450,11 @@ FASTRPC_MAP_MAX = enum_fastrpc_map_flags.define('FASTRPC_MAP_MAX', 4)
 class struct__cstring1_s(Struct): pass
 struct__cstring1_s._fields_ = [
   ('data', ctypes.POINTER(ctypes.c_char)),
-  ('dataLen', ctypes.c_int),
+  ('dataLen', ctypes.c_int32),
 ]
 _cstring1_t = struct__cstring1_s
-apps_std_FILE = ctypes.c_int
-enum_apps_std_SEEK = CEnum(ctypes.c_uint)
+apps_std_FILE = ctypes.c_int32
+enum_apps_std_SEEK = CEnum(ctypes.c_uint32)
 APPS_STD_SEEK_SET = enum_apps_std_SEEK.define('APPS_STD_SEEK_SET', 0)
 APPS_STD_SEEK_CUR = enum_apps_std_SEEK.define('APPS_STD_SEEK_CUR', 1)
 APPS_STD_SEEK_END = enum_apps_std_SEEK.define('APPS_STD_SEEK_END', 2)
@@ -462,20 +462,20 @@ _32BIT_PLACEHOLDER_apps_std_SEEK = enum_apps_std_SEEK.define('_32BIT_PLACEHOLDER
 
 apps_std_SEEK = enum_apps_std_SEEK
 class struct_apps_std_DIR(Struct): pass
-uint64 = ctypes.c_ulonglong
+uint64 = ctypes.c_uint64
 struct_apps_std_DIR._fields_ = [
   ('handle', uint64),
 ]
 apps_std_DIR = struct_apps_std_DIR
 class struct_apps_std_DIRENT(Struct): pass
 struct_apps_std_DIRENT._fields_ = [
-  ('ino', ctypes.c_int),
+  ('ino', ctypes.c_int32),
   ('name', (ctypes.c_char * 255)),
 ]
 apps_std_DIRENT = struct_apps_std_DIRENT
 class struct_apps_std_STAT(Struct): pass
-uint32 = ctypes.c_uint
-int64 = ctypes.c_longlong
+uint32 = ctypes.c_uint32
+int64 = ctypes.c_int64
 struct_apps_std_STAT._fields_ = [
   ('tsz', uint64),
   ('dev', uint64),

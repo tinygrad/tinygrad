@@ -2,107 +2,107 @@
 import ctypes
 from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 class struct_vfio_info_cap_header(Struct): pass
-__u16 = ctypes.c_ushort
-__u32 = ctypes.c_uint
+__u16 = ctypes.c_uint16
+__u32 = ctypes.c_uint32
 struct_vfio_info_cap_header._fields_ = [
-  ('id', ctypes.c_ushort),
-  ('version', ctypes.c_ushort),
-  ('next', ctypes.c_uint),
+  ('id', ctypes.c_uint16),
+  ('version', ctypes.c_uint16),
+  ('next', ctypes.c_uint32),
 ]
 class struct_vfio_group_status(Struct): pass
 struct_vfio_group_status._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
 ]
 class struct_vfio_device_info(Struct): pass
 struct_vfio_device_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('num_regions', ctypes.c_uint),
-  ('num_irqs', ctypes.c_uint),
-  ('cap_offset', ctypes.c_uint),
-  ('pad', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('num_regions', ctypes.c_uint32),
+  ('num_irqs', ctypes.c_uint32),
+  ('cap_offset', ctypes.c_uint32),
+  ('pad', ctypes.c_uint32),
 ]
 class struct_vfio_device_info_cap_pci_atomic_comp(Struct): pass
 struct_vfio_device_info_cap_pci_atomic_comp._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('flags', ctypes.c_uint),
-  ('reserved', ctypes.c_uint),
+  ('flags', ctypes.c_uint32),
+  ('reserved', ctypes.c_uint32),
 ]
 class struct_vfio_region_info(Struct): pass
-__u64 = ctypes.c_ulonglong
+__u64 = ctypes.c_uint64
 struct_vfio_region_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('index', ctypes.c_uint),
-  ('cap_offset', ctypes.c_uint),
-  ('size', ctypes.c_ulonglong),
-  ('offset', ctypes.c_ulonglong),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('index', ctypes.c_uint32),
+  ('cap_offset', ctypes.c_uint32),
+  ('size', ctypes.c_uint64),
+  ('offset', ctypes.c_uint64),
 ]
 class struct_vfio_region_sparse_mmap_area(Struct): pass
 struct_vfio_region_sparse_mmap_area._fields_ = [
-  ('offset', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
+  ('offset', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
 ]
 class struct_vfio_region_info_cap_sparse_mmap(Struct): pass
 struct_vfio_region_info_cap_sparse_mmap._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('nr_areas', ctypes.c_uint),
-  ('reserved', ctypes.c_uint),
+  ('nr_areas', ctypes.c_uint32),
+  ('reserved', ctypes.c_uint32),
   ('areas', (struct_vfio_region_sparse_mmap_area * 0)),
 ]
 class struct_vfio_region_info_cap_type(Struct): pass
 struct_vfio_region_info_cap_type._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('type', ctypes.c_uint),
-  ('subtype', ctypes.c_uint),
+  ('type', ctypes.c_uint32),
+  ('subtype', ctypes.c_uint32),
 ]
 class struct_vfio_region_gfx_edid(Struct): pass
 struct_vfio_region_gfx_edid._fields_ = [
-  ('edid_offset', ctypes.c_uint),
-  ('edid_max_size', ctypes.c_uint),
-  ('edid_size', ctypes.c_uint),
-  ('max_xres', ctypes.c_uint),
-  ('max_yres', ctypes.c_uint),
-  ('link_state', ctypes.c_uint),
+  ('edid_offset', ctypes.c_uint32),
+  ('edid_max_size', ctypes.c_uint32),
+  ('edid_size', ctypes.c_uint32),
+  ('max_xres', ctypes.c_uint32),
+  ('max_yres', ctypes.c_uint32),
+  ('link_state', ctypes.c_uint32),
 ]
 class struct_vfio_device_migration_info(Struct): pass
 struct_vfio_device_migration_info._fields_ = [
-  ('device_state', ctypes.c_uint),
-  ('reserved', ctypes.c_uint),
-  ('pending_bytes', ctypes.c_ulonglong),
-  ('data_offset', ctypes.c_ulonglong),
-  ('data_size', ctypes.c_ulonglong),
+  ('device_state', ctypes.c_uint32),
+  ('reserved', ctypes.c_uint32),
+  ('pending_bytes', ctypes.c_uint64),
+  ('data_offset', ctypes.c_uint64),
+  ('data_size', ctypes.c_uint64),
 ]
 class struct_vfio_region_info_cap_nvlink2_ssatgt(Struct): pass
 struct_vfio_region_info_cap_nvlink2_ssatgt._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('tgt', ctypes.c_ulonglong),
+  ('tgt', ctypes.c_uint64),
 ]
 class struct_vfio_region_info_cap_nvlink2_lnkspd(Struct): pass
 struct_vfio_region_info_cap_nvlink2_lnkspd._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('link_speed', ctypes.c_uint),
-  ('__pad', ctypes.c_uint),
+  ('link_speed', ctypes.c_uint32),
+  ('__pad', ctypes.c_uint32),
 ]
 class struct_vfio_irq_info(Struct): pass
 struct_vfio_irq_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('index', ctypes.c_uint),
-  ('count', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('index', ctypes.c_uint32),
+  ('count', ctypes.c_uint32),
 ]
 class struct_vfio_irq_set(Struct): pass
 __u8 = ctypes.c_ubyte
 struct_vfio_irq_set._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('index', ctypes.c_uint),
-  ('start', ctypes.c_uint),
-  ('count', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('index', ctypes.c_uint32),
+  ('start', ctypes.c_uint32),
+  ('count', ctypes.c_uint32),
   ('data', (ctypes.c_ubyte * 0)),
 ]
-_anonenum0 = CEnum(ctypes.c_uint)
+_anonenum0 = CEnum(ctypes.c_uint32)
 VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0)
 VFIO_PCI_BAR1_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR1_REGION_INDEX', 1)
 VFIO_PCI_BAR2_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR2_REGION_INDEX', 2)
@@ -114,7 +114,7 @@ VFIO_PCI_CONFIG_REGION_INDEX = _anonenum0.define('VFIO_PCI_CONFIG_REGION_INDEX',
 VFIO_PCI_VGA_REGION_INDEX = _anonenum0.define('VFIO_PCI_VGA_REGION_INDEX', 8)
 VFIO_PCI_NUM_REGIONS = _anonenum0.define('VFIO_PCI_NUM_REGIONS', 9)
 
-_anonenum1 = CEnum(ctypes.c_uint)
+_anonenum1 = CEnum(ctypes.c_uint32)
 VFIO_PCI_INTX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_INTX_IRQ_INDEX', 0)
 VFIO_PCI_MSI_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSI_IRQ_INDEX', 1)
 VFIO_PCI_MSIX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSIX_IRQ_INDEX', 2)
@@ -122,115 +122,115 @@ VFIO_PCI_ERR_IRQ_INDEX = _anonenum1.define('VFIO_PCI_ERR_IRQ_INDEX', 3)
 VFIO_PCI_REQ_IRQ_INDEX = _anonenum1.define('VFIO_PCI_REQ_IRQ_INDEX', 4)
 VFIO_PCI_NUM_IRQS = _anonenum1.define('VFIO_PCI_NUM_IRQS', 5)
 
-_anonenum2 = CEnum(ctypes.c_uint)
+_anonenum2 = CEnum(ctypes.c_uint32)
 VFIO_CCW_CONFIG_REGION_INDEX = _anonenum2.define('VFIO_CCW_CONFIG_REGION_INDEX', 0)
 VFIO_CCW_NUM_REGIONS = _anonenum2.define('VFIO_CCW_NUM_REGIONS', 1)
 
-_anonenum3 = CEnum(ctypes.c_uint)
+_anonenum3 = CEnum(ctypes.c_uint32)
 VFIO_CCW_IO_IRQ_INDEX = _anonenum3.define('VFIO_CCW_IO_IRQ_INDEX', 0)
 VFIO_CCW_CRW_IRQ_INDEX = _anonenum3.define('VFIO_CCW_CRW_IRQ_INDEX', 1)
 VFIO_CCW_REQ_IRQ_INDEX = _anonenum3.define('VFIO_CCW_REQ_IRQ_INDEX', 2)
 VFIO_CCW_NUM_IRQS = _anonenum3.define('VFIO_CCW_NUM_IRQS', 3)
 
-_anonenum4 = CEnum(ctypes.c_uint)
+_anonenum4 = CEnum(ctypes.c_uint32)
 VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0)
 VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 1)
 
 class struct_vfio_pci_dependent_device(Struct): pass
 class struct_vfio_pci_dependent_device_0(ctypes.Union): pass
 struct_vfio_pci_dependent_device_0._fields_ = [
-  ('group_id', ctypes.c_uint),
-  ('devid', ctypes.c_uint),
+  ('group_id', ctypes.c_uint32),
+  ('devid', ctypes.c_uint32),
 ]
 struct_vfio_pci_dependent_device._anonymous_ = ['_0']
 struct_vfio_pci_dependent_device._fields_ = [
   ('_0', struct_vfio_pci_dependent_device_0),
-  ('segment', ctypes.c_ushort),
+  ('segment', ctypes.c_uint16),
   ('bus', ctypes.c_ubyte),
   ('devfn', ctypes.c_ubyte),
 ]
 class struct_vfio_pci_hot_reset_info(Struct): pass
 struct_vfio_pci_hot_reset_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('count', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('count', ctypes.c_uint32),
   ('devices', (struct_vfio_pci_dependent_device * 0)),
 ]
 class struct_vfio_pci_hot_reset(Struct): pass
-__s32 = ctypes.c_int
+__s32 = ctypes.c_int32
 struct_vfio_pci_hot_reset._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('count', ctypes.c_uint),
-  ('group_fds', (ctypes.c_int * 0)),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('count', ctypes.c_uint32),
+  ('group_fds', (ctypes.c_int32 * 0)),
 ]
 class struct_vfio_device_gfx_plane_info(Struct): pass
 class struct_vfio_device_gfx_plane_info_0(ctypes.Union): pass
 struct_vfio_device_gfx_plane_info_0._fields_ = [
-  ('region_index', ctypes.c_uint),
-  ('dmabuf_id', ctypes.c_uint),
+  ('region_index', ctypes.c_uint32),
+  ('dmabuf_id', ctypes.c_uint32),
 ]
 struct_vfio_device_gfx_plane_info._anonymous_ = ['_0']
 struct_vfio_device_gfx_plane_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('drm_plane_type', ctypes.c_uint),
-  ('drm_format', ctypes.c_uint),
-  ('drm_format_mod', ctypes.c_ulonglong),
-  ('width', ctypes.c_uint),
-  ('height', ctypes.c_uint),
-  ('stride', ctypes.c_uint),
-  ('size', ctypes.c_uint),
-  ('x_pos', ctypes.c_uint),
-  ('y_pos', ctypes.c_uint),
-  ('x_hot', ctypes.c_uint),
-  ('y_hot', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('drm_plane_type', ctypes.c_uint32),
+  ('drm_format', ctypes.c_uint32),
+  ('drm_format_mod', ctypes.c_uint64),
+  ('width', ctypes.c_uint32),
+  ('height', ctypes.c_uint32),
+  ('stride', ctypes.c_uint32),
+  ('size', ctypes.c_uint32),
+  ('x_pos', ctypes.c_uint32),
+  ('y_pos', ctypes.c_uint32),
+  ('x_hot', ctypes.c_uint32),
+  ('y_hot', ctypes.c_uint32),
   ('_0', struct_vfio_device_gfx_plane_info_0),
-  ('reserved', ctypes.c_uint),
+  ('reserved', ctypes.c_uint32),
 ]
 class struct_vfio_device_ioeventfd(Struct): pass
 struct_vfio_device_ioeventfd._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('offset', ctypes.c_ulonglong),
-  ('data', ctypes.c_ulonglong),
-  ('fd', ctypes.c_int),
-  ('reserved', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('offset', ctypes.c_uint64),
+  ('data', ctypes.c_uint64),
+  ('fd', ctypes.c_int32),
+  ('reserved', ctypes.c_uint32),
 ]
 class struct_vfio_device_feature(Struct): pass
 struct_vfio_device_feature._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
   ('data', (ctypes.c_ubyte * 0)),
 ]
 class struct_vfio_device_bind_iommufd(Struct): pass
 struct_vfio_device_bind_iommufd._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('iommufd', ctypes.c_int),
-  ('out_devid', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('iommufd', ctypes.c_int32),
+  ('out_devid', ctypes.c_uint32),
 ]
 class struct_vfio_device_attach_iommufd_pt(Struct): pass
 struct_vfio_device_attach_iommufd_pt._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('pt_id', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('pt_id', ctypes.c_uint32),
 ]
 class struct_vfio_device_detach_iommufd_pt(Struct): pass
 struct_vfio_device_detach_iommufd_pt._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
 ]
 class struct_vfio_device_feature_migration(Struct): pass
 struct_vfio_device_feature_migration._fields_ = [
-  ('flags', ctypes.c_ulonglong),
+  ('flags', ctypes.c_uint64),
 ]
 class struct_vfio_device_feature_mig_state(Struct): pass
 struct_vfio_device_feature_mig_state._fields_ = [
-  ('device_state', ctypes.c_uint),
-  ('data_fd', ctypes.c_int),
+  ('device_state', ctypes.c_uint32),
+  ('data_fd', ctypes.c_int32),
 ]
-enum_vfio_device_mig_state = CEnum(ctypes.c_uint)
+enum_vfio_device_mig_state = CEnum(ctypes.c_uint32)
 VFIO_DEVICE_STATE_ERROR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_ERROR', 0)
 VFIO_DEVICE_STATE_STOP = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP', 1)
 VFIO_DEVICE_STATE_RUNNING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING', 2)
@@ -243,129 +243,129 @@ VFIO_DEVICE_STATE_NR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_NR',
 
 class struct_vfio_precopy_info(Struct): pass
 struct_vfio_precopy_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('initial_bytes', ctypes.c_ulonglong),
-  ('dirty_bytes', ctypes.c_ulonglong),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('initial_bytes', ctypes.c_uint64),
+  ('dirty_bytes', ctypes.c_uint64),
 ]
 class struct_vfio_device_low_power_entry_with_wakeup(Struct): pass
 struct_vfio_device_low_power_entry_with_wakeup._fields_ = [
-  ('wakeup_eventfd', ctypes.c_int),
-  ('reserved', ctypes.c_uint),
+  ('wakeup_eventfd', ctypes.c_int32),
+  ('reserved', ctypes.c_uint32),
 ]
 class struct_vfio_device_feature_dma_logging_control(Struct): pass
 struct_vfio_device_feature_dma_logging_control._fields_ = [
-  ('page_size', ctypes.c_ulonglong),
-  ('num_ranges', ctypes.c_uint),
-  ('__reserved', ctypes.c_uint),
-  ('ranges', ctypes.c_ulonglong),
+  ('page_size', ctypes.c_uint64),
+  ('num_ranges', ctypes.c_uint32),
+  ('__reserved', ctypes.c_uint32),
+  ('ranges', ctypes.c_uint64),
 ]
 class struct_vfio_device_feature_dma_logging_range(Struct): pass
 struct_vfio_device_feature_dma_logging_range._fields_ = [
-  ('iova', ctypes.c_ulonglong),
-  ('length', ctypes.c_ulonglong),
+  ('iova', ctypes.c_uint64),
+  ('length', ctypes.c_uint64),
 ]
 class struct_vfio_device_feature_dma_logging_report(Struct): pass
 struct_vfio_device_feature_dma_logging_report._fields_ = [
-  ('iova', ctypes.c_ulonglong),
-  ('length', ctypes.c_ulonglong),
-  ('page_size', ctypes.c_ulonglong),
-  ('bitmap', ctypes.c_ulonglong),
+  ('iova', ctypes.c_uint64),
+  ('length', ctypes.c_uint64),
+  ('page_size', ctypes.c_uint64),
+  ('bitmap', ctypes.c_uint64),
 ]
 class struct_vfio_device_feature_mig_data_size(Struct): pass
 struct_vfio_device_feature_mig_data_size._fields_ = [
-  ('stop_copy_length', ctypes.c_ulonglong),
+  ('stop_copy_length', ctypes.c_uint64),
 ]
 class struct_vfio_device_feature_bus_master(Struct): pass
 struct_vfio_device_feature_bus_master._fields_ = [
-  ('op', ctypes.c_uint),
+  ('op', ctypes.c_uint32),
 ]
 class struct_vfio_iommu_type1_info(Struct): pass
 struct_vfio_iommu_type1_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('iova_pgsizes', ctypes.c_ulonglong),
-  ('cap_offset', ctypes.c_uint),
-  ('pad', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('iova_pgsizes', ctypes.c_uint64),
+  ('cap_offset', ctypes.c_uint32),
+  ('pad', ctypes.c_uint32),
 ]
 class struct_vfio_iova_range(Struct): pass
 struct_vfio_iova_range._fields_ = [
-  ('start', ctypes.c_ulonglong),
-  ('end', ctypes.c_ulonglong),
+  ('start', ctypes.c_uint64),
+  ('end', ctypes.c_uint64),
 ]
 class struct_vfio_iommu_type1_info_cap_iova_range(Struct): pass
 struct_vfio_iommu_type1_info_cap_iova_range._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('nr_iovas', ctypes.c_uint),
-  ('reserved', ctypes.c_uint),
+  ('nr_iovas', ctypes.c_uint32),
+  ('reserved', ctypes.c_uint32),
   ('iova_ranges', (struct_vfio_iova_range * 0)),
 ]
 class struct_vfio_iommu_type1_info_cap_migration(Struct): pass
 struct_vfio_iommu_type1_info_cap_migration._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('flags', ctypes.c_uint),
-  ('pgsize_bitmap', ctypes.c_ulonglong),
-  ('max_dirty_bitmap_size', ctypes.c_ulonglong),
+  ('flags', ctypes.c_uint32),
+  ('pgsize_bitmap', ctypes.c_uint64),
+  ('max_dirty_bitmap_size', ctypes.c_uint64),
 ]
 class struct_vfio_iommu_type1_info_dma_avail(Struct): pass
 struct_vfio_iommu_type1_info_dma_avail._fields_ = [
   ('header', struct_vfio_info_cap_header),
-  ('avail', ctypes.c_uint),
+  ('avail', ctypes.c_uint32),
 ]
 class struct_vfio_iommu_type1_dma_map(Struct): pass
 struct_vfio_iommu_type1_dma_map._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('vaddr', ctypes.c_ulonglong),
-  ('iova', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('vaddr', ctypes.c_uint64),
+  ('iova', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
 ]
 class struct_vfio_bitmap(Struct): pass
 struct_vfio_bitmap._fields_ = [
-  ('pgsize', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
-  ('data', ctypes.POINTER(ctypes.c_ulonglong)),
+  ('pgsize', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
+  ('data', ctypes.POINTER(ctypes.c_uint64)),
 ]
 class struct_vfio_iommu_type1_dma_unmap(Struct): pass
 struct_vfio_iommu_type1_dma_unmap._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('iova', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('iova', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
   ('data', (ctypes.c_ubyte * 0)),
 ]
 class struct_vfio_iommu_type1_dirty_bitmap(Struct): pass
 struct_vfio_iommu_type1_dirty_bitmap._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
   ('data', (ctypes.c_ubyte * 0)),
 ]
 class struct_vfio_iommu_type1_dirty_bitmap_get(Struct): pass
 struct_vfio_iommu_type1_dirty_bitmap_get._fields_ = [
-  ('iova', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
+  ('iova', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
   ('bitmap', struct_vfio_bitmap),
 ]
 class struct_vfio_iommu_spapr_tce_ddw_info(Struct): pass
 struct_vfio_iommu_spapr_tce_ddw_info._fields_ = [
-  ('pgsizes', ctypes.c_ulonglong),
-  ('max_dynamic_windows_supported', ctypes.c_uint),
-  ('levels', ctypes.c_uint),
+  ('pgsizes', ctypes.c_uint64),
+  ('max_dynamic_windows_supported', ctypes.c_uint32),
+  ('levels', ctypes.c_uint32),
 ]
 class struct_vfio_iommu_spapr_tce_info(Struct): pass
 struct_vfio_iommu_spapr_tce_info._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('dma32_window_start', ctypes.c_uint),
-  ('dma32_window_size', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('dma32_window_start', ctypes.c_uint32),
+  ('dma32_window_size', ctypes.c_uint32),
   ('ddw', struct_vfio_iommu_spapr_tce_ddw_info),
 ]
 class struct_vfio_eeh_pe_err(Struct): pass
 struct_vfio_eeh_pe_err._fields_ = [
-  ('type', ctypes.c_uint),
-  ('func', ctypes.c_uint),
-  ('addr', ctypes.c_ulonglong),
-  ('mask', ctypes.c_ulonglong),
+  ('type', ctypes.c_uint32),
+  ('func', ctypes.c_uint32),
+  ('addr', ctypes.c_uint64),
+  ('mask', ctypes.c_uint64),
 ]
 class struct_vfio_eeh_pe_op(Struct): pass
 class struct_vfio_eeh_pe_op_0(ctypes.Union): pass
@@ -374,34 +374,34 @@ struct_vfio_eeh_pe_op_0._fields_ = [
 ]
 struct_vfio_eeh_pe_op._anonymous_ = ['_0']
 struct_vfio_eeh_pe_op._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('op', ctypes.c_uint),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('op', ctypes.c_uint32),
   ('_0', struct_vfio_eeh_pe_op_0),
 ]
 class struct_vfio_iommu_spapr_register_memory(Struct): pass
 struct_vfio_iommu_spapr_register_memory._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('vaddr', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('vaddr', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
 ]
 class struct_vfio_iommu_spapr_tce_create(Struct): pass
 struct_vfio_iommu_spapr_tce_create._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('page_shift', ctypes.c_uint),
-  ('__resv1', ctypes.c_uint),
-  ('window_size', ctypes.c_ulonglong),
-  ('levels', ctypes.c_uint),
-  ('__resv2', ctypes.c_uint),
-  ('start_addr', ctypes.c_ulonglong),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('page_shift', ctypes.c_uint32),
+  ('__resv1', ctypes.c_uint32),
+  ('window_size', ctypes.c_uint64),
+  ('levels', ctypes.c_uint32),
+  ('__resv2', ctypes.c_uint32),
+  ('start_addr', ctypes.c_uint64),
 ]
 class struct_vfio_iommu_spapr_tce_remove(Struct): pass
 struct_vfio_iommu_spapr_tce_remove._fields_ = [
-  ('argsz', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('start_addr', ctypes.c_ulonglong),
+  ('argsz', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('start_addr', ctypes.c_uint64),
 ]
 VFIO_API_VERSION = 0
 VFIO_TYPE1_IOMMU = 1

@@ -2,7 +2,7 @@
 import ctypes
 from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
 class struct_sqtt_data_info(Struct): pass
-uint32_t = ctypes.c_uint
+uint32_t = ctypes.c_uint32
 class struct_sqtt_data_info_0(ctypes.Union): pass
 struct_sqtt_data_info_0._fields_ = [
   ('gfx9_write_counter', uint32_t),
@@ -21,7 +21,7 @@ struct_sqtt_data_se._fields_ = [
   ('shader_engine', uint32_t),
   ('compute_unit', uint32_t),
 ]
-enum_sqtt_version = CEnum(ctypes.c_uint)
+enum_sqtt_version = CEnum(ctypes.c_uint32)
 SQTT_VERSION_NONE = enum_sqtt_version.define('SQTT_VERSION_NONE', 0)
 SQTT_VERSION_2_2 = enum_sqtt_version.define('SQTT_VERSION_2_2', 5)
 SQTT_VERSION_2_3 = enum_sqtt_version.define('SQTT_VERSION_2_3', 6)
@@ -29,7 +29,7 @@ SQTT_VERSION_2_4 = enum_sqtt_version.define('SQTT_VERSION_2_4', 7)
 SQTT_VERSION_3_2 = enum_sqtt_version.define('SQTT_VERSION_3_2', 11)
 SQTT_VERSION_3_3 = enum_sqtt_version.define('SQTT_VERSION_3_3', 12)
 
-enum_sqtt_file_chunk_type = CEnum(ctypes.c_uint)
+enum_sqtt_file_chunk_type = CEnum(ctypes.c_uint32)
 SQTT_FILE_CHUNK_TYPE_ASIC_INFO = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_ASIC_INFO', 0)
 SQTT_FILE_CHUNK_TYPE_SQTT_DESC = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SQTT_DESC', 1)
 SQTT_FILE_CHUNK_TYPE_SQTT_DATA = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SQTT_DATA', 2)
@@ -46,14 +46,14 @@ SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE = enum_sqtt_file_chunk_type.define('S
 SQTT_FILE_CHUNK_TYPE_COUNT = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_COUNT', 13)
 
 class struct_sqtt_file_chunk_id(Struct): pass
-int32_t = ctypes.c_int
+int32_t = ctypes.c_int32
 struct_sqtt_file_chunk_id._fields_ = [
   ('type', int32_t,8),
   ('index', int32_t,8),
   ('reserved', int32_t,16),
 ]
 class struct_sqtt_file_chunk_header(Struct): pass
-uint16_t = ctypes.c_ushort
+uint16_t = ctypes.c_uint16
 struct_sqtt_file_chunk_header._fields_ = [
   ('chunk_id', struct_sqtt_file_chunk_id),
   ('minor_version', uint16_t),
@@ -96,7 +96,7 @@ struct_sqtt_file_header._fields_ = [
   ('is_daylight_savings', int32_t),
 ]
 class struct_sqtt_file_chunk_cpu_info(Struct): pass
-uint64_t = ctypes.c_ulong
+uint64_t = ctypes.c_uint64
 struct_sqtt_file_chunk_cpu_info._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('vendor_id', (uint32_t * 4)),
@@ -108,17 +108,17 @@ struct_sqtt_file_chunk_cpu_info._fields_ = [
   ('num_physical_cores', uint32_t),
   ('system_ram_size', uint32_t),
 ]
-enum_sqtt_file_chunk_asic_info_flags = CEnum(ctypes.c_uint)
+enum_sqtt_file_chunk_asic_info_flags = CEnum(ctypes.c_uint32)
 SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING', 1)
 SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED', 2)
 
-enum_sqtt_gpu_type = CEnum(ctypes.c_uint)
+enum_sqtt_gpu_type = CEnum(ctypes.c_uint32)
 SQTT_GPU_TYPE_UNKNOWN = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_UNKNOWN', 0)
 SQTT_GPU_TYPE_INTEGRATED = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_INTEGRATED', 1)
 SQTT_GPU_TYPE_DISCRETE = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_DISCRETE', 2)
 SQTT_GPU_TYPE_VIRTUAL = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_VIRTUAL', 3)
 
-enum_sqtt_gfxip_level = CEnum(ctypes.c_uint)
+enum_sqtt_gfxip_level = CEnum(ctypes.c_uint32)
 SQTT_GFXIP_LEVEL_NONE = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_NONE', 0)
 SQTT_GFXIP_LEVEL_GFXIP_6 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_6', 1)
 SQTT_GFXIP_LEVEL_GFXIP_7 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_7', 2)
@@ -131,7 +131,7 @@ SQTT_GFXIP_LEVEL_GFXIP_11_0 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFX
 SQTT_GFXIP_LEVEL_GFXIP_11_5 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_11_5', 13)
 SQTT_GFXIP_LEVEL_GFXIP_12 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_12', 16)
 
-enum_sqtt_memory_type = CEnum(ctypes.c_uint)
+enum_sqtt_memory_type = CEnum(ctypes.c_uint32)
 SQTT_MEMORY_TYPE_UNKNOWN = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_UNKNOWN', 0)
 SQTT_MEMORY_TYPE_DDR = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR', 1)
 SQTT_MEMORY_TYPE_DDR2 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR2', 2)
@@ -149,7 +149,7 @@ SQTT_MEMORY_TYPE_LPDDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR4'
 SQTT_MEMORY_TYPE_LPDDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR5', 49)
 
 class struct_sqtt_file_chunk_asic_info(Struct): pass
-int64_t = ctypes.c_long
+int64_t = ctypes.c_int64
 struct_sqtt_file_chunk_asic_info._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('flags', uint64_t),
@@ -203,18 +203,18 @@ struct_sqtt_file_chunk_asic_info._fields_ = [
   ('mall_cache_size', uint32_t),
   ('padding', (ctypes.c_char * 4)),
 ]
-enum_sqtt_api_type = CEnum(ctypes.c_uint)
+enum_sqtt_api_type = CEnum(ctypes.c_uint32)
 SQTT_API_TYPE_DIRECTX_12 = enum_sqtt_api_type.define('SQTT_API_TYPE_DIRECTX_12', 0)
 SQTT_API_TYPE_VULKAN = enum_sqtt_api_type.define('SQTT_API_TYPE_VULKAN', 1)
 SQTT_API_TYPE_GENERIC = enum_sqtt_api_type.define('SQTT_API_TYPE_GENERIC', 2)
 SQTT_API_TYPE_OPENCL = enum_sqtt_api_type.define('SQTT_API_TYPE_OPENCL', 3)
 
-enum_sqtt_instruction_trace_mode = CEnum(ctypes.c_uint)
+enum_sqtt_instruction_trace_mode = CEnum(ctypes.c_uint32)
 SQTT_INSTRUCTION_TRACE_DISABLED = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_DISABLED', 0)
 SQTT_INSTRUCTION_TRACE_FULL_FRAME = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_FULL_FRAME', 1)
 SQTT_INSTRUCTION_TRACE_API_PSO = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_API_PSO', 2)
 
-enum_sqtt_profiling_mode = CEnum(ctypes.c_uint)
+enum_sqtt_profiling_mode = CEnum(ctypes.c_uint32)
 SQTT_PROFILING_MODE_PRESENT = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_PRESENT', 0)
 SQTT_PROFILING_MODE_USER_MARKERS = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_USER_MARKERS', 1)
 SQTT_PROFILING_MODE_INDEX = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_INDEX', 2)
@@ -318,7 +318,7 @@ struct_sqtt_file_chunk_sqtt_desc_0_v0._fields_ = [
   ('instrumentation_version', int32_t),
 ]
 class struct_sqtt_file_chunk_sqtt_desc_0_v1(Struct): pass
-int16_t = ctypes.c_short
+int16_t = ctypes.c_int16
 struct_sqtt_file_chunk_sqtt_desc_0_v1._fields_ = [
   ('instrumentation_spec_version', int16_t),
   ('instrumentation_api_version', int16_t),
@@ -349,13 +349,13 @@ struct_sqtt_file_chunk_queue_event_timings._fields_ = [
   ('queue_event_table_record_count', uint32_t),
   ('queue_event_table_size', uint32_t),
 ]
-enum_sqtt_queue_type = CEnum(ctypes.c_uint)
+enum_sqtt_queue_type = CEnum(ctypes.c_uint32)
 SQTT_QUEUE_TYPE_UNKNOWN = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_UNKNOWN', 0)
 SQTT_QUEUE_TYPE_UNIVERSAL = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_UNIVERSAL', 1)
 SQTT_QUEUE_TYPE_COMPUTE = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_COMPUTE', 2)
 SQTT_QUEUE_TYPE_DMA = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_DMA', 3)
 
-enum_sqtt_engine_type = CEnum(ctypes.c_uint)
+enum_sqtt_engine_type = CEnum(ctypes.c_uint32)
 SQTT_ENGINE_TYPE_UNKNOWN = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_UNKNOWN', 0)
 SQTT_ENGINE_TYPE_UNIVERSAL = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_UNIVERSAL', 1)
 SQTT_ENGINE_TYPE_COMPUTE = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_COMPUTE', 2)
@@ -388,7 +388,7 @@ struct_sqtt_queue_info_record._fields_ = [
   ('hardware_info', struct_sqtt_queue_hardware_info),
   ('reserved', uint32_t),
 ]
-enum_sqtt_queue_event_type = CEnum(ctypes.c_uint)
+enum_sqtt_queue_event_type = CEnum(ctypes.c_uint32)
 SQTT_QUEUE_TIMING_EVENT_CMDBUF_SUBMIT = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_CMDBUF_SUBMIT', 0)
 SQTT_QUEUE_TIMING_EVENT_SIGNAL_SEMAPHORE = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_SIGNAL_SEMAPHORE', 1)
 SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE', 2)
@@ -412,7 +412,7 @@ struct_sqtt_file_chunk_clock_calibration._fields_ = [
   ('gpu_timestamp', uint64_t),
   ('reserved', uint64_t),
 ]
-enum_elf_gfxip_level = CEnum(ctypes.c_uint)
+enum_elf_gfxip_level = CEnum(ctypes.c_uint32)
 EF_AMDGPU_MACH_AMDGCN_GFX801 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX801', 40)
 EF_AMDGPU_MACH_AMDGCN_GFX900 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX900', 44)
 EF_AMDGPU_MACH_AMDGCN_GFX1010 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1010', 51)
@@ -431,7 +431,7 @@ struct_sqtt_file_chunk_spm_db._fields_ = [
   ('spm_counter_info_size', uint32_t),
   ('sample_interval', uint32_t),
 ]
-enum_rgp_sqtt_marker_identifier = CEnum(ctypes.c_uint)
+enum_rgp_sqtt_marker_identifier = CEnum(ctypes.c_uint32)
 RGP_SQTT_MARKER_IDENTIFIER_EVENT = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_EVENT', 0)
 RGP_SQTT_MARKER_IDENTIFIER_CB_START = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_CB_START', 1)
 RGP_SQTT_MARKER_IDENTIFIER_CB_END = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_CB_END', 2)
@@ -534,7 +534,7 @@ struct_rgp_sqtt_marker_cb_end._fields_ = [
   ('_1', struct_rgp_sqtt_marker_cb_end_1),
   ('_2', struct_rgp_sqtt_marker_cb_end_2),
 ]
-enum_rgp_sqtt_marker_general_api_type = CEnum(ctypes.c_uint)
+enum_rgp_sqtt_marker_general_api_type = CEnum(ctypes.c_uint32)
 ApiCmdBindPipeline = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindPipeline', 0)
 ApiCmdBindDescriptorSets = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindDescriptorSets', 1)
 ApiCmdBindIndexBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindIndexBuffer', 2)
@@ -606,7 +606,7 @@ struct_rgp_sqtt_marker_general_api._anonymous_ = ['_0']
 struct_rgp_sqtt_marker_general_api._fields_ = [
   ('_0', struct_rgp_sqtt_marker_general_api_0),
 ]
-enum_rgp_sqtt_marker_event_type = CEnum(ctypes.c_uint)
+enum_rgp_sqtt_marker_event_type = CEnum(ctypes.c_uint32)
 EventCmdDraw = enum_rgp_sqtt_marker_event_type.define('EventCmdDraw', 0)
 EventCmdDrawIndexed = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexed', 1)
 EventCmdDrawIndirect = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndirect', 2)
@@ -832,7 +832,7 @@ struct_rgp_sqtt_marker_user_event_with_length._fields_ = [
   ('user_event', struct_rgp_sqtt_marker_user_event),
   ('length', uint32_t),
 ]
-enum_rgp_sqtt_marker_user_event_type = CEnum(ctypes.c_uint)
+enum_rgp_sqtt_marker_user_event_type = CEnum(ctypes.c_uint32)
 UserEventTrigger = enum_rgp_sqtt_marker_user_event_type.define('UserEventTrigger', 0)
 UserEventPop = enum_rgp_sqtt_marker_user_event_type.define('UserEventPop', 1)
 UserEventPush = enum_rgp_sqtt_marker_user_event_type.define('UserEventPush', 2)

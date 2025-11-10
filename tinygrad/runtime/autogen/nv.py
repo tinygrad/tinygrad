@@ -6,9 +6,9 @@ MCTP_HEADER = _anonstruct0
 class _anonstruct1(Struct): pass
 NVDM_PAYLOAD_COT = _anonstruct1
 class MESSAGE_QUEUE_INIT_ARGUMENTS(Struct): pass
-NvU64 = ctypes.c_ulonglong
-NvU32 = ctypes.c_uint
-NvLength = ctypes.c_ulonglong
+NvU64 = ctypes.c_uint64
+NvU32 = ctypes.c_uint32
+NvLength = ctypes.c_uint64
 MESSAGE_QUEUE_INIT_ARGUMENTS._fields_ = [
   ('sharedMemPhysAddr', NvU64),
   ('pageTableEntryCount', NvU32),
@@ -35,7 +35,7 @@ GSP_ARGUMENTS_CACHED._fields_ = [
   ('bDmemStack', NvBool),
   ('profilerArgs', GSP_ARGUMENTS_CACHED_profilerArgs),
 ]
-GSP_DMA_TARGET = CEnum(ctypes.c_uint)
+GSP_DMA_TARGET = CEnum(ctypes.c_uint32)
 GSP_DMA_TARGET_LOCAL_FB = GSP_DMA_TARGET.define('GSP_DMA_TARGET_LOCAL_FB', 0)
 GSP_DMA_TARGET_COHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COHERENT_SYSTEM', 1)
 GSP_DMA_TARGET_NONCOHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_NONCOHERENT_SYSTEM', 2)
@@ -115,7 +115,7 @@ RM_RISCV_UCODE_DESC._fields_ = [
   ('fbReservedSize', NvU32),
   ('bSignedAsCode', NvU32),
 ]
-RPC_GR_BUFFER_TYPE = CEnum(ctypes.c_uint)
+RPC_GR_BUFFER_TYPE = CEnum(ctypes.c_uint32)
 RPC_GR_BUFFER_TYPE_GRAPHICS = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS', 0)
 RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL', 1)
 RPC_GR_BUFFER_TYPE_GRAPHICS_GRAPHICS_PM = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_GRAPHICS_PM', 2)
@@ -131,13 +131,13 @@ RPC_GR_BUFFER_TYPE_GRAPHICS_FECS_EVENT = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFE
 RPC_GR_BUFFER_TYPE_GRAPHICS_PRIV_ACCESS_MAP = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_PRIV_ACCESS_MAP', 12)
 RPC_GR_BUFFER_TYPE_GRAPHICS_MAX = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_MAX', 13)
 
-FECS_ERROR_EVENT_TYPE = CEnum(ctypes.c_uint)
+FECS_ERROR_EVENT_TYPE = CEnum(ctypes.c_uint32)
 FECS_ERROR_EVENT_TYPE_NONE = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_NONE', 0)
 FECS_ERROR_EVENT_TYPE_BUFFER_RESET_REQUIRED = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_BUFFER_RESET_REQUIRED', 1)
 FECS_ERROR_EVENT_TYPE_BUFFER_FULL = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_BUFFER_FULL', 2)
 FECS_ERROR_EVENT_TYPE_MAX = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_MAX', 3)
 
-NV_RPC_UPDATE_PDE_BAR_TYPE = CEnum(ctypes.c_uint)
+NV_RPC_UPDATE_PDE_BAR_TYPE = CEnum(ctypes.c_uint32)
 NV_RPC_UPDATE_PDE_BAR_1 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_1', 0)
 NV_RPC_UPDATE_PDE_BAR_2 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_2', 1)
 NV_RPC_UPDATE_PDE_BAR_INVALID = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_INVALID', 2)
@@ -155,12 +155,12 @@ struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS._fields_ = [
   ('maxNumHeads', NvU32),
 ]
 VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS = struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS
-GPU_RECOVERY_EVENT_TYPE = CEnum(ctypes.c_uint)
+GPU_RECOVERY_EVENT_TYPE = CEnum(ctypes.c_uint32)
 GPU_RECOVERY_EVENT_TYPE_REFRESH = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_REFRESH', 0)
 GPU_RECOVERY_EVENT_TYPE_GPU_DRAIN_P2P = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_GPU_DRAIN_P2P', 1)
 GPU_RECOVERY_EVENT_TYPE_SYS_REBOOT = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_SYS_REBOOT', 2)
 
-rpc_fns = CEnum(ctypes.c_uint)
+rpc_fns = CEnum(ctypes.c_uint32)
 NV_VGPU_MSG_FUNCTION_NOP = rpc_fns.define('NV_VGPU_MSG_FUNCTION_NOP', 0)
 NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO = rpc_fns.define('NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO', 1)
 NV_VGPU_MSG_FUNCTION_ALLOC_ROOT = rpc_fns.define('NV_VGPU_MSG_FUNCTION_ALLOC_ROOT', 2)
@@ -386,7 +386,7 @@ NV_VGPU_MSG_FUNCTION_CTRL_RESERVE_CCU_PROF = rpc_fns.define('NV_VGPU_MSG_FUNCTIO
 NV_VGPU_MSG_FUNCTION_CTRL_RELEASE_CCU_PROF = rpc_fns.define('NV_VGPU_MSG_FUNCTION_CTRL_RELEASE_CCU_PROF', 222)
 NV_VGPU_MSG_FUNCTION_NUM_FUNCTIONS = rpc_fns.define('NV_VGPU_MSG_FUNCTION_NUM_FUNCTIONS', 223)
 
-rpc_events = CEnum(ctypes.c_uint)
+rpc_events = CEnum(ctypes.c_uint32)
 NV_VGPU_MSG_EVENT_FIRST_EVENT = rpc_events.define('NV_VGPU_MSG_EVENT_FIRST_EVENT', 4096)
 NV_VGPU_MSG_EVENT_GSP_INIT_DONE = rpc_events.define('NV_VGPU_MSG_EVENT_GSP_INIT_DONE', 4097)
 NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER = rpc_events.define('NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER', 4098)
@@ -424,13 +424,13 @@ NV_VGPU_MSG_EVENT_FECS_ERROR = rpc_events.define('NV_VGPU_MSG_EVENT_FECS_ERROR',
 NV_VGPU_MSG_EVENT_RECOVERY_ACTION = rpc_events.define('NV_VGPU_MSG_EVENT_RECOVERY_ACTION', 4130)
 NV_VGPU_MSG_EVENT_NUM_EVENTS = rpc_events.define('NV_VGPU_MSG_EVENT_NUM_EVENTS', 4131)
 
-LibosAddress = ctypes.c_int
-LibosMemoryRegionKind = CEnum(ctypes.c_uint)
+LibosAddress = ctypes.c_int32
+LibosMemoryRegionKind = CEnum(ctypes.c_uint32)
 LIBOS_MEMORY_REGION_NONE = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_NONE', 0)
 LIBOS_MEMORY_REGION_CONTIGUOUS = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_CONTIGUOUS', 1)
 LIBOS_MEMORY_REGION_RADIX3 = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_RADIX3', 2)
 
-LibosMemoryRegionLoc = CEnum(ctypes.c_uint)
+LibosMemoryRegionLoc = CEnum(ctypes.c_uint32)
 LIBOS_MEMORY_REGION_LOC_NONE = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_NONE', 0)
 LIBOS_MEMORY_REGION_LOC_SYSMEM = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_SYSMEM', 1)
 LIBOS_MEMORY_REGION_LOC_FB = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_FB', 2)
@@ -454,9 +454,9 @@ msgqRxHeader._fields_ = [
 ]
 class msgqMetadata(Struct): pass
 NvU8 = ctypes.c_ubyte
-msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_void_p)
-msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p)
-msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint)
+msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_void_p)
+msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p)
+msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32)
 msgqFcnBarrier = ctypes.CFUNCTYPE(None, )
 msgqMetadata._fields_ = [
   ('pOurTxHdr', ctypes.POINTER(msgqTxHeader)),
@@ -502,7 +502,7 @@ struct_rpc_set_guest_system_info_v03_00._fields_ = [
 rpc_set_guest_system_info_v03_00 = struct_rpc_set_guest_system_info_v03_00
 rpc_set_guest_system_info_v = struct_rpc_set_guest_system_info_v03_00
 class struct_rpc_set_guest_system_info_ext_v15_02(Struct): pass
-NvU16 = ctypes.c_ushort
+NvU16 = ctypes.c_uint16
 struct_rpc_set_guest_system_info_ext_v15_02._fields_ = [
   ('guestDriverBranch', (ctypes.c_char * 256)),
   ('domain', NvU32),
@@ -521,7 +521,7 @@ struct_rpc_set_guest_system_info_ext_v25_1B._fields_ = [
 rpc_set_guest_system_info_ext_v25_1B = struct_rpc_set_guest_system_info_ext_v25_1B
 rpc_set_guest_system_info_ext_v = struct_rpc_set_guest_system_info_ext_v25_1B
 class struct_rpc_alloc_root_v07_00(Struct): pass
-NvHandle = ctypes.c_uint
+NvHandle = ctypes.c_uint32
 struct_rpc_alloc_root_v07_00._fields_ = [
   ('hClient', NvHandle),
   ('processID', NvU32),
@@ -963,7 +963,7 @@ rpc_alloc_object_v = struct_rpc_alloc_object_v29_06
 class struct_rpc_free_v03_00(Struct): pass
 class struct_NVOS00_PARAMETERS_v03_00(Struct): pass
 NVOS00_PARAMETERS_v03_00 = struct_NVOS00_PARAMETERS_v03_00
-NvV32 = ctypes.c_uint
+NvV32 = ctypes.c_uint32
 struct_NVOS00_PARAMETERS_v03_00._fields_ = [
   ('hRoot', NvHandle),
   ('hObjectParent', NvHandle),
@@ -1085,7 +1085,7 @@ rpc_alloc_event_v = struct_rpc_alloc_event_v03_00
 class struct_rpc_rm_api_control_v25_0D(Struct): pass
 class struct_NVOS54_PARAMETERS_v03_00(Struct): pass
 NVOS54_PARAMETERS_v03_00 = struct_NVOS54_PARAMETERS_v03_00
-NvRmctrlCmd = ctypes.c_uint
+NvRmctrlCmd = ctypes.c_uint32
 struct_NVOS54_PARAMETERS_v03_00._fields_ = [
   ('hClient', NvHandle),
   ('hObject', NvHandle),
@@ -1198,7 +1198,7 @@ class union_vgpuGetEngineUtilization_data_v1F_0E(ctypes.Union): pass
 vgpuGetEngineUtilization_data_v1F_0E = union_vgpuGetEngineUtilization_data_v1F_0E
 class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(Struct): pass
 NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00 = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00
-enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint)
+enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint32)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVENC', 1)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC', 2)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG', 3)
@@ -2180,7 +2180,7 @@ struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07._fields_ = [
   ('depth', NvU32),
   ('stencil', NvU32),
 ]
-enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = CEnum(ctypes.c_uint)
+enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = CEnum(ctypes.c_uint32)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID', 0)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR', 1)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_DEPTH = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_DEPTH', 2)
@@ -2367,7 +2367,7 @@ rpc_ctrl_reserve_hwpm_legacy_v = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
 class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(Struct): pass
 class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F(Struct): pass
 NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F = struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F
-enum_NVB0CC_REGOPS_MODE = CEnum(ctypes.c_uint)
+enum_NVB0CC_REGOPS_MODE = CEnum(ctypes.c_uint32)
 NVB0CC_REGOPS_MODE_ALL_OR_NONE = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_ALL_OR_NONE', 0)
 NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR', 1)
 
@@ -2821,7 +2821,7 @@ struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F._fields_ = [
   ('clientActiveMask', NvU32),
   ('bRegkeyLimitRatedTdp', NvU8),
 ]
-enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint)
+enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint32)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT', 0)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED', 1)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT', 2)
@@ -2844,7 +2844,7 @@ rpc_ctrl_perf_rated_tdp_get_status_v = struct_rpc_ctrl_perf_rated_tdp_get_status
 class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(Struct): pass
 class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F
-enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint)
+enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint32)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', 0)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342 = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342', 1)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL', 2)
@@ -2923,7 +2923,7 @@ rpc_ctrl_dbg_set_single_sm_single_step_v = struct_rpc_ctrl_dbg_set_single_sm_sin
 class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(Struct): pass
 class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04(Struct): pass
 NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04 = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04
-enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint)
+enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint32)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE', 0)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC', 1)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC', 2)
@@ -3962,7 +3962,7 @@ struct_PACKED_REGISTRY_TABLE._fields_ = [
   ('numEntries', NvU32),
 ]
 PACKED_REGISTRY_TABLE = struct_PACKED_REGISTRY_TABLE
-DISPMUXSTATE = CEnum(ctypes.c_uint)
+DISPMUXSTATE = CEnum(ctypes.c_uint32)
 dispMuxState_None = DISPMUXSTATE.define('dispMuxState_None', 0)
 dispMuxState_IntegratedGPU = DISPMUXSTATE.define('dispMuxState_IntegratedGPU', 1)
 dispMuxState_DiscreteGPU = DISPMUXSTATE.define('dispMuxState_DiscreteGPU', 2)
@@ -3977,7 +3977,7 @@ ACPI_DSM_CACHE._fields_ = [
   ('callback', NvU32),
 ]
 class ACPI_DATA(Struct): pass
-enum__ACPI_DSM_FUNCTION = CEnum(ctypes.c_uint)
+enum__ACPI_DSM_FUNCTION = CEnum(ctypes.c_uint32)
 ACPI_DSM_FUNCTION_NBSI = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NBSI', 0)
 ACPI_DSM_FUNCTION_NVHG = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NVHG', 1)
 ACPI_DSM_FUNCTION_MXM = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_MXM', 2)
@@ -4008,7 +4008,7 @@ ACPI_DATA._fields_ = [
   ('dsmCurrentFuncSupport', NvU32),
 ]
 class struct_DOD_METHOD_DATA(Struct): pass
-NV_STATUS = ctypes.c_uint
+NV_STATUS = ctypes.c_uint32
 struct_DOD_METHOD_DATA._fields_ = [
   ('status', NV_STATUS),
   ('acpiIdListLen', NvU32),
@@ -4053,7 +4053,7 @@ struct_ACPI_METHOD_DATA._fields_ = [
   ('capsMethodData', CAPS_METHOD_DATA),
 ]
 ACPI_METHOD_DATA = struct_ACPI_METHOD_DATA
-RM_ENGINE_TYPE = CEnum(ctypes.c_uint)
+RM_ENGINE_TYPE = CEnum(ctypes.c_uint32)
 RM_ENGINE_TYPE_NULL = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_NULL', 0)
 RM_ENGINE_TYPE_GR0 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_GR0', 1)
 RM_ENGINE_TYPE_GR1 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_GR1', 2)
@@ -4358,9 +4358,9 @@ FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3 = _anonstruct15
 class struct_BIT_HEADER_V1_00(Struct): pass
 struct_BIT_HEADER_V1_00._packed_ = True
 struct_BIT_HEADER_V1_00._fields_ = [
-  ('Id', ctypes.c_ushort),
-  ('Signature', ctypes.c_uint),
-  ('BCD_Version', ctypes.c_ushort),
+  ('Id', ctypes.c_uint16),
+  ('Signature', ctypes.c_uint32),
+  ('BCD_Version', ctypes.c_uint16),
   ('HeaderSize', ctypes.c_ubyte),
   ('TokenSize', ctypes.c_ubyte),
   ('TokenEntries', ctypes.c_ubyte),
@@ -4372,20 +4372,20 @@ struct_BIT_TOKEN_V1_00._packed_ = True
 struct_BIT_TOKEN_V1_00._fields_ = [
   ('TokenId', ctypes.c_ubyte),
   ('DataVersion', ctypes.c_ubyte),
-  ('DataSize', ctypes.c_ushort),
-  ('DataPtr', ctypes.c_uint),
+  ('DataSize', ctypes.c_uint16),
+  ('DataPtr', ctypes.c_uint32),
 ]
 BIT_TOKEN_V1_00 = struct_BIT_TOKEN_V1_00
 class BIT_DATA_BIOSDATA_BINVER(Struct): pass
 BIT_DATA_BIOSDATA_BINVER._packed_ = True
 BIT_DATA_BIOSDATA_BINVER._fields_ = [
-  ('Version', ctypes.c_uint),
+  ('Version', ctypes.c_uint32),
   ('OemVersion', ctypes.c_ubyte),
 ]
 class BIT_DATA_FALCON_DATA_V2(Struct): pass
 BIT_DATA_FALCON_DATA_V2._packed_ = True
 BIT_DATA_FALCON_DATA_V2._fields_ = [
-  ('FalconUcodeTablePtr', ctypes.c_uint),
+  ('FalconUcodeTablePtr', ctypes.c_uint32),
 ]
 class FALCON_UCODE_TABLE_HDR_V1(Struct): pass
 FALCON_UCODE_TABLE_HDR_V1._packed_ = True
@@ -4402,29 +4402,29 @@ FALCON_UCODE_TABLE_ENTRY_V1._packed_ = True
 FALCON_UCODE_TABLE_ENTRY_V1._fields_ = [
   ('ApplicationID', ctypes.c_ubyte),
   ('TargetID', ctypes.c_ubyte),
-  ('DescPtr', ctypes.c_uint),
+  ('DescPtr', ctypes.c_uint32),
 ]
 class FALCON_UCODE_DESC_HEADER(Struct): pass
 FALCON_UCODE_DESC_HEADER._packed_ = True
 FALCON_UCODE_DESC_HEADER._fields_ = [
-  ('vDesc', ctypes.c_uint),
+  ('vDesc', ctypes.c_uint32),
 ]
 class FALCON_UCODE_DESC_V3(Struct): pass
 FALCON_UCODE_DESC_V3._fields_ = [
   ('Hdr', FALCON_UCODE_DESC_HEADER),
-  ('StoredSize', ctypes.c_uint),
-  ('PKCDataOffset', ctypes.c_uint),
-  ('InterfaceOffset', ctypes.c_uint),
-  ('IMEMPhysBase', ctypes.c_uint),
-  ('IMEMLoadSize', ctypes.c_uint),
-  ('IMEMVirtBase', ctypes.c_uint),
-  ('DMEMPhysBase', ctypes.c_uint),
-  ('DMEMLoadSize', ctypes.c_uint),
-  ('EngineIdMask', ctypes.c_ushort),
+  ('StoredSize', ctypes.c_uint32),
+  ('PKCDataOffset', ctypes.c_uint32),
+  ('InterfaceOffset', ctypes.c_uint32),
+  ('IMEMPhysBase', ctypes.c_uint32),
+  ('IMEMLoadSize', ctypes.c_uint32),
+  ('IMEMVirtBase', ctypes.c_uint32),
+  ('DMEMPhysBase', ctypes.c_uint32),
+  ('DMEMLoadSize', ctypes.c_uint32),
+  ('EngineIdMask', ctypes.c_uint16),
   ('UcodeId', ctypes.c_ubyte),
   ('SignatureCount', ctypes.c_ubyte),
-  ('SignatureVersions', ctypes.c_ushort),
-  ('Reserved', ctypes.c_ushort),
+  ('SignatureVersions', ctypes.c_uint16),
+  ('Reserved', ctypes.c_uint16),
 ]
 class _anonstruct16(Struct): pass
 _anonstruct16._packed_ = True

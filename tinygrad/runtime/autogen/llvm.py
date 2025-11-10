@@ -8,90 +8,90 @@ def dll():
   return None
 dll = dll()
 
-intmax_t = ctypes.c_long
+intmax_t = ctypes.c_int64
 # extern intmax_t imaxabs(intmax_t __n) __attribute__((nothrow)) __attribute__((const))
 try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
 except AttributeError: pass
 
 class imaxdiv_t(Struct): pass
 imaxdiv_t._fields_ = [
-  ('quot', ctypes.c_long),
-  ('rem', ctypes.c_long),
+  ('quot', ctypes.c_int64),
+  ('rem', ctypes.c_int64),
 ]
 # extern imaxdiv_t imaxdiv(intmax_t __numer, intmax_t __denom) __attribute__((nothrow)) __attribute__((const))
 try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, intmax_t]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
-uintmax_t = ctypes.c_ulong
+uintmax_t = ctypes.c_uint64
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
-__gwchar_t = ctypes.c_int
+__gwchar_t = ctypes.c_int32
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 class fd_set(Struct): pass
-__fd_mask = ctypes.c_long
+__fd_mask = ctypes.c_int64
 fd_set._fields_ = [
-  ('fds_bits', (ctypes.c_long * 16)),
+  ('fds_bits', (ctypes.c_int64 * 16)),
 ]
 class struct_timeval(Struct): pass
-__time_t = ctypes.c_long
-__suseconds_t = ctypes.c_long
+__time_t = ctypes.c_int64
+__suseconds_t = ctypes.c_int64
 struct_timeval._fields_ = [
-  ('tv_sec', ctypes.c_long),
-  ('tv_usec', ctypes.c_long),
+  ('tv_sec', ctypes.c_int64),
+  ('tv_usec', ctypes.c_int64),
 ]
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 class struct_timespec(Struct): pass
-__syscall_slong_t = ctypes.c_long
+__syscall_slong_t = ctypes.c_int64
 struct_timespec._fields_ = [
-  ('tv_sec', ctypes.c_long),
-  ('tv_nsec', ctypes.c_long),
+  ('tv_sec', ctypes.c_int64),
+  ('tv_nsec', ctypes.c_int64),
 ]
 class __sigset_t(Struct): pass
 __sigset_t._fields_ = [
-  ('__val', (ctypes.c_ulong * 16)),
+  ('__val', (ctypes.c_uint64 * 16)),
 ]
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-LLVMVerifierFailureAction = CEnum(ctypes.c_uint)
+LLVMVerifierFailureAction = CEnum(ctypes.c_uint32)
 LLVMAbortProcessAction = LLVMVerifierFailureAction.define('LLVMAbortProcessAction', 0)
 LLVMPrintMessageAction = LLVMVerifierFailureAction.define('LLVMPrintMessageAction', 1)
 LLVMReturnStatusAction = LLVMVerifierFailureAction.define('LLVMReturnStatusAction', 2)
 
-LLVMBool = ctypes.c_int
+LLVMBool = ctypes.c_int32
 class struct_LLVMOpaqueModule(Struct): pass
 LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
 # LLVMBool LLVMVerifyModule(LLVMModuleRef M, LLVMVerifierFailureAction Action, char **OutMessage)
@@ -121,43 +121,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 class struct_LLVMOpaqueMemoryBuffer(Struct): pass
@@ -205,55 +205,55 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # int LLVMWriteBitcodeToFile(LLVMModuleRef M, const char *Path)
-try: (LLVMWriteBitcodeToFile:=dll.LLVMWriteBitcodeToFile).restype, LLVMWriteBitcodeToFile.argtypes = ctypes.c_int, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMWriteBitcodeToFile:=dll.LLVMWriteBitcodeToFile).restype, LLVMWriteBitcodeToFile.argtypes = ctypes.c_int32, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # int LLVMWriteBitcodeToFD(LLVMModuleRef M, int FD, int ShouldClose, int Unbuffered)
-try: (LLVMWriteBitcodeToFD:=dll.LLVMWriteBitcodeToFD).restype, LLVMWriteBitcodeToFD.argtypes = ctypes.c_int, [LLVMModuleRef, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+try: (LLVMWriteBitcodeToFD:=dll.LLVMWriteBitcodeToFD).restype, LLVMWriteBitcodeToFD.argtypes = ctypes.c_int32, [LLVMModuleRef, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
 # int LLVMWriteBitcodeToFileHandle(LLVMModuleRef M, int Handle)
-try: (LLVMWriteBitcodeToFileHandle:=dll.LLVMWriteBitcodeToFileHandle).restype, LLVMWriteBitcodeToFileHandle.argtypes = ctypes.c_int, [LLVMModuleRef, ctypes.c_int]
+try: (LLVMWriteBitcodeToFileHandle:=dll.LLVMWriteBitcodeToFileHandle).restype, LLVMWriteBitcodeToFileHandle.argtypes = ctypes.c_int32, [LLVMModuleRef, ctypes.c_int32]
 except AttributeError: pass
 
 # LLVMMemoryBufferRef LLVMWriteBitcodeToMemoryBuffer(LLVMModuleRef M)
@@ -269,46 +269,46 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-LLVMComdatSelectionKind = CEnum(ctypes.c_uint)
+LLVMComdatSelectionKind = CEnum(ctypes.c_uint32)
 LLVMAnyComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMAnyComdatSelectionKind', 0)
 LLVMExactMatchComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMExactMatchComdatSelectionKind', 1)
 LLVMLargestComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMLargestComdatSelectionKind', 2)
@@ -359,46 +359,46 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-LLVMOpcode = CEnum(ctypes.c_uint)
+LLVMOpcode = CEnum(ctypes.c_uint32)
 LLVMRet = LLVMOpcode.define('LLVMRet', 1)
 LLVMBr = LLVMOpcode.define('LLVMBr', 2)
 LLVMSwitch = LLVMOpcode.define('LLVMSwitch', 3)
@@ -467,7 +467,7 @@ LLVMCatchPad = LLVMOpcode.define('LLVMCatchPad', 63)
 LLVMCleanupPad = LLVMOpcode.define('LLVMCleanupPad', 64)
 LLVMCatchSwitch = LLVMOpcode.define('LLVMCatchSwitch', 65)
 
-LLVMTypeKind = CEnum(ctypes.c_uint)
+LLVMTypeKind = CEnum(ctypes.c_uint32)
 LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0)
 LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1)
 LLVMFloatTypeKind = LLVMTypeKind.define('LLVMFloatTypeKind', 2)
@@ -489,7 +489,7 @@ LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18)
 LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19)
 LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20)
 
-LLVMLinkage = CEnum(ctypes.c_uint)
+LLVMLinkage = CEnum(ctypes.c_uint32)
 LLVMExternalLinkage = LLVMLinkage.define('LLVMExternalLinkage', 0)
 LLVMAvailableExternallyLinkage = LLVMLinkage.define('LLVMAvailableExternallyLinkage', 1)
 LLVMLinkOnceAnyLinkage = LLVMLinkage.define('LLVMLinkOnceAnyLinkage', 2)
@@ -508,22 +508,22 @@ LLVMCommonLinkage = LLVMLinkage.define('LLVMCommonLinkage', 14)
 LLVMLinkerPrivateLinkage = LLVMLinkage.define('LLVMLinkerPrivateLinkage', 15)
 LLVMLinkerPrivateWeakLinkage = LLVMLinkage.define('LLVMLinkerPrivateWeakLinkage', 16)
 
-LLVMVisibility = CEnum(ctypes.c_uint)
+LLVMVisibility = CEnum(ctypes.c_uint32)
 LLVMDefaultVisibility = LLVMVisibility.define('LLVMDefaultVisibility', 0)
 LLVMHiddenVisibility = LLVMVisibility.define('LLVMHiddenVisibility', 1)
 LLVMProtectedVisibility = LLVMVisibility.define('LLVMProtectedVisibility', 2)
 
-LLVMUnnamedAddr = CEnum(ctypes.c_uint)
+LLVMUnnamedAddr = CEnum(ctypes.c_uint32)
 LLVMNoUnnamedAddr = LLVMUnnamedAddr.define('LLVMNoUnnamedAddr', 0)
 LLVMLocalUnnamedAddr = LLVMUnnamedAddr.define('LLVMLocalUnnamedAddr', 1)
 LLVMGlobalUnnamedAddr = LLVMUnnamedAddr.define('LLVMGlobalUnnamedAddr', 2)
 
-LLVMDLLStorageClass = CEnum(ctypes.c_uint)
+LLVMDLLStorageClass = CEnum(ctypes.c_uint32)
 LLVMDefaultStorageClass = LLVMDLLStorageClass.define('LLVMDefaultStorageClass', 0)
 LLVMDLLImportStorageClass = LLVMDLLStorageClass.define('LLVMDLLImportStorageClass', 1)
 LLVMDLLExportStorageClass = LLVMDLLStorageClass.define('LLVMDLLExportStorageClass', 2)
 
-LLVMCallConv = CEnum(ctypes.c_uint)
+LLVMCallConv = CEnum(ctypes.c_uint32)
 LLVMCCallConv = LLVMCallConv.define('LLVMCCallConv', 0)
 LLVMFastCallConv = LLVMCallConv.define('LLVMFastCallConv', 8)
 LLVMColdCallConv = LLVMCallConv.define('LLVMColdCallConv', 9)
@@ -566,7 +566,7 @@ LLVMMSP430BUILTINCallConv = LLVMCallConv.define('LLVMMSP430BUILTINCallConv', 94)
 LLVMAMDGPULSCallConv = LLVMCallConv.define('LLVMAMDGPULSCallConv', 95)
 LLVMAMDGPUESCallConv = LLVMCallConv.define('LLVMAMDGPUESCallConv', 96)
 
-LLVMValueKind = CEnum(ctypes.c_uint)
+LLVMValueKind = CEnum(ctypes.c_uint32)
 LLVMArgumentValueKind = LLVMValueKind.define('LLVMArgumentValueKind', 0)
 LLVMBasicBlockValueKind = LLVMValueKind.define('LLVMBasicBlockValueKind', 1)
 LLVMMemoryUseValueKind = LLVMValueKind.define('LLVMMemoryUseValueKind', 2)
@@ -596,7 +596,7 @@ LLVMPoisonValueValueKind = LLVMValueKind.define('LLVMPoisonValueValueKind', 25)
 LLVMConstantTargetNoneValueKind = LLVMValueKind.define('LLVMConstantTargetNoneValueKind', 26)
 LLVMConstantPtrAuthValueKind = LLVMValueKind.define('LLVMConstantPtrAuthValueKind', 27)
 
-LLVMIntPredicate = CEnum(ctypes.c_uint)
+LLVMIntPredicate = CEnum(ctypes.c_uint32)
 LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32)
 LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33)
 LLVMIntUGT = LLVMIntPredicate.define('LLVMIntUGT', 34)
@@ -608,7 +608,7 @@ LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39)
 LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40)
 LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41)
 
-LLVMRealPredicate = CEnum(ctypes.c_uint)
+LLVMRealPredicate = CEnum(ctypes.c_uint32)
 LLVMRealPredicateFalse = LLVMRealPredicate.define('LLVMRealPredicateFalse', 0)
 LLVMRealOEQ = LLVMRealPredicate.define('LLVMRealOEQ', 1)
 LLVMRealOGT = LLVMRealPredicate.define('LLVMRealOGT', 2)
@@ -626,18 +626,18 @@ LLVMRealULE = LLVMRealPredicate.define('LLVMRealULE', 13)
 LLVMRealUNE = LLVMRealPredicate.define('LLVMRealUNE', 14)
 LLVMRealPredicateTrue = LLVMRealPredicate.define('LLVMRealPredicateTrue', 15)
 
-LLVMLandingPadClauseTy = CEnum(ctypes.c_uint)
+LLVMLandingPadClauseTy = CEnum(ctypes.c_uint32)
 LLVMLandingPadCatch = LLVMLandingPadClauseTy.define('LLVMLandingPadCatch', 0)
 LLVMLandingPadFilter = LLVMLandingPadClauseTy.define('LLVMLandingPadFilter', 1)
 
-LLVMThreadLocalMode = CEnum(ctypes.c_uint)
+LLVMThreadLocalMode = CEnum(ctypes.c_uint32)
 LLVMNotThreadLocal = LLVMThreadLocalMode.define('LLVMNotThreadLocal', 0)
 LLVMGeneralDynamicTLSModel = LLVMThreadLocalMode.define('LLVMGeneralDynamicTLSModel', 1)
 LLVMLocalDynamicTLSModel = LLVMThreadLocalMode.define('LLVMLocalDynamicTLSModel', 2)
 LLVMInitialExecTLSModel = LLVMThreadLocalMode.define('LLVMInitialExecTLSModel', 3)
 LLVMLocalExecTLSModel = LLVMThreadLocalMode.define('LLVMLocalExecTLSModel', 4)
 
-LLVMAtomicOrdering = CEnum(ctypes.c_uint)
+LLVMAtomicOrdering = CEnum(ctypes.c_uint32)
 LLVMAtomicOrderingNotAtomic = LLVMAtomicOrdering.define('LLVMAtomicOrderingNotAtomic', 0)
 LLVMAtomicOrderingUnordered = LLVMAtomicOrdering.define('LLVMAtomicOrderingUnordered', 1)
 LLVMAtomicOrderingMonotonic = LLVMAtomicOrdering.define('LLVMAtomicOrderingMonotonic', 2)
@@ -646,7 +646,7 @@ LLVMAtomicOrderingRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingRelease
 LLVMAtomicOrderingAcquireRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingAcquireRelease', 6)
 LLVMAtomicOrderingSequentiallyConsistent = LLVMAtomicOrdering.define('LLVMAtomicOrderingSequentiallyConsistent', 7)
 
-LLVMAtomicRMWBinOp = CEnum(ctypes.c_uint)
+LLVMAtomicRMWBinOp = CEnum(ctypes.c_uint32)
 LLVMAtomicRMWBinOpXchg = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXchg', 0)
 LLVMAtomicRMWBinOpAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAdd', 1)
 LLVMAtomicRMWBinOpSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpSub', 2)
@@ -667,17 +667,17 @@ LLVMAtomicRMWBinOpUDecWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUDecWr
 LLVMAtomicRMWBinOpUSubCond = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubCond', 17)
 LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat', 18)
 
-LLVMDiagnosticSeverity = CEnum(ctypes.c_uint)
+LLVMDiagnosticSeverity = CEnum(ctypes.c_uint32)
 LLVMDSError = LLVMDiagnosticSeverity.define('LLVMDSError', 0)
 LLVMDSWarning = LLVMDiagnosticSeverity.define('LLVMDSWarning', 1)
 LLVMDSRemark = LLVMDiagnosticSeverity.define('LLVMDSRemark', 2)
 LLVMDSNote = LLVMDiagnosticSeverity.define('LLVMDSNote', 3)
 
-LLVMInlineAsmDialect = CEnum(ctypes.c_uint)
+LLVMInlineAsmDialect = CEnum(ctypes.c_uint32)
 LLVMInlineAsmDialectATT = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectATT', 0)
 LLVMInlineAsmDialectIntel = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectIntel', 1)
 
-LLVMModuleFlagBehavior = CEnum(ctypes.c_uint)
+LLVMModuleFlagBehavior = CEnum(ctypes.c_uint32)
 LLVMModuleFlagBehaviorError = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorError', 0)
 LLVMModuleFlagBehaviorWarning = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorWarning', 1)
 LLVMModuleFlagBehaviorRequire = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorRequire', 2)
@@ -685,18 +685,18 @@ LLVMModuleFlagBehaviorOverride = LLVMModuleFlagBehavior.define('LLVMModuleFlagBe
 LLVMModuleFlagBehaviorAppend = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppend', 4)
 LLVMModuleFlagBehaviorAppendUnique = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppendUnique', 5)
 
-_anonenum0 = CEnum(ctypes.c_int)
+_anonenum0 = CEnum(ctypes.c_int32)
 LLVMAttributeReturnIndex = _anonenum0.define('LLVMAttributeReturnIndex', 0)
 LLVMAttributeFunctionIndex = _anonenum0.define('LLVMAttributeFunctionIndex', -1)
 
-LLVMAttributeIndex = ctypes.c_uint
-LLVMTailCallKind = CEnum(ctypes.c_uint)
+LLVMAttributeIndex = ctypes.c_uint32
+LLVMTailCallKind = CEnum(ctypes.c_uint32)
 LLVMTailCallKindNone = LLVMTailCallKind.define('LLVMTailCallKindNone', 0)
 LLVMTailCallKindTail = LLVMTailCallKind.define('LLVMTailCallKindTail', 1)
 LLVMTailCallKindMustTail = LLVMTailCallKind.define('LLVMTailCallKindMustTail', 2)
 LLVMTailCallKindNoTail = LLVMTailCallKind.define('LLVMTailCallKindNoTail', 3)
 
-_anonenum1 = CEnum(ctypes.c_uint)
+_anonenum1 = CEnum(ctypes.c_uint32)
 LLVMFastMathAllowReassoc = _anonenum1.define('LLVMFastMathAllowReassoc', 1)
 LLVMFastMathNoNaNs = _anonenum1.define('LLVMFastMathNoNaNs', 2)
 LLVMFastMathNoInfs = _anonenum1.define('LLVMFastMathNoInfs', 4)
@@ -707,19 +707,19 @@ LLVMFastMathApproxFunc = _anonenum1.define('LLVMFastMathApproxFunc', 64)
 LLVMFastMathNone = _anonenum1.define('LLVMFastMathNone', 0)
 LLVMFastMathAll = _anonenum1.define('LLVMFastMathAll', 127)
 
-LLVMFastMathFlags = ctypes.c_uint
-_anonenum2 = CEnum(ctypes.c_uint)
+LLVMFastMathFlags = ctypes.c_uint32
+_anonenum2 = CEnum(ctypes.c_uint32)
 LLVMGEPFlagInBounds = _anonenum2.define('LLVMGEPFlagInBounds', 1)
 LLVMGEPFlagNUSW = _anonenum2.define('LLVMGEPFlagNUSW', 2)
 LLVMGEPFlagNUW = _anonenum2.define('LLVMGEPFlagNUW', 4)
 
-LLVMGEPNoWrapFlags = ctypes.c_uint
+LLVMGEPNoWrapFlags = ctypes.c_uint32
 # void LLVMShutdown(void)
 try: (LLVMShutdown:=dll.LLVMShutdown).restype, LLVMShutdown.argtypes = None, []
 except AttributeError: pass
 
 # void LLVMGetVersion(unsigned int *Major, unsigned int *Minor, unsigned int *Patch)
-try: (LLVMGetVersion:=dll.LLVMGetVersion).restype, LLVMGetVersion.argtypes = None, [ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMGetVersion:=dll.LLVMGetVersion).restype, LLVMGetVersion.argtypes = None, [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # char *LLVMCreateMessage(const char *Message)
@@ -779,35 +779,35 @@ try: (LLVMGetDiagInfoSeverity:=dll.LLVMGetDiagInfoSeverity).restype, LLVMGetDiag
 except AttributeError: pass
 
 # unsigned int LLVMGetMDKindIDInContext(LLVMContextRef C, const char *Name, unsigned int SLen)
-try: (LLVMGetMDKindIDInContext:=dll.LLVMGetMDKindIDInContext).restype, LLVMGetMDKindIDInContext.argtypes = ctypes.c_uint, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMGetMDKindIDInContext:=dll.LLVMGetMDKindIDInContext).restype, LLVMGetMDKindIDInContext.argtypes = ctypes.c_uint32, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetMDKindID(const char *Name, unsigned int SLen)
-try: (LLVMGetMDKindID:=dll.LLVMGetMDKindID).restype, LLVMGetMDKindID.argtypes = ctypes.c_uint, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMGetMDKindID:=dll.LLVMGetMDKindID).restype, LLVMGetMDKindID.argtypes = ctypes.c_uint32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
-size_t = ctypes.c_ulong
+size_t = ctypes.c_uint64
 # unsigned int LLVMGetSyncScopeID(LLVMContextRef C, const char *Name, size_t SLen)
-try: (LLVMGetSyncScopeID:=dll.LLVMGetSyncScopeID).restype, LLVMGetSyncScopeID.argtypes = ctypes.c_uint, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMGetSyncScopeID:=dll.LLVMGetSyncScopeID).restype, LLVMGetSyncScopeID.argtypes = ctypes.c_uint32, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # unsigned int LLVMGetEnumAttributeKindForName(const char *Name, size_t SLen)
-try: (LLVMGetEnumAttributeKindForName:=dll.LLVMGetEnumAttributeKindForName).restype, LLVMGetEnumAttributeKindForName.argtypes = ctypes.c_uint, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMGetEnumAttributeKindForName:=dll.LLVMGetEnumAttributeKindForName).restype, LLVMGetEnumAttributeKindForName.argtypes = ctypes.c_uint32, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # unsigned int LLVMGetLastEnumAttributeKind(void)
-try: (LLVMGetLastEnumAttributeKind:=dll.LLVMGetLastEnumAttributeKind).restype, LLVMGetLastEnumAttributeKind.argtypes = ctypes.c_uint, []
+try: (LLVMGetLastEnumAttributeKind:=dll.LLVMGetLastEnumAttributeKind).restype, LLVMGetLastEnumAttributeKind.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
 class struct_LLVMOpaqueAttributeRef(Struct): pass
 LLVMAttributeRef = ctypes.POINTER(struct_LLVMOpaqueAttributeRef)
-uint64_t = ctypes.c_ulong
+uint64_t = ctypes.c_uint64
 # LLVMAttributeRef LLVMCreateEnumAttribute(LLVMContextRef C, unsigned int KindID, uint64_t Val)
-try: (LLVMCreateEnumAttribute:=dll.LLVMCreateEnumAttribute).restype, LLVMCreateEnumAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint, uint64_t]
+try: (LLVMCreateEnumAttribute:=dll.LLVMCreateEnumAttribute).restype, LLVMCreateEnumAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, uint64_t]
 except AttributeError: pass
 
 # unsigned int LLVMGetEnumAttributeKind(LLVMAttributeRef A)
-try: (LLVMGetEnumAttributeKind:=dll.LLVMGetEnumAttributeKind).restype, LLVMGetEnumAttributeKind.argtypes = ctypes.c_uint, [LLVMAttributeRef]
+try: (LLVMGetEnumAttributeKind:=dll.LLVMGetEnumAttributeKind).restype, LLVMGetEnumAttributeKind.argtypes = ctypes.c_uint32, [LLVMAttributeRef]
 except AttributeError: pass
 
 # uint64_t LLVMGetEnumAttributeValue(LLVMAttributeRef A)
@@ -817,7 +817,7 @@ except AttributeError: pass
 class struct_LLVMOpaqueType(Struct): pass
 LLVMTypeRef = ctypes.POINTER(struct_LLVMOpaqueType)
 # LLVMAttributeRef LLVMCreateTypeAttribute(LLVMContextRef C, unsigned int KindID, LLVMTypeRef type_ref)
-try: (LLVMCreateTypeAttribute:=dll.LLVMCreateTypeAttribute).restype, LLVMCreateTypeAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint, LLVMTypeRef]
+try: (LLVMCreateTypeAttribute:=dll.LLVMCreateTypeAttribute).restype, LLVMCreateTypeAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, LLVMTypeRef]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMGetTypeAttributeValue(LLVMAttributeRef A)
@@ -825,19 +825,19 @@ try: (LLVMGetTypeAttributeValue:=dll.LLVMGetTypeAttributeValue).restype, LLVMGet
 except AttributeError: pass
 
 # LLVMAttributeRef LLVMCreateConstantRangeAttribute(LLVMContextRef C, unsigned int KindID, unsigned int NumBits, const uint64_t LowerWords[], const uint64_t UpperWords[])
-try: (LLVMCreateConstantRangeAttribute:=dll.LLVMCreateConstantRangeAttribute).restype, LLVMCreateConstantRangeAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint, ctypes.c_uint, (uint64_t * 0), (uint64_t * 0)]
+try: (LLVMCreateConstantRangeAttribute:=dll.LLVMCreateConstantRangeAttribute).restype, LLVMCreateConstantRangeAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, ctypes.c_uint32, (uint64_t * 0), (uint64_t * 0)]
 except AttributeError: pass
 
 # LLVMAttributeRef LLVMCreateStringAttribute(LLVMContextRef C, const char *K, unsigned int KLength, const char *V, unsigned int VLength)
-try: (LLVMCreateStringAttribute:=dll.LLVMCreateStringAttribute).restype, LLVMCreateStringAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMCreateStringAttribute:=dll.LLVMCreateStringAttribute).restype, LLVMCreateStringAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # const char *LLVMGetStringAttributeKind(LLVMAttributeRef A, unsigned int *Length)
-try: (LLVMGetStringAttributeKind:=dll.LLVMGetStringAttributeKind).restype, LLVMGetStringAttributeKind.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMAttributeRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMGetStringAttributeKind:=dll.LLVMGetStringAttributeKind).restype, LLVMGetStringAttributeKind.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMAttributeRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # const char *LLVMGetStringAttributeValue(LLVMAttributeRef A, unsigned int *Length)
-try: (LLVMGetStringAttributeValue:=dll.LLVMGetStringAttributeValue).restype, LLVMGetStringAttributeValue.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMAttributeRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMGetStringAttributeValue:=dll.LLVMGetStringAttributeValue).restype, LLVMGetStringAttributeValue.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMAttributeRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # LLVMBool LLVMIsEnumAttribute(LLVMAttributeRef A)
@@ -927,17 +927,17 @@ try: (LLVMDisposeModuleFlagsMetadata:=dll.LLVMDisposeModuleFlagsMetadata).restyp
 except AttributeError: pass
 
 # LLVMModuleFlagBehavior LLVMModuleFlagEntriesGetFlagBehavior(LLVMModuleFlagEntry *Entries, unsigned int Index)
-try: (LLVMModuleFlagEntriesGetFlagBehavior:=dll.LLVMModuleFlagEntriesGetFlagBehavior).restype, LLVMModuleFlagEntriesGetFlagBehavior.argtypes = LLVMModuleFlagBehavior, [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint]
+try: (LLVMModuleFlagEntriesGetFlagBehavior:=dll.LLVMModuleFlagEntriesGetFlagBehavior).restype, LLVMModuleFlagEntriesGetFlagBehavior.argtypes = LLVMModuleFlagBehavior, [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint32]
 except AttributeError: pass
 
 # const char *LLVMModuleFlagEntriesGetKey(LLVMModuleFlagEntry *Entries, unsigned int Index, size_t *Len)
-try: (LLVMModuleFlagEntriesGetKey:=dll.LLVMModuleFlagEntriesGetKey).restype, LLVMModuleFlagEntriesGetKey.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint, ctypes.POINTER(size_t)]
+try: (LLVMModuleFlagEntriesGetKey:=dll.LLVMModuleFlagEntriesGetKey).restype, LLVMModuleFlagEntriesGetKey.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint32, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
 class struct_LLVMOpaqueMetadata(Struct): pass
 LLVMMetadataRef = ctypes.POINTER(struct_LLVMOpaqueMetadata)
 # LLVMMetadataRef LLVMModuleFlagEntriesGetMetadata(LLVMModuleFlagEntry *Entries, unsigned int Index)
-try: (LLVMModuleFlagEntriesGetMetadata:=dll.LLVMModuleFlagEntriesGetMetadata).restype, LLVMModuleFlagEntriesGetMetadata.argtypes = LLVMMetadataRef, [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint]
+try: (LLVMModuleFlagEntriesGetMetadata:=dll.LLVMModuleFlagEntriesGetMetadata).restype, LLVMModuleFlagEntriesGetMetadata.argtypes = LLVMMetadataRef, [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMGetModuleFlag(LLVMModuleRef M, const char *Key, size_t KeyLen)
@@ -1043,7 +1043,7 @@ try: (LLVMGetNamedMetadataName:=dll.LLVMGetNamedMetadataName).restype, LLVMGetNa
 except AttributeError: pass
 
 # unsigned int LLVMGetNamedMetadataNumOperands(LLVMModuleRef M, const char *Name)
-try: (LLVMGetNamedMetadataNumOperands:=dll.LLVMGetNamedMetadataNumOperands).restype, LLVMGetNamedMetadataNumOperands.argtypes = ctypes.c_uint, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMGetNamedMetadataNumOperands:=dll.LLVMGetNamedMetadataNumOperands).restype, LLVMGetNamedMetadataNumOperands.argtypes = ctypes.c_uint32, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # void LLVMGetNamedMetadataOperands(LLVMModuleRef M, const char *Name, LLVMValueRef *Dest)
@@ -1055,19 +1055,19 @@ try: (LLVMAddNamedMetadataOperand:=dll.LLVMAddNamedMetadataOperand).restype, LLV
 except AttributeError: pass
 
 # const char *LLVMGetDebugLocDirectory(LLVMValueRef Val, unsigned int *Length)
-try: (LLVMGetDebugLocDirectory:=dll.LLVMGetDebugLocDirectory).restype, LLVMGetDebugLocDirectory.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMGetDebugLocDirectory:=dll.LLVMGetDebugLocDirectory).restype, LLVMGetDebugLocDirectory.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # const char *LLVMGetDebugLocFilename(LLVMValueRef Val, unsigned int *Length)
-try: (LLVMGetDebugLocFilename:=dll.LLVMGetDebugLocFilename).restype, LLVMGetDebugLocFilename.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMGetDebugLocFilename:=dll.LLVMGetDebugLocFilename).restype, LLVMGetDebugLocFilename.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # unsigned int LLVMGetDebugLocLine(LLVMValueRef Val)
-try: (LLVMGetDebugLocLine:=dll.LLVMGetDebugLocLine).restype, LLVMGetDebugLocLine.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetDebugLocLine:=dll.LLVMGetDebugLocLine).restype, LLVMGetDebugLocLine.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMGetDebugLocColumn(LLVMValueRef Val)
-try: (LLVMGetDebugLocColumn:=dll.LLVMGetDebugLocColumn).restype, LLVMGetDebugLocColumn.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetDebugLocColumn:=dll.LLVMGetDebugLocColumn).restype, LLVMGetDebugLocColumn.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMAddFunction(LLVMModuleRef M, const char *Name, LLVMTypeRef FunctionTy)
@@ -1147,7 +1147,7 @@ try: (LLVMInt128TypeInContext:=dll.LLVMInt128TypeInContext).restype, LLVMInt128T
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntTypeInContext(LLVMContextRef C, unsigned int NumBits)
-try: (LLVMIntTypeInContext:=dll.LLVMIntTypeInContext).restype, LLVMIntTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint]
+try: (LLVMIntTypeInContext:=dll.LLVMIntTypeInContext).restype, LLVMIntTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMInt1Type(void)
@@ -1175,11 +1175,11 @@ try: (LLVMInt128Type:=dll.LLVMInt128Type).restype, LLVMInt128Type.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntType(unsigned int NumBits)
-try: (LLVMIntType:=dll.LLVMIntType).restype, LLVMIntType.argtypes = LLVMTypeRef, [ctypes.c_uint]
+try: (LLVMIntType:=dll.LLVMIntType).restype, LLVMIntType.argtypes = LLVMTypeRef, [ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetIntTypeWidth(LLVMTypeRef IntegerTy)
-try: (LLVMGetIntTypeWidth:=dll.LLVMGetIntTypeWidth).restype, LLVMGetIntTypeWidth.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMGetIntTypeWidth:=dll.LLVMGetIntTypeWidth).restype, LLVMGetIntTypeWidth.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMHalfTypeInContext(LLVMContextRef C)
@@ -1239,7 +1239,7 @@ try: (LLVMPPCFP128Type:=dll.LLVMPPCFP128Type).restype, LLVMPPCFP128Type.argtypes
 except AttributeError: pass
 
 # LLVMTypeRef LLVMFunctionType(LLVMTypeRef ReturnType, LLVMTypeRef *ParamTypes, unsigned int ParamCount, LLVMBool IsVarArg)
-try: (LLVMFunctionType:=dll.LLVMFunctionType).restype, LLVMFunctionType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint, LLVMBool]
+try: (LLVMFunctionType:=dll.LLVMFunctionType).restype, LLVMFunctionType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMBool LLVMIsFunctionVarArg(LLVMTypeRef FunctionTy)
@@ -1251,7 +1251,7 @@ try: (LLVMGetReturnType:=dll.LLVMGetReturnType).restype, LLVMGetReturnType.argty
 except AttributeError: pass
 
 # unsigned int LLVMCountParamTypes(LLVMTypeRef FunctionTy)
-try: (LLVMCountParamTypes:=dll.LLVMCountParamTypes).restype, LLVMCountParamTypes.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMCountParamTypes:=dll.LLVMCountParamTypes).restype, LLVMCountParamTypes.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # void LLVMGetParamTypes(LLVMTypeRef FunctionTy, LLVMTypeRef *Dest)
@@ -1259,11 +1259,11 @@ try: (LLVMGetParamTypes:=dll.LLVMGetParamTypes).restype, LLVMGetParamTypes.argty
 except AttributeError: pass
 
 # LLVMTypeRef LLVMStructTypeInContext(LLVMContextRef C, LLVMTypeRef *ElementTypes, unsigned int ElementCount, LLVMBool Packed)
-try: (LLVMStructTypeInContext:=dll.LLVMStructTypeInContext).restype, LLVMStructTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint, LLVMBool]
+try: (LLVMStructTypeInContext:=dll.LLVMStructTypeInContext).restype, LLVMStructTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMStructType(LLVMTypeRef *ElementTypes, unsigned int ElementCount, LLVMBool Packed)
-try: (LLVMStructType:=dll.LLVMStructType).restype, LLVMStructType.argtypes = LLVMTypeRef, [ctypes.POINTER(LLVMTypeRef), ctypes.c_uint, LLVMBool]
+try: (LLVMStructType:=dll.LLVMStructType).restype, LLVMStructType.argtypes = LLVMTypeRef, [ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMStructCreateNamed(LLVMContextRef C, const char *Name)
@@ -1275,11 +1275,11 @@ try: (LLVMGetStructName:=dll.LLVMGetStructName).restype, LLVMGetStructName.argty
 except AttributeError: pass
 
 # void LLVMStructSetBody(LLVMTypeRef StructTy, LLVMTypeRef *ElementTypes, unsigned int ElementCount, LLVMBool Packed)
-try: (LLVMStructSetBody:=dll.LLVMStructSetBody).restype, LLVMStructSetBody.argtypes = None, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint, LLVMBool]
+try: (LLVMStructSetBody:=dll.LLVMStructSetBody).restype, LLVMStructSetBody.argtypes = None, [LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # unsigned int LLVMCountStructElementTypes(LLVMTypeRef StructTy)
-try: (LLVMCountStructElementTypes:=dll.LLVMCountStructElementTypes).restype, LLVMCountStructElementTypes.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMCountStructElementTypes:=dll.LLVMCountStructElementTypes).restype, LLVMCountStructElementTypes.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # void LLVMGetStructElementTypes(LLVMTypeRef StructTy, LLVMTypeRef *Dest)
@@ -1287,7 +1287,7 @@ try: (LLVMGetStructElementTypes:=dll.LLVMGetStructElementTypes).restype, LLVMGet
 except AttributeError: pass
 
 # LLVMTypeRef LLVMStructGetTypeAtIndex(LLVMTypeRef StructTy, unsigned int i)
-try: (LLVMStructGetTypeAtIndex:=dll.LLVMStructGetTypeAtIndex).restype, LLVMStructGetTypeAtIndex.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint]
+try: (LLVMStructGetTypeAtIndex:=dll.LLVMStructGetTypeAtIndex).restype, LLVMStructGetTypeAtIndex.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMBool LLVMIsPackedStruct(LLVMTypeRef StructTy)
@@ -1311,11 +1311,11 @@ try: (LLVMGetSubtypes:=dll.LLVMGetSubtypes).restype, LLVMGetSubtypes.argtypes = 
 except AttributeError: pass
 
 # unsigned int LLVMGetNumContainedTypes(LLVMTypeRef Tp)
-try: (LLVMGetNumContainedTypes:=dll.LLVMGetNumContainedTypes).restype, LLVMGetNumContainedTypes.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMGetNumContainedTypes:=dll.LLVMGetNumContainedTypes).restype, LLVMGetNumContainedTypes.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMArrayType(LLVMTypeRef ElementType, unsigned int ElementCount)
-try: (LLVMArrayType:=dll.LLVMArrayType).restype, LLVMArrayType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint]
+try: (LLVMArrayType:=dll.LLVMArrayType).restype, LLVMArrayType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMArrayType2(LLVMTypeRef ElementType, uint64_t ElementCount)
@@ -1323,7 +1323,7 @@ try: (LLVMArrayType2:=dll.LLVMArrayType2).restype, LLVMArrayType2.argtypes = LLV
 except AttributeError: pass
 
 # unsigned int LLVMGetArrayLength(LLVMTypeRef ArrayTy)
-try: (LLVMGetArrayLength:=dll.LLVMGetArrayLength).restype, LLVMGetArrayLength.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMGetArrayLength:=dll.LLVMGetArrayLength).restype, LLVMGetArrayLength.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # uint64_t LLVMGetArrayLength2(LLVMTypeRef ArrayTy)
@@ -1331,7 +1331,7 @@ try: (LLVMGetArrayLength2:=dll.LLVMGetArrayLength2).restype, LLVMGetArrayLength2
 except AttributeError: pass
 
 # LLVMTypeRef LLVMPointerType(LLVMTypeRef ElementType, unsigned int AddressSpace)
-try: (LLVMPointerType:=dll.LLVMPointerType).restype, LLVMPointerType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint]
+try: (LLVMPointerType:=dll.LLVMPointerType).restype, LLVMPointerType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMBool LLVMPointerTypeIsOpaque(LLVMTypeRef Ty)
@@ -1339,23 +1339,23 @@ try: (LLVMPointerTypeIsOpaque:=dll.LLVMPointerTypeIsOpaque).restype, LLVMPointer
 except AttributeError: pass
 
 # LLVMTypeRef LLVMPointerTypeInContext(LLVMContextRef C, unsigned int AddressSpace)
-try: (LLVMPointerTypeInContext:=dll.LLVMPointerTypeInContext).restype, LLVMPointerTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint]
+try: (LLVMPointerTypeInContext:=dll.LLVMPointerTypeInContext).restype, LLVMPointerTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetPointerAddressSpace(LLVMTypeRef PointerTy)
-try: (LLVMGetPointerAddressSpace:=dll.LLVMGetPointerAddressSpace).restype, LLVMGetPointerAddressSpace.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMGetPointerAddressSpace:=dll.LLVMGetPointerAddressSpace).restype, LLVMGetPointerAddressSpace.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMVectorType(LLVMTypeRef ElementType, unsigned int ElementCount)
-try: (LLVMVectorType:=dll.LLVMVectorType).restype, LLVMVectorType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint]
+try: (LLVMVectorType:=dll.LLVMVectorType).restype, LLVMVectorType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMScalableVectorType(LLVMTypeRef ElementType, unsigned int ElementCount)
-try: (LLVMScalableVectorType:=dll.LLVMScalableVectorType).restype, LLVMScalableVectorType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint]
+try: (LLVMScalableVectorType:=dll.LLVMScalableVectorType).restype, LLVMScalableVectorType.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetVectorSize(LLVMTypeRef VectorTy)
-try: (LLVMGetVectorSize:=dll.LLVMGetVectorSize).restype, LLVMGetVectorSize.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMGetVectorSize:=dll.LLVMGetVectorSize).restype, LLVMGetVectorSize.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetConstantPtrAuthPointer(LLVMValueRef PtrAuth)
@@ -1407,7 +1407,7 @@ try: (LLVMX86AMXType:=dll.LLVMX86AMXType).restype, LLVMX86AMXType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMTargetExtTypeInContext(LLVMContextRef C, const char *Name, LLVMTypeRef *TypeParams, unsigned int TypeParamCount, unsigned int *IntParams, unsigned int IntParamCount)
-try: (LLVMTargetExtTypeInContext:=dll.LLVMTargetExtTypeInContext).restype, LLVMTargetExtTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTypeRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_uint), ctypes.c_uint]
+try: (LLVMTargetExtTypeInContext:=dll.LLVMTargetExtTypeInContext).restype, LLVMTargetExtTypeInContext.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
 except AttributeError: pass
 
 # const char *LLVMGetTargetExtTypeName(LLVMTypeRef TargetExtTy)
@@ -1415,19 +1415,19 @@ try: (LLVMGetTargetExtTypeName:=dll.LLVMGetTargetExtTypeName).restype, LLVMGetTa
 except AttributeError: pass
 
 # unsigned int LLVMGetTargetExtTypeNumTypeParams(LLVMTypeRef TargetExtTy)
-try: (LLVMGetTargetExtTypeNumTypeParams:=dll.LLVMGetTargetExtTypeNumTypeParams).restype, LLVMGetTargetExtTypeNumTypeParams.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMGetTargetExtTypeNumTypeParams:=dll.LLVMGetTargetExtTypeNumTypeParams).restype, LLVMGetTargetExtTypeNumTypeParams.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMGetTargetExtTypeTypeParam(LLVMTypeRef TargetExtTy, unsigned int Idx)
-try: (LLVMGetTargetExtTypeTypeParam:=dll.LLVMGetTargetExtTypeTypeParam).restype, LLVMGetTargetExtTypeTypeParam.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint]
+try: (LLVMGetTargetExtTypeTypeParam:=dll.LLVMGetTargetExtTypeTypeParam).restype, LLVMGetTargetExtTypeTypeParam.argtypes = LLVMTypeRef, [LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetTargetExtTypeNumIntParams(LLVMTypeRef TargetExtTy)
-try: (LLVMGetTargetExtTypeNumIntParams:=dll.LLVMGetTargetExtTypeNumIntParams).restype, LLVMGetTargetExtTypeNumIntParams.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (LLVMGetTargetExtTypeNumIntParams:=dll.LLVMGetTargetExtTypeNumIntParams).restype, LLVMGetTargetExtTypeNumIntParams.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMGetTargetExtTypeIntParam(LLVMTypeRef TargetExtTy, unsigned int Idx)
-try: (LLVMGetTargetExtTypeIntParam:=dll.LLVMGetTargetExtTypeIntParam).restype, LLVMGetTargetExtTypeIntParam.argtypes = ctypes.c_uint, [LLVMTypeRef, ctypes.c_uint]
+try: (LLVMGetTargetExtTypeIntParam:=dll.LLVMGetTargetExtTypeIntParam).restype, LLVMGetTargetExtTypeIntParam.argtypes = ctypes.c_uint32, [LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMTypeOf(LLVMValueRef Val)
@@ -1875,19 +1875,19 @@ try: (LLVMGetUsedValue:=dll.LLVMGetUsedValue).restype, LLVMGetUsedValue.argtypes
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetOperand(LLVMValueRef Val, unsigned int Index)
-try: (LLVMGetOperand:=dll.LLVMGetOperand).restype, LLVMGetOperand.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetOperand:=dll.LLVMGetOperand).restype, LLVMGetOperand.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMUseRef LLVMGetOperandUse(LLVMValueRef Val, unsigned int Index)
-try: (LLVMGetOperandUse:=dll.LLVMGetOperandUse).restype, LLVMGetOperandUse.argtypes = LLVMUseRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetOperandUse:=dll.LLVMGetOperandUse).restype, LLVMGetOperandUse.argtypes = LLVMUseRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMSetOperand(LLVMValueRef User, unsigned int Index, LLVMValueRef Val)
-try: (LLVMSetOperand:=dll.LLVMSetOperand).restype, LLVMSetOperand.argtypes = None, [LLVMValueRef, ctypes.c_uint, LLVMValueRef]
+try: (LLVMSetOperand:=dll.LLVMSetOperand).restype, LLVMSetOperand.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
 except AttributeError: pass
 
 # int LLVMGetNumOperands(LLVMValueRef Val)
-try: (LLVMGetNumOperands:=dll.LLVMGetNumOperands).restype, LLVMGetNumOperands.argtypes = ctypes.c_int, [LLVMValueRef]
+try: (LLVMGetNumOperands:=dll.LLVMGetNumOperands).restype, LLVMGetNumOperands.argtypes = ctypes.c_int32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstNull(LLVMTypeRef Ty)
@@ -1915,11 +1915,11 @@ try: (LLVMConstPointerNull:=dll.LLVMConstPointerNull).restype, LLVMConstPointerN
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstInt(LLVMTypeRef IntTy, unsigned long long N, LLVMBool SignExtend)
-try: (LLVMConstInt:=dll.LLVMConstInt).restype, LLVMConstInt.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_ulonglong, LLVMBool]
+try: (LLVMConstInt:=dll.LLVMConstInt).restype, LLVMConstInt.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_uint64, LLVMBool]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstIntOfArbitraryPrecision(LLVMTypeRef IntTy, unsigned int NumWords, const uint64_t Words[])
-try: (LLVMConstIntOfArbitraryPrecision:=dll.LLVMConstIntOfArbitraryPrecision).restype, LLVMConstIntOfArbitraryPrecision.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_uint, (uint64_t * 0)]
+try: (LLVMConstIntOfArbitraryPrecision:=dll.LLVMConstIntOfArbitraryPrecision).restype, LLVMConstIntOfArbitraryPrecision.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_uint32, (uint64_t * 0)]
 except AttributeError: pass
 
 uint8_t = ctypes.c_ubyte
@@ -1928,7 +1928,7 @@ try: (LLVMConstIntOfString:=dll.LLVMConstIntOfString).restype, LLVMConstIntOfStr
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstIntOfStringAndSize(LLVMTypeRef IntTy, const char *Text, unsigned int SLen, uint8_t Radix)
-try: (LLVMConstIntOfStringAndSize:=dll.LLVMConstIntOfStringAndSize).restype, LLVMConstIntOfStringAndSize.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, uint8_t]
+try: (LLVMConstIntOfStringAndSize:=dll.LLVMConstIntOfStringAndSize).restype, LLVMConstIntOfStringAndSize.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, uint8_t]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstReal(LLVMTypeRef RealTy, double N)
@@ -1940,15 +1940,15 @@ try: (LLVMConstRealOfString:=dll.LLVMConstRealOfString).restype, LLVMConstRealOf
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstRealOfStringAndSize(LLVMTypeRef RealTy, const char *Text, unsigned int SLen)
-try: (LLVMConstRealOfStringAndSize:=dll.LLVMConstRealOfStringAndSize).restype, LLVMConstRealOfStringAndSize.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMConstRealOfStringAndSize:=dll.LLVMConstRealOfStringAndSize).restype, LLVMConstRealOfStringAndSize.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMConstIntGetZExtValue(LLVMValueRef ConstantVal)
-try: (LLVMConstIntGetZExtValue:=dll.LLVMConstIntGetZExtValue).restype, LLVMConstIntGetZExtValue.argtypes = ctypes.c_ulonglong, [LLVMValueRef]
+try: (LLVMConstIntGetZExtValue:=dll.LLVMConstIntGetZExtValue).restype, LLVMConstIntGetZExtValue.argtypes = ctypes.c_uint64, [LLVMValueRef]
 except AttributeError: pass
 
 # long long LLVMConstIntGetSExtValue(LLVMValueRef ConstantVal)
-try: (LLVMConstIntGetSExtValue:=dll.LLVMConstIntGetSExtValue).restype, LLVMConstIntGetSExtValue.argtypes = ctypes.c_longlong, [LLVMValueRef]
+try: (LLVMConstIntGetSExtValue:=dll.LLVMConstIntGetSExtValue).restype, LLVMConstIntGetSExtValue.argtypes = ctypes.c_int64, [LLVMValueRef]
 except AttributeError: pass
 
 # double LLVMConstRealGetDouble(LLVMValueRef ConstantVal, LLVMBool *losesInfo)
@@ -1956,7 +1956,7 @@ try: (LLVMConstRealGetDouble:=dll.LLVMConstRealGetDouble).restype, LLVMConstReal
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstStringInContext(LLVMContextRef C, const char *Str, unsigned int Length, LLVMBool DontNullTerminate)
-try: (LLVMConstStringInContext:=dll.LLVMConstStringInContext).restype, LLVMConstStringInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, LLVMBool]
+try: (LLVMConstStringInContext:=dll.LLVMConstStringInContext).restype, LLVMConstStringInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstStringInContext2(LLVMContextRef C, const char *Str, size_t Length, LLVMBool DontNullTerminate)
@@ -1964,7 +1964,7 @@ try: (LLVMConstStringInContext2:=dll.LLVMConstStringInContext2).restype, LLVMCon
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstString(const char *Str, unsigned int Length, LLVMBool DontNullTerminate)
-try: (LLVMConstString:=dll.LLVMConstString).restype, LLVMConstString.argtypes = LLVMValueRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint, LLVMBool]
+try: (LLVMConstString:=dll.LLVMConstString).restype, LLVMConstString.argtypes = LLVMValueRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMBool LLVMIsConstantString(LLVMValueRef c)
@@ -1976,15 +1976,15 @@ try: (LLVMGetAsString:=dll.LLVMGetAsString).restype, LLVMGetAsString.argtypes = 
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstStructInContext(LLVMContextRef C, LLVMValueRef *ConstantVals, unsigned int Count, LLVMBool Packed)
-try: (LLVMConstStructInContext:=dll.LLVMConstStructInContext).restype, LLVMConstStructInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, LLVMBool]
+try: (LLVMConstStructInContext:=dll.LLVMConstStructInContext).restype, LLVMConstStructInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstStruct(LLVMValueRef *ConstantVals, unsigned int Count, LLVMBool Packed)
-try: (LLVMConstStruct:=dll.LLVMConstStruct).restype, LLVMConstStruct.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint, LLVMBool]
+try: (LLVMConstStruct:=dll.LLVMConstStruct).restype, LLVMConstStruct.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstArray(LLVMTypeRef ElementTy, LLVMValueRef *ConstantVals, unsigned int Length)
-try: (LLVMConstArray:=dll.LLVMConstArray).restype, LLVMConstArray.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMConstArray:=dll.LLVMConstArray).restype, LLVMConstArray.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstArray2(LLVMTypeRef ElementTy, LLVMValueRef *ConstantVals, uint64_t Length)
@@ -1992,19 +1992,19 @@ try: (LLVMConstArray2:=dll.LLVMConstArray2).restype, LLVMConstArray2.argtypes = 
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstNamedStruct(LLVMTypeRef StructTy, LLVMValueRef *ConstantVals, unsigned int Count)
-try: (LLVMConstNamedStruct:=dll.LLVMConstNamedStruct).restype, LLVMConstNamedStruct.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMConstNamedStruct:=dll.LLVMConstNamedStruct).restype, LLVMConstNamedStruct.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetAggregateElement(LLVMValueRef C, unsigned int Idx)
-try: (LLVMGetAggregateElement:=dll.LLVMGetAggregateElement).restype, LLVMGetAggregateElement.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetAggregateElement:=dll.LLVMGetAggregateElement).restype, LLVMGetAggregateElement.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetElementAsConstant(LLVMValueRef C, unsigned int idx) __attribute__((deprecated("Use LLVMGetAggregateElement instead")))
-try: (LLVMGetElementAsConstant:=dll.LLVMGetElementAsConstant).restype, LLVMGetElementAsConstant.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetElementAsConstant:=dll.LLVMGetElementAsConstant).restype, LLVMGetElementAsConstant.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstVector(LLVMValueRef *ScalarConstantVals, unsigned int Size)
-try: (LLVMConstVector:=dll.LLVMConstVector).restype, LLVMConstVector.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMConstVector:=dll.LLVMConstVector).restype, LLVMConstVector.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstantPtrAuth(LLVMValueRef Ptr, LLVMValueRef Key, LLVMValueRef Disc, LLVMValueRef AddrDisc)
@@ -2080,15 +2080,15 @@ try: (LLVMConstXor:=dll.LLVMConstXor).restype, LLVMConstXor.argtypes = LLVMValue
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstGEP2(LLVMTypeRef Ty, LLVMValueRef ConstantVal, LLVMValueRef *ConstantIndices, unsigned int NumIndices)
-try: (LLVMConstGEP2:=dll.LLVMConstGEP2).restype, LLVMConstGEP2.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMConstGEP2:=dll.LLVMConstGEP2).restype, LLVMConstGEP2.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstInBoundsGEP2(LLVMTypeRef Ty, LLVMValueRef ConstantVal, LLVMValueRef *ConstantIndices, unsigned int NumIndices)
-try: (LLVMConstInBoundsGEP2:=dll.LLVMConstInBoundsGEP2).restype, LLVMConstInBoundsGEP2.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMConstInBoundsGEP2:=dll.LLVMConstInBoundsGEP2).restype, LLVMConstInBoundsGEP2.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstGEPWithNoWrapFlags(LLVMTypeRef Ty, LLVMValueRef ConstantVal, LLVMValueRef *ConstantIndices, unsigned int NumIndices, LLVMGEPNoWrapFlags NoWrapFlags)
-try: (LLVMConstGEPWithNoWrapFlags:=dll.LLVMConstGEPWithNoWrapFlags).restype, LLVMConstGEPWithNoWrapFlags.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, LLVMGEPNoWrapFlags]
+try: (LLVMConstGEPWithNoWrapFlags:=dll.LLVMConstGEPWithNoWrapFlags).restype, LLVMConstGEPWithNoWrapFlags.argtypes = LLVMValueRef, [LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMGEPNoWrapFlags]
 except AttributeError: pass
 
 # LLVMValueRef LLVMConstTrunc(LLVMValueRef ConstantVal, LLVMTypeRef ToType)
@@ -2210,19 +2210,19 @@ try: (LLVMSetUnnamedAddr:=dll.LLVMSetUnnamedAddr).restype, LLVMSetUnnamedAddr.ar
 except AttributeError: pass
 
 # unsigned int LLVMGetAlignment(LLVMValueRef V)
-try: (LLVMGetAlignment:=dll.LLVMGetAlignment).restype, LLVMGetAlignment.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetAlignment:=dll.LLVMGetAlignment).restype, LLVMGetAlignment.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMSetAlignment(LLVMValueRef V, unsigned int Bytes)
-try: (LLVMSetAlignment:=dll.LLVMSetAlignment).restype, LLVMSetAlignment.argtypes = None, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMSetAlignment:=dll.LLVMSetAlignment).restype, LLVMSetAlignment.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMGlobalSetMetadata(LLVMValueRef Global, unsigned int Kind, LLVMMetadataRef MD)
-try: (LLVMGlobalSetMetadata:=dll.LLVMGlobalSetMetadata).restype, LLVMGlobalSetMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint, LLVMMetadataRef]
+try: (LLVMGlobalSetMetadata:=dll.LLVMGlobalSetMetadata).restype, LLVMGlobalSetMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
 # void LLVMGlobalEraseMetadata(LLVMValueRef Global, unsigned int Kind)
-try: (LLVMGlobalEraseMetadata:=dll.LLVMGlobalEraseMetadata).restype, LLVMGlobalEraseMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGlobalEraseMetadata:=dll.LLVMGlobalEraseMetadata).restype, LLVMGlobalEraseMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMGlobalClearMetadata(LLVMValueRef Global)
@@ -2240,11 +2240,11 @@ try: (LLVMDisposeValueMetadataEntries:=dll.LLVMDisposeValueMetadataEntries).rest
 except AttributeError: pass
 
 # unsigned int LLVMValueMetadataEntriesGetKind(LLVMValueMetadataEntry *Entries, unsigned int Index)
-try: (LLVMValueMetadataEntriesGetKind:=dll.LLVMValueMetadataEntriesGetKind).restype, LLVMValueMetadataEntriesGetKind.argtypes = ctypes.c_uint, [ctypes.POINTER(LLVMValueMetadataEntry), ctypes.c_uint]
+try: (LLVMValueMetadataEntriesGetKind:=dll.LLVMValueMetadataEntriesGetKind).restype, LLVMValueMetadataEntriesGetKind.argtypes = ctypes.c_uint32, [ctypes.POINTER(LLVMValueMetadataEntry), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMValueMetadataEntriesGetMetadata(LLVMValueMetadataEntry *Entries, unsigned int Index)
-try: (LLVMValueMetadataEntriesGetMetadata:=dll.LLVMValueMetadataEntriesGetMetadata).restype, LLVMValueMetadataEntriesGetMetadata.argtypes = LLVMMetadataRef, [ctypes.POINTER(LLVMValueMetadataEntry), ctypes.c_uint]
+try: (LLVMValueMetadataEntriesGetMetadata:=dll.LLVMValueMetadataEntriesGetMetadata).restype, LLVMValueMetadataEntriesGetMetadata.argtypes = LLVMMetadataRef, [ctypes.POINTER(LLVMValueMetadataEntry), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMAddGlobal(LLVMModuleRef M, LLVMTypeRef Ty, const char *Name)
@@ -2252,7 +2252,7 @@ try: (LLVMAddGlobal:=dll.LLVMAddGlobal).restype, LLVMAddGlobal.argtypes = LLVMVa
 except AttributeError: pass
 
 # LLVMValueRef LLVMAddGlobalInAddressSpace(LLVMModuleRef M, LLVMTypeRef Ty, const char *Name, unsigned int AddressSpace)
-try: (LLVMAddGlobalInAddressSpace:=dll.LLVMAddGlobalInAddressSpace).restype, LLVMAddGlobalInAddressSpace.argtypes = LLVMValueRef, [LLVMModuleRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMAddGlobalInAddressSpace:=dll.LLVMAddGlobalInAddressSpace).restype, LLVMAddGlobalInAddressSpace.argtypes = LLVMValueRef, [LLVMModuleRef, LLVMTypeRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetNamedGlobal(LLVMModuleRef M, const char *Name)
@@ -2324,7 +2324,7 @@ try: (LLVMSetExternallyInitialized:=dll.LLVMSetExternallyInitialized).restype, L
 except AttributeError: pass
 
 # LLVMValueRef LLVMAddAlias2(LLVMModuleRef M, LLVMTypeRef ValueTy, unsigned int AddrSpace, LLVMValueRef Aliasee, const char *Name)
-try: (LLVMAddAlias2:=dll.LLVMAddAlias2).restype, LLVMAddAlias2.argtypes = LLVMValueRef, [LLVMModuleRef, LLVMTypeRef, ctypes.c_uint, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMAddAlias2:=dll.LLVMAddAlias2).restype, LLVMAddAlias2.argtypes = LLVMValueRef, [LLVMModuleRef, LLVMTypeRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetNamedGlobalAlias(LLVMModuleRef M, const char *Name, size_t NameLen)
@@ -2372,43 +2372,43 @@ try: (LLVMSetPersonalityFn:=dll.LLVMSetPersonalityFn).restype, LLVMSetPersonalit
 except AttributeError: pass
 
 # unsigned int LLVMLookupIntrinsicID(const char *Name, size_t NameLen)
-try: (LLVMLookupIntrinsicID:=dll.LLVMLookupIntrinsicID).restype, LLVMLookupIntrinsicID.argtypes = ctypes.c_uint, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMLookupIntrinsicID:=dll.LLVMLookupIntrinsicID).restype, LLVMLookupIntrinsicID.argtypes = ctypes.c_uint32, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # unsigned int LLVMGetIntrinsicID(LLVMValueRef Fn)
-try: (LLVMGetIntrinsicID:=dll.LLVMGetIntrinsicID).restype, LLVMGetIntrinsicID.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetIntrinsicID:=dll.LLVMGetIntrinsicID).restype, LLVMGetIntrinsicID.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetIntrinsicDeclaration(LLVMModuleRef Mod, unsigned int ID, LLVMTypeRef *ParamTypes, size_t ParamCount)
-try: (LLVMGetIntrinsicDeclaration:=dll.LLVMGetIntrinsicDeclaration).restype, LLVMGetIntrinsicDeclaration.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.c_uint, ctypes.POINTER(LLVMTypeRef), size_t]
+try: (LLVMGetIntrinsicDeclaration:=dll.LLVMGetIntrinsicDeclaration).restype, LLVMGetIntrinsicDeclaration.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntrinsicGetType(LLVMContextRef Ctx, unsigned int ID, LLVMTypeRef *ParamTypes, size_t ParamCount)
-try: (LLVMIntrinsicGetType:=dll.LLVMIntrinsicGetType).restype, LLVMIntrinsicGetType.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint, ctypes.POINTER(LLVMTypeRef), size_t]
+try: (LLVMIntrinsicGetType:=dll.LLVMIntrinsicGetType).restype, LLVMIntrinsicGetType.argtypes = LLVMTypeRef, [LLVMContextRef, ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t]
 except AttributeError: pass
 
 # const char *LLVMIntrinsicGetName(unsigned int ID, size_t *NameLength)
-try: (LLVMIntrinsicGetName:=dll.LLVMIntrinsicGetName).restype, LLVMIntrinsicGetName.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_uint, ctypes.POINTER(size_t)]
+try: (LLVMIntrinsicGetName:=dll.LLVMIntrinsicGetName).restype, LLVMIntrinsicGetName.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_uint32, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
 # char *LLVMIntrinsicCopyOverloadedName(unsigned int ID, LLVMTypeRef *ParamTypes, size_t ParamCount, size_t *NameLength)
-try: (LLVMIntrinsicCopyOverloadedName:=dll.LLVMIntrinsicCopyOverloadedName).restype, LLVMIntrinsicCopyOverloadedName.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_uint, ctypes.POINTER(LLVMTypeRef), size_t, ctypes.POINTER(size_t)]
+try: (LLVMIntrinsicCopyOverloadedName:=dll.LLVMIntrinsicCopyOverloadedName).restype, LLVMIntrinsicCopyOverloadedName.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
 # char *LLVMIntrinsicCopyOverloadedName2(LLVMModuleRef Mod, unsigned int ID, LLVMTypeRef *ParamTypes, size_t ParamCount, size_t *NameLength)
-try: (LLVMIntrinsicCopyOverloadedName2:=dll.LLVMIntrinsicCopyOverloadedName2).restype, LLVMIntrinsicCopyOverloadedName2.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef, ctypes.c_uint, ctypes.POINTER(LLVMTypeRef), size_t, ctypes.POINTER(size_t)]
+try: (LLVMIntrinsicCopyOverloadedName2:=dll.LLVMIntrinsicCopyOverloadedName2).restype, LLVMIntrinsicCopyOverloadedName2.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(LLVMTypeRef), size_t, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
 # LLVMBool LLVMIntrinsicIsOverloaded(unsigned int ID)
-try: (LLVMIntrinsicIsOverloaded:=dll.LLVMIntrinsicIsOverloaded).restype, LLVMIntrinsicIsOverloaded.argtypes = LLVMBool, [ctypes.c_uint]
+try: (LLVMIntrinsicIsOverloaded:=dll.LLVMIntrinsicIsOverloaded).restype, LLVMIntrinsicIsOverloaded.argtypes = LLVMBool, [ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetFunctionCallConv(LLVMValueRef Fn)
-try: (LLVMGetFunctionCallConv:=dll.LLVMGetFunctionCallConv).restype, LLVMGetFunctionCallConv.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetFunctionCallConv:=dll.LLVMGetFunctionCallConv).restype, LLVMGetFunctionCallConv.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMSetFunctionCallConv(LLVMValueRef Fn, unsigned int CC)
-try: (LLVMSetFunctionCallConv:=dll.LLVMSetFunctionCallConv).restype, LLVMSetFunctionCallConv.argtypes = None, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMSetFunctionCallConv:=dll.LLVMSetFunctionCallConv).restype, LLVMSetFunctionCallConv.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # const char *LLVMGetGC(LLVMValueRef Fn)
@@ -2448,7 +2448,7 @@ try: (LLVMAddAttributeAtIndex:=dll.LLVMAddAttributeAtIndex).restype, LLVMAddAttr
 except AttributeError: pass
 
 # unsigned int LLVMGetAttributeCountAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx)
-try: (LLVMGetAttributeCountAtIndex:=dll.LLVMGetAttributeCountAtIndex).restype, LLVMGetAttributeCountAtIndex.argtypes = ctypes.c_uint, [LLVMValueRef, LLVMAttributeIndex]
+try: (LLVMGetAttributeCountAtIndex:=dll.LLVMGetAttributeCountAtIndex).restype, LLVMGetAttributeCountAtIndex.argtypes = ctypes.c_uint32, [LLVMValueRef, LLVMAttributeIndex]
 except AttributeError: pass
 
 # void LLVMGetAttributesAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx, LLVMAttributeRef *Attrs)
@@ -2456,19 +2456,19 @@ try: (LLVMGetAttributesAtIndex:=dll.LLVMGetAttributesAtIndex).restype, LLVMGetAt
 except AttributeError: pass
 
 # LLVMAttributeRef LLVMGetEnumAttributeAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx, unsigned int KindID)
-try: (LLVMGetEnumAttributeAtIndex:=dll.LLVMGetEnumAttributeAtIndex).restype, LLVMGetEnumAttributeAtIndex.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint]
+try: (LLVMGetEnumAttributeAtIndex:=dll.LLVMGetEnumAttributeAtIndex).restype, LLVMGetEnumAttributeAtIndex.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMAttributeRef LLVMGetStringAttributeAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx, const char *K, unsigned int KLen)
-try: (LLVMGetStringAttributeAtIndex:=dll.LLVMGetStringAttributeAtIndex).restype, LLVMGetStringAttributeAtIndex.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMGetStringAttributeAtIndex:=dll.LLVMGetStringAttributeAtIndex).restype, LLVMGetStringAttributeAtIndex.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMRemoveEnumAttributeAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx, unsigned int KindID)
-try: (LLVMRemoveEnumAttributeAtIndex:=dll.LLVMRemoveEnumAttributeAtIndex).restype, LLVMRemoveEnumAttributeAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint]
+try: (LLVMRemoveEnumAttributeAtIndex:=dll.LLVMRemoveEnumAttributeAtIndex).restype, LLVMRemoveEnumAttributeAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMRemoveStringAttributeAtIndex(LLVMValueRef F, LLVMAttributeIndex Idx, const char *K, unsigned int KLen)
-try: (LLVMRemoveStringAttributeAtIndex:=dll.LLVMRemoveStringAttributeAtIndex).restype, LLVMRemoveStringAttributeAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMRemoveStringAttributeAtIndex:=dll.LLVMRemoveStringAttributeAtIndex).restype, LLVMRemoveStringAttributeAtIndex.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMAddTargetDependentFunctionAttr(LLVMValueRef Fn, const char *A, const char *V)
@@ -2476,7 +2476,7 @@ try: (LLVMAddTargetDependentFunctionAttr:=dll.LLVMAddTargetDependentFunctionAttr
 except AttributeError: pass
 
 # unsigned int LLVMCountParams(LLVMValueRef Fn)
-try: (LLVMCountParams:=dll.LLVMCountParams).restype, LLVMCountParams.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMCountParams:=dll.LLVMCountParams).restype, LLVMCountParams.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMGetParams(LLVMValueRef Fn, LLVMValueRef *Params)
@@ -2484,7 +2484,7 @@ try: (LLVMGetParams:=dll.LLVMGetParams).restype, LLVMGetParams.argtypes = None, 
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetParam(LLVMValueRef Fn, unsigned int Index)
-try: (LLVMGetParam:=dll.LLVMGetParam).restype, LLVMGetParam.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetParam:=dll.LLVMGetParam).restype, LLVMGetParam.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetParamParent(LLVMValueRef Inst)
@@ -2508,11 +2508,11 @@ try: (LLVMGetPreviousParam:=dll.LLVMGetPreviousParam).restype, LLVMGetPreviousPa
 except AttributeError: pass
 
 # void LLVMSetParamAlignment(LLVMValueRef Arg, unsigned int Align)
-try: (LLVMSetParamAlignment:=dll.LLVMSetParamAlignment).restype, LLVMSetParamAlignment.argtypes = None, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMSetParamAlignment:=dll.LLVMSetParamAlignment).restype, LLVMSetParamAlignment.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMAddGlobalIFunc(LLVMModuleRef M, const char *Name, size_t NameLen, LLVMTypeRef Ty, unsigned int AddrSpace, LLVMValueRef Resolver)
-try: (LLVMAddGlobalIFunc:=dll.LLVMAddGlobalIFunc).restype, LLVMAddGlobalIFunc.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMTypeRef, ctypes.c_uint, LLVMValueRef]
+try: (LLVMAddGlobalIFunc:=dll.LLVMAddGlobalIFunc).restype, LLVMAddGlobalIFunc.argtypes = LLVMValueRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMTypeRef, ctypes.c_uint32, LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetNamedGlobalIFunc(LLVMModuleRef M, const char *Name, size_t NameLen)
@@ -2568,11 +2568,11 @@ try: (LLVMValueAsMetadata:=dll.LLVMValueAsMetadata).restype, LLVMValueAsMetadata
 except AttributeError: pass
 
 # const char *LLVMGetMDString(LLVMValueRef V, unsigned int *Length)
-try: (LLVMGetMDString:=dll.LLVMGetMDString).restype, LLVMGetMDString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMGetMDString:=dll.LLVMGetMDString).restype, LLVMGetMDString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMValueRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # unsigned int LLVMGetMDNodeNumOperands(LLVMValueRef V)
-try: (LLVMGetMDNodeNumOperands:=dll.LLVMGetMDNodeNumOperands).restype, LLVMGetMDNodeNumOperands.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetMDNodeNumOperands:=dll.LLVMGetMDNodeNumOperands).restype, LLVMGetMDNodeNumOperands.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMGetMDNodeOperands(LLVMValueRef V, LLVMValueRef *Dest)
@@ -2580,29 +2580,29 @@ try: (LLVMGetMDNodeOperands:=dll.LLVMGetMDNodeOperands).restype, LLVMGetMDNodeOp
 except AttributeError: pass
 
 # void LLVMReplaceMDNodeOperandWith(LLVMValueRef V, unsigned int Index, LLVMMetadataRef Replacement)
-try: (LLVMReplaceMDNodeOperandWith:=dll.LLVMReplaceMDNodeOperandWith).restype, LLVMReplaceMDNodeOperandWith.argtypes = None, [LLVMValueRef, ctypes.c_uint, LLVMMetadataRef]
+try: (LLVMReplaceMDNodeOperandWith:=dll.LLVMReplaceMDNodeOperandWith).restype, LLVMReplaceMDNodeOperandWith.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMMDStringInContext(LLVMContextRef C, const char *Str, unsigned int SLen)
-try: (LLVMMDStringInContext:=dll.LLVMMDStringInContext).restype, LLVMMDStringInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMMDStringInContext:=dll.LLVMMDStringInContext).restype, LLVMMDStringInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMMDString(const char *Str, unsigned int SLen)
-try: (LLVMMDString:=dll.LLVMMDString).restype, LLVMMDString.argtypes = LLVMValueRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMMDString:=dll.LLVMMDString).restype, LLVMMDString.argtypes = LLVMValueRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMMDNodeInContext(LLVMContextRef C, LLVMValueRef *Vals, unsigned int Count)
-try: (LLVMMDNodeInContext:=dll.LLVMMDNodeInContext).restype, LLVMMDNodeInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMMDNodeInContext:=dll.LLVMMDNodeInContext).restype, LLVMMDNodeInContext.argtypes = LLVMValueRef, [LLVMContextRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMMDNode(LLVMValueRef *Vals, unsigned int Count)
-try: (LLVMMDNode:=dll.LLVMMDNode).restype, LLVMMDNode.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMMDNode:=dll.LLVMMDNode).restype, LLVMMDNode.argtypes = LLVMValueRef, [ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 class struct_LLVMOpaqueOperandBundle(Struct): pass
 LLVMOperandBundleRef = ctypes.POINTER(struct_LLVMOpaqueOperandBundle)
 # LLVMOperandBundleRef LLVMCreateOperandBundle(const char *Tag, size_t TagLen, LLVMValueRef *Args, unsigned int NumArgs)
-try: (LLVMCreateOperandBundle:=dll.LLVMCreateOperandBundle).restype, LLVMCreateOperandBundle.argtypes = LLVMOperandBundleRef, [ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMCreateOperandBundle:=dll.LLVMCreateOperandBundle).restype, LLVMCreateOperandBundle.argtypes = LLVMOperandBundleRef, [ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMDisposeOperandBundle(LLVMOperandBundleRef Bundle)
@@ -2614,11 +2614,11 @@ try: (LLVMGetOperandBundleTag:=dll.LLVMGetOperandBundleTag).restype, LLVMGetOper
 except AttributeError: pass
 
 # unsigned int LLVMGetNumOperandBundleArgs(LLVMOperandBundleRef Bundle)
-try: (LLVMGetNumOperandBundleArgs:=dll.LLVMGetNumOperandBundleArgs).restype, LLVMGetNumOperandBundleArgs.argtypes = ctypes.c_uint, [LLVMOperandBundleRef]
+try: (LLVMGetNumOperandBundleArgs:=dll.LLVMGetNumOperandBundleArgs).restype, LLVMGetNumOperandBundleArgs.argtypes = ctypes.c_uint32, [LLVMOperandBundleRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetOperandBundleArgAtIndex(LLVMOperandBundleRef Bundle, unsigned int Index)
-try: (LLVMGetOperandBundleArgAtIndex:=dll.LLVMGetOperandBundleArgAtIndex).restype, LLVMGetOperandBundleArgAtIndex.argtypes = LLVMValueRef, [LLVMOperandBundleRef, ctypes.c_uint]
+try: (LLVMGetOperandBundleArgAtIndex:=dll.LLVMGetOperandBundleArgAtIndex).restype, LLVMGetOperandBundleArgAtIndex.argtypes = LLVMValueRef, [LLVMOperandBundleRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBasicBlockAsValue(LLVMBasicBlockRef BB)
@@ -2646,7 +2646,7 @@ try: (LLVMGetBasicBlockTerminator:=dll.LLVMGetBasicBlockTerminator).restype, LLV
 except AttributeError: pass
 
 # unsigned int LLVMCountBasicBlocks(LLVMValueRef Fn)
-try: (LLVMCountBasicBlocks:=dll.LLVMCountBasicBlocks).restype, LLVMCountBasicBlocks.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMCountBasicBlocks:=dll.LLVMCountBasicBlocks).restype, LLVMCountBasicBlocks.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMGetBasicBlocks(LLVMValueRef Fn, LLVMBasicBlockRef *BasicBlocks)
@@ -2728,15 +2728,15 @@ try: (LLVMGetLastInstruction:=dll.LLVMGetLastInstruction).restype, LLVMGetLastIn
 except AttributeError: pass
 
 # int LLVMHasMetadata(LLVMValueRef Val)
-try: (LLVMHasMetadata:=dll.LLVMHasMetadata).restype, LLVMHasMetadata.argtypes = ctypes.c_int, [LLVMValueRef]
+try: (LLVMHasMetadata:=dll.LLVMHasMetadata).restype, LLVMHasMetadata.argtypes = ctypes.c_int32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetMetadata(LLVMValueRef Val, unsigned int KindID)
-try: (LLVMGetMetadata:=dll.LLVMGetMetadata).restype, LLVMGetMetadata.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetMetadata:=dll.LLVMGetMetadata).restype, LLVMGetMetadata.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMSetMetadata(LLVMValueRef Val, unsigned int KindID, LLVMValueRef Node)
-try: (LLVMSetMetadata:=dll.LLVMSetMetadata).restype, LLVMSetMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint, LLVMValueRef]
+try: (LLVMSetMetadata:=dll.LLVMSetMetadata).restype, LLVMSetMetadata.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueMetadataEntry *LLVMInstructionGetAllMetadataOtherThanDebugLoc(LLVMValueRef Instr, size_t *NumEntries)
@@ -2804,19 +2804,19 @@ try: (LLVMGetPreviousDbgRecord:=dll.LLVMGetPreviousDbgRecord).restype, LLVMGetPr
 except AttributeError: pass
 
 # unsigned int LLVMGetNumArgOperands(LLVMValueRef Instr)
-try: (LLVMGetNumArgOperands:=dll.LLVMGetNumArgOperands).restype, LLVMGetNumArgOperands.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetNumArgOperands:=dll.LLVMGetNumArgOperands).restype, LLVMGetNumArgOperands.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMSetInstructionCallConv(LLVMValueRef Instr, unsigned int CC)
-try: (LLVMSetInstructionCallConv:=dll.LLVMSetInstructionCallConv).restype, LLVMSetInstructionCallConv.argtypes = None, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMSetInstructionCallConv:=dll.LLVMSetInstructionCallConv).restype, LLVMSetInstructionCallConv.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetInstructionCallConv(LLVMValueRef Instr)
-try: (LLVMGetInstructionCallConv:=dll.LLVMGetInstructionCallConv).restype, LLVMGetInstructionCallConv.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetInstructionCallConv:=dll.LLVMGetInstructionCallConv).restype, LLVMGetInstructionCallConv.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMSetInstrParamAlignment(LLVMValueRef Instr, LLVMAttributeIndex Idx, unsigned int Align)
-try: (LLVMSetInstrParamAlignment:=dll.LLVMSetInstrParamAlignment).restype, LLVMSetInstrParamAlignment.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint]
+try: (LLVMSetInstrParamAlignment:=dll.LLVMSetInstrParamAlignment).restype, LLVMSetInstrParamAlignment.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMAddCallSiteAttribute(LLVMValueRef C, LLVMAttributeIndex Idx, LLVMAttributeRef A)
@@ -2824,7 +2824,7 @@ try: (LLVMAddCallSiteAttribute:=dll.LLVMAddCallSiteAttribute).restype, LLVMAddCa
 except AttributeError: pass
 
 # unsigned int LLVMGetCallSiteAttributeCount(LLVMValueRef C, LLVMAttributeIndex Idx)
-try: (LLVMGetCallSiteAttributeCount:=dll.LLVMGetCallSiteAttributeCount).restype, LLVMGetCallSiteAttributeCount.argtypes = ctypes.c_uint, [LLVMValueRef, LLVMAttributeIndex]
+try: (LLVMGetCallSiteAttributeCount:=dll.LLVMGetCallSiteAttributeCount).restype, LLVMGetCallSiteAttributeCount.argtypes = ctypes.c_uint32, [LLVMValueRef, LLVMAttributeIndex]
 except AttributeError: pass
 
 # void LLVMGetCallSiteAttributes(LLVMValueRef C, LLVMAttributeIndex Idx, LLVMAttributeRef *Attrs)
@@ -2832,19 +2832,19 @@ try: (LLVMGetCallSiteAttributes:=dll.LLVMGetCallSiteAttributes).restype, LLVMGet
 except AttributeError: pass
 
 # LLVMAttributeRef LLVMGetCallSiteEnumAttribute(LLVMValueRef C, LLVMAttributeIndex Idx, unsigned int KindID)
-try: (LLVMGetCallSiteEnumAttribute:=dll.LLVMGetCallSiteEnumAttribute).restype, LLVMGetCallSiteEnumAttribute.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint]
+try: (LLVMGetCallSiteEnumAttribute:=dll.LLVMGetCallSiteEnumAttribute).restype, LLVMGetCallSiteEnumAttribute.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMAttributeRef LLVMGetCallSiteStringAttribute(LLVMValueRef C, LLVMAttributeIndex Idx, const char *K, unsigned int KLen)
-try: (LLVMGetCallSiteStringAttribute:=dll.LLVMGetCallSiteStringAttribute).restype, LLVMGetCallSiteStringAttribute.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMGetCallSiteStringAttribute:=dll.LLVMGetCallSiteStringAttribute).restype, LLVMGetCallSiteStringAttribute.argtypes = LLVMAttributeRef, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMRemoveCallSiteEnumAttribute(LLVMValueRef C, LLVMAttributeIndex Idx, unsigned int KindID)
-try: (LLVMRemoveCallSiteEnumAttribute:=dll.LLVMRemoveCallSiteEnumAttribute).restype, LLVMRemoveCallSiteEnumAttribute.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint]
+try: (LLVMRemoveCallSiteEnumAttribute:=dll.LLVMRemoveCallSiteEnumAttribute).restype, LLVMRemoveCallSiteEnumAttribute.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMRemoveCallSiteStringAttribute(LLVMValueRef C, LLVMAttributeIndex Idx, const char *K, unsigned int KLen)
-try: (LLVMRemoveCallSiteStringAttribute:=dll.LLVMRemoveCallSiteStringAttribute).restype, LLVMRemoveCallSiteStringAttribute.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (LLVMRemoveCallSiteStringAttribute:=dll.LLVMRemoveCallSiteStringAttribute).restype, LLVMRemoveCallSiteStringAttribute.argtypes = None, [LLVMValueRef, LLVMAttributeIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMGetCalledFunctionType(LLVMValueRef C)
@@ -2856,11 +2856,11 @@ try: (LLVMGetCalledValue:=dll.LLVMGetCalledValue).restype, LLVMGetCalledValue.ar
 except AttributeError: pass
 
 # unsigned int LLVMGetNumOperandBundles(LLVMValueRef C)
-try: (LLVMGetNumOperandBundles:=dll.LLVMGetNumOperandBundles).restype, LLVMGetNumOperandBundles.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetNumOperandBundles:=dll.LLVMGetNumOperandBundles).restype, LLVMGetNumOperandBundles.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMOperandBundleRef LLVMGetOperandBundleAtIndex(LLVMValueRef C, unsigned int Index)
-try: (LLVMGetOperandBundleAtIndex:=dll.LLVMGetOperandBundleAtIndex).restype, LLVMGetOperandBundleAtIndex.argtypes = LLVMOperandBundleRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetOperandBundleAtIndex:=dll.LLVMGetOperandBundleAtIndex).restype, LLVMGetOperandBundleAtIndex.argtypes = LLVMOperandBundleRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMBool LLVMIsTailCall(LLVMValueRef CallInst)
@@ -2900,23 +2900,23 @@ try: (LLVMGetCallBrDefaultDest:=dll.LLVMGetCallBrDefaultDest).restype, LLVMGetCa
 except AttributeError: pass
 
 # unsigned int LLVMGetCallBrNumIndirectDests(LLVMValueRef CallBr)
-try: (LLVMGetCallBrNumIndirectDests:=dll.LLVMGetCallBrNumIndirectDests).restype, LLVMGetCallBrNumIndirectDests.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetCallBrNumIndirectDests:=dll.LLVMGetCallBrNumIndirectDests).restype, LLVMGetCallBrNumIndirectDests.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMBasicBlockRef LLVMGetCallBrIndirectDest(LLVMValueRef CallBr, unsigned int Idx)
-try: (LLVMGetCallBrIndirectDest:=dll.LLVMGetCallBrIndirectDest).restype, LLVMGetCallBrIndirectDest.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetCallBrIndirectDest:=dll.LLVMGetCallBrIndirectDest).restype, LLVMGetCallBrIndirectDest.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetNumSuccessors(LLVMValueRef Term)
-try: (LLVMGetNumSuccessors:=dll.LLVMGetNumSuccessors).restype, LLVMGetNumSuccessors.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetNumSuccessors:=dll.LLVMGetNumSuccessors).restype, LLVMGetNumSuccessors.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMBasicBlockRef LLVMGetSuccessor(LLVMValueRef Term, unsigned int i)
-try: (LLVMGetSuccessor:=dll.LLVMGetSuccessor).restype, LLVMGetSuccessor.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetSuccessor:=dll.LLVMGetSuccessor).restype, LLVMGetSuccessor.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMSetSuccessor(LLVMValueRef Term, unsigned int i, LLVMBasicBlockRef block)
-try: (LLVMSetSuccessor:=dll.LLVMSetSuccessor).restype, LLVMSetSuccessor.argtypes = None, [LLVMValueRef, ctypes.c_uint, LLVMBasicBlockRef]
+try: (LLVMSetSuccessor:=dll.LLVMSetSuccessor).restype, LLVMSetSuccessor.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMBasicBlockRef]
 except AttributeError: pass
 
 # LLVMBool LLVMIsConditional(LLVMValueRef Branch)
@@ -2960,27 +2960,27 @@ try: (LLVMGEPSetNoWrapFlags:=dll.LLVMGEPSetNoWrapFlags).restype, LLVMGEPSetNoWra
 except AttributeError: pass
 
 # void LLVMAddIncoming(LLVMValueRef PhiNode, LLVMValueRef *IncomingValues, LLVMBasicBlockRef *IncomingBlocks, unsigned int Count)
-try: (LLVMAddIncoming:=dll.LLVMAddIncoming).restype, LLVMAddIncoming.argtypes = None, [LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.POINTER(LLVMBasicBlockRef), ctypes.c_uint]
+try: (LLVMAddIncoming:=dll.LLVMAddIncoming).restype, LLVMAddIncoming.argtypes = None, [LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.POINTER(LLVMBasicBlockRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMCountIncoming(LLVMValueRef PhiNode)
-try: (LLVMCountIncoming:=dll.LLVMCountIncoming).restype, LLVMCountIncoming.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMCountIncoming:=dll.LLVMCountIncoming).restype, LLVMCountIncoming.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetIncomingValue(LLVMValueRef PhiNode, unsigned int Index)
-try: (LLVMGetIncomingValue:=dll.LLVMGetIncomingValue).restype, LLVMGetIncomingValue.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetIncomingValue:=dll.LLVMGetIncomingValue).restype, LLVMGetIncomingValue.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMBasicBlockRef LLVMGetIncomingBlock(LLVMValueRef PhiNode, unsigned int Index)
-try: (LLVMGetIncomingBlock:=dll.LLVMGetIncomingBlock).restype, LLVMGetIncomingBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetIncomingBlock:=dll.LLVMGetIncomingBlock).restype, LLVMGetIncomingBlock.argtypes = LLVMBasicBlockRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetNumIndices(LLVMValueRef Inst)
-try: (LLVMGetNumIndices:=dll.LLVMGetNumIndices).restype, LLVMGetNumIndices.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetNumIndices:=dll.LLVMGetNumIndices).restype, LLVMGetNumIndices.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # const unsigned int *LLVMGetIndices(LLVMValueRef Inst)
-try: (LLVMGetIndices:=dll.LLVMGetIndices).restype, LLVMGetIndices.argtypes = ctypes.POINTER(ctypes.c_uint), [LLVMValueRef]
+try: (LLVMGetIndices:=dll.LLVMGetIndices).restype, LLVMGetIndices.argtypes = ctypes.POINTER(ctypes.c_uint32), [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMBuilderRef LLVMCreateBuilderInContext(LLVMContextRef C)
@@ -3076,7 +3076,7 @@ try: (LLVMBuildRet:=dll.LLVMBuildRet).restype, LLVMBuildRet.argtypes = LLVMValue
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildAggregateRet(LLVMBuilderRef, LLVMValueRef *RetVals, unsigned int N)
-try: (LLVMBuildAggregateRet:=dll.LLVMBuildAggregateRet).restype, LLVMBuildAggregateRet.argtypes = LLVMValueRef, [LLVMBuilderRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint]
+try: (LLVMBuildAggregateRet:=dll.LLVMBuildAggregateRet).restype, LLVMBuildAggregateRet.argtypes = LLVMValueRef, [LLVMBuilderRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildBr(LLVMBuilderRef, LLVMBasicBlockRef Dest)
@@ -3088,23 +3088,23 @@ try: (LLVMBuildCondBr:=dll.LLVMBuildCondBr).restype, LLVMBuildCondBr.argtypes = 
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildSwitch(LLVMBuilderRef, LLVMValueRef V, LLVMBasicBlockRef Else, unsigned int NumCases)
-try: (LLVMBuildSwitch:=dll.LLVMBuildSwitch).restype, LLVMBuildSwitch.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.c_uint]
+try: (LLVMBuildSwitch:=dll.LLVMBuildSwitch).restype, LLVMBuildSwitch.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildIndirectBr(LLVMBuilderRef B, LLVMValueRef Addr, unsigned int NumDests)
-try: (LLVMBuildIndirectBr:=dll.LLVMBuildIndirectBr).restype, LLVMBuildIndirectBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint]
+try: (LLVMBuildIndirectBr:=dll.LLVMBuildIndirectBr).restype, LLVMBuildIndirectBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildCallBr(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Fn, LLVMBasicBlockRef DefaultDest, LLVMBasicBlockRef *IndirectDests, unsigned int NumIndirectDests, LLVMValueRef *Args, unsigned int NumArgs, LLVMOperandBundleRef *Bundles, unsigned int NumBundles, const char *Name)
-try: (LLVMBuildCallBr:=dll.LLVMBuildCallBr).restype, LLVMBuildCallBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.POINTER(LLVMBasicBlockRef), ctypes.c_uint, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildCallBr:=dll.LLVMBuildCallBr).restype, LLVMBuildCallBr.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.POINTER(LLVMBasicBlockRef), ctypes.c_uint32, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildInvoke2(LLVMBuilderRef, LLVMTypeRef Ty, LLVMValueRef Fn, LLVMValueRef *Args, unsigned int NumArgs, LLVMBasicBlockRef Then, LLVMBasicBlockRef Catch, const char *Name)
-try: (LLVMBuildInvoke2:=dll.LLVMBuildInvoke2).restype, LLVMBuildInvoke2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, LLVMBasicBlockRef, LLVMBasicBlockRef, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildInvoke2:=dll.LLVMBuildInvoke2).restype, LLVMBuildInvoke2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBasicBlockRef, LLVMBasicBlockRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildInvokeWithOperandBundles(LLVMBuilderRef, LLVMTypeRef Ty, LLVMValueRef Fn, LLVMValueRef *Args, unsigned int NumArgs, LLVMBasicBlockRef Then, LLVMBasicBlockRef Catch, LLVMOperandBundleRef *Bundles, unsigned int NumBundles, const char *Name)
-try: (LLVMBuildInvokeWithOperandBundles:=dll.LLVMBuildInvokeWithOperandBundles).restype, LLVMBuildInvokeWithOperandBundles.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, LLVMBasicBlockRef, LLVMBasicBlockRef, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildInvokeWithOperandBundles:=dll.LLVMBuildInvokeWithOperandBundles).restype, LLVMBuildInvokeWithOperandBundles.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, LLVMBasicBlockRef, LLVMBasicBlockRef, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildUnreachable(LLVMBuilderRef)
@@ -3116,7 +3116,7 @@ try: (LLVMBuildResume:=dll.LLVMBuildResume).restype, LLVMBuildResume.argtypes = 
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildLandingPad(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef PersFn, unsigned int NumClauses, const char *Name)
-try: (LLVMBuildLandingPad:=dll.LLVMBuildLandingPad).restype, LLVMBuildLandingPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildLandingPad:=dll.LLVMBuildLandingPad).restype, LLVMBuildLandingPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildCleanupRet(LLVMBuilderRef B, LLVMValueRef CatchPad, LLVMBasicBlockRef BB)
@@ -3128,15 +3128,15 @@ try: (LLVMBuildCatchRet:=dll.LLVMBuildCatchRet).restype, LLVMBuildCatchRet.argty
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildCatchPad(LLVMBuilderRef B, LLVMValueRef ParentPad, LLVMValueRef *Args, unsigned int NumArgs, const char *Name)
-try: (LLVMBuildCatchPad:=dll.LLVMBuildCatchPad).restype, LLVMBuildCatchPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildCatchPad:=dll.LLVMBuildCatchPad).restype, LLVMBuildCatchPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildCleanupPad(LLVMBuilderRef B, LLVMValueRef ParentPad, LLVMValueRef *Args, unsigned int NumArgs, const char *Name)
-try: (LLVMBuildCleanupPad:=dll.LLVMBuildCleanupPad).restype, LLVMBuildCleanupPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildCleanupPad:=dll.LLVMBuildCleanupPad).restype, LLVMBuildCleanupPad.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildCatchSwitch(LLVMBuilderRef B, LLVMValueRef ParentPad, LLVMBasicBlockRef UnwindBB, unsigned int NumHandlers, const char *Name)
-try: (LLVMBuildCatchSwitch:=dll.LLVMBuildCatchSwitch).restype, LLVMBuildCatchSwitch.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildCatchSwitch:=dll.LLVMBuildCatchSwitch).restype, LLVMBuildCatchSwitch.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMBasicBlockRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # void LLVMAddCase(LLVMValueRef Switch, LLVMValueRef OnVal, LLVMBasicBlockRef Dest)
@@ -3148,11 +3148,11 @@ try: (LLVMAddDestination:=dll.LLVMAddDestination).restype, LLVMAddDestination.ar
 except AttributeError: pass
 
 # unsigned int LLVMGetNumClauses(LLVMValueRef LandingPad)
-try: (LLVMGetNumClauses:=dll.LLVMGetNumClauses).restype, LLVMGetNumClauses.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetNumClauses:=dll.LLVMGetNumClauses).restype, LLVMGetNumClauses.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetClause(LLVMValueRef LandingPad, unsigned int Idx)
-try: (LLVMGetClause:=dll.LLVMGetClause).restype, LLVMGetClause.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetClause:=dll.LLVMGetClause).restype, LLVMGetClause.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMAddClause(LLVMValueRef LandingPad, LLVMValueRef ClauseVal)
@@ -3172,7 +3172,7 @@ try: (LLVMAddHandler:=dll.LLVMAddHandler).restype, LLVMAddHandler.argtypes = Non
 except AttributeError: pass
 
 # unsigned int LLVMGetNumHandlers(LLVMValueRef CatchSwitch)
-try: (LLVMGetNumHandlers:=dll.LLVMGetNumHandlers).restype, LLVMGetNumHandlers.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetNumHandlers:=dll.LLVMGetNumHandlers).restype, LLVMGetNumHandlers.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMGetHandlers(LLVMValueRef CatchSwitch, LLVMBasicBlockRef *Handlers)
@@ -3180,11 +3180,11 @@ try: (LLVMGetHandlers:=dll.LLVMGetHandlers).restype, LLVMGetHandlers.argtypes = 
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetArgOperand(LLVMValueRef Funclet, unsigned int i)
-try: (LLVMGetArgOperand:=dll.LLVMGetArgOperand).restype, LLVMGetArgOperand.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetArgOperand:=dll.LLVMGetArgOperand).restype, LLVMGetArgOperand.argtypes = LLVMValueRef, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMSetArgOperand(LLVMValueRef Funclet, unsigned int i, LLVMValueRef value)
-try: (LLVMSetArgOperand:=dll.LLVMSetArgOperand).restype, LLVMSetArgOperand.argtypes = None, [LLVMValueRef, ctypes.c_uint, LLVMValueRef]
+try: (LLVMSetArgOperand:=dll.LLVMSetArgOperand).restype, LLVMSetArgOperand.argtypes = None, [LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMGetParentCatchSwitch(LLVMValueRef CatchPad)
@@ -3384,15 +3384,15 @@ try: (LLVMBuildArrayMalloc:=dll.LLVMBuildArrayMalloc).restype, LLVMBuildArrayMal
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildMemSet(LLVMBuilderRef B, LLVMValueRef Ptr, LLVMValueRef Val, LLVMValueRef Len, unsigned int Align)
-try: (LLVMBuildMemSet:=dll.LLVMBuildMemSet).restype, LLVMBuildMemSet.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint]
+try: (LLVMBuildMemSet:=dll.LLVMBuildMemSet).restype, LLVMBuildMemSet.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildMemCpy(LLVMBuilderRef B, LLVMValueRef Dst, unsigned int DstAlign, LLVMValueRef Src, unsigned int SrcAlign, LLVMValueRef Size)
-try: (LLVMBuildMemCpy:=dll.LLVMBuildMemCpy).restype, LLVMBuildMemCpy.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef, ctypes.c_uint, LLVMValueRef]
+try: (LLVMBuildMemCpy:=dll.LLVMBuildMemCpy).restype, LLVMBuildMemCpy.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildMemMove(LLVMBuilderRef B, LLVMValueRef Dst, unsigned int DstAlign, LLVMValueRef Src, unsigned int SrcAlign, LLVMValueRef Size)
-try: (LLVMBuildMemMove:=dll.LLVMBuildMemMove).restype, LLVMBuildMemMove.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef, ctypes.c_uint, LLVMValueRef]
+try: (LLVMBuildMemMove:=dll.LLVMBuildMemMove).restype, LLVMBuildMemMove.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildAlloca(LLVMBuilderRef, LLVMTypeRef Ty, const char *Name)
@@ -3416,19 +3416,19 @@ try: (LLVMBuildStore:=dll.LLVMBuildStore).restype, LLVMBuildStore.argtypes = LLV
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildGEP2(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Pointer, LLVMValueRef *Indices, unsigned int NumIndices, const char *Name)
-try: (LLVMBuildGEP2:=dll.LLVMBuildGEP2).restype, LLVMBuildGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildGEP2:=dll.LLVMBuildGEP2).restype, LLVMBuildGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildInBoundsGEP2(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Pointer, LLVMValueRef *Indices, unsigned int NumIndices, const char *Name)
-try: (LLVMBuildInBoundsGEP2:=dll.LLVMBuildInBoundsGEP2).restype, LLVMBuildInBoundsGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildInBoundsGEP2:=dll.LLVMBuildInBoundsGEP2).restype, LLVMBuildInBoundsGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildGEPWithNoWrapFlags(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Pointer, LLVMValueRef *Indices, unsigned int NumIndices, const char *Name, LLVMGEPNoWrapFlags NoWrapFlags)
-try: (LLVMBuildGEPWithNoWrapFlags:=dll.LLVMBuildGEPWithNoWrapFlags).restype, LLVMBuildGEPWithNoWrapFlags.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char), LLVMGEPNoWrapFlags]
+try: (LLVMBuildGEPWithNoWrapFlags:=dll.LLVMBuildGEPWithNoWrapFlags).restype, LLVMBuildGEPWithNoWrapFlags.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), LLVMGEPNoWrapFlags]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildStructGEP2(LLVMBuilderRef B, LLVMTypeRef Ty, LLVMValueRef Pointer, unsigned int Idx, const char *Name)
-try: (LLVMBuildStructGEP2:=dll.LLVMBuildStructGEP2).restype, LLVMBuildStructGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildStructGEP2:=dll.LLVMBuildStructGEP2).restype, LLVMBuildStructGEP2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildGlobalString(LLVMBuilderRef B, const char *Str, const char *Name)
@@ -3572,11 +3572,11 @@ try: (LLVMBuildPhi:=dll.LLVMBuildPhi).restype, LLVMBuildPhi.argtypes = LLVMValue
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildCall2(LLVMBuilderRef, LLVMTypeRef, LLVMValueRef Fn, LLVMValueRef *Args, unsigned int NumArgs, const char *Name)
-try: (LLVMBuildCall2:=dll.LLVMBuildCall2).restype, LLVMBuildCall2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildCall2:=dll.LLVMBuildCall2).restype, LLVMBuildCall2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildCallWithOperandBundles(LLVMBuilderRef, LLVMTypeRef, LLVMValueRef Fn, LLVMValueRef *Args, unsigned int NumArgs, LLVMOperandBundleRef *Bundles, unsigned int NumBundles, const char *Name)
-try: (LLVMBuildCallWithOperandBundles:=dll.LLVMBuildCallWithOperandBundles).restype, LLVMBuildCallWithOperandBundles.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildCallWithOperandBundles:=dll.LLVMBuildCallWithOperandBundles).restype, LLVMBuildCallWithOperandBundles.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32, ctypes.POINTER(LLVMOperandBundleRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildSelect(LLVMBuilderRef, LLVMValueRef If, LLVMValueRef Then, LLVMValueRef Else, const char *Name)
@@ -3600,11 +3600,11 @@ try: (LLVMBuildShuffleVector:=dll.LLVMBuildShuffleVector).restype, LLVMBuildShuf
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildExtractValue(LLVMBuilderRef, LLVMValueRef AggVal, unsigned int Index, const char *Name)
-try: (LLVMBuildExtractValue:=dll.LLVMBuildExtractValue).restype, LLVMBuildExtractValue.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildExtractValue:=dll.LLVMBuildExtractValue).restype, LLVMBuildExtractValue.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildInsertValue(LLVMBuilderRef, LLVMValueRef AggVal, LLVMValueRef EltVal, unsigned int Index, const char *Name)
-try: (LLVMBuildInsertValue:=dll.LLVMBuildInsertValue).restype, LLVMBuildInsertValue.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildInsertValue:=dll.LLVMBuildInsertValue).restype, LLVMBuildInsertValue.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildFreeze(LLVMBuilderRef, LLVMValueRef Val, const char *Name)
@@ -3628,7 +3628,7 @@ try: (LLVMBuildFence:=dll.LLVMBuildFence).restype, LLVMBuildFence.argtypes = LLV
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildFenceSyncScope(LLVMBuilderRef B, LLVMAtomicOrdering ordering, unsigned int SSID, const char *Name)
-try: (LLVMBuildFenceSyncScope:=dll.LLVMBuildFenceSyncScope).restype, LLVMBuildFenceSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicOrdering, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (LLVMBuildFenceSyncScope:=dll.LLVMBuildFenceSyncScope).restype, LLVMBuildFenceSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicOrdering, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildAtomicRMW(LLVMBuilderRef B, LLVMAtomicRMWBinOp op, LLVMValueRef PTR, LLVMValueRef Val, LLVMAtomicOrdering ordering, LLVMBool singleThread)
@@ -3636,7 +3636,7 @@ try: (LLVMBuildAtomicRMW:=dll.LLVMBuildAtomicRMW).restype, LLVMBuildAtomicRMW.ar
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildAtomicRMWSyncScope(LLVMBuilderRef B, LLVMAtomicRMWBinOp op, LLVMValueRef PTR, LLVMValueRef Val, LLVMAtomicOrdering ordering, unsigned int SSID)
-try: (LLVMBuildAtomicRMWSyncScope:=dll.LLVMBuildAtomicRMWSyncScope).restype, LLVMBuildAtomicRMWSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicRMWBinOp, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, ctypes.c_uint]
+try: (LLVMBuildAtomicRMWSyncScope:=dll.LLVMBuildAtomicRMWSyncScope).restype, LLVMBuildAtomicRMWSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMAtomicRMWBinOp, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildAtomicCmpXchg(LLVMBuilderRef B, LLVMValueRef Ptr, LLVMValueRef Cmp, LLVMValueRef New, LLVMAtomicOrdering SuccessOrdering, LLVMAtomicOrdering FailureOrdering, LLVMBool SingleThread)
@@ -3644,19 +3644,19 @@ try: (LLVMBuildAtomicCmpXchg:=dll.LLVMBuildAtomicCmpXchg).restype, LLVMBuildAtom
 except AttributeError: pass
 
 # LLVMValueRef LLVMBuildAtomicCmpXchgSyncScope(LLVMBuilderRef B, LLVMValueRef Ptr, LLVMValueRef Cmp, LLVMValueRef New, LLVMAtomicOrdering SuccessOrdering, LLVMAtomicOrdering FailureOrdering, unsigned int SSID)
-try: (LLVMBuildAtomicCmpXchgSyncScope:=dll.LLVMBuildAtomicCmpXchgSyncScope).restype, LLVMBuildAtomicCmpXchgSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, LLVMAtomicOrdering, ctypes.c_uint]
+try: (LLVMBuildAtomicCmpXchgSyncScope:=dll.LLVMBuildAtomicCmpXchgSyncScope).restype, LLVMBuildAtomicCmpXchgSyncScope.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMAtomicOrdering, LLVMAtomicOrdering, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int LLVMGetNumMaskElements(LLVMValueRef ShuffleVectorInst)
-try: (LLVMGetNumMaskElements:=dll.LLVMGetNumMaskElements).restype, LLVMGetNumMaskElements.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetNumMaskElements:=dll.LLVMGetNumMaskElements).restype, LLVMGetNumMaskElements.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # int LLVMGetUndefMaskElem(void)
-try: (LLVMGetUndefMaskElem:=dll.LLVMGetUndefMaskElem).restype, LLVMGetUndefMaskElem.argtypes = ctypes.c_int, []
+try: (LLVMGetUndefMaskElem:=dll.LLVMGetUndefMaskElem).restype, LLVMGetUndefMaskElem.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
 # int LLVMGetMaskValue(LLVMValueRef ShuffleVectorInst, unsigned int Elt)
-try: (LLVMGetMaskValue:=dll.LLVMGetMaskValue).restype, LLVMGetMaskValue.argtypes = ctypes.c_int, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMGetMaskValue:=dll.LLVMGetMaskValue).restype, LLVMGetMaskValue.argtypes = ctypes.c_int32, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMBool LLVMIsAtomicSingleThread(LLVMValueRef AtomicInst)
@@ -3672,11 +3672,11 @@ try: (LLVMIsAtomic:=dll.LLVMIsAtomic).restype, LLVMIsAtomic.argtypes = LLVMBool,
 except AttributeError: pass
 
 # unsigned int LLVMGetAtomicSyncScopeID(LLVMValueRef AtomicInst)
-try: (LLVMGetAtomicSyncScopeID:=dll.LLVMGetAtomicSyncScopeID).restype, LLVMGetAtomicSyncScopeID.argtypes = ctypes.c_uint, [LLVMValueRef]
+try: (LLVMGetAtomicSyncScopeID:=dll.LLVMGetAtomicSyncScopeID).restype, LLVMGetAtomicSyncScopeID.argtypes = ctypes.c_uint32, [LLVMValueRef]
 except AttributeError: pass
 
 # void LLVMSetAtomicSyncScopeID(LLVMValueRef AtomicInst, unsigned int SSID)
-try: (LLVMSetAtomicSyncScopeID:=dll.LLVMSetAtomicSyncScopeID).restype, LLVMSetAtomicSyncScopeID.argtypes = None, [LLVMValueRef, ctypes.c_uint]
+try: (LLVMSetAtomicSyncScopeID:=dll.LLVMSetAtomicSyncScopeID).restype, LLVMSetAtomicSyncScopeID.argtypes = None, [LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMAtomicOrdering LLVMGetCmpXchgSuccessOrdering(LLVMValueRef CmpXchgInst)
@@ -3788,43 +3788,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # extern intmax_t imaxabs(intmax_t __n) __attribute__((nothrow)) __attribute__((const))
@@ -3836,46 +3836,46 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-LLVMDIFlags = CEnum(ctypes.c_uint)
+LLVMDIFlags = CEnum(ctypes.c_uint32)
 LLVMDIFlagZero = LLVMDIFlags.define('LLVMDIFlagZero', 0)
 LLVMDIFlagPrivate = LLVMDIFlags.define('LLVMDIFlagPrivate', 1)
 LLVMDIFlagProtected = LLVMDIFlags.define('LLVMDIFlagProtected', 2)
@@ -3912,7 +3912,7 @@ LLVMDIFlagIndirectVirtualBase = LLVMDIFlags.define('LLVMDIFlagIndirectVirtualBas
 LLVMDIFlagAccessibility = LLVMDIFlags.define('LLVMDIFlagAccessibility', 3)
 LLVMDIFlagPtrToMemberRep = LLVMDIFlags.define('LLVMDIFlagPtrToMemberRep', 196608)
 
-LLVMDWARFSourceLanguage = CEnum(ctypes.c_uint)
+LLVMDWARFSourceLanguage = CEnum(ctypes.c_uint32)
 LLVMDWARFSourceLanguageC89 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC89', 0)
 LLVMDWARFSourceLanguageC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC', 1)
 LLVMDWARFSourceLanguageAda83 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda83', 2)
@@ -3977,12 +3977,12 @@ LLVMDWARFSourceLanguageMips_Assembler = LLVMDWARFSourceLanguage.define('LLVMDWAR
 LLVMDWARFSourceLanguageGOOGLE_RenderScript = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGOOGLE_RenderScript', 61)
 LLVMDWARFSourceLanguageBORLAND_Delphi = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageBORLAND_Delphi', 62)
 
-LLVMDWARFEmissionKind = CEnum(ctypes.c_uint)
+LLVMDWARFEmissionKind = CEnum(ctypes.c_uint32)
 LLVMDWARFEmissionNone = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionNone', 0)
 LLVMDWARFEmissionFull = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionFull', 1)
 LLVMDWARFEmissionLineTablesOnly = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionLineTablesOnly', 2)
 
-_anonenum3 = CEnum(ctypes.c_uint)
+_anonenum3 = CEnum(ctypes.c_uint32)
 LLVMMDStringMetadataKind = _anonenum3.define('LLVMMDStringMetadataKind', 0)
 LLVMConstantAsMetadataMetadataKind = _anonenum3.define('LLVMConstantAsMetadataMetadataKind', 1)
 LLVMLocalAsMetadataMetadataKind = _anonenum3.define('LLVMLocalAsMetadataMetadataKind', 2)
@@ -4020,9 +4020,9 @@ LLVMDIGenericSubrangeMetadataKind = _anonenum3.define('LLVMDIGenericSubrangeMeta
 LLVMDIArgListMetadataKind = _anonenum3.define('LLVMDIArgListMetadataKind', 34)
 LLVMDIAssignIDMetadataKind = _anonenum3.define('LLVMDIAssignIDMetadataKind', 35)
 
-LLVMMetadataKind = ctypes.c_uint
-LLVMDWARFTypeEncoding = ctypes.c_uint
-LLVMDWARFMacinfoRecordType = CEnum(ctypes.c_uint)
+LLVMMetadataKind = ctypes.c_uint32
+LLVMDWARFTypeEncoding = ctypes.c_uint32
+LLVMDWARFMacinfoRecordType = CEnum(ctypes.c_uint32)
 LLVMDWARFMacinfoRecordTypeDefine = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeDefine', 1)
 LLVMDWARFMacinfoRecordTypeMacro = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeMacro', 2)
 LLVMDWARFMacinfoRecordTypeStartFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeStartFile', 3)
@@ -4030,11 +4030,11 @@ LLVMDWARFMacinfoRecordTypeEndFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARF
 LLVMDWARFMacinfoRecordTypeVendorExt = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeVendorExt', 255)
 
 # unsigned int LLVMDebugMetadataVersion(void)
-try: (LLVMDebugMetadataVersion:=dll.LLVMDebugMetadataVersion).restype, LLVMDebugMetadataVersion.argtypes = ctypes.c_uint, []
+try: (LLVMDebugMetadataVersion:=dll.LLVMDebugMetadataVersion).restype, LLVMDebugMetadataVersion.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
 # unsigned int LLVMGetModuleDebugMetadataVersion(LLVMModuleRef Module)
-try: (LLVMGetModuleDebugMetadataVersion:=dll.LLVMGetModuleDebugMetadataVersion).restype, LLVMGetModuleDebugMetadataVersion.argtypes = ctypes.c_uint, [LLVMModuleRef]
+try: (LLVMGetModuleDebugMetadataVersion:=dll.LLVMGetModuleDebugMetadataVersion).restype, LLVMGetModuleDebugMetadataVersion.argtypes = ctypes.c_uint32, [LLVMModuleRef]
 except AttributeError: pass
 
 # LLVMBool LLVMStripModuleDebugInfo(LLVMModuleRef Module)
@@ -4064,7 +4064,7 @@ try: (LLVMDIBuilderFinalizeSubprogram:=dll.LLVMDIBuilderFinalizeSubprogram).rest
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateCompileUnit(LLVMDIBuilderRef Builder, LLVMDWARFSourceLanguage Lang, LLVMMetadataRef FileRef, const char *Producer, size_t ProducerLen, LLVMBool isOptimized, const char *Flags, size_t FlagsLen, unsigned int RuntimeVer, const char *SplitName, size_t SplitNameLen, LLVMDWARFEmissionKind Kind, unsigned int DWOId, LLVMBool SplitDebugInlining, LLVMBool DebugInfoForProfiling, const char *SysRoot, size_t SysRootLen, const char *SDK, size_t SDKLen)
-try: (LLVMDIBuilderCreateCompileUnit:=dll.LLVMDIBuilderCreateCompileUnit).restype, LLVMDIBuilderCreateCompileUnit.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMDWARFSourceLanguage, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMBool, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), size_t, LLVMDWARFEmissionKind, ctypes.c_uint, LLVMBool, LLVMBool, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreateCompileUnit:=dll.LLVMDIBuilderCreateCompileUnit).restype, LLVMDIBuilderCreateCompileUnit.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMDWARFSourceLanguage, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMBool, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, LLVMDWARFEmissionKind, ctypes.c_uint32, LLVMBool, LLVMBool, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateFile(LLVMDIBuilderRef Builder, const char *Filename, size_t FilenameLen, const char *Directory, size_t DirectoryLen)
@@ -4080,43 +4080,43 @@ try: (LLVMDIBuilderCreateNameSpace:=dll.LLVMDIBuilderCreateNameSpace).restype, L
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateFunction(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, const char *LinkageName, size_t LinkageNameLen, LLVMMetadataRef File, unsigned int LineNo, LLVMMetadataRef Ty, LLVMBool IsLocalToUnit, LLVMBool IsDefinition, unsigned int ScopeLine, LLVMDIFlags Flags, LLVMBool IsOptimized)
-try: (LLVMDIBuilderCreateFunction:=dll.LLVMDIBuilderCreateFunction).restype, LLVMDIBuilderCreateFunction.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef, LLVMBool, LLVMBool, ctypes.c_uint, LLVMDIFlags, LLVMBool]
+try: (LLVMDIBuilderCreateFunction:=dll.LLVMDIBuilderCreateFunction).restype, LLVMDIBuilderCreateFunction.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMBool, ctypes.c_uint32, LLVMDIFlags, LLVMBool]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateLexicalBlock(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, LLVMMetadataRef File, unsigned int Line, unsigned int Column)
-try: (LLVMDIBuilderCreateLexicalBlock:=dll.LLVMDIBuilderCreateLexicalBlock).restype, LLVMDIBuilderCreateLexicalBlock.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint, ctypes.c_uint]
+try: (LLVMDIBuilderCreateLexicalBlock:=dll.LLVMDIBuilderCreateLexicalBlock).restype, LLVMDIBuilderCreateLexicalBlock.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateLexicalBlockFile(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, LLVMMetadataRef File, unsigned int Discriminator)
-try: (LLVMDIBuilderCreateLexicalBlockFile:=dll.LLVMDIBuilderCreateLexicalBlockFile).restype, LLVMDIBuilderCreateLexicalBlockFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint]
+try: (LLVMDIBuilderCreateLexicalBlockFile:=dll.LLVMDIBuilderCreateLexicalBlockFile).restype, LLVMDIBuilderCreateLexicalBlockFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateImportedModuleFromNamespace(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, LLVMMetadataRef NS, LLVMMetadataRef File, unsigned int Line)
-try: (LLVMDIBuilderCreateImportedModuleFromNamespace:=dll.LLVMDIBuilderCreateImportedModuleFromNamespace).restype, LLVMDIBuilderCreateImportedModuleFromNamespace.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint]
+try: (LLVMDIBuilderCreateImportedModuleFromNamespace:=dll.LLVMDIBuilderCreateImportedModuleFromNamespace).restype, LLVMDIBuilderCreateImportedModuleFromNamespace.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateImportedModuleFromAlias(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, LLVMMetadataRef ImportedEntity, LLVMMetadataRef File, unsigned int Line, LLVMMetadataRef *Elements, unsigned int NumElements)
-try: (LLVMDIBuilderCreateImportedModuleFromAlias:=dll.LLVMDIBuilderCreateImportedModuleFromAlias).restype, LLVMDIBuilderCreateImportedModuleFromAlias.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint]
+try: (LLVMDIBuilderCreateImportedModuleFromAlias:=dll.LLVMDIBuilderCreateImportedModuleFromAlias).restype, LLVMDIBuilderCreateImportedModuleFromAlias.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateImportedModuleFromModule(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, LLVMMetadataRef M, LLVMMetadataRef File, unsigned int Line, LLVMMetadataRef *Elements, unsigned int NumElements)
-try: (LLVMDIBuilderCreateImportedModuleFromModule:=dll.LLVMDIBuilderCreateImportedModuleFromModule).restype, LLVMDIBuilderCreateImportedModuleFromModule.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint]
+try: (LLVMDIBuilderCreateImportedModuleFromModule:=dll.LLVMDIBuilderCreateImportedModuleFromModule).restype, LLVMDIBuilderCreateImportedModuleFromModule.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateImportedDeclaration(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, LLVMMetadataRef Decl, LLVMMetadataRef File, unsigned int Line, const char *Name, size_t NameLen, LLVMMetadataRef *Elements, unsigned int NumElements)
-try: (LLVMDIBuilderCreateImportedDeclaration:=dll.LLVMDIBuilderCreateImportedDeclaration).restype, LLVMDIBuilderCreateImportedDeclaration.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint]
+try: (LLVMDIBuilderCreateImportedDeclaration:=dll.LLVMDIBuilderCreateImportedDeclaration).restype, LLVMDIBuilderCreateImportedDeclaration.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateDebugLocation(LLVMContextRef Ctx, unsigned int Line, unsigned int Column, LLVMMetadataRef Scope, LLVMMetadataRef InlinedAt)
-try: (LLVMDIBuilderCreateDebugLocation:=dll.LLVMDIBuilderCreateDebugLocation).restype, LLVMDIBuilderCreateDebugLocation.argtypes = LLVMMetadataRef, [LLVMContextRef, ctypes.c_uint, ctypes.c_uint, LLVMMetadataRef, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateDebugLocation:=dll.LLVMDIBuilderCreateDebugLocation).restype, LLVMDIBuilderCreateDebugLocation.argtypes = LLVMMetadataRef, [LLVMContextRef, ctypes.c_uint32, ctypes.c_uint32, LLVMMetadataRef, LLVMMetadataRef]
 except AttributeError: pass
 
 # unsigned int LLVMDILocationGetLine(LLVMMetadataRef Location)
-try: (LLVMDILocationGetLine:=dll.LLVMDILocationGetLine).restype, LLVMDILocationGetLine.argtypes = ctypes.c_uint, [LLVMMetadataRef]
+try: (LLVMDILocationGetLine:=dll.LLVMDILocationGetLine).restype, LLVMDILocationGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
 except AttributeError: pass
 
 # unsigned int LLVMDILocationGetColumn(LLVMMetadataRef Location)
-try: (LLVMDILocationGetColumn:=dll.LLVMDILocationGetColumn).restype, LLVMDILocationGetColumn.argtypes = ctypes.c_uint, [LLVMMetadataRef]
+try: (LLVMDILocationGetColumn:=dll.LLVMDILocationGetColumn).restype, LLVMDILocationGetColumn.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDILocationGetScope(LLVMMetadataRef Location)
@@ -4132,15 +4132,15 @@ try: (LLVMDIScopeGetFile:=dll.LLVMDIScopeGetFile).restype, LLVMDIScopeGetFile.ar
 except AttributeError: pass
 
 # const char *LLVMDIFileGetDirectory(LLVMMetadataRef File, unsigned int *Len)
-try: (LLVMDIFileGetDirectory:=dll.LLVMDIFileGetDirectory).restype, LLVMDIFileGetDirectory.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMDIFileGetDirectory:=dll.LLVMDIFileGetDirectory).restype, LLVMDIFileGetDirectory.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # const char *LLVMDIFileGetFilename(LLVMMetadataRef File, unsigned int *Len)
-try: (LLVMDIFileGetFilename:=dll.LLVMDIFileGetFilename).restype, LLVMDIFileGetFilename.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMDIFileGetFilename:=dll.LLVMDIFileGetFilename).restype, LLVMDIFileGetFilename.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # const char *LLVMDIFileGetSource(LLVMMetadataRef File, unsigned int *Len)
-try: (LLVMDIFileGetSource:=dll.LLVMDIFileGetSource).restype, LLVMDIFileGetSource.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint)]
+try: (LLVMDIFileGetSource:=dll.LLVMDIFileGetSource).restype, LLVMDIFileGetSource.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMMetadataRef, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderGetOrCreateTypeArray(LLVMDIBuilderRef Builder, LLVMMetadataRef *Data, size_t NumElements)
@@ -4148,37 +4148,37 @@ try: (LLVMDIBuilderGetOrCreateTypeArray:=dll.LLVMDIBuilderGetOrCreateTypeArray).
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateSubroutineType(LLVMDIBuilderRef Builder, LLVMMetadataRef File, LLVMMetadataRef *ParameterTypes, unsigned int NumParameterTypes, LLVMDIFlags Flags)
-try: (LLVMDIBuilderCreateSubroutineType:=dll.LLVMDIBuilderCreateSubroutineType).restype, LLVMDIBuilderCreateSubroutineType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint, LLVMDIFlags]
+try: (LLVMDIBuilderCreateSubroutineType:=dll.LLVMDIBuilderCreateSubroutineType).restype, LLVMDIBuilderCreateSubroutineType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, LLVMDIFlags]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateMacro(LLVMDIBuilderRef Builder, LLVMMetadataRef ParentMacroFile, unsigned int Line, LLVMDWARFMacinfoRecordType RecordType, const char *Name, size_t NameLen, const char *Value, size_t ValueLen)
-try: (LLVMDIBuilderCreateMacro:=dll.LLVMDIBuilderCreateMacro).restype, LLVMDIBuilderCreateMacro.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.c_uint, LLVMDWARFMacinfoRecordType, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreateMacro:=dll.LLVMDIBuilderCreateMacro).restype, LLVMDIBuilderCreateMacro.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.c_uint32, LLVMDWARFMacinfoRecordType, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateTempMacroFile(LLVMDIBuilderRef Builder, LLVMMetadataRef ParentMacroFile, unsigned int Line, LLVMMetadataRef File)
-try: (LLVMDIBuilderCreateTempMacroFile:=dll.LLVMDIBuilderCreateTempMacroFile).restype, LLVMDIBuilderCreateTempMacroFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateTempMacroFile:=dll.LLVMDIBuilderCreateTempMacroFile).restype, LLVMDIBuilderCreateTempMacroFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
-int64_t = ctypes.c_long
+int64_t = ctypes.c_int64
 # LLVMMetadataRef LLVMDIBuilderCreateEnumerator(LLVMDIBuilderRef Builder, const char *Name, size_t NameLen, int64_t Value, LLVMBool IsUnsigned)
 try: (LLVMDIBuilderCreateEnumerator:=dll.LLVMDIBuilderCreateEnumerator).restype, LLVMDIBuilderCreateEnumerator.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, int64_t, LLVMBool]
 except AttributeError: pass
 
-uint32_t = ctypes.c_uint
+uint32_t = ctypes.c_uint32
 # LLVMMetadataRef LLVMDIBuilderCreateEnumerationType(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNumber, uint64_t SizeInBits, uint32_t AlignInBits, LLVMMetadataRef *Elements, unsigned int NumElements, LLVMMetadataRef ClassTy)
-try: (LLVMDIBuilderCreateEnumerationType:=dll.LLVMDIBuilderCreateEnumerationType).restype, LLVMDIBuilderCreateEnumerationType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, uint64_t, uint32_t, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateEnumerationType:=dll.LLVMDIBuilderCreateEnumerationType).restype, LLVMDIBuilderCreateEnumerationType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateUnionType(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNumber, uint64_t SizeInBits, uint32_t AlignInBits, LLVMDIFlags Flags, LLVMMetadataRef *Elements, unsigned int NumElements, unsigned int RunTimeLang, const char *UniqueId, size_t UniqueIdLen)
-try: (LLVMDIBuilderCreateUnionType:=dll.LLVMDIBuilderCreateUnionType).restype, LLVMDIBuilderCreateUnionType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, uint64_t, uint32_t, LLVMDIFlags, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreateUnionType:=dll.LLVMDIBuilderCreateUnionType).restype, LLVMDIBuilderCreateUnionType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, LLVMDIFlags, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateArrayType(LLVMDIBuilderRef Builder, uint64_t Size, uint32_t AlignInBits, LLVMMetadataRef Ty, LLVMMetadataRef *Subscripts, unsigned int NumSubscripts)
-try: (LLVMDIBuilderCreateArrayType:=dll.LLVMDIBuilderCreateArrayType).restype, LLVMDIBuilderCreateArrayType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, uint64_t, uint32_t, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint]
+try: (LLVMDIBuilderCreateArrayType:=dll.LLVMDIBuilderCreateArrayType).restype, LLVMDIBuilderCreateArrayType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, uint64_t, uint32_t, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateVectorType(LLVMDIBuilderRef Builder, uint64_t Size, uint32_t AlignInBits, LLVMMetadataRef Ty, LLVMMetadataRef *Subscripts, unsigned int NumSubscripts)
-try: (LLVMDIBuilderCreateVectorType:=dll.LLVMDIBuilderCreateVectorType).restype, LLVMDIBuilderCreateVectorType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, uint64_t, uint32_t, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint]
+try: (LLVMDIBuilderCreateVectorType:=dll.LLVMDIBuilderCreateVectorType).restype, LLVMDIBuilderCreateVectorType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, uint64_t, uint32_t, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateUnspecifiedType(LLVMDIBuilderRef Builder, const char *Name, size_t NameLen)
@@ -4190,19 +4190,19 @@ try: (LLVMDIBuilderCreateBasicType:=dll.LLVMDIBuilderCreateBasicType).restype, L
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreatePointerType(LLVMDIBuilderRef Builder, LLVMMetadataRef PointeeTy, uint64_t SizeInBits, uint32_t AlignInBits, unsigned int AddressSpace, const char *Name, size_t NameLen)
-try: (LLVMDIBuilderCreatePointerType:=dll.LLVMDIBuilderCreatePointerType).restype, LLVMDIBuilderCreatePointerType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, uint64_t, uint32_t, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreatePointerType:=dll.LLVMDIBuilderCreatePointerType).restype, LLVMDIBuilderCreatePointerType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, uint64_t, uint32_t, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateStructType(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNumber, uint64_t SizeInBits, uint32_t AlignInBits, LLVMDIFlags Flags, LLVMMetadataRef DerivedFrom, LLVMMetadataRef *Elements, unsigned int NumElements, unsigned int RunTimeLang, LLVMMetadataRef VTableHolder, const char *UniqueId, size_t UniqueIdLen)
-try: (LLVMDIBuilderCreateStructType:=dll.LLVMDIBuilderCreateStructType).restype, LLVMDIBuilderCreateStructType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, uint64_t, uint32_t, LLVMDIFlags, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint, ctypes.c_uint, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreateStructType:=dll.LLVMDIBuilderCreateStructType).restype, LLVMDIBuilderCreateStructType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, LLVMDIFlags, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, ctypes.c_uint32, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateMemberType(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNo, uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits, LLVMDIFlags Flags, LLVMMetadataRef Ty)
-try: (LLVMDIBuilderCreateMemberType:=dll.LLVMDIBuilderCreateMemberType).restype, LLVMDIBuilderCreateMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateMemberType:=dll.LLVMDIBuilderCreateMemberType).restype, LLVMDIBuilderCreateMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateStaticMemberType(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNumber, LLVMMetadataRef Type, LLVMDIFlags Flags, LLVMValueRef ConstantVal, uint32_t AlignInBits)
-try: (LLVMDIBuilderCreateStaticMemberType:=dll.LLVMDIBuilderCreateStaticMemberType).restype, LLVMDIBuilderCreateStaticMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef, LLVMDIFlags, LLVMValueRef, uint32_t]
+try: (LLVMDIBuilderCreateStaticMemberType:=dll.LLVMDIBuilderCreateStaticMemberType).restype, LLVMDIBuilderCreateStaticMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMDIFlags, LLVMValueRef, uint32_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateMemberPointerType(LLVMDIBuilderRef Builder, LLVMMetadataRef PointeeType, LLVMMetadataRef ClassType, uint64_t SizeInBits, uint32_t AlignInBits, LLVMDIFlags Flags)
@@ -4210,11 +4210,11 @@ try: (LLVMDIBuilderCreateMemberPointerType:=dll.LLVMDIBuilderCreateMemberPointer
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateObjCIVar(LLVMDIBuilderRef Builder, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNo, uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits, LLVMDIFlags Flags, LLVMMetadataRef Ty, LLVMMetadataRef PropertyNode)
-try: (LLVMDIBuilderCreateObjCIVar:=dll.LLVMDIBuilderCreateObjCIVar).restype, LLVMDIBuilderCreateObjCIVar.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateObjCIVar:=dll.LLVMDIBuilderCreateObjCIVar).restype, LLVMDIBuilderCreateObjCIVar.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateObjCProperty(LLVMDIBuilderRef Builder, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNo, const char *GetterName, size_t GetterNameLen, const char *SetterName, size_t SetterNameLen, unsigned int PropertyAttributes, LLVMMetadataRef Ty)
-try: (LLVMDIBuilderCreateObjCProperty:=dll.LLVMDIBuilderCreateObjCProperty).restype, LLVMDIBuilderCreateObjCProperty.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateObjCProperty:=dll.LLVMDIBuilderCreateObjCProperty).restype, LLVMDIBuilderCreateObjCProperty.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateObjectPointerType(LLVMDIBuilderRef Builder, LLVMMetadataRef Type, LLVMBool Implicit)
@@ -4222,11 +4222,11 @@ try: (LLVMDIBuilderCreateObjectPointerType:=dll.LLVMDIBuilderCreateObjectPointer
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateQualifiedType(LLVMDIBuilderRef Builder, unsigned int Tag, LLVMMetadataRef Type)
-try: (LLVMDIBuilderCreateQualifiedType:=dll.LLVMDIBuilderCreateQualifiedType).restype, LLVMDIBuilderCreateQualifiedType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateQualifiedType:=dll.LLVMDIBuilderCreateQualifiedType).restype, LLVMDIBuilderCreateQualifiedType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateReferenceType(LLVMDIBuilderRef Builder, unsigned int Tag, LLVMMetadataRef Type)
-try: (LLVMDIBuilderCreateReferenceType:=dll.LLVMDIBuilderCreateReferenceType).restype, LLVMDIBuilderCreateReferenceType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateReferenceType:=dll.LLVMDIBuilderCreateReferenceType).restype, LLVMDIBuilderCreateReferenceType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateNullPtrType(LLVMDIBuilderRef Builder)
@@ -4234,7 +4234,7 @@ try: (LLVMDIBuilderCreateNullPtrType:=dll.LLVMDIBuilderCreateNullPtrType).restyp
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateTypedef(LLVMDIBuilderRef Builder, LLVMMetadataRef Type, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNo, LLVMMetadataRef Scope, uint32_t AlignInBits)
-try: (LLVMDIBuilderCreateTypedef:=dll.LLVMDIBuilderCreateTypedef).restype, LLVMDIBuilderCreateTypedef.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef, uint32_t]
+try: (LLVMDIBuilderCreateTypedef:=dll.LLVMDIBuilderCreateTypedef).restype, LLVMDIBuilderCreateTypedef.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, uint32_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateInheritance(LLVMDIBuilderRef Builder, LLVMMetadataRef Ty, LLVMMetadataRef BaseTy, uint64_t BaseOffset, uint32_t VBPtrOffset, LLVMDIFlags Flags)
@@ -4242,19 +4242,19 @@ try: (LLVMDIBuilderCreateInheritance:=dll.LLVMDIBuilderCreateInheritance).restyp
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateForwardDecl(LLVMDIBuilderRef Builder, unsigned int Tag, const char *Name, size_t NameLen, LLVMMetadataRef Scope, LLVMMetadataRef File, unsigned int Line, unsigned int RuntimeLang, uint64_t SizeInBits, uint32_t AlignInBits, const char *UniqueIdentifier, size_t UniqueIdentifierLen)
-try: (LLVMDIBuilderCreateForwardDecl:=dll.LLVMDIBuilderCreateForwardDecl).restype, LLVMDIBuilderCreateForwardDecl.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint, ctypes.c_uint, uint64_t, uint32_t, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreateForwardDecl:=dll.LLVMDIBuilderCreateForwardDecl).restype, LLVMDIBuilderCreateForwardDecl.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.c_uint32, uint64_t, uint32_t, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateReplaceableCompositeType(LLVMDIBuilderRef Builder, unsigned int Tag, const char *Name, size_t NameLen, LLVMMetadataRef Scope, LLVMMetadataRef File, unsigned int Line, unsigned int RuntimeLang, uint64_t SizeInBits, uint32_t AlignInBits, LLVMDIFlags Flags, const char *UniqueIdentifier, size_t UniqueIdentifierLen)
-try: (LLVMDIBuilderCreateReplaceableCompositeType:=dll.LLVMDIBuilderCreateReplaceableCompositeType).restype, LLVMDIBuilderCreateReplaceableCompositeType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint, ctypes.c_uint, uint64_t, uint32_t, LLVMDIFlags, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreateReplaceableCompositeType:=dll.LLVMDIBuilderCreateReplaceableCompositeType).restype, LLVMDIBuilderCreateReplaceableCompositeType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, LLVMMetadataRef, ctypes.c_uint32, ctypes.c_uint32, uint64_t, uint32_t, LLVMDIFlags, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateBitFieldMemberType(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNumber, uint64_t SizeInBits, uint64_t OffsetInBits, uint64_t StorageOffsetInBits, LLVMDIFlags Flags, LLVMMetadataRef Type)
-try: (LLVMDIBuilderCreateBitFieldMemberType:=dll.LLVMDIBuilderCreateBitFieldMemberType).restype, LLVMDIBuilderCreateBitFieldMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, uint64_t, uint64_t, uint64_t, LLVMDIFlags, LLVMMetadataRef]
+try: (LLVMDIBuilderCreateBitFieldMemberType:=dll.LLVMDIBuilderCreateBitFieldMemberType).restype, LLVMDIBuilderCreateBitFieldMemberType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint64_t, uint64_t, LLVMDIFlags, LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateClassType(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNumber, uint64_t SizeInBits, uint32_t AlignInBits, uint64_t OffsetInBits, LLVMDIFlags Flags, LLVMMetadataRef DerivedFrom, LLVMMetadataRef *Elements, unsigned int NumElements, LLVMMetadataRef VTableHolder, LLVMMetadataRef TemplateParamsNode, const char *UniqueIdentifier, size_t UniqueIdentifierLen)
-try: (LLVMDIBuilderCreateClassType:=dll.LLVMDIBuilderCreateClassType).restype, LLVMDIBuilderCreateClassType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint, LLVMMetadataRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t]
+try: (LLVMDIBuilderCreateClassType:=dll.LLVMDIBuilderCreateClassType).restype, LLVMDIBuilderCreateClassType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, uint64_t, LLVMDIFlags, LLVMMetadataRef, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, LLVMMetadataRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateArtificialType(LLVMDIBuilderRef Builder, LLVMMetadataRef Type)
@@ -4278,7 +4278,7 @@ try: (LLVMDITypeGetAlignInBits:=dll.LLVMDITypeGetAlignInBits).restype, LLVMDITyp
 except AttributeError: pass
 
 # unsigned int LLVMDITypeGetLine(LLVMMetadataRef DType)
-try: (LLVMDITypeGetLine:=dll.LLVMDITypeGetLine).restype, LLVMDITypeGetLine.argtypes = ctypes.c_uint, [LLVMMetadataRef]
+try: (LLVMDITypeGetLine:=dll.LLVMDITypeGetLine).restype, LLVMDITypeGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMDIFlags LLVMDITypeGetFlags(LLVMMetadataRef DType)
@@ -4302,10 +4302,10 @@ try: (LLVMDIBuilderCreateConstantValueExpression:=dll.LLVMDIBuilderCreateConstan
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateGlobalVariableExpression(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, const char *Linkage, size_t LinkLen, LLVMMetadataRef File, unsigned int LineNo, LLVMMetadataRef Ty, LLVMBool LocalToUnit, LLVMMetadataRef Expr, LLVMMetadataRef Decl, uint32_t AlignInBits)
-try: (LLVMDIBuilderCreateGlobalVariableExpression:=dll.LLVMDIBuilderCreateGlobalVariableExpression).restype, LLVMDIBuilderCreateGlobalVariableExpression.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef, LLVMBool, LLVMMetadataRef, LLVMMetadataRef, uint32_t]
+try: (LLVMDIBuilderCreateGlobalVariableExpression:=dll.LLVMDIBuilderCreateGlobalVariableExpression).restype, LLVMDIBuilderCreateGlobalVariableExpression.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMMetadataRef, LLVMMetadataRef, uint32_t]
 except AttributeError: pass
 
-uint16_t = ctypes.c_ushort
+uint16_t = ctypes.c_uint16
 # uint16_t LLVMGetDINodeTag(LLVMMetadataRef MD)
 try: (LLVMGetDINodeTag:=dll.LLVMGetDINodeTag).restype, LLVMGetDINodeTag.argtypes = uint16_t, [LLVMMetadataRef]
 except AttributeError: pass
@@ -4327,7 +4327,7 @@ try: (LLVMDIVariableGetScope:=dll.LLVMDIVariableGetScope).restype, LLVMDIVariabl
 except AttributeError: pass
 
 # unsigned int LLVMDIVariableGetLine(LLVMMetadataRef Var)
-try: (LLVMDIVariableGetLine:=dll.LLVMDIVariableGetLine).restype, LLVMDIVariableGetLine.argtypes = ctypes.c_uint, [LLVMMetadataRef]
+try: (LLVMDIVariableGetLine:=dll.LLVMDIVariableGetLine).restype, LLVMDIVariableGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMTemporaryMDNode(LLVMContextRef Ctx, LLVMMetadataRef *Data, size_t NumElements)
@@ -4343,7 +4343,7 @@ try: (LLVMMetadataReplaceAllUsesWith:=dll.LLVMMetadataReplaceAllUsesWith).restyp
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateTempGlobalVariableFwdDecl(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, const char *Linkage, size_t LnkLen, LLVMMetadataRef File, unsigned int LineNo, LLVMMetadataRef Ty, LLVMBool LocalToUnit, LLVMMetadataRef Decl, uint32_t AlignInBits)
-try: (LLVMDIBuilderCreateTempGlobalVariableFwdDecl:=dll.LLVMDIBuilderCreateTempGlobalVariableFwdDecl).restype, LLVMDIBuilderCreateTempGlobalVariableFwdDecl.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef, LLVMBool, LLVMMetadataRef, uint32_t]
+try: (LLVMDIBuilderCreateTempGlobalVariableFwdDecl:=dll.LLVMDIBuilderCreateTempGlobalVariableFwdDecl).restype, LLVMDIBuilderCreateTempGlobalVariableFwdDecl.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMMetadataRef, uint32_t]
 except AttributeError: pass
 
 # LLVMDbgRecordRef LLVMDIBuilderInsertDeclareRecordBefore(LLVMDIBuilderRef Builder, LLVMValueRef Storage, LLVMMetadataRef VarInfo, LLVMMetadataRef Expr, LLVMMetadataRef DebugLoc, LLVMValueRef Instr)
@@ -4363,11 +4363,11 @@ try: (LLVMDIBuilderInsertDbgValueRecordAtEnd:=dll.LLVMDIBuilderInsertDbgValueRec
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateAutoVariable(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNo, LLVMMetadataRef Ty, LLVMBool AlwaysPreserve, LLVMDIFlags Flags, uint32_t AlignInBits)
-try: (LLVMDIBuilderCreateAutoVariable:=dll.LLVMDIBuilderCreateAutoVariable).restype, LLVMDIBuilderCreateAutoVariable.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef, LLVMBool, LLVMDIFlags, uint32_t]
+try: (LLVMDIBuilderCreateAutoVariable:=dll.LLVMDIBuilderCreateAutoVariable).restype, LLVMDIBuilderCreateAutoVariable.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMDIFlags, uint32_t]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateParameterVariable(LLVMDIBuilderRef Builder, LLVMMetadataRef Scope, const char *Name, size_t NameLen, unsigned int ArgNo, LLVMMetadataRef File, unsigned int LineNo, LLVMMetadataRef Ty, LLVMBool AlwaysPreserve, LLVMDIFlags Flags)
-try: (LLVMDIBuilderCreateParameterVariable:=dll.LLVMDIBuilderCreateParameterVariable).restype, LLVMDIBuilderCreateParameterVariable.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint, LLVMMetadataRef, ctypes.c_uint, LLVMMetadataRef, LLVMBool, LLVMDIFlags]
+try: (LLVMDIBuilderCreateParameterVariable:=dll.LLVMDIBuilderCreateParameterVariable).restype, LLVMDIBuilderCreateParameterVariable.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.c_uint32, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMDIFlags]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMGetSubprogram(LLVMValueRef Func)
@@ -4379,7 +4379,7 @@ try: (LLVMSetSubprogram:=dll.LLVMSetSubprogram).restype, LLVMSetSubprogram.argty
 except AttributeError: pass
 
 # unsigned int LLVMDISubprogramGetLine(LLVMMetadataRef Subprogram)
-try: (LLVMDISubprogramGetLine:=dll.LLVMDISubprogramGetLine).restype, LLVMDISubprogramGetLine.argtypes = ctypes.c_uint, [LLVMMetadataRef]
+try: (LLVMDISubprogramGetLine:=dll.LLVMDISubprogramGetLine).restype, LLVMDISubprogramGetLine.argtypes = ctypes.c_uint32, [LLVMMetadataRef]
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMInstructionGetDebugLoc(LLVMValueRef Inst)
@@ -4391,7 +4391,7 @@ try: (LLVMInstructionSetDebugLoc:=dll.LLVMInstructionSetDebugLoc).restype, LLVMI
 except AttributeError: pass
 
 # LLVMMetadataRef LLVMDIBuilderCreateLabel(LLVMDIBuilderRef Builder, LLVMMetadataRef Context, const char *Name, size_t NameLen, LLVMMetadataRef File, unsigned int LineNo, LLVMBool AlwaysPreserve)
-try: (LLVMDIBuilderCreateLabel:=dll.LLVMDIBuilderCreateLabel).restype, LLVMDIBuilderCreateLabel.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint, LLVMBool]
+try: (LLVMDIBuilderCreateLabel:=dll.LLVMDIBuilderCreateLabel).restype, LLVMDIBuilderCreateLabel.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMBool]
 except AttributeError: pass
 
 # LLVMDbgRecordRef LLVMDIBuilderInsertLabelBefore(LLVMDIBuilderRef Builder, LLVMMetadataRef LabelInfo, LLVMMetadataRef Location, LLVMValueRef InsertBefore)
@@ -4415,62 +4415,62 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 LLVMDisasmContextRef = ctypes.c_void_p
-LLVMOpInfoCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int, ctypes.c_void_p)
-LLVMSymbolLookupCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.c_ulong, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+LLVMOpInfoCallback = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int32, ctypes.c_void_p)
+LLVMSymbolLookupCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint64, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
 # LLVMDisasmContextRef LLVMCreateDisasm(const char *TripleName, void *DisInfo, int TagType, LLVMOpInfoCallback GetOpInfo, LLVMSymbolLookupCallback SymbolLookUp)
-try: (LLVMCreateDisasm:=dll.LLVMCreateDisasm).restype, LLVMCreateDisasm.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
+try: (LLVMCreateDisasm:=dll.LLVMCreateDisasm).restype, LLVMCreateDisasm.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int32, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
 except AttributeError: pass
 
 # LLVMDisasmContextRef LLVMCreateDisasmCPU(const char *Triple, const char *CPU, void *DisInfo, int TagType, LLVMOpInfoCallback GetOpInfo, LLVMSymbolLookupCallback SymbolLookUp)
-try: (LLVMCreateDisasmCPU:=dll.LLVMCreateDisasmCPU).restype, LLVMCreateDisasmCPU.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
+try: (LLVMCreateDisasmCPU:=dll.LLVMCreateDisasmCPU).restype, LLVMCreateDisasmCPU.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int32, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
 except AttributeError: pass
 
 # LLVMDisasmContextRef LLVMCreateDisasmCPUFeatures(const char *Triple, const char *CPU, const char *Features, void *DisInfo, int TagType, LLVMOpInfoCallback GetOpInfo, LLVMSymbolLookupCallback SymbolLookUp)
-try: (LLVMCreateDisasmCPUFeatures:=dll.LLVMCreateDisasmCPUFeatures).restype, LLVMCreateDisasmCPUFeatures.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
+try: (LLVMCreateDisasmCPUFeatures:=dll.LLVMCreateDisasmCPUFeatures).restype, LLVMCreateDisasmCPUFeatures.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int32, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
 except AttributeError: pass
 
 # int LLVMSetDisasmOptions(LLVMDisasmContextRef DC, uint64_t Options)
-try: (LLVMSetDisasmOptions:=dll.LLVMSetDisasmOptions).restype, LLVMSetDisasmOptions.argtypes = ctypes.c_int, [LLVMDisasmContextRef, uint64_t]
+try: (LLVMSetDisasmOptions:=dll.LLVMSetDisasmOptions).restype, LLVMSetDisasmOptions.argtypes = ctypes.c_int32, [LLVMDisasmContextRef, uint64_t]
 except AttributeError: pass
 
 # void LLVMDisasmDispose(LLVMDisasmContextRef DC)
@@ -4490,43 +4490,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 class struct_LLVMOpInfoSymbol1(Struct): pass
@@ -4594,43 +4594,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -5169,7 +5169,7 @@ except AttributeError: pass
 try: (LLVMCopyStringRepOfTargetData:=dll.LLVMCopyStringRepOfTargetData).restype, LLVMCopyStringRepOfTargetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTargetDataRef]
 except AttributeError: pass
 
-enum_LLVMByteOrdering = CEnum(ctypes.c_uint)
+enum_LLVMByteOrdering = CEnum(ctypes.c_uint32)
 LLVMBigEndian = enum_LLVMByteOrdering.define('LLVMBigEndian', 0)
 LLVMLittleEndian = enum_LLVMByteOrdering.define('LLVMLittleEndian', 1)
 
@@ -5178,11 +5178,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -5190,7 +5190,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -5198,43 +5198,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 class struct_LLVMTarget(Struct): pass
@@ -5297,7 +5297,7 @@ except AttributeError: pass
 try: (LLVMTargetMachineOptionsSetABI:=dll.LLVMTargetMachineOptionsSetABI).restype, LLVMTargetMachineOptionsSetABI.argtypes = None, [LLVMTargetMachineOptionsRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-LLVMCodeGenOptLevel = CEnum(ctypes.c_uint)
+LLVMCodeGenOptLevel = CEnum(ctypes.c_uint32)
 LLVMCodeGenLevelNone = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelNone', 0)
 LLVMCodeGenLevelLess = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelLess', 1)
 LLVMCodeGenLevelDefault = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelDefault', 2)
@@ -5307,7 +5307,7 @@ LLVMCodeGenLevelAggressive = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelAggress
 try: (LLVMTargetMachineOptionsSetCodeGenOptLevel:=dll.LLVMTargetMachineOptionsSetCodeGenOptLevel).restype, LLVMTargetMachineOptionsSetCodeGenOptLevel.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMCodeGenOptLevel]
 except AttributeError: pass
 
-LLVMRelocMode = CEnum(ctypes.c_uint)
+LLVMRelocMode = CEnum(ctypes.c_uint32)
 LLVMRelocDefault = LLVMRelocMode.define('LLVMRelocDefault', 0)
 LLVMRelocStatic = LLVMRelocMode.define('LLVMRelocStatic', 1)
 LLVMRelocPIC = LLVMRelocMode.define('LLVMRelocPIC', 2)
@@ -5320,7 +5320,7 @@ LLVMRelocROPI_RWPI = LLVMRelocMode.define('LLVMRelocROPI_RWPI', 6)
 try: (LLVMTargetMachineOptionsSetRelocMode:=dll.LLVMTargetMachineOptionsSetRelocMode).restype, LLVMTargetMachineOptionsSetRelocMode.argtypes = None, [LLVMTargetMachineOptionsRef, LLVMRelocMode]
 except AttributeError: pass
 
-LLVMCodeModel = CEnum(ctypes.c_uint)
+LLVMCodeModel = CEnum(ctypes.c_uint32)
 LLVMCodeModelDefault = LLVMCodeModel.define('LLVMCodeModelDefault', 0)
 LLVMCodeModelJITDefault = LLVMCodeModel.define('LLVMCodeModelJITDefault', 1)
 LLVMCodeModelTiny = LLVMCodeModel.define('LLVMCodeModelTiny', 2)
@@ -5379,7 +5379,7 @@ except AttributeError: pass
 try: (LLVMSetTargetMachineGlobalISel:=dll.LLVMSetTargetMachineGlobalISel).restype, LLVMSetTargetMachineGlobalISel.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
 except AttributeError: pass
 
-LLVMGlobalISelAbortMode = CEnum(ctypes.c_uint)
+LLVMGlobalISelAbortMode = CEnum(ctypes.c_uint32)
 LLVMGlobalISelAbortEnable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortEnable', 0)
 LLVMGlobalISelAbortDisable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisable', 1)
 LLVMGlobalISelAbortDisableWithDiag = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisableWithDiag', 2)
@@ -5392,7 +5392,7 @@ except AttributeError: pass
 try: (LLVMSetTargetMachineMachineOutliner:=dll.LLVMSetTargetMachineMachineOutliner).restype, LLVMSetTargetMachineMachineOutliner.argtypes = None, [LLVMTargetMachineRef, LLVMBool]
 except AttributeError: pass
 
-LLVMCodeGenFileType = CEnum(ctypes.c_uint)
+LLVMCodeGenFileType = CEnum(ctypes.c_uint32)
 LLVMAssemblyFile = LLVMCodeGenFileType.define('LLVMAssemblyFile', 0)
 LLVMObjectFile = LLVMCodeGenFileType.define('LLVMObjectFile', 1)
 
@@ -5440,14 +5440,14 @@ class struct_LLVMOpaqueMCJITMemoryManager(Struct): pass
 LLVMMCJITMemoryManagerRef = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
 class struct_LLVMMCJITCompilerOptions(Struct): pass
 struct_LLVMMCJITCompilerOptions._fields_ = [
-  ('OptLevel', ctypes.c_uint),
+  ('OptLevel', ctypes.c_uint32),
   ('CodeModel', LLVMCodeModel),
   ('NoFramePointerElim', LLVMBool),
   ('EnableFastISel', LLVMBool),
   ('MCJMM', LLVMMCJITMemoryManagerRef),
 ]
 # LLVMGenericValueRef LLVMCreateGenericValueOfInt(LLVMTypeRef Ty, unsigned long long N, LLVMBool IsSigned)
-try: (LLVMCreateGenericValueOfInt:=dll.LLVMCreateGenericValueOfInt).restype, LLVMCreateGenericValueOfInt.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_ulonglong, LLVMBool]
+try: (LLVMCreateGenericValueOfInt:=dll.LLVMCreateGenericValueOfInt).restype, LLVMCreateGenericValueOfInt.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_uint64, LLVMBool]
 except AttributeError: pass
 
 # LLVMGenericValueRef LLVMCreateGenericValueOfPointer(void *P)
@@ -5459,11 +5459,11 @@ try: (LLVMCreateGenericValueOfFloat:=dll.LLVMCreateGenericValueOfFloat).restype,
 except AttributeError: pass
 
 # unsigned int LLVMGenericValueIntWidth(LLVMGenericValueRef GenValRef)
-try: (LLVMGenericValueIntWidth:=dll.LLVMGenericValueIntWidth).restype, LLVMGenericValueIntWidth.argtypes = ctypes.c_uint, [LLVMGenericValueRef]
+try: (LLVMGenericValueIntWidth:=dll.LLVMGenericValueIntWidth).restype, LLVMGenericValueIntWidth.argtypes = ctypes.c_uint32, [LLVMGenericValueRef]
 except AttributeError: pass
 
 # unsigned long long LLVMGenericValueToInt(LLVMGenericValueRef GenVal, LLVMBool IsSigned)
-try: (LLVMGenericValueToInt:=dll.LLVMGenericValueToInt).restype, LLVMGenericValueToInt.argtypes = ctypes.c_ulonglong, [LLVMGenericValueRef, LLVMBool]
+try: (LLVMGenericValueToInt:=dll.LLVMGenericValueToInt).restype, LLVMGenericValueToInt.argtypes = ctypes.c_uint64, [LLVMGenericValueRef, LLVMBool]
 except AttributeError: pass
 
 # void *LLVMGenericValueToPointer(LLVMGenericValueRef GenVal)
@@ -5487,7 +5487,7 @@ try: (LLVMCreateInterpreterForModule:=dll.LLVMCreateInterpreterForModule).restyp
 except AttributeError: pass
 
 # LLVMBool LLVMCreateJITCompilerForModule(LLVMExecutionEngineRef *OutJIT, LLVMModuleRef M, unsigned int OptLevel, char **OutError)
-try: (LLVMCreateJITCompilerForModule:=dll.LLVMCreateJITCompilerForModule).restype, LLVMCreateJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.c_uint, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (LLVMCreateJITCompilerForModule:=dll.LLVMCreateJITCompilerForModule).restype, LLVMCreateJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 # void LLVMInitializeMCJITCompilerOptions(struct LLVMMCJITCompilerOptions *Options, size_t SizeOfOptions)
@@ -5511,11 +5511,11 @@ try: (LLVMRunStaticDestructors:=dll.LLVMRunStaticDestructors).restype, LLVMRunSt
 except AttributeError: pass
 
 # int LLVMRunFunctionAsMain(LLVMExecutionEngineRef EE, LLVMValueRef F, unsigned int ArgC, const char *const *ArgV, const char *const *EnvP)
-try: (LLVMRunFunctionAsMain:=dll.LLVMRunFunctionAsMain).restype, LLVMRunFunctionAsMain.argtypes = ctypes.c_int, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (LLVMRunFunctionAsMain:=dll.LLVMRunFunctionAsMain).restype, LLVMRunFunctionAsMain.argtypes = ctypes.c_int32, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 # LLVMGenericValueRef LLVMRunFunction(LLVMExecutionEngineRef EE, LLVMValueRef F, unsigned int NumArgs, LLVMGenericValueRef *Args)
-try: (LLVMRunFunction:=dll.LLVMRunFunction).restype, LLVMRunFunction.argtypes = LLVMGenericValueRef, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(LLVMGenericValueRef)]
+try: (LLVMRunFunction:=dll.LLVMRunFunction).restype, LLVMRunFunction.argtypes = LLVMGenericValueRef, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(LLVMGenericValueRef)]
 except AttributeError: pass
 
 # void LLVMFreeMachineCodeForFunction(LLVMExecutionEngineRef EE, LLVMValueRef F)
@@ -5566,9 +5566,9 @@ except AttributeError: pass
 try: (LLVMExecutionEngineGetErrMsg:=dll.LLVMExecutionEngineGetErrMsg).restype, LLVMExecutionEngineGetErrMsg.argtypes = LLVMBool, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-LLVMMemoryManagerAllocateCodeSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_char))
-LLVMMemoryManagerAllocateDataSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_ulong, ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_char), ctypes.c_int)
-LLVMMemoryManagerFinalizeMemoryCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+LLVMMemoryManagerAllocateCodeSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
+LLVMMemoryManagerAllocateDataSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32)
+LLVMMemoryManagerFinalizeMemoryCallback = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
 LLVMMemoryManagerDestroyCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 # LLVMMCJITMemoryManagerRef LLVMCreateSimpleMCJITMemoryManager(void *Opaque, LLVMMemoryManagerAllocateCodeSectionCallback AllocateCodeSection, LLVMMemoryManagerAllocateDataSectionCallback AllocateDataSection, LLVMMemoryManagerFinalizeMemoryCallback FinalizeMemory, LLVMMemoryManagerDestroyCallback Destroy)
 try: (LLVMCreateSimpleMCJITMemoryManager:=dll.LLVMCreateSimpleMCJITMemoryManager).restype, LLVMCreateSimpleMCJITMemoryManager.argtypes = LLVMMCJITMemoryManagerRef, [ctypes.c_void_p, LLVMMemoryManagerAllocateCodeSectionCallback, LLVMMemoryManagerAllocateDataSectionCallback, LLVMMemoryManagerFinalizeMemoryCallback, LLVMMemoryManagerDestroyCallback]
@@ -5605,43 +5605,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # LLVMBool LLVMParseIRInContext(LLVMContextRef ContextRef, LLVMMemoryBufferRef MemBuf, LLVMModuleRef *OutM, char **OutMessage)
@@ -5685,43 +5685,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -6261,11 +6261,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -6273,7 +6273,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -6281,43 +6281,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTargetRef LLVMGetFirstTarget(void)
@@ -6491,14 +6491,14 @@ LLVMOrcSymbolStringPoolEntryRef = ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStrin
 try: (LLVMOrcExecutionSessionIntern:=dll.LLVMOrcExecutionSessionIntern).restype, LLVMOrcExecutionSessionIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-LLVMOrcLookupKind = CEnum(ctypes.c_uint)
+LLVMOrcLookupKind = CEnum(ctypes.c_uint32)
 LLVMOrcLookupKindStatic = LLVMOrcLookupKind.define('LLVMOrcLookupKindStatic', 0)
 LLVMOrcLookupKindDLSym = LLVMOrcLookupKind.define('LLVMOrcLookupKindDLSym', 1)
 
 class LLVMOrcCJITDylibSearchOrderElement(Struct): pass
 class struct_LLVMOrcOpaqueJITDylib(Struct): pass
 LLVMOrcJITDylibRef = ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib)
-LLVMOrcJITDylibLookupFlags = CEnum(ctypes.c_uint)
+LLVMOrcJITDylibLookupFlags = CEnum(ctypes.c_uint32)
 LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly', 0)
 LLVMOrcJITDylibLookupFlagsMatchAllSymbols = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchAllSymbols', 1)
 
@@ -6508,7 +6508,7 @@ LLVMOrcCJITDylibSearchOrderElement._fields_ = [
 ]
 LLVMOrcCJITDylibSearchOrder = ctypes.POINTER(LLVMOrcCJITDylibSearchOrderElement)
 class LLVMOrcCLookupSetElement(Struct): pass
-LLVMOrcSymbolLookupFlags = CEnum(ctypes.c_uint)
+LLVMOrcSymbolLookupFlags = CEnum(ctypes.c_uint32)
 LLVMOrcSymbolLookupFlagsRequiredSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsRequiredSymbol', 0)
 LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol', 1)
 
@@ -6519,7 +6519,7 @@ LLVMOrcCLookupSetElement._fields_ = [
 LLVMOrcCLookupSet = ctypes.POINTER(LLVMOrcCLookupSetElement)
 class LLVMOrcCSymbolMapPair(Struct): pass
 class LLVMJITEvaluatedSymbol(Struct): pass
-LLVMOrcExecutorAddress = ctypes.c_ulong
+LLVMOrcExecutorAddress = ctypes.c_uint64
 class LLVMJITSymbolFlags(Struct): pass
 LLVMJITSymbolFlags._fields_ = [
   ('GenericFlags', uint8_t),
@@ -6533,7 +6533,7 @@ LLVMOrcCSymbolMapPair._fields_ = [
   ('Name', LLVMOrcSymbolStringPoolEntryRef),
   ('Sym', LLVMJITEvaluatedSymbol),
 ]
-LLVMOrcExecutionSessionLookupHandleResultFunction = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(LLVMOrcCSymbolMapPair), ctypes.c_ulong, ctypes.c_void_p)
+LLVMOrcExecutionSessionLookupHandleResultFunction = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(LLVMOrcCSymbolMapPair), ctypes.c_uint64, ctypes.c_void_p)
 # void LLVMOrcExecutionSessionLookup(LLVMOrcExecutionSessionRef ES, LLVMOrcLookupKind K, LLVMOrcCJITDylibSearchOrder SearchOrder, size_t SearchOrderSize, LLVMOrcCLookupSet Symbols, size_t SymbolsSize, LLVMOrcExecutionSessionLookupHandleResultFunction HandleResult, void *Ctx)
 try: (LLVMOrcExecutionSessionLookup:=dll.LLVMOrcExecutionSessionLookup).restype, LLVMOrcExecutionSessionLookup.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcLookupKind, LLVMOrcCJITDylibSearchOrder, size_t, LLVMOrcCLookupSet, size_t, LLVMOrcExecutionSessionLookupHandleResultFunction, ctypes.c_void_p]
 except AttributeError: pass
@@ -6721,7 +6721,7 @@ try: (LLVMOrcJITDylibAddGenerator:=dll.LLVMOrcJITDylibAddGenerator).restype, LLV
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueLookupState(Struct): pass
-LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)), LLVMOrcLookupKind, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), LLVMOrcJITDylibLookupFlags, ctypes.POINTER(LLVMOrcCLookupSetElement), ctypes.c_ulong)
+LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)), LLVMOrcLookupKind, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), LLVMOrcJITDylibLookupFlags, ctypes.POINTER(LLVMOrcCLookupSetElement), ctypes.c_uint64)
 LLVMOrcDisposeCAPIDefinitionGeneratorFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 # LLVMOrcDefinitionGeneratorRef LLVMOrcCreateCustomCAPIDefinitionGenerator(LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction F, void *Ctx, LLVMOrcDisposeCAPIDefinitionGeneratorFunction Dispose)
 try: (LLVMOrcCreateCustomCAPIDefinitionGenerator:=dll.LLVMOrcCreateCustomCAPIDefinitionGenerator).restype, LLVMOrcCreateCustomCAPIDefinitionGenerator.argtypes = LLVMOrcDefinitionGeneratorRef, [LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, ctypes.c_void_p, LLVMOrcDisposeCAPIDefinitionGeneratorFunction]
@@ -6732,7 +6732,7 @@ LLVMOrcLookupStateRef = ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)
 try: (LLVMOrcLookupStateContinueLookup:=dll.LLVMOrcLookupStateContinueLookup).restype, LLVMOrcLookupStateContinueLookup.argtypes = None, [LLVMOrcLookupStateRef, LLVMErrorRef]
 except AttributeError: pass
 
-LLVMOrcSymbolPredicate = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
+LLVMOrcSymbolPredicate = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
 # LLVMErrorRef LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(LLVMOrcDefinitionGeneratorRef *Result, char GlobalPrefx, LLVMOrcSymbolPredicate Filter, void *FilterCtx)
 try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
 except AttributeError: pass
@@ -6840,7 +6840,7 @@ except AttributeError: pass
 try: (LLVMOrcDisposeIndirectStubsManager:=dll.LLVMOrcDisposeIndirectStubsManager).restype, LLVMOrcDisposeIndirectStubsManager.argtypes = None, [LLVMOrcIndirectStubsManagerRef]
 except AttributeError: pass
 
-LLVMOrcJITTargetAddress = ctypes.c_ulong
+LLVMOrcJITTargetAddress = ctypes.c_uint64
 # LLVMErrorRef LLVMOrcCreateLocalLazyCallThroughManager(const char *TargetTriple, LLVMOrcExecutionSessionRef ES, LLVMOrcJITTargetAddress ErrorHandlerAddr, LLVMOrcLazyCallThroughManagerRef *LCTM)
 try: (LLVMOrcCreateLocalLazyCallThroughManager:=dll.LLVMOrcCreateLocalLazyCallThroughManager).restype, LLVMOrcCreateLocalLazyCallThroughManager.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char), LLVMOrcExecutionSessionRef, LLVMOrcJITTargetAddress, ctypes.POINTER(LLVMOrcLazyCallThroughManagerRef)]
 except AttributeError: pass
@@ -6985,43 +6985,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -7561,11 +7561,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -7573,7 +7573,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -7581,43 +7581,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTargetRef LLVMGetFirstTarget(void)
@@ -8133,46 +8133,46 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-LLVMLinkerMode = CEnum(ctypes.c_uint)
+LLVMLinkerMode = CEnum(ctypes.c_uint32)
 LLVMLinkerDestroySource = LLVMLinkerMode.define('LLVMLinkerDestroySource', 0)
 LLVMLinkerPreserveSource_Removed = LLVMLinkerMode.define('LLVMLinkerPreserveSource_Removed', 1)
 
@@ -8189,43 +8189,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 class struct_LLVMOpaqueSectionIterator(Struct): pass
@@ -8234,7 +8234,7 @@ class struct_LLVMOpaqueSymbolIterator(Struct): pass
 LLVMSymbolIteratorRef = ctypes.POINTER(struct_LLVMOpaqueSymbolIterator)
 class struct_LLVMOpaqueRelocationIterator(Struct): pass
 LLVMRelocationIteratorRef = ctypes.POINTER(struct_LLVMOpaqueRelocationIterator)
-LLVMBinaryType = CEnum(ctypes.c_uint)
+LLVMBinaryType = CEnum(ctypes.c_uint32)
 LLVMBinaryTypeArchive = LLVMBinaryType.define('LLVMBinaryTypeArchive', 0)
 LLVMBinaryTypeMachOUniversalBinary = LLVMBinaryType.define('LLVMBinaryTypeMachOUniversalBinary', 1)
 LLVMBinaryTypeCOFFImportFile = LLVMBinaryType.define('LLVMBinaryTypeCOFFImportFile', 2)
@@ -8441,43 +8441,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -9017,11 +9017,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -9029,7 +9029,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -9037,43 +9037,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTargetRef LLVMGetFirstTarget(void)
@@ -9224,7 +9224,7 @@ except AttributeError: pass
 try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysisPasses.argtypes = None, [LLVMTargetMachineRef, LLVMPassManagerRef]
 except AttributeError: pass
 
-LLVMJITSymbolGenericFlags = CEnum(ctypes.c_uint)
+LLVMJITSymbolGenericFlags = CEnum(ctypes.c_uint32)
 LLVMJITSymbolGenericFlagsNone = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsNone', 0)
 LLVMJITSymbolGenericFlagsExported = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsExported', 1)
 LLVMJITSymbolGenericFlagsWeak = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsWeak', 2)
@@ -9543,43 +9543,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -10119,11 +10119,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -10131,7 +10131,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -10139,43 +10139,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTargetRef LLVMGetFirstTarget(void)
@@ -10335,7 +10335,7 @@ try: (LLVMLinkInInterpreter:=dll.LLVMLinkInInterpreter).restype, LLVMLinkInInter
 except AttributeError: pass
 
 # LLVMGenericValueRef LLVMCreateGenericValueOfInt(LLVMTypeRef Ty, unsigned long long N, LLVMBool IsSigned)
-try: (LLVMCreateGenericValueOfInt:=dll.LLVMCreateGenericValueOfInt).restype, LLVMCreateGenericValueOfInt.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_ulonglong, LLVMBool]
+try: (LLVMCreateGenericValueOfInt:=dll.LLVMCreateGenericValueOfInt).restype, LLVMCreateGenericValueOfInt.argtypes = LLVMGenericValueRef, [LLVMTypeRef, ctypes.c_uint64, LLVMBool]
 except AttributeError: pass
 
 # LLVMGenericValueRef LLVMCreateGenericValueOfPointer(void *P)
@@ -10347,11 +10347,11 @@ try: (LLVMCreateGenericValueOfFloat:=dll.LLVMCreateGenericValueOfFloat).restype,
 except AttributeError: pass
 
 # unsigned int LLVMGenericValueIntWidth(LLVMGenericValueRef GenValRef)
-try: (LLVMGenericValueIntWidth:=dll.LLVMGenericValueIntWidth).restype, LLVMGenericValueIntWidth.argtypes = ctypes.c_uint, [LLVMGenericValueRef]
+try: (LLVMGenericValueIntWidth:=dll.LLVMGenericValueIntWidth).restype, LLVMGenericValueIntWidth.argtypes = ctypes.c_uint32, [LLVMGenericValueRef]
 except AttributeError: pass
 
 # unsigned long long LLVMGenericValueToInt(LLVMGenericValueRef GenVal, LLVMBool IsSigned)
-try: (LLVMGenericValueToInt:=dll.LLVMGenericValueToInt).restype, LLVMGenericValueToInt.argtypes = ctypes.c_ulonglong, [LLVMGenericValueRef, LLVMBool]
+try: (LLVMGenericValueToInt:=dll.LLVMGenericValueToInt).restype, LLVMGenericValueToInt.argtypes = ctypes.c_uint64, [LLVMGenericValueRef, LLVMBool]
 except AttributeError: pass
 
 # void *LLVMGenericValueToPointer(LLVMGenericValueRef GenVal)
@@ -10375,7 +10375,7 @@ try: (LLVMCreateInterpreterForModule:=dll.LLVMCreateInterpreterForModule).restyp
 except AttributeError: pass
 
 # LLVMBool LLVMCreateJITCompilerForModule(LLVMExecutionEngineRef *OutJIT, LLVMModuleRef M, unsigned int OptLevel, char **OutError)
-try: (LLVMCreateJITCompilerForModule:=dll.LLVMCreateJITCompilerForModule).restype, LLVMCreateJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.c_uint, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (LLVMCreateJITCompilerForModule:=dll.LLVMCreateJITCompilerForModule).restype, LLVMCreateJITCompilerForModule.argtypes = LLVMBool, [ctypes.POINTER(LLVMExecutionEngineRef), LLVMModuleRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 # void LLVMInitializeMCJITCompilerOptions(struct LLVMMCJITCompilerOptions *Options, size_t SizeOfOptions)
@@ -10399,11 +10399,11 @@ try: (LLVMRunStaticDestructors:=dll.LLVMRunStaticDestructors).restype, LLVMRunSt
 except AttributeError: pass
 
 # int LLVMRunFunctionAsMain(LLVMExecutionEngineRef EE, LLVMValueRef F, unsigned int ArgC, const char *const *ArgV, const char *const *EnvP)
-try: (LLVMRunFunctionAsMain:=dll.LLVMRunFunctionAsMain).restype, LLVMRunFunctionAsMain.argtypes = ctypes.c_int, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (LLVMRunFunctionAsMain:=dll.LLVMRunFunctionAsMain).restype, LLVMRunFunctionAsMain.argtypes = ctypes.c_int32, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 # LLVMGenericValueRef LLVMRunFunction(LLVMExecutionEngineRef EE, LLVMValueRef F, unsigned int NumArgs, LLVMGenericValueRef *Args)
-try: (LLVMRunFunction:=dll.LLVMRunFunction).restype, LLVMRunFunction.argtypes = LLVMGenericValueRef, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(LLVMGenericValueRef)]
+try: (LLVMRunFunction:=dll.LLVMRunFunction).restype, LLVMRunFunction.argtypes = LLVMGenericValueRef, [LLVMExecutionEngineRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(LLVMGenericValueRef)]
 except AttributeError: pass
 
 # void LLVMFreeMachineCodeForFunction(LLVMExecutionEngineRef EE, LLVMValueRef F)
@@ -10773,46 +10773,46 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-enum_LLVMRemarkType = CEnum(ctypes.c_uint)
+enum_LLVMRemarkType = CEnum(ctypes.c_uint32)
 LLVMRemarkTypeUnknown = enum_LLVMRemarkType.define('LLVMRemarkTypeUnknown', 0)
 LLVMRemarkTypePassed = enum_LLVMRemarkType.define('LLVMRemarkTypePassed', 1)
 LLVMRemarkTypeMissed = enum_LLVMRemarkType.define('LLVMRemarkTypeMissed', 2)
@@ -10940,43 +10940,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # LLVMBool LLVMLoadLibraryPermanently(const char *Filename)
@@ -10984,7 +10984,7 @@ try: (LLVMLoadLibraryPermanently:=dll.LLVMLoadLibraryPermanently).restype, LLVML
 except AttributeError: pass
 
 # void LLVMParseCommandLineOptions(int argc, const char *const *argv, const char *Overview)
-try: (LLVMParseCommandLineOptions:=dll.LLVMParseCommandLineOptions).restype, LLVMParseCommandLineOptions.argtypes = None, [ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
+try: (LLVMParseCommandLineOptions:=dll.LLVMParseCommandLineOptions).restype, LLVMParseCommandLineOptions.argtypes = None, [ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # void *LLVMSearchForAddressOfSymbol(const char *symbolName)
@@ -11004,43 +11004,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -11580,11 +11580,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -11592,7 +11592,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -11600,43 +11600,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern intmax_t imaxabs(intmax_t __n) __attribute__((nothrow)) __attribute__((const))
@@ -11648,43 +11648,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -12224,11 +12224,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -12236,7 +12236,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -12244,43 +12244,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTargetRef LLVMGetFirstTarget(void)
@@ -12468,43 +12468,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 # void LLVMInitializeAArch64TargetInfo(void)
@@ -13044,11 +13044,11 @@ try: (LLVMByteOrder:=dll.LLVMByteOrder).restype, LLVMByteOrder.argtypes = enum_L
 except AttributeError: pass
 
 # unsigned int LLVMPointerSize(LLVMTargetDataRef TD)
-try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint, [LLVMTargetDataRef]
+try: (LLVMPointerSize:=dll.LLVMPointerSize).restype, LLVMPointerSize.argtypes = ctypes.c_uint32, [LLVMTargetDataRef]
 except AttributeError: pass
 
 # unsigned int LLVMPointerSizeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMPointerSizeForAS:=dll.LLVMPointerSizeForAS).restype, LLVMPointerSizeForAS.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrType(LLVMTargetDataRef TD)
@@ -13056,7 +13056,7 @@ try: (LLVMIntPtrType:=dll.LLVMIntPtrType).restype, LLVMIntPtrType.argtypes = LLV
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForAS(LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForAS:=dll.LLVMIntPtrTypeForAS).restype, LLVMIntPtrTypeForAS.argtypes = LLVMTypeRef, [LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeInContext(LLVMContextRef C, LLVMTargetDataRef TD)
@@ -13064,43 +13064,43 @@ try: (LLVMIntPtrTypeInContext:=dll.LLVMIntPtrTypeInContext).restype, LLVMIntPtrT
 except AttributeError: pass
 
 # LLVMTypeRef LLVMIntPtrTypeForASInContext(LLVMContextRef C, LLVMTargetDataRef TD, unsigned int AS)
-try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint]
+try: (LLVMIntPtrTypeForASInContext:=dll.LLVMIntPtrTypeForASInContext).restype, LLVMIntPtrTypeForASInContext.argtypes = LLVMTypeRef, [LLVMContextRef, LLVMTargetDataRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned long long LLVMSizeOfTypeInBits(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMSizeOfTypeInBits:=dll.LLVMSizeOfTypeInBits).restype, LLVMSizeOfTypeInBits.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMStoreSizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMStoreSizeOfType:=dll.LLVMStoreSizeOfType).restype, LLVMStoreSizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned long long LLVMABISizeOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABISizeOfType:=dll.LLVMABISizeOfType).restype, LLVMABISizeOfType.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMABIAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMABIAlignmentOfType:=dll.LLVMABIAlignmentOfType).restype, LLVMABIAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMCallFrameAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMCallFrameAlignmentOfType:=dll.LLVMCallFrameAlignmentOfType).restype, LLVMCallFrameAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfType(LLVMTargetDataRef TD, LLVMTypeRef Ty)
-try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef]
+try: (LLVMPreferredAlignmentOfType:=dll.LLVMPreferredAlignmentOfType).restype, LLVMPreferredAlignmentOfType.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef]
 except AttributeError: pass
 
 # unsigned int LLVMPreferredAlignmentOfGlobal(LLVMTargetDataRef TD, LLVMValueRef GlobalVar)
-try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMValueRef]
+try: (LLVMPreferredAlignmentOfGlobal:=dll.LLVMPreferredAlignmentOfGlobal).restype, LLVMPreferredAlignmentOfGlobal.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMValueRef]
 except AttributeError: pass
 
 # unsigned int LLVMElementAtOffset(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned long long Offset)
-try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_ulonglong]
+try: (LLVMElementAtOffset:=dll.LLVMElementAtOffset).restype, LLVMElementAtOffset.argtypes = ctypes.c_uint32, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint64]
 except AttributeError: pass
 
 # unsigned long long LLVMOffsetOfElement(LLVMTargetDataRef TD, LLVMTypeRef StructTy, unsigned int Element)
-try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_ulonglong, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint]
+try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement.argtypes = ctypes.c_uint64, [LLVMTargetDataRef, LLVMTypeRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMTargetRef LLVMGetFirstTarget(void)
@@ -13298,11 +13298,11 @@ try: (LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll:=dll.LLVMPassBuilderOpt
 except AttributeError: pass
 
 # void LLVMPassBuilderOptionsSetLicmMssaOptCap(LLVMPassBuilderOptionsRef Options, unsigned int LicmMssaOptCap)
-try: (LLVMPassBuilderOptionsSetLicmMssaOptCap:=dll.LLVMPassBuilderOptionsSetLicmMssaOptCap).restype, LLVMPassBuilderOptionsSetLicmMssaOptCap.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_uint]
+try: (LLVMPassBuilderOptionsSetLicmMssaOptCap:=dll.LLVMPassBuilderOptionsSetLicmMssaOptCap).restype, LLVMPassBuilderOptionsSetLicmMssaOptCap.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap(LLVMPassBuilderOptionsRef Options, unsigned int LicmMssaNoAccForPromotionCap)
-try: (LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap:=dll.LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap).restype, LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_uint]
+try: (LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap:=dll.LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap).restype, LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void LLVMPassBuilderOptionsSetCallGraphProfile(LLVMPassBuilderOptionsRef Options, LLVMBool CallGraphProfile)
@@ -13314,7 +13314,7 @@ try: (LLVMPassBuilderOptionsSetMergeFunctions:=dll.LLVMPassBuilderOptionsSetMerg
 except AttributeError: pass
 
 # void LLVMPassBuilderOptionsSetInlinerThreshold(LLVMPassBuilderOptionsRef Options, int Threshold)
-try: (LLVMPassBuilderOptionsSetInlinerThreshold:=dll.LLVMPassBuilderOptionsSetInlinerThreshold).restype, LLVMPassBuilderOptionsSetInlinerThreshold.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_int]
+try: (LLVMPassBuilderOptionsSetInlinerThreshold:=dll.LLVMPassBuilderOptionsSetInlinerThreshold).restype, LLVMPassBuilderOptionsSetInlinerThreshold.argtypes = None, [LLVMPassBuilderOptionsRef, ctypes.c_int32]
 except AttributeError: pass
 
 # void LLVMDisposePassBuilderOptions(LLVMPassBuilderOptionsRef Options)
@@ -13330,43 +13330,43 @@ try: (imaxdiv:=dll.imaxdiv).restype, imaxdiv.argtypes = imaxdiv_t, [intmax_t, in
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t strtoimax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoimax") __attribute__((nothrow))
-try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t strtoumax(const char *restrict __nptr, char **restrict __endptr, int __base) asm("__isoc23_strtoumax") __attribute__((nothrow))
-try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern intmax_t wcstoimax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoimax") __attribute__((nothrow))
-try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern uintmax_t wcstoumax(const __gwchar_t *restrict __nptr, __gwchar_t **restrict __endptr, int __base) asm("__isoc23_wcstoumax") __attribute__((nothrow))
-try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.POINTER(ctypes.c_int)), ctypes.c_int]
+try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 class llvm_blake3_chunk_state(Struct): pass
@@ -13422,15 +13422,15 @@ try: (llvm_blake3_hasher_reset:=dll.llvm_blake3_hasher_reset).restype, llvm_blak
 except AttributeError: pass
 
 # extern int select(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, struct timeval *restrict __timeout)
-try: (select:=dll.select).restype, select.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
+try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
 # extern int pselect(int __nfds, fd_set *restrict __readfds, fd_set *restrict __writefds, fd_set *restrict __exceptfds, const struct timespec *restrict __timeout, const __sigset_t *restrict __sigmask)
-try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int, [ctypes.c_int, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
+try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
 lto_bool_t = ctypes.c_bool
-lto_symbol_attributes = CEnum(ctypes.c_uint)
+lto_symbol_attributes = CEnum(ctypes.c_uint32)
 LTO_SYMBOL_ALIGNMENT_MASK = lto_symbol_attributes.define('LTO_SYMBOL_ALIGNMENT_MASK', 31)
 LTO_SYMBOL_PERMISSIONS_MASK = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_MASK', 224)
 LTO_SYMBOL_PERMISSIONS_CODE = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_CODE', 160)
@@ -13451,11 +13451,11 @@ LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = lto_symbol_attributes.define('LTO_SYMBO
 LTO_SYMBOL_COMDAT = lto_symbol_attributes.define('LTO_SYMBOL_COMDAT', 16384)
 LTO_SYMBOL_ALIAS = lto_symbol_attributes.define('LTO_SYMBOL_ALIAS', 32768)
 
-lto_debug_model = CEnum(ctypes.c_uint)
+lto_debug_model = CEnum(ctypes.c_uint32)
 LTO_DEBUG_MODEL_NONE = lto_debug_model.define('LTO_DEBUG_MODEL_NONE', 0)
 LTO_DEBUG_MODEL_DWARF = lto_debug_model.define('LTO_DEBUG_MODEL_DWARF', 1)
 
-lto_codegen_model = CEnum(ctypes.c_uint)
+lto_codegen_model = CEnum(ctypes.c_uint32)
 LTO_CODEGEN_PIC_MODEL_STATIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_STATIC', 0)
 LTO_CODEGEN_PIC_MODEL_DYNAMIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC', 1)
 LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC', 2)
@@ -13516,12 +13516,12 @@ try: (lto_module_create_in_codegen_context:=dll.lto_module_create_in_codegen_con
 except AttributeError: pass
 
 # extern lto_module_t lto_module_create_from_fd(int fd, const char *path, size_t file_size)
-try: (lto_module_create_from_fd:=dll.lto_module_create_from_fd).restype, lto_module_create_from_fd.argtypes = lto_module_t, [ctypes.c_int, ctypes.POINTER(ctypes.c_char), size_t]
+try: (lto_module_create_from_fd:=dll.lto_module_create_from_fd).restype, lto_module_create_from_fd.argtypes = lto_module_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-off_t = ctypes.c_long
+off_t = ctypes.c_int64
 # extern lto_module_t lto_module_create_from_fd_at_offset(int fd, const char *path, size_t file_size, size_t map_size, off_t offset)
-try: (lto_module_create_from_fd_at_offset:=dll.lto_module_create_from_fd_at_offset).restype, lto_module_create_from_fd_at_offset.argtypes = lto_module_t, [ctypes.c_int, ctypes.POINTER(ctypes.c_char), size_t, size_t, off_t]
+try: (lto_module_create_from_fd_at_offset:=dll.lto_module_create_from_fd_at_offset).restype, lto_module_create_from_fd_at_offset.argtypes = lto_module_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t, size_t, off_t]
 except AttributeError: pass
 
 # extern void lto_module_dispose(lto_module_t mod)
@@ -13537,15 +13537,15 @@ try: (lto_module_set_target_triple:=dll.lto_module_set_target_triple).restype, l
 except AttributeError: pass
 
 # extern unsigned int lto_module_get_num_symbols(lto_module_t mod)
-try: (lto_module_get_num_symbols:=dll.lto_module_get_num_symbols).restype, lto_module_get_num_symbols.argtypes = ctypes.c_uint, [lto_module_t]
+try: (lto_module_get_num_symbols:=dll.lto_module_get_num_symbols).restype, lto_module_get_num_symbols.argtypes = ctypes.c_uint32, [lto_module_t]
 except AttributeError: pass
 
 # extern const char *lto_module_get_symbol_name(lto_module_t mod, unsigned int index)
-try: (lto_module_get_symbol_name:=dll.lto_module_get_symbol_name).restype, lto_module_get_symbol_name.argtypes = ctypes.POINTER(ctypes.c_char), [lto_module_t, ctypes.c_uint]
+try: (lto_module_get_symbol_name:=dll.lto_module_get_symbol_name).restype, lto_module_get_symbol_name.argtypes = ctypes.POINTER(ctypes.c_char), [lto_module_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern lto_symbol_attributes lto_module_get_symbol_attribute(lto_module_t mod, unsigned int index)
-try: (lto_module_get_symbol_attribute:=dll.lto_module_get_symbol_attribute).restype, lto_module_get_symbol_attribute.argtypes = lto_symbol_attributes, [lto_module_t, ctypes.c_uint]
+try: (lto_module_get_symbol_attribute:=dll.lto_module_get_symbol_attribute).restype, lto_module_get_symbol_attribute.argtypes = lto_symbol_attributes, [lto_module_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern const char *lto_module_get_linkeropts(lto_module_t mod)
@@ -13553,14 +13553,14 @@ try: (lto_module_get_linkeropts:=dll.lto_module_get_linkeropts).restype, lto_mod
 except AttributeError: pass
 
 # extern lto_bool_t lto_module_get_macho_cputype(lto_module_t mod, unsigned int *out_cputype, unsigned int *out_cpusubtype)
-try: (lto_module_get_macho_cputype:=dll.lto_module_get_macho_cputype).restype, lto_module_get_macho_cputype.argtypes = lto_bool_t, [lto_module_t, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (lto_module_get_macho_cputype:=dll.lto_module_get_macho_cputype).restype, lto_module_get_macho_cputype.argtypes = lto_bool_t, [lto_module_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # extern lto_bool_t lto_module_has_ctor_dtor(lto_module_t mod)
 try: (lto_module_has_ctor_dtor:=dll.lto_module_has_ctor_dtor).restype, lto_module_has_ctor_dtor.argtypes = lto_bool_t, [lto_module_t]
 except AttributeError: pass
 
-lto_codegen_diagnostic_severity_t = CEnum(ctypes.c_uint)
+lto_codegen_diagnostic_severity_t = CEnum(ctypes.c_uint32)
 LTO_DS_ERROR = lto_codegen_diagnostic_severity_t.define('LTO_DS_ERROR', 0)
 LTO_DS_WARNING = lto_codegen_diagnostic_severity_t.define('LTO_DS_WARNING', 1)
 LTO_DS_REMARK = lto_codegen_diagnostic_severity_t.define('LTO_DS_REMARK', 3)
@@ -13608,7 +13608,7 @@ try: (lto_codegen_set_assembler_path:=dll.lto_codegen_set_assembler_path).restyp
 except AttributeError: pass
 
 # extern void lto_codegen_set_assembler_args(lto_code_gen_t cg, const char **args, int nargs)
-try: (lto_codegen_set_assembler_args:=dll.lto_codegen_set_assembler_args).restype, lto_codegen_set_assembler_args.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (lto_codegen_set_assembler_args:=dll.lto_codegen_set_assembler_args).restype, lto_codegen_set_assembler_args.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern void lto_codegen_add_must_preserve_symbol(lto_code_gen_t cg, const char *symbol)
@@ -13636,11 +13636,11 @@ try: (lto_codegen_compile_optimized:=dll.lto_codegen_compile_optimized).restype,
 except AttributeError: pass
 
 # extern unsigned int lto_api_version(void)
-try: (lto_api_version:=dll.lto_api_version).restype, lto_api_version.argtypes = ctypes.c_uint, []
+try: (lto_api_version:=dll.lto_api_version).restype, lto_api_version.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
 # extern void lto_set_debug_options(const char *const *options, int number)
-try: (lto_set_debug_options:=dll.lto_set_debug_options).restype, lto_set_debug_options.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (lto_set_debug_options:=dll.lto_set_debug_options).restype, lto_set_debug_options.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern void lto_codegen_debug_options(lto_code_gen_t cg, const char *)
@@ -13648,7 +13648,7 @@ try: (lto_codegen_debug_options:=dll.lto_codegen_debug_options).restype, lto_cod
 except AttributeError: pass
 
 # extern void lto_codegen_debug_options_array(lto_code_gen_t cg, const char *const *, int number)
-try: (lto_codegen_debug_options_array:=dll.lto_codegen_debug_options_array).restype, lto_codegen_debug_options_array.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (lto_codegen_debug_options_array:=dll.lto_codegen_debug_options_array).restype, lto_codegen_debug_options_array.argtypes = None, [lto_code_gen_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern void lto_initialize_disassembler(void)
@@ -13674,7 +13674,7 @@ try: (lto_input_dispose:=dll.lto_input_dispose).restype, lto_input_dispose.argty
 except AttributeError: pass
 
 # extern unsigned int lto_input_get_num_dependent_libraries(lto_input_t input)
-try: (lto_input_get_num_dependent_libraries:=dll.lto_input_get_num_dependent_libraries).restype, lto_input_get_num_dependent_libraries.argtypes = ctypes.c_uint, [lto_input_t]
+try: (lto_input_get_num_dependent_libraries:=dll.lto_input_get_num_dependent_libraries).restype, lto_input_get_num_dependent_libraries.argtypes = ctypes.c_uint32, [lto_input_t]
 except AttributeError: pass
 
 # extern const char *lto_input_get_dependent_library(lto_input_t input, size_t index, size_t *size)
@@ -13699,7 +13699,7 @@ try: (thinlto_codegen_dispose:=dll.thinlto_codegen_dispose).restype, thinlto_cod
 except AttributeError: pass
 
 # extern void thinlto_codegen_add_module(thinlto_code_gen_t cg, const char *identifier, const char *data, int length)
-try: (thinlto_codegen_add_module:=dll.thinlto_codegen_add_module).restype, thinlto_codegen_add_module.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int]
+try: (thinlto_codegen_add_module:=dll.thinlto_codegen_add_module).restype, thinlto_codegen_add_module.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_process(thinlto_code_gen_t cg)
@@ -13707,19 +13707,19 @@ try: (thinlto_codegen_process:=dll.thinlto_codegen_process).restype, thinlto_cod
 except AttributeError: pass
 
 # extern unsigned int thinlto_module_get_num_objects(thinlto_code_gen_t cg)
-try: (thinlto_module_get_num_objects:=dll.thinlto_module_get_num_objects).restype, thinlto_module_get_num_objects.argtypes = ctypes.c_uint, [thinlto_code_gen_t]
+try: (thinlto_module_get_num_objects:=dll.thinlto_module_get_num_objects).restype, thinlto_module_get_num_objects.argtypes = ctypes.c_uint32, [thinlto_code_gen_t]
 except AttributeError: pass
 
 # extern LTOObjectBuffer thinlto_module_get_object(thinlto_code_gen_t cg, unsigned int index)
-try: (thinlto_module_get_object:=dll.thinlto_module_get_object).restype, thinlto_module_get_object.argtypes = LTOObjectBuffer, [thinlto_code_gen_t, ctypes.c_uint]
+try: (thinlto_module_get_object:=dll.thinlto_module_get_object).restype, thinlto_module_get_object.argtypes = LTOObjectBuffer, [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int thinlto_module_get_num_object_files(thinlto_code_gen_t cg)
-try: (thinlto_module_get_num_object_files:=dll.thinlto_module_get_num_object_files).restype, thinlto_module_get_num_object_files.argtypes = ctypes.c_uint, [thinlto_code_gen_t]
+try: (thinlto_module_get_num_object_files:=dll.thinlto_module_get_num_object_files).restype, thinlto_module_get_num_object_files.argtypes = ctypes.c_uint32, [thinlto_code_gen_t]
 except AttributeError: pass
 
 # const char *thinlto_module_get_object_file(thinlto_code_gen_t cg, unsigned int index)
-try: (thinlto_module_get_object_file:=dll.thinlto_module_get_object_file).restype, thinlto_module_get_object_file.argtypes = ctypes.POINTER(ctypes.c_char), [thinlto_code_gen_t, ctypes.c_uint]
+try: (thinlto_module_get_object_file:=dll.thinlto_module_get_object_file).restype, thinlto_module_get_object_file.argtypes = ctypes.POINTER(ctypes.c_char), [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern lto_bool_t thinlto_codegen_set_pic_model(thinlto_code_gen_t cg, lto_codegen_model)
@@ -13747,7 +13747,7 @@ try: (thinlto_codegen_set_codegen_only:=dll.thinlto_codegen_set_codegen_only).re
 except AttributeError: pass
 
 # extern void thinlto_debug_options(const char *const *options, int number)
-try: (thinlto_debug_options:=dll.thinlto_debug_options).restype, thinlto_debug_options.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int]
+try: (thinlto_debug_options:=dll.thinlto_debug_options).restype, thinlto_debug_options.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
 # extern lto_bool_t lto_module_is_thinlto(lto_module_t mod)
@@ -13755,11 +13755,11 @@ try: (lto_module_is_thinlto:=dll.lto_module_is_thinlto).restype, lto_module_is_t
 except AttributeError: pass
 
 # extern void thinlto_codegen_add_must_preserve_symbol(thinlto_code_gen_t cg, const char *name, int length)
-try: (thinlto_codegen_add_must_preserve_symbol:=dll.thinlto_codegen_add_must_preserve_symbol).restype, thinlto_codegen_add_must_preserve_symbol.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int]
+try: (thinlto_codegen_add_must_preserve_symbol:=dll.thinlto_codegen_add_must_preserve_symbol).restype, thinlto_codegen_add_must_preserve_symbol.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_add_cross_referenced_symbol(thinlto_code_gen_t cg, const char *name, int length)
-try: (thinlto_codegen_add_cross_referenced_symbol:=dll.thinlto_codegen_add_cross_referenced_symbol).restype, thinlto_codegen_add_cross_referenced_symbol.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int]
+try: (thinlto_codegen_add_cross_referenced_symbol:=dll.thinlto_codegen_add_cross_referenced_symbol).restype, thinlto_codegen_add_cross_referenced_symbol.argtypes = None, [thinlto_code_gen_t, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_set_cache_dir(thinlto_code_gen_t cg, const char *cache_dir)
@@ -13767,27 +13767,27 @@ try: (thinlto_codegen_set_cache_dir:=dll.thinlto_codegen_set_cache_dir).restype,
 except AttributeError: pass
 
 # extern void thinlto_codegen_set_cache_pruning_interval(thinlto_code_gen_t cg, int interval)
-try: (thinlto_codegen_set_cache_pruning_interval:=dll.thinlto_codegen_set_cache_pruning_interval).restype, thinlto_codegen_set_cache_pruning_interval.argtypes = None, [thinlto_code_gen_t, ctypes.c_int]
+try: (thinlto_codegen_set_cache_pruning_interval:=dll.thinlto_codegen_set_cache_pruning_interval).restype, thinlto_codegen_set_cache_pruning_interval.argtypes = None, [thinlto_code_gen_t, ctypes.c_int32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_set_final_cache_size_relative_to_available_space(thinlto_code_gen_t cg, unsigned int percentage)
-try: (thinlto_codegen_set_final_cache_size_relative_to_available_space:=dll.thinlto_codegen_set_final_cache_size_relative_to_available_space).restype, thinlto_codegen_set_final_cache_size_relative_to_available_space.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint]
+try: (thinlto_codegen_set_final_cache_size_relative_to_available_space:=dll.thinlto_codegen_set_final_cache_size_relative_to_available_space).restype, thinlto_codegen_set_final_cache_size_relative_to_available_space.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_set_cache_entry_expiration(thinlto_code_gen_t cg, unsigned int expiration)
-try: (thinlto_codegen_set_cache_entry_expiration:=dll.thinlto_codegen_set_cache_entry_expiration).restype, thinlto_codegen_set_cache_entry_expiration.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint]
+try: (thinlto_codegen_set_cache_entry_expiration:=dll.thinlto_codegen_set_cache_entry_expiration).restype, thinlto_codegen_set_cache_entry_expiration.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_set_cache_size_bytes(thinlto_code_gen_t cg, unsigned int max_size_bytes)
-try: (thinlto_codegen_set_cache_size_bytes:=dll.thinlto_codegen_set_cache_size_bytes).restype, thinlto_codegen_set_cache_size_bytes.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint]
+try: (thinlto_codegen_set_cache_size_bytes:=dll.thinlto_codegen_set_cache_size_bytes).restype, thinlto_codegen_set_cache_size_bytes.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_set_cache_size_megabytes(thinlto_code_gen_t cg, unsigned int max_size_megabytes)
-try: (thinlto_codegen_set_cache_size_megabytes:=dll.thinlto_codegen_set_cache_size_megabytes).restype, thinlto_codegen_set_cache_size_megabytes.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint]
+try: (thinlto_codegen_set_cache_size_megabytes:=dll.thinlto_codegen_set_cache_size_megabytes).restype, thinlto_codegen_set_cache_size_megabytes.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # extern void thinlto_codegen_set_cache_size_files(thinlto_code_gen_t cg, unsigned int max_size_files)
-try: (thinlto_codegen_set_cache_size_files:=dll.thinlto_codegen_set_cache_size_files).restype, thinlto_codegen_set_cache_size_files.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint]
+try: (thinlto_codegen_set_cache_size_files:=dll.thinlto_codegen_set_cache_size_files).restype, thinlto_codegen_set_cache_size_files.argtypes = None, [thinlto_code_gen_t, ctypes.c_uint32]
 except AttributeError: pass
 
 LLVMDisassembler_Option_UseMarkup = 1

@@ -10,7 +10,7 @@ def dll():
   return None
 dll = dll()
 
-hsa_status_t = CEnum(ctypes.c_uint)
+hsa_status_t = CEnum(ctypes.c_uint32)
 HSA_STATUS_SUCCESS = hsa_status_t.define('HSA_STATUS_SUCCESS', 0)
 HSA_STATUS_INFO_BREAK = hsa_status_t.define('HSA_STATUS_INFO_BREAK', 1)
 HSA_STATUS_ERROR = hsa_status_t.define('HSA_STATUS_ERROR', 4096)
@@ -52,20 +52,20 @@ try: (hsa_status_string:=dll.hsa_status_string).restype, hsa_status_string.argty
 except AttributeError: pass
 
 class struct_hsa_dim3_s(Struct): pass
-uint32_t = ctypes.c_uint
+uint32_t = ctypes.c_uint32
 struct_hsa_dim3_s._fields_ = [
   ('x', uint32_t),
   ('y', uint32_t),
   ('z', uint32_t),
 ]
 hsa_dim3_t = struct_hsa_dim3_s
-hsa_access_permission_t = CEnum(ctypes.c_uint)
+hsa_access_permission_t = CEnum(ctypes.c_uint32)
 HSA_ACCESS_PERMISSION_NONE = hsa_access_permission_t.define('HSA_ACCESS_PERMISSION_NONE', 0)
 HSA_ACCESS_PERMISSION_RO = hsa_access_permission_t.define('HSA_ACCESS_PERMISSION_RO', 1)
 HSA_ACCESS_PERMISSION_WO = hsa_access_permission_t.define('HSA_ACCESS_PERMISSION_WO', 2)
 HSA_ACCESS_PERMISSION_RW = hsa_access_permission_t.define('HSA_ACCESS_PERMISSION_RW', 3)
 
-hsa_file_t = ctypes.c_int
+hsa_file_t = ctypes.c_int32
 # hsa_status_t hsa_init()
 try: (hsa_init:=dll.hsa_init).restype, hsa_init.argtypes = hsa_status_t, []
 except AttributeError: pass
@@ -74,19 +74,19 @@ except AttributeError: pass
 try: (hsa_shut_down:=dll.hsa_shut_down).restype, hsa_shut_down.argtypes = hsa_status_t, []
 except AttributeError: pass
 
-hsa_endianness_t = CEnum(ctypes.c_uint)
+hsa_endianness_t = CEnum(ctypes.c_uint32)
 HSA_ENDIANNESS_LITTLE = hsa_endianness_t.define('HSA_ENDIANNESS_LITTLE', 0)
 HSA_ENDIANNESS_BIG = hsa_endianness_t.define('HSA_ENDIANNESS_BIG', 1)
 
-hsa_machine_model_t = CEnum(ctypes.c_uint)
+hsa_machine_model_t = CEnum(ctypes.c_uint32)
 HSA_MACHINE_MODEL_SMALL = hsa_machine_model_t.define('HSA_MACHINE_MODEL_SMALL', 0)
 HSA_MACHINE_MODEL_LARGE = hsa_machine_model_t.define('HSA_MACHINE_MODEL_LARGE', 1)
 
-hsa_profile_t = CEnum(ctypes.c_uint)
+hsa_profile_t = CEnum(ctypes.c_uint32)
 HSA_PROFILE_BASE = hsa_profile_t.define('HSA_PROFILE_BASE', 0)
 HSA_PROFILE_FULL = hsa_profile_t.define('HSA_PROFILE_FULL', 1)
 
-hsa_system_info_t = CEnum(ctypes.c_uint)
+hsa_system_info_t = CEnum(ctypes.c_uint32)
 HSA_SYSTEM_INFO_VERSION_MAJOR = hsa_system_info_t.define('HSA_SYSTEM_INFO_VERSION_MAJOR', 0)
 HSA_SYSTEM_INFO_VERSION_MINOR = hsa_system_info_t.define('HSA_SYSTEM_INFO_VERSION_MINOR', 1)
 HSA_SYSTEM_INFO_TIMESTAMP = hsa_system_info_t.define('HSA_SYSTEM_INFO_TIMESTAMP', 2)
@@ -109,7 +109,7 @@ HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR = hsa_system_info_t.define('HSA_AMD_SYSTEM
 try: (hsa_system_get_info:=dll.hsa_system_get_info).restype, hsa_system_get_info.argtypes = hsa_status_t, [hsa_system_info_t, ctypes.c_void_p]
 except AttributeError: pass
 
-hsa_extension_t = CEnum(ctypes.c_uint)
+hsa_extension_t = CEnum(ctypes.c_uint32)
 HSA_EXTENSION_FINALIZER = hsa_extension_t.define('HSA_EXTENSION_FINALIZER', 0)
 HSA_EXTENSION_IMAGES = hsa_extension_t.define('HSA_EXTENSION_IMAGES', 1)
 HSA_EXTENSION_PERFORMANCE_COUNTERS = hsa_extension_t.define('HSA_EXTENSION_PERFORMANCE_COUNTERS', 2)
@@ -122,7 +122,7 @@ HSA_EXTENSION_AMD_AQLPROFILE = hsa_extension_t.define('HSA_EXTENSION_AMD_AQLPROF
 HSA_EXTENSION_AMD_PC_SAMPLING = hsa_extension_t.define('HSA_EXTENSION_AMD_PC_SAMPLING', 515)
 HSA_AMD_LAST_EXTENSION = hsa_extension_t.define('HSA_AMD_LAST_EXTENSION', 515)
 
-uint16_t = ctypes.c_ushort
+uint16_t = ctypes.c_uint16
 # hsa_status_t hsa_extension_get_name(uint16_t extension, const char **name)
 try: (hsa_extension_get_name:=dll.hsa_extension_get_name).restype, hsa_extension_get_name.argtypes = hsa_status_t, [uint16_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
@@ -139,32 +139,32 @@ except AttributeError: pass
 try: (hsa_system_get_extension_table:=dll.hsa_system_get_extension_table).restype, hsa_system_get_extension_table.argtypes = hsa_status_t, [uint16_t, uint16_t, uint16_t, ctypes.c_void_p]
 except AttributeError: pass
 
-size_t = ctypes.c_ulong
+size_t = ctypes.c_uint64
 # hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t version_major, size_t table_length, void *table)
 try: (hsa_system_get_major_extension_table:=dll.hsa_system_get_major_extension_table).restype, hsa_system_get_major_extension_table.argtypes = hsa_status_t, [uint16_t, uint16_t, size_t, ctypes.c_void_p]
 except AttributeError: pass
 
 class struct_hsa_agent_s(Struct): pass
-uint64_t = ctypes.c_ulong
+uint64_t = ctypes.c_uint64
 struct_hsa_agent_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_agent_t = struct_hsa_agent_s
-hsa_agent_feature_t = CEnum(ctypes.c_uint)
+hsa_agent_feature_t = CEnum(ctypes.c_uint32)
 HSA_AGENT_FEATURE_KERNEL_DISPATCH = hsa_agent_feature_t.define('HSA_AGENT_FEATURE_KERNEL_DISPATCH', 1)
 HSA_AGENT_FEATURE_AGENT_DISPATCH = hsa_agent_feature_t.define('HSA_AGENT_FEATURE_AGENT_DISPATCH', 2)
 
-hsa_device_type_t = CEnum(ctypes.c_uint)
+hsa_device_type_t = CEnum(ctypes.c_uint32)
 HSA_DEVICE_TYPE_CPU = hsa_device_type_t.define('HSA_DEVICE_TYPE_CPU', 0)
 HSA_DEVICE_TYPE_GPU = hsa_device_type_t.define('HSA_DEVICE_TYPE_GPU', 1)
 HSA_DEVICE_TYPE_DSP = hsa_device_type_t.define('HSA_DEVICE_TYPE_DSP', 2)
 
-hsa_default_float_rounding_mode_t = CEnum(ctypes.c_uint)
+hsa_default_float_rounding_mode_t = CEnum(ctypes.c_uint32)
 HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT = hsa_default_float_rounding_mode_t.define('HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT', 0)
 HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO = hsa_default_float_rounding_mode_t.define('HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO', 1)
 HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR = hsa_default_float_rounding_mode_t.define('HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR', 2)
 
-hsa_agent_info_t = CEnum(ctypes.c_uint)
+hsa_agent_info_t = CEnum(ctypes.c_uint32)
 HSA_AGENT_INFO_NAME = hsa_agent_info_t.define('HSA_AGENT_INFO_NAME', 0)
 HSA_AGENT_INFO_VENDOR_NAME = hsa_agent_info_t.define('HSA_AGENT_INFO_VENDOR_NAME', 1)
 HSA_AGENT_INFO_FEATURE = hsa_agent_info_t.define('HSA_AGENT_INFO_FEATURE', 2)
@@ -200,7 +200,7 @@ except AttributeError: pass
 try: (hsa_iterate_agents:=dll.hsa_iterate_agents).restype, hsa_iterate_agents.argtypes = hsa_status_t, [ctypes.CFUNCTYPE(hsa_status_t, hsa_agent_t, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-hsa_exception_policy_t = CEnum(ctypes.c_uint)
+hsa_exception_policy_t = CEnum(ctypes.c_uint32)
 HSA_EXCEPTION_POLICY_BREAK = hsa_exception_policy_t.define('HSA_EXCEPTION_POLICY_BREAK', 1)
 HSA_EXCEPTION_POLICY_DETECT = hsa_exception_policy_t.define('HSA_EXCEPTION_POLICY_DETECT', 2)
 
@@ -213,7 +213,7 @@ struct_hsa_cache_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_cache_t = struct_hsa_cache_s
-hsa_cache_info_t = CEnum(ctypes.c_uint)
+hsa_cache_info_t = CEnum(ctypes.c_uint32)
 HSA_CACHE_INFO_NAME_LENGTH = hsa_cache_info_t.define('HSA_CACHE_INFO_NAME_LENGTH', 0)
 HSA_CACHE_INFO_NAME = hsa_cache_info_t.define('HSA_CACHE_INFO_NAME', 1)
 HSA_CACHE_INFO_LEVEL = hsa_cache_info_t.define('HSA_CACHE_INFO_LEVEL', 2)
@@ -240,7 +240,7 @@ struct_hsa_signal_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_signal_t = struct_hsa_signal_s
-hsa_signal_value_t = ctypes.c_long
+hsa_signal_value_t = ctypes.c_int64
 # hsa_status_t hsa_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers, const hsa_agent_t *consumers, hsa_signal_t *signal)
 try: (hsa_signal_create:=dll.hsa_signal_create).restype, hsa_signal_create.argtypes = hsa_status_t, [hsa_signal_value_t, uint32_t, ctypes.POINTER(hsa_agent_t), ctypes.POINTER(hsa_signal_t)]
 except AttributeError: pass
@@ -477,13 +477,13 @@ except AttributeError: pass
 try: (hsa_signal_xor_release:=dll.hsa_signal_xor_release).restype, hsa_signal_xor_release.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
 except AttributeError: pass
 
-hsa_signal_condition_t = CEnum(ctypes.c_uint)
+hsa_signal_condition_t = CEnum(ctypes.c_uint32)
 HSA_SIGNAL_CONDITION_EQ = hsa_signal_condition_t.define('HSA_SIGNAL_CONDITION_EQ', 0)
 HSA_SIGNAL_CONDITION_NE = hsa_signal_condition_t.define('HSA_SIGNAL_CONDITION_NE', 1)
 HSA_SIGNAL_CONDITION_LT = hsa_signal_condition_t.define('HSA_SIGNAL_CONDITION_LT', 2)
 HSA_SIGNAL_CONDITION_GTE = hsa_signal_condition_t.define('HSA_SIGNAL_CONDITION_GTE', 3)
 
-hsa_wait_state_t = CEnum(ctypes.c_uint)
+hsa_wait_state_t = CEnum(ctypes.c_uint32)
 HSA_WAIT_STATE_BLOCKED = hsa_wait_state_t.define('HSA_WAIT_STATE_BLOCKED', 0)
 HSA_WAIT_STATE_ACTIVE = hsa_wait_state_t.define('HSA_WAIT_STATE_ACTIVE', 1)
 
@@ -525,13 +525,13 @@ struct_hsa_region_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_region_t = struct_hsa_region_s
-hsa_queue_type_t = CEnum(ctypes.c_uint)
+hsa_queue_type_t = CEnum(ctypes.c_uint32)
 HSA_QUEUE_TYPE_MULTI = hsa_queue_type_t.define('HSA_QUEUE_TYPE_MULTI', 0)
 HSA_QUEUE_TYPE_SINGLE = hsa_queue_type_t.define('HSA_QUEUE_TYPE_SINGLE', 1)
 HSA_QUEUE_TYPE_COOPERATIVE = hsa_queue_type_t.define('HSA_QUEUE_TYPE_COOPERATIVE', 2)
 
-hsa_queue_type32_t = ctypes.c_uint
-hsa_queue_feature_t = CEnum(ctypes.c_uint)
+hsa_queue_type32_t = ctypes.c_uint32
+hsa_queue_feature_t = CEnum(ctypes.c_uint32)
 HSA_QUEUE_FEATURE_KERNEL_DISPATCH = hsa_queue_feature_t.define('HSA_QUEUE_FEATURE_KERNEL_DISPATCH', 1)
 HSA_QUEUE_FEATURE_AGENT_DISPATCH = hsa_queue_feature_t.define('HSA_QUEUE_FEATURE_AGENT_DISPATCH', 2)
 
@@ -666,7 +666,7 @@ except AttributeError: pass
 try: (hsa_queue_store_read_index_screlease:=dll.hsa_queue_store_read_index_screlease).restype, hsa_queue_store_read_index_screlease.argtypes = None, [ctypes.POINTER(hsa_queue_t), uint64_t]
 except AttributeError: pass
 
-hsa_packet_type_t = CEnum(ctypes.c_uint)
+hsa_packet_type_t = CEnum(ctypes.c_uint32)
 HSA_PACKET_TYPE_VENDOR_SPECIFIC = hsa_packet_type_t.define('HSA_PACKET_TYPE_VENDOR_SPECIFIC', 0)
 HSA_PACKET_TYPE_INVALID = hsa_packet_type_t.define('HSA_PACKET_TYPE_INVALID', 1)
 HSA_PACKET_TYPE_KERNEL_DISPATCH = hsa_packet_type_t.define('HSA_PACKET_TYPE_KERNEL_DISPATCH', 2)
@@ -674,12 +674,12 @@ HSA_PACKET_TYPE_BARRIER_AND = hsa_packet_type_t.define('HSA_PACKET_TYPE_BARRIER_
 HSA_PACKET_TYPE_AGENT_DISPATCH = hsa_packet_type_t.define('HSA_PACKET_TYPE_AGENT_DISPATCH', 4)
 HSA_PACKET_TYPE_BARRIER_OR = hsa_packet_type_t.define('HSA_PACKET_TYPE_BARRIER_OR', 5)
 
-hsa_fence_scope_t = CEnum(ctypes.c_uint)
+hsa_fence_scope_t = CEnum(ctypes.c_uint32)
 HSA_FENCE_SCOPE_NONE = hsa_fence_scope_t.define('HSA_FENCE_SCOPE_NONE', 0)
 HSA_FENCE_SCOPE_AGENT = hsa_fence_scope_t.define('HSA_FENCE_SCOPE_AGENT', 1)
 HSA_FENCE_SCOPE_SYSTEM = hsa_fence_scope_t.define('HSA_FENCE_SCOPE_SYSTEM', 2)
 
-hsa_packet_header_t = CEnum(ctypes.c_uint)
+hsa_packet_header_t = CEnum(ctypes.c_uint32)
 HSA_PACKET_HEADER_TYPE = hsa_packet_header_t.define('HSA_PACKET_HEADER_TYPE', 0)
 HSA_PACKET_HEADER_BARRIER = hsa_packet_header_t.define('HSA_PACKET_HEADER_BARRIER', 8)
 HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE = hsa_packet_header_t.define('HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE', 9)
@@ -687,7 +687,7 @@ HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE = hsa_packet_header_t.define('HSA_PACKET_H
 HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE = hsa_packet_header_t.define('HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE', 11)
 HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE = hsa_packet_header_t.define('HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE', 11)
 
-hsa_packet_header_width_t = CEnum(ctypes.c_uint)
+hsa_packet_header_width_t = CEnum(ctypes.c_uint32)
 HSA_PACKET_HEADER_WIDTH_TYPE = hsa_packet_header_width_t.define('HSA_PACKET_HEADER_WIDTH_TYPE', 8)
 HSA_PACKET_HEADER_WIDTH_BARRIER = hsa_packet_header_width_t.define('HSA_PACKET_HEADER_WIDTH_BARRIER', 1)
 HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE = hsa_packet_header_width_t.define('HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE', 2)
@@ -695,10 +695,10 @@ HSA_PACKET_HEADER_WIDTH_ACQUIRE_FENCE_SCOPE = hsa_packet_header_width_t.define('
 HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE = hsa_packet_header_width_t.define('HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE', 2)
 HSA_PACKET_HEADER_WIDTH_RELEASE_FENCE_SCOPE = hsa_packet_header_width_t.define('HSA_PACKET_HEADER_WIDTH_RELEASE_FENCE_SCOPE', 2)
 
-hsa_kernel_dispatch_packet_setup_t = CEnum(ctypes.c_uint)
+hsa_kernel_dispatch_packet_setup_t = CEnum(ctypes.c_uint32)
 HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS = hsa_kernel_dispatch_packet_setup_t.define('HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS', 0)
 
-hsa_kernel_dispatch_packet_setup_width_t = CEnum(ctypes.c_uint)
+hsa_kernel_dispatch_packet_setup_width_t = CEnum(ctypes.c_uint32)
 HSA_KERNEL_DISPATCH_PACKET_SETUP_WIDTH_DIMENSIONS = hsa_kernel_dispatch_packet_setup_width_t.define('HSA_KERNEL_DISPATCH_PACKET_SETUP_WIDTH_DIMENSIONS', 2)
 
 class struct_hsa_kernel_dispatch_packet_s(Struct): pass
@@ -751,20 +751,20 @@ struct_hsa_barrier_or_packet_s._fields_ = [
   ('completion_signal', hsa_signal_t),
 ]
 hsa_barrier_or_packet_t = struct_hsa_barrier_or_packet_s
-hsa_region_segment_t = CEnum(ctypes.c_uint)
+hsa_region_segment_t = CEnum(ctypes.c_uint32)
 HSA_REGION_SEGMENT_GLOBAL = hsa_region_segment_t.define('HSA_REGION_SEGMENT_GLOBAL', 0)
 HSA_REGION_SEGMENT_READONLY = hsa_region_segment_t.define('HSA_REGION_SEGMENT_READONLY', 1)
 HSA_REGION_SEGMENT_PRIVATE = hsa_region_segment_t.define('HSA_REGION_SEGMENT_PRIVATE', 2)
 HSA_REGION_SEGMENT_GROUP = hsa_region_segment_t.define('HSA_REGION_SEGMENT_GROUP', 3)
 HSA_REGION_SEGMENT_KERNARG = hsa_region_segment_t.define('HSA_REGION_SEGMENT_KERNARG', 4)
 
-hsa_region_global_flag_t = CEnum(ctypes.c_uint)
+hsa_region_global_flag_t = CEnum(ctypes.c_uint32)
 HSA_REGION_GLOBAL_FLAG_KERNARG = hsa_region_global_flag_t.define('HSA_REGION_GLOBAL_FLAG_KERNARG', 1)
 HSA_REGION_GLOBAL_FLAG_FINE_GRAINED = hsa_region_global_flag_t.define('HSA_REGION_GLOBAL_FLAG_FINE_GRAINED', 2)
 HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED = hsa_region_global_flag_t.define('HSA_REGION_GLOBAL_FLAG_COARSE_GRAINED', 4)
 HSA_REGION_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED = hsa_region_global_flag_t.define('HSA_REGION_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED', 8)
 
-hsa_region_info_t = CEnum(ctypes.c_uint)
+hsa_region_info_t = CEnum(ctypes.c_uint32)
 HSA_REGION_INFO_SEGMENT = hsa_region_info_t.define('HSA_REGION_INFO_SEGMENT', 0)
 HSA_REGION_INFO_GLOBAL_FLAGS = hsa_region_info_t.define('HSA_REGION_INFO_GLOBAL_FLAGS', 1)
 HSA_REGION_INFO_SIZE = hsa_region_info_t.define('HSA_REGION_INFO_SIZE', 2)
@@ -819,7 +819,7 @@ except AttributeError: pass
 try: (hsa_agent_iterate_isas:=dll.hsa_agent_iterate_isas).restype, hsa_agent_iterate_isas.argtypes = hsa_status_t, [hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_isa_t, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-hsa_isa_info_t = CEnum(ctypes.c_uint)
+hsa_isa_info_t = CEnum(ctypes.c_uint32)
 HSA_ISA_INFO_NAME_LENGTH = hsa_isa_info_t.define('HSA_ISA_INFO_NAME_LENGTH', 0)
 HSA_ISA_INFO_NAME = hsa_isa_info_t.define('HSA_ISA_INFO_NAME', 1)
 HSA_ISA_INFO_CALL_CONVENTION_COUNT = hsa_isa_info_t.define('HSA_ISA_INFO_CALL_CONVENTION_COUNT', 2)
@@ -848,16 +848,16 @@ except AttributeError: pass
 try: (hsa_isa_get_exception_policies:=dll.hsa_isa_get_exception_policies).restype, hsa_isa_get_exception_policies.argtypes = hsa_status_t, [hsa_isa_t, hsa_profile_t, ctypes.POINTER(uint16_t)]
 except AttributeError: pass
 
-hsa_fp_type_t = CEnum(ctypes.c_uint)
+hsa_fp_type_t = CEnum(ctypes.c_uint32)
 HSA_FP_TYPE_16 = hsa_fp_type_t.define('HSA_FP_TYPE_16', 1)
 HSA_FP_TYPE_32 = hsa_fp_type_t.define('HSA_FP_TYPE_32', 2)
 HSA_FP_TYPE_64 = hsa_fp_type_t.define('HSA_FP_TYPE_64', 4)
 
-hsa_flush_mode_t = CEnum(ctypes.c_uint)
+hsa_flush_mode_t = CEnum(ctypes.c_uint32)
 HSA_FLUSH_MODE_FTZ = hsa_flush_mode_t.define('HSA_FLUSH_MODE_FTZ', 1)
 HSA_FLUSH_MODE_NON_FTZ = hsa_flush_mode_t.define('HSA_FLUSH_MODE_NON_FTZ', 2)
 
-hsa_round_method_t = CEnum(ctypes.c_uint)
+hsa_round_method_t = CEnum(ctypes.c_uint32)
 HSA_ROUND_METHOD_SINGLE = hsa_round_method_t.define('HSA_ROUND_METHOD_SINGLE', 1)
 HSA_ROUND_METHOD_DOUBLE = hsa_round_method_t.define('HSA_ROUND_METHOD_DOUBLE', 2)
 
@@ -870,7 +870,7 @@ struct_hsa_wavefront_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_wavefront_t = struct_hsa_wavefront_s
-hsa_wavefront_info_t = CEnum(ctypes.c_uint)
+hsa_wavefront_info_t = CEnum(ctypes.c_uint32)
 HSA_WAVEFRONT_INFO_SIZE = hsa_wavefront_info_t.define('HSA_WAVEFRONT_INFO_SIZE', 0)
 
 # hsa_status_t hsa_wavefront_get_info(hsa_wavefront_t wavefront, hsa_wavefront_info_t attribute, void *value)
@@ -907,7 +907,7 @@ struct_hsa_executable_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_executable_t = struct_hsa_executable_s
-hsa_executable_state_t = CEnum(ctypes.c_uint)
+hsa_executable_state_t = CEnum(ctypes.c_uint32)
 HSA_EXECUTABLE_STATE_UNFROZEN = hsa_executable_state_t.define('HSA_EXECUTABLE_STATE_UNFROZEN', 0)
 HSA_EXECUTABLE_STATE_FROZEN = hsa_executable_state_t.define('HSA_EXECUTABLE_STATE_FROZEN', 1)
 
@@ -940,7 +940,7 @@ except AttributeError: pass
 try: (hsa_executable_freeze:=dll.hsa_executable_freeze).restype, hsa_executable_freeze.argtypes = hsa_status_t, [hsa_executable_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-hsa_executable_info_t = CEnum(ctypes.c_uint)
+hsa_executable_info_t = CEnum(ctypes.c_uint32)
 HSA_EXECUTABLE_INFO_PROFILE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_PROFILE', 1)
 HSA_EXECUTABLE_INFO_STATE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_STATE', 2)
 HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 3)
@@ -974,7 +974,7 @@ struct_hsa_executable_symbol_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_executable_symbol_t = struct_hsa_executable_symbol_s
-int32_t = ctypes.c_int
+int32_t = ctypes.c_int32
 # hsa_status_t hsa_executable_get_symbol(hsa_executable_t executable, const char *module_name, const char *symbol_name, hsa_agent_t agent, int32_t call_convention, hsa_executable_symbol_t *symbol)
 try: (hsa_executable_get_symbol:=dll.hsa_executable_get_symbol).restype, hsa_executable_get_symbol.argtypes = hsa_status_t, [hsa_executable_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), hsa_agent_t, int32_t, ctypes.POINTER(hsa_executable_symbol_t)]
 except AttributeError: pass
@@ -983,24 +983,24 @@ except AttributeError: pass
 try: (hsa_executable_get_symbol_by_name:=dll.hsa_executable_get_symbol_by_name).restype, hsa_executable_get_symbol_by_name.argtypes = hsa_status_t, [hsa_executable_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(hsa_agent_t), ctypes.POINTER(hsa_executable_symbol_t)]
 except AttributeError: pass
 
-hsa_symbol_kind_t = CEnum(ctypes.c_uint)
+hsa_symbol_kind_t = CEnum(ctypes.c_uint32)
 HSA_SYMBOL_KIND_VARIABLE = hsa_symbol_kind_t.define('HSA_SYMBOL_KIND_VARIABLE', 0)
 HSA_SYMBOL_KIND_KERNEL = hsa_symbol_kind_t.define('HSA_SYMBOL_KIND_KERNEL', 1)
 HSA_SYMBOL_KIND_INDIRECT_FUNCTION = hsa_symbol_kind_t.define('HSA_SYMBOL_KIND_INDIRECT_FUNCTION', 2)
 
-hsa_symbol_linkage_t = CEnum(ctypes.c_uint)
+hsa_symbol_linkage_t = CEnum(ctypes.c_uint32)
 HSA_SYMBOL_LINKAGE_MODULE = hsa_symbol_linkage_t.define('HSA_SYMBOL_LINKAGE_MODULE', 0)
 HSA_SYMBOL_LINKAGE_PROGRAM = hsa_symbol_linkage_t.define('HSA_SYMBOL_LINKAGE_PROGRAM', 1)
 
-hsa_variable_allocation_t = CEnum(ctypes.c_uint)
+hsa_variable_allocation_t = CEnum(ctypes.c_uint32)
 HSA_VARIABLE_ALLOCATION_AGENT = hsa_variable_allocation_t.define('HSA_VARIABLE_ALLOCATION_AGENT', 0)
 HSA_VARIABLE_ALLOCATION_PROGRAM = hsa_variable_allocation_t.define('HSA_VARIABLE_ALLOCATION_PROGRAM', 1)
 
-hsa_variable_segment_t = CEnum(ctypes.c_uint)
+hsa_variable_segment_t = CEnum(ctypes.c_uint32)
 HSA_VARIABLE_SEGMENT_GLOBAL = hsa_variable_segment_t.define('HSA_VARIABLE_SEGMENT_GLOBAL', 0)
 HSA_VARIABLE_SEGMENT_READONLY = hsa_variable_segment_t.define('HSA_VARIABLE_SEGMENT_READONLY', 1)
 
-hsa_executable_symbol_info_t = CEnum(ctypes.c_uint)
+hsa_executable_symbol_info_t = CEnum(ctypes.c_uint32)
 HSA_EXECUTABLE_SYMBOL_INFO_TYPE = hsa_executable_symbol_info_t.define('HSA_EXECUTABLE_SYMBOL_INFO_TYPE', 0)
 HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH = hsa_executable_symbol_info_t.define('HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH', 1)
 HSA_EXECUTABLE_SYMBOL_INFO_NAME = hsa_executable_symbol_info_t.define('HSA_EXECUTABLE_SYMBOL_INFO_NAME', 2)
@@ -1063,10 +1063,10 @@ except AttributeError: pass
 try: (hsa_code_object_destroy:=dll.hsa_code_object_destroy).restype, hsa_code_object_destroy.argtypes = hsa_status_t, [hsa_code_object_t]
 except AttributeError: pass
 
-hsa_code_object_type_t = CEnum(ctypes.c_uint)
+hsa_code_object_type_t = CEnum(ctypes.c_uint32)
 HSA_CODE_OBJECT_TYPE_PROGRAM = hsa_code_object_type_t.define('HSA_CODE_OBJECT_TYPE_PROGRAM', 0)
 
-hsa_code_object_info_t = CEnum(ctypes.c_uint)
+hsa_code_object_info_t = CEnum(ctypes.c_uint32)
 HSA_CODE_OBJECT_INFO_VERSION = hsa_code_object_info_t.define('HSA_CODE_OBJECT_INFO_VERSION', 0)
 HSA_CODE_OBJECT_INFO_TYPE = hsa_code_object_info_t.define('HSA_CODE_OBJECT_INFO_TYPE', 1)
 HSA_CODE_OBJECT_INFO_ISA = hsa_code_object_info_t.define('HSA_CODE_OBJECT_INFO_ISA', 2)
@@ -1095,7 +1095,7 @@ except AttributeError: pass
 try: (hsa_code_object_get_symbol_from_name:=dll.hsa_code_object_get_symbol_from_name).restype, hsa_code_object_get_symbol_from_name.argtypes = hsa_status_t, [hsa_code_object_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(hsa_code_symbol_t)]
 except AttributeError: pass
 
-hsa_code_symbol_info_t = CEnum(ctypes.c_uint)
+hsa_code_symbol_info_t = CEnum(ctypes.c_uint32)
 HSA_CODE_SYMBOL_INFO_TYPE = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_TYPE', 0)
 HSA_CODE_SYMBOL_INFO_NAME_LENGTH = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_NAME_LENGTH', 1)
 HSA_CODE_SYMBOL_INFO_NAME = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_NAME', 2)
@@ -1125,8 +1125,8 @@ except AttributeError: pass
 try: (hsa_code_object_iterate_symbols:=dll.hsa_code_object_iterate_symbols).restype, hsa_code_object_iterate_symbols.argtypes = hsa_status_t, [hsa_code_object_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_code_object_t, hsa_code_symbol_t, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-hsa_signal_condition32_t = ctypes.c_uint
-hsa_amd_packet_type_t = CEnum(ctypes.c_uint)
+hsa_signal_condition32_t = ctypes.c_uint32
+hsa_amd_packet_type_t = CEnum(ctypes.c_uint32)
 HSA_AMD_PACKET_TYPE_BARRIER_VALUE = hsa_amd_packet_type_t.define('HSA_AMD_PACKET_TYPE_BARRIER_VALUE', 2)
 
 hsa_amd_packet_type8_t = ctypes.c_ubyte
@@ -1152,7 +1152,7 @@ struct_hsa_amd_barrier_value_packet_s._fields_ = [
   ('completion_signal', hsa_signal_t),
 ]
 hsa_amd_barrier_value_packet_t = struct_hsa_amd_barrier_value_packet_s
-_anonenum0 = CEnum(ctypes.c_uint)
+_anonenum0 = CEnum(ctypes.c_uint32)
 HSA_STATUS_ERROR_INVALID_MEMORY_POOL = _anonenum0.define('HSA_STATUS_ERROR_INVALID_MEMORY_POOL', 40)
 HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION = _anonenum0.define('HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION', 41)
 HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION = _anonenum0.define('HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION', 42)
@@ -1161,11 +1161,11 @@ HSA_STATUS_CU_MASK_REDUCED = _anonenum0.define('HSA_STATUS_CU_MASK_REDUCED', 44)
 HSA_STATUS_ERROR_OUT_OF_REGISTERS = _anonenum0.define('HSA_STATUS_ERROR_OUT_OF_REGISTERS', 45)
 HSA_STATUS_ERROR_RESOURCE_BUSY = _anonenum0.define('HSA_STATUS_ERROR_RESOURCE_BUSY', 46)
 
-hsa_amd_iommu_version_t = CEnum(ctypes.c_uint)
+hsa_amd_iommu_version_t = CEnum(ctypes.c_uint32)
 HSA_IOMMU_SUPPORT_NONE = hsa_amd_iommu_version_t.define('HSA_IOMMU_SUPPORT_NONE', 0)
 HSA_IOMMU_SUPPORT_V2 = hsa_amd_iommu_version_t.define('HSA_IOMMU_SUPPORT_V2', 1)
 
-enum_hsa_amd_agent_info_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_agent_info_s = CEnum(ctypes.c_uint32)
 HSA_AMD_AGENT_INFO_CHIP_ID = enum_hsa_amd_agent_info_s.define('HSA_AMD_AGENT_INFO_CHIP_ID', 40960)
 HSA_AMD_AGENT_INFO_CACHELINE_SIZE = enum_hsa_amd_agent_info_s.define('HSA_AMD_AGENT_INFO_CACHELINE_SIZE', 40961)
 HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT = enum_hsa_amd_agent_info_s.define('HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT', 40962)
@@ -1202,11 +1202,11 @@ HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES = enum_hsa_amd_agent_info_s.define('HSA_AMD
 HSA_AMD_AGENT_INFO_AQL_EXTENSIONS = enum_hsa_amd_agent_info_s.define('HSA_AMD_AGENT_INFO_AQL_EXTENSIONS', 41237)
 
 hsa_amd_agent_info_t = enum_hsa_amd_agent_info_s
-enum_hsa_amd_agent_memory_properties_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_agent_memory_properties_s = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU = enum_hsa_amd_agent_memory_properties_s.define('HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU', 1)
 
 hsa_amd_agent_memory_properties_t = enum_hsa_amd_agent_memory_properties_s
-enum_hsa_amd_sdma_engine_id = CEnum(ctypes.c_uint)
+enum_hsa_amd_sdma_engine_id = CEnum(ctypes.c_uint32)
 HSA_AMD_SDMA_ENGINE_0 = enum_hsa_amd_sdma_engine_id.define('HSA_AMD_SDMA_ENGINE_0', 1)
 HSA_AMD_SDMA_ENGINE_1 = enum_hsa_amd_sdma_engine_id.define('HSA_AMD_SDMA_ENGINE_1', 2)
 HSA_AMD_SDMA_ENGINE_2 = enum_hsa_amd_sdma_engine_id.define('HSA_AMD_SDMA_ENGINE_2', 4)
@@ -1231,14 +1231,14 @@ struct_hsa_amd_hdp_flush_s._fields_ = [
   ('HDP_REG_FLUSH_CNTL', ctypes.POINTER(uint32_t)),
 ]
 hsa_amd_hdp_flush_t = struct_hsa_amd_hdp_flush_s
-enum_hsa_amd_region_info_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_region_info_s = CEnum(ctypes.c_uint32)
 HSA_AMD_REGION_INFO_HOST_ACCESSIBLE = enum_hsa_amd_region_info_s.define('HSA_AMD_REGION_INFO_HOST_ACCESSIBLE', 40960)
 HSA_AMD_REGION_INFO_BASE = enum_hsa_amd_region_info_s.define('HSA_AMD_REGION_INFO_BASE', 40961)
 HSA_AMD_REGION_INFO_BUS_WIDTH = enum_hsa_amd_region_info_s.define('HSA_AMD_REGION_INFO_BUS_WIDTH', 40962)
 HSA_AMD_REGION_INFO_MAX_CLOCK_FREQUENCY = enum_hsa_amd_region_info_s.define('HSA_AMD_REGION_INFO_MAX_CLOCK_FREQUENCY', 40963)
 
 hsa_amd_region_info_t = enum_hsa_amd_region_info_s
-enum_hsa_amd_coherency_type_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_coherency_type_s = CEnum(ctypes.c_uint32)
 HSA_AMD_COHERENCY_TYPE_COHERENT = enum_hsa_amd_coherency_type_s.define('HSA_AMD_COHERENCY_TYPE_COHERENT', 0)
 HSA_AMD_COHERENCY_TYPE_NONCOHERENT = enum_hsa_amd_coherency_type_s.define('HSA_AMD_COHERENCY_TYPE_NONCOHERENT', 1)
 
@@ -1264,7 +1264,7 @@ struct_hsa_amd_profiling_async_copy_time_s._fields_ = [
 ]
 hsa_amd_profiling_async_copy_time_t = struct_hsa_amd_profiling_async_copy_time_s
 # hsa_status_t hsa_amd_profiling_set_profiler_enabled(hsa_queue_t *queue, int enable)
-try: (hsa_amd_profiling_set_profiler_enabled:=dll.hsa_amd_profiling_set_profiler_enabled).restype, hsa_amd_profiling_set_profiler_enabled.argtypes = hsa_status_t, [ctypes.POINTER(hsa_queue_t), ctypes.c_int]
+try: (hsa_amd_profiling_set_profiler_enabled:=dll.hsa_amd_profiling_set_profiler_enabled).restype, hsa_amd_profiling_set_profiler_enabled.argtypes = hsa_status_t, [ctypes.POINTER(hsa_queue_t), ctypes.c_int32]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_profiling_async_copy_enable(bool enable)
@@ -1283,7 +1283,7 @@ except AttributeError: pass
 try: (hsa_amd_profiling_convert_tick_to_system_domain:=dll.hsa_amd_profiling_convert_tick_to_system_domain).restype, hsa_amd_profiling_convert_tick_to_system_domain.argtypes = hsa_status_t, [hsa_agent_t, uint64_t, ctypes.POINTER(uint64_t)]
 except AttributeError: pass
 
-hsa_amd_signal_attribute_t = CEnum(ctypes.c_uint)
+hsa_amd_signal_attribute_t = CEnum(ctypes.c_uint32)
 HSA_AMD_SIGNAL_AMD_GPU_ONLY = hsa_amd_signal_attribute_t.define('HSA_AMD_SIGNAL_AMD_GPU_ONLY', 1)
 HSA_AMD_SIGNAL_IPC = hsa_amd_signal_attribute_t.define('HSA_AMD_SIGNAL_IPC', 2)
 
@@ -1295,7 +1295,7 @@ except AttributeError: pass
 try: (hsa_amd_signal_value_pointer:=dll.hsa_amd_signal_value_pointer).restype, hsa_amd_signal_value_pointer.argtypes = hsa_status_t, [hsa_signal_t, ctypes.POINTER(ctypes.POINTER(hsa_signal_value_t))]
 except AttributeError: pass
 
-hsa_amd_signal_handler = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_long, ctypes.c_void_p)
+hsa_amd_signal_handler = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_int64, ctypes.c_void_p)
 # hsa_status_t hsa_amd_signal_async_handler(hsa_signal_t signal, hsa_signal_condition_t cond, hsa_signal_value_t value, hsa_amd_signal_handler handler, void *arg)
 try: (hsa_amd_signal_async_handler:=dll.hsa_amd_signal_async_handler).restype, hsa_amd_signal_async_handler.argtypes = hsa_status_t, [hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, hsa_amd_signal_handler, ctypes.c_void_p]
 except AttributeError: pass
@@ -1320,7 +1320,7 @@ except AttributeError: pass
 try: (hsa_amd_queue_cu_get_mask:=dll.hsa_amd_queue_cu_get_mask).restype, hsa_amd_queue_cu_get_mask.argtypes = hsa_status_t, [ctypes.POINTER(hsa_queue_t), uint32_t, ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
-hsa_amd_segment_t = CEnum(ctypes.c_uint)
+hsa_amd_segment_t = CEnum(ctypes.c_uint32)
 HSA_AMD_SEGMENT_GLOBAL = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_GLOBAL', 0)
 HSA_AMD_SEGMENT_READONLY = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_READONLY', 1)
 HSA_AMD_SEGMENT_PRIVATE = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_PRIVATE', 2)
@@ -1331,19 +1331,19 @@ struct_hsa_amd_memory_pool_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_amd_memory_pool_t = struct_hsa_amd_memory_pool_s
-enum_hsa_amd_memory_pool_global_flag_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_memory_pool_global_flag_s = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT = enum_hsa_amd_memory_pool_global_flag_s.define('HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT', 1)
 HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED = enum_hsa_amd_memory_pool_global_flag_s.define('HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED', 2)
 HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED = enum_hsa_amd_memory_pool_global_flag_s.define('HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED', 4)
 HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED = enum_hsa_amd_memory_pool_global_flag_s.define('HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED', 8)
 
 hsa_amd_memory_pool_global_flag_t = enum_hsa_amd_memory_pool_global_flag_s
-enum_hsa_amd_memory_pool_location_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_memory_pool_location_s = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_POOL_LOCATION_CPU = enum_hsa_amd_memory_pool_location_s.define('HSA_AMD_MEMORY_POOL_LOCATION_CPU', 0)
 HSA_AMD_MEMORY_POOL_LOCATION_GPU = enum_hsa_amd_memory_pool_location_s.define('HSA_AMD_MEMORY_POOL_LOCATION_GPU', 1)
 
 hsa_amd_memory_pool_location_t = enum_hsa_amd_memory_pool_location_s
-hsa_amd_memory_pool_info_t = CEnum(ctypes.c_uint)
+hsa_amd_memory_pool_info_t = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_POOL_INFO_SEGMENT = hsa_amd_memory_pool_info_t.define('HSA_AMD_MEMORY_POOL_INFO_SEGMENT', 0)
 HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS = hsa_amd_memory_pool_info_t.define('HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS', 1)
 HSA_AMD_MEMORY_POOL_INFO_SIZE = hsa_amd_memory_pool_info_t.define('HSA_AMD_MEMORY_POOL_INFO_SIZE', 2)
@@ -1355,7 +1355,7 @@ HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE = hsa_amd_memory_pool_info_t.define('HSA
 HSA_AMD_MEMORY_POOL_INFO_LOCATION = hsa_amd_memory_pool_info_t.define('HSA_AMD_MEMORY_POOL_INFO_LOCATION', 17)
 HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE = hsa_amd_memory_pool_info_t.define('HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE', 18)
 
-enum_hsa_amd_memory_pool_flag_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_memory_pool_flag_s = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_POOL_STANDARD_FLAG = enum_hsa_amd_memory_pool_flag_s.define('HSA_AMD_MEMORY_POOL_STANDARD_FLAG', 0)
 HSA_AMD_MEMORY_POOL_PCIE_FLAG = enum_hsa_amd_memory_pool_flag_s.define('HSA_AMD_MEMORY_POOL_PCIE_FLAG', 1)
 HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG = enum_hsa_amd_memory_pool_flag_s.define('HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG', 2)
@@ -1396,7 +1396,7 @@ struct_hsa_pitched_ptr_s._fields_ = [
   ('slice', size_t),
 ]
 hsa_pitched_ptr_t = struct_hsa_pitched_ptr_s
-hsa_amd_copy_direction_t = CEnum(ctypes.c_uint)
+hsa_amd_copy_direction_t = CEnum(ctypes.c_uint32)
 hsaHostToHost = hsa_amd_copy_direction_t.define('hsaHostToHost', 0)
 hsaHostToDevice = hsa_amd_copy_direction_t.define('hsaHostToDevice', 1)
 hsaDeviceToHost = hsa_amd_copy_direction_t.define('hsaDeviceToHost', 2)
@@ -1406,12 +1406,12 @@ hsaDeviceToDevice = hsa_amd_copy_direction_t.define('hsaDeviceToDevice', 3)
 try: (hsa_amd_memory_async_copy_rect:=dll.hsa_amd_memory_async_copy_rect).restype, hsa_amd_memory_async_copy_rect.argtypes = hsa_status_t, [ctypes.POINTER(hsa_pitched_ptr_t), ctypes.POINTER(hsa_dim3_t), ctypes.POINTER(hsa_pitched_ptr_t), ctypes.POINTER(hsa_dim3_t), ctypes.POINTER(hsa_dim3_t), hsa_agent_t, hsa_amd_copy_direction_t, uint32_t, ctypes.POINTER(hsa_signal_t), hsa_signal_t]
 except AttributeError: pass
 
-hsa_amd_memory_pool_access_t = CEnum(ctypes.c_uint)
+hsa_amd_memory_pool_access_t = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED = hsa_amd_memory_pool_access_t.define('HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED', 0)
 HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT = hsa_amd_memory_pool_access_t.define('HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT', 1)
 HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT = hsa_amd_memory_pool_access_t.define('HSA_AMD_MEMORY_POOL_ACCESS_DISALLOWED_BY_DEFAULT', 2)
 
-hsa_amd_link_info_type_t = CEnum(ctypes.c_uint)
+hsa_amd_link_info_type_t = CEnum(ctypes.c_uint32)
 HSA_AMD_LINK_INFO_TYPE_HYPERTRANSPORT = hsa_amd_link_info_type_t.define('HSA_AMD_LINK_INFO_TYPE_HYPERTRANSPORT', 0)
 HSA_AMD_LINK_INFO_TYPE_QPI = hsa_amd_link_info_type_t.define('HSA_AMD_LINK_INFO_TYPE_QPI', 1)
 HSA_AMD_LINK_INFO_TYPE_PCIE = hsa_amd_link_info_type_t.define('HSA_AMD_LINK_INFO_TYPE_PCIE', 2)
@@ -1431,7 +1431,7 @@ struct_hsa_amd_memory_pool_link_info_s._fields_ = [
   ('numa_distance', uint32_t),
 ]
 hsa_amd_memory_pool_link_info_t = struct_hsa_amd_memory_pool_link_info_s
-hsa_amd_agent_memory_pool_info_t = CEnum(ctypes.c_uint)
+hsa_amd_agent_memory_pool_info_t = CEnum(ctypes.c_uint32)
 HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS = hsa_amd_agent_memory_pool_info_t.define('HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS', 0)
 HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS = hsa_amd_agent_memory_pool_info_t.define('HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS', 1)
 HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO = hsa_amd_agent_memory_pool_info_t.define('HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO', 2)
@@ -1453,11 +1453,11 @@ try: (hsa_amd_memory_migrate:=dll.hsa_amd_memory_migrate).restype, hsa_amd_memor
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_memory_lock(void *host_ptr, size_t size, hsa_agent_t *agents, int num_agent, void **agent_ptr)
-try: (hsa_amd_memory_lock:=dll.hsa_amd_memory_lock).restype, hsa_amd_memory_lock.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, ctypes.POINTER(hsa_agent_t), ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+try: (hsa_amd_memory_lock:=dll.hsa_amd_memory_lock).restype, hsa_amd_memory_lock.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, ctypes.POINTER(hsa_agent_t), ctypes.c_int32, ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_memory_lock_to_pool(void *host_ptr, size_t size, hsa_agent_t *agents, int num_agent, hsa_amd_memory_pool_t pool, uint32_t flags, void **agent_ptr)
-try: (hsa_amd_memory_lock_to_pool:=dll.hsa_amd_memory_lock_to_pool).restype, hsa_amd_memory_lock_to_pool.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, ctypes.POINTER(hsa_agent_t), ctypes.c_int, hsa_amd_memory_pool_t, uint32_t, ctypes.POINTER(ctypes.c_void_p)]
+try: (hsa_amd_memory_lock_to_pool:=dll.hsa_amd_memory_lock_to_pool).restype, hsa_amd_memory_lock_to_pool.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, ctypes.POINTER(hsa_agent_t), ctypes.c_int32, hsa_amd_memory_pool_t, uint32_t, ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_memory_unlock(void *host_ptr)
@@ -1469,7 +1469,7 @@ try: (hsa_amd_memory_fill:=dll.hsa_amd_memory_fill).restype, hsa_amd_memory_fill
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t *agents, int interop_handle, uint32_t flags, size_t *size, void **ptr, size_t *metadata_size, const void **metadata)
-try: (hsa_amd_interop_map_buffer:=dll.hsa_amd_interop_map_buffer).restype, hsa_amd_interop_map_buffer.argtypes = hsa_status_t, [uint32_t, ctypes.POINTER(hsa_agent_t), ctypes.c_int, uint32_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_void_p)]
+try: (hsa_amd_interop_map_buffer:=dll.hsa_amd_interop_map_buffer).restype, hsa_amd_interop_map_buffer.argtypes = hsa_status_t, [uint32_t, ctypes.POINTER(hsa_agent_t), ctypes.c_int32, uint32_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_interop_unmap_buffer(void *ptr)
@@ -1485,7 +1485,7 @@ struct_hsa_amd_image_descriptor_s._fields_ = [
 hsa_amd_image_descriptor_t = struct_hsa_amd_image_descriptor_s
 class struct_hsa_ext_image_descriptor_s(Struct): pass
 hsa_ext_image_descriptor_t = struct_hsa_ext_image_descriptor_s
-hsa_ext_image_geometry_t = CEnum(ctypes.c_uint)
+hsa_ext_image_geometry_t = CEnum(ctypes.c_uint32)
 HSA_EXT_IMAGE_GEOMETRY_1D = hsa_ext_image_geometry_t.define('HSA_EXT_IMAGE_GEOMETRY_1D', 0)
 HSA_EXT_IMAGE_GEOMETRY_2D = hsa_ext_image_geometry_t.define('HSA_EXT_IMAGE_GEOMETRY_2D', 1)
 HSA_EXT_IMAGE_GEOMETRY_3D = hsa_ext_image_geometry_t.define('HSA_EXT_IMAGE_GEOMETRY_3D', 2)
@@ -1497,8 +1497,8 @@ HSA_EXT_IMAGE_GEOMETRY_2DADEPTH = hsa_ext_image_geometry_t.define('HSA_EXT_IMAGE
 
 class struct_hsa_ext_image_format_s(Struct): pass
 hsa_ext_image_format_t = struct_hsa_ext_image_format_s
-hsa_ext_image_channel_type32_t = ctypes.c_uint
-hsa_ext_image_channel_order32_t = ctypes.c_uint
+hsa_ext_image_channel_type32_t = ctypes.c_uint32
+hsa_ext_image_channel_order32_t = ctypes.c_uint32
 struct_hsa_ext_image_format_s._fields_ = [
   ('channel_type', hsa_ext_image_channel_type32_t),
   ('channel_order', hsa_ext_image_channel_order32_t),
@@ -1520,7 +1520,7 @@ struct_hsa_ext_image_s._fields_ = [
 try: (hsa_amd_image_create:=dll.hsa_amd_image_create).restype, hsa_amd_image_create.argtypes = hsa_status_t, [hsa_agent_t, ctypes.POINTER(hsa_ext_image_descriptor_t), ctypes.POINTER(hsa_amd_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, ctypes.POINTER(hsa_ext_image_t)]
 except AttributeError: pass
 
-hsa_amd_pointer_type_t = CEnum(ctypes.c_uint)
+hsa_amd_pointer_type_t = CEnum(ctypes.c_uint32)
 HSA_EXT_POINTER_TYPE_UNKNOWN = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_UNKNOWN', 0)
 HSA_EXT_POINTER_TYPE_HSA = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_HSA', 1)
 HSA_EXT_POINTER_TYPE_LOCKED = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_LOCKED', 2)
@@ -1573,12 +1573,12 @@ except AttributeError: pass
 try: (hsa_amd_ipc_signal_attach:=dll.hsa_amd_ipc_signal_attach).restype, hsa_amd_ipc_signal_attach.argtypes = hsa_status_t, [ctypes.POINTER(hsa_amd_ipc_signal_t), ctypes.POINTER(hsa_signal_t)]
 except AttributeError: pass
 
-enum_hsa_amd_event_type_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_event_type_s = CEnum(ctypes.c_uint32)
 HSA_AMD_GPU_MEMORY_FAULT_EVENT = enum_hsa_amd_event_type_s.define('HSA_AMD_GPU_MEMORY_FAULT_EVENT', 0)
 HSA_AMD_GPU_HW_EXCEPTION_EVENT = enum_hsa_amd_event_type_s.define('HSA_AMD_GPU_HW_EXCEPTION_EVENT', 1)
 
 hsa_amd_event_type_t = enum_hsa_amd_event_type_s
-hsa_amd_memory_fault_reason_t = CEnum(ctypes.c_uint)
+hsa_amd_memory_fault_reason_t = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT = hsa_amd_memory_fault_reason_t.define('HSA_AMD_MEMORY_FAULT_PAGE_NOT_PRESENT', 1)
 HSA_AMD_MEMORY_FAULT_READ_ONLY = hsa_amd_memory_fault_reason_t.define('HSA_AMD_MEMORY_FAULT_READ_ONLY', 2)
 HSA_AMD_MEMORY_FAULT_NX = hsa_amd_memory_fault_reason_t.define('HSA_AMD_MEMORY_FAULT_NX', 4)
@@ -1595,10 +1595,10 @@ struct_hsa_amd_gpu_memory_fault_info_s._fields_ = [
   ('fault_reason_mask', uint32_t),
 ]
 hsa_amd_gpu_memory_fault_info_t = struct_hsa_amd_gpu_memory_fault_info_s
-hsa_amd_hw_exception_reset_type_t = CEnum(ctypes.c_uint)
+hsa_amd_hw_exception_reset_type_t = CEnum(ctypes.c_uint32)
 HSA_AMD_HW_EXCEPTION_RESET_TYPE_OTHER = hsa_amd_hw_exception_reset_type_t.define('HSA_AMD_HW_EXCEPTION_RESET_TYPE_OTHER', 1)
 
-hsa_amd_hw_exception_reset_cause_t = CEnum(ctypes.c_uint)
+hsa_amd_hw_exception_reset_cause_t = CEnum(ctypes.c_uint32)
 HSA_AMD_HW_EXCEPTION_CAUSE_GPU_HANG = hsa_amd_hw_exception_reset_cause_t.define('HSA_AMD_HW_EXCEPTION_CAUSE_GPU_HANG', 1)
 HSA_AMD_HW_EXCEPTION_CAUSE_ECC = hsa_amd_hw_exception_reset_cause_t.define('HSA_AMD_HW_EXCEPTION_CAUSE_ECC', 2)
 
@@ -1632,7 +1632,7 @@ hsa_amd_system_event_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.POINTER(
 try: (hsa_amd_register_system_event_handler:=dll.hsa_amd_register_system_event_handler).restype, hsa_amd_register_system_event_handler.argtypes = hsa_status_t, [hsa_amd_system_event_callback_t, ctypes.c_void_p]
 except AttributeError: pass
 
-enum_hsa_amd_queue_priority_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_queue_priority_s = CEnum(ctypes.c_uint32)
 HSA_AMD_QUEUE_PRIORITY_LOW = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_LOW', 0)
 HSA_AMD_QUEUE_PRIORITY_NORMAL = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_NORMAL', 1)
 HSA_AMD_QUEUE_PRIORITY_HIGH = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_HIGH', 2)
@@ -1651,13 +1651,13 @@ except AttributeError: pass
 try: (hsa_amd_deregister_deallocation_callback:=dll.hsa_amd_deregister_deallocation_callback).restype, hsa_amd_deregister_deallocation_callback.argtypes = hsa_status_t, [ctypes.c_void_p, hsa_amd_deallocation_callback_t]
 except AttributeError: pass
 
-enum_hsa_amd_svm_model_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_svm_model_s = CEnum(ctypes.c_uint32)
 HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED = enum_hsa_amd_svm_model_s.define('HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED', 0)
 HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED = enum_hsa_amd_svm_model_s.define('HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED', 1)
 HSA_AMD_SVM_GLOBAL_FLAG_INDETERMINATE = enum_hsa_amd_svm_model_s.define('HSA_AMD_SVM_GLOBAL_FLAG_INDETERMINATE', 2)
 
 hsa_amd_svm_model_t = enum_hsa_amd_svm_model_s
-enum_hsa_amd_svm_attribute_s = CEnum(ctypes.c_uint)
+enum_hsa_amd_svm_attribute_s = CEnum(ctypes.c_uint32)
 HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG = enum_hsa_amd_svm_attribute_s.define('HSA_AMD_SVM_ATTRIB_GLOBAL_FLAG', 0)
 HSA_AMD_SVM_ATTRIB_READ_ONLY = enum_hsa_amd_svm_attribute_s.define('HSA_AMD_SVM_ATTRIB_READ_ONLY', 1)
 HSA_AMD_SVM_ATTRIB_HIVE_LOCAL = enum_hsa_amd_svm_attribute_s.define('HSA_AMD_SVM_ATTRIB_HIVE_LOCAL', 2)
@@ -1703,11 +1703,11 @@ try: (hsa_amd_spm_set_dest_buffer:=dll.hsa_amd_spm_set_dest_buffer).restype, hsa
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_portable_export_dmabuf(const void *ptr, size_t size, int *dmabuf, uint64_t *offset)
-try: (hsa_amd_portable_export_dmabuf:=dll.hsa_amd_portable_export_dmabuf).restype, hsa_amd_portable_export_dmabuf.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(uint64_t)]
+try: (hsa_amd_portable_export_dmabuf:=dll.hsa_amd_portable_export_dmabuf).restype, hsa_amd_portable_export_dmabuf.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(uint64_t)]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_portable_close_dmabuf(int dmabuf)
-try: (hsa_amd_portable_close_dmabuf:=dll.hsa_amd_portable_close_dmabuf).restype, hsa_amd_portable_close_dmabuf.argtypes = hsa_status_t, [ctypes.c_int]
+try: (hsa_amd_portable_close_dmabuf:=dll.hsa_amd_portable_close_dmabuf).restype, hsa_amd_portable_close_dmabuf.argtypes = hsa_status_t, [ctypes.c_int32]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_vmem_address_reserve(void **va, size_t size, uint64_t address, uint64_t flags)
@@ -1727,7 +1727,7 @@ struct_hsa_amd_vmem_alloc_handle_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_amd_vmem_alloc_handle_t = struct_hsa_amd_vmem_alloc_handle_s
-hsa_amd_memory_type_t = CEnum(ctypes.c_uint)
+hsa_amd_memory_type_t = CEnum(ctypes.c_uint32)
 MEMORY_TYPE_NONE = hsa_amd_memory_type_t.define('MEMORY_TYPE_NONE', 0)
 MEMORY_TYPE_PINNED = hsa_amd_memory_type_t.define('MEMORY_TYPE_PINNED', 1)
 
@@ -1762,11 +1762,11 @@ try: (hsa_amd_vmem_get_access:=dll.hsa_amd_vmem_get_access).restype, hsa_amd_vme
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_vmem_export_shareable_handle(int *dmabuf_fd, hsa_amd_vmem_alloc_handle_t handle, uint64_t flags)
-try: (hsa_amd_vmem_export_shareable_handle:=dll.hsa_amd_vmem_export_shareable_handle).restype, hsa_amd_vmem_export_shareable_handle.argtypes = hsa_status_t, [ctypes.POINTER(ctypes.c_int), hsa_amd_vmem_alloc_handle_t, uint64_t]
+try: (hsa_amd_vmem_export_shareable_handle:=dll.hsa_amd_vmem_export_shareable_handle).restype, hsa_amd_vmem_export_shareable_handle.argtypes = hsa_status_t, [ctypes.POINTER(ctypes.c_int32), hsa_amd_vmem_alloc_handle_t, uint64_t]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_vmem_import_shareable_handle(int dmabuf_fd, hsa_amd_vmem_alloc_handle_t *handle)
-try: (hsa_amd_vmem_import_shareable_handle:=dll.hsa_amd_vmem_import_shareable_handle).restype, hsa_amd_vmem_import_shareable_handle.argtypes = hsa_status_t, [ctypes.c_int, ctypes.POINTER(hsa_amd_vmem_alloc_handle_t)]
+try: (hsa_amd_vmem_import_shareable_handle:=dll.hsa_amd_vmem_import_shareable_handle).restype, hsa_amd_vmem_import_shareable_handle.argtypes = hsa_status_t, [ctypes.c_int32, ctypes.POINTER(hsa_amd_vmem_alloc_handle_t)]
 except AttributeError: pass
 
 # hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t *memory_handle, void *addr)
@@ -1781,7 +1781,7 @@ except AttributeError: pass
 try: (hsa_amd_agent_set_async_scratch_limit:=dll.hsa_amd_agent_set_async_scratch_limit).restype, hsa_amd_agent_set_async_scratch_limit.argtypes = hsa_status_t, [hsa_agent_t, size_t]
 except AttributeError: pass
 
-hsa_queue_info_attribute_t = CEnum(ctypes.c_uint)
+hsa_queue_info_attribute_t = CEnum(ctypes.c_uint32)
 HSA_AMD_QUEUE_INFO_AGENT = hsa_queue_info_attribute_t.define('HSA_AMD_QUEUE_INFO_AGENT', 0)
 HSA_AMD_QUEUE_INFO_DOORBELL_ID = hsa_queue_info_attribute_t.define('HSA_AMD_QUEUE_INFO_DOORBELL_ID', 1)
 
@@ -1789,8 +1789,8 @@ HSA_AMD_QUEUE_INFO_DOORBELL_ID = hsa_queue_info_attribute_t.define('HSA_AMD_QUEU
 try: (hsa_amd_queue_get_info:=dll.hsa_amd_queue_get_info).restype, hsa_amd_queue_get_info.argtypes = hsa_status_t, [ctypes.POINTER(hsa_queue_t), hsa_queue_info_attribute_t, ctypes.c_void_p]
 except AttributeError: pass
 
-amd_signal_kind64_t = ctypes.c_long
-enum_amd_signal_kind_t = CEnum(ctypes.c_int)
+amd_signal_kind64_t = ctypes.c_int64
+enum_amd_signal_kind_t = CEnum(ctypes.c_int32)
 AMD_SIGNAL_KIND_INVALID = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_INVALID', 0)
 AMD_SIGNAL_KIND_USER = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_USER', 1)
 AMD_SIGNAL_KIND_DOORBELL = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_DOORBELL', -1)
@@ -1798,7 +1798,7 @@ AMD_SIGNAL_KIND_LEGACY_DOORBELL = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND
 
 class struct_amd_signal_s(Struct): pass
 class struct_amd_signal_s_0(ctypes.Union): pass
-int64_t = ctypes.c_long
+int64_t = ctypes.c_int64
 struct_amd_signal_s_0._fields_ = [
   ('value', int64_t),
   ('legacy_hardware_doorbell_ptr', ctypes.POINTER(uint32_t)),
@@ -1807,7 +1807,7 @@ struct_amd_signal_s_0._fields_ = [
 class struct_amd_signal_s_1(ctypes.Union): pass
 class struct_amd_queue_s(Struct): pass
 amd_queue_t = struct_amd_queue_s
-amd_queue_properties32_t = ctypes.c_uint
+amd_queue_properties32_t = ctypes.c_uint32
 struct_amd_queue_s._fields_ = [
   ('hsa_queue', hsa_queue_t),
   ('caps', uint32_t),
@@ -1858,7 +1858,7 @@ struct_amd_signal_s._fields_ = [
   ('reserved3', (uint32_t * 2)),
 ]
 amd_signal_t = struct_amd_signal_s
-enum_amd_queue_properties_t = CEnum(ctypes.c_int)
+enum_amd_queue_properties_t = CEnum(ctypes.c_int32)
 AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_SHIFT = enum_amd_queue_properties_t.define('AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_SHIFT', 0)
 AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_WIDTH = enum_amd_queue_properties_t.define('AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_WIDTH', 1)
 AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER = enum_amd_queue_properties_t.define('AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER', 1)
@@ -1878,37 +1878,37 @@ AMD_QUEUE_PROPERTIES_RESERVED1_SHIFT = enum_amd_queue_properties_t.define('AMD_Q
 AMD_QUEUE_PROPERTIES_RESERVED1_WIDTH = enum_amd_queue_properties_t.define('AMD_QUEUE_PROPERTIES_RESERVED1_WIDTH', 27)
 AMD_QUEUE_PROPERTIES_RESERVED1 = enum_amd_queue_properties_t.define('AMD_QUEUE_PROPERTIES_RESERVED1', -32)
 
-amd_queue_capabilities32_t = ctypes.c_uint
-enum_amd_queue_capabilities_t = CEnum(ctypes.c_uint)
+amd_queue_capabilities32_t = ctypes.c_uint32
+enum_amd_queue_capabilities_t = CEnum(ctypes.c_uint32)
 AMD_QUEUE_CAPS_ASYNC_RECLAIM_SHIFT = enum_amd_queue_capabilities_t.define('AMD_QUEUE_CAPS_ASYNC_RECLAIM_SHIFT', 0)
 AMD_QUEUE_CAPS_ASYNC_RECLAIM_WIDTH = enum_amd_queue_capabilities_t.define('AMD_QUEUE_CAPS_ASYNC_RECLAIM_WIDTH', 1)
 AMD_QUEUE_CAPS_ASYNC_RECLAIM = enum_amd_queue_capabilities_t.define('AMD_QUEUE_CAPS_ASYNC_RECLAIM', 1)
 
-amd_kernel_code_version32_t = ctypes.c_uint
-enum_amd_kernel_code_version_t = CEnum(ctypes.c_uint)
+amd_kernel_code_version32_t = ctypes.c_uint32
+enum_amd_kernel_code_version_t = CEnum(ctypes.c_uint32)
 AMD_KERNEL_CODE_VERSION_MAJOR = enum_amd_kernel_code_version_t.define('AMD_KERNEL_CODE_VERSION_MAJOR', 1)
 AMD_KERNEL_CODE_VERSION_MINOR = enum_amd_kernel_code_version_t.define('AMD_KERNEL_CODE_VERSION_MINOR', 1)
 
-amd_machine_kind16_t = ctypes.c_ushort
-enum_amd_machine_kind_t = CEnum(ctypes.c_uint)
+amd_machine_kind16_t = ctypes.c_uint16
+enum_amd_machine_kind_t = CEnum(ctypes.c_uint32)
 AMD_MACHINE_KIND_UNDEFINED = enum_amd_machine_kind_t.define('AMD_MACHINE_KIND_UNDEFINED', 0)
 AMD_MACHINE_KIND_AMDGPU = enum_amd_machine_kind_t.define('AMD_MACHINE_KIND_AMDGPU', 1)
 
-amd_machine_version16_t = ctypes.c_ushort
-enum_amd_float_round_mode_t = CEnum(ctypes.c_uint)
+amd_machine_version16_t = ctypes.c_uint16
+enum_amd_float_round_mode_t = CEnum(ctypes.c_uint32)
 AMD_FLOAT_ROUND_MODE_NEAREST_EVEN = enum_amd_float_round_mode_t.define('AMD_FLOAT_ROUND_MODE_NEAREST_EVEN', 0)
 AMD_FLOAT_ROUND_MODE_PLUS_INFINITY = enum_amd_float_round_mode_t.define('AMD_FLOAT_ROUND_MODE_PLUS_INFINITY', 1)
 AMD_FLOAT_ROUND_MODE_MINUS_INFINITY = enum_amd_float_round_mode_t.define('AMD_FLOAT_ROUND_MODE_MINUS_INFINITY', 2)
 AMD_FLOAT_ROUND_MODE_ZERO = enum_amd_float_round_mode_t.define('AMD_FLOAT_ROUND_MODE_ZERO', 3)
 
-enum_amd_float_denorm_mode_t = CEnum(ctypes.c_uint)
+enum_amd_float_denorm_mode_t = CEnum(ctypes.c_uint32)
 AMD_FLOAT_DENORM_MODE_FLUSH_SOURCE_OUTPUT = enum_amd_float_denorm_mode_t.define('AMD_FLOAT_DENORM_MODE_FLUSH_SOURCE_OUTPUT', 0)
 AMD_FLOAT_DENORM_MODE_FLUSH_OUTPUT = enum_amd_float_denorm_mode_t.define('AMD_FLOAT_DENORM_MODE_FLUSH_OUTPUT', 1)
 AMD_FLOAT_DENORM_MODE_FLUSH_SOURCE = enum_amd_float_denorm_mode_t.define('AMD_FLOAT_DENORM_MODE_FLUSH_SOURCE', 2)
 AMD_FLOAT_DENORM_MODE_NO_FLUSH = enum_amd_float_denorm_mode_t.define('AMD_FLOAT_DENORM_MODE_NO_FLUSH', 3)
 
-amd_compute_pgm_rsrc_one32_t = ctypes.c_uint
-enum_amd_compute_pgm_rsrc_one_t = CEnum(ctypes.c_int)
+amd_compute_pgm_rsrc_one32_t = ctypes.c_uint32
+enum_amd_compute_pgm_rsrc_one_t = CEnum(ctypes.c_int32)
 AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT = enum_amd_compute_pgm_rsrc_one_t.define('AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT', 0)
 AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH = enum_amd_compute_pgm_rsrc_one_t.define('AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH', 6)
 AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT = enum_amd_compute_pgm_rsrc_one_t.define('AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT', 63)
@@ -1952,14 +1952,14 @@ AMD_COMPUTE_PGM_RSRC_ONE_RESERVED1_SHIFT = enum_amd_compute_pgm_rsrc_one_t.defin
 AMD_COMPUTE_PGM_RSRC_ONE_RESERVED1_WIDTH = enum_amd_compute_pgm_rsrc_one_t.define('AMD_COMPUTE_PGM_RSRC_ONE_RESERVED1_WIDTH', 6)
 AMD_COMPUTE_PGM_RSRC_ONE_RESERVED1 = enum_amd_compute_pgm_rsrc_one_t.define('AMD_COMPUTE_PGM_RSRC_ONE_RESERVED1', -67108864)
 
-enum_amd_system_vgpr_workitem_id_t = CEnum(ctypes.c_uint)
+enum_amd_system_vgpr_workitem_id_t = CEnum(ctypes.c_uint32)
 AMD_SYSTEM_VGPR_WORKITEM_ID_X = enum_amd_system_vgpr_workitem_id_t.define('AMD_SYSTEM_VGPR_WORKITEM_ID_X', 0)
 AMD_SYSTEM_VGPR_WORKITEM_ID_X_Y = enum_amd_system_vgpr_workitem_id_t.define('AMD_SYSTEM_VGPR_WORKITEM_ID_X_Y', 1)
 AMD_SYSTEM_VGPR_WORKITEM_ID_X_Y_Z = enum_amd_system_vgpr_workitem_id_t.define('AMD_SYSTEM_VGPR_WORKITEM_ID_X_Y_Z', 2)
 AMD_SYSTEM_VGPR_WORKITEM_ID_UNDEFINED = enum_amd_system_vgpr_workitem_id_t.define('AMD_SYSTEM_VGPR_WORKITEM_ID_UNDEFINED', 3)
 
-amd_compute_pgm_rsrc_two32_t = ctypes.c_uint
-enum_amd_compute_pgm_rsrc_two_t = CEnum(ctypes.c_int)
+amd_compute_pgm_rsrc_two32_t = ctypes.c_uint32
+enum_amd_compute_pgm_rsrc_two_t = CEnum(ctypes.c_int32)
 AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_PRIVATE_SEGMENT_WAVE_BYTE_OFFSET_SHIFT = enum_amd_compute_pgm_rsrc_two_t.define('AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_PRIVATE_SEGMENT_WAVE_BYTE_OFFSET_SHIFT', 0)
 AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_PRIVATE_SEGMENT_WAVE_BYTE_OFFSET_WIDTH = enum_amd_compute_pgm_rsrc_two_t.define('AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_PRIVATE_SEGMENT_WAVE_BYTE_OFFSET_WIDTH', 1)
 AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_PRIVATE_SEGMENT_WAVE_BYTE_OFFSET = enum_amd_compute_pgm_rsrc_two_t.define('AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_PRIVATE_SEGMENT_WAVE_BYTE_OFFSET', 1)
@@ -2018,14 +2018,14 @@ AMD_COMPUTE_PGM_RSRC_TWO_RESERVED1_SHIFT = enum_amd_compute_pgm_rsrc_two_t.defin
 AMD_COMPUTE_PGM_RSRC_TWO_RESERVED1_WIDTH = enum_amd_compute_pgm_rsrc_two_t.define('AMD_COMPUTE_PGM_RSRC_TWO_RESERVED1_WIDTH', 1)
 AMD_COMPUTE_PGM_RSRC_TWO_RESERVED1 = enum_amd_compute_pgm_rsrc_two_t.define('AMD_COMPUTE_PGM_RSRC_TWO_RESERVED1', -2147483648)
 
-enum_amd_element_byte_size_t = CEnum(ctypes.c_uint)
+enum_amd_element_byte_size_t = CEnum(ctypes.c_uint32)
 AMD_ELEMENT_BYTE_SIZE_2 = enum_amd_element_byte_size_t.define('AMD_ELEMENT_BYTE_SIZE_2', 0)
 AMD_ELEMENT_BYTE_SIZE_4 = enum_amd_element_byte_size_t.define('AMD_ELEMENT_BYTE_SIZE_4', 1)
 AMD_ELEMENT_BYTE_SIZE_8 = enum_amd_element_byte_size_t.define('AMD_ELEMENT_BYTE_SIZE_8', 2)
 AMD_ELEMENT_BYTE_SIZE_16 = enum_amd_element_byte_size_t.define('AMD_ELEMENT_BYTE_SIZE_16', 3)
 
-amd_kernel_code_properties32_t = ctypes.c_uint
-enum_amd_kernel_code_properties_t = CEnum(ctypes.c_int)
+amd_kernel_code_properties32_t = ctypes.c_uint32
+enum_amd_kernel_code_properties_t = CEnum(ctypes.c_int32)
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_SHIFT = enum_amd_kernel_code_properties_t.define('AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_SHIFT', 0)
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_WIDTH = enum_amd_kernel_code_properties_t.define('AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_WIDTH', 1)
 AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER = enum_amd_kernel_code_properties_t.define('AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER', 1)
@@ -2082,7 +2082,7 @@ AMD_KERNEL_CODE_PROPERTIES_RESERVED2_WIDTH = enum_amd_kernel_code_properties_t.d
 AMD_KERNEL_CODE_PROPERTIES_RESERVED2 = enum_amd_kernel_code_properties_t.define('AMD_KERNEL_CODE_PROPERTIES_RESERVED2', -8388608)
 
 amd_powertwo8_t = ctypes.c_ubyte
-enum_amd_powertwo_t = CEnum(ctypes.c_uint)
+enum_amd_powertwo_t = CEnum(ctypes.c_uint32)
 AMD_POWERTWO_1 = enum_amd_powertwo_t.define('AMD_POWERTWO_1', 0)
 AMD_POWERTWO_2 = enum_amd_powertwo_t.define('AMD_POWERTWO_2', 1)
 AMD_POWERTWO_4 = enum_amd_powertwo_t.define('AMD_POWERTWO_4', 2)
@@ -2093,8 +2093,8 @@ AMD_POWERTWO_64 = enum_amd_powertwo_t.define('AMD_POWERTWO_64', 6)
 AMD_POWERTWO_128 = enum_amd_powertwo_t.define('AMD_POWERTWO_128', 7)
 AMD_POWERTWO_256 = enum_amd_powertwo_t.define('AMD_POWERTWO_256', 8)
 
-amd_enabled_control_directive64_t = ctypes.c_ulong
-enum_amd_enabled_control_directive_t = CEnum(ctypes.c_uint)
+amd_enabled_control_directive64_t = ctypes.c_uint64
+enum_amd_enabled_control_directive_t = CEnum(ctypes.c_uint32)
 AMD_ENABLED_CONTROL_DIRECTIVE_ENABLE_BREAK_EXCEPTIONS = enum_amd_enabled_control_directive_t.define('AMD_ENABLED_CONTROL_DIRECTIVE_ENABLE_BREAK_EXCEPTIONS', 1)
 AMD_ENABLED_CONTROL_DIRECTIVE_ENABLE_DETECT_EXCEPTIONS = enum_amd_enabled_control_directive_t.define('AMD_ENABLED_CONTROL_DIRECTIVE_ENABLE_DETECT_EXCEPTIONS', 2)
 AMD_ENABLED_CONTROL_DIRECTIVE_MAX_DYNAMIC_GROUP_SIZE = enum_amd_enabled_control_directive_t.define('AMD_ENABLED_CONTROL_DIRECTIVE_MAX_DYNAMIC_GROUP_SIZE', 4)
@@ -2105,8 +2105,8 @@ AMD_ENABLED_CONTROL_DIRECTIVE_REQUIRED_GRID_SIZE = enum_amd_enabled_control_dire
 AMD_ENABLED_CONTROL_DIRECTIVE_REQUIRED_WORKGROUP_SIZE = enum_amd_enabled_control_directive_t.define('AMD_ENABLED_CONTROL_DIRECTIVE_REQUIRED_WORKGROUP_SIZE', 128)
 AMD_ENABLED_CONTROL_DIRECTIVE_REQUIRE_NO_PARTIAL_WORKGROUPS = enum_amd_enabled_control_directive_t.define('AMD_ENABLED_CONTROL_DIRECTIVE_REQUIRE_NO_PARTIAL_WORKGROUPS', 256)
 
-amd_exception_kind16_t = ctypes.c_ushort
-enum_amd_exception_kind_t = CEnum(ctypes.c_uint)
+amd_exception_kind16_t = ctypes.c_uint16
+enum_amd_exception_kind_t = CEnum(ctypes.c_uint32)
 AMD_EXCEPTION_KIND_INVALID_OPERATION = enum_amd_exception_kind_t.define('AMD_EXCEPTION_KIND_INVALID_OPERATION', 1)
 AMD_EXCEPTION_KIND_DIVISION_BY_ZERO = enum_amd_exception_kind_t.define('AMD_EXCEPTION_KIND_DIVISION_BY_ZERO', 2)
 AMD_EXCEPTION_KIND_OVERFLOW = enum_amd_exception_kind_t.define('AMD_EXCEPTION_KIND_OVERFLOW', 4)
@@ -2176,7 +2176,7 @@ struct_amd_runtime_loader_debug_info_s._fields_ = [
 amd_runtime_loader_debug_info_t = struct_amd_runtime_loader_debug_info_s
 class struct_BrigModuleHeader(Struct): pass
 BrigModule_t = ctypes.POINTER(struct_BrigModuleHeader)
-_anonenum1 = CEnum(ctypes.c_uint)
+_anonenum1 = CEnum(ctypes.c_uint32)
 HSA_EXT_STATUS_ERROR_INVALID_PROGRAM = _anonenum1.define('HSA_EXT_STATUS_ERROR_INVALID_PROGRAM', 8192)
 HSA_EXT_STATUS_ERROR_INVALID_MODULE = _anonenum1.define('HSA_EXT_STATUS_ERROR_INVALID_MODULE', 8193)
 HSA_EXT_STATUS_ERROR_INCOMPATIBLE_MODULE = _anonenum1.define('HSA_EXT_STATUS_ERROR_INCOMPATIBLE_MODULE', 8194)
@@ -2207,7 +2207,7 @@ except AttributeError: pass
 try: (hsa_ext_program_iterate_modules:=dll.hsa_ext_program_iterate_modules).restype, hsa_ext_program_iterate_modules.argtypes = hsa_status_t, [hsa_ext_program_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-hsa_ext_program_info_t = CEnum(ctypes.c_uint)
+hsa_ext_program_info_t = CEnum(ctypes.c_uint32)
 HSA_EXT_PROGRAM_INFO_MACHINE_MODEL = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_MACHINE_MODEL', 0)
 HSA_EXT_PROGRAM_INFO_PROFILE = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_PROFILE', 1)
 HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 2)
@@ -2216,7 +2216,7 @@ HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_ext_program_info_t.define
 try: (hsa_ext_program_get_info:=dll.hsa_ext_program_get_info).restype, hsa_ext_program_get_info.argtypes = hsa_status_t, [hsa_ext_program_t, hsa_ext_program_info_t, ctypes.c_void_p]
 except AttributeError: pass
 
-hsa_ext_finalizer_call_convention_t = CEnum(ctypes.c_int)
+hsa_ext_finalizer_call_convention_t = CEnum(ctypes.c_int32)
 HSA_EXT_FINALIZER_CALL_CONVENTION_AUTO = hsa_ext_finalizer_call_convention_t.define('HSA_EXT_FINALIZER_CALL_CONVENTION_AUTO', -1)
 
 class struct_hsa_ext_control_directives_s(Struct): pass
@@ -2248,13 +2248,13 @@ struct_hsa_ext_finalizer_1_00_pfn_s._fields_ = [
   ('hsa_ext_program_finalize', ctypes.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_isa_t, int32_t, hsa_ext_control_directives_t, ctypes.POINTER(ctypes.c_char), hsa_code_object_type_t, ctypes.POINTER(hsa_code_object_t))),
 ]
 hsa_ext_finalizer_1_00_pfn_t = struct_hsa_ext_finalizer_1_00_pfn_s
-_anonenum2 = CEnum(ctypes.c_uint)
+_anonenum2 = CEnum(ctypes.c_uint32)
 HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED', 12288)
 HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED', 12289)
 HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED', 12290)
 HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED', 12291)
 
-_anonenum3 = CEnum(ctypes.c_uint)
+_anonenum3 = CEnum(ctypes.c_uint32)
 HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS', 12288)
 HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS', 12289)
 HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS', 12290)
@@ -2269,7 +2269,7 @@ HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES = _anonenum3.define('HSA_EXT_AGENT_INF
 HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS = _anonenum3.define('HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS', 12299)
 HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT', 12300)
 
-hsa_ext_image_channel_type_t = CEnum(ctypes.c_uint)
+hsa_ext_image_channel_type_t = CEnum(ctypes.c_uint32)
 HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8 = hsa_ext_image_channel_type_t.define('HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8', 0)
 HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16 = hsa_ext_image_channel_type_t.define('HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT16', 1)
 HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8 = hsa_ext_image_channel_type_t.define('HSA_EXT_IMAGE_CHANNEL_TYPE_UNORM_INT8', 2)
@@ -2287,7 +2287,7 @@ HSA_EXT_IMAGE_CHANNEL_TYPE_UNSIGNED_INT32 = hsa_ext_image_channel_type_t.define(
 HSA_EXT_IMAGE_CHANNEL_TYPE_HALF_FLOAT = hsa_ext_image_channel_type_t.define('HSA_EXT_IMAGE_CHANNEL_TYPE_HALF_FLOAT', 14)
 HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT = hsa_ext_image_channel_type_t.define('HSA_EXT_IMAGE_CHANNEL_TYPE_FLOAT', 15)
 
-hsa_ext_image_channel_order_t = CEnum(ctypes.c_uint)
+hsa_ext_image_channel_order_t = CEnum(ctypes.c_uint32)
 HSA_EXT_IMAGE_CHANNEL_ORDER_A = hsa_ext_image_channel_order_t.define('HSA_EXT_IMAGE_CHANNEL_ORDER_A', 0)
 HSA_EXT_IMAGE_CHANNEL_ORDER_R = hsa_ext_image_channel_order_t.define('HSA_EXT_IMAGE_CHANNEL_ORDER_R', 1)
 HSA_EXT_IMAGE_CHANNEL_ORDER_RX = hsa_ext_image_channel_order_t.define('HSA_EXT_IMAGE_CHANNEL_ORDER_RX', 2)
@@ -2309,7 +2309,7 @@ HSA_EXT_IMAGE_CHANNEL_ORDER_LUMINANCE = hsa_ext_image_channel_order_t.define('HS
 HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH = hsa_ext_image_channel_order_t.define('HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH', 18)
 HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL = hsa_ext_image_channel_order_t.define('HSA_EXT_IMAGE_CHANNEL_ORDER_DEPTH_STENCIL', 19)
 
-hsa_ext_image_capability_t = CEnum(ctypes.c_uint)
+hsa_ext_image_capability_t = CEnum(ctypes.c_uint32)
 HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED = hsa_ext_image_capability_t.define('HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED', 0)
 HSA_EXT_IMAGE_CAPABILITY_READ_ONLY = hsa_ext_image_capability_t.define('HSA_EXT_IMAGE_CAPABILITY_READ_ONLY', 1)
 HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY = hsa_ext_image_capability_t.define('HSA_EXT_IMAGE_CAPABILITY_WRITE_ONLY', 2)
@@ -2317,7 +2317,7 @@ HSA_EXT_IMAGE_CAPABILITY_READ_WRITE = hsa_ext_image_capability_t.define('HSA_EXT
 HSA_EXT_IMAGE_CAPABILITY_READ_MODIFY_WRITE = hsa_ext_image_capability_t.define('HSA_EXT_IMAGE_CAPABILITY_READ_MODIFY_WRITE', 8)
 HSA_EXT_IMAGE_CAPABILITY_ACCESS_INVARIANT_DATA_LAYOUT = hsa_ext_image_capability_t.define('HSA_EXT_IMAGE_CAPABILITY_ACCESS_INVARIANT_DATA_LAYOUT', 16)
 
-hsa_ext_image_data_layout_t = CEnum(ctypes.c_uint)
+hsa_ext_image_data_layout_t = CEnum(ctypes.c_uint32)
 HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE = hsa_ext_image_data_layout_t.define('HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE', 0)
 HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR = hsa_ext_image_data_layout_t.define('HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR', 1)
 
@@ -2382,24 +2382,24 @@ struct_hsa_ext_sampler_s._fields_ = [
   ('handle', uint64_t),
 ]
 hsa_ext_sampler_t = struct_hsa_ext_sampler_s
-hsa_ext_sampler_addressing_mode_t = CEnum(ctypes.c_uint)
+hsa_ext_sampler_addressing_mode_t = CEnum(ctypes.c_uint32)
 HSA_EXT_SAMPLER_ADDRESSING_MODE_UNDEFINED = hsa_ext_sampler_addressing_mode_t.define('HSA_EXT_SAMPLER_ADDRESSING_MODE_UNDEFINED', 0)
 HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_EDGE = hsa_ext_sampler_addressing_mode_t.define('HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_EDGE', 1)
 HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_BORDER = hsa_ext_sampler_addressing_mode_t.define('HSA_EXT_SAMPLER_ADDRESSING_MODE_CLAMP_TO_BORDER', 2)
 HSA_EXT_SAMPLER_ADDRESSING_MODE_REPEAT = hsa_ext_sampler_addressing_mode_t.define('HSA_EXT_SAMPLER_ADDRESSING_MODE_REPEAT', 3)
 HSA_EXT_SAMPLER_ADDRESSING_MODE_MIRRORED_REPEAT = hsa_ext_sampler_addressing_mode_t.define('HSA_EXT_SAMPLER_ADDRESSING_MODE_MIRRORED_REPEAT', 4)
 
-hsa_ext_sampler_addressing_mode32_t = ctypes.c_uint
-hsa_ext_sampler_coordinate_mode_t = CEnum(ctypes.c_uint)
+hsa_ext_sampler_addressing_mode32_t = ctypes.c_uint32
+hsa_ext_sampler_coordinate_mode_t = CEnum(ctypes.c_uint32)
 HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED = hsa_ext_sampler_coordinate_mode_t.define('HSA_EXT_SAMPLER_COORDINATE_MODE_UNNORMALIZED', 0)
 HSA_EXT_SAMPLER_COORDINATE_MODE_NORMALIZED = hsa_ext_sampler_coordinate_mode_t.define('HSA_EXT_SAMPLER_COORDINATE_MODE_NORMALIZED', 1)
 
-hsa_ext_sampler_coordinate_mode32_t = ctypes.c_uint
-hsa_ext_sampler_filter_mode_t = CEnum(ctypes.c_uint)
+hsa_ext_sampler_coordinate_mode32_t = ctypes.c_uint32
+hsa_ext_sampler_filter_mode_t = CEnum(ctypes.c_uint32)
 HSA_EXT_SAMPLER_FILTER_MODE_NEAREST = hsa_ext_sampler_filter_mode_t.define('HSA_EXT_SAMPLER_FILTER_MODE_NEAREST', 0)
 HSA_EXT_SAMPLER_FILTER_MODE_LINEAR = hsa_ext_sampler_filter_mode_t.define('HSA_EXT_SAMPLER_FILTER_MODE_LINEAR', 1)
 
-hsa_ext_sampler_filter_mode32_t = ctypes.c_uint
+hsa_ext_sampler_filter_mode32_t = ctypes.c_uint32
 class struct_hsa_ext_sampler_descriptor_s(Struct): pass
 struct_hsa_ext_sampler_descriptor_s._fields_ = [
   ('coordinate_mode', hsa_ext_sampler_coordinate_mode32_t),
@@ -2454,11 +2454,11 @@ except AttributeError: pass
 try: (hsa_ven_amd_aqlprofile_version_minor:=dll.hsa_ven_amd_aqlprofile_version_minor).restype, hsa_ven_amd_aqlprofile_version_minor.argtypes = uint32_t, []
 except AttributeError: pass
 
-hsa_ven_amd_aqlprofile_event_type_t = CEnum(ctypes.c_uint)
+hsa_ven_amd_aqlprofile_event_type_t = CEnum(ctypes.c_uint32)
 HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC = hsa_ven_amd_aqlprofile_event_type_t.define('HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC', 0)
 HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE = hsa_ven_amd_aqlprofile_event_type_t.define('HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE', 1)
 
-hsa_ven_amd_aqlprofile_block_name_t = CEnum(ctypes.c_uint)
+hsa_ven_amd_aqlprofile_block_name_t = CEnum(ctypes.c_uint32)
 HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC = hsa_ven_amd_aqlprofile_block_name_t.define('HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC', 0)
 HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF = hsa_ven_amd_aqlprofile_block_name_t.define('HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF', 1)
 HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GDS = hsa_ven_amd_aqlprofile_block_name_t.define('HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GDS', 2)
@@ -2505,7 +2505,7 @@ hsa_ven_amd_aqlprofile_event_t._fields_ = [
 try: (hsa_ven_amd_aqlprofile_validate_event:=dll.hsa_ven_amd_aqlprofile_validate_event).restype, hsa_ven_amd_aqlprofile_validate_event.argtypes = hsa_status_t, [hsa_agent_t, ctypes.POINTER(hsa_ven_amd_aqlprofile_event_t), ctypes.POINTER(ctypes.c_bool)]
 except AttributeError: pass
 
-hsa_ven_amd_aqlprofile_parameter_name_t = CEnum(ctypes.c_uint)
+hsa_ven_amd_aqlprofile_parameter_name_t = CEnum(ctypes.c_uint32)
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET', 0)
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK', 1)
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK', 2)
@@ -2526,7 +2526,7 @@ hsa_ven_amd_aqlprofile_parameter_t._fields_ = [
   ('parameter_name', hsa_ven_amd_aqlprofile_parameter_name_t),
   ('value', uint32_t),
 ]
-hsa_ven_amd_aqlprofile_att_marker_channel_t = CEnum(ctypes.c_uint)
+hsa_ven_amd_aqlprofile_att_marker_channel_t = CEnum(ctypes.c_uint32)
 HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_0 = hsa_ven_amd_aqlprofile_att_marker_channel_t.define('HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_0', 0)
 HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_1 = hsa_ven_amd_aqlprofile_att_marker_channel_t.define('HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_1', 1)
 HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2 = hsa_ven_amd_aqlprofile_att_marker_channel_t.define('HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2', 2)
@@ -2566,7 +2566,7 @@ except AttributeError: pass
 try: (hsa_ven_amd_aqlprofile_read:=dll.hsa_ven_amd_aqlprofile_read).restype, hsa_ven_amd_aqlprofile_read.argtypes = hsa_status_t, [ctypes.POINTER(hsa_ven_amd_aqlprofile_profile_t), ctypes.POINTER(hsa_ext_amd_aql_pm4_packet_t)]
 except AttributeError: pass
 
-try: HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE = ctypes.c_uint.in_dll(dll, 'HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE')
+try: HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE = ctypes.c_uint32.in_dll(dll, 'HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE')
 except (ValueError,AttributeError): pass
 # hsa_status_t hsa_ven_amd_aqlprofile_legacy_get_pm4(const hsa_ext_amd_aql_pm4_packet_t *aql_packet, void *data)
 try: (hsa_ven_amd_aqlprofile_legacy_get_pm4:=dll.hsa_ven_amd_aqlprofile_legacy_get_pm4).restype, hsa_ven_amd_aqlprofile_legacy_get_pm4.argtypes = hsa_status_t, [ctypes.POINTER(hsa_ext_amd_aql_pm4_packet_t), ctypes.c_void_p]
@@ -2598,7 +2598,7 @@ hsa_ven_amd_aqlprofile_id_query_t._fields_ = [
   ('id', uint32_t),
   ('instance_count', uint32_t),
 ]
-hsa_ven_amd_aqlprofile_info_type_t = CEnum(ctypes.c_uint)
+hsa_ven_amd_aqlprofile_info_type_t = CEnum(ctypes.c_uint32)
 HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE = hsa_ven_amd_aqlprofile_info_type_t.define('HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE', 0)
 HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA_SIZE = hsa_ven_amd_aqlprofile_info_type_t.define('HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA_SIZE', 1)
 HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA = hsa_ven_amd_aqlprofile_info_type_t.define('HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA', 2)
@@ -2621,12 +2621,12 @@ except AttributeError: pass
 try: (hsa_ven_amd_aqlprofile_error_string:=dll.hsa_ven_amd_aqlprofile_error_string).restype, hsa_ven_amd_aqlprofile_error_string.argtypes = hsa_status_t, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-hsa_ven_amd_aqlprofile_eventname_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.c_int, ctypes.POINTER(ctypes.c_char))
+hsa_ven_amd_aqlprofile_eventname_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.c_int32, ctypes.POINTER(ctypes.c_char))
 # hsa_status_t hsa_ven_amd_aqlprofile_iterate_event_ids(hsa_ven_amd_aqlprofile_eventname_callback_t)
 try: (hsa_ven_amd_aqlprofile_iterate_event_ids:=dll.hsa_ven_amd_aqlprofile_iterate_event_ids).restype, hsa_ven_amd_aqlprofile_iterate_event_ids.argtypes = hsa_status_t, [hsa_ven_amd_aqlprofile_eventname_callback_t]
 except AttributeError: pass
 
-hsa_ven_amd_aqlprofile_coordinate_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p)
+hsa_ven_amd_aqlprofile_coordinate_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p)
 # hsa_status_t hsa_ven_amd_aqlprofile_iterate_event_coord(hsa_agent_t agent, hsa_ven_amd_aqlprofile_event_t event, uint32_t sample_id, hsa_ven_amd_aqlprofile_coordinate_callback_t callback, void *userdata)
 try: (hsa_ven_amd_aqlprofile_iterate_event_coord:=dll.hsa_ven_amd_aqlprofile_iterate_event_coord).restype, hsa_ven_amd_aqlprofile_iterate_event_coord.argtypes = hsa_status_t, [hsa_agent_t, hsa_ven_amd_aqlprofile_event_t, uint32_t, hsa_ven_amd_aqlprofile_coordinate_callback_t, ctypes.c_void_p]
 except AttributeError: pass

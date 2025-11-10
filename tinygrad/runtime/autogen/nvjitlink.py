@@ -8,7 +8,7 @@ def dll():
   return None
 dll = dll()
 
-nvJitLinkResult = CEnum(ctypes.c_uint)
+nvJitLinkResult = CEnum(ctypes.c_uint32)
 NVJITLINK_SUCCESS = nvJitLinkResult.define('NVJITLINK_SUCCESS', 0)
 NVJITLINK_ERROR_UNRECOGNIZED_OPTION = nvJitLinkResult.define('NVJITLINK_ERROR_UNRECOGNIZED_OPTION', 1)
 NVJITLINK_ERROR_MISSING_ARCH = nvJitLinkResult.define('NVJITLINK_ERROR_MISSING_ARCH', 2)
@@ -17,7 +17,7 @@ NVJITLINK_ERROR_PTX_COMPILE = nvJitLinkResult.define('NVJITLINK_ERROR_PTX_COMPIL
 NVJITLINK_ERROR_NVVM_COMPILE = nvJitLinkResult.define('NVJITLINK_ERROR_NVVM_COMPILE', 5)
 NVJITLINK_ERROR_INTERNAL = nvJitLinkResult.define('NVJITLINK_ERROR_INTERNAL', 6)
 
-nvJitLinkInputType = CEnum(ctypes.c_uint)
+nvJitLinkInputType = CEnum(ctypes.c_uint32)
 NVJITLINK_INPUT_NONE = nvJitLinkInputType.define('NVJITLINK_INPUT_NONE', 0)
 NVJITLINK_INPUT_CUBIN = nvJitLinkInputType.define('NVJITLINK_INPUT_CUBIN', 1)
 NVJITLINK_INPUT_PTX = nvJitLinkInputType.define('NVJITLINK_INPUT_PTX', 2)
@@ -28,7 +28,7 @@ NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6
 
 class struct_nvJitLink(Struct): pass
 nvJitLinkHandle = ctypes.POINTER(struct_nvJitLink)
-uint32_t = ctypes.c_uint
+uint32_t = ctypes.c_uint32
 # extern nvJitLinkResult __nvJitLinkCreate_12_0(nvJitLinkHandle *handle, uint32_t numOptions, const char **options)
 try: (__nvJitLinkCreate_12_0:=dll.__nvJitLinkCreate_12_0).restype, __nvJitLinkCreate_12_0.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle), uint32_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
@@ -37,7 +37,7 @@ except AttributeError: pass
 try: (__nvJitLinkDestroy_12_0:=dll.__nvJitLinkDestroy_12_0).restype, __nvJitLinkDestroy_12_0.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle)]
 except AttributeError: pass
 
-size_t = ctypes.c_ulong
+size_t = ctypes.c_uint64
 # extern nvJitLinkResult __nvJitLinkAddData_12_0(nvJitLinkHandle handle, nvJitLinkInputType inputType, const void *data, size_t size, const char *name)
 try: (__nvJitLinkAddData_12_0:=dll.__nvJitLinkAddData_12_0).restype, __nvJitLinkAddData_12_0.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass

@@ -20,38 +20,38 @@ dll = dll()
 
 class struct_u_printf_info(Struct): pass
 u_printf_info = struct_u_printf_info
-uint32_t = ctypes.c_uint
+uint32_t = ctypes.c_uint32
 try: nir_debug = uint32_t.in_dll(dll, 'nir_debug')
 except (ValueError,AttributeError): pass
 try: nir_debug_print_shader = (ctypes.c_bool * 15).in_dll(dll, 'nir_debug_print_shader')
 except (ValueError,AttributeError): pass
-nir_component_mask_t = ctypes.c_ushort
+nir_component_mask_t = ctypes.c_uint16
 # void nir_process_debug_variable(void)
 try: (nir_process_debug_variable:=dll.nir_process_debug_variable).restype, nir_process_debug_variable.argtypes = None, []
 except AttributeError: pass
 
 # bool nir_component_mask_can_reinterpret(nir_component_mask_t mask, unsigned int old_bit_size, unsigned int new_bit_size)
-try: (nir_component_mask_can_reinterpret:=dll.nir_component_mask_can_reinterpret).restype, nir_component_mask_can_reinterpret.argtypes = ctypes.c_bool, [nir_component_mask_t, ctypes.c_uint, ctypes.c_uint]
+try: (nir_component_mask_can_reinterpret:=dll.nir_component_mask_can_reinterpret).restype, nir_component_mask_can_reinterpret.argtypes = ctypes.c_bool, [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_component_mask_t nir_component_mask_reinterpret(nir_component_mask_t mask, unsigned int old_bit_size, unsigned int new_bit_size)
-try: (nir_component_mask_reinterpret:=dll.nir_component_mask_reinterpret).restype, nir_component_mask_reinterpret.argtypes = nir_component_mask_t, [nir_component_mask_t, ctypes.c_uint, ctypes.c_uint]
+try: (nir_component_mask_reinterpret:=dll.nir_component_mask_reinterpret).restype, nir_component_mask_reinterpret.argtypes = nir_component_mask_t, [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 class struct_nir_state_slot(Struct): pass
-gl_state_index16 = ctypes.c_short
+gl_state_index16 = ctypes.c_int16
 struct_nir_state_slot._fields_ = [
   ('tokens', (gl_state_index16 * 4)),
 ]
 nir_state_slot = struct_nir_state_slot
-nir_rounding_mode = CEnum(ctypes.c_uint)
+nir_rounding_mode = CEnum(ctypes.c_uint32)
 nir_rounding_mode_undef = nir_rounding_mode.define('nir_rounding_mode_undef', 0)
 nir_rounding_mode_rtne = nir_rounding_mode.define('nir_rounding_mode_rtne', 1)
 nir_rounding_mode_ru = nir_rounding_mode.define('nir_rounding_mode_ru', 2)
 nir_rounding_mode_rd = nir_rounding_mode.define('nir_rounding_mode_rd', 3)
 nir_rounding_mode_rtz = nir_rounding_mode.define('nir_rounding_mode_rtz', 4)
 
-nir_ray_query_value = CEnum(ctypes.c_uint)
+nir_ray_query_value = CEnum(ctypes.c_uint32)
 nir_ray_query_value_intersection_type = nir_ray_query_value.define('nir_ray_query_value_intersection_type', 0)
 nir_ray_query_value_intersection_t = nir_ray_query_value.define('nir_ray_query_value_intersection_t', 1)
 nir_ray_query_value_intersection_instance_custom_index = nir_ray_query_value.define('nir_ray_query_value_intersection_instance_custom_index', 2)
@@ -72,19 +72,19 @@ nir_ray_query_value_world_ray_direction = nir_ray_query_value.define('nir_ray_qu
 nir_ray_query_value_world_ray_origin = nir_ray_query_value.define('nir_ray_query_value_world_ray_origin', 17)
 nir_ray_query_value_intersection_triangle_vertex_positions = nir_ray_query_value.define('nir_ray_query_value_intersection_triangle_vertex_positions', 18)
 
-nir_resource_data_intel = CEnum(ctypes.c_uint)
+nir_resource_data_intel = CEnum(ctypes.c_uint32)
 nir_resource_intel_bindless = nir_resource_data_intel.define('nir_resource_intel_bindless', 1)
 nir_resource_intel_pushable = nir_resource_data_intel.define('nir_resource_intel_pushable', 2)
 nir_resource_intel_sampler = nir_resource_data_intel.define('nir_resource_intel_sampler', 4)
 nir_resource_intel_non_uniform = nir_resource_data_intel.define('nir_resource_intel_non_uniform', 8)
 nir_resource_intel_sampler_embedded = nir_resource_data_intel.define('nir_resource_intel_sampler_embedded', 16)
 
-nir_preamble_class = CEnum(ctypes.c_uint)
+nir_preamble_class = CEnum(ctypes.c_uint32)
 nir_preamble_class_general = nir_preamble_class.define('nir_preamble_class_general', 0)
 nir_preamble_class_image = nir_preamble_class.define('nir_preamble_class_image', 1)
 nir_preamble_num_classes = nir_preamble_class.define('nir_preamble_num_classes', 2)
 
-nir_cmat_signed = CEnum(ctypes.c_uint)
+nir_cmat_signed = CEnum(ctypes.c_uint32)
 NIR_CMAT_A_SIGNED = nir_cmat_signed.define('NIR_CMAT_A_SIGNED', 1)
 NIR_CMAT_B_SIGNED = nir_cmat_signed.define('NIR_CMAT_B_SIGNED', 2)
 NIR_CMAT_C_SIGNED = nir_cmat_signed.define('NIR_CMAT_C_SIGNED', 4)
@@ -93,11 +93,11 @@ NIR_CMAT_RESULT_SIGNED = nir_cmat_signed.define('NIR_CMAT_RESULT_SIGNED', 8)
 class nir_const_value(ctypes.Union): pass
 int8_t = ctypes.c_char
 uint8_t = ctypes.c_ubyte
-int16_t = ctypes.c_short
-uint16_t = ctypes.c_ushort
-int32_t = ctypes.c_int
-int64_t = ctypes.c_long
-uint64_t = ctypes.c_ulong
+int16_t = ctypes.c_int16
+uint16_t = ctypes.c_uint16
+int32_t = ctypes.c_int32
+int64_t = ctypes.c_int64
+uint64_t = ctypes.c_uint64
 nir_const_value._fields_ = [
   ('b', ctypes.c_bool),
   ('f32', ctypes.c_float),
@@ -112,11 +112,11 @@ nir_const_value._fields_ = [
   ('u64', uint64_t),
 ]
 # nir_const_value nir_const_value_for_float(double b, unsigned int bit_size)
-try: (nir_const_value_for_float:=dll.nir_const_value_for_float).restype, nir_const_value_for_float.argtypes = nir_const_value, [ctypes.c_double, ctypes.c_uint]
+try: (nir_const_value_for_float:=dll.nir_const_value_for_float).restype, nir_const_value_for_float.argtypes = nir_const_value, [ctypes.c_double, ctypes.c_uint32]
 except AttributeError: pass
 
 # double nir_const_value_as_float(nir_const_value value, unsigned int bit_size)
-try: (nir_const_value_as_float:=dll.nir_const_value_as_float).restype, nir_const_value_as_float.argtypes = ctypes.c_double, [nir_const_value, ctypes.c_uint]
+try: (nir_const_value_as_float:=dll.nir_const_value_as_float).restype, nir_const_value_as_float.argtypes = ctypes.c_double, [nir_const_value, ctypes.c_uint32]
 except AttributeError: pass
 
 class struct_nir_constant(Struct): pass
@@ -124,17 +124,17 @@ nir_constant = struct_nir_constant
 struct_nir_constant._fields_ = [
   ('values', (nir_const_value * 16)),
   ('is_null_constant', ctypes.c_bool),
-  ('num_elements', ctypes.c_uint),
+  ('num_elements', ctypes.c_uint32),
   ('elements', ctypes.POINTER(ctypes.POINTER(nir_constant))),
 ]
-nir_depth_layout = CEnum(ctypes.c_uint)
+nir_depth_layout = CEnum(ctypes.c_uint32)
 nir_depth_layout_none = nir_depth_layout.define('nir_depth_layout_none', 0)
 nir_depth_layout_any = nir_depth_layout.define('nir_depth_layout_any', 1)
 nir_depth_layout_greater = nir_depth_layout.define('nir_depth_layout_greater', 2)
 nir_depth_layout_less = nir_depth_layout.define('nir_depth_layout_less', 3)
 nir_depth_layout_unchanged = nir_depth_layout.define('nir_depth_layout_unchanged', 4)
 
-nir_var_declaration_type = CEnum(ctypes.c_uint)
+nir_var_declaration_type = CEnum(ctypes.c_uint32)
 nir_var_declared_normally = nir_var_declaration_type.define('nir_var_declared_normally', 0)
 nir_var_declared_implicitly = nir_var_declaration_type.define('nir_var_declared_implicitly', 1)
 nir_var_hidden = nir_var_declaration_type.define('nir_var_hidden', 2)
@@ -142,7 +142,7 @@ nir_var_hidden = nir_var_declaration_type.define('nir_var_hidden', 2)
 class struct_nir_variable_data(Struct): pass
 class struct_nir_variable_data_0(ctypes.Union): pass
 class struct_nir_variable_data_0_image(Struct): pass
-enum_pipe_format = CEnum(ctypes.c_uint)
+enum_pipe_format = CEnum(ctypes.c_uint32)
 PIPE_FORMAT_NONE = enum_pipe_format.define('PIPE_FORMAT_NONE', 0)
 PIPE_FORMAT_R64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64_UINT', 1)
 PIPE_FORMAT_R64G64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64G64_UINT', 2)
@@ -618,10 +618,10 @@ struct_nir_variable_data_0_image._fields_ = [
 ]
 class struct_nir_variable_data_0_sampler(Struct): pass
 struct_nir_variable_data_0_sampler._fields_ = [
-  ('is_inline_sampler', ctypes.c_uint,1),
-  ('addressing_mode', ctypes.c_uint,3),
-  ('normalized_coordinates', ctypes.c_uint,1),
-  ('filter_mode', ctypes.c_uint,1),
+  ('is_inline_sampler', ctypes.c_uint32,1),
+  ('addressing_mode', ctypes.c_uint32,3),
+  ('normalized_coordinates', ctypes.c_uint32,1),
+  ('filter_mode', ctypes.c_uint32,1),
 ]
 class struct_nir_variable_data_0_xfb(Struct): pass
 struct_nir_variable_data_0_xfb._fields_ = [
@@ -635,54 +635,54 @@ struct_nir_variable_data_0._fields_ = [
 ]
 struct_nir_variable_data._anonymous_ = ['_0']
 struct_nir_variable_data._fields_ = [
-  ('mode', ctypes.c_uint,21),
-  ('read_only', ctypes.c_uint,1),
-  ('centroid', ctypes.c_uint,1),
-  ('sample', ctypes.c_uint,1),
-  ('patch', ctypes.c_uint,1),
-  ('invariant', ctypes.c_uint,1),
-  ('explicit_invariant', ctypes.c_uint,1),
-  ('ray_query', ctypes.c_uint,1),
-  ('precision', ctypes.c_uint,2),
-  ('assigned', ctypes.c_uint,1),
-  ('cannot_coalesce', ctypes.c_uint,1),
-  ('always_active_io', ctypes.c_uint,1),
-  ('interpolation', ctypes.c_uint,3),
-  ('location_frac', ctypes.c_uint,2),
-  ('compact', ctypes.c_uint,1),
-  ('fb_fetch_output', ctypes.c_uint,1),
-  ('bindless', ctypes.c_uint,1),
-  ('explicit_binding', ctypes.c_uint,1),
-  ('explicit_location', ctypes.c_uint,1),
-  ('implicit_sized_array', ctypes.c_uint,1),
-  ('max_array_access', ctypes.c_int),
-  ('has_initializer', ctypes.c_uint,1),
-  ('is_implicit_initializer', ctypes.c_uint,1),
-  ('is_xfb', ctypes.c_uint,1),
-  ('is_xfb_only', ctypes.c_uint,1),
-  ('explicit_xfb_buffer', ctypes.c_uint,1),
-  ('explicit_xfb_stride', ctypes.c_uint,1),
-  ('explicit_offset', ctypes.c_uint,1),
-  ('matrix_layout', ctypes.c_uint,2),
-  ('from_named_ifc_block', ctypes.c_uint,1),
-  ('from_ssbo_unsized_array', ctypes.c_uint,1),
-  ('must_be_shader_input', ctypes.c_uint,1),
-  ('used', ctypes.c_uint,1),
-  ('how_declared', ctypes.c_uint,2),
-  ('per_view', ctypes.c_uint,1),
-  ('per_primitive', ctypes.c_uint,1),
-  ('per_vertex', ctypes.c_uint,1),
-  ('aliased_shared_memory', ctypes.c_uint,1),
-  ('depth_layout', ctypes.c_uint,3),
-  ('stream', ctypes.c_uint,9),
-  ('access', ctypes.c_uint,9),
-  ('descriptor_set', ctypes.c_uint,5),
-  ('index', ctypes.c_uint),
-  ('binding', ctypes.c_uint),
-  ('location', ctypes.c_int),
-  ('alignment', ctypes.c_uint),
-  ('driver_location', ctypes.c_uint),
-  ('offset', ctypes.c_uint),
+  ('mode', ctypes.c_uint32,21),
+  ('read_only', ctypes.c_uint32,1),
+  ('centroid', ctypes.c_uint32,1),
+  ('sample', ctypes.c_uint32,1),
+  ('patch', ctypes.c_uint32,1),
+  ('invariant', ctypes.c_uint32,1),
+  ('explicit_invariant', ctypes.c_uint32,1),
+  ('ray_query', ctypes.c_uint32,1),
+  ('precision', ctypes.c_uint32,2),
+  ('assigned', ctypes.c_uint32,1),
+  ('cannot_coalesce', ctypes.c_uint32,1),
+  ('always_active_io', ctypes.c_uint32,1),
+  ('interpolation', ctypes.c_uint32,3),
+  ('location_frac', ctypes.c_uint32,2),
+  ('compact', ctypes.c_uint32,1),
+  ('fb_fetch_output', ctypes.c_uint32,1),
+  ('bindless', ctypes.c_uint32,1),
+  ('explicit_binding', ctypes.c_uint32,1),
+  ('explicit_location', ctypes.c_uint32,1),
+  ('implicit_sized_array', ctypes.c_uint32,1),
+  ('max_array_access', ctypes.c_int32),
+  ('has_initializer', ctypes.c_uint32,1),
+  ('is_implicit_initializer', ctypes.c_uint32,1),
+  ('is_xfb', ctypes.c_uint32,1),
+  ('is_xfb_only', ctypes.c_uint32,1),
+  ('explicit_xfb_buffer', ctypes.c_uint32,1),
+  ('explicit_xfb_stride', ctypes.c_uint32,1),
+  ('explicit_offset', ctypes.c_uint32,1),
+  ('matrix_layout', ctypes.c_uint32,2),
+  ('from_named_ifc_block', ctypes.c_uint32,1),
+  ('from_ssbo_unsized_array', ctypes.c_uint32,1),
+  ('must_be_shader_input', ctypes.c_uint32,1),
+  ('used', ctypes.c_uint32,1),
+  ('how_declared', ctypes.c_uint32,2),
+  ('per_view', ctypes.c_uint32,1),
+  ('per_primitive', ctypes.c_uint32,1),
+  ('per_vertex', ctypes.c_uint32,1),
+  ('aliased_shared_memory', ctypes.c_uint32,1),
+  ('depth_layout', ctypes.c_uint32,3),
+  ('stream', ctypes.c_uint32,9),
+  ('access', ctypes.c_uint32,9),
+  ('descriptor_set', ctypes.c_uint32,5),
+  ('index', ctypes.c_uint32),
+  ('binding', ctypes.c_uint32),
+  ('location', ctypes.c_int32),
+  ('alignment', ctypes.c_uint32),
+  ('driver_location', ctypes.c_uint32),
+  ('offset', ctypes.c_uint32),
   ('_0', struct_nir_variable_data_0),
   ('node_name', ctypes.POINTER(ctypes.c_char)),
 ]
@@ -694,7 +694,7 @@ struct_exec_node._fields_ = [
   ('prev', ctypes.POINTER(struct_exec_node)),
 ]
 class struct_glsl_type(Struct): pass
-enum_glsl_base_type = CEnum(ctypes.c_uint)
+enum_glsl_base_type = CEnum(ctypes.c_uint32)
 GLSL_TYPE_UINT = enum_glsl_base_type.define('GLSL_TYPE_UINT', 0)
 GLSL_TYPE_INT = enum_glsl_base_type.define('GLSL_TYPE_INT', 1)
 GLSL_TYPE_FLOAT = enum_glsl_base_type.define('GLSL_TYPE_FLOAT', 2)
@@ -730,7 +730,7 @@ struct_glsl_cmat_description._fields_ = [
   ('cols', uint8_t),
   ('use', uint8_t),
 ]
-uintptr_t = ctypes.c_ulong
+uintptr_t = ctypes.c_uint64
 class struct_glsl_type_fields(ctypes.Union): pass
 glsl_type = struct_glsl_type
 class struct_glsl_struct_field(Struct): pass
@@ -738,34 +738,34 @@ glsl_struct_field = struct_glsl_struct_field
 class struct_glsl_struct_field_0(ctypes.Union): pass
 class struct_glsl_struct_field_0_0(Struct): pass
 struct_glsl_struct_field_0_0._fields_ = [
-  ('interpolation', ctypes.c_uint,3),
-  ('centroid', ctypes.c_uint,1),
-  ('sample', ctypes.c_uint,1),
-  ('matrix_layout', ctypes.c_uint,2),
-  ('patch', ctypes.c_uint,1),
-  ('precision', ctypes.c_uint,2),
-  ('memory_read_only', ctypes.c_uint,1),
-  ('memory_write_only', ctypes.c_uint,1),
-  ('memory_coherent', ctypes.c_uint,1),
-  ('memory_volatile', ctypes.c_uint,1),
-  ('memory_restrict', ctypes.c_uint,1),
-  ('explicit_xfb_buffer', ctypes.c_uint,1),
-  ('implicit_sized_array', ctypes.c_uint,1),
+  ('interpolation', ctypes.c_uint32,3),
+  ('centroid', ctypes.c_uint32,1),
+  ('sample', ctypes.c_uint32,1),
+  ('matrix_layout', ctypes.c_uint32,2),
+  ('patch', ctypes.c_uint32,1),
+  ('precision', ctypes.c_uint32,2),
+  ('memory_read_only', ctypes.c_uint32,1),
+  ('memory_write_only', ctypes.c_uint32,1),
+  ('memory_coherent', ctypes.c_uint32,1),
+  ('memory_volatile', ctypes.c_uint32,1),
+  ('memory_restrict', ctypes.c_uint32,1),
+  ('explicit_xfb_buffer', ctypes.c_uint32,1),
+  ('implicit_sized_array', ctypes.c_uint32,1),
 ]
 struct_glsl_struct_field_0._anonymous_ = ['_0']
 struct_glsl_struct_field_0._fields_ = [
   ('_0', struct_glsl_struct_field_0_0),
-  ('flags', ctypes.c_uint),
+  ('flags', ctypes.c_uint32),
 ]
 struct_glsl_struct_field._anonymous_ = ['_0']
 struct_glsl_struct_field._fields_ = [
   ('type', ctypes.POINTER(glsl_type)),
   ('name', ctypes.POINTER(ctypes.c_char)),
-  ('location', ctypes.c_int),
-  ('component', ctypes.c_int),
-  ('offset', ctypes.c_int),
-  ('xfb_buffer', ctypes.c_int),
-  ('xfb_stride', ctypes.c_int),
+  ('location', ctypes.c_int32),
+  ('component', ctypes.c_int32),
+  ('offset', ctypes.c_int32),
+  ('xfb_buffer', ctypes.c_int32),
+  ('xfb_stride', ctypes.c_int32),
   ('image_format', enum_pipe_format),
   ('_0', struct_glsl_struct_field_0),
 ]
@@ -777,20 +777,20 @@ struct_glsl_type._fields_ = [
   ('gl_type', uint32_t),
   ('base_type', enum_glsl_base_type,8),
   ('sampled_type', enum_glsl_base_type,8),
-  ('sampler_dimensionality', ctypes.c_uint,4),
-  ('sampler_shadow', ctypes.c_uint,1),
-  ('sampler_array', ctypes.c_uint,1),
-  ('interface_packing', ctypes.c_uint,2),
-  ('interface_row_major', ctypes.c_uint,1),
+  ('sampler_dimensionality', ctypes.c_uint32,4),
+  ('sampler_shadow', ctypes.c_uint32,1),
+  ('sampler_array', ctypes.c_uint32,1),
+  ('interface_packing', ctypes.c_uint32,2),
+  ('interface_row_major', ctypes.c_uint32,1),
   ('cmat_desc', struct_glsl_cmat_description),
-  ('packed', ctypes.c_uint,1),
-  ('has_builtin_name', ctypes.c_uint,1),
+  ('packed', ctypes.c_uint32,1),
+  ('has_builtin_name', ctypes.c_uint32,1),
   ('vector_elements', uint8_t),
   ('matrix_columns', uint8_t),
-  ('length', ctypes.c_uint),
+  ('length', ctypes.c_uint32),
   ('name_id', uintptr_t),
-  ('explicit_stride', ctypes.c_uint),
-  ('explicit_alignment', ctypes.c_uint),
+  ('explicit_stride', ctypes.c_uint32),
+  ('explicit_alignment', ctypes.c_uint32),
   ('fields', struct_glsl_type_fields),
 ]
 nir_variable = struct_nir_variable
@@ -799,9 +799,9 @@ struct_nir_variable._fields_ = [
   ('type', ctypes.POINTER(struct_glsl_type)),
   ('name', ctypes.POINTER(ctypes.c_char)),
   ('data', struct_nir_variable_data),
-  ('index', ctypes.c_uint),
+  ('index', ctypes.c_uint32),
   ('num_members', uint16_t),
-  ('max_ifc_array_access', ctypes.POINTER(ctypes.c_int)),
+  ('max_ifc_array_access', ctypes.POINTER(ctypes.c_int32)),
   ('num_state_slots', uint16_t),
   ('state_slots', ctypes.POINTER(nir_state_slot)),
   ('constant_initializer', ctypes.POINTER(nir_constant)),
@@ -826,7 +826,7 @@ class struct_nir_block(Struct): pass
 nir_block = struct_nir_block
 class struct_nir_cf_node(Struct): pass
 nir_cf_node = struct_nir_cf_node
-nir_cf_node_type = CEnum(ctypes.c_uint)
+nir_cf_node_type = CEnum(ctypes.c_uint32)
 nir_cf_node_block = nir_cf_node_type.define('nir_cf_node_block', 0)
 nir_cf_node_if = nir_cf_node_type.define('nir_cf_node_if', 1)
 nir_cf_node_loop = nir_cf_node_type.define('nir_cf_node_loop', 2)
@@ -867,20 +867,20 @@ struct_set._fields_ = [
 struct_nir_block._fields_ = [
   ('cf_node', nir_cf_node),
   ('instr_list', struct_exec_list),
-  ('index', ctypes.c_uint),
+  ('index', ctypes.c_uint32),
   ('divergent', ctypes.c_bool),
   ('successors', (ctypes.POINTER(nir_block) * 2)),
   ('predecessors', ctypes.POINTER(struct_set)),
   ('imm_dom', ctypes.POINTER(nir_block)),
-  ('num_dom_children', ctypes.c_uint),
+  ('num_dom_children', ctypes.c_uint32),
   ('dom_children', ctypes.POINTER(ctypes.POINTER(nir_block))),
   ('dom_frontier', ctypes.POINTER(struct_set)),
   ('dom_pre_index', uint32_t),
   ('dom_post_index', uint32_t),
   ('start_ip', uint32_t),
   ('end_ip', uint32_t),
-  ('live_in', ctypes.POINTER(ctypes.c_uint)),
-  ('live_out', ctypes.POINTER(ctypes.c_uint)),
+  ('live_in', ctypes.POINTER(ctypes.c_uint32)),
+  ('live_out', ctypes.POINTER(ctypes.c_uint32)),
 ]
 struct_nir_instr._fields_ = [
   ('node', struct_exec_node),
@@ -900,7 +900,7 @@ struct_list_head._fields_ = [
 struct_nir_def._fields_ = [
   ('parent_instr', ctypes.POINTER(nir_instr)),
   ('uses', struct_list_head),
-  ('index', ctypes.c_uint),
+  ('index', ctypes.c_uint32),
   ('num_components', uint8_t),
   ('bit_size', uint8_t),
   ('divergent', ctypes.c_bool),
@@ -956,7 +956,7 @@ except AttributeError: pass
 try: (nir_get_glsl_base_type_for_nir_type:=dll.nir_get_glsl_base_type_for_nir_type).restype, nir_get_glsl_base_type_for_nir_type.argtypes = enum_glsl_base_type, [nir_alu_type]
 except AttributeError: pass
 
-nir_op = CEnum(ctypes.c_uint)
+nir_op = CEnum(ctypes.c_uint32)
 nir_op_alignbyte_amd = nir_op.define('nir_op_alignbyte_amd', 0)
 nir_op_amul = nir_op.define('nir_op_amul', 1)
 nir_op_andg_ir3 = nir_op.define('nir_op_andg_ir3', 2)
@@ -1453,7 +1453,7 @@ nir_num_opcodes = nir_op.define('nir_num_opcodes', 489)
 try: (nir_type_conversion_op:=dll.nir_type_conversion_op).restype, nir_type_conversion_op.argtypes = nir_op, [nir_alu_type, nir_alu_type, nir_rounding_mode]
 except AttributeError: pass
 
-nir_atomic_op = CEnum(ctypes.c_uint)
+nir_atomic_op = CEnum(ctypes.c_uint32)
 nir_atomic_op_iadd = nir_atomic_op.define('nir_atomic_op_iadd', 0)
 nir_atomic_op_imin = nir_atomic_op.define('nir_atomic_op_imin', 1)
 nir_atomic_op_umin = nir_atomic_op.define('nir_atomic_op_umin', 2)
@@ -1477,14 +1477,14 @@ try: (nir_atomic_op_to_alu:=dll.nir_atomic_op_to_alu).restype, nir_atomic_op_to_
 except AttributeError: pass
 
 # nir_op nir_op_vec(unsigned int num_components)
-try: (nir_op_vec:=dll.nir_op_vec).restype, nir_op_vec.argtypes = nir_op, [ctypes.c_uint]
+try: (nir_op_vec:=dll.nir_op_vec).restype, nir_op_vec.argtypes = nir_op, [ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_op_is_vec(nir_op op)
 try: (nir_op_is_vec:=dll.nir_op_is_vec).restype, nir_op_is_vec.argtypes = ctypes.c_bool, [nir_op]
 except AttributeError: pass
 
-nir_op_algebraic_property = CEnum(ctypes.c_uint)
+nir_op_algebraic_property = CEnum(ctypes.c_uint32)
 NIR_OP_IS_2SRC_COMMUTATIVE = nir_op_algebraic_property.define('NIR_OP_IS_2SRC_COMMUTATIVE', 1)
 NIR_OP_IS_ASSOCIATIVE = nir_op_algebraic_property.define('NIR_OP_IS_ASSOCIATIVE', 2)
 NIR_OP_IS_SELECTION = nir_op_algebraic_property.define('NIR_OP_IS_SELECTION', 4)
@@ -1520,11 +1520,11 @@ try: (nir_alu_src_copy:=dll.nir_alu_src_copy).restype, nir_alu_src_copy.argtypes
 except AttributeError: pass
 
 # nir_component_mask_t nir_alu_instr_src_read_mask(const nir_alu_instr *instr, unsigned int src)
-try: (nir_alu_instr_src_read_mask:=dll.nir_alu_instr_src_read_mask).restype, nir_alu_instr_src_read_mask.argtypes = nir_component_mask_t, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint]
+try: (nir_alu_instr_src_read_mask:=dll.nir_alu_instr_src_read_mask).restype, nir_alu_instr_src_read_mask.argtypes = nir_component_mask_t, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int nir_ssa_alu_instr_src_components(const nir_alu_instr *instr, unsigned int src)
-try: (nir_ssa_alu_instr_src_components:=dll.nir_ssa_alu_instr_src_components).restype, nir_ssa_alu_instr_src_components.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint]
+try: (nir_ssa_alu_instr_src_components:=dll.nir_ssa_alu_instr_src_components).restype, nir_ssa_alu_instr_src_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_alu_instr_is_comparison(const nir_alu_instr *instr)
@@ -1536,22 +1536,22 @@ try: (nir_const_value_negative_equal:=dll.nir_const_value_negative_equal).restyp
 except AttributeError: pass
 
 # bool nir_alu_srcs_equal(const nir_alu_instr *alu1, const nir_alu_instr *alu2, unsigned int src1, unsigned int src2)
-try: (nir_alu_srcs_equal:=dll.nir_alu_srcs_equal).restype, nir_alu_srcs_equal.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint, ctypes.c_uint]
+try: (nir_alu_srcs_equal:=dll.nir_alu_srcs_equal).restype, nir_alu_srcs_equal.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_alu_srcs_negative_equal_typed(const nir_alu_instr *alu1, const nir_alu_instr *alu2, unsigned int src1, unsigned int src2, nir_alu_type base_type)
-try: (nir_alu_srcs_negative_equal_typed:=dll.nir_alu_srcs_negative_equal_typed).restype, nir_alu_srcs_negative_equal_typed.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint, ctypes.c_uint, nir_alu_type]
+try: (nir_alu_srcs_negative_equal_typed:=dll.nir_alu_srcs_negative_equal_typed).restype, nir_alu_srcs_negative_equal_typed.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32, nir_alu_type]
 except AttributeError: pass
 
 # bool nir_alu_srcs_negative_equal(const nir_alu_instr *alu1, const nir_alu_instr *alu2, unsigned int src1, unsigned int src2)
-try: (nir_alu_srcs_negative_equal:=dll.nir_alu_srcs_negative_equal).restype, nir_alu_srcs_negative_equal.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint, ctypes.c_uint]
+try: (nir_alu_srcs_negative_equal:=dll.nir_alu_srcs_negative_equal).restype, nir_alu_srcs_negative_equal.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_alu_src_is_trivial_ssa(const nir_alu_instr *alu, unsigned int srcn)
-try: (nir_alu_src_is_trivial_ssa:=dll.nir_alu_src_is_trivial_ssa).restype, nir_alu_src_is_trivial_ssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint]
+try: (nir_alu_src_is_trivial_ssa:=dll.nir_alu_src_is_trivial_ssa).restype, nir_alu_src_is_trivial_ssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-nir_deref_type = CEnum(ctypes.c_uint)
+nir_deref_type = CEnum(ctypes.c_uint32)
 nir_deref_type_var = nir_deref_type.define('nir_deref_type_var', 0)
 nir_deref_type_array = nir_deref_type.define('nir_deref_type_array', 1)
 nir_deref_type_array_wildcard = nir_deref_type.define('nir_deref_type_array_wildcard', 2)
@@ -1560,7 +1560,7 @@ nir_deref_type_struct = nir_deref_type.define('nir_deref_type_struct', 4)
 nir_deref_type_cast = nir_deref_type.define('nir_deref_type_cast', 5)
 
 class struct_nir_deref_instr(Struct): pass
-nir_variable_mode = CEnum(ctypes.c_uint)
+nir_variable_mode = CEnum(ctypes.c_uint32)
 nir_var_system_value = nir_variable_mode.define('nir_var_system_value', 1)
 nir_var_uniform = nir_variable_mode.define('nir_var_uniform', 2)
 nir_var_shader_in = nir_variable_mode.define('nir_var_shader_in', 4)
@@ -1601,13 +1601,13 @@ struct_nir_deref_instr_1_arr._fields_ = [
 ]
 class struct_nir_deref_instr_1_strct(Struct): pass
 struct_nir_deref_instr_1_strct._fields_ = [
-  ('index', ctypes.c_uint),
+  ('index', ctypes.c_uint32),
 ]
 class struct_nir_deref_instr_1_cast(Struct): pass
 struct_nir_deref_instr_1_cast._fields_ = [
-  ('ptr_stride', ctypes.c_uint),
-  ('align_mul', ctypes.c_uint),
-  ('align_offset', ctypes.c_uint),
+  ('ptr_stride', ctypes.c_uint32),
+  ('align_mul', ctypes.c_uint32),
+  ('align_offset', ctypes.c_uint32),
 ]
 struct_nir_deref_instr_1._fields_ = [
   ('arr', struct_nir_deref_instr_1_arr),
@@ -1637,7 +1637,7 @@ except AttributeError: pass
 try: (nir_deref_instr_is_known_out_of_bounds:=dll.nir_deref_instr_is_known_out_of_bounds).restype, nir_deref_instr_is_known_out_of_bounds.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
-nir_deref_instr_has_complex_use_options = CEnum(ctypes.c_uint)
+nir_deref_instr_has_complex_use_options = CEnum(ctypes.c_uint32)
 nir_deref_instr_has_complex_use_allow_memcpy_src = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_src', 1)
 nir_deref_instr_has_complex_use_allow_memcpy_dst = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_dst', 2)
 nir_deref_instr_has_complex_use_allow_atomics = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_atomics', 4)
@@ -1651,7 +1651,7 @@ try: (nir_deref_instr_remove_if_unused:=dll.nir_deref_instr_remove_if_unused).re
 except AttributeError: pass
 
 # unsigned int nir_deref_instr_array_stride(nir_deref_instr *instr)
-try: (nir_deref_instr_array_stride:=dll.nir_deref_instr_array_stride).restype, nir_deref_instr_array_stride.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_deref_instr)]
+try: (nir_deref_instr_array_stride:=dll.nir_deref_instr_array_stride).restype, nir_deref_instr_array_stride.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
 class struct_nir_call_instr(Struct): pass
@@ -1673,7 +1673,7 @@ const_struct_nir_instr._fields_ = [
   ('index', uint32_t),
 ]
 nir_instr_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
-nir_lower_int64_options = CEnum(ctypes.c_uint)
+nir_lower_int64_options = CEnum(ctypes.c_uint32)
 nir_lower_imul64 = nir_lower_int64_options.define('nir_lower_imul64', 1)
 nir_lower_isign64 = nir_lower_int64_options.define('nir_lower_isign64', 2)
 nir_lower_divmod64 = nir_lower_int64_options.define('nir_lower_divmod64', 4)
@@ -1703,7 +1703,7 @@ nir_lower_iadd3_64 = nir_lower_int64_options.define('nir_lower_iadd3_64', 335544
 nir_lower_bitfield_reverse64 = nir_lower_int64_options.define('nir_lower_bitfield_reverse64', 67108864)
 nir_lower_bitfield_extract64 = nir_lower_int64_options.define('nir_lower_bitfield_extract64', 134217728)
 
-nir_lower_doubles_options = CEnum(ctypes.c_uint)
+nir_lower_doubles_options = CEnum(ctypes.c_uint32)
 nir_lower_drcp = nir_lower_doubles_options.define('nir_lower_drcp', 1)
 nir_lower_dsqrt = nir_lower_doubles_options.define('nir_lower_dsqrt', 2)
 nir_lower_drsq = nir_lower_doubles_options.define('nir_lower_drsq', 4)
@@ -1720,7 +1720,7 @@ nir_lower_dminmax = nir_lower_doubles_options.define('nir_lower_dminmax', 4096)
 nir_lower_dsat = nir_lower_doubles_options.define('nir_lower_dsat', 8192)
 nir_lower_fp64_full_software = nir_lower_doubles_options.define('nir_lower_fp64_full_software', 16384)
 
-nir_divergence_options = CEnum(ctypes.c_uint)
+nir_divergence_options = CEnum(ctypes.c_uint32)
 nir_divergence_single_prim_per_subgroup = nir_divergence_options.define('nir_divergence_single_prim_per_subgroup', 1)
 nir_divergence_single_patch_per_tcs_subgroup = nir_divergence_options.define('nir_divergence_single_patch_per_tcs_subgroup', 2)
 nir_divergence_single_patch_per_tes_subgroup = nir_divergence_options.define('nir_divergence_single_patch_per_tes_subgroup', 4)
@@ -1731,7 +1731,7 @@ nir_divergence_shader_record_ptr_uniform = nir_divergence_options.define('nir_di
 nir_divergence_uniform_load_tears = nir_divergence_options.define('nir_divergence_uniform_load_tears', 128)
 nir_divergence_ignore_undef_if_phi_srcs = nir_divergence_options.define('nir_divergence_ignore_undef_if_phi_srcs', 256)
 
-nir_io_options = CEnum(ctypes.c_uint)
+nir_io_options = CEnum(ctypes.c_uint32)
 nir_io_has_flexible_input_interpolation_except_flat = nir_io_options.define('nir_io_has_flexible_input_interpolation_except_flat', 1)
 nir_io_dont_use_pos_for_non_fs_varyings = nir_io_options.define('nir_io_dont_use_pos_for_non_fs_varyings', 2)
 nir_io_16bit_input_output_support = nir_io_options.define('nir_io_16bit_input_output_support', 4)
@@ -1889,9 +1889,9 @@ struct_nir_shader_compiler_options._fields_ = [
   ('avoid_ternary_with_two_constants', ctypes.c_bool),
   ('support_8bit_alu', ctypes.c_bool),
   ('support_16bit_alu', ctypes.c_bool),
-  ('max_unroll_iterations', ctypes.c_uint),
-  ('max_unroll_iterations_aggressive', ctypes.c_uint),
-  ('max_unroll_iterations_fp64', ctypes.c_uint),
+  ('max_unroll_iterations', ctypes.c_uint32),
+  ('max_unroll_iterations_aggressive', ctypes.c_uint32),
+  ('max_unroll_iterations_fp64', ctypes.c_uint32),
   ('lower_uniforms_to_ubo', ctypes.c_bool),
   ('force_indirect_unrolling_sampler', ctypes.c_bool),
   ('no_integers', ctypes.c_bool),
@@ -1916,15 +1916,15 @@ struct_nir_shader_compiler_options._fields_ = [
   ('per_view_unique_driver_locations', ctypes.c_bool),
   ('compact_view_index', ctypes.c_bool),
   ('io_options', nir_io_options),
-  ('skip_lower_packing_ops', ctypes.c_uint),
+  ('skip_lower_packing_ops', ctypes.c_uint32),
   ('lower_mediump_io', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_nir_shader))),
-  ('varying_expression_max_cost', ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader))),
-  ('varying_estimate_instr_cost', ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(struct_nir_instr))),
-  ('max_varying_expression_cost', ctypes.c_uint),
+  ('varying_expression_max_cost', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader))),
+  ('varying_estimate_instr_cost', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr))),
+  ('max_varying_expression_cost', ctypes.c_uint32),
 ]
 class struct_shader_info(Struct): pass
 blake3_hash = (ctypes.c_ubyte * 32)
-enum_pipe_shader_type = CEnum(ctypes.c_int)
+enum_pipe_shader_type = CEnum(ctypes.c_int32)
 MESA_SHADER_NONE = enum_pipe_shader_type.define('MESA_SHADER_NONE', -1)
 MESA_SHADER_VERTEX = enum_pipe_shader_type.define('MESA_SHADER_VERTEX', 0)
 PIPE_SHADER_VERTEX = enum_pipe_shader_type.define('PIPE_SHADER_VERTEX', 0)
@@ -1965,7 +1965,7 @@ SUBGROUP_SIZE_REQUIRE_32 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_3
 SUBGROUP_SIZE_REQUIRE_64 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_64', 64)
 SUBGROUP_SIZE_REQUIRE_128 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_128', 128)
 
-enum_gl_derivative_group = CEnum(ctypes.c_uint)
+enum_gl_derivative_group = CEnum(ctypes.c_uint32)
 DERIVATIVE_GROUP_NONE = enum_gl_derivative_group.define('DERIVATIVE_GROUP_NONE', 0)
 DERIVATIVE_GROUP_QUADS = enum_gl_derivative_group.define('DERIVATIVE_GROUP_QUADS', 1)
 DERIVATIVE_GROUP_LINEAR = enum_gl_derivative_group.define('DERIVATIVE_GROUP_LINEAR', 2)
@@ -2010,14 +2010,14 @@ struct_shader_info_0_gs._fields_ = [
   ('active_stream_mask', uint8_t,4),
 ]
 class struct_shader_info_0_fs(Struct): pass
-enum_gl_frag_depth_layout = CEnum(ctypes.c_uint)
+enum_gl_frag_depth_layout = CEnum(ctypes.c_uint32)
 FRAG_DEPTH_LAYOUT_NONE = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_NONE', 0)
 FRAG_DEPTH_LAYOUT_ANY = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_ANY', 1)
 FRAG_DEPTH_LAYOUT_GREATER = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_GREATER', 2)
 FRAG_DEPTH_LAYOUT_LESS = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_LESS', 3)
 FRAG_DEPTH_LAYOUT_UNCHANGED = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_UNCHANGED', 4)
 
-enum_gl_frag_stencil_layout = CEnum(ctypes.c_uint)
+enum_gl_frag_stencil_layout = CEnum(ctypes.c_uint32)
 FRAG_STENCIL_LAYOUT_NONE = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_NONE', 0)
 FRAG_STENCIL_LAYOUT_ANY = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_ANY', 1)
 FRAG_STENCIL_LAYOUT_GREATER = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_GREATER', 2)
@@ -2046,13 +2046,13 @@ struct_shader_info_0_fs._fields_ = [
   ('sample_interlock_unordered', ctypes.c_bool,1),
   ('untyped_color_outputs', ctypes.c_bool,1),
   ('depth_layout', enum_gl_frag_depth_layout,3),
-  ('color0_interp', ctypes.c_uint,3),
+  ('color0_interp', ctypes.c_uint32,3),
   ('color0_sample', ctypes.c_bool,1),
   ('color0_centroid', ctypes.c_bool,1),
-  ('color1_interp', ctypes.c_uint,3),
+  ('color1_interp', ctypes.c_uint32,3),
   ('color1_sample', ctypes.c_bool,1),
   ('color1_centroid', ctypes.c_bool,1),
-  ('advanced_blend_modes', ctypes.c_uint),
+  ('advanced_blend_modes', ctypes.c_uint32),
   ('early_and_late_fragment_tests', ctypes.c_bool,1),
   ('stencil_front_layout', enum_gl_frag_stencil_layout,3),
   ('stencil_back_layout', enum_gl_frag_stencil_layout,3),
@@ -2064,13 +2064,13 @@ struct_shader_info_0_cs._fields_ = [
   ('has_variable_shared_mem', ctypes.c_bool,1),
   ('has_cooperative_matrix', ctypes.c_bool,1),
   ('image_block_size_per_thread_agx', uint8_t),
-  ('ptr_size', ctypes.c_uint),
+  ('ptr_size', ctypes.c_uint32),
   ('shader_index', uint32_t),
   ('node_payloads_size', uint32_t),
   ('workgroup_count', (uint32_t * 3)),
 ]
 class struct_shader_info_0_tess(Struct): pass
-enum_tess_primitive_mode = CEnum(ctypes.c_uint)
+enum_tess_primitive_mode = CEnum(ctypes.c_uint32)
 TESS_PRIMITIVE_UNSPECIFIED = enum_tess_primitive_mode.define('TESS_PRIMITIVE_UNSPECIFIED', 0)
 TESS_PRIMITIVE_TRIANGLES = enum_tess_primitive_mode.define('TESS_PRIMITIVE_TRIANGLES', 1)
 TESS_PRIMITIVE_QUADS = enum_tess_primitive_mode.define('TESS_PRIMITIVE_QUADS', 2)
@@ -2079,7 +2079,7 @@ TESS_PRIMITIVE_ISOLINES = enum_tess_primitive_mode.define('TESS_PRIMITIVE_ISOLIN
 struct_shader_info_0_tess._fields_ = [
   ('_primitive_mode', enum_tess_primitive_mode),
   ('tcs_vertices_out', uint8_t),
-  ('spacing', ctypes.c_uint,2),
+  ('spacing', ctypes.c_uint32,2),
   ('ccw', ctypes.c_bool,1),
   ('point_mode', ctypes.c_bool,1),
   ('tcs_same_invocation_inputs_read', uint64_t),
@@ -2126,7 +2126,7 @@ struct_shader_info._fields_ = [
   ('dual_slot_inputs', uint64_t),
   ('outputs_written', uint64_t),
   ('outputs_read', uint64_t),
-  ('system_values_read', (ctypes.c_uint * 4)),
+  ('system_values_read', (ctypes.c_uint32 * 4)),
   ('per_primitive_inputs', uint64_t),
   ('per_primitive_outputs', uint64_t),
   ('per_view_outputs', uint64_t),
@@ -2146,16 +2146,16 @@ struct_shader_info._fields_ = [
   ('patch_inputs_read_indirectly', uint32_t),
   ('patch_outputs_read_indirectly', uint32_t),
   ('patch_outputs_written_indirectly', uint32_t),
-  ('textures_used', (ctypes.c_uint * 4)),
-  ('textures_used_by_txf', (ctypes.c_uint * 4)),
-  ('samplers_used', (ctypes.c_uint * 1)),
-  ('images_used', (ctypes.c_uint * 2)),
-  ('image_buffers', (ctypes.c_uint * 2)),
-  ('msaa_images', (ctypes.c_uint * 2)),
+  ('textures_used', (ctypes.c_uint32 * 4)),
+  ('textures_used_by_txf', (ctypes.c_uint32 * 4)),
+  ('samplers_used', (ctypes.c_uint32 * 1)),
+  ('images_used', (ctypes.c_uint32 * 2)),
+  ('image_buffers', (ctypes.c_uint32 * 2)),
+  ('msaa_images', (ctypes.c_uint32 * 2)),
   ('float_controls_execution_mode', uint32_t),
-  ('shared_size', ctypes.c_uint),
-  ('task_payload_size', ctypes.c_uint),
-  ('ray_queries', ctypes.c_uint),
+  ('shared_size', ctypes.c_uint32),
+  ('task_payload_size', ctypes.c_uint32),
+  ('ray_queries', ctypes.c_uint32),
   ('workgroup_size', (uint16_t * 3)),
   ('subgroup_size', enum_gl_subgroup_size),
   ('num_subgroups', uint8_t),
@@ -2199,15 +2199,15 @@ struct_nir_shader._fields_ = [
   ('options', ctypes.POINTER(nir_shader_compiler_options)),
   ('info', struct_shader_info),
   ('functions', struct_exec_list),
-  ('num_inputs', ctypes.c_uint),
-  ('num_uniforms', ctypes.c_uint),
-  ('num_outputs', ctypes.c_uint),
-  ('global_mem_size', ctypes.c_uint),
-  ('scratch_size', ctypes.c_uint),
+  ('num_inputs', ctypes.c_uint32),
+  ('num_uniforms', ctypes.c_uint32),
+  ('num_outputs', ctypes.c_uint32),
+  ('global_mem_size', ctypes.c_uint32),
+  ('scratch_size', ctypes.c_uint32),
   ('constant_data', ctypes.c_void_p),
-  ('constant_data_size', ctypes.c_uint),
+  ('constant_data_size', ctypes.c_uint32),
   ('xfb_info', ctypes.POINTER(nir_xfb_info)),
-  ('printf_info_count', ctypes.c_uint),
+  ('printf_info_count', ctypes.c_uint32),
   ('printf_info', ctypes.POINTER(u_printf_info)),
   ('has_debug_info', ctypes.c_bool),
 ]
@@ -2227,7 +2227,7 @@ struct_nir_parameter._fields_ = [
 class struct_nir_function_impl(Struct): pass
 nir_function_impl = struct_nir_function_impl
 nir_function = struct_nir_function
-nir_metadata = CEnum(ctypes.c_int)
+nir_metadata = CEnum(ctypes.c_int32)
 nir_metadata_none = nir_metadata.define('nir_metadata_none', 0)
 nir_metadata_block_index = nir_metadata.define('nir_metadata_block_index', 1)
 nir_metadata_dominance = nir_metadata.define('nir_metadata_dominance', 2)
@@ -2246,8 +2246,8 @@ struct_nir_function_impl._fields_ = [
   ('body', struct_exec_list),
   ('end_block', ctypes.POINTER(nir_block)),
   ('locals', struct_exec_list),
-  ('ssa_alloc', ctypes.c_uint),
-  ('num_blocks', ctypes.c_uint),
+  ('ssa_alloc', ctypes.c_uint32),
+  ('num_blocks', ctypes.c_uint32),
   ('structured', ctypes.c_bool),
   ('valid_metadata', nir_metadata),
   ('loop_analysis_indirect_mask', nir_variable_mode),
@@ -2257,7 +2257,7 @@ struct_nir_function._fields_ = [
   ('node', struct_exec_node),
   ('name', ctypes.POINTER(ctypes.c_char)),
   ('shader', ctypes.POINTER(nir_shader)),
-  ('num_params', ctypes.c_uint),
+  ('num_params', ctypes.c_uint32),
   ('params', ctypes.POINTER(nir_parameter)),
   ('impl', ctypes.POINTER(nir_function_impl)),
   ('driver_attributes', uint32_t),
@@ -2266,24 +2266,24 @@ struct_nir_function._fields_ = [
   ('is_preamble', ctypes.c_bool),
   ('should_inline', ctypes.c_bool),
   ('dont_inline', ctypes.c_bool),
-  ('workgroup_size', (ctypes.c_uint * 3)),
+  ('workgroup_size', (ctypes.c_uint32 * 3)),
   ('is_subroutine', ctypes.c_bool),
   ('is_tmp_globals_wrapper', ctypes.c_bool),
-  ('num_subroutine_types', ctypes.c_int),
+  ('num_subroutine_types', ctypes.c_int32),
   ('subroutine_types', ctypes.POINTER(ctypes.POINTER(struct_glsl_type))),
-  ('subroutine_index', ctypes.c_int),
+  ('subroutine_index', ctypes.c_int32),
   ('pass_flags', uint32_t),
 ]
 struct_nir_call_instr._fields_ = [
   ('instr', nir_instr),
   ('callee', ctypes.POINTER(nir_function)),
   ('indirect_callee', nir_src),
-  ('num_params', ctypes.c_uint),
+  ('num_params', ctypes.c_uint32),
   ('params', (nir_src * 0)),
 ]
 nir_call_instr = struct_nir_call_instr
 class struct_nir_intrinsic_instr(Struct): pass
-nir_intrinsic_op = CEnum(ctypes.c_uint)
+nir_intrinsic_op = CEnum(ctypes.c_uint32)
 nir_intrinsic_accept_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_accept_ray_intersection', 0)
 nir_intrinsic_addr_mode_is = nir_intrinsic_op.define('nir_intrinsic_addr_mode_is', 1)
 nir_intrinsic_al2p_nv = nir_intrinsic_op.define('nir_intrinsic_al2p_nv', 2)
@@ -3024,19 +3024,19 @@ struct_nir_intrinsic_instr._fields_ = [
   ('intrinsic', nir_intrinsic_op),
   ('def', nir_def),
   ('num_components', uint8_t),
-  ('const_index', (ctypes.c_int * 8)),
+  ('const_index', (ctypes.c_int32 * 8)),
   ('name', ctypes.POINTER(ctypes.c_char)),
   ('src', (nir_src * 0)),
 ]
 nir_intrinsic_instr = struct_nir_intrinsic_instr
-nir_memory_semantics = CEnum(ctypes.c_uint)
+nir_memory_semantics = CEnum(ctypes.c_uint32)
 NIR_MEMORY_ACQUIRE = nir_memory_semantics.define('NIR_MEMORY_ACQUIRE', 1)
 NIR_MEMORY_RELEASE = nir_memory_semantics.define('NIR_MEMORY_RELEASE', 2)
 NIR_MEMORY_ACQ_REL = nir_memory_semantics.define('NIR_MEMORY_ACQ_REL', 3)
 NIR_MEMORY_MAKE_AVAILABLE = nir_memory_semantics.define('NIR_MEMORY_MAKE_AVAILABLE', 4)
 NIR_MEMORY_MAKE_VISIBLE = nir_memory_semantics.define('NIR_MEMORY_MAKE_VISIBLE', 8)
 
-nir_intrinsic_semantic_flag = CEnum(ctypes.c_uint)
+nir_intrinsic_semantic_flag = CEnum(ctypes.c_uint32)
 NIR_INTRINSIC_CAN_ELIMINATE = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_CAN_ELIMINATE', 1)
 NIR_INTRINSIC_CAN_REORDER = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_CAN_REORDER', 2)
 NIR_INTRINSIC_SUBGROUP = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_SUBGROUP', 4)
@@ -3044,20 +3044,20 @@ NIR_INTRINSIC_QUADGROUP = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_QUAD
 
 class struct_nir_io_semantics(Struct): pass
 struct_nir_io_semantics._fields_ = [
-  ('location', ctypes.c_uint,7),
-  ('num_slots', ctypes.c_uint,6),
-  ('dual_source_blend_index', ctypes.c_uint,1),
-  ('fb_fetch_output', ctypes.c_uint,1),
-  ('fb_fetch_output_coherent', ctypes.c_uint,1),
-  ('gs_streams', ctypes.c_uint,8),
-  ('medium_precision', ctypes.c_uint,1),
-  ('per_view', ctypes.c_uint,1),
-  ('high_16bits', ctypes.c_uint,1),
-  ('high_dvec2', ctypes.c_uint,1),
-  ('no_varying', ctypes.c_uint,1),
-  ('no_sysval_output', ctypes.c_uint,1),
-  ('interp_explicit_strict', ctypes.c_uint,1),
-  ('_pad', ctypes.c_uint,1),
+  ('location', ctypes.c_uint32,7),
+  ('num_slots', ctypes.c_uint32,6),
+  ('dual_source_blend_index', ctypes.c_uint32,1),
+  ('fb_fetch_output', ctypes.c_uint32,1),
+  ('fb_fetch_output_coherent', ctypes.c_uint32,1),
+  ('gs_streams', ctypes.c_uint32,8),
+  ('medium_precision', ctypes.c_uint32,1),
+  ('per_view', ctypes.c_uint32,1),
+  ('high_16bits', ctypes.c_uint32,1),
+  ('high_dvec2', ctypes.c_uint32,1),
+  ('no_varying', ctypes.c_uint32,1),
+  ('no_sysval_output', ctypes.c_uint32,1),
+  ('interp_explicit_strict', ctypes.c_uint32,1),
+  ('_pad', ctypes.c_uint32,1),
 ]
 nir_io_semantics = struct_nir_io_semantics
 class struct_nir_io_xfb(Struct): pass
@@ -3072,7 +3072,7 @@ struct_nir_io_xfb._fields_ = [
 ]
 nir_io_xfb = struct_nir_io_xfb
 # unsigned int nir_instr_xfb_write_mask(nir_intrinsic_instr *instr)
-try: (nir_instr_xfb_write_mask:=dll.nir_instr_xfb_write_mask).restype, nir_instr_xfb_write_mask.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_intrinsic_instr)]
+try: (nir_instr_xfb_write_mask:=dll.nir_instr_xfb_write_mask).restype, nir_instr_xfb_write_mask.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
 class struct_nir_intrinsic_info(Struct): pass
@@ -3093,15 +3093,15 @@ nir_intrinsic_info = struct_nir_intrinsic_info
 try: nir_intrinsic_infos = (nir_intrinsic_info * 732).in_dll(dll, 'nir_intrinsic_infos')
 except (ValueError,AttributeError): pass
 # unsigned int nir_intrinsic_src_components(const nir_intrinsic_instr *intr, unsigned int srcn)
-try: (nir_intrinsic_src_components:=dll.nir_intrinsic_src_components).restype, nir_intrinsic_src_components.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint]
+try: (nir_intrinsic_src_components:=dll.nir_intrinsic_src_components).restype, nir_intrinsic_src_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int nir_intrinsic_dest_components(nir_intrinsic_instr *intr)
-try: (nir_intrinsic_dest_components:=dll.nir_intrinsic_dest_components).restype, nir_intrinsic_dest_components.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_intrinsic_instr)]
+try: (nir_intrinsic_dest_components:=dll.nir_intrinsic_dest_components).restype, nir_intrinsic_dest_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
 # nir_alu_type nir_intrinsic_instr_src_type(const nir_intrinsic_instr *intrin, unsigned int src)
-try: (nir_intrinsic_instr_src_type:=dll.nir_intrinsic_instr_src_type).restype, nir_intrinsic_instr_src_type.argtypes = nir_alu_type, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint]
+try: (nir_intrinsic_instr_src_type:=dll.nir_intrinsic_instr_src_type).restype, nir_intrinsic_instr_src_type.argtypes = nir_alu_type, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_alu_type nir_intrinsic_instr_dest_type(const nir_intrinsic_instr *intrin)
@@ -3113,7 +3113,7 @@ try: (nir_intrinsic_copy_const_indices:=dll.nir_intrinsic_copy_const_indices).re
 except AttributeError: pass
 
 # unsigned int nir_image_intrinsic_coord_components(const nir_intrinsic_instr *instr)
-try: (nir_image_intrinsic_coord_components:=dll.nir_image_intrinsic_coord_components).restype, nir_image_intrinsic_coord_components.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_intrinsic_instr)]
+try: (nir_image_intrinsic_coord_components:=dll.nir_image_intrinsic_coord_components).restype, nir_image_intrinsic_coord_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
 # void nir_rewrite_image_intrinsic(nir_intrinsic_instr *instr, nir_def *handle, bool bindless)
@@ -3128,7 +3128,7 @@ except AttributeError: pass
 try: (nir_intrinsic_writes_external_memory:=dll.nir_intrinsic_writes_external_memory).restype, nir_intrinsic_writes_external_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-enum_nir_tex_src_type = CEnum(ctypes.c_uint)
+enum_nir_tex_src_type = CEnum(ctypes.c_uint32)
 nir_tex_src_coord = enum_nir_tex_src_type.define('nir_tex_src_coord', 0)
 nir_tex_src_projector = enum_nir_tex_src_type.define('nir_tex_src_projector', 1)
 nir_tex_src_comparator = enum_nir_tex_src_type.define('nir_tex_src_comparator', 2)
@@ -3161,7 +3161,7 @@ struct_nir_tex_src._fields_ = [
   ('src_type', nir_tex_src_type),
 ]
 nir_tex_src = struct_nir_tex_src
-enum_nir_texop = CEnum(ctypes.c_uint)
+enum_nir_texop = CEnum(ctypes.c_uint32)
 nir_texop_tex = enum_nir_texop.define('nir_texop_tex', 0)
 nir_texop_txb = enum_nir_texop.define('nir_texop_txb', 1)
 nir_texop_txl = enum_nir_texop.define('nir_texop_txl', 2)
@@ -3190,7 +3190,7 @@ nir_texop_tex_type_nv = enum_nir_texop.define('nir_texop_tex_type_nv', 24)
 
 nir_texop = enum_nir_texop
 class struct_nir_tex_instr(Struct): pass
-enum_glsl_sampler_dim = CEnum(ctypes.c_uint)
+enum_glsl_sampler_dim = CEnum(ctypes.c_uint32)
 GLSL_SAMPLER_DIM_1D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_1D', 0)
 GLSL_SAMPLER_DIM_2D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_2D', 1)
 GLSL_SAMPLER_DIM_3D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_3D', 2)
@@ -3209,22 +3209,22 @@ struct_nir_tex_instr._fields_ = [
   ('op', nir_texop),
   ('def', nir_def),
   ('src', ctypes.POINTER(nir_tex_src)),
-  ('num_srcs', ctypes.c_uint),
-  ('coord_components', ctypes.c_uint),
+  ('num_srcs', ctypes.c_uint32),
+  ('coord_components', ctypes.c_uint32),
   ('is_array', ctypes.c_bool),
   ('is_shadow', ctypes.c_bool),
   ('is_new_style_shadow', ctypes.c_bool),
   ('is_sparse', ctypes.c_bool),
-  ('component', ctypes.c_uint,2),
-  ('array_is_lowered_cube', ctypes.c_uint,1),
-  ('is_gather_implicit_lod', ctypes.c_uint,1),
-  ('skip_helpers', ctypes.c_uint,1),
+  ('component', ctypes.c_uint32,2),
+  ('array_is_lowered_cube', ctypes.c_uint32,1),
+  ('is_gather_implicit_lod', ctypes.c_uint32,1),
+  ('skip_helpers', ctypes.c_uint32,1),
   ('tg4_offsets', ((int8_t * 2) * 4)),
   ('texture_non_uniform', ctypes.c_bool),
   ('sampler_non_uniform', ctypes.c_bool),
   ('offset_non_uniform', ctypes.c_bool),
-  ('texture_index', ctypes.c_uint),
-  ('sampler_index', ctypes.c_uint),
+  ('texture_index', ctypes.c_uint32),
+  ('sampler_index', ctypes.c_uint32),
   ('backend_flags', uint32_t),
 ]
 nir_tex_instr = struct_nir_tex_instr
@@ -3233,7 +3233,7 @@ try: (nir_tex_instr_need_sampler:=dll.nir_tex_instr_need_sampler).restype, nir_t
 except AttributeError: pass
 
 # unsigned int nir_tex_instr_result_size(const nir_tex_instr *instr)
-try: (nir_tex_instr_result_size:=dll.nir_tex_instr_result_size).restype, nir_tex_instr_result_size.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_tex_instr)]
+try: (nir_tex_instr_result_size:=dll.nir_tex_instr_result_size).restype, nir_tex_instr_result_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
 # bool nir_tex_instr_is_query(const nir_tex_instr *instr)
@@ -3245,11 +3245,11 @@ try: (nir_tex_instr_has_implicit_derivative:=dll.nir_tex_instr_has_implicit_deri
 except AttributeError: pass
 
 # nir_alu_type nir_tex_instr_src_type(const nir_tex_instr *instr, unsigned int src)
-try: (nir_tex_instr_src_type:=dll.nir_tex_instr_src_type).restype, nir_tex_instr_src_type.argtypes = nir_alu_type, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint]
+try: (nir_tex_instr_src_type:=dll.nir_tex_instr_src_type).restype, nir_tex_instr_src_type.argtypes = nir_alu_type, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int nir_tex_instr_src_size(const nir_tex_instr *instr, unsigned int src)
-try: (nir_tex_instr_src_size:=dll.nir_tex_instr_src_size).restype, nir_tex_instr_src_size.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint]
+try: (nir_tex_instr_src_size:=dll.nir_tex_instr_src_size).restype, nir_tex_instr_src_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # void nir_tex_instr_add_src(nir_tex_instr *tex, nir_tex_src_type src_type, nir_def *src)
@@ -3257,7 +3257,7 @@ try: (nir_tex_instr_add_src:=dll.nir_tex_instr_add_src).restype, nir_tex_instr_a
 except AttributeError: pass
 
 # void nir_tex_instr_remove_src(nir_tex_instr *tex, unsigned int src_idx)
-try: (nir_tex_instr_remove_src:=dll.nir_tex_instr_remove_src).restype, nir_tex_instr_remove_src.argtypes = None, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint]
+try: (nir_tex_instr_remove_src:=dll.nir_tex_instr_remove_src).restype, nir_tex_instr_remove_src.argtypes = None, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_tex_instr_has_explicit_tg4_offsets(nir_tex_instr *tex)
@@ -3271,7 +3271,7 @@ struct_nir_load_const_instr._fields_ = [
   ('value', (nir_const_value * 0)),
 ]
 nir_load_const_instr = struct_nir_load_const_instr
-nir_jump_type = CEnum(ctypes.c_uint)
+nir_jump_type = CEnum(ctypes.c_uint32)
 nir_jump_return = nir_jump_type.define('nir_jump_return', 0)
 nir_jump_halt = nir_jump_type.define('nir_jump_halt', 1)
 nir_jump_break = nir_jump_type.define('nir_jump_break', 2)
@@ -3342,7 +3342,7 @@ nir_instr_debug_info = struct_nir_instr_debug_info
 class struct_nir_scalar(Struct): pass
 struct_nir_scalar._fields_ = [
   ('def', ctypes.POINTER(nir_def)),
-  ('comp', ctypes.c_uint),
+  ('comp', ctypes.c_uint32),
 ]
 nir_scalar = struct_nir_scalar
 # nir_scalar nir_scalar_chase_movs(nir_scalar s)
@@ -3353,9 +3353,9 @@ class struct_nir_binding(Struct): pass
 struct_nir_binding._fields_ = [
   ('success', ctypes.c_bool),
   ('var', ctypes.POINTER(nir_variable)),
-  ('desc_set', ctypes.c_uint),
-  ('binding', ctypes.c_uint),
-  ('num_indices', ctypes.c_uint),
+  ('desc_set', ctypes.c_uint32),
+  ('binding', ctypes.c_uint32),
+  ('num_indices', ctypes.c_uint32),
   ('indices', (nir_src * 4)),
   ('read_first_invocation', ctypes.c_bool),
 ]
@@ -3372,7 +3372,7 @@ except AttributeError: pass
 try: (nir_block_contains_work:=dll.nir_block_contains_work).restype, nir_block_contains_work.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-nir_selection_control = CEnum(ctypes.c_uint)
+nir_selection_control = CEnum(ctypes.c_uint32)
 nir_selection_control_none = nir_selection_control.define('nir_selection_control_none', 0)
 nir_selection_control_flatten = nir_selection_control.define('nir_selection_control_flatten', 1)
 nir_selection_control_dont_flatten = nir_selection_control.define('nir_selection_control_dont_flatten', 2)
@@ -3430,10 +3430,10 @@ struct_hash_table._fields_ = [
   ('deleted_entries', uint32_t),
 ]
 struct_nir_loop_info._fields_ = [
-  ('instr_cost', ctypes.c_uint),
+  ('instr_cost', ctypes.c_uint32),
   ('has_soft_fp64', ctypes.c_bool),
-  ('guessed_trip_count', ctypes.c_uint),
-  ('max_trip_count', ctypes.c_uint),
+  ('guessed_trip_count', ctypes.c_uint32),
+  ('max_trip_count', ctypes.c_uint32),
   ('exact_trip_count_known', ctypes.c_bool),
   ('force_unroll', ctypes.c_bool),
   ('complex_loop', ctypes.c_bool),
@@ -3442,7 +3442,7 @@ struct_nir_loop_info._fields_ = [
   ('induction_vars', ctypes.POINTER(struct_hash_table)),
 ]
 nir_loop_info = struct_nir_loop_info
-nir_loop_control = CEnum(ctypes.c_uint)
+nir_loop_control = CEnum(ctypes.c_uint32)
 nir_loop_control_none = nir_loop_control.define('nir_loop_control_none', 0)
 nir_loop_control_unroll = nir_loop_control.define('nir_loop_control_unroll', 1)
 nir_loop_control_dont_unroll = nir_loop_control.define('nir_loop_control_dont_unroll', 2)
@@ -3465,7 +3465,7 @@ const_struct_nir_intrinsic_instr._fields_ = [
   ('intrinsic', nir_intrinsic_op),
   ('def', nir_def),
   ('num_components', uint8_t),
-  ('const_index', (ctypes.c_int * 8)),
+  ('const_index', (ctypes.c_int32 * 8)),
   ('name', ctypes.POINTER(ctypes.c_char)),
   ('src', (nir_src * 0)),
 ]
@@ -3509,19 +3509,19 @@ try: (nir_state_variable_create:=dll.nir_state_variable_create).restype, nir_sta
 except AttributeError: pass
 
 # nir_variable *nir_get_variable_with_location(nir_shader *shader, nir_variable_mode mode, int location, const struct glsl_type *type)
-try: (nir_get_variable_with_location:=dll.nir_get_variable_with_location).restype, nir_get_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int, ctypes.POINTER(struct_glsl_type)]
+try: (nir_get_variable_with_location:=dll.nir_get_variable_with_location).restype, nir_get_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, ctypes.POINTER(struct_glsl_type)]
 except AttributeError: pass
 
 # nir_variable *nir_create_variable_with_location(nir_shader *shader, nir_variable_mode mode, int location, const struct glsl_type *type)
-try: (nir_create_variable_with_location:=dll.nir_create_variable_with_location).restype, nir_create_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int, ctypes.POINTER(struct_glsl_type)]
+try: (nir_create_variable_with_location:=dll.nir_create_variable_with_location).restype, nir_create_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, ctypes.POINTER(struct_glsl_type)]
 except AttributeError: pass
 
 # nir_variable *nir_find_variable_with_location(nir_shader *shader, nir_variable_mode mode, unsigned int location)
-try: (nir_find_variable_with_location:=dll.nir_find_variable_with_location).restype, nir_find_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_uint]
+try: (nir_find_variable_with_location:=dll.nir_find_variable_with_location).restype, nir_find_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_variable *nir_find_variable_with_driver_location(nir_shader *shader, nir_variable_mode mode, unsigned int location)
-try: (nir_find_variable_with_driver_location:=dll.nir_find_variable_with_driver_location).restype, nir_find_variable_with_driver_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_uint]
+try: (nir_find_variable_with_driver_location:=dll.nir_find_variable_with_driver_location).restype, nir_find_variable_with_driver_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_variable *nir_find_state_variable(nir_shader *s, gl_state_index16 tokens[4])
@@ -3529,11 +3529,11 @@ try: (nir_find_state_variable:=dll.nir_find_state_variable).restype, nir_find_st
 except AttributeError: pass
 
 # nir_variable *nir_find_sampler_variable_with_tex_index(nir_shader *shader, unsigned int texture_index)
-try: (nir_find_sampler_variable_with_tex_index:=dll.nir_find_sampler_variable_with_tex_index).restype, nir_find_sampler_variable_with_tex_index.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_find_sampler_variable_with_tex_index:=dll.nir_find_sampler_variable_with_tex_index).restype, nir_find_sampler_variable_with_tex_index.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # void nir_sort_variables_with_modes(nir_shader *shader, int (*compar)(const nir_variable *, const nir_variable *), nir_variable_mode modes)
-try: (nir_sort_variables_with_modes:=dll.nir_sort_variables_with_modes).restype, nir_sort_variables_with_modes.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(nir_variable), ctypes.POINTER(nir_variable)), nir_variable_mode]
+try: (nir_sort_variables_with_modes:=dll.nir_sort_variables_with_modes).restype, nir_sort_variables_with_modes.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(nir_variable), ctypes.POINTER(nir_variable)), nir_variable_mode]
 except AttributeError: pass
 
 # nir_function *nir_function_create(nir_shader *shader, const char *name)
@@ -3593,7 +3593,7 @@ try: (nir_jump_instr_create:=dll.nir_jump_instr_create).restype, nir_jump_instr_
 except AttributeError: pass
 
 # nir_load_const_instr *nir_load_const_instr_create(nir_shader *shader, unsigned int num_components, unsigned int bit_size)
-try: (nir_load_const_instr_create:=dll.nir_load_const_instr_create).restype, nir_load_const_instr_create.argtypes = ctypes.POINTER(nir_load_const_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_uint]
+try: (nir_load_const_instr_create:=dll.nir_load_const_instr_create).restype, nir_load_const_instr_create.argtypes = ctypes.POINTER(nir_load_const_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_intrinsic_instr *nir_intrinsic_instr_create(nir_shader *shader, nir_intrinsic_op op)
@@ -3605,7 +3605,7 @@ try: (nir_call_instr_create:=dll.nir_call_instr_create).restype, nir_call_instr_
 except AttributeError: pass
 
 # nir_tex_instr *nir_tex_instr_create(nir_shader *shader, unsigned int num_srcs)
-try: (nir_tex_instr_create:=dll.nir_tex_instr_create).restype, nir_tex_instr_create.argtypes = ctypes.POINTER(nir_tex_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_tex_instr_create:=dll.nir_tex_instr_create).restype, nir_tex_instr_create.argtypes = ctypes.POINTER(nir_tex_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_phi_instr *nir_phi_instr_create(nir_shader *shader)
@@ -3621,14 +3621,14 @@ try: (nir_parallel_copy_instr_create:=dll.nir_parallel_copy_instr_create).restyp
 except AttributeError: pass
 
 # nir_undef_instr *nir_undef_instr_create(nir_shader *shader, unsigned int num_components, unsigned int bit_size)
-try: (nir_undef_instr_create:=dll.nir_undef_instr_create).restype, nir_undef_instr_create.argtypes = ctypes.POINTER(nir_undef_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_uint]
+try: (nir_undef_instr_create:=dll.nir_undef_instr_create).restype, nir_undef_instr_create.argtypes = ctypes.POINTER(nir_undef_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_const_value nir_alu_binop_identity(nir_op binop, unsigned int bit_size)
-try: (nir_alu_binop_identity:=dll.nir_alu_binop_identity).restype, nir_alu_binop_identity.argtypes = nir_const_value, [nir_op, ctypes.c_uint]
+try: (nir_alu_binop_identity:=dll.nir_alu_binop_identity).restype, nir_alu_binop_identity.argtypes = nir_const_value, [nir_op, ctypes.c_uint32]
 except AttributeError: pass
 
-nir_cursor_option = CEnum(ctypes.c_uint)
+nir_cursor_option = CEnum(ctypes.c_uint32)
 nir_cursor_before_block = nir_cursor_option.define('nir_cursor_before_block', 0)
 nir_cursor_after_block = nir_cursor_option.define('nir_cursor_after_block', 1)
 nir_cursor_before_instr = nir_cursor_option.define('nir_cursor_before_instr', 2)
@@ -3725,7 +3725,7 @@ try: (nir_instr_is_before:=dll.nir_instr_is_before).restype, nir_instr_is_before
 except AttributeError: pass
 
 # void nir_def_init(nir_instr *instr, nir_def *def, unsigned int num_components, unsigned int bit_size)
-try: (nir_def_init:=dll.nir_def_init).restype, nir_def_init.argtypes = None, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_def), ctypes.c_uint, ctypes.c_uint]
+try: (nir_def_init:=dll.nir_def_init).restype, nir_def_init.argtypes = None, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_def), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # void nir_def_rewrite_uses(nir_def *def, nir_def *new_ssa)
@@ -3809,7 +3809,7 @@ try: (nir_index_ssa_defs:=dll.nir_index_ssa_defs).restype, nir_index_ssa_defs.ar
 except AttributeError: pass
 
 # unsigned int nir_index_instrs(nir_function_impl *impl)
-try: (nir_index_instrs:=dll.nir_index_instrs).restype, nir_index_instrs.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_function_impl)]
+try: (nir_index_instrs:=dll.nir_index_instrs).restype, nir_index_instrs.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
 # void nir_index_blocks(nir_function_impl *impl)
@@ -3821,24 +3821,24 @@ try: (nir_shader_clear_pass_flags:=dll.nir_shader_clear_pass_flags).restype, nir
 except AttributeError: pass
 
 # unsigned int nir_shader_index_vars(nir_shader *shader, nir_variable_mode modes)
-try: (nir_shader_index_vars:=dll.nir_shader_index_vars).restype, nir_shader_index_vars.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_shader), nir_variable_mode]
+try: (nir_shader_index_vars:=dll.nir_shader_index_vars).restype, nir_shader_index_vars.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
 # unsigned int nir_function_impl_index_vars(nir_function_impl *impl)
-try: (nir_function_impl_index_vars:=dll.nir_function_impl_index_vars).restype, nir_function_impl_index_vars.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_function_impl)]
+try: (nir_function_impl_index_vars:=dll.nir_function_impl_index_vars).restype, nir_function_impl_index_vars.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
 class struct__IO_FILE(Struct): pass
 FILE = struct__IO_FILE
 class struct__IO_marker(Struct): pass
-__off_t = ctypes.c_long
+__off_t = ctypes.c_int64
 _IO_lock_t = None
-__off64_t = ctypes.c_long
+__off64_t = ctypes.c_int64
 class struct__IO_codecvt(Struct): pass
 class struct__IO_wide_data(Struct): pass
-size_t = ctypes.c_ulong
+size_t = ctypes.c_uint64
 struct__IO_FILE._fields_ = [
-  ('_flags', ctypes.c_int),
+  ('_flags', ctypes.c_int32),
   ('_IO_read_ptr', ctypes.POINTER(ctypes.c_char)),
   ('_IO_read_end', ctypes.POINTER(ctypes.c_char)),
   ('_IO_read_base', ctypes.POINTER(ctypes.c_char)),
@@ -3852,20 +3852,20 @@ struct__IO_FILE._fields_ = [
   ('_IO_save_end', ctypes.POINTER(ctypes.c_char)),
   ('_markers', ctypes.POINTER(struct__IO_marker)),
   ('_chain', ctypes.POINTER(struct__IO_FILE)),
-  ('_fileno', ctypes.c_int),
-  ('_flags2', ctypes.c_int),
-  ('_old_offset', ctypes.c_long),
-  ('_cur_column', ctypes.c_ushort),
+  ('_fileno', ctypes.c_int32),
+  ('_flags2', ctypes.c_int32),
+  ('_old_offset', ctypes.c_int64),
+  ('_cur_column', ctypes.c_uint16),
   ('_vtable_offset', ctypes.c_char),
   ('_shortbuf', (ctypes.c_char * 1)),
   ('_lock', ctypes.POINTER(_IO_lock_t)),
-  ('_offset', ctypes.c_long),
+  ('_offset', ctypes.c_int64),
   ('_codecvt', ctypes.POINTER(struct__IO_codecvt)),
   ('_wide_data', ctypes.POINTER(struct__IO_wide_data)),
   ('_freeres_list', ctypes.POINTER(struct__IO_FILE)),
   ('_freeres_buf', ctypes.c_void_p),
   ('__pad5', size_t),
-  ('_mode', ctypes.c_int),
+  ('_mode', ctypes.c_int32),
   ('_unused2', (ctypes.c_char * 20)),
 ]
 # void nir_print_shader(nir_shader *shader, FILE *fp)
@@ -3888,7 +3888,7 @@ except AttributeError: pass
 try: (nir_print_deref:=dll.nir_print_deref).restype, nir_print_deref.argtypes = None, [ctypes.POINTER(nir_deref_instr), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-enum_mesa_log_level = CEnum(ctypes.c_uint)
+enum_mesa_log_level = CEnum(ctypes.c_uint32)
 MESA_LOG_ERROR = enum_mesa_log_level.define('MESA_LOG_ERROR', 0)
 MESA_LOG_WARN = enum_mesa_log_level.define('MESA_LOG_WARN', 1)
 MESA_LOG_INFO = enum_mesa_log_level.define('MESA_LOG_INFO', 2)
@@ -3978,7 +3978,7 @@ except AttributeError: pass
 try: (nir_metadata_require_all:=dll.nir_metadata_require_all).restype, nir_metadata_require_all.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_uint, ctypes.c_void_p)
+nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
 class struct_nir_builder(Struct): pass
 nir_lower_instr_cb = ctypes.CFUNCTYPE(ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 # bool nir_function_impl_lower_instructions(nir_function_impl *impl, nir_instr_filter_cb filter, nir_lower_instr_cb lower, void *cb_data)
@@ -4034,15 +4034,15 @@ try: (nir_dump_cfg:=dll.nir_dump_cfg).restype, nir_dump_cfg.argtypes = None, [ct
 except AttributeError: pass
 
 # void nir_gs_count_vertices_and_primitives(const nir_shader *shader, int *out_vtxcnt, int *out_prmcnt, int *out_decomposed_prmcnt, unsigned int num_streams)
-try: (nir_gs_count_vertices_and_primitives:=dll.nir_gs_count_vertices_and_primitives).restype, nir_gs_count_vertices_and_primitives.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.c_uint]
+try: (nir_gs_count_vertices_and_primitives:=dll.nir_gs_count_vertices_and_primitives).restype, nir_gs_count_vertices_and_primitives.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError: pass
 
-nir_load_grouping = CEnum(ctypes.c_uint)
+nir_load_grouping = CEnum(ctypes.c_uint32)
 nir_group_all = nir_load_grouping.define('nir_group_all', 0)
 nir_group_same_resource_only = nir_load_grouping.define('nir_group_same_resource_only', 1)
 
 # bool nir_group_loads(nir_shader *shader, nir_load_grouping grouping, unsigned int max_distance)
-try: (nir_group_loads:=dll.nir_group_loads).restype, nir_group_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_load_grouping, ctypes.c_uint]
+try: (nir_group_loads:=dll.nir_group_loads).restype, nir_group_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_load_grouping, ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_shrink_vec_array_vars(nir_shader *shader, nir_variable_mode modes)
@@ -4099,15 +4099,15 @@ try: (nir_find_inlinable_uniforms:=dll.nir_find_inlinable_uniforms).restype, nir
 except AttributeError: pass
 
 # bool nir_inline_uniforms(nir_shader *shader, unsigned int num_uniforms, const uint32_t *uniform_values, const uint16_t *uniform_dw_offsets)
-try: (nir_inline_uniforms:=dll.nir_inline_uniforms).restype, nir_inline_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.POINTER(uint32_t), ctypes.POINTER(uint16_t)]
+try: (nir_inline_uniforms:=dll.nir_inline_uniforms).restype, nir_inline_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint16_t)]
 except AttributeError: pass
 
 # bool nir_collect_src_uniforms(const nir_src *src, int component, uint32_t *uni_offsets, uint8_t *num_offsets, unsigned int max_num_bo, unsigned int max_offset)
-try: (nir_collect_src_uniforms:=dll.nir_collect_src_uniforms).restype, nir_collect_src_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_src), ctypes.c_int, ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint, ctypes.c_uint]
+try: (nir_collect_src_uniforms:=dll.nir_collect_src_uniforms).restype, nir_collect_src_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_src), ctypes.c_int32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # void nir_add_inlinable_uniforms(const nir_src *cond, nir_loop_info *info, uint32_t *uni_offsets, uint8_t *num_offsets, unsigned int max_num_bo, unsigned int max_offset)
-try: (nir_add_inlinable_uniforms:=dll.nir_add_inlinable_uniforms).restype, nir_add_inlinable_uniforms.argtypes = None, [ctypes.POINTER(nir_src), ctypes.POINTER(nir_loop_info), ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint, ctypes.c_uint]
+try: (nir_add_inlinable_uniforms:=dll.nir_add_inlinable_uniforms).restype, nir_add_inlinable_uniforms.argtypes = None, [ctypes.POINTER(nir_src), ctypes.POINTER(nir_loop_info), ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_propagate_invariant(nir_shader *shader, bool invariant_prim)
@@ -4150,7 +4150,7 @@ except AttributeError: pass
 try: (nir_lower_constant_to_temp:=dll.nir_lower_constant_to_temp).restype, nir_lower_constant_to_temp.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_lower_array_deref_of_vec_options = CEnum(ctypes.c_uint)
+nir_lower_array_deref_of_vec_options = CEnum(ctypes.c_uint32)
 nir_lower_direct_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_load', 1)
 nir_lower_indirect_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_load', 2)
 nir_lower_direct_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_store', 4)
@@ -4181,25 +4181,25 @@ const_struct_glsl_type._fields_ = [
   ('gl_type', uint32_t),
   ('base_type', enum_glsl_base_type,8),
   ('sampled_type', enum_glsl_base_type,8),
-  ('sampler_dimensionality', ctypes.c_uint,4),
-  ('sampler_shadow', ctypes.c_uint,1),
-  ('sampler_array', ctypes.c_uint,1),
-  ('interface_packing', ctypes.c_uint,2),
-  ('interface_row_major', ctypes.c_uint,1),
+  ('sampler_dimensionality', ctypes.c_uint32,4),
+  ('sampler_shadow', ctypes.c_uint32,1),
+  ('sampler_array', ctypes.c_uint32,1),
+  ('interface_packing', ctypes.c_uint32,2),
+  ('interface_row_major', ctypes.c_uint32,1),
   ('cmat_desc', struct_glsl_cmat_description),
-  ('packed', ctypes.c_uint,1),
-  ('has_builtin_name', ctypes.c_uint,1),
+  ('packed', ctypes.c_uint32,1),
+  ('has_builtin_name', ctypes.c_uint32,1),
   ('vector_elements', uint8_t),
   ('matrix_columns', uint8_t),
-  ('length', ctypes.c_uint),
+  ('length', ctypes.c_uint32),
   ('name_id', uintptr_t),
-  ('explicit_stride', ctypes.c_uint),
-  ('explicit_alignment', ctypes.c_uint),
+  ('explicit_stride', ctypes.c_uint32),
+  ('explicit_alignment', ctypes.c_uint32),
   ('fields', struct_glsl_type_fields),
 ]
-glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(const_struct_glsl_type), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint))
+glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(const_struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
 # bool nir_lower_vars_to_scratch(nir_shader *shader, nir_variable_mode modes, int size_threshold, glsl_type_size_align_func variable_size_align, glsl_type_size_align_func scratch_layout_size_align)
-try: (nir_lower_vars_to_scratch:=dll.nir_lower_vars_to_scratch).restype, nir_lower_vars_to_scratch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int, glsl_type_size_align_func, glsl_type_size_align_func]
+try: (nir_lower_vars_to_scratch:=dll.nir_lower_vars_to_scratch).restype, nir_lower_vars_to_scratch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func]
 except AttributeError: pass
 
 # bool nir_lower_scratch_to_var(nir_shader *nir)
@@ -4215,7 +4215,7 @@ try: (nir_shader_gather_info:=dll.nir_shader_gather_info).restype, nir_shader_ga
 except AttributeError: pass
 
 # void nir_gather_types(nir_function_impl *impl, unsigned int *float_types, unsigned int *int_types)
-try: (nir_gather_types:=dll.nir_gather_types).restype, nir_gather_types.argtypes = None, [ctypes.POINTER(nir_function_impl), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (nir_gather_types:=dll.nir_gather_types).restype, nir_gather_types.argtypes = None, [ctypes.POINTER(nir_function_impl), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # bool nir_remove_unused_varyings(nir_shader *producer, nir_shader *consumer)
@@ -4250,15 +4250,15 @@ except AttributeError: pass
 try: (nir_clone_deref_instr:=dll.nir_clone_deref_instr).restype, nir_clone_deref_instr.argtypes = ctypes.POINTER(nir_deref_instr), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_variable), ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
-nir_opt_varyings_progress = CEnum(ctypes.c_uint)
+nir_opt_varyings_progress = CEnum(ctypes.c_uint32)
 nir_progress_producer = nir_opt_varyings_progress.define('nir_progress_producer', 1)
 nir_progress_consumer = nir_opt_varyings_progress.define('nir_progress_consumer', 2)
 
 # nir_opt_varyings_progress nir_opt_varyings(nir_shader *producer, nir_shader *consumer, bool spirv, unsigned int max_uniform_components, unsigned int max_ubos_per_stage, bool debug_no_algebraic)
-try: (nir_opt_varyings:=dll.nir_opt_varyings).restype, nir_opt_varyings.argtypes = nir_opt_varyings_progress, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_uint, ctypes.c_uint, ctypes.c_bool]
+try: (nir_opt_varyings:=dll.nir_opt_varyings).restype, nir_opt_varyings.argtypes = nir_opt_varyings_progress, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool]
 except AttributeError: pass
 
-gl_varying_slot = CEnum(ctypes.c_uint)
+gl_varying_slot = CEnum(ctypes.c_uint32)
 VARYING_SLOT_POS = gl_varying_slot.define('VARYING_SLOT_POS', 0)
 VARYING_SLOT_COL0 = gl_varying_slot.define('VARYING_SLOT_COL0', 1)
 VARYING_SLOT_COL1 = gl_varying_slot.define('VARYING_SLOT_COL1', 2)
@@ -4399,7 +4399,7 @@ try: (nir_remove_sysval_output:=dll.nir_remove_sysval_output).restype, nir_remov
 except AttributeError: pass
 
 # bool nir_lower_amul(nir_shader *shader, int (*type_size)(const struct glsl_type *, bool))
-try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool)]
+try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool)]
 except AttributeError: pass
 
 # bool nir_lower_ubo_vec4(nir_shader *shader)
@@ -4411,21 +4411,21 @@ try: (nir_sort_variables_by_location:=dll.nir_sort_variables_by_location).restyp
 except AttributeError: pass
 
 # void nir_assign_io_var_locations(nir_shader *shader, nir_variable_mode mode, unsigned int *size, gl_shader_stage stage)
-try: (nir_assign_io_var_locations:=dll.nir_assign_io_var_locations).restype, nir_assign_io_var_locations.argtypes = None, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.POINTER(ctypes.c_uint), gl_shader_stage]
+try: (nir_assign_io_var_locations:=dll.nir_assign_io_var_locations).restype, nir_assign_io_var_locations.argtypes = None, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.POINTER(ctypes.c_uint32), gl_shader_stage]
 except AttributeError: pass
 
 # bool nir_opt_clip_cull_const(nir_shader *shader)
 try: (nir_opt_clip_cull_const:=dll.nir_opt_clip_cull_const).restype, nir_opt_clip_cull_const.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_lower_io_options = CEnum(ctypes.c_uint)
+nir_lower_io_options = CEnum(ctypes.c_uint32)
 nir_lower_io_lower_64bit_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32', 1)
 nir_lower_io_lower_64bit_float_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_float_to_32', 2)
 nir_lower_io_lower_64bit_to_32_new = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32_new', 4)
 nir_lower_io_use_interpolated_input_intrinsics = nir_lower_io_options.define('nir_lower_io_use_interpolated_input_intrinsics', 8)
 
 # bool nir_lower_io(nir_shader *shader, nir_variable_mode modes, int (*type_size)(const struct glsl_type *, bool), nir_lower_io_options)
-try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
+try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
 except AttributeError: pass
 
 # bool nir_io_add_const_offset_to_base(nir_shader *nir, nir_variable_mode modes)
@@ -4456,7 +4456,7 @@ except AttributeError: pass
 try: (nir_lower_vec3_to_vec4:=dll.nir_lower_vec3_to_vec4).restype, nir_lower_vec3_to_vec4.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-nir_address_format = CEnum(ctypes.c_uint)
+nir_address_format = CEnum(ctypes.c_uint32)
 nir_address_format_32bit_global = nir_address_format.define('nir_address_format_32bit_global', 0)
 nir_address_format_64bit_global = nir_address_format.define('nir_address_format_64bit_global', 1)
 nir_address_format_2x32bit_global = nir_address_format.define('nir_address_format_2x32bit_global', 2)
@@ -4471,11 +4471,11 @@ nir_address_format_32bit_offset_as_64bit = nir_address_format.define('nir_addres
 nir_address_format_logical = nir_address_format.define('nir_address_format_logical', 11)
 
 # unsigned int nir_address_format_bit_size(nir_address_format addr_format)
-try: (nir_address_format_bit_size:=dll.nir_address_format_bit_size).restype, nir_address_format_bit_size.argtypes = ctypes.c_uint, [nir_address_format]
+try: (nir_address_format_bit_size:=dll.nir_address_format_bit_size).restype, nir_address_format_bit_size.argtypes = ctypes.c_uint32, [nir_address_format]
 except AttributeError: pass
 
 # unsigned int nir_address_format_num_components(nir_address_format addr_format)
-try: (nir_address_format_num_components:=dll.nir_address_format_num_components).restype, nir_address_format_num_components.argtypes = ctypes.c_uint, [nir_address_format]
+try: (nir_address_format_num_components:=dll.nir_address_format_num_components).restype, nir_address_format_num_components.argtypes = ctypes.c_uint32, [nir_address_format]
 except AttributeError: pass
 
 # const nir_const_value *nir_address_format_null_value(nir_address_format addr_format)
@@ -4514,7 +4514,7 @@ except AttributeError: pass
 try: (nir_lower_explicit_io:=dll.nir_lower_explicit_io).restype, nir_lower_explicit_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, nir_address_format]
 except AttributeError: pass
 
-nir_mem_access_shift_method = CEnum(ctypes.c_uint)
+nir_mem_access_shift_method = CEnum(ctypes.c_uint32)
 nir_mem_access_shift_method_scalar = nir_mem_access_shift_method.define('nir_mem_access_shift_method_scalar', 0)
 nir_mem_access_shift_method_shift64 = nir_mem_access_shift_method.define('nir_mem_access_shift_method_shift64', 1)
 nir_mem_access_shift_method_bytealign_amd = nir_mem_access_shift_method.define('nir_mem_access_shift_method_bytealign_amd', 2)
@@ -4527,7 +4527,7 @@ struct_nir_mem_access_size_align._fields_ = [
   ('shift', nir_mem_access_shift_method),
 ]
 nir_mem_access_size_align = struct_nir_mem_access_size_align
-enum_gl_access_qualifier = CEnum(ctypes.c_uint)
+enum_gl_access_qualifier = CEnum(ctypes.c_uint32)
 ACCESS_COHERENT = enum_gl_access_qualifier.define('ACCESS_COHERENT', 1)
 ACCESS_RESTRICT = enum_gl_access_qualifier.define('ACCESS_RESTRICT', 2)
 ACCESS_VOLATILE = enum_gl_access_qualifier.define('ACCESS_VOLATILE', 4)
@@ -4546,7 +4546,7 @@ ACCESS_IN_BOUNDS = enum_gl_access_qualifier.define('ACCESS_IN_BOUNDS', 16384)
 ACCESS_KEEP_SCALAR = enum_gl_access_qualifier.define('ACCESS_KEEP_SCALAR', 32768)
 ACCESS_SMEM_AMD = enum_gl_access_qualifier.define('ACCESS_SMEM_AMD', 65536)
 
-nir_lower_mem_access_bit_sizes_cb = ctypes.CFUNCTYPE(struct_nir_mem_access_size_align, nir_intrinsic_op, ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint, ctypes.c_uint, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p)
+nir_lower_mem_access_bit_sizes_cb = ctypes.CFUNCTYPE(struct_nir_mem_access_size_align, nir_intrinsic_op, ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p)
 class struct_nir_lower_mem_access_bit_sizes_options(Struct): pass
 struct_nir_lower_mem_access_bit_sizes_options._fields_ = [
   ('callback', nir_lower_mem_access_bit_sizes_cb),
@@ -4563,7 +4563,7 @@ except AttributeError: pass
 try: (nir_lower_robust_access:=dll.nir_lower_robust_access).restype, nir_lower_robust_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-nir_should_vectorize_mem_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_long, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+nir_should_vectorize_mem_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
 class struct_nir_load_store_vectorize_options(Struct): pass
 struct_nir_load_store_vectorize_options._fields_ = [
   ('callback', nir_should_vectorize_mem_func),
@@ -4585,7 +4585,7 @@ nir_lower_shader_calls_should_remat_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctype
 class struct_nir_lower_shader_calls_options(Struct): pass
 struct_nir_lower_shader_calls_options._fields_ = [
   ('address_format', nir_address_format),
-  ('stack_alignment', ctypes.c_uint),
+  ('stack_alignment', ctypes.c_uint32),
   ('localized_loads', ctypes.c_bool),
   ('vectorizer_callback', nir_should_vectorize_mem_func),
   ('vectorizer_data', ctypes.c_void_p),
@@ -4598,15 +4598,15 @@ try: (nir_lower_shader_calls:=dll.nir_lower_shader_calls).restype, nir_lower_sha
 except AttributeError: pass
 
 # int nir_get_io_offset_src_number(const nir_intrinsic_instr *instr)
-try: (nir_get_io_offset_src_number:=dll.nir_get_io_offset_src_number).restype, nir_get_io_offset_src_number.argtypes = ctypes.c_int, [ctypes.POINTER(nir_intrinsic_instr)]
+try: (nir_get_io_offset_src_number:=dll.nir_get_io_offset_src_number).restype, nir_get_io_offset_src_number.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
 # int nir_get_io_index_src_number(const nir_intrinsic_instr *instr)
-try: (nir_get_io_index_src_number:=dll.nir_get_io_index_src_number).restype, nir_get_io_index_src_number.argtypes = ctypes.c_int, [ctypes.POINTER(nir_intrinsic_instr)]
+try: (nir_get_io_index_src_number:=dll.nir_get_io_index_src_number).restype, nir_get_io_index_src_number.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
 # int nir_get_io_arrayed_index_src_number(const nir_intrinsic_instr *instr)
-try: (nir_get_io_arrayed_index_src_number:=dll.nir_get_io_arrayed_index_src_number).restype, nir_get_io_arrayed_index_src_number.argtypes = ctypes.c_int, [ctypes.POINTER(nir_intrinsic_instr)]
+try: (nir_get_io_arrayed_index_src_number:=dll.nir_get_io_arrayed_index_src_number).restype, nir_get_io_arrayed_index_src_number.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
 # nir_src *nir_get_io_offset_src(nir_intrinsic_instr *instr)
@@ -4668,14 +4668,14 @@ try: (nir_lower_variable_initializers:=dll.nir_lower_variable_initializers).rest
 except AttributeError: pass
 
 # bool nir_zero_initialize_shared_memory(nir_shader *shader, const unsigned int shared_size, const unsigned int chunk_size)
-try: (nir_zero_initialize_shared_memory:=dll.nir_zero_initialize_shared_memory).restype, nir_zero_initialize_shared_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_uint]
+try: (nir_zero_initialize_shared_memory:=dll.nir_zero_initialize_shared_memory).restype, nir_zero_initialize_shared_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_clear_shared_memory(nir_shader *shader, const unsigned int shared_size, const unsigned int chunk_size)
-try: (nir_clear_shared_memory:=dll.nir_clear_shared_memory).restype, nir_clear_shared_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_uint]
+try: (nir_clear_shared_memory:=dll.nir_clear_shared_memory).restype, nir_clear_shared_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-nir_opt_move_to_top_options = CEnum(ctypes.c_uint)
+nir_opt_move_to_top_options = CEnum(ctypes.c_uint32)
 nir_move_to_entry_block_only = nir_opt_move_to_top_options.define('nir_move_to_entry_block_only', 1)
 nir_move_to_top_input_loads = nir_opt_move_to_top_options.define('nir_move_to_top_input_loads', 2)
 nir_move_to_top_load_smem_amd = nir_opt_move_to_top_options.define('nir_move_to_top_load_smem_amd', 4)
@@ -4696,7 +4696,7 @@ except AttributeError: pass
 try: (nir_lower_vec_to_regs:=dll.nir_lower_vec_to_regs).restype, nir_lower_vec_to_regs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_instr_writemask_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-enum_compare_func = CEnum(ctypes.c_uint)
+enum_compare_func = CEnum(ctypes.c_uint32)
 COMPARE_FUNC_NEVER = enum_compare_func.define('COMPARE_FUNC_NEVER', 0)
 COMPARE_FUNC_LESS = enum_compare_func.define('COMPARE_FUNC_LESS', 1)
 COMPARE_FUNC_EQUAL = enum_compare_func.define('COMPARE_FUNC_EQUAL', 2)
@@ -4723,7 +4723,7 @@ try: (nir_lower_alu:=dll.nir_lower_alu).restype, nir_lower_alu.argtypes = ctypes
 except AttributeError: pass
 
 # bool nir_lower_flrp(nir_shader *shader, unsigned int lowering_mask, bool always_precise)
-try: (nir_lower_flrp:=dll.nir_lower_flrp).restype, nir_lower_flrp.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_bool]
+try: (nir_lower_flrp:=dll.nir_lower_flrp).restype, nir_lower_flrp.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool]
 except AttributeError: pass
 
 # bool nir_scale_fdiv(nir_shader *shader)
@@ -4759,7 +4759,7 @@ try: (nir_opt_simplify_convert_alu_types:=dll.nir_opt_simplify_convert_alu_types
 except AttributeError: pass
 
 # bool nir_lower_const_arrays_to_uniforms(nir_shader *shader, unsigned int max_uniform_components)
-try: (nir_lower_const_arrays_to_uniforms:=dll.nir_lower_const_arrays_to_uniforms).restype, nir_lower_const_arrays_to_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_lower_const_arrays_to_uniforms:=dll.nir_lower_const_arrays_to_uniforms).restype, nir_lower_const_arrays_to_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_lower_convert_alu_types(nir_shader *shader, bool (*should_lower)(nir_intrinsic_instr *))
@@ -4819,7 +4819,7 @@ try: (nir_lower_tess_level_array_vars_to_vec:=dll.nir_lower_tess_level_array_var
 except AttributeError: pass
 
 # nir_shader *nir_create_passthrough_tcs_impl(const nir_shader_compiler_options *options, unsigned int *locations, unsigned int num_locations, uint8_t patch_vertices)
-try: (nir_create_passthrough_tcs_impl:=dll.nir_create_passthrough_tcs_impl).restype, nir_create_passthrough_tcs_impl.argtypes = ctypes.POINTER(nir_shader), [ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(ctypes.c_uint), ctypes.c_uint, uint8_t]
+try: (nir_create_passthrough_tcs_impl:=dll.nir_create_passthrough_tcs_impl).restype, nir_create_passthrough_tcs_impl.argtypes = ctypes.POINTER(nir_shader), [ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32, uint8_t]
 except AttributeError: pass
 
 # nir_shader *nir_create_passthrough_tcs(const nir_shader_compiler_options *options, const nir_shader *vs, uint8_t patch_vertices)
@@ -4831,7 +4831,7 @@ try: (nir_create_passthrough_gs:=dll.nir_create_passthrough_gs).restype, nir_cre
 except AttributeError: pass
 
 # bool nir_lower_fragcolor(nir_shader *shader, unsigned int max_cbufs)
-try: (nir_lower_fragcolor:=dll.nir_lower_fragcolor).restype, nir_lower_fragcolor.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_lower_fragcolor:=dll.nir_lower_fragcolor).restype, nir_lower_fragcolor.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_lower_fragcoord_wtrans(nir_shader *shader)
@@ -4948,7 +4948,7 @@ nir_lower_tex_packing_8 = enum_nir_lower_tex_packing.define('nir_lower_tex_packi
 
 class struct_nir_lower_tex_options(Struct): pass
 struct_nir_lower_tex_options._fields_ = [
-  ('lower_txp', ctypes.c_uint),
+  ('lower_txp', ctypes.c_uint32),
   ('lower_txp_array', ctypes.c_bool),
   ('lower_txf_offset', ctypes.c_bool),
   ('lower_rect_offset', ctypes.c_bool),
@@ -4956,31 +4956,31 @@ struct_nir_lower_tex_options._fields_ = [
   ('lower_rect', ctypes.c_bool),
   ('lower_1d', ctypes.c_bool),
   ('lower_1d_shadow', ctypes.c_bool),
-  ('lower_y_uv_external', ctypes.c_uint),
-  ('lower_y_vu_external', ctypes.c_uint),
-  ('lower_y_u_v_external', ctypes.c_uint),
-  ('lower_yx_xuxv_external', ctypes.c_uint),
-  ('lower_yx_xvxu_external', ctypes.c_uint),
-  ('lower_xy_uxvx_external', ctypes.c_uint),
-  ('lower_xy_vxux_external', ctypes.c_uint),
-  ('lower_ayuv_external', ctypes.c_uint),
-  ('lower_xyuv_external', ctypes.c_uint),
-  ('lower_yuv_external', ctypes.c_uint),
-  ('lower_yu_yv_external', ctypes.c_uint),
-  ('lower_yv_yu_external', ctypes.c_uint),
-  ('lower_y41x_external', ctypes.c_uint),
-  ('lower_sx10_external', ctypes.c_uint),
-  ('lower_sx12_external', ctypes.c_uint),
-  ('bt709_external', ctypes.c_uint),
-  ('bt2020_external', ctypes.c_uint),
-  ('yuv_full_range_external', ctypes.c_uint),
-  ('saturate_s', ctypes.c_uint),
-  ('saturate_t', ctypes.c_uint),
-  ('saturate_r', ctypes.c_uint),
-  ('swizzle_result', ctypes.c_uint),
+  ('lower_y_uv_external', ctypes.c_uint32),
+  ('lower_y_vu_external', ctypes.c_uint32),
+  ('lower_y_u_v_external', ctypes.c_uint32),
+  ('lower_yx_xuxv_external', ctypes.c_uint32),
+  ('lower_yx_xvxu_external', ctypes.c_uint32),
+  ('lower_xy_uxvx_external', ctypes.c_uint32),
+  ('lower_xy_vxux_external', ctypes.c_uint32),
+  ('lower_ayuv_external', ctypes.c_uint32),
+  ('lower_xyuv_external', ctypes.c_uint32),
+  ('lower_yuv_external', ctypes.c_uint32),
+  ('lower_yu_yv_external', ctypes.c_uint32),
+  ('lower_yv_yu_external', ctypes.c_uint32),
+  ('lower_y41x_external', ctypes.c_uint32),
+  ('lower_sx10_external', ctypes.c_uint32),
+  ('lower_sx12_external', ctypes.c_uint32),
+  ('bt709_external', ctypes.c_uint32),
+  ('bt2020_external', ctypes.c_uint32),
+  ('yuv_full_range_external', ctypes.c_uint32),
+  ('saturate_s', ctypes.c_uint32),
+  ('saturate_t', ctypes.c_uint32),
+  ('saturate_r', ctypes.c_uint32),
+  ('swizzle_result', ctypes.c_uint32),
   ('swizzles', ((uint8_t * 4) * 32)),
   ('scale_factors', (ctypes.c_float * 32)),
-  ('lower_srgb', ctypes.c_uint),
+  ('lower_srgb', ctypes.c_uint32),
   ('lower_txd_cube_map', ctypes.c_bool),
   ('lower_txd_3d', ctypes.c_bool),
   ('lower_txd_array', ctypes.c_bool),
@@ -5012,14 +5012,14 @@ except AttributeError: pass
 
 class struct_nir_lower_tex_shadow_swizzle(Struct): pass
 struct_nir_lower_tex_shadow_swizzle._fields_ = [
-  ('swizzle_r', ctypes.c_uint,3),
-  ('swizzle_g', ctypes.c_uint,3),
-  ('swizzle_b', ctypes.c_uint,3),
-  ('swizzle_a', ctypes.c_uint,3),
+  ('swizzle_r', ctypes.c_uint32,3),
+  ('swizzle_g', ctypes.c_uint32,3),
+  ('swizzle_b', ctypes.c_uint32,3),
+  ('swizzle_a', ctypes.c_uint32,3),
 ]
 nir_lower_tex_shadow_swizzle = struct_nir_lower_tex_shadow_swizzle
 # bool nir_lower_tex_shadow(nir_shader *s, unsigned int n_states, enum compare_func *compare_func, nir_lower_tex_shadow_swizzle *tex_swizzles, bool is_fixed_point_format)
-try: (nir_lower_tex_shadow:=dll.nir_lower_tex_shadow).restype, nir_lower_tex_shadow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.POINTER(enum_compare_func), ctypes.POINTER(nir_lower_tex_shadow_swizzle), ctypes.c_bool]
+try: (nir_lower_tex_shadow:=dll.nir_lower_tex_shadow).restype, nir_lower_tex_shadow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(enum_compare_func), ctypes.POINTER(nir_lower_tex_shadow_swizzle), ctypes.c_bool]
 except AttributeError: pass
 
 class struct_nir_lower_image_options(Struct): pass
@@ -5041,7 +5041,7 @@ except AttributeError: pass
 try: (nir_lower_readonly_images_to_tex:=dll.nir_lower_readonly_images_to_tex).restype, nir_lower_readonly_images_to_tex.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-enum_nir_lower_non_uniform_access_type = CEnum(ctypes.c_uint)
+enum_nir_lower_non_uniform_access_type = CEnum(ctypes.c_uint32)
 nir_lower_non_uniform_ubo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ubo_access', 1)
 nir_lower_non_uniform_ssbo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ssbo_access', 2)
 nir_lower_non_uniform_texture_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_access', 4)
@@ -5058,32 +5058,32 @@ const_struct_nir_tex_instr._fields_ = [
   ('op', nir_texop),
   ('def', nir_def),
   ('src', ctypes.POINTER(nir_tex_src)),
-  ('num_srcs', ctypes.c_uint),
-  ('coord_components', ctypes.c_uint),
+  ('num_srcs', ctypes.c_uint32),
+  ('coord_components', ctypes.c_uint32),
   ('is_array', ctypes.c_bool),
   ('is_shadow', ctypes.c_bool),
   ('is_new_style_shadow', ctypes.c_bool),
   ('is_sparse', ctypes.c_bool),
-  ('component', ctypes.c_uint,2),
-  ('array_is_lowered_cube', ctypes.c_uint,1),
-  ('is_gather_implicit_lod', ctypes.c_uint,1),
-  ('skip_helpers', ctypes.c_uint,1),
+  ('component', ctypes.c_uint32,2),
+  ('array_is_lowered_cube', ctypes.c_uint32,1),
+  ('is_gather_implicit_lod', ctypes.c_uint32,1),
+  ('skip_helpers', ctypes.c_uint32,1),
   ('tg4_offsets', ((int8_t * 2) * 4)),
   ('texture_non_uniform', ctypes.c_bool),
   ('sampler_non_uniform', ctypes.c_bool),
   ('offset_non_uniform', ctypes.c_bool),
-  ('texture_index', ctypes.c_uint),
-  ('sampler_index', ctypes.c_uint),
+  ('texture_index', ctypes.c_uint32),
+  ('sampler_index', ctypes.c_uint32),
   ('backend_flags', uint32_t),
 ]
-nir_lower_non_uniform_src_access_callback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_tex_instr), ctypes.c_uint, ctypes.c_void_p)
+nir_lower_non_uniform_src_access_callback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
 class const_struct_nir_src(Struct): pass
 const_struct_nir_src._fields_ = [
   ('_parent', uintptr_t),
   ('use_link', struct_list_head),
   ('ssa', ctypes.POINTER(nir_def)),
 ]
-nir_lower_non_uniform_access_callback = ctypes.CFUNCTYPE(ctypes.c_ushort, ctypes.POINTER(const_struct_nir_src), ctypes.c_void_p)
+nir_lower_non_uniform_access_callback = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(const_struct_nir_src), ctypes.c_void_p)
 class struct_nir_lower_non_uniform_access_options(Struct): pass
 struct_nir_lower_non_uniform_access_options._fields_ = [
   ('types', enum_nir_lower_non_uniform_access_type),
@@ -5128,15 +5128,15 @@ try: (nir_lower_input_attachments:=dll.nir_lower_input_attachments).restype, nir
 except AttributeError: pass
 
 # bool nir_lower_clip_vs(nir_shader *shader, unsigned int ucp_enables, bool use_vars, bool use_clipdist_array, const gl_state_index16 clipplane_state_tokens[][4])
-try: (nir_lower_clip_vs:=dll.nir_lower_clip_vs).restype, nir_lower_clip_vs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_bool, ctypes.c_bool, ((gl_state_index16 * 4) * 0)]
+try: (nir_lower_clip_vs:=dll.nir_lower_clip_vs).restype, nir_lower_clip_vs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, ((gl_state_index16 * 4) * 0)]
 except AttributeError: pass
 
 # bool nir_lower_clip_gs(nir_shader *shader, unsigned int ucp_enables, bool use_clipdist_array, const gl_state_index16 clipplane_state_tokens[][4])
-try: (nir_lower_clip_gs:=dll.nir_lower_clip_gs).restype, nir_lower_clip_gs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_bool, ((gl_state_index16 * 4) * 0)]
+try: (nir_lower_clip_gs:=dll.nir_lower_clip_gs).restype, nir_lower_clip_gs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ((gl_state_index16 * 4) * 0)]
 except AttributeError: pass
 
 # bool nir_lower_clip_fs(nir_shader *shader, unsigned int ucp_enables, bool use_clipdist_array, bool use_load_interp)
-try: (nir_lower_clip_fs:=dll.nir_lower_clip_fs).restype, nir_lower_clip_fs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_bool, ctypes.c_bool]
+try: (nir_lower_clip_fs:=dll.nir_lower_clip_fs).restype, nir_lower_clip_fs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
 # bool nir_lower_clip_cull_distance_to_vec4s(nir_shader *shader)
@@ -5148,7 +5148,7 @@ try: (nir_lower_clip_cull_distance_array_vars:=dll.nir_lower_clip_cull_distance_
 except AttributeError: pass
 
 # bool nir_lower_clip_disable(nir_shader *shader, unsigned int clip_plane_enable)
-try: (nir_lower_clip_disable:=dll.nir_lower_clip_disable).restype, nir_lower_clip_disable.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_lower_clip_disable:=dll.nir_lower_clip_disable).restype, nir_lower_clip_disable.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_lower_point_size_mov(nir_shader *shader, const gl_state_index16 *pointsize_state_tokens)
@@ -5176,7 +5176,7 @@ try: (nir_lower_passthrough_edgeflags:=dll.nir_lower_passthrough_edgeflags).rest
 except AttributeError: pass
 
 # bool nir_lower_patch_vertices(nir_shader *nir, unsigned int static_count, const gl_state_index16 *uniform_state_tokens)
-try: (nir_lower_patch_vertices:=dll.nir_lower_patch_vertices).restype, nir_lower_patch_vertices.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.POINTER(gl_state_index16)]
+try: (nir_lower_patch_vertices:=dll.nir_lower_patch_vertices).restype, nir_lower_patch_vertices.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(gl_state_index16)]
 except AttributeError: pass
 
 class struct_nir_lower_wpos_ytransform_options(Struct): pass
@@ -5213,8 +5213,8 @@ struct_nir_lower_drawpixels_options._fields_ = [
   ('texcoord_state_tokens', (gl_state_index16 * 4)),
   ('scale_state_tokens', (gl_state_index16 * 4)),
   ('bias_state_tokens', (gl_state_index16 * 4)),
-  ('drawpix_sampler', ctypes.c_uint),
-  ('pixelmap_sampler', ctypes.c_uint),
+  ('drawpix_sampler', ctypes.c_uint32),
+  ('pixelmap_sampler', ctypes.c_uint32),
   ('pixel_maps', ctypes.c_bool,1),
   ('scale_and_bias', ctypes.c_bool,1),
 ]
@@ -5225,7 +5225,7 @@ except AttributeError: pass
 
 class struct_nir_lower_bitmap_options(Struct): pass
 struct_nir_lower_bitmap_options._fields_ = [
-  ('sampler', ctypes.c_uint),
+  ('sampler', ctypes.c_uint32),
   ('swizzle_xxxx', ctypes.c_bool),
 ]
 nir_lower_bitmap_options = struct_nir_lower_bitmap_options
@@ -5234,10 +5234,10 @@ try: (nir_lower_bitmap:=dll.nir_lower_bitmap).restype, nir_lower_bitmap.argtypes
 except AttributeError: pass
 
 # bool nir_lower_atomics_to_ssbo(nir_shader *shader, unsigned int offset_align_state)
-try: (nir_lower_atomics_to_ssbo:=dll.nir_lower_atomics_to_ssbo).restype, nir_lower_atomics_to_ssbo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_lower_atomics_to_ssbo:=dll.nir_lower_atomics_to_ssbo).restype, nir_lower_atomics_to_ssbo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-nir_lower_gs_intrinsics_flags = CEnum(ctypes.c_uint)
+nir_lower_gs_intrinsics_flags = CEnum(ctypes.c_uint32)
 nir_lower_gs_intrinsics_per_stream = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_per_stream', 1)
 nir_lower_gs_intrinsics_count_primitives = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_primitives', 2)
 nir_lower_gs_intrinsics_count_vertices_per_primitive = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_vertices_per_primitive', 4)
@@ -5266,7 +5266,7 @@ nir_lower_task_shader_options = struct_nir_lower_task_shader_options
 try: (nir_lower_task_shader:=dll.nir_lower_task_shader).restype, nir_lower_task_shader.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_task_shader_options]
 except AttributeError: pass
 
-nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
+nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
 # bool nir_lower_bit_size(nir_shader *shader, nir_lower_bit_size_callback callback, void *callback_data)
 try: (nir_lower_bit_size:=dll.nir_lower_bit_size).restype, nir_lower_bit_size.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p]
 except AttributeError: pass
@@ -5336,8 +5336,8 @@ except AttributeError: pass
 
 class struct_nir_opt_tex_srcs_options(Struct): pass
 struct_nir_opt_tex_srcs_options._fields_ = [
-  ('sampler_dims', ctypes.c_uint),
-  ('src_types', ctypes.c_uint),
+  ('sampler_dims', ctypes.c_uint32),
+  ('src_types', ctypes.c_uint32),
 ]
 nir_opt_tex_srcs_options = struct_nir_opt_tex_srcs_options
 class struct_nir_opt_16bit_tex_image_options(Struct): pass
@@ -5348,7 +5348,7 @@ struct_nir_opt_16bit_tex_image_options._fields_ = [
   ('integer_dest_saturates', ctypes.c_bool),
   ('opt_image_store_data', ctypes.c_bool),
   ('opt_image_srcs', ctypes.c_bool),
-  ('opt_srcs_options_count', ctypes.c_uint),
+  ('opt_srcs_options_count', ctypes.c_uint32),
   ('opt_srcs_options', ctypes.POINTER(nir_opt_tex_srcs_options)),
 ]
 nir_opt_16bit_tex_image_options = struct_nir_opt_16bit_tex_image_options
@@ -5377,14 +5377,14 @@ try: (nir_lower_default_point_size:=dll.nir_lower_default_point_size).restype, n
 except AttributeError: pass
 
 # bool nir_lower_texcoord_replace(nir_shader *s, unsigned int coord_replace, bool point_coord_is_sysval, bool yinvert)
-try: (nir_lower_texcoord_replace:=dll.nir_lower_texcoord_replace).restype, nir_lower_texcoord_replace.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_bool, ctypes.c_bool]
+try: (nir_lower_texcoord_replace:=dll.nir_lower_texcoord_replace).restype, nir_lower_texcoord_replace.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
 # bool nir_lower_texcoord_replace_late(nir_shader *s, unsigned int coord_replace, bool point_coord_is_sysval)
-try: (nir_lower_texcoord_replace_late:=dll.nir_lower_texcoord_replace_late).restype, nir_lower_texcoord_replace_late.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint, ctypes.c_bool]
+try: (nir_lower_texcoord_replace_late:=dll.nir_lower_texcoord_replace_late).restype, nir_lower_texcoord_replace_late.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool]
 except AttributeError: pass
 
-nir_lower_interpolation_options = CEnum(ctypes.c_uint)
+nir_lower_interpolation_options = CEnum(ctypes.c_uint32)
 nir_lower_interpolation_at_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_at_sample', 2)
 nir_lower_interpolation_at_offset = nir_lower_interpolation_options.define('nir_lower_interpolation_at_offset', 4)
 nir_lower_interpolation_centroid = nir_lower_interpolation_options.define('nir_lower_interpolation_centroid', 8)
@@ -5395,7 +5395,7 @@ nir_lower_interpolation_sample = nir_lower_interpolation_options.define('nir_low
 try: (nir_lower_interpolation:=dll.nir_lower_interpolation).restype, nir_lower_interpolation.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_interpolation_options]
 except AttributeError: pass
 
-nir_lower_discard_if_options = CEnum(ctypes.c_uint)
+nir_lower_discard_if_options = CEnum(ctypes.c_uint32)
 nir_lower_demote_if_to_cf = nir_lower_discard_if_options.define('nir_lower_demote_if_to_cf', 1)
 nir_lower_terminate_if_to_cf = nir_lower_discard_if_options.define('nir_lower_terminate_if_to_cf', 2)
 nir_move_terminate_out_of_loops = nir_lower_discard_if_options.define('nir_move_terminate_out_of_loops', 4)
@@ -5442,7 +5442,7 @@ except AttributeError: pass
 try: (nir_lower_view_index_to_device_index:=dll.nir_lower_view_index_to_device_index).restype, nir_lower_view_index_to_device_index.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_lower_fp16_cast_options = CEnum(ctypes.c_uint)
+nir_lower_fp16_cast_options = CEnum(ctypes.c_uint32)
 nir_lower_fp16_rtz = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtz', 1)
 nir_lower_fp16_rtne = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtne', 2)
 nir_lower_fp16_ru = nir_lower_fp16_cast_options.define('nir_lower_fp16_ru', 4)
@@ -5467,7 +5467,7 @@ try: (nir_live_defs_impl:=dll.nir_live_defs_impl).restype, nir_live_defs_impl.ar
 except AttributeError: pass
 
 # const unsigned int *nir_get_live_defs(nir_cursor cursor, void *mem_ctx)
-try: (nir_get_live_defs:=dll.nir_get_live_defs).restype, nir_get_live_defs.argtypes = ctypes.POINTER(ctypes.c_uint), [nir_cursor, ctypes.c_void_p]
+try: (nir_get_live_defs:=dll.nir_get_live_defs).restype, nir_get_live_defs.argtypes = ctypes.POINTER(ctypes.c_uint32), [nir_cursor, ctypes.c_void_p]
 except AttributeError: pass
 
 # void nir_loop_analyze_impl(nir_function_impl *impl, nir_variable_mode indirect_mask, bool force_unroll_sampler_indirect)
@@ -5562,8 +5562,8 @@ except AttributeError: pass
 
 class struct_nir_lower_printf_options(Struct): pass
 struct_nir_lower_printf_options._fields_ = [
-  ('max_buffer_size', ctypes.c_uint),
-  ('ptr_bit_size', ctypes.c_uint),
+  ('max_buffer_size', ctypes.c_uint32),
+  ('ptr_bit_size', ctypes.c_uint32),
   ('hash_format_strings', ctypes.c_bool),
 ]
 nir_lower_printf_options = struct_nir_lower_printf_options
@@ -5629,7 +5629,7 @@ nir_combine_barrier_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_n
 try: (nir_opt_combine_barriers:=dll.nir_opt_combine_barriers).restype, nir_opt_combine_barriers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_combine_barrier_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-mesa_scope = CEnum(ctypes.c_uint)
+mesa_scope = CEnum(ctypes.c_uint32)
 SCOPE_NONE = mesa_scope.define('SCOPE_NONE', 0)
 SCOPE_INVOCATION = mesa_scope.define('SCOPE_INVOCATION', 1)
 SCOPE_SUBGROUP = mesa_scope.define('SCOPE_SUBGROUP', 2)
@@ -5711,14 +5711,14 @@ try: (nir_opt_generate_bfi:=dll.nir_opt_generate_bfi).restype, nir_opt_generate_
 except AttributeError: pass
 
 # bool nir_opt_idiv_const(nir_shader *shader, unsigned int min_bit_size)
-try: (nir_opt_idiv_const:=dll.nir_opt_idiv_const).restype, nir_opt_idiv_const.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_opt_idiv_const:=dll.nir_opt_idiv_const).restype, nir_opt_idiv_const.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_opt_mqsad(nir_shader *shader)
 try: (nir_opt_mqsad:=dll.nir_opt_mqsad).restype, nir_opt_mqsad.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_opt_if_options = CEnum(ctypes.c_uint)
+nir_opt_if_options = CEnum(ctypes.c_uint32)
 nir_opt_if_optimize_phi_true_false = nir_opt_if_options.define('nir_opt_if_optimize_phi_true_false', 1)
 nir_opt_if_avoid_64bit_phis = nir_opt_if_options.define('nir_opt_if_avoid_64bit_phis', 2)
 
@@ -5731,7 +5731,7 @@ try: (nir_opt_intrinsics:=dll.nir_opt_intrinsics).restype, nir_opt_intrinsics.ar
 except AttributeError: pass
 
 # bool nir_opt_large_constants(nir_shader *shader, glsl_type_size_align_func size_align, unsigned int threshold)
-try: (nir_opt_large_constants:=dll.nir_opt_large_constants).restype, nir_opt_large_constants.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), glsl_type_size_align_func, ctypes.c_uint]
+try: (nir_opt_large_constants:=dll.nir_opt_large_constants).restype, nir_opt_large_constants.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), glsl_type_size_align_func, ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_opt_licm(nir_shader *shader)
@@ -5746,7 +5746,7 @@ except AttributeError: pass
 try: (nir_opt_loop_unroll:=dll.nir_opt_loop_unroll).restype, nir_opt_loop_unroll.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_move_options = CEnum(ctypes.c_uint)
+nir_move_options = CEnum(ctypes.c_uint32)
 nir_move_const_undef = nir_move_options.define('nir_move_const_undef', 1)
 nir_move_load_ubo = nir_move_options.define('nir_move_load_ubo', 2)
 nir_move_load_input = nir_move_options.define('nir_move_load_input', 4)
@@ -5787,7 +5787,7 @@ except AttributeError: pass
 
 class struct_nir_opt_peephole_select_options(Struct): pass
 struct_nir_opt_peephole_select_options._fields_ = [
-  ('limit', ctypes.c_uint),
+  ('limit', ctypes.c_uint32),
   ('indirect_load_ok', ctypes.c_bool),
   ('expensive_alu_ok', ctypes.c_bool),
   ('discard_ok', ctypes.c_bool),
@@ -5873,7 +5873,7 @@ except AttributeError: pass
 try: (nir_sweep:=dll.nir_sweep).restype, nir_sweep.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-gl_system_value = CEnum(ctypes.c_uint)
+gl_system_value = CEnum(ctypes.c_uint32)
 SYSTEM_VALUE_SUBGROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_SIZE', 0)
 SYSTEM_VALUE_SUBGROUP_INVOCATION = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_INVOCATION', 1)
 SYSTEM_VALUE_SUBGROUP_EQ_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_EQ_MASK', 2)
@@ -5985,11 +5985,11 @@ except AttributeError: pass
 
 class struct_nir_unsigned_upper_bound_config(Struct): pass
 struct_nir_unsigned_upper_bound_config._fields_ = [
-  ('min_subgroup_size', ctypes.c_uint),
-  ('max_subgroup_size', ctypes.c_uint),
-  ('max_workgroup_invocations', ctypes.c_uint),
-  ('max_workgroup_count', (ctypes.c_uint * 3)),
-  ('max_workgroup_size', (ctypes.c_uint * 3)),
+  ('min_subgroup_size', ctypes.c_uint32),
+  ('max_subgroup_size', ctypes.c_uint32),
+  ('max_workgroup_invocations', ctypes.c_uint32),
+  ('max_workgroup_count', (ctypes.c_uint32 * 3)),
+  ('max_workgroup_size', (ctypes.c_uint32 * 3)),
   ('vertex_attrib_max', (uint32_t * 32)),
 ]
 nir_unsigned_upper_bound_config = struct_nir_unsigned_upper_bound_config
@@ -5998,7 +5998,7 @@ try: (nir_unsigned_upper_bound:=dll.nir_unsigned_upper_bound).restype, nir_unsig
 except AttributeError: pass
 
 # bool nir_addition_might_overflow(nir_shader *shader, struct hash_table *range_ht, nir_scalar ssa, unsigned int const_val, const nir_unsigned_upper_bound_config *config)
-try: (nir_addition_might_overflow:=dll.nir_addition_might_overflow).restype, nir_addition_might_overflow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.c_uint, ctypes.POINTER(nir_unsigned_upper_bound_config)]
+try: (nir_addition_might_overflow:=dll.nir_addition_might_overflow).restype, nir_addition_might_overflow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.c_uint32, ctypes.POINTER(nir_unsigned_upper_bound_config)]
 except AttributeError: pass
 
 class struct_nir_opt_preamble_options(Struct): pass
@@ -6006,8 +6006,8 @@ struct_nir_opt_preamble_options._fields_ = [
   ('drawid_uniform', ctypes.c_bool),
   ('subgroup_size_uniform', ctypes.c_bool),
   ('load_workgroup_size_allowed', ctypes.c_bool),
-  ('def_size', ctypes.CFUNCTYPE(None, ctypes.POINTER(nir_def), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(nir_preamble_class))),
-  ('preamble_storage_size', (ctypes.c_uint * 2)),
+  ('def_size', ctypes.CFUNCTYPE(None, ctypes.POINTER(nir_def), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(nir_preamble_class))),
+  ('preamble_storage_size', (ctypes.c_uint32 * 2)),
   ('instr_cost_cb', ctypes.CFUNCTYPE(ctypes.c_float, ctypes.POINTER(nir_instr), ctypes.c_void_p)),
   ('rewrite_cost_cb', ctypes.CFUNCTYPE(ctypes.c_float, ctypes.POINTER(nir_def), ctypes.c_void_p)),
   ('avoid_instr_cb', nir_instr_filter_cb),
@@ -6015,7 +6015,7 @@ struct_nir_opt_preamble_options._fields_ = [
 ]
 nir_opt_preamble_options = struct_nir_opt_preamble_options
 # bool nir_opt_preamble(nir_shader *shader, const nir_opt_preamble_options *options, unsigned int *size)
-try: (nir_opt_preamble:=dll.nir_opt_preamble).restype, nir_opt_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_preamble_options), ctypes.POINTER(ctypes.c_uint)]
+try: (nir_opt_preamble:=dll.nir_opt_preamble).restype, nir_opt_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_preamble_options), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # nir_function_impl *nir_shader_get_preamble(nir_shader *shader)
@@ -6027,15 +6027,15 @@ try: (nir_lower_point_smooth:=dll.nir_lower_point_smooth).restype, nir_lower_poi
 except AttributeError: pass
 
 # bool nir_lower_poly_line_smooth(nir_shader *shader, unsigned int num_smooth_aa_sample)
-try: (nir_lower_poly_line_smooth:=dll.nir_lower_poly_line_smooth).restype, nir_lower_poly_line_smooth.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_lower_poly_line_smooth:=dll.nir_lower_poly_line_smooth).restype, nir_lower_poly_line_smooth.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_mod_analysis(nir_scalar val, nir_alu_type val_type, unsigned int div, unsigned int *mod)
-try: (nir_mod_analysis:=dll.nir_mod_analysis).restype, nir_mod_analysis.argtypes = ctypes.c_bool, [nir_scalar, nir_alu_type, ctypes.c_uint, ctypes.POINTER(ctypes.c_uint)]
+try: (nir_mod_analysis:=dll.nir_mod_analysis).restype, nir_mod_analysis.argtypes = ctypes.c_bool, [nir_scalar, nir_alu_type, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # bool nir_remove_tex_shadow(nir_shader *shader, unsigned int textures_bitmask)
-try: (nir_remove_tex_shadow:=dll.nir_remove_tex_shadow).restype, nir_remove_tex_shadow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint]
+try: (nir_remove_tex_shadow:=dll.nir_remove_tex_shadow).restype, nir_remove_tex_shadow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
 # bool nir_trivialize_registers(nir_shader *s)
@@ -6043,7 +6043,7 @@ try: (nir_trivialize_registers:=dll.nir_trivialize_registers).restype, nir_trivi
 except AttributeError: pass
 
 # unsigned int nir_static_workgroup_size(const nir_shader *s)
-try: (nir_static_workgroup_size:=dll.nir_static_workgroup_size).restype, nir_static_workgroup_size.argtypes = ctypes.c_uint, [ctypes.POINTER(nir_shader)]
+try: (nir_static_workgroup_size:=dll.nir_static_workgroup_size).restype, nir_static_workgroup_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
 class struct_nir_use_dominance_state(Struct): pass
@@ -6065,14 +6065,14 @@ try: (nir_instr_dominates_use:=dll.nir_instr_dominates_use).restype, nir_instr_d
 except AttributeError: pass
 
 # void nir_print_use_dominators(nir_use_dominance_state *state, nir_instr **instructions, unsigned int num_instructions)
-try: (nir_print_use_dominators:=dll.nir_print_use_dominators).restype, nir_print_use_dominators.argtypes = None, [ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(ctypes.POINTER(nir_instr)), ctypes.c_uint]
+try: (nir_print_use_dominators:=dll.nir_print_use_dominators).restype, nir_print_use_dominators.argtypes = None, [ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(ctypes.POINTER(nir_instr)), ctypes.c_uint32]
 except AttributeError: pass
 
 class nir_output_deps(Struct): pass
 class nir_output_deps_output(Struct): pass
 nir_output_deps_output._fields_ = [
   ('instr_list', ctypes.POINTER(ctypes.POINTER(nir_instr))),
-  ('num_instr', ctypes.c_uint),
+  ('num_instr', ctypes.c_uint32),
 ]
 nir_output_deps._fields_ = [
   ('output', (nir_output_deps_output * 112)),
@@ -6088,7 +6088,7 @@ except AttributeError: pass
 class nir_input_to_output_deps(Struct): pass
 class nir_input_to_output_deps_output(Struct): pass
 nir_input_to_output_deps_output._fields_ = [
-  ('inputs', (ctypes.c_uint * 28)),
+  ('inputs', (ctypes.c_uint32 * 28)),
   ('defined', ctypes.c_bool),
   ('uses_ssbo_reads', ctypes.c_bool),
   ('uses_image_reads', ctypes.c_bool),
@@ -6106,9 +6106,9 @@ except AttributeError: pass
 
 class nir_output_clipper_var_groups(Struct): pass
 nir_output_clipper_var_groups._fields_ = [
-  ('pos_only', (ctypes.c_uint * 28)),
-  ('var_only', (ctypes.c_uint * 28)),
-  ('both', (ctypes.c_uint * 28)),
+  ('pos_only', (ctypes.c_uint32 * 28)),
+  ('var_only', (ctypes.c_uint32 * 28)),
+  ('both', (ctypes.c_uint32 * 28)),
 ]
 # void nir_gather_output_clipper_var_groups(nir_shader *nir, nir_output_clipper_var_groups *groups)
 try: (nir_gather_output_clipper_var_groups:=dll.nir_gather_output_clipper_var_groups).restype, nir_gather_output_clipper_var_groups.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_output_clipper_var_groups)]
@@ -6163,7 +6163,7 @@ try: (nir_build_alu_src_arr:=dll.nir_build_alu_src_arr).restype, nir_build_alu_s
 except AttributeError: pass
 
 # nir_def *nir_build_tex_deref_instr(nir_builder *build, nir_texop op, nir_deref_instr *texture, nir_deref_instr *sampler, unsigned int num_extra_srcs, const nir_tex_src *extra_srcs)
-try: (nir_build_tex_deref_instr:=dll.nir_build_tex_deref_instr).restype, nir_build_tex_deref_instr.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_texop, ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_deref_instr), ctypes.c_uint, ctypes.POINTER(nir_tex_src)]
+try: (nir_build_tex_deref_instr:=dll.nir_build_tex_deref_instr).restype, nir_build_tex_deref_instr.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_texop, ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_deref_instr), ctypes.c_uint32, ctypes.POINTER(nir_tex_src)]
 except AttributeError: pass
 
 # void nir_builder_cf_insert(nir_builder *build, nir_cf_node *cf)
@@ -6211,7 +6211,7 @@ try: (nir_build_alu_src_arr:=dll.nir_build_alu_src_arr).restype, nir_build_alu_s
 except AttributeError: pass
 
 # nir_def *nir_load_system_value(nir_builder *build, nir_intrinsic_op op, int index, unsigned int num_components, unsigned int bit_size)
-try: (nir_load_system_value:=dll.nir_load_system_value).restype, nir_load_system_value.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_intrinsic_op, ctypes.c_int, ctypes.c_uint, ctypes.c_uint]
+try: (nir_load_system_value:=dll.nir_load_system_value).restype, nir_load_system_value.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_intrinsic_op, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_def *nir_type_convert(nir_builder *b, nir_def *src, nir_alu_type src_type, nir_alu_type dest_type, nir_rounding_mode rnd)
@@ -6219,11 +6219,11 @@ try: (nir_type_convert:=dll.nir_type_convert).restype, nir_type_convert.argtypes
 except AttributeError: pass
 
 # nir_def *nir_vec_scalars(nir_builder *build, nir_scalar *comp, unsigned int num_components)
-try: (nir_vec_scalars:=dll.nir_vec_scalars).restype, nir_vec_scalars.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_scalar), ctypes.c_uint]
+try: (nir_vec_scalars:=dll.nir_vec_scalars).restype, nir_vec_scalars.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_scalar), ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_def *nir_ssa_for_alu_src(nir_builder *build, nir_alu_instr *instr, unsigned int srcn)
-try: (nir_ssa_for_alu_src:=dll.nir_ssa_for_alu_src).restype, nir_ssa_for_alu_src.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_alu_instr), ctypes.c_uint]
+try: (nir_ssa_for_alu_src:=dll.nir_ssa_for_alu_src).restype, nir_ssa_for_alu_src.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
 # nir_def *nir_build_string(nir_builder *build, const char *value)
@@ -6239,18 +6239,18 @@ try: (nir_gen_rect_vertices:=dll.nir_gen_rect_vertices).restype, nir_gen_rect_ve
 except AttributeError: pass
 
 # void nir_printf_fmt(nir_builder *b, unsigned int ptr_bit_size, const char *fmt, ...)
-try: (nir_printf_fmt:=dll.nir_printf_fmt).restype, nir_printf_fmt.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (nir_printf_fmt:=dll.nir_printf_fmt).restype, nir_printf_fmt.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # void nir_printf_fmt_at_px(nir_builder *b, unsigned int ptr_bit_size, unsigned int x, unsigned int y, const char *fmt, ...)
-try: (nir_printf_fmt_at_px:=dll.nir_printf_fmt_at_px).restype, nir_printf_fmt_at_px.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (nir_printf_fmt_at_px:=dll.nir_printf_fmt_at_px).restype, nir_printf_fmt_at_px.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # nir_def *nir_call_serialized(nir_builder *build, const uint32_t *serialized, size_t serialized_size_B, nir_def **args)
 try: (nir_call_serialized:=dll.nir_call_serialized).restype, nir_call_serialized.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(uint32_t), size_t, ctypes.POINTER(ctypes.POINTER(nir_def))]
 except AttributeError: pass
 
-nir_lower_packing_op = CEnum(ctypes.c_uint)
+nir_lower_packing_op = CEnum(ctypes.c_uint32)
 nir_lower_packing_op_pack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_pack_64_2x32', 0)
 nir_lower_packing_op_unpack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_64_2x32', 1)
 nir_lower_packing_op_pack_64_4x16 = nir_lower_packing_op.define('nir_lower_packing_op_pack_64_4x16', 2)
@@ -6292,7 +6292,7 @@ except AttributeError: pass
 try: (nir_deserialize_function:=dll.nir_deserialize_function).restype, nir_deserialize_function.argtypes = ctypes.POINTER(nir_function), [ctypes.c_void_p, ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-nir_intrinsic_index_flag = CEnum(ctypes.c_uint)
+nir_intrinsic_index_flag = CEnum(ctypes.c_uint32)
 NIR_INTRINSIC_BASE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BASE', 0)
 NIR_INTRINSIC_WRITE_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_WRITE_MASK', 1)
 NIR_INTRINSIC_STREAM_ID = nir_intrinsic_index_flag.define('NIR_INTRINSIC_STREAM_ID', 2)
@@ -6655,7 +6655,7 @@ LLVMExecutionEngineRef = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
 class struct_LLVMOpaqueMCJITMemoryManager(Struct): pass
 LLVMMCJITMemoryManagerRef = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
 # extern int lp_build_create_jit_compiler_for_module(LLVMExecutionEngineRef *OutJIT, struct lp_generated_code **OutCode, struct lp_cached_code *cache_out, LLVMModuleRef M, LLVMMCJITMemoryManagerRef MM, unsigned int OptLevel, char **OutError)
-try: (lp_build_create_jit_compiler_for_module:=dll.lp_build_create_jit_compiler_for_module).restype, lp_build_create_jit_compiler_for_module.argtypes = ctypes.c_int, [ctypes.POINTER(LLVMExecutionEngineRef), ctypes.POINTER(ctypes.POINTER(struct_lp_generated_code)), ctypes.POINTER(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (lp_build_create_jit_compiler_for_module:=dll.lp_build_create_jit_compiler_for_module).restype, lp_build_create_jit_compiler_for_module.argtypes = ctypes.c_int32, [ctypes.POINTER(LLVMExecutionEngineRef), ctypes.POINTER(ctypes.POINTER(struct_lp_generated_code)), ctypes.POINTER(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 # extern void lp_free_generated_code(struct lp_generated_code *code)
@@ -6685,21 +6685,21 @@ try: (lp_free_objcache:=dll.lp_free_objcache).restype, lp_free_objcache.argtypes
 except AttributeError: pass
 
 # void lp_set_module_stack_alignment_override(LLVMModuleRef M, unsigned int align)
-try: (lp_set_module_stack_alignment_override:=dll.lp_set_module_stack_alignment_override).restype, lp_set_module_stack_alignment_override.argtypes = None, [LLVMModuleRef, ctypes.c_uint]
+try: (lp_set_module_stack_alignment_override:=dll.lp_set_module_stack_alignment_override).restype, lp_set_module_stack_alignment_override.argtypes = None, [LLVMModuleRef, ctypes.c_uint32]
 except AttributeError: pass
 
-try: lp_native_vector_width = ctypes.c_uint.in_dll(dll, 'lp_native_vector_width')
+try: lp_native_vector_width = ctypes.c_uint32.in_dll(dll, 'lp_native_vector_width')
 except (ValueError,AttributeError): pass
 class struct_lp_type(Struct): pass
 struct_lp_type._fields_ = [
-  ('floating', ctypes.c_uint,1),
-  ('fixed', ctypes.c_uint,1),
-  ('sign', ctypes.c_uint,1),
-  ('norm', ctypes.c_uint,1),
-  ('signed_zero_preserve', ctypes.c_uint,1),
-  ('nan_preserve', ctypes.c_uint,1),
-  ('width', ctypes.c_uint,14),
-  ('length', ctypes.c_uint,14),
+  ('floating', ctypes.c_uint32,1),
+  ('fixed', ctypes.c_uint32,1),
+  ('sign', ctypes.c_uint32,1),
+  ('norm', ctypes.c_uint32,1),
+  ('signed_zero_preserve', ctypes.c_uint32,1),
+  ('nan_preserve', ctypes.c_uint32,1),
+  ('width', ctypes.c_uint32,14),
+  ('length', ctypes.c_uint32,14),
 ]
 class struct_lp_build_context(Struct): pass
 class struct_gallivm_state(Struct): pass
@@ -6761,10 +6761,10 @@ try: (lp_wider_type:=dll.lp_wider_type).restype, lp_wider_type.argtypes = struct
 except AttributeError: pass
 
 # unsigned int lp_sizeof_llvm_type(LLVMTypeRef t)
-try: (lp_sizeof_llvm_type:=dll.lp_sizeof_llvm_type).restype, lp_sizeof_llvm_type.argtypes = ctypes.c_uint, [LLVMTypeRef]
+try: (lp_sizeof_llvm_type:=dll.lp_sizeof_llvm_type).restype, lp_sizeof_llvm_type.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
-LLVMTypeKind = CEnum(ctypes.c_uint)
+LLVMTypeKind = CEnum(ctypes.c_uint32)
 LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0)
 LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1)
 LLVMFloatTypeKind = LLVMTypeKind.define('LLVMFloatTypeKind', 2)
@@ -6799,7 +6799,7 @@ try: (lp_build_context_init:=dll.lp_build_context_init).restype, lp_build_contex
 except AttributeError: pass
 
 # unsigned int lp_build_count_ir_module(LLVMModuleRef module)
-try: (lp_build_count_ir_module:=dll.lp_build_count_ir_module).restype, lp_build_count_ir_module.argtypes = ctypes.c_uint, [LLVMModuleRef]
+try: (lp_build_count_ir_module:=dll.lp_build_count_ir_module).restype, lp_build_count_ir_module.argtypes = ctypes.c_uint32, [LLVMModuleRef]
 except AttributeError: pass
 
 class struct_lp_jit_texture(Struct): pass
@@ -6824,7 +6824,7 @@ struct_gallivm_state._fields_ = [
   ('builder', LLVMBuilderRef),
   ('di_builder', LLVMDIBuilderRef),
   ('cache', ctypes.POINTER(struct_lp_cached_code)),
-  ('compiled', ctypes.c_uint),
+  ('compiled', ctypes.c_uint32),
   ('coro_malloc_hook', LLVMValueRef),
   ('coro_free_hook', LLVMValueRef),
   ('debug_printf_hook', LLVMValueRef),
@@ -6838,7 +6838,7 @@ struct_gallivm_state._fields_ = [
   ('sampler_descriptor', LLVMValueRef),
 ]
 # unsigned int lp_build_init_native_width(void)
-try: (lp_build_init_native_width:=dll.lp_build_init_native_width).restype, lp_build_init_native_width.argtypes = ctypes.c_uint, []
+try: (lp_build_init_native_width:=dll.lp_build_init_native_width).restype, lp_build_init_native_width.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
 # bool lp_build_init(void)
@@ -6879,7 +6879,7 @@ try: (gallivm_stub_func:=dll.gallivm_stub_func).restype, gallivm_stub_func.argty
 except AttributeError: pass
 
 # unsigned int gallivm_get_perf_flags(void)
-try: (gallivm_get_perf_flags:=dll.gallivm_get_perf_flags).restype, gallivm_get_perf_flags.argtypes = ctypes.c_uint, []
+try: (gallivm_get_perf_flags:=dll.gallivm_get_perf_flags).restype, gallivm_get_perf_flags.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
 # void lp_init_clock_hook(struct gallivm_state *gallivm)
@@ -6943,10 +6943,10 @@ struct_lp_derivatives._fields_ = [
 ]
 struct_lp_sampler_params._fields_ = [
   ('type', struct_lp_type),
-  ('texture_index', ctypes.c_uint),
-  ('sampler_index', ctypes.c_uint),
+  ('texture_index', ctypes.c_uint32),
+  ('sampler_index', ctypes.c_uint32),
   ('texture_index_offset', LLVMValueRef),
-  ('sample_key', ctypes.c_uint),
+  ('sample_key', ctypes.c_uint32),
   ('resources_type', LLVMTypeRef),
   ('resources_ptr', LLVMValueRef),
   ('thread_data_type', LLVMTypeRef),
@@ -6964,16 +6964,16 @@ struct_lp_sampler_params._fields_ = [
   ('exec_mask_nz', ctypes.c_bool),
 ]
 class struct_lp_sampler_size_query_params(Struct): pass
-enum_lp_sampler_lod_property = CEnum(ctypes.c_uint)
+enum_lp_sampler_lod_property = CEnum(ctypes.c_uint32)
 LP_SAMPLER_LOD_SCALAR = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_SCALAR', 0)
 LP_SAMPLER_LOD_PER_ELEMENT = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_PER_ELEMENT', 1)
 LP_SAMPLER_LOD_PER_QUAD = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_PER_QUAD', 2)
 
 struct_lp_sampler_size_query_params._fields_ = [
   ('int_type', struct_lp_type),
-  ('texture_unit', ctypes.c_uint),
+  ('texture_unit', ctypes.c_uint32),
   ('texture_unit_offset', LLVMValueRef),
-  ('target', ctypes.c_uint),
+  ('target', ctypes.c_uint32),
   ('resources_type', LLVMTypeRef),
   ('resources_ptr', LLVMValueRef),
   ('is_sviewinfo', ctypes.c_bool),
@@ -7008,19 +7008,19 @@ struct_tgsi_shader_info._fields_ = [
   ('system_value_semantic_name', (uint8_t * 80)),
   ('processor', uint8_t),
   ('file_mask', (uint32_t * 15)),
-  ('file_count', (ctypes.c_uint * 15)),
-  ('file_max', (ctypes.c_int * 15)),
-  ('const_file_max', (ctypes.c_int * 32)),
-  ('const_buffers_declared', ctypes.c_uint),
-  ('samplers_declared', ctypes.c_uint),
+  ('file_count', (ctypes.c_uint32 * 15)),
+  ('file_max', (ctypes.c_int32 * 15)),
+  ('const_file_max', (ctypes.c_int32 * 32)),
+  ('const_buffers_declared', ctypes.c_uint32),
+  ('samplers_declared', ctypes.c_uint32),
   ('sampler_targets', (uint8_t * 128)),
   ('sampler_type', (uint8_t * 128)),
   ('num_stream_output_components', (uint8_t * 4)),
   ('input_array_first', (uint8_t * 80)),
   ('output_array_first', (uint8_t * 80)),
-  ('immediate_count', ctypes.c_uint),
-  ('num_instructions', ctypes.c_uint),
-  ('opcode_count', (ctypes.c_uint * 252)),
+  ('immediate_count', ctypes.c_uint32),
+  ('num_instructions', ctypes.c_uint32),
+  ('opcode_count', (ctypes.c_uint32 * 252)),
   ('reads_pervertex_outputs', ctypes.c_bool),
   ('reads_perpatch_outputs', ctypes.c_bool),
   ('reads_tessfactor_outputs', ctypes.c_bool),
@@ -7045,33 +7045,33 @@ struct_tgsi_shader_info._fields_ = [
   ('writes_layer', ctypes.c_bool),
   ('writes_memory', ctypes.c_bool),
   ('uses_fbfetch', ctypes.c_bool),
-  ('num_written_culldistance', ctypes.c_uint),
-  ('num_written_clipdistance', ctypes.c_uint),
-  ('images_declared', ctypes.c_uint),
-  ('msaa_images_declared', ctypes.c_uint),
-  ('images_buffers', ctypes.c_uint),
-  ('shader_buffers_declared', ctypes.c_uint),
-  ('shader_buffers_load', ctypes.c_uint),
-  ('shader_buffers_store', ctypes.c_uint),
-  ('shader_buffers_atomic', ctypes.c_uint),
-  ('hw_atomic_declared', ctypes.c_uint),
-  ('indirect_files', ctypes.c_uint),
-  ('dim_indirect_files', ctypes.c_uint),
-  ('properties', (ctypes.c_uint * 29)),
+  ('num_written_culldistance', ctypes.c_uint32),
+  ('num_written_clipdistance', ctypes.c_uint32),
+  ('images_declared', ctypes.c_uint32),
+  ('msaa_images_declared', ctypes.c_uint32),
+  ('images_buffers', ctypes.c_uint32),
+  ('shader_buffers_declared', ctypes.c_uint32),
+  ('shader_buffers_load', ctypes.c_uint32),
+  ('shader_buffers_store', ctypes.c_uint32),
+  ('shader_buffers_atomic', ctypes.c_uint32),
+  ('hw_atomic_declared', ctypes.c_uint32),
+  ('indirect_files', ctypes.c_uint32),
+  ('dim_indirect_files', ctypes.c_uint32),
+  ('properties', (ctypes.c_uint32 * 29)),
 ]
 class struct_lp_build_gs_iface(Struct): pass
 struct_lp_build_gs_iface._fields_ = [
   ('fetch_input', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_gs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef)),
   ('emit_vertex', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.POINTER((LLVMValueRef * 4)), LLVMValueRef, LLVMValueRef, LLVMValueRef)),
-  ('end_primitive', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), ctypes.POINTER(struct_lp_build_context), LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint)),
-  ('gs_epilogue', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), LLVMValueRef, LLVMValueRef, ctypes.c_uint)),
+  ('end_primitive', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), ctypes.POINTER(struct_lp_build_context), LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32)),
+  ('gs_epilogue', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), LLVMValueRef, LLVMValueRef, ctypes.c_uint32)),
 ]
 class struct_lp_build_tcs_iface(Struct): pass
 struct_lp_build_tcs_iface._fields_ = [
   ('emit_prologue', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_context))),
   ('emit_epilogue', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_context))),
   ('emit_barrier', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_context))),
-  ('emit_store_output', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_tcs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef)),
+  ('emit_store_output', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_tcs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint32, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef)),
   ('emit_fetch_input', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_tcs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef)),
   ('emit_fetch_output', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_tcs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, uint32_t)),
 ]
@@ -7082,12 +7082,12 @@ struct_lp_build_tes_iface._fields_ = [
 ]
 class struct_lp_build_mesh_iface(Struct): pass
 struct_lp_build_mesh_iface._fields_ = [
-  ('emit_store_output', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_mesh_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef)),
+  ('emit_store_output', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_mesh_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint32, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef)),
   ('emit_vertex_and_primitive_count', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_mesh_iface), ctypes.POINTER(struct_lp_build_context), LLVMValueRef, LLVMValueRef)),
 ]
 class struct_lp_build_image_soa(Struct): pass
 class struct_lp_img_params(Struct): pass
-LLVMAtomicRMWBinOp = CEnum(ctypes.c_uint)
+LLVMAtomicRMWBinOp = CEnum(ctypes.c_uint32)
 LLVMAtomicRMWBinOpXchg = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXchg', 0)
 LLVMAtomicRMWBinOpAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAdd', 1)
 LLVMAtomicRMWBinOpSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpSub', 2)
@@ -7110,11 +7110,11 @@ LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat
 
 struct_lp_img_params._fields_ = [
   ('type', struct_lp_type),
-  ('image_index', ctypes.c_uint),
+  ('image_index', ctypes.c_uint32),
   ('image_index_offset', LLVMValueRef),
-  ('img_op', ctypes.c_uint),
-  ('target', ctypes.c_uint),
-  ('packed_op', ctypes.c_uint),
+  ('img_op', ctypes.c_uint32),
+  ('target', ctypes.c_uint32),
+  ('packed_op', ctypes.c_uint32),
   ('op', LLVMAtomicRMWBinOp),
   ('exec_mask', LLVMValueRef),
   ('exec_mask_nz', ctypes.c_bool),
@@ -7137,8 +7137,8 @@ struct_lp_build_image_soa._fields_ = [
 class struct_lp_build_coro_suspend_info(Struct): pass
 class struct_lp_build_fs_iface(Struct): pass
 struct_lp_build_fs_iface._fields_ = [
-  ('interp_fn', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_fs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint, ctypes.c_uint, ctypes.c_bool, ctypes.c_bool, LLVMValueRef, (LLVMValueRef * 2))),
-  ('fb_fetch', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_fs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_int, (LLVMValueRef * 4))),
+  ('interp_fn', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_fs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, LLVMValueRef, (LLVMValueRef * 2))),
+  ('fb_fetch', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_fs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_int32, (LLVMValueRef * 4))),
 ]
 struct_lp_build_tgsi_params._fields_ = [
   ('type', struct_lp_type),
@@ -7147,7 +7147,7 @@ struct_lp_build_tgsi_params._fields_ = [
   ('const_sizes_ptr', LLVMValueRef),
   ('system_values', ctypes.POINTER(struct_lp_bld_tgsi_system_values)),
   ('inputs', ctypes.POINTER((LLVMValueRef * 4))),
-  ('num_inputs', ctypes.c_int),
+  ('num_inputs', ctypes.c_int32),
   ('context_type', LLVMTypeRef),
   ('context_ptr', LLVMValueRef),
   ('resources_type', LLVMTypeRef),
@@ -7167,7 +7167,7 @@ struct_lp_build_tgsi_params._fields_ = [
   ('payload_ptr', LLVMValueRef),
   ('coro', ctypes.POINTER(struct_lp_build_coro_suspend_info)),
   ('fs_iface', ctypes.POINTER(struct_lp_build_fs_iface)),
-  ('gs_vertex_streams', ctypes.c_uint),
+  ('gs_vertex_streams', ctypes.c_uint32),
   ('current_func', LLVMValueRef),
   ('fns', ctypes.POINTER(struct_hash_table)),
   ('scratch_ptr', LLVMValueRef),
@@ -7182,7 +7182,7 @@ try: (lp_build_nir_soa_func:=dll.lp_build_nir_soa_func).restype, lp_build_nir_so
 except AttributeError: pass
 
 class struct_lp_build_sampler_aos(Struct): pass
-enum_tgsi_texture_type = CEnum(ctypes.c_uint)
+enum_tgsi_texture_type = CEnum(ctypes.c_uint32)
 TGSI_TEXTURE_BUFFER = enum_tgsi_texture_type.define('TGSI_TEXTURE_BUFFER', 0)
 TGSI_TEXTURE_1D = enum_tgsi_texture_type.define('TGSI_TEXTURE_1D', 1)
 TGSI_TEXTURE_2D = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D', 2)
@@ -7204,7 +7204,7 @@ TGSI_TEXTURE_SHADOWCUBE_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHAD
 TGSI_TEXTURE_UNKNOWN = enum_tgsi_texture_type.define('TGSI_TEXTURE_UNKNOWN', 18)
 TGSI_TEXTURE_COUNT = enum_tgsi_texture_type.define('TGSI_TEXTURE_COUNT', 19)
 
-enum_lp_build_tex_modifier = CEnum(ctypes.c_uint)
+enum_lp_build_tex_modifier = CEnum(ctypes.c_uint32)
 LP_BLD_TEX_MODIFIER_NONE = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_NONE', 0)
 LP_BLD_TEX_MODIFIER_PROJECTED = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_PROJECTED', 1)
 LP_BLD_TEX_MODIFIER_LOD_BIAS = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_LOD_BIAS', 2)
@@ -7213,7 +7213,7 @@ LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV = enum_lp_build_tex_modifier.define('LP_BLD_T
 LP_BLD_TEX_MODIFIER_LOD_ZERO = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_LOD_ZERO', 5)
 
 struct_lp_build_sampler_aos._fields_ = [
-  ('emit_fetch_texel', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_sampler_aos), ctypes.POINTER(struct_lp_build_context), enum_tgsi_texture_type, ctypes.c_uint, LLVMValueRef, struct_lp_derivatives, enum_lp_build_tex_modifier)),
+  ('emit_fetch_texel', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_sampler_aos), ctypes.POINTER(struct_lp_build_context), enum_tgsi_texture_type, ctypes.c_uint32, LLVMValueRef, struct_lp_derivatives, enum_lp_build_tex_modifier)),
 ]
 # void lp_build_nir_aos(struct gallivm_state *gallivm, struct nir_shader *shader, struct lp_type type, const unsigned char swizzles[4], LLVMValueRef consts_ptr, const LLVMValueRef *inputs, LLVMValueRef *outputs, const struct lp_build_sampler_aos *sampler)
 try: (lp_build_nir_aos:=dll.lp_build_nir_aos).restype, lp_build_nir_aos.argtypes = None, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), struct_lp_type, (ctypes.c_ubyte * 4), LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.POINTER(LLVMValueRef), ctypes.POINTER(struct_lp_build_sampler_aos)]
@@ -7248,7 +7248,7 @@ except AttributeError: pass
 try: (lp_packed_img_op_from_intrinsic:=dll.lp_packed_img_op_from_intrinsic).restype, lp_packed_img_op_from_intrinsic.argtypes = uint32_t, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-enum_lp_nir_call_context_args = CEnum(ctypes.c_uint)
+enum_lp_nir_call_context_args = CEnum(ctypes.c_uint32)
 LP_NIR_CALL_CONTEXT_CONTEXT = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_CONTEXT', 0)
 LP_NIR_CALL_CONTEXT_RESOURCES = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_RESOURCES', 1)
 LP_NIR_CALL_CONTEXT_SHARED = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_SHARED', 2)
@@ -7269,15 +7269,15 @@ LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2 = enum_lp_nir_call_context_args.define('LP_NIR_
 LP_NIR_CALL_CONTEXT_MAX_ARGS = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_MAX_ARGS', 17)
 
 # LLVMTypeRef lp_build_cs_func_call_context(struct gallivm_state *gallivm, int length, LLVMTypeRef context_type, LLVMTypeRef resources_type)
-try: (lp_build_cs_func_call_context:=dll.lp_build_cs_func_call_context).restype, lp_build_cs_func_call_context.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_int, LLVMTypeRef, LLVMTypeRef]
+try: (lp_build_cs_func_call_context:=dll.lp_build_cs_func_call_context).restype, lp_build_cs_func_call_context.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_int32, LLVMTypeRef, LLVMTypeRef]
 except AttributeError: pass
 
 # LLVMValueRef lp_build_struct_get_ptr2(struct gallivm_state *gallivm, LLVMTypeRef ptr_type, LLVMValueRef ptr, unsigned int member, const char *name)
-try: (lp_build_struct_get_ptr2:=dll.lp_build_struct_get_ptr2).restype, lp_build_struct_get_ptr2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (lp_build_struct_get_ptr2:=dll.lp_build_struct_get_ptr2).restype, lp_build_struct_get_ptr2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef lp_build_struct_get2(struct gallivm_state *gallivm, LLVMTypeRef ptr_type, LLVMValueRef ptr, unsigned int member, const char *name)
-try: (lp_build_struct_get2:=dll.lp_build_struct_get2).restype, lp_build_struct_get2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (lp_build_struct_get2:=dll.lp_build_struct_get2).restype, lp_build_struct_get2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef lp_build_array_get_ptr2(struct gallivm_state *gallivm, LLVMTypeRef array_type, LLVMValueRef ptr, LLVMValueRef index)
@@ -7293,7 +7293,7 @@ try: (lp_build_pointer_get2:=dll.lp_build_pointer_get2).restype, lp_build_pointe
 except AttributeError: pass
 
 # LLVMValueRef lp_build_pointer_get_unaligned2(LLVMBuilderRef builder, LLVMTypeRef ptr_type, LLVMValueRef ptr, LLVMValueRef index, unsigned int alignment)
-try: (lp_build_pointer_get_unaligned2:=dll.lp_build_pointer_get_unaligned2).restype, lp_build_pointer_get_unaligned2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint]
+try: (lp_build_pointer_get_unaligned2:=dll.lp_build_pointer_get_unaligned2).restype, lp_build_pointer_get_unaligned2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # void lp_build_pointer_set(LLVMBuilderRef builder, LLVMValueRef ptr, LLVMValueRef index, LLVMValueRef value)
@@ -7301,29 +7301,29 @@ try: (lp_build_pointer_set:=dll.lp_build_pointer_set).restype, lp_build_pointer_
 except AttributeError: pass
 
 # void lp_build_pointer_set_unaligned(LLVMBuilderRef builder, LLVMValueRef ptr, LLVMValueRef index, LLVMValueRef value, unsigned int alignment)
-try: (lp_build_pointer_set_unaligned:=dll.lp_build_pointer_set_unaligned).restype, lp_build_pointer_set_unaligned.argtypes = None, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint]
+try: (lp_build_pointer_set_unaligned:=dll.lp_build_pointer_set_unaligned).restype, lp_build_pointer_set_unaligned.argtypes = None, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 class struct_lp_sampler_dynamic_state(Struct): pass
 struct_lp_sampler_dynamic_state._fields_ = [
-  ('width', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('height', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('depth', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('first_level', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('last_level', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('row_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef, ctypes.POINTER(LLVMTypeRef))),
-  ('img_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef, ctypes.POINTER(LLVMTypeRef))),
-  ('base_ptr', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('mip_offsets', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef, ctypes.POINTER(LLVMTypeRef))),
-  ('num_samples', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('sample_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('min_lod', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint)),
-  ('max_lod', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint)),
-  ('lod_bias', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint)),
-  ('border_color', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint)),
-  ('cache_ptr', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint)),
-  ('residency', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
-  ('base_offset', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint, LLVMValueRef)),
+  ('width', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('height', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('depth', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('first_level', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('last_level', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('row_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(LLVMTypeRef))),
+  ('img_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(LLVMTypeRef))),
+  ('base_ptr', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('mip_offsets', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(LLVMTypeRef))),
+  ('num_samples', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('sample_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('min_lod', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32)),
+  ('max_lod', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32)),
+  ('lod_bias', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32)),
+  ('border_color', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32)),
+  ('cache_ptr', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32)),
+  ('residency', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
+  ('base_offset', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef)),
 ]
 class struct_lp_jit_buffer(Struct): pass
 class struct_lp_jit_buffer_0(ctypes.Union): pass
@@ -7336,21 +7336,21 @@ struct_lp_jit_buffer._fields_ = [
   ('_0', struct_lp_jit_buffer_0),
   ('num_elements', uint32_t),
 ]
-_anonenum0 = CEnum(ctypes.c_uint)
+_anonenum0 = CEnum(ctypes.c_uint32)
 LP_JIT_BUFFER_BASE = _anonenum0.define('LP_JIT_BUFFER_BASE', 0)
 LP_JIT_BUFFER_NUM_ELEMENTS = _anonenum0.define('LP_JIT_BUFFER_NUM_ELEMENTS', 1)
 LP_JIT_BUFFER_NUM_FIELDS = _anonenum0.define('LP_JIT_BUFFER_NUM_FIELDS', 2)
 
 # LLVMValueRef lp_llvm_descriptor_base(struct gallivm_state *gallivm, LLVMValueRef buffers_ptr, LLVMValueRef index, unsigned int buffers_limit)
-try: (lp_llvm_descriptor_base:=dll.lp_llvm_descriptor_base).restype, lp_llvm_descriptor_base.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint]
+try: (lp_llvm_descriptor_base:=dll.lp_llvm_descriptor_base).restype, lp_llvm_descriptor_base.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef lp_llvm_buffer_base(struct gallivm_state *gallivm, LLVMValueRef buffers_ptr, LLVMValueRef buffers_offset, unsigned int buffers_limit)
-try: (lp_llvm_buffer_base:=dll.lp_llvm_buffer_base).restype, lp_llvm_buffer_base.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint]
+try: (lp_llvm_buffer_base:=dll.lp_llvm_buffer_base).restype, lp_llvm_buffer_base.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef lp_llvm_buffer_num_elements(struct gallivm_state *gallivm, LLVMValueRef buffers_ptr, LLVMValueRef buffers_offset, unsigned int buffers_limit)
-try: (lp_llvm_buffer_num_elements:=dll.lp_llvm_buffer_num_elements).restype, lp_llvm_buffer_num_elements.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint]
+try: (lp_llvm_buffer_num_elements:=dll.lp_llvm_buffer_num_elements).restype, lp_llvm_buffer_num_elements.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
 class struct_lp_jit_texture_0(ctypes.Union): pass
@@ -7376,7 +7376,7 @@ struct_lp_jit_texture._fields_ = [
   ('mip_offsets', (uint32_t * 16)),
   ('sampler_index', uint32_t),
 ]
-_anonenum1 = CEnum(ctypes.c_uint)
+_anonenum1 = CEnum(ctypes.c_uint32)
 LP_JIT_TEXTURE_BASE = _anonenum1.define('LP_JIT_TEXTURE_BASE', 0)
 LP_JIT_TEXTURE_WIDTH = _anonenum1.define('LP_JIT_TEXTURE_WIDTH', 1)
 LP_JIT_TEXTURE_HEIGHT = _anonenum1.define('LP_JIT_TEXTURE_HEIGHT', 2)
@@ -7396,7 +7396,7 @@ struct_lp_jit_sampler._fields_ = [
   ('lod_bias', ctypes.c_float),
   ('border_color', (ctypes.c_float * 4)),
 ]
-_anonenum2 = CEnum(ctypes.c_uint)
+_anonenum2 = CEnum(ctypes.c_uint32)
 LP_JIT_SAMPLER_MIN_LOD = _anonenum2.define('LP_JIT_SAMPLER_MIN_LOD', 0)
 LP_JIT_SAMPLER_MAX_LOD = _anonenum2.define('LP_JIT_SAMPLER_MAX_LOD', 1)
 LP_JIT_SAMPLER_LOD_BIAS = _anonenum2.define('LP_JIT_SAMPLER_LOD_BIAS', 2)
@@ -7416,7 +7416,7 @@ struct_lp_jit_image._fields_ = [
   ('residency', ctypes.c_void_p),
   ('base_offset', uint32_t),
 ]
-_anonenum3 = CEnum(ctypes.c_uint)
+_anonenum3 = CEnum(ctypes.c_uint32)
 LP_JIT_IMAGE_BASE = _anonenum3.define('LP_JIT_IMAGE_BASE', 0)
 LP_JIT_IMAGE_WIDTH = _anonenum3.define('LP_JIT_IMAGE_WIDTH', 1)
 LP_JIT_IMAGE_HEIGHT = _anonenum3.define('LP_JIT_IMAGE_HEIGHT', 2)
@@ -7437,7 +7437,7 @@ struct_lp_jit_resources._fields_ = [
   ('samplers', (struct_lp_jit_sampler * 32)),
   ('images', (struct_lp_jit_image * 64)),
 ]
-_anonenum4 = CEnum(ctypes.c_uint)
+_anonenum4 = CEnum(ctypes.c_uint32)
 LP_JIT_RES_CONSTANTS = _anonenum4.define('LP_JIT_RES_CONSTANTS', 0)
 LP_JIT_RES_SSBOS = _anonenum4.define('LP_JIT_RES_SSBOS', 1)
 LP_JIT_RES_TEXTURES = _anonenum4.define('LP_JIT_RES_TEXTURES', 2)
@@ -7449,13 +7449,13 @@ LP_JIT_RES_COUNT = _anonenum4.define('LP_JIT_RES_COUNT', 5)
 try: (lp_build_jit_resources_type:=dll.lp_build_jit_resources_type).restype, lp_build_jit_resources_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
-_anonenum5 = CEnum(ctypes.c_uint)
+_anonenum5 = CEnum(ctypes.c_uint32)
 LP_JIT_VERTEX_HEADER_VERTEX_ID = _anonenum5.define('LP_JIT_VERTEX_HEADER_VERTEX_ID', 0)
 LP_JIT_VERTEX_HEADER_CLIP_POS = _anonenum5.define('LP_JIT_VERTEX_HEADER_CLIP_POS', 1)
 LP_JIT_VERTEX_HEADER_DATA = _anonenum5.define('LP_JIT_VERTEX_HEADER_DATA', 2)
 
 # LLVMTypeRef lp_build_create_jit_vertex_header_type(struct gallivm_state *gallivm, int data_elems)
-try: (lp_build_create_jit_vertex_header_type:=dll.lp_build_create_jit_vertex_header_type).restype, lp_build_create_jit_vertex_header_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_int]
+try: (lp_build_create_jit_vertex_header_type:=dll.lp_build_create_jit_vertex_header_type).restype, lp_build_create_jit_vertex_header_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_int32]
 except AttributeError: pass
 
 # void lp_build_jit_fill_sampler_dynamic_state(struct lp_sampler_dynamic_state *state)
@@ -7480,7 +7480,7 @@ except AttributeError: pass
 
 class struct_lp_texture_handle_state(Struct): pass
 class struct_lp_static_texture_state(Struct): pass
-enum_pipe_texture_target = CEnum(ctypes.c_uint)
+enum_pipe_texture_target = CEnum(ctypes.c_uint32)
 PIPE_BUFFER = enum_pipe_texture_target.define('PIPE_BUFFER', 0)
 PIPE_TEXTURE_1D = enum_pipe_texture_target.define('PIPE_TEXTURE_1D', 1)
 PIPE_TEXTURE_2D = enum_pipe_texture_target.define('PIPE_TEXTURE_2D', 2)
@@ -7495,18 +7495,18 @@ PIPE_MAX_TEXTURE_TYPES = enum_pipe_texture_target.define('PIPE_MAX_TEXTURE_TYPES
 struct_lp_static_texture_state._fields_ = [
   ('format', enum_pipe_format),
   ('res_format', enum_pipe_format),
-  ('swizzle_r', ctypes.c_uint,3),
-  ('swizzle_g', ctypes.c_uint,3),
-  ('swizzle_b', ctypes.c_uint,3),
-  ('swizzle_a', ctypes.c_uint,3),
+  ('swizzle_r', ctypes.c_uint32,3),
+  ('swizzle_g', ctypes.c_uint32,3),
+  ('swizzle_b', ctypes.c_uint32,3),
+  ('swizzle_a', ctypes.c_uint32,3),
   ('target', enum_pipe_texture_target,5),
   ('res_target', enum_pipe_texture_target,5),
-  ('pot_width', ctypes.c_uint,1),
-  ('pot_height', ctypes.c_uint,1),
-  ('pot_depth', ctypes.c_uint,1),
-  ('level_zero_only', ctypes.c_uint,1),
-  ('tiled', ctypes.c_uint,1),
-  ('tiled_samples', ctypes.c_uint,5),
+  ('pot_width', ctypes.c_uint32,1),
+  ('pot_height', ctypes.c_uint32,1),
+  ('pot_depth', ctypes.c_uint32,1),
+  ('level_zero_only', ctypes.c_uint32,1),
+  ('tiled', ctypes.c_uint32,1),
+  ('tiled_samples', ctypes.c_uint32,5),
 ]
 struct_lp_texture_handle_state._fields_ = [
   ('static_state', struct_lp_static_texture_state),
@@ -7619,7 +7619,7 @@ except AttributeError: pass
 try: (lp_build_loop_force_reload_counter:=dll.lp_build_loop_force_reload_counter).restype, lp_build_loop_force_reload_counter.argtypes = None, [ctypes.POINTER(struct_lp_build_loop_state)]
 except AttributeError: pass
 
-LLVMIntPredicate = CEnum(ctypes.c_uint)
+LLVMIntPredicate = CEnum(ctypes.c_uint32)
 LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32)
 LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33)
 LLVMIntUGT = LLVMIntPredicate.define('LLVMIntUGT', 34)
@@ -7698,15 +7698,15 @@ try: (lp_build_array_alloca:=dll.lp_build_array_alloca).restype, lp_build_array_
 except AttributeError: pass
 
 # unsigned int lp_mantissa(struct lp_type type)
-try: (lp_mantissa:=dll.lp_mantissa).restype, lp_mantissa.argtypes = ctypes.c_uint, [struct_lp_type]
+try: (lp_mantissa:=dll.lp_mantissa).restype, lp_mantissa.argtypes = ctypes.c_uint32, [struct_lp_type]
 except AttributeError: pass
 
 # unsigned int lp_const_shift(struct lp_type type)
-try: (lp_const_shift:=dll.lp_const_shift).restype, lp_const_shift.argtypes = ctypes.c_uint, [struct_lp_type]
+try: (lp_const_shift:=dll.lp_const_shift).restype, lp_const_shift.argtypes = ctypes.c_uint32, [struct_lp_type]
 except AttributeError: pass
 
 # unsigned int lp_const_offset(struct lp_type type)
-try: (lp_const_offset:=dll.lp_const_offset).restype, lp_const_offset.argtypes = ctypes.c_uint, [struct_lp_type]
+try: (lp_const_offset:=dll.lp_const_offset).restype, lp_const_offset.argtypes = ctypes.c_uint32, [struct_lp_type]
 except AttributeError: pass
 
 # double lp_const_scale(struct lp_type type)
@@ -7746,7 +7746,7 @@ try: (lp_build_const_vec:=dll.lp_build_const_vec).restype, lp_build_const_vec.ar
 except AttributeError: pass
 
 # LLVMValueRef lp_build_const_int_vec(struct gallivm_state *gallivm, struct lp_type type, long long val)
-try: (lp_build_const_int_vec:=dll.lp_build_const_int_vec).restype, lp_build_const_int_vec.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_longlong]
+try: (lp_build_const_int_vec:=dll.lp_build_const_int_vec).restype, lp_build_const_int_vec.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_int64]
 except AttributeError: pass
 
 # LLVMValueRef lp_build_const_channel_vec(struct gallivm_state *gallivm, struct lp_type type)
@@ -7758,11 +7758,11 @@ try: (lp_build_const_aos:=dll.lp_build_const_aos).restype, lp_build_const_aos.ar
 except AttributeError: pass
 
 # LLVMValueRef lp_build_const_mask_aos(struct gallivm_state *gallivm, struct lp_type type, unsigned int mask, unsigned int channels)
-try: (lp_build_const_mask_aos:=dll.lp_build_const_mask_aos).restype, lp_build_const_mask_aos.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint, ctypes.c_uint]
+try: (lp_build_const_mask_aos:=dll.lp_build_const_mask_aos).restype, lp_build_const_mask_aos.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # LLVMValueRef lp_build_const_mask_aos_swizzled(struct gallivm_state *gallivm, struct lp_type type, unsigned int mask, unsigned int channels, const unsigned char *swizzle)
-try: (lp_build_const_mask_aos_swizzled:=dll.lp_build_const_mask_aos_swizzled).restype, lp_build_const_mask_aos_swizzled.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(ctypes.c_ubyte)]
+try: (lp_build_const_mask_aos_swizzled:=dll.lp_build_const_mask_aos_swizzled).restype, lp_build_const_mask_aos_swizzled.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError: pass
 
 # LLVMValueRef lp_build_const_string(struct gallivm_state *gallivm, const char *str)
@@ -7770,7 +7770,7 @@ try: (lp_build_const_string:=dll.lp_build_const_string).restype, lp_build_const_
 except AttributeError: pass
 
 # LLVMValueRef lp_build_const_func_pointer(struct gallivm_state *gallivm, const void *ptr, LLVMTypeRef ret_type, LLVMTypeRef *arg_types, unsigned int num_args, const char *name)
-try: (lp_build_const_func_pointer:=dll.lp_build_const_func_pointer).restype, lp_build_const_func_pointer.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint, ctypes.POINTER(ctypes.c_char)]
+try: (lp_build_const_func_pointer:=dll.lp_build_const_func_pointer).restype, lp_build_const_func_pointer.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # LLVMValueRef lp_build_const_func_pointer_from_type(struct gallivm_state *gallivm, const void *ptr, LLVMTypeRef function_type, const char *name)
@@ -7798,21 +7798,21 @@ try: (glsl_apply_signedness_to_base_type:=dll.glsl_apply_signedness_to_base_type
 except AttributeError: pass
 
 # int glsl_get_sampler_dim_coordinate_components(enum glsl_sampler_dim dim)
-try: (glsl_get_sampler_dim_coordinate_components:=dll.glsl_get_sampler_dim_coordinate_components).restype, glsl_get_sampler_dim_coordinate_components.argtypes = ctypes.c_int, [enum_glsl_sampler_dim]
+try: (glsl_get_sampler_dim_coordinate_components:=dll.glsl_get_sampler_dim_coordinate_components).restype, glsl_get_sampler_dim_coordinate_components.argtypes = ctypes.c_int32, [enum_glsl_sampler_dim]
 except AttributeError: pass
 
-enum_glsl_matrix_layout = CEnum(ctypes.c_uint)
+enum_glsl_matrix_layout = CEnum(ctypes.c_uint32)
 GLSL_MATRIX_LAYOUT_INHERITED = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_INHERITED', 0)
 GLSL_MATRIX_LAYOUT_COLUMN_MAJOR = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_COLUMN_MAJOR', 1)
 GLSL_MATRIX_LAYOUT_ROW_MAJOR = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_ROW_MAJOR', 2)
 
-_anonenum6 = CEnum(ctypes.c_uint)
+_anonenum6 = CEnum(ctypes.c_uint32)
 GLSL_PRECISION_NONE = _anonenum6.define('GLSL_PRECISION_NONE', 0)
 GLSL_PRECISION_HIGH = _anonenum6.define('GLSL_PRECISION_HIGH', 1)
 GLSL_PRECISION_MEDIUM = _anonenum6.define('GLSL_PRECISION_MEDIUM', 2)
 GLSL_PRECISION_LOW = _anonenum6.define('GLSL_PRECISION_LOW', 3)
 
-enum_glsl_cmat_use = CEnum(ctypes.c_uint)
+enum_glsl_cmat_use = CEnum(ctypes.c_uint32)
 GLSL_CMAT_USE_NONE = enum_glsl_cmat_use.define('GLSL_CMAT_USE_NONE', 0)
 GLSL_CMAT_USE_A = enum_glsl_cmat_use.define('GLSL_CMAT_USE_A', 1)
 GLSL_CMAT_USE_B = enum_glsl_cmat_use.define('GLSL_CMAT_USE_B', 2)
@@ -7863,7 +7863,7 @@ try: (glsl_get_base_glsl_type:=dll.glsl_get_base_glsl_type).restype, glsl_get_ba
 except AttributeError: pass
 
 # unsigned int glsl_get_length(const glsl_type *t)
-try: (glsl_get_length:=dll.glsl_get_length).restype, glsl_get_length.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_get_length:=dll.glsl_get_length).restype, glsl_get_length.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # const glsl_type *glsl_type_wrap_in_arrays(const glsl_type *t, const glsl_type *arrays)
@@ -7871,7 +7871,7 @@ try: (glsl_type_wrap_in_arrays:=dll.glsl_type_wrap_in_arrays).restype, glsl_type
 except AttributeError: pass
 
 # unsigned int glsl_get_aoa_size(const glsl_type *t)
-try: (glsl_get_aoa_size:=dll.glsl_get_aoa_size).restype, glsl_get_aoa_size.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_get_aoa_size:=dll.glsl_get_aoa_size).restype, glsl_get_aoa_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # const glsl_type *glsl_get_array_element(const glsl_type *t)
@@ -7899,7 +7899,7 @@ try: (glsl_get_cmat_description:=dll.glsl_get_cmat_description).restype, glsl_ge
 except AttributeError: pass
 
 # unsigned int glsl_atomic_size(const glsl_type *type)
-try: (glsl_atomic_size:=dll.glsl_atomic_size).restype, glsl_atomic_size.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_atomic_size:=dll.glsl_atomic_size).restype, glsl_atomic_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # bool glsl_type_contains_32bit(const glsl_type *t)
@@ -7943,7 +7943,7 @@ try: (glsl_contains_subroutine:=dll.glsl_contains_subroutine).restype, glsl_cont
 except AttributeError: pass
 
 # int glsl_get_sampler_coordinate_components(const glsl_type *t)
-try: (glsl_get_sampler_coordinate_components:=dll.glsl_get_sampler_coordinate_components).restype, glsl_get_sampler_coordinate_components.argtypes = ctypes.c_int, [ctypes.POINTER(glsl_type)]
+try: (glsl_get_sampler_coordinate_components:=dll.glsl_get_sampler_coordinate_components).restype, glsl_get_sampler_coordinate_components.argtypes = ctypes.c_int32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # bool glsl_type_compare_no_precision(const glsl_type *a, const glsl_type *b)
@@ -7955,19 +7955,19 @@ try: (glsl_record_compare:=dll.glsl_record_compare).restype, glsl_record_compare
 except AttributeError: pass
 
 # const glsl_type *glsl_get_struct_field(const glsl_type *t, unsigned int index)
-try: (glsl_get_struct_field:=dll.glsl_get_struct_field).restype, glsl_get_struct_field.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint]
+try: (glsl_get_struct_field:=dll.glsl_get_struct_field).restype, glsl_get_struct_field.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_struct_field *glsl_get_struct_field_data(const glsl_type *t, unsigned int index)
-try: (glsl_get_struct_field_data:=dll.glsl_get_struct_field_data).restype, glsl_get_struct_field_data.argtypes = ctypes.POINTER(glsl_struct_field), [ctypes.POINTER(glsl_type), ctypes.c_uint]
+try: (glsl_get_struct_field_data:=dll.glsl_get_struct_field_data).restype, glsl_get_struct_field_data.argtypes = ctypes.POINTER(glsl_struct_field), [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int glsl_get_struct_location_offset(const glsl_type *t, unsigned int length)
-try: (glsl_get_struct_location_offset:=dll.glsl_get_struct_location_offset).restype, glsl_get_struct_location_offset.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_uint]
+try: (glsl_get_struct_location_offset:=dll.glsl_get_struct_location_offset).restype, glsl_get_struct_location_offset.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
 # int glsl_get_field_index(const glsl_type *t, const char *name)
-try: (glsl_get_field_index:=dll.glsl_get_field_index).restype, glsl_get_field_index.argtypes = ctypes.c_int, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_char)]
+try: (glsl_get_field_index:=dll.glsl_get_field_index).restype, glsl_get_field_index.argtypes = ctypes.c_int32, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # const glsl_type *glsl_get_field_type(const glsl_type *t, const char *name)
@@ -7975,67 +7975,67 @@ try: (glsl_get_field_type:=dll.glsl_get_field_type).restype, glsl_get_field_type
 except AttributeError: pass
 
 # const glsl_type *glsl_vec_type(unsigned int components)
-try: (glsl_vec_type:=dll.glsl_vec_type).restype, glsl_vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_vec_type:=dll.glsl_vec_type).restype, glsl_vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_f16vec_type(unsigned int components)
-try: (glsl_f16vec_type:=dll.glsl_f16vec_type).restype, glsl_f16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_f16vec_type:=dll.glsl_f16vec_type).restype, glsl_f16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_bf16vec_type(unsigned int components)
-try: (glsl_bf16vec_type:=dll.glsl_bf16vec_type).restype, glsl_bf16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_bf16vec_type:=dll.glsl_bf16vec_type).restype, glsl_bf16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_e4m3fnvec_type(unsigned int components)
-try: (glsl_e4m3fnvec_type:=dll.glsl_e4m3fnvec_type).restype, glsl_e4m3fnvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_e4m3fnvec_type:=dll.glsl_e4m3fnvec_type).restype, glsl_e4m3fnvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_e5m2vec_type(unsigned int components)
-try: (glsl_e5m2vec_type:=dll.glsl_e5m2vec_type).restype, glsl_e5m2vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_e5m2vec_type:=dll.glsl_e5m2vec_type).restype, glsl_e5m2vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_dvec_type(unsigned int components)
-try: (glsl_dvec_type:=dll.glsl_dvec_type).restype, glsl_dvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_dvec_type:=dll.glsl_dvec_type).restype, glsl_dvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_ivec_type(unsigned int components)
-try: (glsl_ivec_type:=dll.glsl_ivec_type).restype, glsl_ivec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_ivec_type:=dll.glsl_ivec_type).restype, glsl_ivec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_uvec_type(unsigned int components)
-try: (glsl_uvec_type:=dll.glsl_uvec_type).restype, glsl_uvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_uvec_type:=dll.glsl_uvec_type).restype, glsl_uvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_bvec_type(unsigned int components)
-try: (glsl_bvec_type:=dll.glsl_bvec_type).restype, glsl_bvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_bvec_type:=dll.glsl_bvec_type).restype, glsl_bvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_i64vec_type(unsigned int components)
-try: (glsl_i64vec_type:=dll.glsl_i64vec_type).restype, glsl_i64vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_i64vec_type:=dll.glsl_i64vec_type).restype, glsl_i64vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_u64vec_type(unsigned int components)
-try: (glsl_u64vec_type:=dll.glsl_u64vec_type).restype, glsl_u64vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_u64vec_type:=dll.glsl_u64vec_type).restype, glsl_u64vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_i16vec_type(unsigned int components)
-try: (glsl_i16vec_type:=dll.glsl_i16vec_type).restype, glsl_i16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_i16vec_type:=dll.glsl_i16vec_type).restype, glsl_i16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_u16vec_type(unsigned int components)
-try: (glsl_u16vec_type:=dll.glsl_u16vec_type).restype, glsl_u16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_u16vec_type:=dll.glsl_u16vec_type).restype, glsl_u16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_i8vec_type(unsigned int components)
-try: (glsl_i8vec_type:=dll.glsl_i8vec_type).restype, glsl_i8vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_i8vec_type:=dll.glsl_i8vec_type).restype, glsl_i8vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_u8vec_type(unsigned int components)
-try: (glsl_u8vec_type:=dll.glsl_u8vec_type).restype, glsl_u8vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint]
+try: (glsl_u8vec_type:=dll.glsl_u8vec_type).restype, glsl_u8vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_simple_explicit_type(unsigned int base_type, unsigned int rows, unsigned int columns, unsigned int explicit_stride, bool row_major, unsigned int explicit_alignment)
-try: (glsl_simple_explicit_type:=dll.glsl_simple_explicit_type).restype, glsl_simple_explicit_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_bool, ctypes.c_uint]
+try: (glsl_simple_explicit_type:=dll.glsl_simple_explicit_type).restype, glsl_simple_explicit_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_sampler_type(enum glsl_sampler_dim dim, bool shadow, bool array, enum glsl_base_type type)
@@ -8059,7 +8059,7 @@ try: (glsl_image_type:=dll.glsl_image_type).restype, glsl_image_type.argtypes = 
 except AttributeError: pass
 
 # const glsl_type *glsl_array_type(const glsl_type *element, unsigned int array_size, unsigned int explicit_stride)
-try: (glsl_array_type:=dll.glsl_array_type).restype, glsl_array_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint, ctypes.c_uint]
+try: (glsl_array_type:=dll.glsl_array_type).restype, glsl_array_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_cmat_type(const struct glsl_cmat_description *desc)
@@ -8067,17 +8067,17 @@ try: (glsl_cmat_type:=dll.glsl_cmat_type).restype, glsl_cmat_type.argtypes = cty
 except AttributeError: pass
 
 # const glsl_type *glsl_struct_type_with_explicit_alignment(const glsl_struct_field *fields, unsigned int num_fields, const char *name, bool packed, unsigned int explicit_alignment)
-try: (glsl_struct_type_with_explicit_alignment:=dll.glsl_struct_type_with_explicit_alignment).restype, glsl_struct_type_with_explicit_alignment.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_struct_field), ctypes.c_uint, ctypes.POINTER(ctypes.c_char), ctypes.c_bool, ctypes.c_uint]
+try: (glsl_struct_type_with_explicit_alignment:=dll.glsl_struct_type_with_explicit_alignment).restype, glsl_struct_type_with_explicit_alignment.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_struct_field), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_bool, ctypes.c_uint32]
 except AttributeError: pass
 
-enum_glsl_interface_packing = CEnum(ctypes.c_uint)
+enum_glsl_interface_packing = CEnum(ctypes.c_uint32)
 GLSL_INTERFACE_PACKING_STD140 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD140', 0)
 GLSL_INTERFACE_PACKING_SHARED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_SHARED', 1)
 GLSL_INTERFACE_PACKING_PACKED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_PACKED', 2)
 GLSL_INTERFACE_PACKING_STD430 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD430', 3)
 
 # const glsl_type *glsl_interface_type(const glsl_struct_field *fields, unsigned int num_fields, enum glsl_interface_packing packing, bool row_major, const char *block_name)
-try: (glsl_interface_type:=dll.glsl_interface_type).restype, glsl_interface_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_struct_field), ctypes.c_uint, enum_glsl_interface_packing, ctypes.c_bool, ctypes.POINTER(ctypes.c_char)]
+try: (glsl_interface_type:=dll.glsl_interface_type).restype, glsl_interface_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_struct_field), ctypes.c_uint32, enum_glsl_interface_packing, ctypes.c_bool, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # const glsl_type *glsl_subroutine_type(const char *subroutine_name)
@@ -8093,7 +8093,7 @@ try: (glsl_get_column_type:=dll.glsl_get_column_type).restype, glsl_get_column_t
 except AttributeError: pass
 
 # const glsl_type *glsl_get_explicit_type_for_size_align(const glsl_type *type, glsl_type_size_align_func type_info, unsigned int *size, unsigned int *alignment)
-try: (glsl_get_explicit_type_for_size_align:=dll.glsl_get_explicit_type_for_size_align).restype, glsl_get_explicit_type_for_size_align.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (glsl_get_explicit_type_for_size_align:=dll.glsl_get_explicit_type_for_size_align).restype, glsl_get_explicit_type_for_size_align.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # const glsl_type *glsl_type_replace_vec3_with_vec4(const glsl_type *type)
@@ -8117,7 +8117,7 @@ try: (glsl_type_to_16bit:=dll.glsl_type_to_16bit).restype, glsl_type_to_16bit.ar
 except AttributeError: pass
 
 # const glsl_type *glsl_replace_vector_type(const glsl_type *t, unsigned int components)
-try: (glsl_replace_vector_type:=dll.glsl_replace_vector_type).restype, glsl_replace_vector_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint]
+try: (glsl_replace_vector_type:=dll.glsl_replace_vector_type).restype, glsl_replace_vector_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
 # const glsl_type *glsl_channel_type(const glsl_type *t)
@@ -8129,51 +8129,51 @@ try: (glsl_get_mul_type:=dll.glsl_get_mul_type).restype, glsl_get_mul_type.argty
 except AttributeError: pass
 
 # unsigned int glsl_type_get_sampler_count(const glsl_type *t)
-try: (glsl_type_get_sampler_count:=dll.glsl_type_get_sampler_count).restype, glsl_type_get_sampler_count.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_type_get_sampler_count:=dll.glsl_type_get_sampler_count).restype, glsl_type_get_sampler_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # unsigned int glsl_type_get_texture_count(const glsl_type *t)
-try: (glsl_type_get_texture_count:=dll.glsl_type_get_texture_count).restype, glsl_type_get_texture_count.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_type_get_texture_count:=dll.glsl_type_get_texture_count).restype, glsl_type_get_texture_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # unsigned int glsl_type_get_image_count(const glsl_type *t)
-try: (glsl_type_get_image_count:=dll.glsl_type_get_image_count).restype, glsl_type_get_image_count.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_type_get_image_count:=dll.glsl_type_get_image_count).restype, glsl_type_get_image_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # unsigned int glsl_count_vec4_slots(const glsl_type *t, bool is_gl_vertex_input, bool is_bindless)
-try: (glsl_count_vec4_slots:=dll.glsl_count_vec4_slots).restype, glsl_count_vec4_slots.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool, ctypes.c_bool]
+try: (glsl_count_vec4_slots:=dll.glsl_count_vec4_slots).restype, glsl_count_vec4_slots.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
 # unsigned int glsl_count_dword_slots(const glsl_type *t, bool is_bindless)
-try: (glsl_count_dword_slots:=dll.glsl_count_dword_slots).restype, glsl_count_dword_slots.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool]
+try: (glsl_count_dword_slots:=dll.glsl_count_dword_slots).restype, glsl_count_dword_slots.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
 # unsigned int glsl_get_component_slots(const glsl_type *t)
-try: (glsl_get_component_slots:=dll.glsl_get_component_slots).restype, glsl_get_component_slots.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_get_component_slots:=dll.glsl_get_component_slots).restype, glsl_get_component_slots.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # unsigned int glsl_get_component_slots_aligned(const glsl_type *t, unsigned int offset)
-try: (glsl_get_component_slots_aligned:=dll.glsl_get_component_slots_aligned).restype, glsl_get_component_slots_aligned.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_uint]
+try: (glsl_get_component_slots_aligned:=dll.glsl_get_component_slots_aligned).restype, glsl_get_component_slots_aligned.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
 # unsigned int glsl_varying_count(const glsl_type *t)
-try: (glsl_varying_count:=dll.glsl_varying_count).restype, glsl_varying_count.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_varying_count:=dll.glsl_varying_count).restype, glsl_varying_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # unsigned int glsl_type_uniform_locations(const glsl_type *t)
-try: (glsl_type_uniform_locations:=dll.glsl_type_uniform_locations).restype, glsl_type_uniform_locations.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_type_uniform_locations:=dll.glsl_type_uniform_locations).restype, glsl_type_uniform_locations.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # unsigned int glsl_get_cl_size(const glsl_type *t)
-try: (glsl_get_cl_size:=dll.glsl_get_cl_size).restype, glsl_get_cl_size.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_get_cl_size:=dll.glsl_get_cl_size).restype, glsl_get_cl_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # unsigned int glsl_get_cl_alignment(const glsl_type *t)
-try: (glsl_get_cl_alignment:=dll.glsl_get_cl_alignment).restype, glsl_get_cl_alignment.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type)]
+try: (glsl_get_cl_alignment:=dll.glsl_get_cl_alignment).restype, glsl_get_cl_alignment.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
 # void glsl_get_cl_type_size_align(const glsl_type *t, unsigned int *size, unsigned int *align)
-try: (glsl_get_cl_type_size_align:=dll.glsl_get_cl_type_size_align).restype, glsl_get_cl_type_size_align.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (glsl_get_cl_type_size_align:=dll.glsl_get_cl_type_size_align).restype, glsl_get_cl_type_size_align.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # enum glsl_interface_packing glsl_get_internal_ifc_packing(const glsl_type *t, bool std430_supported)
@@ -8181,27 +8181,27 @@ try: (glsl_get_internal_ifc_packing:=dll.glsl_get_internal_ifc_packing).restype,
 except AttributeError: pass
 
 # unsigned int glsl_get_std140_base_alignment(const glsl_type *t, bool row_major)
-try: (glsl_get_std140_base_alignment:=dll.glsl_get_std140_base_alignment).restype, glsl_get_std140_base_alignment.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool]
+try: (glsl_get_std140_base_alignment:=dll.glsl_get_std140_base_alignment).restype, glsl_get_std140_base_alignment.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
 # unsigned int glsl_get_std140_size(const glsl_type *t, bool row_major)
-try: (glsl_get_std140_size:=dll.glsl_get_std140_size).restype, glsl_get_std140_size.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool]
+try: (glsl_get_std140_size:=dll.glsl_get_std140_size).restype, glsl_get_std140_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
 # unsigned int glsl_get_std430_array_stride(const glsl_type *t, bool row_major)
-try: (glsl_get_std430_array_stride:=dll.glsl_get_std430_array_stride).restype, glsl_get_std430_array_stride.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool]
+try: (glsl_get_std430_array_stride:=dll.glsl_get_std430_array_stride).restype, glsl_get_std430_array_stride.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
 # unsigned int glsl_get_std430_base_alignment(const glsl_type *t, bool row_major)
-try: (glsl_get_std430_base_alignment:=dll.glsl_get_std430_base_alignment).restype, glsl_get_std430_base_alignment.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool]
+try: (glsl_get_std430_base_alignment:=dll.glsl_get_std430_base_alignment).restype, glsl_get_std430_base_alignment.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
 # unsigned int glsl_get_std430_size(const glsl_type *t, bool row_major)
-try: (glsl_get_std430_size:=dll.glsl_get_std430_size).restype, glsl_get_std430_size.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool]
+try: (glsl_get_std430_size:=dll.glsl_get_std430_size).restype, glsl_get_std430_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
 # unsigned int glsl_get_explicit_size(const glsl_type *t, bool align_to_stride)
-try: (glsl_get_explicit_size:=dll.glsl_get_explicit_size).restype, glsl_get_explicit_size.argtypes = ctypes.c_uint, [ctypes.POINTER(glsl_type), ctypes.c_bool]
+try: (glsl_get_explicit_size:=dll.glsl_get_explicit_size).restype, glsl_get_explicit_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
 # const glsl_type *glsl_get_explicit_std140_type(const glsl_type *t, bool row_major)
@@ -8213,19 +8213,19 @@ try: (glsl_get_explicit_std430_type:=dll.glsl_get_explicit_std430_type).restype,
 except AttributeError: pass
 
 # void glsl_size_align_handle_array_and_structs(const glsl_type *type, glsl_type_size_align_func size_align, unsigned int *size, unsigned int *align)
-try: (glsl_size_align_handle_array_and_structs:=dll.glsl_size_align_handle_array_and_structs).restype, glsl_size_align_handle_array_and_structs.argtypes = None, [ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (glsl_size_align_handle_array_and_structs:=dll.glsl_size_align_handle_array_and_structs).restype, glsl_size_align_handle_array_and_structs.argtypes = None, [ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # void glsl_get_natural_size_align_bytes(const glsl_type *t, unsigned int *size, unsigned int *align)
-try: (glsl_get_natural_size_align_bytes:=dll.glsl_get_natural_size_align_bytes).restype, glsl_get_natural_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (glsl_get_natural_size_align_bytes:=dll.glsl_get_natural_size_align_bytes).restype, glsl_get_natural_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # void glsl_get_word_size_align_bytes(const glsl_type *type, unsigned int *size, unsigned int *align)
-try: (glsl_get_word_size_align_bytes:=dll.glsl_get_word_size_align_bytes).restype, glsl_get_word_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (glsl_get_word_size_align_bytes:=dll.glsl_get_word_size_align_bytes).restype, glsl_get_word_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # void glsl_get_vec4_size_align_bytes(const glsl_type *type, unsigned int *size, unsigned int *align)
-try: (glsl_get_vec4_size_align_bytes:=dll.glsl_get_vec4_size_align_bytes).restype, glsl_get_vec4_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_uint)]
+try: (glsl_get_vec4_size_align_bytes:=dll.glsl_get_vec4_size_align_bytes).restype, glsl_get_vec4_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # void blob_init(struct blob *blob)
@@ -8248,7 +8248,7 @@ except AttributeError: pass
 try: (blob_write_bytes:=dll.blob_write_bytes).restype, blob_write_bytes.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-intptr_t = ctypes.c_long
+intptr_t = ctypes.c_int64
 # intptr_t blob_reserve_bytes(struct blob *blob, size_t to_write)
 try: (blob_reserve_bytes:=dll.blob_reserve_bytes).restype, blob_reserve_bytes.argtypes = intptr_t, [ctypes.POINTER(struct_blob), size_t]
 except AttributeError: pass
@@ -8366,19 +8366,19 @@ try: (rerzalloc_size:=dll.rerzalloc_size).restype, rerzalloc_size.argtypes = cty
 except AttributeError: pass
 
 # void *ralloc_array_size(const void *ctx, size_t size, unsigned int count)
-try: (ralloc_array_size:=dll.ralloc_array_size).restype, ralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint]
+try: (ralloc_array_size:=dll.ralloc_array_size).restype, ralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # void *rzalloc_array_size(const void *ctx, size_t size, unsigned int count)
-try: (rzalloc_array_size:=dll.rzalloc_array_size).restype, rzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint]
+try: (rzalloc_array_size:=dll.rzalloc_array_size).restype, rzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # void *reralloc_array_size(const void *ctx, void *ptr, size_t size, unsigned int count)
-try: (reralloc_array_size:=dll.reralloc_array_size).restype, reralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint]
+try: (reralloc_array_size:=dll.reralloc_array_size).restype, reralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # void *rerzalloc_array_size(const void *ctx, void *ptr, size_t size, unsigned int old_count, unsigned int new_count)
-try: (rerzalloc_array_size:=dll.rerzalloc_array_size).restype, rerzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint, ctypes.c_uint]
+try: (rerzalloc_array_size:=dll.rerzalloc_array_size).restype, rerzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # void ralloc_free(void *ptr)
@@ -8431,8 +8431,8 @@ except AttributeError: pass
 
 class struct___va_list_tag(Struct): pass
 struct___va_list_tag._fields_ = [
-  ('gp_offset', ctypes.c_uint),
-  ('fp_offset', ctypes.c_uint),
+  ('gp_offset', ctypes.c_uint32),
+  ('fp_offset', ctypes.c_uint32),
   ('overflow_arg_area', ctypes.c_void_p),
   ('reg_save_area', ctypes.c_void_p),
 ]
@@ -8496,12 +8496,12 @@ except AttributeError: pass
 class struct_linear_ctx(Struct): pass
 linear_ctx = struct_linear_ctx
 # void *linear_alloc_child(linear_ctx *ctx, unsigned int size)
-try: (linear_alloc_child:=dll.linear_alloc_child).restype, linear_alloc_child.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), ctypes.c_uint]
+try: (linear_alloc_child:=dll.linear_alloc_child).restype, linear_alloc_child.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), ctypes.c_uint32]
 except AttributeError: pass
 
 class linear_opts(Struct): pass
 linear_opts._fields_ = [
-  ('min_buffer_size', ctypes.c_uint),
+  ('min_buffer_size', ctypes.c_uint32),
 ]
 # linear_ctx *linear_context(void *ralloc_ctx)
 try: (linear_context:=dll.linear_context).restype, linear_context.argtypes = ctypes.POINTER(linear_ctx), [ctypes.c_void_p]
@@ -8512,7 +8512,7 @@ try: (linear_context_with_opts:=dll.linear_context_with_opts).restype, linear_co
 except AttributeError: pass
 
 # void *linear_zalloc_child(linear_ctx *ctx, unsigned int size)
-try: (linear_zalloc_child:=dll.linear_zalloc_child).restype, linear_zalloc_child.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), ctypes.c_uint]
+try: (linear_zalloc_child:=dll.linear_zalloc_child).restype, linear_zalloc_child.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), ctypes.c_uint32]
 except AttributeError: pass
 
 # void linear_free_context(linear_ctx *ctx)
@@ -8528,11 +8528,11 @@ try: (ralloc_parent_of_linear_context:=dll.ralloc_parent_of_linear_context).rest
 except AttributeError: pass
 
 # void *linear_alloc_child_array(linear_ctx *ctx, size_t size, unsigned int count)
-try: (linear_alloc_child_array:=dll.linear_alloc_child_array).restype, linear_alloc_child_array.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint]
+try: (linear_alloc_child_array:=dll.linear_alloc_child_array).restype, linear_alloc_child_array.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # void *linear_zalloc_child_array(linear_ctx *ctx, size_t size, unsigned int count)
-try: (linear_zalloc_child_array:=dll.linear_zalloc_child_array).restype, linear_zalloc_child_array.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint]
+try: (linear_zalloc_child_array:=dll.linear_zalloc_child_array).restype, linear_zalloc_child_array.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # char *linear_strdup(linear_ctx *ctx, const char *str)
@@ -8567,11 +8567,11 @@ except AttributeError: pass
 try: (linear_strcat:=dll.linear_strcat).restype, linear_strcat.argtypes = ctypes.c_bool, [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-_anonenum7 = CEnum(ctypes.c_uint)
+_anonenum7 = CEnum(ctypes.c_uint32)
 RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ONLY', 1)
 
 # void ralloc_print_info(FILE *f, const void *p, unsigned int flags)
-try: (ralloc_print_info:=dll.ralloc_print_info).restype, ralloc_print_info.argtypes = None, [ctypes.POINTER(FILE), ctypes.c_void_p, ctypes.c_uint]
+try: (ralloc_print_info:=dll.ralloc_print_info).restype, ralloc_print_info.argtypes = None, [ctypes.POINTER(FILE), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
 NIR_DEBUG_CLONE = (1 << 0)

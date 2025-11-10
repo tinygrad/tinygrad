@@ -11,14 +11,14 @@ def dll():
   return None
 dll = dll()
 
-amd_comgr_status_s = CEnum(ctypes.c_uint)
+amd_comgr_status_s = CEnum(ctypes.c_uint32)
 AMD_COMGR_STATUS_SUCCESS = amd_comgr_status_s.define('AMD_COMGR_STATUS_SUCCESS', 0)
 AMD_COMGR_STATUS_ERROR = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR', 1)
 AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT', 2)
 AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES', 3)
 
 amd_comgr_status_t = amd_comgr_status_s
-amd_comgr_language_s = CEnum(ctypes.c_uint)
+amd_comgr_language_s = CEnum(ctypes.c_uint32)
 AMD_COMGR_LANGUAGE_NONE = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_NONE', 0)
 AMD_COMGR_LANGUAGE_OPENCL_1_2 = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_OPENCL_1_2', 1)
 AMD_COMGR_LANGUAGE_OPENCL_2_0 = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_OPENCL_2_0', 2)
@@ -31,12 +31,12 @@ amd_comgr_language_t = amd_comgr_language_s
 try: (amd_comgr_status_string:=dll.amd_comgr_status_string).restype, amd_comgr_status_string.argtypes = amd_comgr_status_t, [amd_comgr_status_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-size_t = ctypes.c_ulong
+size_t = ctypes.c_uint64
 # void amd_comgr_get_version(size_t *major, size_t *minor)
 try: (amd_comgr_get_version:=dll.amd_comgr_get_version).restype, amd_comgr_get_version.argtypes = None, [ctypes.POINTER(size_t), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-amd_comgr_data_kind_s = CEnum(ctypes.c_uint)
+amd_comgr_data_kind_s = CEnum(ctypes.c_uint32)
 AMD_COMGR_DATA_KIND_UNDEF = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_UNDEF', 0)
 AMD_COMGR_DATA_KIND_SOURCE = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_SOURCE', 1)
 AMD_COMGR_DATA_KIND_INCLUDE = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_INCLUDE', 2)
@@ -57,7 +57,7 @@ AMD_COMGR_DATA_KIND_LAST = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_LAS
 
 amd_comgr_data_kind_t = amd_comgr_data_kind_s
 class amd_comgr_data_s(Struct): pass
-uint64_t = ctypes.c_ulong
+uint64_t = ctypes.c_uint64
 amd_comgr_data_s._fields_ = [
   ('handle', uint64_t),
 ]
@@ -121,7 +121,7 @@ try: (amd_comgr_set_data:=dll.amd_comgr_set_data).restype, amd_comgr_set_data.ar
 except AttributeError: pass
 
 # amd_comgr_status_t amd_comgr_set_data_from_file_slice(amd_comgr_data_t data, int file_descriptor, uint64_t offset, uint64_t size)
-try: (amd_comgr_set_data_from_file_slice:=dll.amd_comgr_set_data_from_file_slice).restype, amd_comgr_set_data_from_file_slice.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.c_int, uint64_t, uint64_t]
+try: (amd_comgr_set_data_from_file_slice:=dll.amd_comgr_set_data_from_file_slice).restype, amd_comgr_set_data_from_file_slice.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.c_int32, uint64_t, uint64_t]
 except AttributeError: pass
 
 # amd_comgr_status_t amd_comgr_set_data_name(amd_comgr_data_t data, const char *name)
@@ -252,7 +252,7 @@ except AttributeError: pass
 try: (amd_comgr_action_info_get_logging:=dll.amd_comgr_action_info_get_logging).restype, amd_comgr_action_info_get_logging.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_bool)]
 except AttributeError: pass
 
-amd_comgr_action_kind_s = CEnum(ctypes.c_uint)
+amd_comgr_action_kind_s = CEnum(ctypes.c_uint32)
 AMD_COMGR_ACTION_SOURCE_TO_PREPROCESSOR = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_SOURCE_TO_PREPROCESSOR', 0)
 AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS', 1)
 AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_COMPILE_SOURCE_TO_BC', 2)
@@ -277,7 +277,7 @@ amd_comgr_action_kind_t = amd_comgr_action_kind_s
 try: (amd_comgr_do_action:=dll.amd_comgr_do_action).restype, amd_comgr_do_action.argtypes = amd_comgr_status_t, [amd_comgr_action_kind_t, amd_comgr_action_info_t, amd_comgr_data_set_t, amd_comgr_data_set_t]
 except AttributeError: pass
 
-amd_comgr_metadata_kind_s = CEnum(ctypes.c_uint)
+amd_comgr_metadata_kind_s = CEnum(ctypes.c_uint32)
 AMD_COMGR_METADATA_KIND_NULL = amd_comgr_metadata_kind_s.define('AMD_COMGR_METADATA_KIND_NULL', 0)
 AMD_COMGR_METADATA_KIND_STRING = amd_comgr_metadata_kind_s.define('AMD_COMGR_METADATA_KIND_STRING', 1)
 AMD_COMGR_METADATA_KIND_MAP = amd_comgr_metadata_kind_s.define('AMD_COMGR_METADATA_KIND_MAP', 2)
@@ -321,7 +321,7 @@ except AttributeError: pass
 try: (amd_comgr_symbol_lookup:=dll.amd_comgr_symbol_lookup).restype, amd_comgr_symbol_lookup.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(amd_comgr_symbol_t)]
 except AttributeError: pass
 
-amd_comgr_symbol_type_s = CEnum(ctypes.c_int)
+amd_comgr_symbol_type_s = CEnum(ctypes.c_int32)
 AMD_COMGR_SYMBOL_TYPE_UNKNOWN = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_TYPE_UNKNOWN', -1)
 AMD_COMGR_SYMBOL_TYPE_NOTYPE = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_TYPE_NOTYPE', 0)
 AMD_COMGR_SYMBOL_TYPE_OBJECT = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_TYPE_OBJECT', 1)
@@ -332,7 +332,7 @@ AMD_COMGR_SYMBOL_TYPE_COMMON = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_
 AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL', 10)
 
 amd_comgr_symbol_type_t = amd_comgr_symbol_type_s
-amd_comgr_symbol_info_s = CEnum(ctypes.c_uint)
+amd_comgr_symbol_info_s = CEnum(ctypes.c_uint32)
 AMD_COMGR_SYMBOL_INFO_NAME_LENGTH = amd_comgr_symbol_info_s.define('AMD_COMGR_SYMBOL_INFO_NAME_LENGTH', 0)
 AMD_COMGR_SYMBOL_INFO_NAME = amd_comgr_symbol_info_s.define('AMD_COMGR_SYMBOL_INFO_NAME', 1)
 AMD_COMGR_SYMBOL_INFO_TYPE = amd_comgr_symbol_info_s.define('AMD_COMGR_SYMBOL_INFO_TYPE', 2)

@@ -7,7 +7,7 @@ def dll():
   return None
 dll = dll()
 
-hipError_t = CEnum(ctypes.c_uint)
+hipError_t = CEnum(ctypes.c_uint32)
 hipSuccess = hipError_t.define('hipSuccess', 0)
 hipErrorInvalidValue = hipError_t.define('hipErrorInvalidValue', 1)
 hipErrorOutOfMemory = hipError_t.define('hipErrorOutOfMemory', 2)
@@ -89,8 +89,8 @@ hipErrorTbd = hipError_t.define('hipErrorTbd', 1054)
 
 class ihipModuleSymbol_t(Struct): pass
 hipFunction_t = ctypes.POINTER(ihipModuleSymbol_t)
-uint32_t = ctypes.c_uint
-size_t = ctypes.c_ulong
+uint32_t = ctypes.c_uint32
+size_t = ctypes.c_uint64
 class ihipStream_t(Struct): pass
 hipStream_t = ctypes.POINTER(ihipStream_t)
 class ihipEvent_t(Struct): pass
@@ -110,10 +110,10 @@ dim3._fields_ = [
   ('z', uint32_t),
 ]
 # hipError_t hipExtLaunchKernel(const void *function_address, dim3 numBlocks, dim3 dimBlocks, void **args, size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags)
-try: (hipExtLaunchKernel:=dll.hipExtLaunchKernel).restype, hipExtLaunchKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int]
+try: (hipExtLaunchKernel:=dll.hipExtLaunchKernel).restype, hipExtLaunchKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int32]
 except AttributeError: pass
 
-hiprtcResult = CEnum(ctypes.c_uint)
+hiprtcResult = CEnum(ctypes.c_uint32)
 HIPRTC_SUCCESS = hiprtcResult.define('HIPRTC_SUCCESS', 0)
 HIPRTC_ERROR_OUT_OF_MEMORY = hiprtcResult.define('HIPRTC_ERROR_OUT_OF_MEMORY', 1)
 HIPRTC_ERROR_PROGRAM_CREATION_FAILURE = hiprtcResult.define('HIPRTC_ERROR_PROGRAM_CREATION_FAILURE', 2)
@@ -128,7 +128,7 @@ HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID = hiprtcResult.define('HIPRTC_ERROR_NAME_
 HIPRTC_ERROR_INTERNAL_ERROR = hiprtcResult.define('HIPRTC_ERROR_INTERNAL_ERROR', 11)
 HIPRTC_ERROR_LINKING = hiprtcResult.define('HIPRTC_ERROR_LINKING', 100)
 
-hiprtcJIT_option = CEnum(ctypes.c_uint)
+hiprtcJIT_option = CEnum(ctypes.c_uint32)
 HIPRTC_JIT_MAX_REGISTERS = hiprtcJIT_option.define('HIPRTC_JIT_MAX_REGISTERS', 0)
 HIPRTC_JIT_THREADS_PER_BLOCK = hiprtcJIT_option.define('HIPRTC_JIT_THREADS_PER_BLOCK', 1)
 HIPRTC_JIT_WALL_TIME = hiprtcJIT_option.define('HIPRTC_JIT_WALL_TIME', 2)
@@ -158,7 +158,7 @@ HIPRTC_JIT_NUM_OPTIONS = hiprtcJIT_option.define('HIPRTC_JIT_NUM_OPTIONS', 25)
 HIPRTC_JIT_IR_TO_ISA_OPT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_EXT', 10000)
 HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT', 10001)
 
-hiprtcJITInputType = CEnum(ctypes.c_uint)
+hiprtcJITInputType = CEnum(ctypes.c_uint32)
 HIPRTC_JIT_INPUT_CUBIN = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_CUBIN', 0)
 HIPRTC_JIT_INPUT_PTX = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_PTX', 1)
 HIPRTC_JIT_INPUT_FATBINARY = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_FATBINARY', 2)
@@ -178,7 +178,7 @@ try: (hiprtcGetErrorString:=dll.hiprtcGetErrorString).restype, hiprtcGetErrorStr
 except AttributeError: pass
 
 # hiprtcResult hiprtcVersion(int *major, int *minor)
-try: (hiprtcVersion:=dll.hiprtcVersion).restype, hiprtcVersion.argtypes = hiprtcResult, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+try: (hiprtcVersion:=dll.hiprtcVersion).restype, hiprtcVersion.argtypes = hiprtcResult, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 class _hiprtcProgram(Struct): pass
@@ -188,11 +188,11 @@ try: (hiprtcAddNameExpression:=dll.hiprtcAddNameExpression).restype, hiprtcAddNa
 except AttributeError: pass
 
 # hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char **options)
-try: (hiprtcCompileProgram:=dll.hiprtcCompileProgram).restype, hiprtcCompileProgram.argtypes = hiprtcResult, [hiprtcProgram, ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (hiprtcCompileProgram:=dll.hiprtcCompileProgram).restype, hiprtcCompileProgram.argtypes = hiprtcResult, [hiprtcProgram, ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 # hiprtcResult hiprtcCreateProgram(hiprtcProgram *prog, const char *src, const char *name, int numHeaders, const char **headers, const char **includeNames)
-try: (hiprtcCreateProgram:=dll.hiprtcCreateProgram).restype, hiprtcCreateProgram.argtypes = hiprtcResult, [ctypes.POINTER(hiprtcProgram), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (hiprtcCreateProgram:=dll.hiprtcCreateProgram).restype, hiprtcCreateProgram.argtypes = hiprtcResult, [ctypes.POINTER(hiprtcProgram), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 # hiprtcResult hiprtcDestroyProgram(hiprtcProgram *prog)
@@ -228,15 +228,15 @@ try: (hiprtcGetBitcodeSize:=dll.hiprtcGetBitcodeSize).restype, hiprtcGetBitcodeS
 except AttributeError: pass
 
 # hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option *option_ptr, void **option_vals_pptr, hiprtcLinkState *hip_link_state_ptr)
-try: (hiprtcLinkCreate:=dll.hiprtcLinkCreate).restype, hiprtcLinkCreate.argtypes = hiprtcResult, [ctypes.c_uint, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(hiprtcLinkState)]
+try: (hiprtcLinkCreate:=dll.hiprtcLinkCreate).restype, hiprtcLinkCreate.argtypes = hiprtcResult, [ctypes.c_uint32, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(hiprtcLinkState)]
 except AttributeError: pass
 
 # hiprtcResult hiprtcLinkAddFile(hiprtcLinkState hip_link_state, hiprtcJITInputType input_type, const char *file_path, unsigned int num_options, hiprtcJIT_option *options_ptr, void **option_values)
-try: (hiprtcLinkAddFile:=dll.hiprtcLinkAddFile).restype, hiprtcLinkAddFile.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
+try: (hiprtcLinkAddFile:=dll.hiprtcLinkAddFile).restype, hiprtcLinkAddFile.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputType input_type, void *image, size_t image_size, const char *name, unsigned int num_options, hiprtcJIT_option *options_ptr, void **option_values)
-try: (hiprtcLinkAddData:=dll.hiprtcLinkAddData).restype, hiprtcLinkAddData.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
+try: (hiprtcLinkAddData:=dll.hiprtcLinkAddData).restype, hiprtcLinkAddData.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hiprtcResult hiprtcLinkComplete(hiprtcLinkState hip_link_state, void **bin_out, size_t *size_out)
@@ -247,7 +247,7 @@ except AttributeError: pass
 try: (hiprtcLinkDestroy:=dll.hiprtcLinkDestroy).restype, hiprtcLinkDestroy.argtypes = hiprtcResult, [hiprtcLinkState]
 except AttributeError: pass
 
-_anonenum0 = CEnum(ctypes.c_uint)
+_anonenum0 = CEnum(ctypes.c_uint32)
 HIP_SUCCESS = _anonenum0.define('HIP_SUCCESS', 0)
 HIP_ERROR_INVALID_VALUE = _anonenum0.define('HIP_ERROR_INVALID_VALUE', 1)
 HIP_ERROR_NOT_INITIALIZED = _anonenum0.define('HIP_ERROR_NOT_INITIALIZED', 2)
@@ -255,23 +255,23 @@ HIP_ERROR_LAUNCH_OUT_OF_RESOURCES = _anonenum0.define('HIP_ERROR_LAUNCH_OUT_OF_R
 
 class hipDeviceArch_t(Struct): pass
 hipDeviceArch_t._fields_ = [
-  ('hasGlobalInt32Atomics', ctypes.c_uint,1),
-  ('hasGlobalFloatAtomicExch', ctypes.c_uint,1),
-  ('hasSharedInt32Atomics', ctypes.c_uint,1),
-  ('hasSharedFloatAtomicExch', ctypes.c_uint,1),
-  ('hasFloatAtomicAdd', ctypes.c_uint,1),
-  ('hasGlobalInt64Atomics', ctypes.c_uint,1),
-  ('hasSharedInt64Atomics', ctypes.c_uint,1),
-  ('hasDoubles', ctypes.c_uint,1),
-  ('hasWarpVote', ctypes.c_uint,1),
-  ('hasWarpBallot', ctypes.c_uint,1),
-  ('hasWarpShuffle', ctypes.c_uint,1),
-  ('hasFunnelShift', ctypes.c_uint,1),
-  ('hasThreadFenceSystem', ctypes.c_uint,1),
-  ('hasSyncThreadsExt', ctypes.c_uint,1),
-  ('hasSurfaceFuncs', ctypes.c_uint,1),
-  ('has3dGrid', ctypes.c_uint,1),
-  ('hasDynamicParallelism', ctypes.c_uint,1),
+  ('hasGlobalInt32Atomics', ctypes.c_uint32,1),
+  ('hasGlobalFloatAtomicExch', ctypes.c_uint32,1),
+  ('hasSharedInt32Atomics', ctypes.c_uint32,1),
+  ('hasSharedFloatAtomicExch', ctypes.c_uint32,1),
+  ('hasFloatAtomicAdd', ctypes.c_uint32,1),
+  ('hasGlobalInt64Atomics', ctypes.c_uint32,1),
+  ('hasSharedInt64Atomics', ctypes.c_uint32,1),
+  ('hasDoubles', ctypes.c_uint32,1),
+  ('hasWarpVote', ctypes.c_uint32,1),
+  ('hasWarpBallot', ctypes.c_uint32,1),
+  ('hasWarpShuffle', ctypes.c_uint32,1),
+  ('hasFunnelShift', ctypes.c_uint32,1),
+  ('hasThreadFenceSystem', ctypes.c_uint32,1),
+  ('hasSyncThreadsExt', ctypes.c_uint32,1),
+  ('hasSurfaceFuncs', ctypes.c_uint32,1),
+  ('has3dGrid', ctypes.c_uint32,1),
+  ('hasDynamicParallelism', ctypes.c_uint32,1),
 ]
 class hipUUID_t(Struct): pass
 hipUUID_t._fields_ = [
@@ -283,112 +283,112 @@ hipDeviceProp_tR0600._fields_ = [
   ('name', (ctypes.c_char * 256)),
   ('uuid', hipUUID),
   ('luid', (ctypes.c_char * 8)),
-  ('luidDeviceNodeMask', ctypes.c_uint),
+  ('luidDeviceNodeMask', ctypes.c_uint32),
   ('totalGlobalMem', size_t),
   ('sharedMemPerBlock', size_t),
-  ('regsPerBlock', ctypes.c_int),
-  ('warpSize', ctypes.c_int),
+  ('regsPerBlock', ctypes.c_int32),
+  ('warpSize', ctypes.c_int32),
   ('memPitch', size_t),
-  ('maxThreadsPerBlock', ctypes.c_int),
-  ('maxThreadsDim', (ctypes.c_int * 3)),
-  ('maxGridSize', (ctypes.c_int * 3)),
-  ('clockRate', ctypes.c_int),
+  ('maxThreadsPerBlock', ctypes.c_int32),
+  ('maxThreadsDim', (ctypes.c_int32 * 3)),
+  ('maxGridSize', (ctypes.c_int32 * 3)),
+  ('clockRate', ctypes.c_int32),
   ('totalConstMem', size_t),
-  ('major', ctypes.c_int),
-  ('minor', ctypes.c_int),
+  ('major', ctypes.c_int32),
+  ('minor', ctypes.c_int32),
   ('textureAlignment', size_t),
   ('texturePitchAlignment', size_t),
-  ('deviceOverlap', ctypes.c_int),
-  ('multiProcessorCount', ctypes.c_int),
-  ('kernelExecTimeoutEnabled', ctypes.c_int),
-  ('integrated', ctypes.c_int),
-  ('canMapHostMemory', ctypes.c_int),
-  ('computeMode', ctypes.c_int),
-  ('maxTexture1D', ctypes.c_int),
-  ('maxTexture1DMipmap', ctypes.c_int),
-  ('maxTexture1DLinear', ctypes.c_int),
-  ('maxTexture2D', (ctypes.c_int * 2)),
-  ('maxTexture2DMipmap', (ctypes.c_int * 2)),
-  ('maxTexture2DLinear', (ctypes.c_int * 3)),
-  ('maxTexture2DGather', (ctypes.c_int * 2)),
-  ('maxTexture3D', (ctypes.c_int * 3)),
-  ('maxTexture3DAlt', (ctypes.c_int * 3)),
-  ('maxTextureCubemap', ctypes.c_int),
-  ('maxTexture1DLayered', (ctypes.c_int * 2)),
-  ('maxTexture2DLayered', (ctypes.c_int * 3)),
-  ('maxTextureCubemapLayered', (ctypes.c_int * 2)),
-  ('maxSurface1D', ctypes.c_int),
-  ('maxSurface2D', (ctypes.c_int * 2)),
-  ('maxSurface3D', (ctypes.c_int * 3)),
-  ('maxSurface1DLayered', (ctypes.c_int * 2)),
-  ('maxSurface2DLayered', (ctypes.c_int * 3)),
-  ('maxSurfaceCubemap', ctypes.c_int),
-  ('maxSurfaceCubemapLayered', (ctypes.c_int * 2)),
+  ('deviceOverlap', ctypes.c_int32),
+  ('multiProcessorCount', ctypes.c_int32),
+  ('kernelExecTimeoutEnabled', ctypes.c_int32),
+  ('integrated', ctypes.c_int32),
+  ('canMapHostMemory', ctypes.c_int32),
+  ('computeMode', ctypes.c_int32),
+  ('maxTexture1D', ctypes.c_int32),
+  ('maxTexture1DMipmap', ctypes.c_int32),
+  ('maxTexture1DLinear', ctypes.c_int32),
+  ('maxTexture2D', (ctypes.c_int32 * 2)),
+  ('maxTexture2DMipmap', (ctypes.c_int32 * 2)),
+  ('maxTexture2DLinear', (ctypes.c_int32 * 3)),
+  ('maxTexture2DGather', (ctypes.c_int32 * 2)),
+  ('maxTexture3D', (ctypes.c_int32 * 3)),
+  ('maxTexture3DAlt', (ctypes.c_int32 * 3)),
+  ('maxTextureCubemap', ctypes.c_int32),
+  ('maxTexture1DLayered', (ctypes.c_int32 * 2)),
+  ('maxTexture2DLayered', (ctypes.c_int32 * 3)),
+  ('maxTextureCubemapLayered', (ctypes.c_int32 * 2)),
+  ('maxSurface1D', ctypes.c_int32),
+  ('maxSurface2D', (ctypes.c_int32 * 2)),
+  ('maxSurface3D', (ctypes.c_int32 * 3)),
+  ('maxSurface1DLayered', (ctypes.c_int32 * 2)),
+  ('maxSurface2DLayered', (ctypes.c_int32 * 3)),
+  ('maxSurfaceCubemap', ctypes.c_int32),
+  ('maxSurfaceCubemapLayered', (ctypes.c_int32 * 2)),
   ('surfaceAlignment', size_t),
-  ('concurrentKernels', ctypes.c_int),
-  ('ECCEnabled', ctypes.c_int),
-  ('pciBusID', ctypes.c_int),
-  ('pciDeviceID', ctypes.c_int),
-  ('pciDomainID', ctypes.c_int),
-  ('tccDriver', ctypes.c_int),
-  ('asyncEngineCount', ctypes.c_int),
-  ('unifiedAddressing', ctypes.c_int),
-  ('memoryClockRate', ctypes.c_int),
-  ('memoryBusWidth', ctypes.c_int),
-  ('l2CacheSize', ctypes.c_int),
-  ('persistingL2CacheMaxSize', ctypes.c_int),
-  ('maxThreadsPerMultiProcessor', ctypes.c_int),
-  ('streamPrioritiesSupported', ctypes.c_int),
-  ('globalL1CacheSupported', ctypes.c_int),
-  ('localL1CacheSupported', ctypes.c_int),
+  ('concurrentKernels', ctypes.c_int32),
+  ('ECCEnabled', ctypes.c_int32),
+  ('pciBusID', ctypes.c_int32),
+  ('pciDeviceID', ctypes.c_int32),
+  ('pciDomainID', ctypes.c_int32),
+  ('tccDriver', ctypes.c_int32),
+  ('asyncEngineCount', ctypes.c_int32),
+  ('unifiedAddressing', ctypes.c_int32),
+  ('memoryClockRate', ctypes.c_int32),
+  ('memoryBusWidth', ctypes.c_int32),
+  ('l2CacheSize', ctypes.c_int32),
+  ('persistingL2CacheMaxSize', ctypes.c_int32),
+  ('maxThreadsPerMultiProcessor', ctypes.c_int32),
+  ('streamPrioritiesSupported', ctypes.c_int32),
+  ('globalL1CacheSupported', ctypes.c_int32),
+  ('localL1CacheSupported', ctypes.c_int32),
   ('sharedMemPerMultiprocessor', size_t),
-  ('regsPerMultiprocessor', ctypes.c_int),
-  ('managedMemory', ctypes.c_int),
-  ('isMultiGpuBoard', ctypes.c_int),
-  ('multiGpuBoardGroupID', ctypes.c_int),
-  ('hostNativeAtomicSupported', ctypes.c_int),
-  ('singleToDoublePrecisionPerfRatio', ctypes.c_int),
-  ('pageableMemoryAccess', ctypes.c_int),
-  ('concurrentManagedAccess', ctypes.c_int),
-  ('computePreemptionSupported', ctypes.c_int),
-  ('canUseHostPointerForRegisteredMem', ctypes.c_int),
-  ('cooperativeLaunch', ctypes.c_int),
-  ('cooperativeMultiDeviceLaunch', ctypes.c_int),
+  ('regsPerMultiprocessor', ctypes.c_int32),
+  ('managedMemory', ctypes.c_int32),
+  ('isMultiGpuBoard', ctypes.c_int32),
+  ('multiGpuBoardGroupID', ctypes.c_int32),
+  ('hostNativeAtomicSupported', ctypes.c_int32),
+  ('singleToDoublePrecisionPerfRatio', ctypes.c_int32),
+  ('pageableMemoryAccess', ctypes.c_int32),
+  ('concurrentManagedAccess', ctypes.c_int32),
+  ('computePreemptionSupported', ctypes.c_int32),
+  ('canUseHostPointerForRegisteredMem', ctypes.c_int32),
+  ('cooperativeLaunch', ctypes.c_int32),
+  ('cooperativeMultiDeviceLaunch', ctypes.c_int32),
   ('sharedMemPerBlockOptin', size_t),
-  ('pageableMemoryAccessUsesHostPageTables', ctypes.c_int),
-  ('directManagedMemAccessFromHost', ctypes.c_int),
-  ('maxBlocksPerMultiProcessor', ctypes.c_int),
-  ('accessPolicyMaxWindowSize', ctypes.c_int),
+  ('pageableMemoryAccessUsesHostPageTables', ctypes.c_int32),
+  ('directManagedMemAccessFromHost', ctypes.c_int32),
+  ('maxBlocksPerMultiProcessor', ctypes.c_int32),
+  ('accessPolicyMaxWindowSize', ctypes.c_int32),
   ('reservedSharedMemPerBlock', size_t),
-  ('hostRegisterSupported', ctypes.c_int),
-  ('sparseHipArraySupported', ctypes.c_int),
-  ('hostRegisterReadOnlySupported', ctypes.c_int),
-  ('timelineSemaphoreInteropSupported', ctypes.c_int),
-  ('memoryPoolsSupported', ctypes.c_int),
-  ('gpuDirectRDMASupported', ctypes.c_int),
-  ('gpuDirectRDMAFlushWritesOptions', ctypes.c_uint),
-  ('gpuDirectRDMAWritesOrdering', ctypes.c_int),
-  ('memoryPoolSupportedHandleTypes', ctypes.c_uint),
-  ('deferredMappingHipArraySupported', ctypes.c_int),
-  ('ipcEventSupported', ctypes.c_int),
-  ('clusterLaunch', ctypes.c_int),
-  ('unifiedFunctionPointers', ctypes.c_int),
-  ('reserved', (ctypes.c_int * 63)),
-  ('hipReserved', (ctypes.c_int * 32)),
+  ('hostRegisterSupported', ctypes.c_int32),
+  ('sparseHipArraySupported', ctypes.c_int32),
+  ('hostRegisterReadOnlySupported', ctypes.c_int32),
+  ('timelineSemaphoreInteropSupported', ctypes.c_int32),
+  ('memoryPoolsSupported', ctypes.c_int32),
+  ('gpuDirectRDMASupported', ctypes.c_int32),
+  ('gpuDirectRDMAFlushWritesOptions', ctypes.c_uint32),
+  ('gpuDirectRDMAWritesOrdering', ctypes.c_int32),
+  ('memoryPoolSupportedHandleTypes', ctypes.c_uint32),
+  ('deferredMappingHipArraySupported', ctypes.c_int32),
+  ('ipcEventSupported', ctypes.c_int32),
+  ('clusterLaunch', ctypes.c_int32),
+  ('unifiedFunctionPointers', ctypes.c_int32),
+  ('reserved', (ctypes.c_int32 * 63)),
+  ('hipReserved', (ctypes.c_int32 * 32)),
   ('gcnArchName', (ctypes.c_char * 256)),
   ('maxSharedMemoryPerMultiProcessor', size_t),
-  ('clockInstructionRate', ctypes.c_int),
+  ('clockInstructionRate', ctypes.c_int32),
   ('arch', hipDeviceArch_t),
-  ('hdpMemFlushCntl', ctypes.POINTER(ctypes.c_uint)),
-  ('hdpRegFlushCntl', ctypes.POINTER(ctypes.c_uint)),
-  ('cooperativeMultiDeviceUnmatchedFunc', ctypes.c_int),
-  ('cooperativeMultiDeviceUnmatchedGridDim', ctypes.c_int),
-  ('cooperativeMultiDeviceUnmatchedBlockDim', ctypes.c_int),
-  ('cooperativeMultiDeviceUnmatchedSharedMem', ctypes.c_int),
-  ('isLargeBar', ctypes.c_int),
-  ('asicRevision', ctypes.c_int),
+  ('hdpMemFlushCntl', ctypes.POINTER(ctypes.c_uint32)),
+  ('hdpRegFlushCntl', ctypes.POINTER(ctypes.c_uint32)),
+  ('cooperativeMultiDeviceUnmatchedFunc', ctypes.c_int32),
+  ('cooperativeMultiDeviceUnmatchedGridDim', ctypes.c_int32),
+  ('cooperativeMultiDeviceUnmatchedBlockDim', ctypes.c_int32),
+  ('cooperativeMultiDeviceUnmatchedSharedMem', ctypes.c_int32),
+  ('isLargeBar', ctypes.c_int32),
+  ('asicRevision', ctypes.c_int32),
 ]
-hipMemoryType = CEnum(ctypes.c_uint)
+hipMemoryType = CEnum(ctypes.c_uint32)
 hipMemoryTypeUnregistered = hipMemoryType.define('hipMemoryTypeUnregistered', 0)
 hipMemoryTypeHost = hipMemoryType.define('hipMemoryTypeHost', 1)
 hipMemoryTypeDevice = hipMemoryType.define('hipMemoryTypeDevice', 2)
@@ -399,13 +399,13 @@ hipMemoryTypeUnified = hipMemoryType.define('hipMemoryTypeUnified', 11)
 class hipPointerAttribute_t(Struct): pass
 hipPointerAttribute_t._fields_ = [
   ('type', hipMemoryType),
-  ('device', ctypes.c_int),
+  ('device', ctypes.c_int32),
   ('devicePointer', ctypes.c_void_p),
   ('hostPointer', ctypes.c_void_p),
-  ('isManaged', ctypes.c_int),
-  ('allocationFlags', ctypes.c_uint),
+  ('isManaged', ctypes.c_int32),
+  ('allocationFlags', ctypes.c_uint32),
 ]
-hipDeviceAttribute_t = CEnum(ctypes.c_uint)
+hipDeviceAttribute_t = CEnum(ctypes.c_uint32)
 hipDeviceAttributeCudaCompatibleBegin = hipDeviceAttribute_t.define('hipDeviceAttributeCudaCompatibleBegin', 0)
 hipDeviceAttributeEccEnabled = hipDeviceAttribute_t.define('hipDeviceAttributeEccEnabled', 0)
 hipDeviceAttributeAccessPolicyMaxWindowSize = hipDeviceAttribute_t.define('hipDeviceAttributeAccessPolicyMaxWindowSize', 1)
@@ -522,22 +522,22 @@ hipDeviceAttributeWallClockRate = hipDeviceAttribute_t.define('hipDeviceAttribut
 hipDeviceAttributeAmdSpecificEnd = hipDeviceAttribute_t.define('hipDeviceAttributeAmdSpecificEnd', 19999)
 hipDeviceAttributeVendorSpecificBegin = hipDeviceAttribute_t.define('hipDeviceAttributeVendorSpecificBegin', 20000)
 
-hipDriverProcAddressQueryResult = CEnum(ctypes.c_uint)
+hipDriverProcAddressQueryResult = CEnum(ctypes.c_uint32)
 HIP_GET_PROC_ADDRESS_SUCCESS = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_SUCCESS', 0)
 HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND', 1)
 HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT', 2)
 
-hipComputeMode = CEnum(ctypes.c_uint)
+hipComputeMode = CEnum(ctypes.c_uint32)
 hipComputeModeDefault = hipComputeMode.define('hipComputeModeDefault', 0)
 hipComputeModeExclusive = hipComputeMode.define('hipComputeModeExclusive', 1)
 hipComputeModeProhibited = hipComputeMode.define('hipComputeModeProhibited', 2)
 hipComputeModeExclusiveProcess = hipComputeMode.define('hipComputeModeExclusiveProcess', 3)
 
-hipFlushGPUDirectRDMAWritesOptions = CEnum(ctypes.c_uint)
+hipFlushGPUDirectRDMAWritesOptions = CEnum(ctypes.c_uint32)
 hipFlushGPUDirectRDMAWritesOptionHost = hipFlushGPUDirectRDMAWritesOptions.define('hipFlushGPUDirectRDMAWritesOptionHost', 1)
 hipFlushGPUDirectRDMAWritesOptionMemOps = hipFlushGPUDirectRDMAWritesOptions.define('hipFlushGPUDirectRDMAWritesOptionMemOps', 2)
 
-hipGPUDirectRDMAWritesOrdering = CEnum(ctypes.c_uint)
+hipGPUDirectRDMAWritesOrdering = CEnum(ctypes.c_uint32)
 hipGPUDirectRDMAWritesOrderingNone = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingNone', 0)
 hipGPUDirectRDMAWritesOrderingOwner = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingOwner', 100)
 hipGPUDirectRDMAWritesOrderingAllDevices = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingAllDevices', 200)
@@ -548,8 +548,8 @@ except AttributeError: pass
 
 class ihipCtx_t(Struct): pass
 hipCtx_t = ctypes.POINTER(ihipCtx_t)
-hipDevice_t = ctypes.c_int
-hipDeviceP2PAttr = CEnum(ctypes.c_uint)
+hipDevice_t = ctypes.c_int32
+hipDeviceP2PAttr = CEnum(ctypes.c_uint32)
 hipDevP2PAttrPerformanceRank = hipDeviceP2PAttr.define('hipDevP2PAttrPerformanceRank', 0)
 hipDevP2PAttrAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrAccessSupported', 1)
 hipDevP2PAttrNativeAtomicSupported = hipDeviceP2PAttr.define('hipDevP2PAttrNativeAtomicSupported', 2)
@@ -571,24 +571,24 @@ class ihipMemPoolHandle_t(Struct): pass
 hipMemPool_t = ctypes.POINTER(ihipMemPoolHandle_t)
 class hipFuncAttributes(Struct): pass
 hipFuncAttributes._fields_ = [
-  ('binaryVersion', ctypes.c_int),
-  ('cacheModeCA', ctypes.c_int),
+  ('binaryVersion', ctypes.c_int32),
+  ('cacheModeCA', ctypes.c_int32),
   ('constSizeBytes', size_t),
   ('localSizeBytes', size_t),
-  ('maxDynamicSharedSizeBytes', ctypes.c_int),
-  ('maxThreadsPerBlock', ctypes.c_int),
-  ('numRegs', ctypes.c_int),
-  ('preferredShmemCarveout', ctypes.c_int),
-  ('ptxVersion', ctypes.c_int),
+  ('maxDynamicSharedSizeBytes', ctypes.c_int32),
+  ('maxThreadsPerBlock', ctypes.c_int32),
+  ('numRegs', ctypes.c_int32),
+  ('preferredShmemCarveout', ctypes.c_int32),
+  ('ptxVersion', ctypes.c_int32),
   ('sharedSizeBytes', size_t),
 ]
-hipLimit_t = CEnum(ctypes.c_uint)
+hipLimit_t = CEnum(ctypes.c_uint32)
 hipLimitStackSize = hipLimit_t.define('hipLimitStackSize', 0)
 hipLimitPrintfFifoSize = hipLimit_t.define('hipLimitPrintfFifoSize', 1)
 hipLimitMallocHeapSize = hipLimit_t.define('hipLimitMallocHeapSize', 2)
 hipLimitRange = hipLimit_t.define('hipLimitRange', 3)
 
-hipMemoryAdvise = CEnum(ctypes.c_uint)
+hipMemoryAdvise = CEnum(ctypes.c_uint32)
 hipMemAdviseSetReadMostly = hipMemoryAdvise.define('hipMemAdviseSetReadMostly', 1)
 hipMemAdviseUnsetReadMostly = hipMemoryAdvise.define('hipMemAdviseUnsetReadMostly', 2)
 hipMemAdviseSetPreferredLocation = hipMemoryAdvise.define('hipMemAdviseSetPreferredLocation', 3)
@@ -598,19 +598,19 @@ hipMemAdviseUnsetAccessedBy = hipMemoryAdvise.define('hipMemAdviseUnsetAccessedB
 hipMemAdviseSetCoarseGrain = hipMemoryAdvise.define('hipMemAdviseSetCoarseGrain', 100)
 hipMemAdviseUnsetCoarseGrain = hipMemoryAdvise.define('hipMemAdviseUnsetCoarseGrain', 101)
 
-hipMemRangeCoherencyMode = CEnum(ctypes.c_uint)
+hipMemRangeCoherencyMode = CEnum(ctypes.c_uint32)
 hipMemRangeCoherencyModeFineGrain = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeFineGrain', 0)
 hipMemRangeCoherencyModeCoarseGrain = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeCoarseGrain', 1)
 hipMemRangeCoherencyModeIndeterminate = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeIndeterminate', 2)
 
-hipMemRangeAttribute = CEnum(ctypes.c_uint)
+hipMemRangeAttribute = CEnum(ctypes.c_uint32)
 hipMemRangeAttributeReadMostly = hipMemRangeAttribute.define('hipMemRangeAttributeReadMostly', 1)
 hipMemRangeAttributePreferredLocation = hipMemRangeAttribute.define('hipMemRangeAttributePreferredLocation', 2)
 hipMemRangeAttributeAccessedBy = hipMemRangeAttribute.define('hipMemRangeAttributeAccessedBy', 3)
 hipMemRangeAttributeLastPrefetchLocation = hipMemRangeAttribute.define('hipMemRangeAttributeLastPrefetchLocation', 4)
 hipMemRangeAttributeCoherencyMode = hipMemRangeAttribute.define('hipMemRangeAttributeCoherencyMode', 100)
 
-hipMemPoolAttr = CEnum(ctypes.c_uint)
+hipMemPoolAttr = CEnum(ctypes.c_uint32)
 hipMemPoolReuseFollowEventDependencies = hipMemPoolAttr.define('hipMemPoolReuseFollowEventDependencies', 1)
 hipMemPoolReuseAllowOpportunistic = hipMemPoolAttr.define('hipMemPoolReuseAllowOpportunistic', 2)
 hipMemPoolReuseAllowInternalDependencies = hipMemPoolAttr.define('hipMemPoolReuseAllowInternalDependencies', 3)
@@ -620,16 +620,16 @@ hipMemPoolAttrReservedMemHigh = hipMemPoolAttr.define('hipMemPoolAttrReservedMem
 hipMemPoolAttrUsedMemCurrent = hipMemPoolAttr.define('hipMemPoolAttrUsedMemCurrent', 7)
 hipMemPoolAttrUsedMemHigh = hipMemPoolAttr.define('hipMemPoolAttrUsedMemHigh', 8)
 
-hipMemLocationType = CEnum(ctypes.c_uint)
+hipMemLocationType = CEnum(ctypes.c_uint32)
 hipMemLocationTypeInvalid = hipMemLocationType.define('hipMemLocationTypeInvalid', 0)
 hipMemLocationTypeDevice = hipMemLocationType.define('hipMemLocationTypeDevice', 1)
 
 class hipMemLocation(Struct): pass
 hipMemLocation._fields_ = [
   ('type', hipMemLocationType),
-  ('id', ctypes.c_int),
+  ('id', ctypes.c_int32),
 ]
-hipMemAccessFlags = CEnum(ctypes.c_uint)
+hipMemAccessFlags = CEnum(ctypes.c_uint32)
 hipMemAccessFlagsProtNone = hipMemAccessFlags.define('hipMemAccessFlagsProtNone', 0)
 hipMemAccessFlagsProtRead = hipMemAccessFlags.define('hipMemAccessFlagsProtRead', 1)
 hipMemAccessFlagsProtReadWrite = hipMemAccessFlags.define('hipMemAccessFlagsProtReadWrite', 3)
@@ -639,12 +639,12 @@ hipMemAccessDesc._fields_ = [
   ('location', hipMemLocation),
   ('flags', hipMemAccessFlags),
 ]
-hipMemAllocationType = CEnum(ctypes.c_uint)
+hipMemAllocationType = CEnum(ctypes.c_uint32)
 hipMemAllocationTypeInvalid = hipMemAllocationType.define('hipMemAllocationTypeInvalid', 0)
 hipMemAllocationTypePinned = hipMemAllocationType.define('hipMemAllocationTypePinned', 1)
 hipMemAllocationTypeMax = hipMemAllocationType.define('hipMemAllocationTypeMax', 2147483647)
 
-hipMemAllocationHandleType = CEnum(ctypes.c_uint)
+hipMemAllocationHandleType = CEnum(ctypes.c_uint32)
 hipMemHandleTypeNone = hipMemAllocationHandleType.define('hipMemHandleTypeNone', 0)
 hipMemHandleTypePosixFileDescriptor = hipMemAllocationHandleType.define('hipMemHandleTypePosixFileDescriptor', 1)
 hipMemHandleTypeWin32 = hipMemAllocationHandleType.define('hipMemHandleTypeWin32', 2)
@@ -663,7 +663,7 @@ class hipMemPoolPtrExportData(Struct): pass
 hipMemPoolPtrExportData._fields_ = [
   ('reserved', (ctypes.c_ubyte * 64)),
 ]
-hipJitOption = CEnum(ctypes.c_uint)
+hipJitOption = CEnum(ctypes.c_uint32)
 hipJitOptionMaxRegisters = hipJitOption.define('hipJitOptionMaxRegisters', 0)
 hipJitOptionThreadsPerBlock = hipJitOption.define('hipJitOptionThreadsPerBlock', 1)
 hipJitOptionWallTime = hipJitOption.define('hipJitOptionWallTime', 2)
@@ -683,18 +683,18 @@ hipJitOptionSm3xOpt = hipJitOption.define('hipJitOptionSm3xOpt', 15)
 hipJitOptionFastCompile = hipJitOption.define('hipJitOptionFastCompile', 16)
 hipJitOptionNumOptions = hipJitOption.define('hipJitOptionNumOptions', 17)
 
-hipFuncAttribute = CEnum(ctypes.c_uint)
+hipFuncAttribute = CEnum(ctypes.c_uint32)
 hipFuncAttributeMaxDynamicSharedMemorySize = hipFuncAttribute.define('hipFuncAttributeMaxDynamicSharedMemorySize', 8)
 hipFuncAttributePreferredSharedMemoryCarveout = hipFuncAttribute.define('hipFuncAttributePreferredSharedMemoryCarveout', 9)
 hipFuncAttributeMax = hipFuncAttribute.define('hipFuncAttributeMax', 10)
 
-hipFuncCache_t = CEnum(ctypes.c_uint)
+hipFuncCache_t = CEnum(ctypes.c_uint32)
 hipFuncCachePreferNone = hipFuncCache_t.define('hipFuncCachePreferNone', 0)
 hipFuncCachePreferShared = hipFuncCache_t.define('hipFuncCachePreferShared', 1)
 hipFuncCachePreferL1 = hipFuncCache_t.define('hipFuncCachePreferL1', 2)
 hipFuncCachePreferEqual = hipFuncCache_t.define('hipFuncCachePreferEqual', 3)
 
-hipSharedMemConfig = CEnum(ctypes.c_uint)
+hipSharedMemConfig = CEnum(ctypes.c_uint32)
 hipSharedMemBankSizeDefault = hipSharedMemConfig.define('hipSharedMemBankSizeDefault', 0)
 hipSharedMemBankSizeFourByte = hipSharedMemConfig.define('hipSharedMemBankSizeFourByte', 1)
 hipSharedMemBankSizeEightByte = hipSharedMemConfig.define('hipSharedMemBankSizeEightByte', 2)
@@ -712,18 +712,18 @@ hipLaunchParams = hipLaunchParams_t
 class hipFunctionLaunchParams_t(Struct): pass
 hipFunctionLaunchParams_t._fields_ = [
   ('function', hipFunction_t),
-  ('gridDimX', ctypes.c_uint),
-  ('gridDimY', ctypes.c_uint),
-  ('gridDimZ', ctypes.c_uint),
-  ('blockDimX', ctypes.c_uint),
-  ('blockDimY', ctypes.c_uint),
-  ('blockDimZ', ctypes.c_uint),
-  ('sharedMemBytes', ctypes.c_uint),
+  ('gridDimX', ctypes.c_uint32),
+  ('gridDimY', ctypes.c_uint32),
+  ('gridDimZ', ctypes.c_uint32),
+  ('blockDimX', ctypes.c_uint32),
+  ('blockDimY', ctypes.c_uint32),
+  ('blockDimZ', ctypes.c_uint32),
+  ('sharedMemBytes', ctypes.c_uint32),
   ('hStream', hipStream_t),
   ('kernelParams', ctypes.POINTER(ctypes.c_void_p)),
 ]
 hipFunctionLaunchParams = hipFunctionLaunchParams_t
-hipExternalMemoryHandleType_enum = CEnum(ctypes.c_uint)
+hipExternalMemoryHandleType_enum = CEnum(ctypes.c_uint32)
 hipExternalMemoryHandleTypeOpaqueFd = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueFd', 1)
 hipExternalMemoryHandleTypeOpaqueWin32 = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueWin32', 2)
 hipExternalMemoryHandleTypeOpaqueWin32Kmt = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueWin32Kmt', 3)
@@ -742,39 +742,39 @@ hipExternalMemoryHandleDesc_st_handle_win32._fields_ = [
   ('name', ctypes.c_void_p),
 ]
 hipExternalMemoryHandleDesc_st_handle._fields_ = [
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('win32', hipExternalMemoryHandleDesc_st_handle_win32),
   ('nvSciBufObject', ctypes.c_void_p),
 ]
 hipExternalMemoryHandleDesc_st._fields_ = [
   ('type', hipExternalMemoryHandleType),
   ('handle', hipExternalMemoryHandleDesc_st_handle),
-  ('size', ctypes.c_ulonglong),
-  ('flags', ctypes.c_uint),
-  ('reserved', (ctypes.c_uint * 16)),
+  ('size', ctypes.c_uint64),
+  ('flags', ctypes.c_uint32),
+  ('reserved', (ctypes.c_uint32 * 16)),
 ]
 hipExternalMemoryHandleDesc = hipExternalMemoryHandleDesc_st
 class hipExternalMemoryBufferDesc_st(Struct): pass
 hipExternalMemoryBufferDesc_st._fields_ = [
-  ('offset', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
-  ('flags', ctypes.c_uint),
-  ('reserved', (ctypes.c_uint * 16)),
+  ('offset', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
+  ('flags', ctypes.c_uint32),
+  ('reserved', (ctypes.c_uint32 * 16)),
 ]
 hipExternalMemoryBufferDesc = hipExternalMemoryBufferDesc_st
 class hipExternalMemoryMipmappedArrayDesc_st(Struct): pass
 class hipChannelFormatDesc(Struct): pass
-hipChannelFormatKind = CEnum(ctypes.c_uint)
+hipChannelFormatKind = CEnum(ctypes.c_uint32)
 hipChannelFormatKindSigned = hipChannelFormatKind.define('hipChannelFormatKindSigned', 0)
 hipChannelFormatKindUnsigned = hipChannelFormatKind.define('hipChannelFormatKindUnsigned', 1)
 hipChannelFormatKindFloat = hipChannelFormatKind.define('hipChannelFormatKindFloat', 2)
 hipChannelFormatKindNone = hipChannelFormatKind.define('hipChannelFormatKindNone', 3)
 
 hipChannelFormatDesc._fields_ = [
-  ('x', ctypes.c_int),
-  ('y', ctypes.c_int),
-  ('z', ctypes.c_int),
-  ('w', ctypes.c_int),
+  ('x', ctypes.c_int32),
+  ('y', ctypes.c_int32),
+  ('z', ctypes.c_int32),
+  ('w', ctypes.c_int32),
   ('f', hipChannelFormatKind),
 ]
 class hipExtent(Struct): pass
@@ -784,15 +784,15 @@ hipExtent._fields_ = [
   ('depth', size_t),
 ]
 hipExternalMemoryMipmappedArrayDesc_st._fields_ = [
-  ('offset', ctypes.c_ulonglong),
+  ('offset', ctypes.c_uint64),
   ('formatDesc', hipChannelFormatDesc),
   ('extent', hipExtent),
-  ('flags', ctypes.c_uint),
-  ('numLevels', ctypes.c_uint),
+  ('flags', ctypes.c_uint32),
+  ('numLevels', ctypes.c_uint32),
 ]
 hipExternalMemoryMipmappedArrayDesc = hipExternalMemoryMipmappedArrayDesc_st
 hipExternalMemory_t = ctypes.c_void_p
-hipExternalSemaphoreHandleType_enum = CEnum(ctypes.c_uint)
+hipExternalSemaphoreHandleType_enum = CEnum(ctypes.c_uint32)
 hipExternalSemaphoreHandleTypeOpaqueFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueFd', 1)
 hipExternalSemaphoreHandleTypeOpaqueWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32', 2)
 hipExternalSemaphoreHandleTypeOpaqueWin32Kmt = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32Kmt', 3)
@@ -813,15 +813,15 @@ hipExternalSemaphoreHandleDesc_st_handle_win32._fields_ = [
   ('name', ctypes.c_void_p),
 ]
 hipExternalSemaphoreHandleDesc_st_handle._fields_ = [
-  ('fd', ctypes.c_int),
+  ('fd', ctypes.c_int32),
   ('win32', hipExternalSemaphoreHandleDesc_st_handle_win32),
   ('NvSciSyncObj', ctypes.c_void_p),
 ]
 hipExternalSemaphoreHandleDesc_st._fields_ = [
   ('type', hipExternalSemaphoreHandleType),
   ('handle', hipExternalSemaphoreHandleDesc_st_handle),
-  ('flags', ctypes.c_uint),
-  ('reserved', (ctypes.c_uint * 16)),
+  ('flags', ctypes.c_uint32),
+  ('reserved', (ctypes.c_uint32 * 16)),
 ]
 hipExternalSemaphoreHandleDesc = hipExternalSemaphoreHandleDesc_st
 hipExternalSemaphore_t = ctypes.c_void_p
@@ -829,62 +829,62 @@ class hipExternalSemaphoreSignalParams_st(Struct): pass
 class hipExternalSemaphoreSignalParams_st_params(Struct): pass
 class hipExternalSemaphoreSignalParams_st_params_fence(Struct): pass
 hipExternalSemaphoreSignalParams_st_params_fence._fields_ = [
-  ('value', ctypes.c_ulonglong),
+  ('value', ctypes.c_uint64),
 ]
 class hipExternalSemaphoreSignalParams_st_params_nvSciSync(ctypes.Union): pass
 hipExternalSemaphoreSignalParams_st_params_nvSciSync._fields_ = [
   ('fence', ctypes.c_void_p),
-  ('reserved', ctypes.c_ulonglong),
+  ('reserved', ctypes.c_uint64),
 ]
 class hipExternalSemaphoreSignalParams_st_params_keyedMutex(Struct): pass
 hipExternalSemaphoreSignalParams_st_params_keyedMutex._fields_ = [
-  ('key', ctypes.c_ulonglong),
+  ('key', ctypes.c_uint64),
 ]
 hipExternalSemaphoreSignalParams_st_params._fields_ = [
   ('fence', hipExternalSemaphoreSignalParams_st_params_fence),
   ('nvSciSync', hipExternalSemaphoreSignalParams_st_params_nvSciSync),
   ('keyedMutex', hipExternalSemaphoreSignalParams_st_params_keyedMutex),
-  ('reserved', (ctypes.c_uint * 12)),
+  ('reserved', (ctypes.c_uint32 * 12)),
 ]
 hipExternalSemaphoreSignalParams_st._fields_ = [
   ('params', hipExternalSemaphoreSignalParams_st_params),
-  ('flags', ctypes.c_uint),
-  ('reserved', (ctypes.c_uint * 16)),
+  ('flags', ctypes.c_uint32),
+  ('reserved', (ctypes.c_uint32 * 16)),
 ]
 hipExternalSemaphoreSignalParams = hipExternalSemaphoreSignalParams_st
 class hipExternalSemaphoreWaitParams_st(Struct): pass
 class hipExternalSemaphoreWaitParams_st_params(Struct): pass
 class hipExternalSemaphoreWaitParams_st_params_fence(Struct): pass
 hipExternalSemaphoreWaitParams_st_params_fence._fields_ = [
-  ('value', ctypes.c_ulonglong),
+  ('value', ctypes.c_uint64),
 ]
 class hipExternalSemaphoreWaitParams_st_params_nvSciSync(ctypes.Union): pass
 hipExternalSemaphoreWaitParams_st_params_nvSciSync._fields_ = [
   ('fence', ctypes.c_void_p),
-  ('reserved', ctypes.c_ulonglong),
+  ('reserved', ctypes.c_uint64),
 ]
 class hipExternalSemaphoreWaitParams_st_params_keyedMutex(Struct): pass
 hipExternalSemaphoreWaitParams_st_params_keyedMutex._fields_ = [
-  ('key', ctypes.c_ulonglong),
-  ('timeoutMs', ctypes.c_uint),
+  ('key', ctypes.c_uint64),
+  ('timeoutMs', ctypes.c_uint32),
 ]
 hipExternalSemaphoreWaitParams_st_params._fields_ = [
   ('fence', hipExternalSemaphoreWaitParams_st_params_fence),
   ('nvSciSync', hipExternalSemaphoreWaitParams_st_params_nvSciSync),
   ('keyedMutex', hipExternalSemaphoreWaitParams_st_params_keyedMutex),
-  ('reserved', (ctypes.c_uint * 10)),
+  ('reserved', (ctypes.c_uint32 * 10)),
 ]
 hipExternalSemaphoreWaitParams_st._fields_ = [
   ('params', hipExternalSemaphoreWaitParams_st_params),
-  ('flags', ctypes.c_uint),
-  ('reserved', (ctypes.c_uint * 16)),
+  ('flags', ctypes.c_uint32),
+  ('reserved', (ctypes.c_uint32 * 16)),
 ]
 hipExternalSemaphoreWaitParams = hipExternalSemaphoreWaitParams_st
 # void __hipGetPCH(const char **pch, unsigned int *size)
-try: (__hipGetPCH:=dll.__hipGetPCH).restype, __hipGetPCH.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint)]
+try: (__hipGetPCH:=dll.__hipGetPCH).restype, __hipGetPCH.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-hipGraphicsRegisterFlags = CEnum(ctypes.c_uint)
+hipGraphicsRegisterFlags = CEnum(ctypes.c_uint32)
 hipGraphicsRegisterFlagsNone = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsNone', 0)
 hipGraphicsRegisterFlagsReadOnly = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsReadOnly', 1)
 hipGraphicsRegisterFlagsWriteDiscard = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsWriteDiscard', 2)
@@ -902,7 +902,7 @@ class hipGraphExec(Struct): pass
 hipGraphExec_t = ctypes.POINTER(hipGraphExec)
 class hipUserObject(Struct): pass
 hipUserObject_t = ctypes.POINTER(hipUserObject)
-hipGraphNodeType = CEnum(ctypes.c_uint)
+hipGraphNodeType = CEnum(ctypes.c_uint32)
 hipGraphNodeTypeKernel = hipGraphNodeType.define('hipGraphNodeTypeKernel', 0)
 hipGraphNodeTypeMemcpy = hipGraphNodeType.define('hipGraphNodeTypeMemcpy', 1)
 hipGraphNodeTypeMemset = hipGraphNodeType.define('hipGraphNodeTypeMemset', 2)
@@ -932,15 +932,15 @@ hipKernelNodeParams._fields_ = [
   ('func', ctypes.c_void_p),
   ('gridDim', dim3),
   ('kernelParams', ctypes.POINTER(ctypes.c_void_p)),
-  ('sharedMemBytes', ctypes.c_uint),
+  ('sharedMemBytes', ctypes.c_uint32),
 ]
 class hipMemsetParams(Struct): pass
 hipMemsetParams._fields_ = [
   ('dst', ctypes.c_void_p),
-  ('elementSize', ctypes.c_uint),
+  ('elementSize', ctypes.c_uint32),
   ('height', size_t),
   ('pitch', size_t),
-  ('value', ctypes.c_uint),
+  ('value', ctypes.c_uint32),
   ('width', size_t),
 ]
 class hipMemAllocNodeParams(Struct): pass
@@ -951,7 +951,7 @@ hipMemAllocNodeParams._fields_ = [
   ('bytesize', size_t),
   ('dptr', ctypes.c_void_p),
 ]
-hipAccessProperty = CEnum(ctypes.c_uint)
+hipAccessProperty = CEnum(ctypes.c_uint32)
 hipAccessPropertyNormal = hipAccessProperty.define('hipAccessPropertyNormal', 0)
 hipAccessPropertyStreaming = hipAccessProperty.define('hipAccessPropertyStreaming', 1)
 hipAccessPropertyPersisting = hipAccessProperty.define('hipAccessPropertyPersisting', 2)
@@ -964,7 +964,7 @@ hipAccessPolicyWindow._fields_ = [
   ('missProp', hipAccessProperty),
   ('num_bytes', size_t),
 ]
-hipLaunchAttributeID = CEnum(ctypes.c_uint)
+hipLaunchAttributeID = CEnum(ctypes.c_uint32)
 hipLaunchAttributeAccessPolicyWindow = hipLaunchAttributeID.define('hipLaunchAttributeAccessPolicyWindow', 1)
 hipLaunchAttributeCooperative = hipLaunchAttributeID.define('hipLaunchAttributeCooperative', 2)
 hipLaunchAttributePriority = hipLaunchAttributeID.define('hipLaunchAttributePriority', 8)
@@ -972,20 +972,20 @@ hipLaunchAttributePriority = hipLaunchAttributeID.define('hipLaunchAttributePrio
 class hipLaunchAttributeValue(ctypes.Union): pass
 hipLaunchAttributeValue._fields_ = [
   ('accessPolicyWindow', hipAccessPolicyWindow),
-  ('cooperative', ctypes.c_int),
-  ('priority', ctypes.c_int),
+  ('cooperative', ctypes.c_int32),
+  ('priority', ctypes.c_int32),
 ]
 class HIP_MEMSET_NODE_PARAMS(Struct): pass
 hipDeviceptr_t = ctypes.c_void_p
 HIP_MEMSET_NODE_PARAMS._fields_ = [
   ('dst', hipDeviceptr_t),
   ('pitch', size_t),
-  ('value', ctypes.c_uint),
-  ('elementSize', ctypes.c_uint),
+  ('value', ctypes.c_uint32),
+  ('elementSize', ctypes.c_uint32),
   ('width', size_t),
   ('height', size_t),
 ]
-hipGraphExecUpdateResult = CEnum(ctypes.c_uint)
+hipGraphExecUpdateResult = CEnum(ctypes.c_uint32)
 hipGraphExecUpdateSuccess = hipGraphExecUpdateResult.define('hipGraphExecUpdateSuccess', 0)
 hipGraphExecUpdateError = hipGraphExecUpdateResult.define('hipGraphExecUpdateError', 1)
 hipGraphExecUpdateErrorTopologyChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorTopologyChanged', 2)
@@ -995,39 +995,39 @@ hipGraphExecUpdateErrorParametersChanged = hipGraphExecUpdateResult.define('hipG
 hipGraphExecUpdateErrorNotSupported = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorNotSupported', 6)
 hipGraphExecUpdateErrorUnsupportedFunctionChange = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorUnsupportedFunctionChange', 7)
 
-hipStreamCaptureMode = CEnum(ctypes.c_uint)
+hipStreamCaptureMode = CEnum(ctypes.c_uint32)
 hipStreamCaptureModeGlobal = hipStreamCaptureMode.define('hipStreamCaptureModeGlobal', 0)
 hipStreamCaptureModeThreadLocal = hipStreamCaptureMode.define('hipStreamCaptureModeThreadLocal', 1)
 hipStreamCaptureModeRelaxed = hipStreamCaptureMode.define('hipStreamCaptureModeRelaxed', 2)
 
-hipStreamCaptureStatus = CEnum(ctypes.c_uint)
+hipStreamCaptureStatus = CEnum(ctypes.c_uint32)
 hipStreamCaptureStatusNone = hipStreamCaptureStatus.define('hipStreamCaptureStatusNone', 0)
 hipStreamCaptureStatusActive = hipStreamCaptureStatus.define('hipStreamCaptureStatusActive', 1)
 hipStreamCaptureStatusInvalidated = hipStreamCaptureStatus.define('hipStreamCaptureStatusInvalidated', 2)
 
-hipStreamUpdateCaptureDependenciesFlags = CEnum(ctypes.c_uint)
+hipStreamUpdateCaptureDependenciesFlags = CEnum(ctypes.c_uint32)
 hipStreamAddCaptureDependencies = hipStreamUpdateCaptureDependenciesFlags.define('hipStreamAddCaptureDependencies', 0)
 hipStreamSetCaptureDependencies = hipStreamUpdateCaptureDependenciesFlags.define('hipStreamSetCaptureDependencies', 1)
 
-hipGraphMemAttributeType = CEnum(ctypes.c_uint)
+hipGraphMemAttributeType = CEnum(ctypes.c_uint32)
 hipGraphMemAttrUsedMemCurrent = hipGraphMemAttributeType.define('hipGraphMemAttrUsedMemCurrent', 0)
 hipGraphMemAttrUsedMemHigh = hipGraphMemAttributeType.define('hipGraphMemAttrUsedMemHigh', 1)
 hipGraphMemAttrReservedMemCurrent = hipGraphMemAttributeType.define('hipGraphMemAttrReservedMemCurrent', 2)
 hipGraphMemAttrReservedMemHigh = hipGraphMemAttributeType.define('hipGraphMemAttrReservedMemHigh', 3)
 
-hipUserObjectFlags = CEnum(ctypes.c_uint)
+hipUserObjectFlags = CEnum(ctypes.c_uint32)
 hipUserObjectNoDestructorSync = hipUserObjectFlags.define('hipUserObjectNoDestructorSync', 1)
 
-hipUserObjectRetainFlags = CEnum(ctypes.c_uint)
+hipUserObjectRetainFlags = CEnum(ctypes.c_uint32)
 hipGraphUserObjectMove = hipUserObjectRetainFlags.define('hipGraphUserObjectMove', 1)
 
-hipGraphInstantiateFlags = CEnum(ctypes.c_uint)
+hipGraphInstantiateFlags = CEnum(ctypes.c_uint32)
 hipGraphInstantiateFlagAutoFreeOnLaunch = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagAutoFreeOnLaunch', 1)
 hipGraphInstantiateFlagUpload = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagUpload', 2)
 hipGraphInstantiateFlagDeviceLaunch = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagDeviceLaunch', 4)
 hipGraphInstantiateFlagUseNodePriority = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagUseNodePriority', 8)
 
-hipGraphDebugDotFlags = CEnum(ctypes.c_uint)
+hipGraphDebugDotFlags = CEnum(ctypes.c_uint32)
 hipGraphDebugDotFlagsVerbose = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsVerbose', 1)
 hipGraphDebugDotFlagsKernelNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsKernelNodeParams', 4)
 hipGraphDebugDotFlagsMemcpyNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsMemcpyNodeParams', 8)
@@ -1039,7 +1039,7 @@ hipGraphDebugDotFlagsExtSemasWaitNodeParams = hipGraphDebugDotFlags.define('hipG
 hipGraphDebugDotFlagsKernelNodeAttributes = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsKernelNodeAttributes', 512)
 hipGraphDebugDotFlagsHandles = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsHandles', 1024)
 
-hipGraphInstantiateResult = CEnum(ctypes.c_uint)
+hipGraphInstantiateResult = CEnum(ctypes.c_uint32)
 hipGraphInstantiateSuccess = hipGraphInstantiateResult.define('hipGraphInstantiateSuccess', 0)
 hipGraphInstantiateError = hipGraphInstantiateResult.define('hipGraphInstantiateError', 1)
 hipGraphInstantiateInvalidStructure = hipGraphInstantiateResult.define('hipGraphInstantiateInvalidStructure', 2)
@@ -1049,7 +1049,7 @@ hipGraphInstantiateMultipleDevicesNotSupported = hipGraphInstantiateResult.defin
 class hipGraphInstantiateParams(Struct): pass
 hipGraphInstantiateParams._fields_ = [
   ('errNode_out', hipGraphNode_t),
-  ('flags', ctypes.c_ulonglong),
+  ('flags', ctypes.c_uint64),
   ('result_out', hipGraphInstantiateResult),
   ('uploadStream', hipStream_t),
 ]
@@ -1058,7 +1058,7 @@ class hipMemAllocationProp_allocFlags(Struct): pass
 hipMemAllocationProp_allocFlags._fields_ = [
   ('compressionType', ctypes.c_ubyte),
   ('gpuDirectRDMACapable', ctypes.c_ubyte),
-  ('usage', ctypes.c_ushort),
+  ('usage', ctypes.c_uint16),
 ]
 hipMemAllocationProp._fields_ = [
   ('type', hipMemAllocationType),
@@ -1071,33 +1071,33 @@ class hipExternalSemaphoreSignalNodeParams(Struct): pass
 hipExternalSemaphoreSignalNodeParams._fields_ = [
   ('extSemArray', ctypes.POINTER(hipExternalSemaphore_t)),
   ('paramsArray', ctypes.POINTER(hipExternalSemaphoreSignalParams)),
-  ('numExtSems', ctypes.c_uint),
+  ('numExtSems', ctypes.c_uint32),
 ]
 class hipExternalSemaphoreWaitNodeParams(Struct): pass
 hipExternalSemaphoreWaitNodeParams._fields_ = [
   ('extSemArray', ctypes.POINTER(hipExternalSemaphore_t)),
   ('paramsArray', ctypes.POINTER(hipExternalSemaphoreWaitParams)),
-  ('numExtSems', ctypes.c_uint),
+  ('numExtSems', ctypes.c_uint32),
 ]
 class ihipMemGenericAllocationHandle(Struct): pass
 hipMemGenericAllocationHandle_t = ctypes.POINTER(ihipMemGenericAllocationHandle)
-hipMemAllocationGranularity_flags = CEnum(ctypes.c_uint)
+hipMemAllocationGranularity_flags = CEnum(ctypes.c_uint32)
 hipMemAllocationGranularityMinimum = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityMinimum', 0)
 hipMemAllocationGranularityRecommended = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityRecommended', 1)
 
-hipMemHandleType = CEnum(ctypes.c_uint)
+hipMemHandleType = CEnum(ctypes.c_uint32)
 hipMemHandleTypeGeneric = hipMemHandleType.define('hipMemHandleTypeGeneric', 0)
 
-hipMemOperationType = CEnum(ctypes.c_uint)
+hipMemOperationType = CEnum(ctypes.c_uint32)
 hipMemOperationTypeMap = hipMemOperationType.define('hipMemOperationTypeMap', 1)
 hipMemOperationTypeUnmap = hipMemOperationType.define('hipMemOperationTypeUnmap', 2)
 
-hipArraySparseSubresourceType = CEnum(ctypes.c_uint)
+hipArraySparseSubresourceType = CEnum(ctypes.c_uint32)
 hipArraySparseSubresourceTypeSparseLevel = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeSparseLevel', 0)
 hipArraySparseSubresourceTypeMiptail = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeMiptail', 1)
 
 class hipArrayMapInfo(Struct): pass
-hipResourceType = CEnum(ctypes.c_uint)
+hipResourceType = CEnum(ctypes.c_uint32)
 hipResourceTypeArray = hipResourceType.define('hipResourceTypeArray', 0)
 hipResourceTypeMipmappedArray = hipResourceType.define('hipResourceTypeMipmappedArray', 1)
 hipResourceTypeLinear = hipResourceType.define('hipResourceTypeLinear', 2)
@@ -1105,7 +1105,7 @@ hipResourceTypePitch2D = hipResourceType.define('hipResourceTypePitch2D', 3)
 
 class hipArrayMapInfo_resource(ctypes.Union): pass
 class hipMipmappedArray(Struct): pass
-hipArray_Format = CEnum(ctypes.c_uint)
+hipArray_Format = CEnum(ctypes.c_uint32)
 HIP_AD_FORMAT_UNSIGNED_INT8 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT8', 1)
 HIP_AD_FORMAT_UNSIGNED_INT16 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT16', 2)
 HIP_AD_FORMAT_UNSIGNED_INT32 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT32', 3)
@@ -1118,15 +1118,15 @@ HIP_AD_FORMAT_FLOAT = hipArray_Format.define('HIP_AD_FORMAT_FLOAT', 32)
 hipMipmappedArray._fields_ = [
   ('data', ctypes.c_void_p),
   ('desc', hipChannelFormatDesc),
-  ('type', ctypes.c_uint),
-  ('width', ctypes.c_uint),
-  ('height', ctypes.c_uint),
-  ('depth', ctypes.c_uint),
-  ('min_mipmap_level', ctypes.c_uint),
-  ('max_mipmap_level', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
+  ('type', ctypes.c_uint32),
+  ('width', ctypes.c_uint32),
+  ('height', ctypes.c_uint32),
+  ('depth', ctypes.c_uint32),
+  ('min_mipmap_level', ctypes.c_uint32),
+  ('max_mipmap_level', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
   ('format', hipArray_Format),
-  ('num_channels', ctypes.c_uint),
+  ('num_channels', ctypes.c_uint32),
 ]
 class hipArray(Struct): pass
 hipArray_t = ctypes.POINTER(hipArray)
@@ -1137,20 +1137,20 @@ hipArrayMapInfo_resource._fields_ = [
 class hipArrayMapInfo_subresource(ctypes.Union): pass
 class hipArrayMapInfo_subresource_sparseLevel(Struct): pass
 hipArrayMapInfo_subresource_sparseLevel._fields_ = [
-  ('level', ctypes.c_uint),
-  ('layer', ctypes.c_uint),
-  ('offsetX', ctypes.c_uint),
-  ('offsetY', ctypes.c_uint),
-  ('offsetZ', ctypes.c_uint),
-  ('extentWidth', ctypes.c_uint),
-  ('extentHeight', ctypes.c_uint),
-  ('extentDepth', ctypes.c_uint),
+  ('level', ctypes.c_uint32),
+  ('layer', ctypes.c_uint32),
+  ('offsetX', ctypes.c_uint32),
+  ('offsetY', ctypes.c_uint32),
+  ('offsetZ', ctypes.c_uint32),
+  ('extentWidth', ctypes.c_uint32),
+  ('extentHeight', ctypes.c_uint32),
+  ('extentDepth', ctypes.c_uint32),
 ]
 class hipArrayMapInfo_subresource_miptail(Struct): pass
 hipArrayMapInfo_subresource_miptail._fields_ = [
-  ('layer', ctypes.c_uint),
-  ('offset', ctypes.c_ulonglong),
-  ('size', ctypes.c_ulonglong),
+  ('layer', ctypes.c_uint32),
+  ('offset', ctypes.c_uint64),
+  ('size', ctypes.c_uint64),
 ]
 hipArrayMapInfo_subresource._fields_ = [
   ('sparseLevel', hipArrayMapInfo_subresource_sparseLevel),
@@ -1168,10 +1168,10 @@ hipArrayMapInfo._fields_ = [
   ('memOperationType', hipMemOperationType),
   ('memHandleType', hipMemHandleType),
   ('memHandle', hipArrayMapInfo_memHandle),
-  ('offset', ctypes.c_ulonglong),
-  ('deviceBitMask', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
-  ('reserved', (ctypes.c_uint * 2)),
+  ('offset', ctypes.c_uint64),
+  ('deviceBitMask', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
+  ('reserved', (ctypes.c_uint32 * 2)),
 ]
 class hipMemcpyNodeParams(Struct): pass
 class hipMemcpy3DParms(Struct): pass
@@ -1188,7 +1188,7 @@ hipPitchedPtr._fields_ = [
   ('xsize', size_t),
   ('ysize', size_t),
 ]
-hipMemcpyKind = CEnum(ctypes.c_uint)
+hipMemcpyKind = CEnum(ctypes.c_uint32)
 hipMemcpyHostToHost = hipMemcpyKind.define('hipMemcpyHostToHost', 0)
 hipMemcpyHostToDevice = hipMemcpyKind.define('hipMemcpyHostToDevice', 1)
 hipMemcpyDeviceToHost = hipMemcpyKind.define('hipMemcpyDeviceToHost', 2)
@@ -1207,8 +1207,8 @@ hipMemcpy3DParms._fields_ = [
   ('kind', hipMemcpyKind),
 ]
 hipMemcpyNodeParams._fields_ = [
-  ('flags', ctypes.c_int),
-  ('reserved', (ctypes.c_int * 3)),
+  ('flags', ctypes.c_int32),
+  ('reserved', (ctypes.c_int32 * 3)),
   ('copyParams', hipMemcpy3DParms),
 ]
 class hipChildGraphNodeParams(Struct): pass
@@ -1230,7 +1230,7 @@ hipMemFreeNodeParams._fields_ = [
 class hipGraphNodeParams(Struct): pass
 class hipGraphNodeParams_0(ctypes.Union): pass
 hipGraphNodeParams_0._fields_ = [
-  ('reserved1', (ctypes.c_longlong * 29)),
+  ('reserved1', (ctypes.c_int64 * 29)),
   ('kernel', hipKernelNodeParams),
   ('memcpy', hipMemcpyNodeParams),
   ('memset', hipMemsetParams),
@@ -1246,11 +1246,11 @@ hipGraphNodeParams_0._fields_ = [
 hipGraphNodeParams._anonymous_ = ['_0']
 hipGraphNodeParams._fields_ = [
   ('type', hipGraphNodeType),
-  ('reserved0', (ctypes.c_int * 3)),
+  ('reserved0', (ctypes.c_int32 * 3)),
   ('_0', hipGraphNodeParams_0),
-  ('reserved2', ctypes.c_longlong),
+  ('reserved2', ctypes.c_int64),
 ]
-hipGraphDependencyType = CEnum(ctypes.c_uint)
+hipGraphDependencyType = CEnum(ctypes.c_uint32)
 hipGraphDependencyTypeDefault = hipGraphDependencyType.define('hipGraphDependencyTypeDefault', 0)
 hipGraphDependencyTypeProgrammatic = hipGraphDependencyType.define('hipGraphDependencyTypeProgrammatic', 1)
 
@@ -1262,27 +1262,27 @@ hipGraphEdgeData._fields_ = [
   ('type', ctypes.c_ubyte),
 ]
 # hipError_t hipInit(unsigned int flags)
-try: (hipInit:=dll.hipInit).restype, hipInit.argtypes = hipError_t, [ctypes.c_uint]
+try: (hipInit:=dll.hipInit).restype, hipInit.argtypes = hipError_t, [ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipDriverGetVersion(int *driverVersion)
-try: (hipDriverGetVersion:=dll.hipDriverGetVersion).restype, hipDriverGetVersion.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int)]
+try: (hipDriverGetVersion:=dll.hipDriverGetVersion).restype, hipDriverGetVersion.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # hipError_t hipRuntimeGetVersion(int *runtimeVersion)
-try: (hipRuntimeGetVersion:=dll.hipRuntimeGetVersion).restype, hipRuntimeGetVersion.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int)]
+try: (hipRuntimeGetVersion:=dll.hipRuntimeGetVersion).restype, hipRuntimeGetVersion.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # hipError_t hipDeviceGet(hipDevice_t *device, int ordinal)
-try: (hipDeviceGet:=dll.hipDeviceGet).restype, hipDeviceGet.argtypes = hipError_t, [ctypes.POINTER(hipDevice_t), ctypes.c_int]
+try: (hipDeviceGet:=dll.hipDeviceGet).restype, hipDeviceGet.argtypes = hipError_t, [ctypes.POINTER(hipDevice_t), ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceComputeCapability(int *major, int *minor, hipDevice_t device)
-try: (hipDeviceComputeCapability:=dll.hipDeviceComputeCapability).restype, hipDeviceComputeCapability.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), hipDevice_t]
+try: (hipDeviceComputeCapability:=dll.hipDeviceComputeCapability).restype, hipDeviceComputeCapability.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), hipDevice_t]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetName(char *name, int len, hipDevice_t device)
-try: (hipDeviceGetName:=dll.hipDeviceGetName).restype, hipDeviceGetName.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.c_int, hipDevice_t]
+try: (hipDeviceGetName:=dll.hipDeviceGetName).restype, hipDeviceGetName.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, hipDevice_t]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetUuid(hipUUID *uuid, hipDevice_t device)
@@ -1290,15 +1290,15 @@ try: (hipDeviceGetUuid:=dll.hipDeviceGetUuid).restype, hipDeviceGetUuid.argtypes
 except AttributeError: pass
 
 # hipError_t hipDeviceGetP2PAttribute(int *value, hipDeviceP2PAttr attr, int srcDevice, int dstDevice)
-try: (hipDeviceGetP2PAttribute:=dll.hipDeviceGetP2PAttribute).restype, hipDeviceGetP2PAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), hipDeviceP2PAttr, ctypes.c_int, ctypes.c_int]
+try: (hipDeviceGetP2PAttribute:=dll.hipDeviceGetP2PAttribute).restype, hipDeviceGetP2PAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipDeviceP2PAttr, ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetPCIBusId(char *pciBusId, int len, int device)
-try: (hipDeviceGetPCIBusId:=dll.hipDeviceGetPCIBusId).restype, hipDeviceGetPCIBusId.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.c_int, ctypes.c_int]
+try: (hipDeviceGetPCIBusId:=dll.hipDeviceGetPCIBusId).restype, hipDeviceGetPCIBusId.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetByPCIBusId(int *device, const char *pciBusId)
-try: (hipDeviceGetByPCIBusId:=dll.hipDeviceGetByPCIBusId).restype, hipDeviceGetByPCIBusId.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_char)]
+try: (hipDeviceGetByPCIBusId:=dll.hipDeviceGetByPCIBusId).restype, hipDeviceGetByPCIBusId.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 # hipError_t hipDeviceTotalMem(size_t *bytes, hipDevice_t device)
@@ -1314,39 +1314,39 @@ try: (hipDeviceReset:=dll.hipDeviceReset).restype, hipDeviceReset.argtypes = hip
 except AttributeError: pass
 
 # hipError_t hipSetDevice(int deviceId)
-try: (hipSetDevice:=dll.hipSetDevice).restype, hipSetDevice.argtypes = hipError_t, [ctypes.c_int]
+try: (hipSetDevice:=dll.hipSetDevice).restype, hipSetDevice.argtypes = hipError_t, [ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipSetValidDevices(int *device_arr, int len)
-try: (hipSetValidDevices:=dll.hipSetValidDevices).restype, hipSetValidDevices.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+try: (hipSetValidDevices:=dll.hipSetValidDevices).restype, hipSetValidDevices.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipGetDevice(int *deviceId)
-try: (hipGetDevice:=dll.hipGetDevice).restype, hipGetDevice.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int)]
+try: (hipGetDevice:=dll.hipGetDevice).restype, hipGetDevice.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # hipError_t hipGetDeviceCount(int *count)
-try: (hipGetDeviceCount:=dll.hipGetDeviceCount).restype, hipGetDeviceCount.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int)]
+try: (hipGetDeviceCount:=dll.hipGetDeviceCount).restype, hipGetDeviceCount.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetAttribute(int *pi, hipDeviceAttribute_t attr, int deviceId)
-try: (hipDeviceGetAttribute:=dll.hipDeviceGetAttribute).restype, hipDeviceGetAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), hipDeviceAttribute_t, ctypes.c_int]
+try: (hipDeviceGetAttribute:=dll.hipDeviceGetAttribute).restype, hipDeviceGetAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipDeviceAttribute_t, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t *mem_pool, int device)
-try: (hipDeviceGetDefaultMemPool:=dll.hipDeviceGetDefaultMemPool).restype, hipDeviceGetDefaultMemPool.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_int]
+try: (hipDeviceGetDefaultMemPool:=dll.hipDeviceGetDefaultMemPool).restype, hipDeviceGetDefaultMemPool.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool)
-try: (hipDeviceSetMemPool:=dll.hipDeviceSetMemPool).restype, hipDeviceSetMemPool.argtypes = hipError_t, [ctypes.c_int, hipMemPool_t]
+try: (hipDeviceSetMemPool:=dll.hipDeviceSetMemPool).restype, hipDeviceSetMemPool.argtypes = hipError_t, [ctypes.c_int32, hipMemPool_t]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetMemPool(hipMemPool_t *mem_pool, int device)
-try: (hipDeviceGetMemPool:=dll.hipDeviceGetMemPool).restype, hipDeviceGetMemPool.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_int]
+try: (hipDeviceGetMemPool:=dll.hipDeviceGetMemPool).restype, hipDeviceGetMemPool.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *prop, int deviceId)
-try: (hipGetDevicePropertiesR0600:=dll.hipGetDevicePropertiesR0600).restype, hipGetDevicePropertiesR0600.argtypes = hipError_t, [ctypes.POINTER(hipDeviceProp_tR0600), ctypes.c_int]
+try: (hipGetDevicePropertiesR0600:=dll.hipGetDevicePropertiesR0600).restype, hipGetDevicePropertiesR0600.argtypes = hipError_t, [ctypes.POINTER(hipDeviceProp_tR0600), ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig)
@@ -1370,7 +1370,7 @@ try: (hipDeviceGetSharedMemConfig:=dll.hipDeviceGetSharedMemConfig).restype, hip
 except AttributeError: pass
 
 # hipError_t hipGetDeviceFlags(unsigned int *flags)
-try: (hipGetDeviceFlags:=dll.hipGetDeviceFlags).restype, hipGetDeviceFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint)]
+try: (hipGetDeviceFlags:=dll.hipGetDeviceFlags).restype, hipGetDeviceFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config)
@@ -1378,15 +1378,15 @@ try: (hipDeviceSetSharedMemConfig:=dll.hipDeviceSetSharedMemConfig).restype, hip
 except AttributeError: pass
 
 # hipError_t hipSetDeviceFlags(unsigned int flags)
-try: (hipSetDeviceFlags:=dll.hipSetDeviceFlags).restype, hipSetDeviceFlags.argtypes = hipError_t, [ctypes.c_uint]
+try: (hipSetDeviceFlags:=dll.hipSetDeviceFlags).restype, hipSetDeviceFlags.argtypes = hipError_t, [ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipChooseDeviceR0600(int *device, const hipDeviceProp_tR0600 *prop)
-try: (hipChooseDeviceR0600:=dll.hipChooseDeviceR0600).restype, hipChooseDeviceR0600.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(hipDeviceProp_tR0600)]
+try: (hipChooseDeviceR0600:=dll.hipChooseDeviceR0600).restype, hipChooseDeviceR0600.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(hipDeviceProp_tR0600)]
 except AttributeError: pass
 
 # hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t *linktype, uint32_t *hopcount)
-try: (hipExtGetLinkTypeAndHopCount:=dll.hipExtGetLinkTypeAndHopCount).restype, hipExtGetLinkTypeAndHopCount.argtypes = hipError_t, [ctypes.c_int, ctypes.c_int, ctypes.POINTER(uint32_t), ctypes.POINTER(uint32_t)]
+try: (hipExtGetLinkTypeAndHopCount:=dll.hipExtGetLinkTypeAndHopCount).restype, hipExtGetLinkTypeAndHopCount.argtypes = hipError_t, [ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
 # hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t *handle, void *devPtr)
@@ -1394,7 +1394,7 @@ try: (hipIpcGetMemHandle:=dll.hipIpcGetMemHandle).restype, hipIpcGetMemHandle.ar
 except AttributeError: pass
 
 # hipError_t hipIpcOpenMemHandle(void **devPtr, hipIpcMemHandle_t handle, unsigned int flags)
-try: (hipIpcOpenMemHandle:=dll.hipIpcOpenMemHandle).restype, hipIpcOpenMemHandle.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), hipIpcMemHandle_t, ctypes.c_uint]
+try: (hipIpcOpenMemHandle:=dll.hipIpcOpenMemHandle).restype, hipIpcOpenMemHandle.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), hipIpcMemHandle_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipIpcCloseMemHandle(void *devPtr)
@@ -1410,7 +1410,7 @@ try: (hipIpcOpenEventHandle:=dll.hipIpcOpenEventHandle).restype, hipIpcOpenEvent
 except AttributeError: pass
 
 # hipError_t hipFuncSetAttribute(const void *func, hipFuncAttribute attr, int value)
-try: (hipFuncSetAttribute:=dll.hipFuncSetAttribute).restype, hipFuncSetAttribute.argtypes = hipError_t, [ctypes.c_void_p, hipFuncAttribute, ctypes.c_int]
+try: (hipFuncSetAttribute:=dll.hipFuncSetAttribute).restype, hipFuncSetAttribute.argtypes = hipError_t, [ctypes.c_void_p, hipFuncAttribute, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipFuncSetCacheConfig(const void *func, hipFuncCache_t config)
@@ -1454,15 +1454,15 @@ try: (hipStreamCreate:=dll.hipStreamCreate).restype, hipStreamCreate.argtypes = 
 except AttributeError: pass
 
 # hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags)
-try: (hipStreamCreateWithFlags:=dll.hipStreamCreateWithFlags).restype, hipStreamCreateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipStream_t), ctypes.c_uint]
+try: (hipStreamCreateWithFlags:=dll.hipStreamCreateWithFlags).restype, hipStreamCreateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipStream_t), ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipStreamCreateWithPriority(hipStream_t *stream, unsigned int flags, int priority)
-try: (hipStreamCreateWithPriority:=dll.hipStreamCreateWithPriority).restype, hipStreamCreateWithPriority.argtypes = hipError_t, [ctypes.POINTER(hipStream_t), ctypes.c_uint, ctypes.c_int]
+try: (hipStreamCreateWithPriority:=dll.hipStreamCreateWithPriority).restype, hipStreamCreateWithPriority.argtypes = hipError_t, [ctypes.POINTER(hipStream_t), ctypes.c_uint32, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceGetStreamPriorityRange(int *leastPriority, int *greatestPriority)
-try: (hipDeviceGetStreamPriorityRange:=dll.hipDeviceGetStreamPriorityRange).restype, hipDeviceGetStreamPriorityRange.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+try: (hipDeviceGetStreamPriorityRange:=dll.hipDeviceGetStreamPriorityRange).restype, hipDeviceGetStreamPriorityRange.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # hipError_t hipStreamDestroy(hipStream_t stream)
@@ -1478,15 +1478,15 @@ try: (hipStreamSynchronize:=dll.hipStreamSynchronize).restype, hipStreamSynchron
 except AttributeError: pass
 
 # hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags = 0)
-try: (hipStreamWaitEvent:=dll.hipStreamWaitEvent).restype, hipStreamWaitEvent.argtypes = hipError_t, [hipStream_t, hipEvent_t, ctypes.c_uint]
+try: (hipStreamWaitEvent:=dll.hipStreamWaitEvent).restype, hipStreamWaitEvent.argtypes = hipError_t, [hipStream_t, hipEvent_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int *flags)
-try: (hipStreamGetFlags:=dll.hipStreamGetFlags).restype, hipStreamGetFlags.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(ctypes.c_uint)]
+try: (hipStreamGetFlags:=dll.hipStreamGetFlags).restype, hipStreamGetFlags.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # hipError_t hipStreamGetPriority(hipStream_t stream, int *priority)
-try: (hipStreamGetPriority:=dll.hipStreamGetPriority).restype, hipStreamGetPriority.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(ctypes.c_int)]
+try: (hipStreamGetPriority:=dll.hipStreamGetPriority).restype, hipStreamGetPriority.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t *device)
@@ -1503,28 +1503,28 @@ except AttributeError: pass
 
 hipStreamCallback_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(ihipStream_t), hipError_t, ctypes.c_void_p)
 # hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void *userData, unsigned int flags)
-try: (hipStreamAddCallback:=dll.hipStreamAddCallback).restype, hipStreamAddCallback.argtypes = hipError_t, [hipStream_t, hipStreamCallback_t, ctypes.c_void_p, ctypes.c_uint]
+try: (hipStreamAddCallback:=dll.hipStreamAddCallback).restype, hipStreamAddCallback.argtypes = hipError_t, [hipStream_t, hipStreamCallback_t, ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipStreamWaitValue32(hipStream_t stream, void *ptr, uint32_t value, unsigned int flags, uint32_t mask = 4294967295U)
-try: (hipStreamWaitValue32:=dll.hipStreamWaitValue32).restype, hipStreamWaitValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint, uint32_t]
+try: (hipStreamWaitValue32:=dll.hipStreamWaitValue32).restype, hipStreamWaitValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint32, uint32_t]
 except AttributeError: pass
 
-uint64_t = ctypes.c_ulong
+uint64_t = ctypes.c_uint64
 # hipError_t hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags, uint64_t mask = 18446744073709551615UL)
-try: (hipStreamWaitValue64:=dll.hipStreamWaitValue64).restype, hipStreamWaitValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint, uint64_t]
+try: (hipStreamWaitValue64:=dll.hipStreamWaitValue64).restype, hipStreamWaitValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint32, uint64_t]
 except AttributeError: pass
 
 # hipError_t hipStreamWriteValue32(hipStream_t stream, void *ptr, uint32_t value, unsigned int flags)
-try: (hipStreamWriteValue32:=dll.hipStreamWriteValue32).restype, hipStreamWriteValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint]
+try: (hipStreamWriteValue32:=dll.hipStreamWriteValue32).restype, hipStreamWriteValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipStreamWriteValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags)
-try: (hipStreamWriteValue64:=dll.hipStreamWriteValue64).restype, hipStreamWriteValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint]
+try: (hipStreamWriteValue64:=dll.hipStreamWriteValue64).restype, hipStreamWriteValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipEventCreateWithFlags(hipEvent_t *event, unsigned int flags)
-try: (hipEventCreateWithFlags:=dll.hipEventCreateWithFlags).restype, hipEventCreateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipEvent_t), ctypes.c_uint]
+try: (hipEventCreateWithFlags:=dll.hipEventCreateWithFlags).restype, hipEventCreateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipEvent_t), ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipEventCreate(hipEvent_t *event)
@@ -1551,7 +1551,7 @@ except AttributeError: pass
 try: (hipEventQuery:=dll.hipEventQuery).restype, hipEventQuery.argtypes = hipError_t, [hipEvent_t]
 except AttributeError: pass
 
-hipPointer_attribute = CEnum(ctypes.c_uint)
+hipPointer_attribute = CEnum(ctypes.c_uint32)
 HIP_POINTER_ATTRIBUTE_CONTEXT = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_CONTEXT', 1)
 HIP_POINTER_ATTRIBUTE_MEMORY_TYPE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMORY_TYPE', 2)
 HIP_POINTER_ATTRIBUTE_DEVICE_POINTER = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_DEVICE_POINTER', 3)
@@ -1583,7 +1583,7 @@ try: (hipPointerGetAttribute:=dll.hipPointerGetAttribute).restype, hipPointerGet
 except AttributeError: pass
 
 # hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_attribute *attributes, void **data, hipDeviceptr_t ptr)
-try: (hipDrvPointerGetAttributes:=dll.hipDrvPointerGetAttributes).restype, hipDrvPointerGetAttributes.argtypes = hipError_t, [ctypes.c_uint, ctypes.POINTER(hipPointer_attribute), ctypes.POINTER(ctypes.c_void_p), hipDeviceptr_t]
+try: (hipDrvPointerGetAttributes:=dll.hipDrvPointerGetAttributes).restype, hipDrvPointerGetAttributes.argtypes = hipError_t, [ctypes.c_uint32, ctypes.POINTER(hipPointer_attribute), ctypes.POINTER(ctypes.c_void_p), hipDeviceptr_t]
 except AttributeError: pass
 
 # hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t *extSem_out, const hipExternalSemaphoreHandleDesc *semHandleDesc)
@@ -1591,11 +1591,11 @@ try: (hipImportExternalSemaphore:=dll.hipImportExternalSemaphore).restype, hipIm
 except AttributeError: pass
 
 # hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t *extSemArray, const hipExternalSemaphoreSignalParams *paramsArray, unsigned int numExtSems, hipStream_t stream)
-try: (hipSignalExternalSemaphoresAsync:=dll.hipSignalExternalSemaphoresAsync).restype, hipSignalExternalSemaphoresAsync.argtypes = hipError_t, [ctypes.POINTER(hipExternalSemaphore_t), ctypes.POINTER(hipExternalSemaphoreSignalParams), ctypes.c_uint, hipStream_t]
+try: (hipSignalExternalSemaphoresAsync:=dll.hipSignalExternalSemaphoresAsync).restype, hipSignalExternalSemaphoresAsync.argtypes = hipError_t, [ctypes.POINTER(hipExternalSemaphore_t), ctypes.POINTER(hipExternalSemaphoreSignalParams), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t *extSemArray, const hipExternalSemaphoreWaitParams *paramsArray, unsigned int numExtSems, hipStream_t stream)
-try: (hipWaitExternalSemaphoresAsync:=dll.hipWaitExternalSemaphoresAsync).restype, hipWaitExternalSemaphoresAsync.argtypes = hipError_t, [ctypes.POINTER(hipExternalSemaphore_t), ctypes.POINTER(hipExternalSemaphoreWaitParams), ctypes.c_uint, hipStream_t]
+try: (hipWaitExternalSemaphoresAsync:=dll.hipWaitExternalSemaphoresAsync).restype, hipWaitExternalSemaphoresAsync.argtypes = hipError_t, [ctypes.POINTER(hipExternalSemaphore_t), ctypes.POINTER(hipExternalSemaphoreWaitParams), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem)
@@ -1624,7 +1624,7 @@ try: (hipMalloc:=dll.hipMalloc).restype, hipMalloc.argtypes = hipError_t, [ctype
 except AttributeError: pass
 
 # hipError_t hipExtMallocWithFlags(void **ptr, size_t sizeBytes, unsigned int flags)
-try: (hipExtMallocWithFlags:=dll.hipExtMallocWithFlags).restype, hipExtMallocWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint]
+try: (hipExtMallocWithFlags:=dll.hipExtMallocWithFlags).restype, hipExtMallocWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # __attribute__((deprecated("use hipHostMalloc instead"))) hipError_t hipMallocHost(void **ptr, size_t size)
@@ -1636,19 +1636,19 @@ try: (hipMemAllocHost:=dll.hipMemAllocHost).restype, hipMemAllocHost.argtypes = 
 except AttributeError: pass
 
 # hipError_t hipHostMalloc(void **ptr, size_t size, unsigned int flags)
-try: (hipHostMalloc:=dll.hipHostMalloc).restype, hipHostMalloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint]
+try: (hipHostMalloc:=dll.hipHostMalloc).restype, hipHostMalloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipMallocManaged(void **dev_ptr, size_t size, unsigned int flags = 1)
-try: (hipMallocManaged:=dll.hipMallocManaged).restype, hipMallocManaged.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint]
+try: (hipMallocManaged:=dll.hipMallocManaged).restype, hipMallocManaged.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipMemPrefetchAsync(const void *dev_ptr, size_t count, int device, hipStream_t stream = 0)
-try: (hipMemPrefetchAsync:=dll.hipMemPrefetchAsync).restype, hipMemPrefetchAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int, hipStream_t]
+try: (hipMemPrefetchAsync:=dll.hipMemPrefetchAsync).restype, hipMemPrefetchAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int32, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipMemAdvise(const void *dev_ptr, size_t count, hipMemoryAdvise advice, int device)
-try: (hipMemAdvise:=dll.hipMemAdvise).restype, hipMemAdvise.argtypes = hipError_t, [ctypes.c_void_p, size_t, hipMemoryAdvise, ctypes.c_int]
+try: (hipMemAdvise:=dll.hipMemAdvise).restype, hipMemAdvise.argtypes = hipError_t, [ctypes.c_void_p, size_t, hipMemoryAdvise, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipMemRangeGetAttribute(void *data, size_t data_size, hipMemRangeAttribute attribute, const void *dev_ptr, size_t count)
@@ -1660,7 +1660,7 @@ try: (hipMemRangeGetAttributes:=dll.hipMemRangeGetAttributes).restype, hipMemRan
 except AttributeError: pass
 
 # hipError_t hipStreamAttachMemAsync(hipStream_t stream, void *dev_ptr, size_t length = 0, unsigned int flags = 4)
-try: (hipStreamAttachMemAsync:=dll.hipStreamAttachMemAsync).restype, hipStreamAttachMemAsync.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, size_t, ctypes.c_uint]
+try: (hipStreamAttachMemAsync:=dll.hipStreamAttachMemAsync).restype, hipStreamAttachMemAsync.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipMallocAsync(void **dev_ptr, size_t size, hipStream_t stream)
@@ -1704,11 +1704,11 @@ try: (hipMallocFromPoolAsync:=dll.hipMallocFromPoolAsync).restype, hipMallocFrom
 except AttributeError: pass
 
 # hipError_t hipMemPoolExportToShareableHandle(void *shared_handle, hipMemPool_t mem_pool, hipMemAllocationHandleType handle_type, unsigned int flags)
-try: (hipMemPoolExportToShareableHandle:=dll.hipMemPoolExportToShareableHandle).restype, hipMemPoolExportToShareableHandle.argtypes = hipError_t, [ctypes.c_void_p, hipMemPool_t, hipMemAllocationHandleType, ctypes.c_uint]
+try: (hipMemPoolExportToShareableHandle:=dll.hipMemPoolExportToShareableHandle).restype, hipMemPoolExportToShareableHandle.argtypes = hipError_t, [ctypes.c_void_p, hipMemPool_t, hipMemAllocationHandleType, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t *mem_pool, void *shared_handle, hipMemAllocationHandleType handle_type, unsigned int flags)
-try: (hipMemPoolImportFromShareableHandle:=dll.hipMemPoolImportFromShareableHandle).restype, hipMemPoolImportFromShareableHandle.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_void_p, hipMemAllocationHandleType, ctypes.c_uint]
+try: (hipMemPoolImportFromShareableHandle:=dll.hipMemPoolImportFromShareableHandle).restype, hipMemPoolImportFromShareableHandle.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_void_p, hipMemAllocationHandleType, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData *export_data, void *dev_ptr)
@@ -1720,19 +1720,19 @@ try: (hipMemPoolImportPointer:=dll.hipMemPoolImportPointer).restype, hipMemPoolI
 except AttributeError: pass
 
 # __attribute__((deprecated("use hipHostMalloc instead"))) hipError_t hipHostAlloc(void **ptr, size_t size, unsigned int flags)
-try: (hipHostAlloc:=dll.hipHostAlloc).restype, hipHostAlloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint]
+try: (hipHostAlloc:=dll.hipHostAlloc).restype, hipHostAlloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipHostGetDevicePointer(void **devPtr, void *hstPtr, unsigned int flags)
-try: (hipHostGetDevicePointer:=dll.hipHostGetDevicePointer).restype, hipHostGetDevicePointer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_uint]
+try: (hipHostGetDevicePointer:=dll.hipHostGetDevicePointer).restype, hipHostGetDevicePointer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipHostGetFlags(unsigned int *flagsPtr, void *hostPtr)
-try: (hipHostGetFlags:=dll.hipHostGetFlags).restype, hipHostGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint), ctypes.c_void_p]
+try: (hipHostGetFlags:=dll.hipHostGetFlags).restype, hipHostGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
 except AttributeError: pass
 
 # hipError_t hipHostRegister(void *hostPtr, size_t sizeBytes, unsigned int flags)
-try: (hipHostRegister:=dll.hipHostRegister).restype, hipHostRegister.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_uint]
+try: (hipHostRegister:=dll.hipHostRegister).restype, hipHostRegister.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipHostUnregister(void *hostPtr)
@@ -1744,7 +1744,7 @@ try: (hipMallocPitch:=dll.hipMallocPitch).restype, hipMallocPitch.argtypes = hip
 except AttributeError: pass
 
 # hipError_t hipMemAllocPitch(hipDeviceptr_t *dptr, size_t *pitch, size_t widthInBytes, size_t height, unsigned int elementSizeBytes)
-try: (hipMemAllocPitch:=dll.hipMemAllocPitch).restype, hipMemAllocPitch.argtypes = hipError_t, [ctypes.POINTER(hipDeviceptr_t), ctypes.POINTER(size_t), size_t, size_t, ctypes.c_uint]
+try: (hipMemAllocPitch:=dll.hipMemAllocPitch).restype, hipMemAllocPitch.argtypes = hipError_t, [ctypes.POINTER(hipDeviceptr_t), ctypes.POINTER(size_t), size_t, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipFree(void *ptr)
@@ -1824,7 +1824,7 @@ try: (hipGetSymbolSize:=dll.hipGetSymbolSize).restype, hipGetSymbolSize.argtypes
 except AttributeError: pass
 
 # hipError_t hipGetProcAddress(const char *symbol, void **pfn, int hipVersion, uint64_t flags, hipDriverProcAddressQueryResult *symbolStatus)
-try: (hipGetProcAddress:=dll.hipGetProcAddress).restype, hipGetProcAddress.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, uint64_t, ctypes.POINTER(hipDriverProcAddressQueryResult)]
+try: (hipGetProcAddress:=dll.hipGetProcAddress).restype, hipGetProcAddress.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_void_p), ctypes.c_int32, uint64_t, ctypes.POINTER(hipDriverProcAddressQueryResult)]
 except AttributeError: pass
 
 # hipError_t hipMemcpyToSymbol(const void *symbol, const void *src, size_t sizeBytes, size_t offset = 0, hipMemcpyKind kind = hipMemcpyHostToDevice)
@@ -1848,7 +1848,7 @@ try: (hipMemcpyAsync:=dll.hipMemcpyAsync).restype, hipMemcpyAsync.argtypes = hip
 except AttributeError: pass
 
 # hipError_t hipMemset(void *dst, int value, size_t sizeBytes)
-try: (hipMemset:=dll.hipMemset).restype, hipMemset.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int, size_t]
+try: (hipMemset:=dll.hipMemset).restype, hipMemset.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
 # hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count)
@@ -1860,39 +1860,39 @@ try: (hipMemsetD8Async:=dll.hipMemsetD8Async).restype, hipMemsetD8Async.argtypes
 except AttributeError: pass
 
 # hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count)
-try: (hipMemsetD16:=dll.hipMemsetD16).restype, hipMemsetD16.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_ushort, size_t]
+try: (hipMemsetD16:=dll.hipMemsetD16).restype, hipMemsetD16.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_uint16, size_t]
 except AttributeError: pass
 
 # hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short value, size_t count, hipStream_t stream = 0)
-try: (hipMemsetD16Async:=dll.hipMemsetD16Async).restype, hipMemsetD16Async.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_ushort, size_t, hipStream_t]
+try: (hipMemsetD16Async:=dll.hipMemsetD16Async).restype, hipMemsetD16Async.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_uint16, size_t, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count)
-try: (hipMemsetD32:=dll.hipMemsetD32).restype, hipMemsetD32.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_int, size_t]
+try: (hipMemsetD32:=dll.hipMemsetD32).restype, hipMemsetD32.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_int32, size_t]
 except AttributeError: pass
 
 # hipError_t hipMemsetAsync(void *dst, int value, size_t sizeBytes, hipStream_t stream = 0)
-try: (hipMemsetAsync:=dll.hipMemsetAsync).restype, hipMemsetAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int, size_t, hipStream_t]
+try: (hipMemsetAsync:=dll.hipMemsetAsync).restype, hipMemsetAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, size_t, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStream_t stream = 0)
-try: (hipMemsetD32Async:=dll.hipMemsetD32Async).restype, hipMemsetD32Async.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_int, size_t, hipStream_t]
+try: (hipMemsetD32Async:=dll.hipMemsetD32Async).restype, hipMemsetD32Async.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_int32, size_t, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipMemset2D(void *dst, size_t pitch, int value, size_t width, size_t height)
-try: (hipMemset2D:=dll.hipMemset2D).restype, hipMemset2D.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int, size_t, size_t]
+try: (hipMemset2D:=dll.hipMemset2D).restype, hipMemset2D.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int32, size_t, size_t]
 except AttributeError: pass
 
 # hipError_t hipMemset2DAsync(void *dst, size_t pitch, int value, size_t width, size_t height, hipStream_t stream = 0)
-try: (hipMemset2DAsync:=dll.hipMemset2DAsync).restype, hipMemset2DAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int, size_t, size_t, hipStream_t]
+try: (hipMemset2DAsync:=dll.hipMemset2DAsync).restype, hipMemset2DAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int32, size_t, size_t, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent)
-try: (hipMemset3D:=dll.hipMemset3D).restype, hipMemset3D.argtypes = hipError_t, [hipPitchedPtr, ctypes.c_int, hipExtent]
+try: (hipMemset3D:=dll.hipMemset3D).restype, hipMemset3D.argtypes = hipError_t, [hipPitchedPtr, ctypes.c_int32, hipExtent]
 except AttributeError: pass
 
 # hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent, hipStream_t stream = 0)
-try: (hipMemset3DAsync:=dll.hipMemset3DAsync).restype, hipMemset3DAsync.argtypes = hipError_t, [hipPitchedPtr, ctypes.c_int, hipExtent, hipStream_t]
+try: (hipMemset3DAsync:=dll.hipMemset3DAsync).restype, hipMemset3DAsync.argtypes = hipError_t, [hipPitchedPtr, ctypes.c_int32, hipExtent, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipMemGetInfo(size_t *free, size_t *total)
@@ -1904,7 +1904,7 @@ try: (hipMemPtrGetInfo:=dll.hipMemPtrGetInfo).restype, hipMemPtrGetInfo.argtypes
 except AttributeError: pass
 
 # hipError_t hipMallocArray(hipArray_t *array, const hipChannelFormatDesc *desc, size_t width, size_t height = 0, unsigned int flags = 0)
-try: (hipMallocArray:=dll.hipMallocArray).restype, hipMallocArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(hipChannelFormatDesc), size_t, size_t, ctypes.c_uint]
+try: (hipMallocArray:=dll.hipMallocArray).restype, hipMallocArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(hipChannelFormatDesc), size_t, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 class HIP_ARRAY_DESCRIPTOR(Struct): pass
@@ -1912,7 +1912,7 @@ HIP_ARRAY_DESCRIPTOR._fields_ = [
   ('Width', size_t),
   ('Height', size_t),
   ('Format', hipArray_Format),
-  ('NumChannels', ctypes.c_uint),
+  ('NumChannels', ctypes.c_uint32),
 ]
 # hipError_t hipArrayCreate(hipArray_t *pHandle, const HIP_ARRAY_DESCRIPTOR *pAllocateArray)
 try: (hipArrayCreate:=dll.hipArrayCreate).restype, hipArrayCreate.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(HIP_ARRAY_DESCRIPTOR)]
@@ -1928,8 +1928,8 @@ HIP_ARRAY3D_DESCRIPTOR._fields_ = [
   ('Height', size_t),
   ('Depth', size_t),
   ('Format', hipArray_Format),
-  ('NumChannels', ctypes.c_uint),
-  ('Flags', ctypes.c_uint),
+  ('NumChannels', ctypes.c_uint32),
+  ('Flags', ctypes.c_uint32),
 ]
 # hipError_t hipArray3DCreate(hipArray_t *array, const HIP_ARRAY3D_DESCRIPTOR *pAllocateArray)
 try: (hipArray3DCreate:=dll.hipArray3DCreate).restype, hipArray3DCreate.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR)]
@@ -1944,11 +1944,11 @@ try: (hipFreeArray:=dll.hipFreeArray).restype, hipFreeArray.argtypes = hipError_
 except AttributeError: pass
 
 # hipError_t hipMalloc3DArray(hipArray_t *array, const struct hipChannelFormatDesc *desc, struct hipExtent extent, unsigned int flags)
-try: (hipMalloc3DArray:=dll.hipMalloc3DArray).restype, hipMalloc3DArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(hipChannelFormatDesc), hipExtent, ctypes.c_uint]
+try: (hipMalloc3DArray:=dll.hipMalloc3DArray).restype, hipMalloc3DArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(hipChannelFormatDesc), hipExtent, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipArrayGetInfo(hipChannelFormatDesc *desc, hipExtent *extent, unsigned int *flags, hipArray_t array)
-try: (hipArrayGetInfo:=dll.hipArrayGetInfo).restype, hipArrayGetInfo.argtypes = hipError_t, [ctypes.POINTER(hipChannelFormatDesc), ctypes.POINTER(hipExtent), ctypes.POINTER(ctypes.c_uint), hipArray_t]
+try: (hipArrayGetInfo:=dll.hipArrayGetInfo).restype, hipArrayGetInfo.argtypes = hipError_t, [ctypes.POINTER(hipChannelFormatDesc), ctypes.POINTER(hipExtent), ctypes.POINTER(ctypes.c_uint32), hipArray_t]
 except AttributeError: pass
 
 # hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR *pArrayDescriptor, hipArray_t array)
@@ -2075,15 +2075,15 @@ try: (hipDrvMemcpy3DAsync:=dll.hipDrvMemcpy3DAsync).restype, hipDrvMemcpy3DAsync
 except AttributeError: pass
 
 # hipError_t hipDeviceCanAccessPeer(int *canAccessPeer, int deviceId, int peerDeviceId)
-try: (hipDeviceCanAccessPeer:=dll.hipDeviceCanAccessPeer).restype, hipDeviceCanAccessPeer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.c_int, ctypes.c_int]
+try: (hipDeviceCanAccessPeer:=dll.hipDeviceCanAccessPeer).restype, hipDeviceCanAccessPeer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags)
-try: (hipDeviceEnablePeerAccess:=dll.hipDeviceEnablePeerAccess).restype, hipDeviceEnablePeerAccess.argtypes = hipError_t, [ctypes.c_int, ctypes.c_uint]
+try: (hipDeviceEnablePeerAccess:=dll.hipDeviceEnablePeerAccess).restype, hipDeviceEnablePeerAccess.argtypes = hipError_t, [ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipDeviceDisablePeerAccess(int peerDeviceId)
-try: (hipDeviceDisablePeerAccess:=dll.hipDeviceDisablePeerAccess).restype, hipDeviceDisablePeerAccess.argtypes = hipError_t, [ctypes.c_int]
+try: (hipDeviceDisablePeerAccess:=dll.hipDeviceDisablePeerAccess).restype, hipDeviceDisablePeerAccess.argtypes = hipError_t, [ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipMemGetAddressRange(hipDeviceptr_t *pbase, size_t *psize, hipDeviceptr_t dptr)
@@ -2091,15 +2091,15 @@ try: (hipMemGetAddressRange:=dll.hipMemGetAddressRange).restype, hipMemGetAddres
 except AttributeError: pass
 
 # hipError_t hipMemcpyPeer(void *dst, int dstDeviceId, const void *src, int srcDeviceId, size_t sizeBytes)
-try: (hipMemcpyPeer:=dll.hipMemcpyPeer).restype, hipMemcpyPeer.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, size_t]
+try: (hipMemcpyPeer:=dll.hipMemcpyPeer).restype, hipMemcpyPeer.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
 # hipError_t hipMemcpyPeerAsync(void *dst, int dstDeviceId, const void *src, int srcDevice, size_t sizeBytes, hipStream_t stream = 0)
-try: (hipMemcpyPeerAsync:=dll.hipMemcpyPeerAsync).restype, hipMemcpyPeerAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int, size_t, hipStream_t]
+try: (hipMemcpyPeerAsync:=dll.hipMemcpyPeerAsync).restype, hipMemcpyPeerAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, size_t, hipStream_t]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxCreate(hipCtx_t *ctx, unsigned int flags, hipDevice_t device)
-try: (hipCtxCreate:=dll.hipCtxCreate).restype, hipCtxCreate.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t), ctypes.c_uint, hipDevice_t]
+try: (hipCtxCreate:=dll.hipCtxCreate).restype, hipCtxCreate.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t), ctypes.c_uint32, hipDevice_t]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDestroy(hipCtx_t ctx)
@@ -2127,7 +2127,7 @@ try: (hipCtxGetDevice:=dll.hipCtxGetDevice).restype, hipCtxGetDevice.argtypes = 
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetApiVersion(hipCtx_t ctx, int *apiVersion)
-try: (hipCtxGetApiVersion:=dll.hipCtxGetApiVersion).restype, hipCtxGetApiVersion.argtypes = hipError_t, [hipCtx_t, ctypes.POINTER(ctypes.c_int)]
+try: (hipCtxGetApiVersion:=dll.hipCtxGetApiVersion).restype, hipCtxGetApiVersion.argtypes = hipError_t, [hipCtx_t, ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetCacheConfig(hipFuncCache_t *cacheConfig)
@@ -2151,11 +2151,11 @@ try: (hipCtxSynchronize:=dll.hipCtxSynchronize).restype, hipCtxSynchronize.argty
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetFlags(unsigned int *flags)
-try: (hipCtxGetFlags:=dll.hipCtxGetFlags).restype, hipCtxGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint)]
+try: (hipCtxGetFlags:=dll.hipCtxGetFlags).restype, hipCtxGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags)
-try: (hipCtxEnablePeerAccess:=dll.hipCtxEnablePeerAccess).restype, hipCtxEnablePeerAccess.argtypes = hipError_t, [hipCtx_t, ctypes.c_uint]
+try: (hipCtxEnablePeerAccess:=dll.hipCtxEnablePeerAccess).restype, hipCtxEnablePeerAccess.argtypes = hipError_t, [hipCtx_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx)
@@ -2163,7 +2163,7 @@ try: (hipCtxDisablePeerAccess:=dll.hipCtxDisablePeerAccess).restype, hipCtxDisab
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int *flags, int *active)
-try: (hipDevicePrimaryCtxGetState:=dll.hipDevicePrimaryCtxGetState).restype, hipDevicePrimaryCtxGetState.argtypes = hipError_t, [hipDevice_t, ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(ctypes.c_int)]
+try: (hipDevicePrimaryCtxGetState:=dll.hipDevicePrimaryCtxGetState).restype, hipDevicePrimaryCtxGetState.argtypes = hipError_t, [hipDevice_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev)
@@ -2179,7 +2179,7 @@ try: (hipDevicePrimaryCtxReset:=dll.hipDevicePrimaryCtxReset).restype, hipDevice
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags)
-try: (hipDevicePrimaryCtxSetFlags:=dll.hipDevicePrimaryCtxSetFlags).restype, hipDevicePrimaryCtxSetFlags.argtypes = hipError_t, [hipDevice_t, ctypes.c_uint]
+try: (hipDevicePrimaryCtxSetFlags:=dll.hipDevicePrimaryCtxSetFlags).restype, hipDevicePrimaryCtxSetFlags.argtypes = hipError_t, [hipDevice_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipModuleLoad(hipModule_t *module, const char *fname)
@@ -2198,7 +2198,7 @@ except AttributeError: pass
 try: (hipFuncGetAttributes:=dll.hipFuncGetAttributes).restype, hipFuncGetAttributes.argtypes = hipError_t, [ctypes.POINTER(hipFuncAttributes), ctypes.c_void_p]
 except AttributeError: pass
 
-hipFunction_attribute = CEnum(ctypes.c_uint)
+hipFunction_attribute = CEnum(ctypes.c_uint32)
 HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK', 0)
 HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES', 1)
 HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES', 2)
@@ -2212,7 +2212,7 @@ HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = hipFunction_attribute.defi
 HIP_FUNC_ATTRIBUTE_MAX = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX', 10)
 
 # hipError_t hipFuncGetAttribute(int *value, hipFunction_attribute attrib, hipFunction_t hfunc)
-try: (hipFuncGetAttribute:=dll.hipFuncGetAttribute).restype, hipFuncGetAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), hipFunction_attribute, hipFunction_t]
+try: (hipFuncGetAttribute:=dll.hipFuncGetAttribute).restype, hipFuncGetAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipFunction_attribute, hipFunction_t]
 except AttributeError: pass
 
 # hipError_t hipGetFuncBySymbol(hipFunction_t *functionPtr, const void *symbolPtr)
@@ -2220,15 +2220,15 @@ try: (hipGetFuncBySymbol:=dll.hipGetFuncBySymbol).restype, hipGetFuncBySymbol.ar
 except AttributeError: pass
 
 class textureReference(Struct): pass
-hipTextureReadMode = CEnum(ctypes.c_uint)
+hipTextureReadMode = CEnum(ctypes.c_uint32)
 hipReadModeElementType = hipTextureReadMode.define('hipReadModeElementType', 0)
 hipReadModeNormalizedFloat = hipTextureReadMode.define('hipReadModeNormalizedFloat', 1)
 
-hipTextureFilterMode = CEnum(ctypes.c_uint)
+hipTextureFilterMode = CEnum(ctypes.c_uint32)
 hipFilterModePoint = hipTextureFilterMode.define('hipFilterModePoint', 0)
 hipFilterModeLinear = hipTextureFilterMode.define('hipFilterModeLinear', 1)
 
-hipTextureAddressMode = CEnum(ctypes.c_uint)
+hipTextureAddressMode = CEnum(ctypes.c_uint32)
 hipAddressModeWrap = hipTextureAddressMode.define('hipAddressModeWrap', 0)
 hipAddressModeClamp = hipTextureAddressMode.define('hipAddressModeClamp', 1)
 hipAddressModeMirror = hipTextureAddressMode.define('hipAddressModeMirror', 2)
@@ -2237,19 +2237,19 @@ hipAddressModeBorder = hipTextureAddressMode.define('hipAddressModeBorder', 3)
 class __hip_texture(Struct): pass
 hipTextureObject_t = ctypes.POINTER(__hip_texture)
 textureReference._fields_ = [
-  ('normalized', ctypes.c_int),
+  ('normalized', ctypes.c_int32),
   ('readMode', hipTextureReadMode),
   ('filterMode', hipTextureFilterMode),
   ('addressMode', (hipTextureAddressMode * 3)),
   ('channelDesc', hipChannelFormatDesc),
-  ('sRGB', ctypes.c_int),
-  ('maxAnisotropy', ctypes.c_uint),
+  ('sRGB', ctypes.c_int32),
+  ('maxAnisotropy', ctypes.c_uint32),
   ('mipmapFilterMode', hipTextureFilterMode),
   ('mipmapLevelBias', ctypes.c_float),
   ('minMipmapLevelClamp', ctypes.c_float),
   ('maxMipmapLevelClamp', ctypes.c_float),
   ('textureObject', hipTextureObject_t),
-  ('numChannels', ctypes.c_int),
+  ('numChannels', ctypes.c_int32),
   ('format', hipArray_Format),
 ]
 # hipError_t hipModuleGetTexRef(textureReference **texRef, hipModule_t hmod, const char *name)
@@ -2261,59 +2261,59 @@ try: (hipModuleLoadData:=dll.hipModuleLoadData).restype, hipModuleLoadData.argty
 except AttributeError: pass
 
 # hipError_t hipModuleLoadDataEx(hipModule_t *module, const void *image, unsigned int numOptions, hipJitOption *options, void **optionValues)
-try: (hipModuleLoadDataEx:=dll.hipModuleLoadDataEx).restype, hipModuleLoadDataEx.argtypes = hipError_t, [ctypes.POINTER(hipModule_t), ctypes.c_void_p, ctypes.c_uint, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
+try: (hipModuleLoadDataEx:=dll.hipModuleLoadDataEx).restype, hipModuleLoadDataEx.argtypes = hipError_t, [ctypes.POINTER(hipModule_t), ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void **kernelParams, void **extra)
-try: (hipModuleLaunchKernel:=dll.hipModuleLaunchKernel).restype, hipModuleLaunchKernel.argtypes = hipError_t, [hipFunction_t, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, hipStream_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p)]
+try: (hipModuleLaunchKernel:=dll.hipModuleLaunchKernel).restype, hipModuleLaunchKernel.argtypes = hipError_t, [hipFunction_t, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, hipStream_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void **kernelParams)
-try: (hipModuleLaunchCooperativeKernel:=dll.hipModuleLaunchCooperativeKernel).restype, hipModuleLaunchCooperativeKernel.argtypes = hipError_t, [hipFunction_t, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, ctypes.c_uint, hipStream_t, ctypes.POINTER(ctypes.c_void_p)]
+try: (hipModuleLaunchCooperativeKernel:=dll.hipModuleLaunchCooperativeKernel).restype, hipModuleLaunchCooperativeKernel.argtypes = hipError_t, [hipFunction_t, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, hipStream_t, ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
 # hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams *launchParamsList, unsigned int numDevices, unsigned int flags)
-try: (hipModuleLaunchCooperativeKernelMultiDevice:=dll.hipModuleLaunchCooperativeKernelMultiDevice).restype, hipModuleLaunchCooperativeKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipFunctionLaunchParams), ctypes.c_uint, ctypes.c_uint]
+try: (hipModuleLaunchCooperativeKernelMultiDevice:=dll.hipModuleLaunchCooperativeKernelMultiDevice).restype, hipModuleLaunchCooperativeKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipFunctionLaunchParams), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipLaunchCooperativeKernel(const void *f, dim3 gridDim, dim3 blockDimX, void **kernelParams, unsigned int sharedMemBytes, hipStream_t stream)
-try: (hipLaunchCooperativeKernel:=dll.hipLaunchCooperativeKernel).restype, hipLaunchCooperativeKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint, hipStream_t]
+try: (hipLaunchCooperativeKernel:=dll.hipLaunchCooperativeKernel).restype, hipLaunchCooperativeKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams *launchParamsList, int numDevices, unsigned int flags)
-try: (hipLaunchCooperativeKernelMultiDevice:=dll.hipLaunchCooperativeKernelMultiDevice).restype, hipLaunchCooperativeKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipLaunchParams), ctypes.c_int, ctypes.c_uint]
+try: (hipLaunchCooperativeKernelMultiDevice:=dll.hipLaunchCooperativeKernelMultiDevice).restype, hipLaunchCooperativeKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipLaunchParams), ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams *launchParamsList, int numDevices, unsigned int flags)
-try: (hipExtLaunchMultiKernelMultiDevice:=dll.hipExtLaunchMultiKernelMultiDevice).restype, hipExtLaunchMultiKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipLaunchParams), ctypes.c_int, ctypes.c_uint]
+try: (hipExtLaunchMultiKernelMultiDevice:=dll.hipExtLaunchMultiKernelMultiDevice).restype, hipExtLaunchMultiKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipLaunchParams), ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipModuleOccupancyMaxPotentialBlockSize(int *gridSize, int *blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit)
-try: (hipModuleOccupancyMaxPotentialBlockSize:=dll.hipModuleOccupancyMaxPotentialBlockSize).restype, hipModuleOccupancyMaxPotentialBlockSize.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), hipFunction_t, size_t, ctypes.c_int]
+try: (hipModuleOccupancyMaxPotentialBlockSize:=dll.hipModuleOccupancyMaxPotentialBlockSize).restype, hipModuleOccupancyMaxPotentialBlockSize.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), hipFunction_t, size_t, ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int *gridSize, int *blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit, unsigned int flags)
-try: (hipModuleOccupancyMaxPotentialBlockSizeWithFlags:=dll.hipModuleOccupancyMaxPotentialBlockSizeWithFlags).restype, hipModuleOccupancyMaxPotentialBlockSizeWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), hipFunction_t, size_t, ctypes.c_int, ctypes.c_uint]
+try: (hipModuleOccupancyMaxPotentialBlockSizeWithFlags:=dll.hipModuleOccupancyMaxPotentialBlockSizeWithFlags).restype, hipModuleOccupancyMaxPotentialBlockSizeWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), hipFunction_t, size_t, ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk)
-try: (hipModuleOccupancyMaxActiveBlocksPerMultiprocessor:=dll.hipModuleOccupancyMaxActiveBlocksPerMultiprocessor).restype, hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), hipFunction_t, ctypes.c_int, size_t]
+try: (hipModuleOccupancyMaxActiveBlocksPerMultiprocessor:=dll.hipModuleOccupancyMaxActiveBlocksPerMultiprocessor).restype, hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipFunction_t, ctypes.c_int32, size_t]
 except AttributeError: pass
 
 # hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags)
-try: (hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:=dll.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags).restype, hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), hipFunction_t, ctypes.c_int, size_t, ctypes.c_uint]
+try: (hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:=dll.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags).restype, hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipFunction_t, ctypes.c_int32, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks, const void *f, int blockSize, size_t dynSharedMemPerBlk)
-try: (hipOccupancyMaxActiveBlocksPerMultiprocessor:=dll.hipOccupancyMaxActiveBlocksPerMultiprocessor).restype, hipOccupancyMaxActiveBlocksPerMultiprocessor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.c_void_p, ctypes.c_int, size_t]
+try: (hipOccupancyMaxActiveBlocksPerMultiprocessor:=dll.hipOccupancyMaxActiveBlocksPerMultiprocessor).restype, hipOccupancyMaxActiveBlocksPerMultiprocessor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
 # hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *numBlocks, const void *f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags = 0)
-try: (hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:=dll.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags).restype, hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.c_void_p, ctypes.c_int, size_t, ctypes.c_uint]
+try: (hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:=dll.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags).restype, hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_void_p, ctypes.c_int32, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipOccupancyMaxPotentialBlockSize(int *gridSize, int *blockSize, const void *f, size_t dynSharedMemPerBlk, int blockSizeLimit)
-try: (hipOccupancyMaxPotentialBlockSize:=dll.hipOccupancyMaxPotentialBlockSize).restype, hipOccupancyMaxPotentialBlockSize.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.c_void_p, size_t, ctypes.c_int]
+try: (hipOccupancyMaxPotentialBlockSize:=dll.hipOccupancyMaxPotentialBlockSize).restype, hipOccupancyMaxPotentialBlockSize.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
 # __attribute__((deprecated("use roctracer/rocTX instead"))) hipError_t hipProfilerStart()
@@ -2357,7 +2357,7 @@ try: (hipDrvMemcpy2DUnaligned:=dll.hipDrvMemcpy2DUnaligned).restype, hipDrvMemcp
 except AttributeError: pass
 
 # hipError_t hipExtLaunchKernel(const void *function_address, dim3 numBlocks, dim3 dimBlocks, void **args, size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags)
-try: (hipExtLaunchKernel:=dll.hipExtLaunchKernel).restype, hipExtLaunchKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int]
+try: (hipExtLaunchKernel:=dll.hipExtLaunchKernel).restype, hipExtLaunchKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int32]
 except AttributeError: pass
 
 class hipResourceDesc(Struct): pass
@@ -2399,17 +2399,17 @@ hipTextureDesc._fields_ = [
   ('addressMode', (hipTextureAddressMode * 3)),
   ('filterMode', hipTextureFilterMode),
   ('readMode', hipTextureReadMode),
-  ('sRGB', ctypes.c_int),
+  ('sRGB', ctypes.c_int32),
   ('borderColor', (ctypes.c_float * 4)),
-  ('normalizedCoords', ctypes.c_int),
-  ('maxAnisotropy', ctypes.c_uint),
+  ('normalizedCoords', ctypes.c_int32),
+  ('maxAnisotropy', ctypes.c_uint32),
   ('mipmapFilterMode', hipTextureFilterMode),
   ('mipmapLevelBias', ctypes.c_float),
   ('minMipmapLevelClamp', ctypes.c_float),
   ('maxMipmapLevelClamp', ctypes.c_float),
 ]
 class hipResourceViewDesc(Struct): pass
-hipResourceViewFormat = CEnum(ctypes.c_uint)
+hipResourceViewFormat = CEnum(ctypes.c_uint32)
 hipResViewFormatNone = hipResourceViewFormat.define('hipResViewFormatNone', 0)
 hipResViewFormatUnsignedChar1 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar1', 1)
 hipResViewFormatUnsignedChar2 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar2', 2)
@@ -2451,10 +2451,10 @@ hipResourceViewDesc._fields_ = [
   ('width', size_t),
   ('height', size_t),
   ('depth', size_t),
-  ('firstMipmapLevel', ctypes.c_uint),
-  ('lastMipmapLevel', ctypes.c_uint),
-  ('firstLayer', ctypes.c_uint),
-  ('lastLayer', ctypes.c_uint),
+  ('firstMipmapLevel', ctypes.c_uint32),
+  ('lastMipmapLevel', ctypes.c_uint32),
+  ('firstLayer', ctypes.c_uint32),
+  ('lastLayer', ctypes.c_uint32),
 ]
 # hipError_t hipCreateTextureObject(hipTextureObject_t *pTexObject, const hipResourceDesc *pResDesc, const hipTextureDesc *pTexDesc, const struct hipResourceViewDesc *pResViewDesc)
 try: (hipCreateTextureObject:=dll.hipCreateTextureObject).restype, hipCreateTextureObject.argtypes = hipError_t, [ctypes.POINTER(hipTextureObject_t), ctypes.POINTER(hipResourceDesc), ctypes.POINTER(hipTextureDesc), ctypes.POINTER(hipResourceViewDesc)]
@@ -2482,7 +2482,7 @@ except AttributeError: pass
 
 class HIP_RESOURCE_DESC_st(Struct): pass
 HIP_RESOURCE_DESC = HIP_RESOURCE_DESC_st
-HIPresourcetype_enum = CEnum(ctypes.c_uint)
+HIPresourcetype_enum = CEnum(ctypes.c_uint32)
 HIP_RESOURCE_TYPE_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_ARRAY', 0)
 HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY', 1)
 HIP_RESOURCE_TYPE_LINEAR = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_LINEAR', 2)
@@ -2502,21 +2502,21 @@ class HIP_RESOURCE_DESC_st_res_linear(Struct): pass
 HIP_RESOURCE_DESC_st_res_linear._fields_ = [
   ('devPtr', hipDeviceptr_t),
   ('format', hipArray_Format),
-  ('numChannels', ctypes.c_uint),
+  ('numChannels', ctypes.c_uint32),
   ('sizeInBytes', size_t),
 ]
 class HIP_RESOURCE_DESC_st_res_pitch2D(Struct): pass
 HIP_RESOURCE_DESC_st_res_pitch2D._fields_ = [
   ('devPtr', hipDeviceptr_t),
   ('format', hipArray_Format),
-  ('numChannels', ctypes.c_uint),
+  ('numChannels', ctypes.c_uint32),
   ('width', size_t),
   ('height', size_t),
   ('pitchInBytes', size_t),
 ]
 class HIP_RESOURCE_DESC_st_res_reserved(Struct): pass
 HIP_RESOURCE_DESC_st_res_reserved._fields_ = [
-  ('reserved', (ctypes.c_int * 32)),
+  ('reserved', (ctypes.c_int32 * 32)),
 ]
 HIP_RESOURCE_DESC_st_res._fields_ = [
   ('array', HIP_RESOURCE_DESC_st_res_array),
@@ -2528,18 +2528,18 @@ HIP_RESOURCE_DESC_st_res._fields_ = [
 HIP_RESOURCE_DESC_st._fields_ = [
   ('resType', HIPresourcetype),
   ('res', HIP_RESOURCE_DESC_st_res),
-  ('flags', ctypes.c_uint),
+  ('flags', ctypes.c_uint32),
 ]
 class HIP_TEXTURE_DESC_st(Struct): pass
 HIP_TEXTURE_DESC = HIP_TEXTURE_DESC_st
-HIPaddress_mode_enum = CEnum(ctypes.c_uint)
+HIPaddress_mode_enum = CEnum(ctypes.c_uint32)
 HIP_TR_ADDRESS_MODE_WRAP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_WRAP', 0)
 HIP_TR_ADDRESS_MODE_CLAMP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_CLAMP', 1)
 HIP_TR_ADDRESS_MODE_MIRROR = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_MIRROR', 2)
 HIP_TR_ADDRESS_MODE_BORDER = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_BORDER', 3)
 
 HIPaddress_mode = HIPaddress_mode_enum
-HIPfilter_mode_enum = CEnum(ctypes.c_uint)
+HIPfilter_mode_enum = CEnum(ctypes.c_uint32)
 HIP_TR_FILTER_MODE_POINT = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_POINT', 0)
 HIP_TR_FILTER_MODE_LINEAR = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_LINEAR', 1)
 
@@ -2547,18 +2547,18 @@ HIPfilter_mode = HIPfilter_mode_enum
 HIP_TEXTURE_DESC_st._fields_ = [
   ('addressMode', (HIPaddress_mode * 3)),
   ('filterMode', HIPfilter_mode),
-  ('flags', ctypes.c_uint),
-  ('maxAnisotropy', ctypes.c_uint),
+  ('flags', ctypes.c_uint32),
+  ('maxAnisotropy', ctypes.c_uint32),
   ('mipmapFilterMode', HIPfilter_mode),
   ('mipmapLevelBias', ctypes.c_float),
   ('minMipmapLevelClamp', ctypes.c_float),
   ('maxMipmapLevelClamp', ctypes.c_float),
   ('borderColor', (ctypes.c_float * 4)),
-  ('reserved', (ctypes.c_int * 12)),
+  ('reserved', (ctypes.c_int32 * 12)),
 ]
 class HIP_RESOURCE_VIEW_DESC_st(Struct): pass
 HIP_RESOURCE_VIEW_DESC = HIP_RESOURCE_VIEW_DESC_st
-HIPresourceViewFormat_enum = CEnum(ctypes.c_uint)
+HIPresourceViewFormat_enum = CEnum(ctypes.c_uint32)
 HIP_RES_VIEW_FORMAT_NONE = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_NONE', 0)
 HIP_RES_VIEW_FORMAT_UINT_1X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X8', 1)
 HIP_RES_VIEW_FORMAT_UINT_2X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_2X8', 2)
@@ -2601,11 +2601,11 @@ HIP_RESOURCE_VIEW_DESC_st._fields_ = [
   ('width', size_t),
   ('height', size_t),
   ('depth', size_t),
-  ('firstMipmapLevel', ctypes.c_uint),
-  ('lastMipmapLevel', ctypes.c_uint),
-  ('firstLayer', ctypes.c_uint),
-  ('lastLayer', ctypes.c_uint),
-  ('reserved', (ctypes.c_uint * 16)),
+  ('firstMipmapLevel', ctypes.c_uint32),
+  ('lastMipmapLevel', ctypes.c_uint32),
+  ('firstLayer', ctypes.c_uint32),
+  ('lastLayer', ctypes.c_uint32),
+  ('reserved', (ctypes.c_uint32 * 16)),
 ]
 # hipError_t hipTexObjectCreate(hipTextureObject_t *pTexObject, const HIP_RESOURCE_DESC *pResDesc, const HIP_TEXTURE_DESC *pTexDesc, const HIP_RESOURCE_VIEW_DESC *pResViewDesc)
 try: (hipTexObjectCreate:=dll.hipTexObjectCreate).restype, hipTexObjectCreate.argtypes = hipError_t, [ctypes.POINTER(hipTextureObject_t), ctypes.POINTER(HIP_RESOURCE_DESC), ctypes.POINTER(HIP_TEXTURE_DESC), ctypes.POINTER(HIP_RESOURCE_VIEW_DESC)]
@@ -2628,7 +2628,7 @@ try: (hipTexObjectGetTextureDesc:=dll.hipTexObjectGetTextureDesc).restype, hipTe
 except AttributeError: pass
 
 # hipError_t hipMallocMipmappedArray(hipMipmappedArray_t *mipmappedArray, const struct hipChannelFormatDesc *desc, struct hipExtent extent, unsigned int numLevels, unsigned int flags = 0)
-try: (hipMallocMipmappedArray:=dll.hipMallocMipmappedArray).restype, hipMallocMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(hipChannelFormatDesc), hipExtent, ctypes.c_uint, ctypes.c_uint]
+try: (hipMallocMipmappedArray:=dll.hipMallocMipmappedArray).restype, hipMallocMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(hipChannelFormatDesc), hipExtent, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray)
@@ -2639,23 +2639,23 @@ class const_hipMipmappedArray(Struct): pass
 const_hipMipmappedArray._fields_ = [
   ('data', ctypes.c_void_p),
   ('desc', hipChannelFormatDesc),
-  ('type', ctypes.c_uint),
-  ('width', ctypes.c_uint),
-  ('height', ctypes.c_uint),
-  ('depth', ctypes.c_uint),
-  ('min_mipmap_level', ctypes.c_uint),
-  ('max_mipmap_level', ctypes.c_uint),
-  ('flags', ctypes.c_uint),
+  ('type', ctypes.c_uint32),
+  ('width', ctypes.c_uint32),
+  ('height', ctypes.c_uint32),
+  ('depth', ctypes.c_uint32),
+  ('min_mipmap_level', ctypes.c_uint32),
+  ('max_mipmap_level', ctypes.c_uint32),
+  ('flags', ctypes.c_uint32),
   ('format', hipArray_Format),
-  ('num_channels', ctypes.c_uint),
+  ('num_channels', ctypes.c_uint32),
 ]
 hipMipmappedArray_const_t = ctypes.POINTER(const_hipMipmappedArray)
 # hipError_t hipGetMipmappedArrayLevel(hipArray_t *levelArray, hipMipmappedArray_const_t mipmappedArray, unsigned int level)
-try: (hipGetMipmappedArrayLevel:=dll.hipGetMipmappedArrayLevel).restype, hipGetMipmappedArrayLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_const_t, ctypes.c_uint]
+try: (hipGetMipmappedArrayLevel:=dll.hipGetMipmappedArrayLevel).restype, hipGetMipmappedArrayLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_const_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t *pHandle, HIP_ARRAY3D_DESCRIPTOR *pMipmappedArrayDesc, unsigned int numMipmapLevels)
-try: (hipMipmappedArrayCreate:=dll.hipMipmappedArrayCreate).restype, hipMipmappedArrayCreate.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR), ctypes.c_uint]
+try: (hipMipmappedArrayCreate:=dll.hipMipmappedArrayCreate).restype, hipMipmappedArrayCreate.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR), ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipMipmappedArrayDestroy(hipMipmappedArray_t hMipmappedArray)
@@ -2663,7 +2663,7 @@ try: (hipMipmappedArrayDestroy:=dll.hipMipmappedArrayDestroy).restype, hipMipmap
 except AttributeError: pass
 
 # hipError_t hipMipmappedArrayGetLevel(hipArray_t *pLevelArray, hipMipmappedArray_t hMipMappedArray, unsigned int level)
-try: (hipMipmappedArrayGetLevel:=dll.hipMipmappedArrayGetLevel).restype, hipMipmappedArrayGetLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_t, ctypes.c_uint]
+try: (hipMipmappedArrayGetLevel:=dll.hipMipmappedArrayGetLevel).restype, hipMipmappedArrayGetLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTextureToMipmappedArray(const textureReference *tex, hipMipmappedArray_const_t mipmappedArray, const hipChannelFormatDesc *desc)
@@ -2683,11 +2683,11 @@ try: (hipTexRefGetArray:=dll.hipTexRefGetArray).restype, hipTexRefGetArray.argty
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddressMode(textureReference *texRef, int dim, enum hipTextureAddressMode am)
-try: (hipTexRefSetAddressMode:=dll.hipTexRefSetAddressMode).restype, hipTexRefSetAddressMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_int, hipTextureAddressMode]
+try: (hipTexRefSetAddressMode:=dll.hipTexRefSetAddressMode).restype, hipTexRefSetAddressMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_int32, hipTextureAddressMode]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetArray(textureReference *tex, hipArray_const_t array, unsigned int flags)
-try: (hipTexRefSetArray:=dll.hipTexRefSetArray).restype, hipTexRefSetArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_const_t, ctypes.c_uint]
+try: (hipTexRefSetArray:=dll.hipTexRefSetArray).restype, hipTexRefSetArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_const_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFilterMode(textureReference *texRef, enum hipTextureFilterMode fm)
@@ -2695,11 +2695,11 @@ try: (hipTexRefSetFilterMode:=dll.hipTexRefSetFilterMode).restype, hipTexRefSetF
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFlags(textureReference *texRef, unsigned int Flags)
-try: (hipTexRefSetFlags:=dll.hipTexRefSetFlags).restype, hipTexRefSetFlags.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint]
+try: (hipTexRefSetFlags:=dll.hipTexRefSetFlags).restype, hipTexRefSetFlags.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint32]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFormat(textureReference *texRef, hipArray_Format fmt, int NumPackedComponents)
-try: (hipTexRefSetFormat:=dll.hipTexRefSetFormat).restype, hipTexRefSetFormat.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_Format, ctypes.c_int]
+try: (hipTexRefSetFormat:=dll.hipTexRefSetFormat).restype, hipTexRefSetFormat.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_Format, ctypes.c_int32]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTexture(size_t *offset, const textureReference *tex, const void *devPtr, const hipChannelFormatDesc *desc, size_t size = (2147483647 * 2U + 1U))
@@ -2727,7 +2727,7 @@ try: (hipTexRefGetAddress:=dll.hipTexRefGetAddress).restype, hipTexRefGetAddress
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetAddressMode(enum hipTextureAddressMode *pam, const textureReference *texRef, int dim)
-try: (hipTexRefGetAddressMode:=dll.hipTexRefGetAddressMode).restype, hipTexRefGetAddressMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureAddressMode), ctypes.POINTER(textureReference), ctypes.c_int]
+try: (hipTexRefGetAddressMode:=dll.hipTexRefGetAddressMode).restype, hipTexRefGetAddressMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureAddressMode), ctypes.POINTER(textureReference), ctypes.c_int32]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
@@ -2735,15 +2735,15 @@ try: (hipTexRefGetFilterMode:=dll.hipTexRefGetFilterMode).restype, hipTexRefGetF
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFlags(unsigned int *pFlags, const textureReference *texRef)
-try: (hipTexRefGetFlags:=dll.hipTexRefGetFlags).restype, hipTexRefGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint), ctypes.POINTER(textureReference)]
+try: (hipTexRefGetFlags:=dll.hipTexRefGetFlags).restype, hipTexRefGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFormat(hipArray_Format *pFormat, int *pNumChannels, const textureReference *texRef)
-try: (hipTexRefGetFormat:=dll.hipTexRefGetFormat).restype, hipTexRefGetFormat.argtypes = hipError_t, [ctypes.POINTER(hipArray_Format), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(textureReference)]
+try: (hipTexRefGetFormat:=dll.hipTexRefGetFormat).restype, hipTexRefGetFormat.argtypes = hipError_t, [ctypes.POINTER(hipArray_Format), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMaxAnisotropy(int *pmaxAnsio, const textureReference *texRef)
-try: (hipTexRefGetMaxAnisotropy:=dll.hipTexRefGetMaxAnisotropy).restype, hipTexRefGetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(textureReference)]
+try: (hipTexRefGetMaxAnisotropy:=dll.hipTexRefGetMaxAnisotropy).restype, hipTexRefGetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
@@ -2771,7 +2771,7 @@ try: (hipTexRefSetAddress2D:=dll.hipTexRefSetAddress2D).restype, hipTexRefSetAdd
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMaxAnisotropy(textureReference *texRef, unsigned int maxAniso)
-try: (hipTexRefSetMaxAnisotropy:=dll.hipTexRefSetMaxAnisotropy).restype, hipTexRefSetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint]
+try: (hipTexRefSetMaxAnisotropy:=dll.hipTexRefSetMaxAnisotropy).restype, hipTexRefSetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint32]
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetBorderColor(textureReference *texRef, float *pBorderColor)
@@ -2791,7 +2791,7 @@ try: (hipTexRefSetMipmapLevelClamp:=dll.hipTexRefSetMipmapLevelClamp).restype, h
 except AttributeError: pass
 
 # __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmappedArray(textureReference *texRef, struct hipMipmappedArray *mipmappedArray, unsigned int Flags)
-try: (hipTexRefSetMipmappedArray:=dll.hipTexRefSetMipmappedArray).restype, hipTexRefSetMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(hipMipmappedArray), ctypes.c_uint]
+try: (hipTexRefSetMipmappedArray:=dll.hipTexRefSetMipmappedArray).restype, hipTexRefSetMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(hipMipmappedArray), ctypes.c_uint32]
 except AttributeError: pass
 
 # const char *hipApiName(uint32_t id)
@@ -2807,7 +2807,7 @@ try: (hipKernelNameRefByPtr:=dll.hipKernelNameRefByPtr).restype, hipKernelNameRe
 except AttributeError: pass
 
 # int hipGetStreamDeviceId(hipStream_t stream)
-try: (hipGetStreamDeviceId:=dll.hipGetStreamDeviceId).restype, hipGetStreamDeviceId.argtypes = ctypes.c_int, [hipStream_t]
+try: (hipGetStreamDeviceId:=dll.hipGetStreamDeviceId).restype, hipGetStreamDeviceId.argtypes = ctypes.c_int32, [hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode)
@@ -2823,11 +2823,11 @@ try: (hipStreamEndCapture:=dll.hipStreamEndCapture).restype, hipStreamEndCapture
 except AttributeError: pass
 
 # hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptureStatus *pCaptureStatus, unsigned long long *pId)
-try: (hipStreamGetCaptureInfo:=dll.hipStreamGetCaptureInfo).restype, hipStreamGetCaptureInfo.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipStreamCaptureStatus), ctypes.POINTER(ctypes.c_ulonglong)]
+try: (hipStreamGetCaptureInfo:=dll.hipStreamGetCaptureInfo).restype, hipStreamGetCaptureInfo.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipStreamCaptureStatus), ctypes.POINTER(ctypes.c_uint64)]
 except AttributeError: pass
 
 # hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus *captureStatus_out, unsigned long long *id_out = 0, hipGraph_t *graph_out = 0, const hipGraphNode_t **dependencies_out = 0, size_t *numDependencies_out = 0)
-try: (hipStreamGetCaptureInfo_v2:=dll.hipStreamGetCaptureInfo_v2).restype, hipStreamGetCaptureInfo_v2.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipStreamCaptureStatus), ctypes.POINTER(ctypes.c_ulonglong), ctypes.POINTER(hipGraph_t), ctypes.POINTER(ctypes.POINTER(hipGraphNode_t)), ctypes.POINTER(size_t)]
+try: (hipStreamGetCaptureInfo_v2:=dll.hipStreamGetCaptureInfo_v2).restype, hipStreamGetCaptureInfo_v2.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipStreamCaptureStatus), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(hipGraph_t), ctypes.POINTER(ctypes.POINTER(hipGraphNode_t)), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
 # hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus *pCaptureStatus)
@@ -2835,7 +2835,7 @@ try: (hipStreamIsCapturing:=dll.hipStreamIsCapturing).restype, hipStreamIsCaptur
 except AttributeError: pass
 
 # hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t *dependencies, size_t numDependencies, unsigned int flags = 0)
-try: (hipStreamUpdateCaptureDependencies:=dll.hipStreamUpdateCaptureDependencies).restype, hipStreamUpdateCaptureDependencies.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.c_uint]
+try: (hipStreamUpdateCaptureDependencies:=dll.hipStreamUpdateCaptureDependencies).restype, hipStreamUpdateCaptureDependencies.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode *mode)
@@ -2843,7 +2843,7 @@ try: (hipThreadExchangeStreamCaptureMode:=dll.hipThreadExchangeStreamCaptureMode
 except AttributeError: pass
 
 # hipError_t hipGraphCreate(hipGraph_t *pGraph, unsigned int flags)
-try: (hipGraphCreate:=dll.hipGraphCreate).restype, hipGraphCreate.argtypes = hipError_t, [ctypes.POINTER(hipGraph_t), ctypes.c_uint]
+try: (hipGraphCreate:=dll.hipGraphCreate).restype, hipGraphCreate.argtypes = hipError_t, [ctypes.POINTER(hipGraph_t), ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipGraphDestroy(hipGraph_t graph)
@@ -2899,7 +2899,7 @@ try: (hipGraphInstantiate:=dll.hipGraphInstantiate).restype, hipGraphInstantiate
 except AttributeError: pass
 
 # hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t *pGraphExec, hipGraph_t graph, unsigned long long flags)
-try: (hipGraphInstantiateWithFlags:=dll.hipGraphInstantiateWithFlags).restype, hipGraphInstantiateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipGraphExec_t), hipGraph_t, ctypes.c_ulonglong]
+try: (hipGraphInstantiateWithFlags:=dll.hipGraphInstantiateWithFlags).restype, hipGraphInstantiateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipGraphExec_t), hipGraph_t, ctypes.c_uint64]
 except AttributeError: pass
 
 # hipError_t hipGraphInstantiateWithParams(hipGraphExec_t *pGraphExec, hipGraph_t graph, hipGraphInstantiateParams *instantiateParams)
@@ -3103,39 +3103,39 @@ try: (hipGraphMemFreeNodeGetParams:=dll.hipGraphMemFreeNodeGetParams).restype, h
 except AttributeError: pass
 
 # hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void *value)
-try: (hipDeviceGetGraphMemAttribute:=dll.hipDeviceGetGraphMemAttribute).restype, hipDeviceGetGraphMemAttribute.argtypes = hipError_t, [ctypes.c_int, hipGraphMemAttributeType, ctypes.c_void_p]
+try: (hipDeviceGetGraphMemAttribute:=dll.hipDeviceGetGraphMemAttribute).restype, hipDeviceGetGraphMemAttribute.argtypes = hipError_t, [ctypes.c_int32, hipGraphMemAttributeType, ctypes.c_void_p]
 except AttributeError: pass
 
 # hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void *value)
-try: (hipDeviceSetGraphMemAttribute:=dll.hipDeviceSetGraphMemAttribute).restype, hipDeviceSetGraphMemAttribute.argtypes = hipError_t, [ctypes.c_int, hipGraphMemAttributeType, ctypes.c_void_p]
+try: (hipDeviceSetGraphMemAttribute:=dll.hipDeviceSetGraphMemAttribute).restype, hipDeviceSetGraphMemAttribute.argtypes = hipError_t, [ctypes.c_int32, hipGraphMemAttributeType, ctypes.c_void_p]
 except AttributeError: pass
 
 # hipError_t hipDeviceGraphMemTrim(int device)
-try: (hipDeviceGraphMemTrim:=dll.hipDeviceGraphMemTrim).restype, hipDeviceGraphMemTrim.argtypes = hipError_t, [ctypes.c_int]
+try: (hipDeviceGraphMemTrim:=dll.hipDeviceGraphMemTrim).restype, hipDeviceGraphMemTrim.argtypes = hipError_t, [ctypes.c_int32]
 except AttributeError: pass
 
 # hipError_t hipUserObjectCreate(hipUserObject_t *object_out, void *ptr, hipHostFn_t destroy, unsigned int initialRefcount, unsigned int flags)
-try: (hipUserObjectCreate:=dll.hipUserObjectCreate).restype, hipUserObjectCreate.argtypes = hipError_t, [ctypes.POINTER(hipUserObject_t), ctypes.c_void_p, hipHostFn_t, ctypes.c_uint, ctypes.c_uint]
+try: (hipUserObjectCreate:=dll.hipUserObjectCreate).restype, hipUserObjectCreate.argtypes = hipError_t, [ctypes.POINTER(hipUserObject_t), ctypes.c_void_p, hipHostFn_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count = 1)
-try: (hipUserObjectRelease:=dll.hipUserObjectRelease).restype, hipUserObjectRelease.argtypes = hipError_t, [hipUserObject_t, ctypes.c_uint]
+try: (hipUserObjectRelease:=dll.hipUserObjectRelease).restype, hipUserObjectRelease.argtypes = hipError_t, [hipUserObject_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count = 1)
-try: (hipUserObjectRetain:=dll.hipUserObjectRetain).restype, hipUserObjectRetain.argtypes = hipError_t, [hipUserObject_t, ctypes.c_uint]
+try: (hipUserObjectRetain:=dll.hipUserObjectRetain).restype, hipUserObjectRetain.argtypes = hipError_t, [hipUserObject_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count = 1, unsigned int flags = 0)
-try: (hipGraphRetainUserObject:=dll.hipGraphRetainUserObject).restype, hipGraphRetainUserObject.argtypes = hipError_t, [hipGraph_t, hipUserObject_t, ctypes.c_uint, ctypes.c_uint]
+try: (hipGraphRetainUserObject:=dll.hipGraphRetainUserObject).restype, hipGraphRetainUserObject.argtypes = hipError_t, [hipGraph_t, hipUserObject_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count = 1)
-try: (hipGraphReleaseUserObject:=dll.hipGraphReleaseUserObject).restype, hipGraphReleaseUserObject.argtypes = hipError_t, [hipGraph_t, hipUserObject_t, ctypes.c_uint]
+try: (hipGraphReleaseUserObject:=dll.hipGraphReleaseUserObject).restype, hipGraphReleaseUserObject.argtypes = hipError_t, [hipGraph_t, hipUserObject_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char *path, unsigned int flags)
-try: (hipGraphDebugDotPrint:=dll.hipGraphDebugDotPrint).restype, hipGraphDebugDotPrint.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint]
+try: (hipGraphDebugDotPrint:=dll.hipGraphDebugDotPrint).restype, hipGraphDebugDotPrint.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst)
@@ -3143,11 +3143,11 @@ try: (hipGraphKernelNodeCopyAttributes:=dll.hipGraphKernelNodeCopyAttributes).re
 except AttributeError: pass
 
 # hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, unsigned int isEnabled)
-try: (hipGraphNodeSetEnabled:=dll.hipGraphNodeSetEnabled).restype, hipGraphNodeSetEnabled.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.c_uint]
+try: (hipGraphNodeSetEnabled:=dll.hipGraphNodeSetEnabled).restype, hipGraphNodeSetEnabled.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, unsigned int *isEnabled)
-try: (hipGraphNodeGetEnabled:=dll.hipGraphNodeGetEnabled).restype, hipGraphNodeGetEnabled.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(ctypes.c_uint)]
+try: (hipGraphNodeGetEnabled:=dll.hipGraphNodeGetEnabled).restype, hipGraphNodeGetEnabled.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
 # hipError_t hipGraphAddExternalSemaphoresWaitNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const hipExternalSemaphoreWaitNodeParams *nodeParams)
@@ -3191,19 +3191,19 @@ try: (hipMemAddressFree:=dll.hipMemAddressFree).restype, hipMemAddressFree.argty
 except AttributeError: pass
 
 # hipError_t hipMemAddressReserve(void **ptr, size_t size, size_t alignment, void *addr, unsigned long long flags)
-try: (hipMemAddressReserve:=dll.hipMemAddressReserve).restype, hipMemAddressReserve.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, size_t, ctypes.c_void_p, ctypes.c_ulonglong]
+try: (hipMemAddressReserve:=dll.hipMemAddressReserve).restype, hipMemAddressReserve.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, size_t, ctypes.c_void_p, ctypes.c_uint64]
 except AttributeError: pass
 
 # hipError_t hipMemCreate(hipMemGenericAllocationHandle_t *handle, size_t size, const hipMemAllocationProp *prop, unsigned long long flags)
-try: (hipMemCreate:=dll.hipMemCreate).restype, hipMemCreate.argtypes = hipError_t, [ctypes.POINTER(hipMemGenericAllocationHandle_t), size_t, ctypes.POINTER(hipMemAllocationProp), ctypes.c_ulonglong]
+try: (hipMemCreate:=dll.hipMemCreate).restype, hipMemCreate.argtypes = hipError_t, [ctypes.POINTER(hipMemGenericAllocationHandle_t), size_t, ctypes.POINTER(hipMemAllocationProp), ctypes.c_uint64]
 except AttributeError: pass
 
 # hipError_t hipMemExportToShareableHandle(void *shareableHandle, hipMemGenericAllocationHandle_t handle, hipMemAllocationHandleType handleType, unsigned long long flags)
-try: (hipMemExportToShareableHandle:=dll.hipMemExportToShareableHandle).restype, hipMemExportToShareableHandle.argtypes = hipError_t, [ctypes.c_void_p, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, ctypes.c_ulonglong]
+try: (hipMemExportToShareableHandle:=dll.hipMemExportToShareableHandle).restype, hipMemExportToShareableHandle.argtypes = hipError_t, [ctypes.c_void_p, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, ctypes.c_uint64]
 except AttributeError: pass
 
 # hipError_t hipMemGetAccess(unsigned long long *flags, const hipMemLocation *location, void *ptr)
-try: (hipMemGetAccess:=dll.hipMemGetAccess).restype, hipMemGetAccess.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_ulonglong), ctypes.POINTER(hipMemLocation), ctypes.c_void_p]
+try: (hipMemGetAccess:=dll.hipMemGetAccess).restype, hipMemGetAccess.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(hipMemLocation), ctypes.c_void_p]
 except AttributeError: pass
 
 # hipError_t hipMemGetAllocationGranularity(size_t *granularity, const hipMemAllocationProp *prop, hipMemAllocationGranularity_flags option)
@@ -3219,11 +3219,11 @@ try: (hipMemImportFromShareableHandle:=dll.hipMemImportFromShareableHandle).rest
 except AttributeError: pass
 
 # hipError_t hipMemMap(void *ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle, unsigned long long flags)
-try: (hipMemMap:=dll.hipMemMap).restype, hipMemMap.argtypes = hipError_t, [ctypes.c_void_p, size_t, size_t, hipMemGenericAllocationHandle_t, ctypes.c_ulonglong]
+try: (hipMemMap:=dll.hipMemMap).restype, hipMemMap.argtypes = hipError_t, [ctypes.c_void_p, size_t, size_t, hipMemGenericAllocationHandle_t, ctypes.c_uint64]
 except AttributeError: pass
 
 # hipError_t hipMemMapArrayAsync(hipArrayMapInfo *mapInfoList, unsigned int count, hipStream_t stream)
-try: (hipMemMapArrayAsync:=dll.hipMemMapArrayAsync).restype, hipMemMapArrayAsync.argtypes = hipError_t, [ctypes.POINTER(hipArrayMapInfo), ctypes.c_uint, hipStream_t]
+try: (hipMemMapArrayAsync:=dll.hipMemMapArrayAsync).restype, hipMemMapArrayAsync.argtypes = hipError_t, [ctypes.POINTER(hipArrayMapInfo), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)
@@ -3243,11 +3243,11 @@ try: (hipMemUnmap:=dll.hipMemUnmap).restype, hipMemUnmap.argtypes = hipError_t, 
 except AttributeError: pass
 
 # hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t *resources, hipStream_t stream = 0)
-try: (hipGraphicsMapResources:=dll.hipGraphicsMapResources).restype, hipGraphicsMapResources.argtypes = hipError_t, [ctypes.c_int, ctypes.POINTER(hipGraphicsResource_t), hipStream_t]
+try: (hipGraphicsMapResources:=dll.hipGraphicsMapResources).restype, hipGraphicsMapResources.argtypes = hipError_t, [ctypes.c_int32, ctypes.POINTER(hipGraphicsResource_t), hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t *array, hipGraphicsResource_t resource, unsigned int arrayIndex, unsigned int mipLevel)
-try: (hipGraphicsSubResourceGetMappedArray:=dll.hipGraphicsSubResourceGetMappedArray).restype, hipGraphicsSubResourceGetMappedArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipGraphicsResource_t, ctypes.c_uint, ctypes.c_uint]
+try: (hipGraphicsSubResourceGetMappedArray:=dll.hipGraphicsSubResourceGetMappedArray).restype, hipGraphicsSubResourceGetMappedArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipGraphicsResource_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 # hipError_t hipGraphicsResourceGetMappedPointer(void **devPtr, size_t *size, hipGraphicsResource_t resource)
@@ -3255,7 +3255,7 @@ try: (hipGraphicsResourceGetMappedPointer:=dll.hipGraphicsResourceGetMappedPoint
 except AttributeError: pass
 
 # hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t *resources, hipStream_t stream = 0)
-try: (hipGraphicsUnmapResources:=dll.hipGraphicsUnmapResources).restype, hipGraphicsUnmapResources.argtypes = hipError_t, [ctypes.c_int, ctypes.POINTER(hipGraphicsResource_t), hipStream_t]
+try: (hipGraphicsUnmapResources:=dll.hipGraphicsUnmapResources).restype, hipGraphicsUnmapResources.argtypes = hipError_t, [ctypes.c_int32, ctypes.POINTER(hipGraphicsResource_t), hipStream_t]
 except AttributeError: pass
 
 # hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource)
