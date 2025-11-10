@@ -10,7 +10,8 @@ class TestOuterworldTransformer(unittest.TestCase):
     i = UOp.range(3, -1, AxisType.OUTER)
     inp_after = Tensor(inp.uop.after(i))
     inp_gemm = inp_after@w[i]
-    inp = Tensor(inp_gemm.uop.reduce(i, arg=Ops.MAX))
+    inp = inp.uop.after(inp.uop.store(inp_gemm.uop).end(i)).contiguous()
+    inp = Tensor(inp)
     inp.realize()
 
 if __name__ == "__main__":

@@ -16,6 +16,9 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
+def realize_store(ctx:dict[UOp, None], a:UOp) -> None:
+  if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
+
 def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
   # if it's a kernel, we don't realize it
@@ -30,6 +33,8 @@ pm_generate_realize_map = PatternMatcher([
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
+  # realize STORE
+  (UPat(Ops.STORE, name="a"), realize_store),
 ])
 
 @dataclass(frozen=True)
@@ -177,7 +182,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       # mark all ranges as ended
       assert rctx.realize_map[x] is None
       rctx.realize_map[x] = list(range(len(x.shape)))
-    elif x.op in {Ops.MSTACK, Ops.MSELECT}:
+    elif x.op in {Ops.MSTACK, Ops.MSELECT, Ops.END}:
       # treat MSTACK/MSELECT like SINK
       continue
     elif len(consumer_rngs) == 0:
