@@ -140,7 +140,7 @@ function renderDag(graph, additions, recenter, layoutOpts) {
     e.preventDefault();
     updateProgress({ start:false });
     displaySelection("#custom");
-    const div = d3.create("div").style("width", "100%").style("padding", "4px");
+    const div = d3.create("div").classed("raw-text", true);
     div.append(() => codeBlock("Error in graph layout:\n"+e.message, "txt"));
     document.querySelector("#custom").replaceChildren(div.node());
   }
