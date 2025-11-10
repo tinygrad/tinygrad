@@ -338,12 +338,12 @@ class QCOMDevice(HCQCompiled):
     kgsl.IOCTL_KGSL_SETPROPERTY(self.fd, type=kgsl.KGSL_PROP_PWR_CONSTRAINT, value=mv_address(pwr), sizebytes=pwr.nbytes)
 
     # Load info about qcom device
-    self.info = kgsl.struct_kgsl_devinfo()
-    kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(self.info), sizebytes=ctypes.sizeof(self.info))
-    self.gpu_id = (self.info.chip_id>>24, (self.info.chip_id>>16)&0xFF, (self.info.chip_id>>8)&0xFF)
+    info = kgsl.struct_kgsl_devinfo()
+    kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(info), sizebytes=ctypes.sizeof(info))
+    self.gpu_id = (info.chip_id >> 24, (info.chip_id >> 16) & 0xFF, (info.chip_id >> 8) & 0xFF)
 
     # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
-    if self.gpu_id[:2] < (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={self.info.chip_id}")
+    if self.gpu_id[:2] < (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id}")
 
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
