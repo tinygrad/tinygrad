@@ -13,6 +13,6 @@ if __name__ == "__main__":
     os.chmod(fp, 0o755)
     os.system(f"sudo {fp} --prefix={fp.parent} --include-subdir")
   else:
-    lib = fetch("https://github.com/ROCm/rocprof-trace-decoder/raw/5420409ad0963b2d76450add067b9058493ccbd0/releases/linux_glibc_2_28_x86_64/librocprof-trace-decoder.so", name="librocprof-trace-decoder.so")
+    lib = fetch("https://github.com/ROCm/rocprof-trace-decoder/raw/43bf0fef74a83c3c25badfc5a09c0bd39ed8c6f9/releases/linux_glibc_2_28_x86_64/librocprof-trace-decoder.so", name="librocprof-trace-decoder.so")
   shutil.copy2(lib, DEST)
   print(f"Installed {lib.name} to", DEST)

@@ -15,7 +15,9 @@ PATHS_TO_TRY = [
 ]
 def _try_dlopen_tinymesa_cpu():
   library = ctypes.util.find_library("tinymesa_cpu")
-  if library: return ctypes.CDLL(library)
+  if library:
+    try: return ctypes.CDLL(library)
+    except OSError: pass
   for candidate in PATHS_TO_TRY:
     try: return ctypes.CDLL(candidate)
     except OSError: pass
@@ -23,6 +25,8 @@ def _try_dlopen_tinymesa_cpu():
 
 
 class AsDictMixin:
+    import sys
+    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}
@@ -10254,7 +10258,6 @@ nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(s
 class struct_nir_builder(Structure):
     pass
 
-struct_nir_builder._pack_ = 0 # source:False
 struct_nir_builder._fields_ = [
     ('cursor', nir_cursor),
     ('exact', ctypes.c_bool),

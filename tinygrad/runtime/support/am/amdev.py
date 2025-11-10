@@ -1,11 +1,11 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, os, hashlib, array
+import ctypes, collections, dataclasses, functools, hashlib, array
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
-from tinygrad.runtime.support.system import System, PCIDevImplBase
+from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
@@ -118,9 +118,9 @@ class AMMemoryManager(MemoryManager):
 class AMDev(PCIDevImplBase):
   Version = 0xA0000006
 
-  def __init__(self, devfmt, vram:MMIOInterface, doorbell:MMIOInterface, mmio:MMIOInterface, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
-    self.devfmt, self.vram, self.doorbell64, self.mmio, self.dma_regions = devfmt, vram, doorbell, mmio, dma_regions
-    self.lock_fd = System.flock_acquire(f"am_{self.devfmt}.lock")
+  def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
+    self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions
+    self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
     self._run_discovery()
     self._build_regs()
@@ -188,7 +188,6 @@ class AMDev(PCIDevImplBase):
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
-    os.close(self.lock_fd)
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 

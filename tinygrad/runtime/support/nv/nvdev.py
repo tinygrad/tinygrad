@@ -1,10 +1,9 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits
-from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
-from tinygrad.runtime.support.system import System, PCIDevImplBase
+from tinygrad.runtime.support.system import System, PCIDevice, PCIDevImplBase
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
@@ -71,9 +70,8 @@ class NVMemoryManager(MemoryManager):
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
 class NVDev(PCIDevImplBase):
-  def __init__(self, devfmt:str, mmio:MMIOInterface, vram:MMIOInterface, venid:int, subvenid:int, rev:int, bars:dict):
-    self.devfmt, self.mmio, self.vram, self.venid, self.subvenid, self.rev, self.bars = devfmt, mmio, vram, venid, subvenid, rev, bars
-    self.lock_fd = System.flock_acquire(f"nv_{self.devfmt}.lock")
+  def __init__(self, pci_dev:PCIDevice):
+    self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
 
     self.smi_dev, self.is_booting = False, True
     self._early_init()
@@ -120,7 +118,7 @@ class NVDev(PCIDevImplBase):
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
-      System.pci_reset(self.devfmt)
+      self.pci_dev.reset()
       time.sleep(0.5)
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
@@ -134,6 +132,8 @@ class NVDev(PCIDevImplBase):
     self.pte_t, self.pde_t, self.dual_pde_t = tuple([self.__dict__[name] for name in mmu_pd_names])
 
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
+
+    self.vram, self.mmio = self.pci_dev.map_bar(1), self.pci_dev.map_bar(0, fmt='I')
     self.large_bar = self.vram.nbytes >= self.vram_size
 
   def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[ctypes.Structure, int]:

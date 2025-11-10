@@ -4,7 +4,7 @@ assert sys.platform != 'win32'
 from typing import cast, ClassVar
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
-from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
+from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPairT
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing
@@ -321,8 +321,7 @@ class NVKIface:
       with contextlib.suppress(RuntimeError): uvm.mm_initialize(self.fd_uvm_2, uvmFd=self.fd_uvm.fd) # this error is okay, CUDA hits it too
 
       nv_iowr(NVKIface.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, gpus_info:=(nv_gpu.nv_ioctl_card_info_t*64)())
-      visible_devices = [int(x) for x in (getenv('VISIBLE_DEVICES', getenv('CUDA_VISIBLE_DEVICES', ''))).split(',') if x.strip()]
-      NVKIface.gpus_info = [gpus_info[x] for x in visible_devices] if visible_devices else gpus_info
+      NVKIface.gpus_info = hcq_filter_visible_devices(gpus_info)
 
     self.dev, self.device_id = dev, device_id
     if self.device_id >= len(NVKIface.gpus_info) or not NVKIface.gpus_info[self.device_id].valid:
@@ -390,12 +389,12 @@ class NVKIface:
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, cpu_addr=None, **kwargs) -> HCQBuffer:
     # Uncached memory is "system". Use huge pages only for gpu memory.
-    page_size = (4 << (12 if OSX else 10)) if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << (12 if OSX else 10)))
+    page_size = mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (mmap.PAGESIZE if MOCKGPU else 4 << 10))
     size = round_up(size, page_size)
-    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access)
+    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access) if (alloced:=cpu_addr is None) else cpu_addr
 
     if host:
-      va_addr = cpu_addr or FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
+      if alloced: va_addr = FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
 
       flags = (nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) \
             | (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30)
@@ -462,9 +461,7 @@ class PCIIface(PCIIfaceBase):
     if not OSX: System.reserve_hugepages(64)
 
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
-    self.dev_impl:NVDev = NVDev(self.pci_dev.pcibus, self.pci_dev.map_bar(0, fmt='I'), self.pci_dev.map_bar(1),
-      self.pci_dev.read_config(pci.PCI_VENDOR_ID, 4), self.pci_dev.read_config(pci.PCI_SUBSYSTEM_VENDOR_ID, 4),
-      self.pci_dev.read_config(pci.PCI_REVISION_ID, 1), self.pci_dev.bar_info)
+    self.dev_impl:NVDev = NVDev(self.pci_dev)
     self.root, self.gpu_instance = 0xc1000000, 0
     self.rm_alloc(0, nv_gpu.NV01_ROOT, nv_gpu.NV0000_ALLOC_PARAMETERS())
 
@@ -474,7 +471,7 @@ class PCIIface(PCIIfaceBase):
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
     # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
-    page_size = (2 << 20) if size >= (8 << 20) and not uncached and not host else (4 << 10)
+    page_size = mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << 10))
     return super().alloc(round_up(size, page_size), host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, **kwargs)
 
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
