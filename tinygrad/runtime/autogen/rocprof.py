@@ -258,4 +258,3 @@ struct_rocprofiler_thread_trace_decoder_shaderdata_t._fields_ = [
 ]
 rocprofiler_thread_trace_decoder_shaderdata_t = struct_rocprofiler_thread_trace_decoder_shaderdata_t
 rocprofiler_thread_trace_decoder_record_type_t = enum_rocprofiler_thread_trace_decoder_record_type_t
-

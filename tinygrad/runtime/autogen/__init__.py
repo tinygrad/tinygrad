@@ -1,5 +1,5 @@
-import importlib, pathlib, subprocess, tarfile
-from tinygrad.helpers import flatten
+import glob, importlib, pathlib, subprocess, tarfile
+from tinygrad.helpers import fetch, flatten
 
 def sys(cmd): return subprocess.check_output(cmd.split()).decode().strip()
 
@@ -9,7 +9,7 @@ macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/M
 
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists():
-    files, kwargs['args'] = files() if callable(files) else files, args() if callable(kwargs.get('args', [])) else kwargs.get('args', [])
+    files, kwargs['args'] = files() if callable(files) else files, args() if callable(args:=kwargs.get('args', [])) else args
     if (tarball:=kwargs.pop('tarball', None)):
       # dangerous for arbitrary urls!
       with tarfile.open(fetch(tarball, gunzip=tarball.endswith("gz"))) as tf:
@@ -107,7 +107,7 @@ python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h
 python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
 python3 src/compiler/builtin_types_h.py gen/builtin_types.h""", cwd=path, shell=True, check=True),
   tarball="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.4/mesa-25.2.4.tar.gz",
-  prolog=["import gzip, base64", "from tinygrad.helpers import OSX"], epilog=lambda path: sys(f"{root}/extra/mesa/lvp_nir_options.sh {path}"))
+  prolog=["import gzip, base64", "from tinygrad.helpers import OSX"], epilog=lambda path: [sys(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang": return load("libclang", ["os.getenv('LIBCLANG_PATH', find_library('clang-20'))"],
                                  lambda: [sys("llvm-config-20 --includedir")+"/clang-c/Index.h"], args=lambda: sys("llvm-config-20 --cflags").split(),
                                  types={"CXString":"ci._CXString","CXType":"ci.Type","CXCursor":"ci.Cursor"}, prolog=["import clang.cindex as ci"])

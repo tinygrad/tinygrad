@@ -87,4 +87,3 @@ except AttributeError: pass
 try: (nvJitLinkVersion:=dll.nvJitLinkVersion).restype, nvJitLinkVersion.argtypes = nvJitLinkResult, [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-
