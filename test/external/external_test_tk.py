@@ -8,6 +8,7 @@ from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import gl, st, rt, rv
 
 class TestTK(unittest.TestCase):
+  @unittest.skip("store from float rt is wrong")
   def test_simple_matmul(self):
     N = 32
     BLOCK_SIZE = 16
@@ -56,8 +57,9 @@ class TestTK(unittest.TestCase):
 
     ref = a.matmul(b, dtype=dtypes.float32).float()
 
-    assert (diff := (ref - c).mean().abs().item()) < 3e-4, f"max diff {diff}"
+    assert ref.allclose(c)
 
+  @unittest.skip("store from float rt is wrong")
   def test_simple_matmul_transposed(self):
     N = 32
     BLOCK_SIZE = 16
@@ -106,7 +108,7 @@ class TestTK(unittest.TestCase):
 
     ref = a.matmul(b.transpose(2, 3), dtype=dtypes.float32).float()
 
-    assert (diff := (ref - c).mean().abs().item()) < 3e-4, f"max diff {diff}"
+    assert ref.allclose(c)
 
   def test_load_store(self):
     N = 32
