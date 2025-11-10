@@ -81,7 +81,7 @@ def __getattr__(nm):
                               "hsa_ext_finalize","hsa_ext_image","hsa_ven_amd_aqlprofile"]], args=["-I/opt/rocm/include"])
     case "amd_gpu": return load("amd_gpu", [], [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers","nvd","gc_11_0_0_offset",
                                  "sienna_cichlid_ip_offset"]], args=["-I/opt/rocm/include", "-x", "c++"])
-    case "kgsl": return load("kgsl", [], [root/"extra/qcom_gpu_driver/msm_kgsl.h"])
+    case "kgsl": return load("kgsl", [], [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
     case "adreno": return load("adreno", [], [root/"extra/qcom_gpu_driver/a6xx.xml.h"])
     case "qcom_dsp":
       return load("qcom_dsp", [], [root/f"extra/dsp/include/{s}.h" for s in ["ion","msm_ion","adsprpc_shared","remote_default","apps_std"]])
