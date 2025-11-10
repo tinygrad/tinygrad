@@ -129,3 +129,15 @@ do_not_mutate = [
 ]
 tests_dir = ["test/test_tiny.py", "test/test_ops.py"]
 debug = true
+
+
+[tool.mypy]
+warn_unused_configs = true
+files = ["tinygrad"]
+ignore_missing_imports = true
+check_untyped_defs = true
+explicit_package_bases = true
+warn_unreachable = true
+warn_redundant_casts = true
+# NOTE: had to comment this out to make mypy pass on both CI and OSX
+#warn_unused_ignores = true
