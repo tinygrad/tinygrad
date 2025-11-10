@@ -437,12 +437,15 @@ MTLPurgeableStateVolatile = enum_MTLPurgeableState.define('MTLPurgeableStateVola
 MTLPurgeableStateEmpty = enum_MTLPurgeableState.define('MTLPurgeableStateEmpty', 4)
 
 MTLPurgeableState = enum_MTLPurgeableState
+kern_return_t = ctypes.c_int32
+task_id_token_t = ctypes.c_uint32
 class MTLHeap(objc.Spec): pass
 MTLResource._bases_ = [NSObject]
 MTLResource._methods_ = [
   ('setPurgeableState:', MTLPurgeableState, [MTLPurgeableState]),
   ('makeAliasable', None, []),
   ('isAliasable', BOOL, []),
+  ('setOwnerWithIdentity:', kern_return_t, [task_id_token_t]),
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
   ('device', MTLDevice, []),
@@ -1637,7 +1640,6 @@ NSURL._methods_ = [
   ('initWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
   ('initAbsoluteURLWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
   ('getFileSystemRepresentation:maxLength:', BOOL, [ctypes.POINTER(ctypes.c_char), NSUInteger]),
-  ('checkResourceIsReachableAndReturnError:', BOOL, [ctypes.POINTER(NSError)]),
   ('isFileReferenceURL', BOOL, []),
   ('fileReferenceURL', NSURL, []),
   ('getResourceValue:forKey:error:', BOOL, [ctypes.POINTER(objc.id_), NSURLResourceKey, ctypes.POINTER(NSError)]),
@@ -1941,6 +1943,8 @@ MTLIndirectCommandTypeDrawPatches = enum_MTLIndirectCommandType.define('MTLIndir
 MTLIndirectCommandTypeDrawIndexedPatches = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawIndexedPatches', 8)
 MTLIndirectCommandTypeConcurrentDispatch = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeConcurrentDispatch', 32)
 MTLIndirectCommandTypeConcurrentDispatchThreads = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeConcurrentDispatchThreads', 64)
+MTLIndirectCommandTypeDrawMeshThreadgroups = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawMeshThreadgroups', 128)
+MTLIndirectCommandTypeDrawMeshThreads = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawMeshThreads', 256)
 
 MTLIndirectCommandType = enum_MTLIndirectCommandType
 class MTLIndirectCommandBufferExecutionRange(Struct): pass
@@ -1964,6 +1968,12 @@ MTLIndirectCommandBufferDescriptor._methods_ = [
   ('setMaxKernelBufferBindCount:', None, [NSUInteger]),
   ('maxKernelThreadgroupMemoryBindCount', NSUInteger, []),
   ('setMaxKernelThreadgroupMemoryBindCount:', None, [NSUInteger]),
+  ('maxObjectBufferBindCount', NSUInteger, []),
+  ('setMaxObjectBufferBindCount:', None, [NSUInteger]),
+  ('maxMeshBufferBindCount', NSUInteger, []),
+  ('setMaxMeshBufferBindCount:', None, [NSUInteger]),
+  ('maxObjectThreadgroupMemoryBindCount', NSUInteger, []),
+  ('setMaxObjectThreadgroupMemoryBindCount:', None, [NSUInteger]),
   ('supportRayTracing', BOOL, []),
   ('setSupportRayTracing:', None, [BOOL]),
   ('supportDynamicAttributeStride', BOOL, []),
@@ -1988,6 +1998,13 @@ MTLIndirectRenderCommand._methods_ = [
   ('drawIndexedPatches:patchStart:patchCount:patchIndexBuffer:patchIndexBufferOffset:controlPointIndexBuffer:controlPointIndexBufferOffset:instanceCount:baseInstance:tessellationFactorBuffer:tessellationFactorBufferOffset:tessellationFactorBufferInstanceStride:', None, [NSUInteger, NSUInteger, NSUInteger, MTLBuffer, NSUInteger, MTLBuffer, NSUInteger, NSUInteger, NSUInteger, MTLBuffer, NSUInteger, NSUInteger]),
   ('drawPrimitives:vertexStart:vertexCount:instanceCount:baseInstance:', None, [MTLPrimitiveType, NSUInteger, NSUInteger, NSUInteger, NSUInteger]),
   ('drawIndexedPrimitives:indexCount:indexType:indexBuffer:indexBufferOffset:instanceCount:baseVertex:baseInstance:', None, [MTLPrimitiveType, NSUInteger, MTLIndexType, MTLBuffer, NSUInteger, NSUInteger, NSInteger, NSUInteger]),
+  ('setObjectThreadgroupMemoryLength:atIndex:', None, [NSUInteger, NSUInteger]),
+  ('setObjectBuffer:offset:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger]),
+  ('setMeshBuffer:offset:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger]),
+  ('drawMeshThreadgroups:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:', None, [MTLSize, MTLSize, MTLSize]),
+  ('drawMeshThreads:threadsPerObjectThreadgroup:threadsPerMeshThreadgroup:', None, [MTLSize, MTLSize, MTLSize]),
+  ('setBarrier', None, []),
+  ('clearBarrier', None, []),
   ('reset', None, []),
 ]
 class MTLIndirectComputeCommand(objc.Spec): pass
