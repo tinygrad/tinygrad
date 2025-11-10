@@ -17,16 +17,14 @@ from __future__ import annotations
 import argparse, math, os
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
-from tinygrad.helpers import fetch, getenv, DEBUG
-from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
+from tinygrad.helpers import fetch, getenv, DEBUG, Timing, GlobalCounters
+from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters
 from examples.llama3 import load
 from extra.models.llama import fix_bf16
 from transformers import AutoTokenizer
 
-from icecream import install, ic
+from icecream import install
 install()
-
-def fix(x): return x.shape, x.dtype, x.numpy()
 
 MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] = {
   "20B": {
@@ -39,6 +37,64 @@ MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] 
     "tokenizer": "openai/gpt-oss-20b",
   }
 }
+
+# ***** model loading *****
+
+def download_weights(model:str, total_num_weights:int) -> Path:
+  model_path = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
+  for i in range(total_num_weights):
+    filename = f"model-{i:05d}-of-{total_num_weights-1:05d}.safetensors"
+    fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
+  return Path(os.path.dirname(model_path))
+
+def get_keymap(num_blocks):
+  return {
+    "model.embed_tokens.weight": "token_embd.weight",
+    **{f"model.layers.{l}.input_layernorm.weight": f"blk.{l}.attn_norm.weight" for l in range(num_blocks)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"blk.{l}.attn_{x}.weight" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"blk.{l}.attn_{x}.bias" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.self_attn.sinks": f"blk.{l}.attn_sink" for l in range(num_blocks)},
+    **{f"model.layers.{l}.post_attention_layernorm.weight": f"blk.{l}.ffn_norm.weight" for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.router.weight": f"blk.{l}.ffn_gate.weight" for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.router.bias": f"blk.{l}.ffn_gate.bias" for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d}_proj_bias": f"blk.{l}.ffn_{d}_proj_bias" for d in ["gate_up", "down"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d}_proj_blocks": f"blk.{l}.ffn_{d}_proj_blocks" for d in ["gate_up", "down"] for l in range(num_blocks)},
+    **{f"model.layers.{l}.mlp.experts.{d}_proj_scales": f"blk.{l}.ffn_{d}_proj_scales" for d in ["gate_up", "down"] for l in range(num_blocks)},
+    "model.norm.weight": "output_norm.weight",
+    "lm_head.weight": "output.weight",
+  }
+
+def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int):
+  # map hf to tinygrad state_dict keys
+  keymap = get_keymap(num_blocks)
+  sd = {}
+  for k, v in weights.items():
+    if ".rotary_emb." in k: continue
+    v = v.to(Device.DEFAULT)
+    if k not in keymap: # todo: remove
+      if DEBUG >= 1: print(f"WARNING: key {k} not in keymap")
+      continue
+    sd[keymap[k]] = v
+  return sd
+
+def fix_mxfp4(weights, num_blocks) -> Tensor:
+  def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
+    """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
+    assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
+    MXFP4_ID, MXFP4_NUM_ELEMENTS = 39, 32
+    block_size, n_blocks = scales.shape[:2]
+    assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
+    data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()
+    out = ggml_data_to_tensor(data, scales.numel() * MXFP4_NUM_ELEMENTS, MXFP4_ID)
+    return out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
+
+  # only dequantize ffn_gate_up_proj and ffn_down_proj
+  for l in range(num_blocks):
+    for d in ['gate_up', 'down']:
+      blocks, scales = f'blk.{l}.ffn_{d}_proj_blocks', f'blk.{l}.ffn_{d}_proj_scales'
+      proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
+      weights[f'blk.{l}.ffn_{d}_proj'] = proj
+  return weights
 
 # ****** model architecture *****
 
@@ -69,7 +125,7 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, 
   return rotate(x.reshape(B, H, T, 2, half).transpose(-1, -2) * attn_scale, freqs).transpose(-1, -2).reshape(B, H, T, Hd)
 
 
-# arxiv.org/pdf/2002.05202v1
+# swiglu arxiv.org/pdf/2002.05202v1
 def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0):
   x_glu, x_up = x[..., ::2].clamp(None, limit), x[..., 1::2].clamp(-limit, limit)
   return x_glu * (alpha * x_glu).sigmoid() * (x_up + 1)
@@ -187,64 +243,6 @@ class Transformer:
       load_state_dict(model, weights, strict=False, consume=True)
     return model
 
-# ***** model loading *****
-
-def download_weights(model:str, total_num_weights:int) -> Path:
-  model_path = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
-  for i in range(total_num_weights):
-    filename = f"model-{i:05d}-of-{total_num_weights-1:05d}.safetensors"
-    fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
-  return Path(os.path.dirname(model_path))
-
-def get_keymap(num_blocks):
-  return {
-    "model.embed_tokens.weight": "token_embd.weight",
-    **{f"model.layers.{l}.input_layernorm.weight": f"blk.{l}.attn_norm.weight" for l in range(num_blocks)},
-    **{f"model.layers.{l}.self_attn.{x}_proj.weight": f"blk.{l}.attn_{x}.weight" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
-    **{f"model.layers.{l}.self_attn.{x}_proj.bias": f"blk.{l}.attn_{x}.bias" for x in ["q", "k", "v", "o"] for l in range(num_blocks)},
-    **{f"model.layers.{l}.self_attn.sinks": f"blk.{l}.attn_sink" for l in range(num_blocks)},
-    **{f"model.layers.{l}.post_attention_layernorm.weight": f"blk.{l}.ffn_norm.weight" for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.router.weight": f"blk.{l}.ffn_gate.weight" for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.router.bias": f"blk.{l}.ffn_gate.bias" for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d}_proj_bias": f"blk.{l}.ffn_{d}_proj_bias" for d in ["gate_up", "down"] for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d}_proj_blocks": f"blk.{l}.ffn_{d}_proj_blocks" for d in ["gate_up", "down"] for l in range(num_blocks)},
-    **{f"model.layers.{l}.mlp.experts.{d}_proj_scales": f"blk.{l}.ffn_{d}_proj_scales" for d in ["gate_up", "down"] for l in range(num_blocks)},
-    "model.norm.weight": "output_norm.weight",
-    "lm_head.weight": "output.weight",
-  }
-
-def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int):
-
-  keymap = get_keymap(num_blocks) # map hf to tinygrad state_dict keys
-  sd = {}
-  for k, v in weights.items():
-    if ".rotary_emb." in k: continue
-    v = v.to(Device.DEFAULT)
-    if k not in keymap: # todo: remove
-      if DEBUG >= 1: print(f"WARNING: key {k} not in keymap")
-      continue
-    sd[keymap[k]] = v
-  return sd
-
-def fix_mxfp4(weights, num_blocks) -> Tensor:
-  def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
-    """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
-    assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
-    MXFP4_ID, MXFP4_NUM_ELEMENTS = 39, 32
-    block_size, n_blocks = scales.shape[:2]
-    assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
-    data = scales.unsqueeze(-1).cat(blocks, dim=-1).flatten()
-    out = ggml_data_to_tensor(data, scales.numel() * MXFP4_NUM_ELEMENTS, MXFP4_ID)
-    return out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
-
-  # dequantize only the ffn_gate_up_proj and ffn_down_proj
-  for l in range(num_blocks):
-    for d in ['gate_up', 'down']:
-      blocks, scales = f'blk.{l}.ffn_{d}_proj_blocks', f'blk.{l}.ffn_{d}_proj_scales'
-      proj = dequantize_mxfp4(weights.pop(blocks), weights.pop(scales))
-      weights[f'blk.{l}.ffn_{d}_proj'] = proj
-  return weights
-
 def main(args):
   if args.seed is not None: Tensor.manual_seed(args.seed)
 
@@ -269,15 +267,17 @@ def main(args):
     return
 
   # build model
-  model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights)
+  with Timing("load weights: ", enabled=DEBUG >= 1):
+    model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights)
 
-  # generate text
   outputted = args.prompt
   start_pos, toks, tok_tensor = 0, tokenizer(outputted)["input_ids"], None
   print(outputted, end="", flush=True)
 
+  # generate text
   for _ in range(args.count):
-    # forward pass
+    GlobalCounters.reset()
+    if DEBUG >= 1: print("")
     next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
     tok_tensor = model(next_tok, start_pos)
     tok = tok_tensor.item()
@@ -294,7 +294,6 @@ def main(args):
 
   assert toks == expected, f"generated {toks} but expected {expected}"
 
-
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument("--size", choices=list(MODELS.keys()), default=list(MODELS.keys())[0], help="Model size")
@@ -303,7 +302,6 @@ if __name__ == "__main__":
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--prompt", type=str, default="Hi, how are you?", help="Phrase to start with")
   parser.add_argument("--count", type=int, default=4, help="Max number of tokens to generate")
-  parser.add_argument("--timing", action="store_true", help="Print timing per token")
   args = parser.parse_args()
 
   main(args)
