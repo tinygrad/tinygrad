@@ -56,12 +56,19 @@ class PrgExec:
   simd:int
   def __str__(self): return f"{self.name},{self.wave},{self.cu},{self.simd}"
 
+@dataclasses.dataclass(frozen=True)
+class WaveExec:
+  wave_id:int
+  cu:int
+  simd:int
+  insts:list[InstExec]
+
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
     self.wave_events:dict[PrgExec, dict[int, InstInfo]] = {}
     self.disasms:dict[tuple[str, int], tuple[str, int]] = {}
-    self.inst_execs:dict[PrgExec, list[InstExec]] = {}
+    self.inst_execs:dict[str, list[WaveExec]] = {}
 
     for prog in prog_evs:
       arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
@@ -92,7 +99,7 @@ class _ROCParseCtx:
 
     if ev.instructions_size > 0:
       self.wave_events[key:=PrgExec(unwrap(self.active_kern), ev.wave_id, ev.cu, ev.simd)] = asm
-      self.inst_execs[key] = inst_execs
+      self.inst_execs.setdefault(key.name, []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, inst_execs))
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}

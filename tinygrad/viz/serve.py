@@ -208,15 +208,16 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   except Exception: return err("DECODER ERROR")
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for k,v in rctx.inst_execs.items():
-    if k.wave == 0:
-      if (r:=ref_map.get(name:=k.name)): name = ctxs[r]["name"]
-      steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                    "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
-    rows = [(e.inst, e.time, e.time-v[i-1].time if i else 0, e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(v)]
-    summary = [{"label":"Total Cycles", "value":v[-1].time-v[0].time if v else 0}, {"label":"CU", "value":k.cu}, {"label":"SIMD", "value":k.simd}]
-    steps.append({"name":f"Wave {k.wave}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                  "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
+  for name,waves in rctx.inst_execs.items():
+    if (r:=ref_map.get(name)): name = ctxs[r]["name"]
+    steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                  "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
+    for w in waves:
+      rows = [(e.inst, e.time, e.time-(w.insts[i-1].time if i else 0), e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(w.insts)]
+      summary = [{"label":"Total Cycles", "value":w.insts[-1].time-w.insts[0].time if w.insts else 0}, {"label":"CU", "value":w.cu},
+                 {"label":"SIMD", "value":w.simd}]
+      steps.append({"name":f"Wave {w.wave_id}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
