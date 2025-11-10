@@ -182,11 +182,9 @@ class Transformer:
     if not fakeweights:
       weights = load(str(model_path / "model.safetensors.index.json"))
       weights = convert_from_huggingface(weights, params["num_blocks"])
-      ic(weights.keys())
       weights = fix_mxfp4(weights, params["num_blocks"])
       # weights = fix_bf16(weights) # todo: do we need ??
       load_state_dict(model, weights, strict=False, consume=True)
-      ic(weights.keys())
     return model
 
 # ***** model loading *****
@@ -217,7 +215,7 @@ def get_keymap(num_blocks):
 
 def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int):
 
-  keymap = get_keymap(num_blocks) # map hf to tinygrad keys
+  keymap = get_keymap(num_blocks) # map hf to tinygrad state_dict keys
   sd = {}
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
@@ -248,11 +246,9 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
   return weights
 
 def main(args):
-
   if args.seed is not None: Tensor.manual_seed(args.seed)
 
   model_info = MODELS[args.size]
-
   model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"])
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
   expected = [12194,    11,  1495,   553,   481,    30,   357,   939,  8975,    13]
@@ -275,25 +271,21 @@ def main(args):
   # build model
   model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights)
 
+  # generate text
   outputted = args.prompt
-  start_pos, toks = 0, tokenizer(outputted)["input_ids"]
+  start_pos, toks, tok_tensor = 0, tokenizer(outputted)["input_ids"], None
   print(outputted, end="", flush=True)
-
-  tok_tensor = None
   for _ in range(args.count):
     # forward pass
     next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
     tok_tensor = model(next_tok, start_pos, temperature=args.temperature)
     tok = tok_tensor.item()
 
-    # use the kv cache
+    # update the kv cache
     start_pos = len(toks)
 
-    # add the new token
-    toks.append(tok)
-    print(toks)
-
     # display
+    toks.append(tok)
     cur = tokenizer.decode(toks, skip_special_tokens=True)
     print(cur[len(outputted):], flush=True)
     outputted = cur

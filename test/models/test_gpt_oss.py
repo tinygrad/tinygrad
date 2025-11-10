@@ -265,7 +265,6 @@ class TestGPTOSS(unittest.TestCase):
     out = model.blk[0].ffn_gate_up_proj
 
     # compare outputs
-    ic(out.numpy(), torch_out.float().detach().cpu().numpy())
     np.testing.assert_allclose(out.float().numpy(), torch_out.float().detach().cpu().numpy(), atol=1e-6, rtol=1e-6)
 
   @torch.no_grad()
@@ -294,16 +293,13 @@ class TestGPTOSS(unittest.TestCase):
     # load model weights
     model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
 
-    # dequantize in tinygrad (override with small params)
+    # dequantize in tinygrad
     model = GptOSS.from_pretrained(model_path, small_params)
-    out = model.blk[0].ffn_gate_up_proj
 
     # dequantize in torch
     torch_device = torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    torch_config = GptOssConfig(**torch_small_params)
-    torch_model = TorchGptOss(torch_config).to(torch_device)
-    torch_model = torch_model.from_pretrained(model_path, config=torch_config, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path, device_map=torch_device)
-    torch_model.eval()
+    torch_model = TorchGptOss.from_pretrained(model_path, config=GptOssConfig(**torch_small_params), ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
+    torch_model = torch_model.to(torch_device).eval()
 
     equal_state_dicts(model, torch_model, num_blocks=1)
 
