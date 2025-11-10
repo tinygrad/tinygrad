@@ -1,5 +1,5 @@
 import ctypes, subprocess, tempfile, unittest
-from tinygrad.helpers import Struct
+from tinygrad.helpers import Struct, WIN
 
 class TestAutogen(unittest.TestCase):
   def test_packed_struct_sizeof(self):
@@ -17,6 +17,8 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(ctypes.sizeof(Foo), 12)
     self.assertEqual(ctypes.sizeof(Bar), 12)
     self.assertEqual(ctypes.sizeof(Baz), 8)
+
+  @unittest.skipIf(WIN)
   def test_packed_struct_interop(self):
     class Baz(Struct): pass
     Baz._packed_ = True
