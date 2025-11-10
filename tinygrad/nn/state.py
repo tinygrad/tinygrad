@@ -308,39 +308,15 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (xl.bitwise_or(xh).bitcast(dtypes.int8) - 32).flatten(-2) * scales
     if ggml_type == 39:
       scales, blocks = blocks[:, 0].cast(dtypes.int32), blocks[:, 1:17]
-      # ic(blocks.shape, scales.shape)
-      # ic(scales.numpy())
       d = ((scales >= 2).cast(dtypes.float32) * (scales.cast(dtypes.float32) - 127).exp2() +
            (scales == 1).cast(dtypes.float32) * 2.0**(-127) +
            (scales == 0).cast(dtypes.float32) * 2.0**(-128)).unsqueeze(-1)
       codes = q_to_uint8(blocks, 4)
-      # import numpy as np
-      # np.save("results/codes.npy", codes.numpy())
-      # ic(codes.shape, codes.numpy())
-      # def to_binary(x, n_bits=4): return [format(val, f'0{n_bits}b') for val in x.flatten().tolist()]
-      # ic(to_binary(codes))
-      # ic(to_binary(codes.rshift(3), n_bits=1))
-
-
       sign = 1.0 - codes.rshift(3).cast(dtypes.float32) * 2.0
-      # ic(sign.numpy())
-
       exp, mant = codes.rshift(1).bitwise_and(0x3).cast(dtypes.float32), codes.bitwise_and(0x1).cast(dtypes.float32)
       fp4_val = sign * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
                         (exp == 0).cast(dtypes.float32) * 0.5 * mant)
-      # ic(fp4_val.shape, (fp4_val * d).sign().numpy())
       return (fp4_val * d).flatten(-2)[:n]
-    # if ggml_type == 39:
-    #   scales, blocks = blocks[:, 0].cast(dtypes.int32) - 127, blocks[:, 1:17]
-    #   codes = q_to_uint8(blocks, 4)
-    #   sign = 1.0 - codes.rshift(3).cast(dtypes.float32) * 2.0
-    #   exp, mant = codes.rshift(1).bitwise_and(0x3).cast(dtypes.float32), codes.bitwise_and(0x1).cast(dtypes.float32)
-    #   fp4_val = sign * ((exp != 0).cast(dtypes.float32) * (1.0 + 0.5 * mant) * (exp - 1.0).exp2() +
-    #                     (exp == 0).cast(dtypes.float32) * 0.5 * mant)
-    #   ic(blocks.shape, scales.shape)
-    #   ic(codes.shape, codes.numpy()[0])
-    #   fp4_val = sign * (exp)
-    #   return blocks
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
 @accept_filename

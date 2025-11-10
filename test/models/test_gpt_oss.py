@@ -29,7 +29,7 @@ def set_equal_weights(model, torch_model, fakeweights, num_blocks):
   torch_model.eval()
   print("Weights are equal!")
 
-def equal_state_dicts(model, torch_model, num_blocks):
+def compare_weights(model, torch_model, num_blocks):
   from tinygrad.nn.state import get_state_dict
   from tinygrad.apps.llm2 import get_keymap
 
@@ -46,8 +46,7 @@ def equal_state_dicts(model, torch_model, num_blocks):
     # check dtype, shape, and value
     np.testing.assert_allclose(v.numpy(), torch_v.float().cpu().numpy(), strict=True, atol=1e-6,
                                err_msg=f"tinygrad:\tk={k}\tv.dtype={v.dtype}\tv.shape={v.shape}\npytorch:\tk={torch_k}\tv.dtype={torch_v.dtype}\tv.shape={torch_v.shape}\n{v.numpy()=}\n{torch_v.float().cpu().numpy()=}")
-    del k, v, torch_k, torch_v # todo: remove
-  print("Weights are equal!")
+    del k, v, torch_k, torch_v
 
 class TestGPTOSS(unittest.TestCase):
   def test_model(self):
@@ -275,43 +274,33 @@ class TestGPTOSS(unittest.TestCase):
     Tensor.manual_seed(42)
     np.random.seed(42)
 
-    params = {"dim": 2880, "hidden_dim": 2880, "head_dim": 64,
-              "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24,
-              "n_experts": 32, "n_active_experts": 4,
-              "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "max_context": 4096,
-              "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
-              }
-    torch_params = {"hidden_size": 2880, "intermediate_size": 2880, "head_dim": 64,
-                    "num_attention_heads": 64, "num_key_value_heads": 8, "num_hidden_layers": 24,
-                    "num_local_experts": 32, "num_experts_per_tok": 4,
-                    "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 2, "initial_context_length": 4096,
-                    "rope_theta": 150000, "rope_scaling": {"factor": 32.0, "beta_slow": 1.0, "beta_fast": 32.0, "rope_type": "yarn", "original_max_position_embeddings": 4096},
-                    "quantization_config": {"modules_to_not_convert": ["model.layers.*.self_attn", "model.layers.*.mlp.router", "model.embed_tokens", "lm_head"], "quant_method": "mxfp4"},
-                    }
-    small_params = params | {'num_blocks': 1, 'max_context': 4}
-    torch_small_params = torch_params | {'num_hidden_layers': 1, 'initial_context_length': 4}
-
     # load model weights
     model_path = download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
 
-    # dequantize in tinygrad
+    # smaller params for testing
     params = MODELS["20B"]["params"] | {'num_blocks': 1, 'max_context': 4}
+    torch_params = AutoConfig.from_pretrained("openai/gpt-oss-20b", num_hidden_layers=1, initial_context_length=4)
+
+    # tinygrad
     model = GptOSS.from_pretrained(model_path, params)
 
     # dequantize in torch
     torch_device = torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    config = GptOssConfig(**torch_small_params)
-    ic(config)
-    ic(GptOssConfig())
-    torch_params = AutoConfig.from_pretrained("openai/gpt-oss-20b")
-    torch_params.num_hidden_layers = 1
-    torch_params.initial_context_length = 4
-    torch_params.layer_types = torch_params.layer_types[:torch_params.num_hidden_layers]
-    ic(torch_params)
     torch_model = TorchGptOss.from_pretrained(model_path, config=torch_params, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
     torch_model = torch_model.to(torch_device).eval()
 
-    equal_state_dicts(model, torch_model, num_blocks=1)
+    # compare model weights
+    compare_weights(model, torch_model, num_blocks=1)
+
+    # compare forward pass
+    bsz, seq_len = 2, 5
+    input_ids = np.random.randint(params["vocab_size"], size=(bsz, seq_len))
+
+    out = model(Tensor(input_ids))
+    with torch.no_grad():
+      torch_logits = torch_model.forward(torch.from_numpy(input_ids).long().to(torch_device)).logits
+      torch_out = torch_logits[:, -1, :].softmax(-1).argmax(-1, keepdim=True)
+    np.testing.assert_allclose(out.numpy(), torch_out.cpu().numpy(), atol=5e-4, rtol=5e-4)
 
 
 if __name__ == '__main__':
