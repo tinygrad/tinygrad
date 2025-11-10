@@ -69,7 +69,7 @@ class QCOMComputeQueue(HWQueue):
 
   def signal(self, signal:QCOMSignal, value=0, ts=False):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
-    if self.dev.gpu_id[:1] < (7, 3):
+    if self.dev.gpu_id[:2] < (7, 3):
       self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
                *data64_le(signal.timestamp_addr if ts else signal.value_addr), qreg.cp_event_write_3(value & 0xFFFFFFFF))
       self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
@@ -342,8 +342,8 @@ class QCOMDevice(HCQCompiled):
     kgsl.IOCTL_KGSL_DEVICE_GETPROPERTY(self.fd, type=kgsl.KGSL_PROP_DEVICE_INFO, value=ctypes.addressof(self.info), sizebytes=ctypes.sizeof(self.info))
     self.gpu_id = (self.info.chip_id>>24, (self.info.chip_id>>16)&0xFF, (self.info.chip_id>>8)&0xFF)
 
-    # a7xx start with 730 or 'C'
-    if self.gpu_id[:1] < (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={self.info.chip_id}")
+    # a7xx start with 730 or 'Cxxx', a8xx starts 'Exxx'
+    if self.gpu_id[:2] < (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={self.info.chip_id}")
 
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
