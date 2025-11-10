@@ -3,7 +3,7 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import Ops, UOp
+from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -56,7 +56,7 @@ view_ops = {
   "aten.expand": Tensor.expand,
   "aten.t": Tensor.transpose,
   "aten.transpose.int": Tensor.transpose,
-  "aten.squeeze": lambda self: self.squeeze(), 
+  "aten.squeeze": lambda self: self.squeeze(),
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
@@ -73,8 +73,8 @@ def realize_with_views(self: Tensor, views: Tensor):
   for v in views:
     if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
     ret = self
-    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
+    # st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
+    # for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
     v.replace(ret)
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
@@ -175,16 +175,20 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 #   if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
 #   return mops
 
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+# # Not sure if needed yet
+# from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
 @wrap_view_op
 def _as_strided(tensor: Tensor, size, stride, storage_offset=None):
   # do not compound; always attach to the base view
   base = canonical_base(tensor)
-  size = tuple(int(x) for x in size); stride = tuple(int(x) for x in stride); off = int(storage_offset or 0)
+  size = tuple(int(x) for x in size)
+  stride = tuple(int(x) for x in stride)
+  off = int(storage_offset or 0)
 
   # Build linear indices idx = off + Σ_i coord_i * stride_i, broadcast across `size`
-  nd  = len(size); idx = None
+  nd  = len(size)
+  idx = None
   for d, (sd, st) in enumerate(zip(size, stride)):
     # trivial axis: coord is 0 everywhere
     if sd == 1: coord = Tensor.zeros(*size, dtype=dtypes.int, device=base.device)
@@ -192,7 +196,8 @@ def _as_strided(tensor: Tensor, size, stride, storage_offset=None):
       ar = Tensor.arange(sd, dtype=dtypes.int, device=base.device)
       shp = (1,)*d + (sd,) + (1,)*(nd-d-1)
       coord = ar.reshape(shp).expand(*size)
-    term = coord * int(st); idx = term if idx is None else (idx + term)
+    term = coord * int(st)
+    idx = term if idx is None else (idx + term)
   if idx is None:
     idx = Tensor.zeros(1, dtype=dtypes.int, device=base.device)
   idx = idx + off
@@ -339,7 +344,7 @@ def scatter_add(self, dim, index, src, out):
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   # realize = dest.is_tiny
-  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest)) 
+  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
