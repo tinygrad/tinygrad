@@ -183,7 +183,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], tarball=None, preprocess=None,
         lines, types = rollback
       except Exception as e: raise Exception(f"error parsing {c.spelling} ({c.kind}) at {c.location}") from e
   main = (f"# mypy: ignore-errors\nimport ctypes{', os' if any('os' in s for s in dll) else ''}\n"
-    "from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap\n" + '\n'.join([*prolog,
+    "from tinygrad.helpers import unwrap\nfrom tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR\n" + '\n'.join([*prolog,
       *(["from ctypes.util import find_library"]*any('find_library' in s for s in dll)), *(["from tinygrad.runtime.support import objc"]*objc),
       *(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass'] for d in dll]),
          "  return None", "dll = dll()\n"]*bool(dll)), *lines]) + '\n')

@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes, os
-from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
+from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 def dll():
   try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so'))
   except: pass

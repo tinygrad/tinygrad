@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
+from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class _anonunion0(ctypes.Union): pass
 NvUPtr = ctypes.c_uint64
 _anonunion0._fields_ = [

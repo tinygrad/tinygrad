@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes, os
-from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
+from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 import gzip, base64
 from tinygrad.helpers import OSX
 from ctypes.util import find_library

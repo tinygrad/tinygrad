@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import Struct, CEnum, _IO, _IOW, _IOR, _IOWR, unwrap
+from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
 class _anonstruct0(Struct): pass
 enum_mes_set_resources_queue_type_enum = CEnum(ctypes.c_uint32)

@@ -1,5 +1,4 @@
 import ctypes, ctypes.util, functools, sys
-from typing import Any
 
 class id_(ctypes.c_void_p):
   retain: bool = False
@@ -53,7 +52,8 @@ class MetaSpec(type(id_)):
 
   def _addmeth(cls, m, clsmeth=False):
     nm = m[0].strip(':').replace(':', '_')
-    m[1], m[2] = cls if m[1] == 'instancetype' else m[1], [cls if a == 'instancetype' else a for a in m[2]]
-    setattr(cls, nm, classmethod(msg(*m, clsmeth=clsmeth))) # type: ignore[misc]
+    if clsmeth: setattr(cls, nm, classmethod(msg(m[0], cls if m[1] == 'instancetype' else m[1],
+                                                 [cls if a == 'instancetype' else a for a in m[2]], *m[3:], clsmeth=True)))
+    else: setattr(cls, nm, msg(m[0], cls if m[1] == 'instancetype' else m[1], [cls if a == 'instancetype' else a for a in m[2]], *m[3:]))
 
 class Spec(id_, metaclass=MetaSpec): pass
