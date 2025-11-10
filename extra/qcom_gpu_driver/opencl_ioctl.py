@@ -101,6 +101,21 @@ def parse_cmd_buf(dat):
             disasm_raw(get_mem(((vals[2] << 32) | vals[1]), num_unit * 128))
           if state_type == ST6_CONSTANTS:
             x = get_mem(((vals[2] << 32) | vals[1]), num_unit*4)
+
+            # def lol(xx):
+            #   ptr_in = memoryview(bytearray(x)).cast('Q')[xx//8]
+            #   print(f'CNST {xx:#x}', hex(ptr), hex(ptr_in))
+            #   if ptr_in != 0:
+            #     constants = get_mem(ptr_in, 0x100)
+            #     print('Indirect PTR IN')
+            #     hexdump(constants)
+
+            # lol(0xb0)
+            # lol(0xb8)
+            # lol(0xc0)
+            # lol(0xd0)
+            # lol(0x140)
+
             CAPTURED_STATE['constants'] = x[:]
             if IOCTL > 2:
               print('constants')
@@ -114,6 +129,7 @@ def parse_cmd_buf(dat):
               print('texture ibos')
               hexdump(ibos_bytes)
         elif state_block == SB6_CS_TEX:
+          # print("SKIP TEXTURE STATE BLOCK")
           if state_type == ST6_SHADER:
             if state_src == 0x1:
               samplers_bytes = get_mem(CAPTURED_STATE['bindless_base'] + ((vals[2] << 32) | vals[1]) * 4, num_unit * 64)
