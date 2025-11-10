@@ -49,4 +49,4 @@ def rv(length, dtype, layout="naive"):
     case _: raise NotImplementedError(f"rv layout {layout} not implemented")
 
   slots.register_slot += 1
-  return UOp.placeholder((outer_dim, inner_dim), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)
+  return UOp.placeholder((outer_dim, inner_dim, 2), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)

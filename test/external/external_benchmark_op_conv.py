@@ -1,7 +1,8 @@
 # ruff: noqa: E501
 from tinygrad import dtypes, Device
-from tinygrad.uop.ops import UOp, AxisType, Ops
+from tinygrad.uop.ops import UOp, AxisType, Ops, KernelInfo
 from tinygrad.codegen import full_rewrite
+from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup
@@ -231,7 +232,11 @@ c42 = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(64), (), 4)
 c46 = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(64), (), 5)
 c50 = (c12.index(c10)+((c40.reduce(c16, c19, arg=Ops.ADD)+c42.index(c4).cast(dtypes.float))*c46.index(c4).cast(dtypes.float)))
 c52 = c0.index(c10, ptr=True).store(c50).end(c7, c2, c4)
-ast = c52.sink()
+
+# NOLOCALS=1 IMAGE=2 DEV=CL
+opts = (Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.NOLOCALS, axis=None, arg=None))
+
+ast = c52.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
 
 compiler = Device.default.compiler
 renderer = Device.default.renderer
@@ -240,14 +245,10 @@ allocator = Device.default.allocator
 uops = full_rewrite(ast, renderer)
 src = renderer.render(uops)
 
-# NOLOCALS=1 IMAGE=2 DEV=CL
 lib = compiler.compile(src)
-# r_64_8_16_4_4_48_4
-# NOLOCALS: r_512_16_4_4_48_4
-ps = ProgramSpec("r_512_16_4_4_48_4", src, Device.DEFAULT, ast, uops)
+ps = ProgramSpec("conv", src, Device.DEFAULT, ast, uops)
 print(ps.src)
 print(ps.applied_opts)
-# (Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.NOLOCALS, axis=None, arg=None))
 cr = CompiledRunner(ps, precompiled=lib)
 
 gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.DEFINE_GLOBAL]), key=lambda u: u.arg)

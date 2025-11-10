@@ -206,9 +206,10 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   except Exception: return err("DECODER IMPORT ISSUE")
   try:
     rctx = decode(profile)
+    summary = [[{"label":"Total Cycles", "value":x[-1].time-x[0].time if x else 0}] for i,x in enumerate(rctx.inst_execs.values())]
     steps = [{"name":str(x[0]), "depth":0, "data":{"rows":[(e.inst, e.time, e.time-x[1][i-1].time if i else 0, e.dur, e.stall,
                                                             str(e.typ).split("_")[-1]) for i,e in enumerate(x[1])],
-                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":[]},
+                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary[i]},
               "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.inst_execs.items())]
     if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   except Exception: return err("DECODER ERROR")

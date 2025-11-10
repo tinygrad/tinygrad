@@ -136,7 +136,7 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """
 
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
-  assert len(full_sink.ranges) == 0, "all ranges must end by the sink"
+  assert len(full_sink.ranges) == 0, f"all ranges must end by the sink, {full_sink.ranges}"
   lst = line_rewrite(linearize(full_sink), pm_linearize_cleanups)
   if SPEC: type_verify(lst, program_spec)
   return lst
