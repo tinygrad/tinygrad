@@ -136,6 +136,14 @@ function renderDag(graph, additions, recenter, layoutOpts) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
+  worker.onerror = (e) => {
+    e.preventDefault();
+    updateProgress({ start:false });
+    displaySelection("#custom");
+    const div = d3.create("div").style("width", "100%").style("padding", "4px");
+    div.append(() => codeBlock("Error in graph layout:\n"+e.message, "txt"));
+    document.querySelector("#custom").replaceChildren(div.node());
+  }
 }
 
 // ** profiler graph
