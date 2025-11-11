@@ -1,8 +1,8 @@
-# ruff: noqa: E501 E712
+# ruff: noqa: E501 E712 F401
 from tinygrad import dtypes, Device
 from tinygrad.uop.ops import UOp, AxisType, Ops, KernelInfo
 from tinygrad.codegen import full_rewrite
-# from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.codegen.opt import Opt, OptOps # pylint: disable=unused-import
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.helpers import dedup, getenv
@@ -33,6 +33,8 @@ def vision_conv_143():
   c67 = c0.index((c2*128+c5+c8*4096), ptr=True).store(c65).end(c8, c2, c5)
 
   opts = None
+  # JITBEAM=2
+  # (Opt(op=OptOps.UPCAST, axis=2, arg=4), Opt(op=OptOps.NOLOCALS, axis=None, arg=None), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.SWAP, axis=1, arg=2))
   return c67.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
 
 def vision_conv_153():
@@ -57,9 +59,32 @@ def vision_conv_153():
   c67 = c0.index((c2*256+c5+c8*4096), ptr=True).store(c65).end(c8, c2, c5)
 
   opts = None
+  # JITBEAM=2
+  # (Opt(op=OptOps.UPCAST, axis=2, arg=4), Opt(op=OptOps.NOLOCALS, axis=None, arg=None), Opt(op=OptOps.UPCAST, axis=2, arg=2), Opt(op=OptOps.SWAP, axis=1, arg=2))
   return c67.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
 
-ast = vision_conv_143() if getenv("NUM", 143) == 143 else vision_conv_153()
+def dm_conv_172():
+  c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.imageh((1, 240, 4)), (), 0)
+  c2 = UOp.range(960, 4, AxisType.LOOP)
+  c5 = UOp(Ops.DEFINE_GLOBAL, dtypes.imageh((8, 384, 4)), (), 1)
+  c7 = UOp.range(32, 0, AxisType.REDUCE)
+  c10 = UOp.range(4, 1, AxisType.REDUCE)
+  c13 = UOp.range(12, 3, AxisType.REDUCE)
+  c18 = UOp.range(8, 2, AxisType.REDUCE)
+  c23 = UOp(Ops.DEFINE_GLOBAL, dtypes.imageh((240, 128, 4)), (), 2)
+  c35 = c5.index((c7*4+c10+c13*128+c18*1536))*c23.index((c10*4+c2%4+c7*16+c2//4*512))
+  c37 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(960), (), 3)
+  c39 = c35.reduce(c7, c10, arg=Ops.ADD)+c37.index(c2)
+  c50 = (1.0+((c39+0.044708251953125*(c39*(c39*c39)))*-2.3021129851685216).exp2()).reciprocal()*c39
+  c53 = c50.reduce(c18, c13, arg=Ops.ADD)*0.010416666666666666
+  c55 = c0.index(c2, ptr=True).store(c53).end(c2)
+
+  opts = None
+  # JITBEAM=2
+  # (Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.GROUPTOP, axis=1, arg=32), Opt(op=OptOps.UNROLL, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.GROUP, axis=1, arg=0))
+  return c55.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
+
+ast = {143: vision_conv_143, 153: vision_conv_153, 172: dm_conv_172}[getenv("NUM", 143)]()
 
 compiler = Device.default.compiler
 renderer = Device.default.renderer
