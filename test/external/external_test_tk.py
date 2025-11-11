@@ -195,7 +195,7 @@ class TestTK(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), ref.numpy())
 
   def test_max_nonsquare(self):
-    N, M = 16, 64
+    N, M = 32, 128
     BLOCK_N, BLOCK_M = 16, 64
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
@@ -289,7 +289,7 @@ class TestTK(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
 
   def test_sum_nonsquare(self):
-    N, M = 16, 64
+    N, M = 32, 128
     BLOCK_N, BLOCK_M = 16, 64
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
