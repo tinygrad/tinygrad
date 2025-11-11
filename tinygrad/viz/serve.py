@@ -144,6 +144,7 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # normalize event timestamps and attach kernel metadata
+prg_execs:dict[str, list[dict]] = {}
 def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
   exec_points:dict[str, ProfilePointEvent] = {}
@@ -157,6 +158,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
         info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
                f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{[str(m) for m in (ei.arg['metadata'] or ())]}"
         key = ei.key
+        prg_execs.setdefault(p.name, []).append({"ts":st-start_ts, "dur":dur, "info":info, "key":key})
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
@@ -288,7 +290,7 @@ def get_render(i:int, j:int, fmt:str) -> dict|None:
   if fmt == "counters": return ctxs[i]["steps"][j]["data"]
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
-  if fmt == "src": return {"src":prg.src, "lang":"cpp"}
+  if fmt == "src": return {"src":prg.src, "lang":"cpp", "runs":prg_execs.get(prg.name, [])}
   compiler = Device[prg.device].compiler
   disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(prg.src)))
   from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler

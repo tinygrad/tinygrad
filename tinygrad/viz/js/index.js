@@ -192,7 +192,8 @@ function tabulate(rows) {
 }
 
 var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map();
-function focusShape(shape) {
+async function focusShape(shape) {
+  if (canvasZoom == null) await renderProfiler();
   saveToHistory({ shape:focusedShape });
   focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
@@ -732,6 +733,14 @@ async function main() {
         return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
       })).node());
     } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
+    if (ckey.includes("src")) {
+      for (const [i,r] of ret.runs.entries()) {
+        const div = document.createElement("div");
+        div.appendChild(document.createElement("p")).innerText = `Run ${i+1} at ${formatTime(r.ts)}`;
+        div.appendChild(document.createElement("p")).innerText = `${formatTime(r.dur)} ${r.info}`;
+        metadata.appendChild(div);
+      }
+    }
     return document.querySelector("#custom").replaceChildren(root);
   }
   // ** UOp view (default)
