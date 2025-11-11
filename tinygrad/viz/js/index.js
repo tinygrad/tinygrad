@@ -734,12 +734,13 @@ async function main() {
       })).node());
     } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
     if (ckey.includes("src")) {
-      let info = "";
+      let curr = "";
       for (const [i,r] of ret.runs.entries()) {
         const div = d3.create("div").style("display", "flex");
-        if (r.info != info) { metadata.appendChild(codeBlock(r.info, "txt")); info = r.info; }
+        if (r.metadata != curr) { metadata.appendChild(codeBlock(r.metadata, "txt")); curr = r.metadata; }
         div.append("a").text(formatTime(r.ts)).on("click", () => switchCtx(-1));
         div.append("p").text(formatTime(r.dur)).style("margin-left", "4px");
+        div.append("p").text(r.flops).style("margin-left", "4px");
         metadata.appendChild(div.node());
       }
     }

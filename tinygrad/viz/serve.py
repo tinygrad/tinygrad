@@ -155,11 +155,13 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
-        metadata = [str(m) for m in (ei.arg['metadata'] or ())]
-        info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
-               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{metadata}"
+        metadata = ",".join([str(m) for m in (ei.arg['metadata'] or ())])
+        flops = sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e-6)
+        flops_str = f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS"
+        info = f"{flops_str} {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s"
         key = ei.key
-        prg_execs.setdefault(p.function_name, []).append({"ts":st-start_ts, "dur":dur, "info":str(metadata), "key":key})
+        prg_execs.setdefault(p.function_name, []).append({"ts":st-start_ts, "dur":dur, "metadata":str(metadata), "flops":flops_str, "key":key})
+        info += "\n"+metadata
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
