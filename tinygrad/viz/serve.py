@@ -79,7 +79,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     try:
       if len(rngs:=u.ranges):
         label += f"\n({multirange_str(rngs, color=True)})"
-      if u.op not in {Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u._shape is not None:
+      if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
