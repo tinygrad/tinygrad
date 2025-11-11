@@ -93,7 +93,6 @@ jobs:
         ./autogen_stubs.sh mesa
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
   autogen-ng:
-    name: Autogen
     name: In-tree Autogen
     runs-on: ubuntu-24.04
     timeout-minutes: 15
