@@ -739,8 +739,8 @@ async function main() {
         const div = d3.create("div").style("display", "flex");
         if (r.metadata != curr) { metadata.appendChild(codeBlock(r.metadata, "txt")); curr = r.metadata; }
         div.append("a").text(formatTime(r.ts)).on("click", () => switchCtx(-1));
-        div.append("p").text(formatTime(r.dur)).style("margin-left", "4px");
-        div.append("p").text(r.flops).style("margin-left", "4px");
+        div.append("span").text(formatTime(r.dur)).style("margin-left", "8px").style("text-wrap", "nowrap");
+        div.append("span").text(r.flops).style("margin-left", "8px").style("text-wrap", "nowrap");
         metadata.appendChild(div.node());
       }
     }
