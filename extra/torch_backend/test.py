@@ -598,5 +598,88 @@ class TestTorchBackend(unittest.TestCase):
     expected_grad = torch.tensor([2.0, 3.0, 4.0], dtype=torch.float32)
     np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
 
+  def test_repeat_basic(self):
+    # Test basic repeat operation
+    a = torch.tensor([1, 2, 3], dtype=torch.float32, device=device)
+    b = a.repeat(2, 1)
+    expected = torch.tensor([[1, 2, 3], [1, 2, 3]], dtype=torch.float32)
+    np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
+
+  def test_repeat_multidim(self):
+    # Test repeat with multiple dimensions
+    a = torch.arange(6, dtype=torch.float32, device=device).reshape(2, 3)
+    b = a.repeat(2, 3)
+    expected = torch.arange(6, dtype=torch.float32).reshape(2, 3).repeat(2, 3)
+    np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
+
+  def test_repeat_backward(self):
+    # Test repeat with gradients
+    a = torch.tensor([[1.0, 2.0]], dtype=torch.float32, device=device, requires_grad=True)
+    b = a.repeat(3, 2)
+    loss = b.sum()
+    loss.backward()
+    # Each element is repeated 3*2 = 6 times
+    expected_grad = torch.tensor([[6.0, 6.0]], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_cumsum_1d(self):
+    # Test 1D cumsum
+    a = torch.tensor([1, 2, 3, 4], dtype=torch.float32, device=device)
+    b = torch.cumsum(a, dim=0)
+    expected = torch.tensor([1, 3, 6, 10], dtype=torch.float32)
+    np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
+
+  def test_cumsum_2d(self):
+    # Test 2D cumsum along different dimensions
+    a = torch.arange(12, dtype=torch.float32, device=device).reshape(3, 4)
+    b = torch.cumsum(a, dim=0)
+    expected = torch.arange(12, dtype=torch.float32).reshape(3, 4).cumsum(dim=0)
+    np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
+    
+    c = torch.cumsum(a, dim=1)
+    expected = torch.arange(12, dtype=torch.float32).reshape(3, 4).cumsum(dim=1)
+    np.testing.assert_equal(c.cpu().numpy(), expected.numpy())
+
+  def test_cumsum_large(self):
+    # Test cumsum with larger shapes (>512 from TODO comment)
+    a = torch.arange(1024, dtype=torch.float32, device=device)
+    b = torch.cumsum(a, dim=0)
+    expected = torch.arange(1024, dtype=torch.float32).cumsum(dim=0)
+    np.testing.assert_allclose(b.cpu().numpy(), expected.numpy(), rtol=1e-5)
+
+  def test_cumsum_backward(self):
+    # Test cumsum with gradients
+    a = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.cumsum(a, dim=0)
+    loss = b.sum()
+    loss.backward()
+    # Gradient propagates: last element affects all cumsum outputs
+    expected_grad = torch.tensor([4.0, 3.0, 2.0, 1.0], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_constant_pad_nd_1d(self):
+    # Test 1D constant padding
+    a = torch.tensor([1, 2, 3], dtype=torch.float32, device=device)
+    b = torch.nn.functional.pad(a, (1, 2), mode='constant', value=0)
+    expected = torch.tensor([0, 1, 2, 3, 0, 0], dtype=torch.float32)
+    np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
+
+  def test_constant_pad_nd_2d(self):
+    # Test 2D constant padding
+    a = torch.arange(6, dtype=torch.float32, device=device).reshape(2, 3)
+    b = torch.nn.functional.pad(a, (1, 1, 1, 1), mode='constant', value=0)
+    expected = torch.nn.functional.pad(torch.arange(6, dtype=torch.float32).reshape(2, 3), (1, 1, 1, 1), mode='constant', value=0)
+    np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
+
+  def test_constant_pad_nd_backward(self):
+    # Test constant_pad_nd with gradients
+    a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.nn.functional.pad(a, (1, 1, 1, 1), mode='constant', value=0)
+    loss = b.sum()
+    loss.backward()
+    # Gradient only flows to original elements, not padding
+    expected_grad = torch.ones((2, 2), dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
 if __name__ == "__main__":
   unittest.main()
