@@ -535,7 +535,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
-    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
+    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()).clone())
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
     # TODO we need to properly match dest shape and strides, not blindly assign
