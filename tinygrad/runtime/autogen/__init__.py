@@ -2,7 +2,7 @@ import importlib, pathlib, subprocess
 
 def sys(cmd): return subprocess.check_output(cmd.split()).decode().strip()
 
-root = (here:=pathlib.Path(__file__).parent).parent.parent.parent
+root = (here:=pathlib.Path(__file__).parent).parents[2]
 
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists():
