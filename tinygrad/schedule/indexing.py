@@ -252,7 +252,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       else:
         disp = render_ranges(rngs, out_rngs, realized=realized_ranges)
       print("***" if x in rctx.realize_map else "   ",
-            f"{len(consumer_map[x]):2d} {str(x.op):20s} {str(x.shape):35s} {len(ending_ranges[x]):2d}", disp)
+            f"{len(consumer_map[x]):2d} {str(x.op):20s} {str(x._shape):35s} {len(ending_ranges[x]):2d}", disp)
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)

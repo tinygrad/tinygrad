@@ -2,7 +2,6 @@ import unittest, math
 
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.engine.realize import ExecItem, get_runner
-from tinygrad.uop.ops import UOp, AxisType
 import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
