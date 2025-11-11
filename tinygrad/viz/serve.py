@@ -79,7 +79,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
     try:
       if len(rngs:=u.ranges):
         label += f"\n({multirange_str(rngs, color=True)})"
-      if u.op not in {Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u._shape is not None:
+      if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
@@ -150,17 +150,21 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
   for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
     if dur == 0: continue
-    name, info, key = e.name, None, None
+    name, fmt, key = e.name, [], None
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
-        info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
-               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{[str(m) for m in (ei.arg['metadata'] or ())]}"
+        flops = sym_infer(p.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
+        membw, ldsbw = sym_infer(p.estimates.mem, var_vals)/t, sym_infer(p.estimates.lds, var_vals)
+        fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
+               f"{membw*1e-9:.0f}|{ldsbw*1e-9:.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else f"{membw*1e-12:.0f}|{ldsbw*1e-12:.0f} TB/s"]
+        if (metadata_str:=",".join([str(m) for m in (ei.arg['metadata'] or ())])): fmt.append(metadata_str)
+        if isinstance(e, ProfileGraphEntry): fmt.append("(batched)")
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), st-start_ts, dur, enum_str(info or "", scache)))
+    events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), st-start_ts, dur, enum_str("\n".join(fmt), scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
@@ -204,20 +208,20 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     return ctxs.append({"name":"Counters", "steps":[step]})
   try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
-  try:
-    rctx = decode(profile)
-    steps:list[dict] = []
-    for k,v in rctx.inst_execs.items():
-      if k.wave == 0:
-        if (r:=ref_map.get(name:=k.name)): name = ctxs[r]["name"]
-        steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                      "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
-      rows = [(e.inst, e.time, e.time-v[i-1].time if i else 0, e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(v)]
-      summary = [{"label":"Total Cycles", "value":v[-1].time-v[0].time if v else 0}, {"label":"CU", "value":k.cu}, {"label":"SIMD", "value":k.simd}]
-      steps.append({"name":f"Wave {k.wave}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
-    if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
+  if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  steps:list[dict] = []
+  for name,waves in rctx.inst_execs.items():
+    if (r:=ref_map.get(name)): name = ctxs[r]["name"]
+    steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                  "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
+    for w in waves:
+      rows = [(e.inst, e.time, e.time-(w.insts[i-1].time if i else 0), e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(w.insts)]
+      summary = [{"label":"Total Cycles", "value":w.insts[-1].time-w.insts[0].time if w.insts else 0}, {"label":"CU", "value":w.cu},
+                 {"label":"SIMD", "value":w.simd}]
+      steps.append({"name":f"Wave {w.wave_id}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
