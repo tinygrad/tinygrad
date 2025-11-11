@@ -139,6 +139,26 @@ class TestTorchBackend(unittest.TestCase):
     torch.nn.functional.max_pool2d(x, kernel_size=2, stride=1).sum().backward()
     np.testing.assert_equal(x.grad.squeeze().cpu().numpy(), [[0, 0, 0], [0, 1, 1], [0, 1, 1]])
 
+  def test_matmul_backward(self):
+    x = torch.randn(3, 4, device=device, dtype=torch.float32, requires_grad=True)
+    y = torch.randn(4, 5, device=device, dtype=torch.float32, requires_grad=True)
+    z = (x @ y).sum()
+    z.backward()
+    assert x.grad is not None
+    assert y.grad is not None
+    assert x.grad.shape == x.shape
+    assert y.grad.shape == y.shape
+
+  def test_matmul_broadcast_backward(self):
+    x = torch.randn(2, 3, 4, device=device, dtype=torch.float32, requires_grad=True)
+    y = torch.randn(4, 5, device=device, dtype=torch.float32, requires_grad=True)
+    z = (x @ y).sum()
+    z.backward()
+    assert x.grad is not None
+    assert y.grad is not None
+    assert x.grad.shape == x.shape
+    assert y.grad.shape == y.shape
+
   def test_copy_cast(self):
     x = torch.zeros(4, device=device, dtype=torch.int64)
     y = torch.ones(4, device=device, dtype=torch.float32).to(dtype=torch.int64)
@@ -203,6 +223,33 @@ class TestTorchBackend(unittest.TestCase):
     b = torch.linalg.det(a)
     np.testing.assert_equal(b.cpu().numpy(), 120.0)
 
+  def test_linalg_eigh(self):
+    a = torch.tensor([[1, 2], [2, 1]], dtype=torch.float32, device=device)
+    w, v = torch.linalg.eigh(a)
+    np.testing.assert_allclose(w.cpu().numpy(), [-1, 3], rtol=1e-5)
+    recon = (v @ torch.diag(w) @ v.T).cpu().numpy()
+    np.testing.assert_allclose(recon, a.cpu().numpy(), rtol=1e-5)
+
+  def test_diag_vector_to_matrix(self):
+    vec = torch.tensor([1., 2., 3., 4., 5.], dtype=torch.float32, device=device)
+    mat = torch.diag(vec)
+    expected = np.diag([1., 2., 3., 4., 5.])
+    np.testing.assert_allclose(mat.cpu().numpy(), expected, rtol=1e-5)
+    assert mat.shape == (5, 5)
+
+  def test_diagonal_matrix_to_vector(self):
+    mat = torch.tensor([[1., 2., 3.], [4., 5., 6.], [7., 8., 9.]], dtype=torch.float32, device=device)
+    vec = torch.linalg.diagonal(mat)
+    expected = np.array([1., 5., 9.])
+    np.testing.assert_allclose(vec.cpu().numpy(), expected, rtol=1e-5)
+    assert vec.shape == (3,)
+    
+  def test_permute(self):
+    a = torch.randn(2, 3, 4, dtype=torch.float32, device=device)
+    b = a.permute(2, 0, 1)  # (2,3,4) -> (4,2,3)
+    assert b.shape == (4, 2, 3)
+    np.testing.assert_equal(b.cpu().numpy(), a.cpu().numpy().transpose(2, 0, 1))
+
   def test_linalg_cross(self):
     a = torch.tensor([[1, 0, 0], [0, 1, 0]], dtype=torch.float32, device=device)
     b = torch.tensor([[0, 0, 1]], dtype=torch.float32, device=device)
@@ -219,7 +266,6 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     print(str(a))
 
-  @unittest.skip("failed")
   def test_floor_div(self):
     a = torch.tensor([10., 7., 5.], device=device)
     b = torch.tensor([3., 2., 2.], device=device)
@@ -247,6 +293,266 @@ class TestTorchBackend(unittest.TestCase):
   def test_diagonal_cube(self): self._test_diagonal(3, 3, 3)
   def test_diagonal_rectangular(self): self._test_diagonal(4, 5, 6)
   def test_diagonal_4d(self): self._test_diagonal(2, 3, 4, 5)
+
+
+  def test_slice_inplace_zero(self):
+    a = torch.ones((3, 3), device=device)
+    b = a[1:, 1:]
+    b.zero_()
+    expected = np.array([[1., 1., 1.],
+                         [1., 0., 0.],
+                         [1., 0., 0.]])
+    np.testing.assert_equal(a.cpu().numpy(), expected)
+
+  def test_slice_inplace_fill(self):
+    a = torch.ones((3, 3), device=device)
+    b = a[1:, 1:]
+    b.fill_(5.0)
+    expected = np.array([[1., 1., 1.],
+                         [1., 5., 5.],
+                         [1., 5., 5.]])
+    np.testing.assert_equal(a.cpu().numpy(), expected)
+
+  def test_slice_inplace_mul(self):
+    a = torch.ones((3, 3), device=device)
+    b = a[1:, 1:]
+    b *= 2
+    expected = np.array([[1., 1., 1.],
+                         [1., 2., 2.],
+                         [1., 2., 2.]])
+    np.testing.assert_equal(a.cpu().numpy(), expected)
+
+  def test_permute_slice_zero(self):
+    a = torch.ones((3, 3), device=device)
+    b = a[1:, 1:].permute(1, 0)
+    b.zero_()
+    expected = np.array([[1., 1., 1.],
+                         [1., 0., 0.],
+                         [1., 0., 0.]])
+    np.testing.assert_equal(a.cpu().numpy(), expected)
+
+  def test_permute_slice_mul(self):
+    a = torch.ones((3, 3), device=device)
+    b = a[1:, 1:].permute(1, 0)
+    b *= 2
+    expected = np.array([[1., 1., 1.],
+                         [1., 2., 2.],
+                         [1., 2., 2.]])
+    np.testing.assert_equal(a.cpu().numpy(), expected)
+
+  def test_simple_slice_setitem(self):
+    a = torch.tensor([10, 20, 30], device=device)
+    a[1] = 99
+    np.testing.assert_equal(a.cpu().numpy(), [10, 99, 30])
+
+  def test_2d_slice_setitem(self):
+    a = torch.zeros((3, 3), device=device)
+    a[1, 2] = 99
+    self.assertEqual(a[1, 2].item(), 99)
+    self.assertEqual(a.sum().item(), 99)
+
+  def test_view_copy(self):
+    a = torch.tensor([10, 20, 30], device=device)
+    view = a[1]
+    view.copy_(torch.tensor(88, device=device))
+    np.testing.assert_equal(a.cpu().numpy(), [10, 88, 30])
+
+  def test_diag_2d_input(self):
+    a = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], device=device)
+    d = torch.diag(a)
+    np.testing.assert_equal(d.cpu().numpy(), [1, 5, 9])
+
+  def test_diag_1d_input(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    d = torch.diag(a)
+    expected = [[1, 0, 0], [0, 2, 0], [0, 0, 3]]
+    np.testing.assert_equal(d.cpu().numpy(), expected)
+
+  def test_permute_view_tracking(self):
+    a = torch.ones((2, 3, 4), device=device)
+    b = a.permute(2, 0, 1)
+    self.assertEqual(b.shape, (4, 2, 3))
+
+  def test_detach_view_creation(self):
+    a = torch.tensor([1.0, 2.0, 3.0], device=device)
+    b = a.detach()
+    np.testing.assert_equal(b.cpu().numpy(), [1.0, 2.0, 3.0])
+
+  def test_view_zero_inplace(self):
+    a = torch.ones((4, 4), device=device)
+    view = a[1:3, 1:3]
+    view.zero_()
+    self.assertEqual(view.sum().item(), 0)
+
+  def test_view_fill_inplace(self):
+    a = torch.zeros((4, 4), device=device)
+    view = a[1:3, 1:3]
+    view.fill_(5)
+    self.assertEqual(view.sum().item(), 20)
+
+  def test_permute_contiguous(self):
+    a = torch.tensor([[1, 2], [3, 4]], device=device)
+    b = a.permute(1, 0)
+    c = b.contiguous()
+    expected = [[1, 3], [2, 4]]
+    np.testing.assert_equal(c.cpu().numpy(), expected)
+
+  def test_diag_2d_extract_diagonal(self):
+    a = torch.tensor([[1, 2], [3, 4]], device=device)
+    result = torch.diag(a)
+    np.testing.assert_equal(result.cpu().numpy(), [1, 4])
+
+
+  def test_slice_inplace_multiply_offset_preservation(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    a[1:] *= 2
+    np.testing.assert_equal(a.cpu().numpy(), [1, 4, 6])
+
+  def test_slice_inplace_mul_pattern(self):
+    a = torch.tensor([1, 2, 3, 4], device=device)
+    a[:2] *= 3
+    a[2:] *= 2
+    np.testing.assert_equal(a.cpu().numpy(), [3, 6, 6, 8])
+
+  def test_realize_with_views_offset_preservation(self):
+    a = torch.tensor([10, 20, 30, 40], device=device)
+    b = a[2:]  # view starting at offset 2
+    b *= 5  # triggers realize_with_views
+    np.testing.assert_equal(a.cpu().numpy(), [10, 20, 150, 200])
+    np.testing.assert_equal(b.cpu().numpy(), [150, 200])
+
+  def test_view_zero_with_indices(self):
+    a = torch.tensor([1, 2, 3, 4], device=device)
+    a[1:3].zero_()
+    np.testing.assert_equal(a.cpu().numpy(), [1, 0, 0, 4])
+
+  def test_view_fill_with_indices(self):
+    a = torch.tensor([1, 2, 3, 4], device=device)
+    a[::2].fill_(9)
+    np.testing.assert_equal(a.cpu().numpy(), [9, 2, 9, 4])
+
+  def test_nested_slice_inplace_ops(self):
+    a = torch.tensor([1, 2, 3, 4, 5, 6], device=device)
+    a[:3] += 10
+    a[3:] *= 2
+    np.testing.assert_equal(a.cpu().numpy(), [11, 12, 13, 8, 10, 12])
+
+  def test_diag_1d_still_works(self):
+    a = torch.tensor([1, 2, 3], device=device)
+    result = torch.diag(a)
+    expected = [[1, 0, 0], [0, 2, 0], [0, 0, 3]]
+    np.testing.assert_equal(result.cpu().numpy(), expected)
+
+  def test_diag_backward(self):
+    a = torch.randn(5, dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.diag(a)
+    b.sum().backward()
+    assert a.grad is not None
+
+  def test_diagonal_backward(self):
+    a = torch.randn(5, 5, dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.diagonal(a)
+    b.sum().backward()
+    assert a.grad is not None
+
+  def test_expand_backward(self):
+    a = torch.randn(4, 3, 1, 6, dtype=torch.float32, device=device, requires_grad=True)
+    b = a.expand(4, 3, 2, 6)
+    b.sum().backward()
+    assert a.grad is not None
+
+  def test_einsum_backward(self):
+    a = torch.randn(10, 10, dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.einsum('ij->ji', a)
+    b.sum().backward()
+    assert a.grad is not None
+
+  def test_diag_backward_gradient_values(self):
+    # Test diag from 1D vector -> 2D matrix
+    a = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.diag(a)
+    loss = b.sum()
+    loss.backward()
+    
+    # Gradient should be 1.0 for each element (sum of diagonal matrix puts 1 on each diagonal element)
+    expected_grad = torch.ones(3, dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_diagonal_backward_gradient_values(self):
+    # Test diagonal from 2D matrix -> 1D vector
+    a = torch.tensor([[1.0, 2.0, 3.0],
+                      [4.0, 5.0, 6.0],
+                      [7.0, 8.0, 9.0]], dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.diagonal(a)  # Should be [1.0, 5.0, 9.0]
+    loss = b.sum()
+    loss.backward()
+    
+    # Gradient should be 1.0 only on diagonal elements, 0 elsewhere
+    expected_grad = torch.tensor([[1.0, 0.0, 0.0],
+                                   [0.0, 1.0, 0.0],
+                                   [0.0, 0.0, 1.0]], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_expand_backward_gradient_values(self):
+    # Test expand with dimension size 1 -> N
+    a = torch.tensor([[1.0], [2.0], [3.0]], dtype=torch.float32, device=device, requires_grad=True)
+    b = a.expand(3, 4)  # Expand from (3,1) to (3,4)
+    loss = b.sum()
+    loss.backward()
+    
+    # Gradient should sum across the expanded dimension
+    # Each row is repeated 4 times, so gradient should be 4.0 for each element
+    expected_grad = torch.tensor([[4.0], [4.0], [4.0]], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_expand_backward_with_leading_dims(self):
+    # Test expand that adds new leading dimensions
+    a = torch.tensor([[1.0, 2.0]], dtype=torch.float32, device=device, requires_grad=True)  # (1, 2)
+    b = a.expand(3, 1, 2)  # Add leading dimension
+    loss = b.sum()
+    loss.backward()
+    
+    # Gradient should sum across the new leading dimension
+    # Each element is repeated 3 times in the new dimension
+    expected_grad = torch.tensor([[3.0, 3.0]], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_diag_2d_to_1d_backward(self):
+    # Test diagonal extraction from 2D matrix (this goes through diag operation with ndim==2)
+    a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32, device=device, requires_grad=True)
+    # When calling .diag() on 2D, it extracts diagonal
+    b = torch.diag(a)  # Should be [1.0, 4.0]
+    loss = b.sum()
+    loss.backward()
+    
+    # Gradient should be 1.0 on diagonal, 0.0 elsewhere
+    expected_grad = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_expand_complex_backward(self):
+    # Test expand with both size-1 expansion and leading dimension addition
+    a = torch.tensor([[[1.0, 2.0]]], dtype=torch.float32, device=device, requires_grad=True)  # (1, 1, 2)
+    b = a.expand(2, 3, 2)  # (2, 3, 2) - adds first dim and expands second dim
+    loss = b.sum()
+    loss.backward()
+    
+    # Total gradient should be 2*3 = 6 for each element
+    expected_grad = torch.tensor([[[6.0, 6.0]]], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_diag_backward_with_scaling(self):
+    # Test diag backward with non-uniform gradients
+    a = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.diag(a)
+    # Create non-uniform gradient by multiplying
+    loss = (b * torch.tensor([[2.0, 0.0, 0.0],
+                               [0.0, 3.0, 0.0],
+                               [0.0, 0.0, 4.0]], device=device)).sum()
+    loss.backward()
+    
+    # Gradient should be [2.0, 3.0, 4.0] (diagonal of the multiplier)
+    expected_grad = torch.tensor([2.0, 3.0, 4.0], dtype=torch.float32)
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
 
 if __name__ == "__main__":
   unittest.main()
