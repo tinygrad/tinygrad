@@ -4,7 +4,7 @@ import argparse, ctypes, struct, hashlib, pickle, code, typing, functools
 import tinygrad.runtime.autogen.sqtt as sqtt
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-from tinygrad.helpers import round_up, flatten, all_same
+from tinygrad.helpers import round_up, flatten, all_same, temp
 from dataclasses import dataclass
 
 CHUNK_CLASSES = {
@@ -210,7 +210,7 @@ class RGP:
         flags=0,
         trace_shader_core_clock=0x93f05080,
         trace_memory_clock=0x4a723a40,
-        device_id={110000: 0x744c, 110003: 0x7480, 120001: 0x7550}[device_props['gfx_target_version']],
+        device_id={110000: 0x744c, 110003: 0x7480, 120001: 0x7550, 120000: 0x7550}[device_props['gfx_target_version']],
         device_revision_id=0xc8,
         vgprs_per_simd=1536,
         sgprs_per_simd=128*16,
@@ -324,7 +324,7 @@ class RGP:
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(prog='rgptool', description='A tool to create (from pickled tinygrad profile), inspect and modify Radeon GPU Profiler files')
   parser.add_argument('command')
-  parser.add_argument('input')
+  parser.add_argument('input', nargs='?', default=temp("profile.pkl", append_user=True))
   parser.add_argument('-d', '--device')
   parser.add_argument('-o', '--output')
   args = parser.parse_args()
@@ -346,3 +346,4 @@ if __name__ == '__main__':
 
   if args.output is not None:
     with open(args.output, 'wb+') as fd: fd.write(rgp.to_bytes())
+    print(f"Saved to {args.output}")

@@ -25,13 +25,18 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ start }) => {
+const updateProgress = ({ start, err }) => {
   clearTimeout(timeout);
   const msg = document.getElementById("progress-message");
   msg.style.display = "none";
   if (start) {
     msg.innerText = "Rendering new graph...";
     timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
+  }
+  d3.select("#custom").html("");
+  if (err) {
+    displaySelection("#custom");
+    d3.select("#custom").append(() => d3.create("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node());
   }
 }
 
@@ -136,6 +141,10 @@ function renderDag(graph, additions, recenter, layoutOpts) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
+  worker.onerror = (e) => {
+    e.preventDefault();
+    updateProgress({ err:"Error in graph layout:\n"+e.message });
+  }
 }
 
 // ** profiler graph
@@ -653,7 +662,7 @@ async function main() {
         u.li = list.appendChild(document.createElement("ul"));
         u.li.id = `step-${i}-${j}`;
         const p = u.li.appendChild(document.createElement("p"));
-        p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
+        p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
         p.onclick = (e) => {
           e.stopPropagation();
           const subrewrites = getSubrewrites(e.currentTarget.parentElement);
@@ -664,7 +673,7 @@ async function main() {
       }
       for (const l of ul.querySelectorAll("ul > ul > p")) {
         const subrewrites = getSubrewrites(l.parentElement);
-        if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
+        if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
     return setState({ currentCtx:-1 });
