@@ -734,12 +734,12 @@ async function main() {
       })).node());
     } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
     if (ckey.includes("src")) {
-      for (const [i,r] of ret.runs.entries()) {
-        const div = document.createElement("div");
-        div.appendChild(document.createElement("p")).innerText = `Run ${i+1} at ${formatTime(r.ts)}`;
-        div.appendChild(document.createElement("p")).innerText = `${formatTime(r.dur)} ${r.info}`;
-        metadata.appendChild(div);
-      }
+      metadata.replaceChildren(...ret.runs.map((r, i) => {
+        const div = d3.create("div").style("display", "flex");
+        div.append("a").text(formatTime(r.ts)).on("click", () => switchCtx(-1));
+        div.append("p").text(formatTime(r.dur)+" "+r.info).style("margin-left", "4px");
+        return div.node();
+      }));
     }
     return document.querySelector("#custom").replaceChildren(root);
   }
