@@ -30,7 +30,7 @@ ref_map:dict[Any, int] = {}
 def get_rewrites(t:RewriteTrace) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
-    steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc)+("\n\nTraceback:\n"+k.tb if k.tb else ""),
+    steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc), "trace":k.tb if j == 0 else None,
               "query":f"/ctxs?ctx={i}&idx={j}", "depth":s.depth} for j,s in enumerate(v)]
     if isinstance(k.ret, ProgramSpec):
       steps.append({"name":"View UOp List", "query":f"/render?ctx={i}&fmt=uops", "depth":0})

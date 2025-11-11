@@ -760,6 +760,7 @@ async function main() {
   // ** right sidebar code blocks
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
   metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  if (step.trace) metadata.insertBefore(codeBlock(step.trace, "txt", { wrap:false }), codeElement);
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
