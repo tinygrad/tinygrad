@@ -18,7 +18,7 @@ BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
 # qreg.<regname>(<field_x>=..., <field_y>=..., ..., <field_n>=...)
 def _qreg_exec(__reg, __val=0, **kwargs):
   for k, v in kwargs.items():
-    reg_name = f'{__reg[4:]}_{k.removeprefix('_').upper()}'
+    reg_name = f"{__reg[4:]}_{k.removeprefix('_').upper()}"
     __val |= (getattr(adreno, reg_name) if v else 0) if type(v) is bool else (v << getattr(adreno, f'{reg_name}__SHIFT'))
   return __val
 qreg: Any = type("QREG", (object,), {name[4:].lower(): functools.partial(_qreg_exec, name) for name in adreno.__dict__.keys() if name[:4] == 'REG_'})
