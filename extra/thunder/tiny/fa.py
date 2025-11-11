@@ -61,24 +61,24 @@ def fa_ker():
       v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head, 0), axis=1)
 
       k_reg = warp.load(k_reg, k_smem)
-      att_block = warp.zero(att_block).after(kv_idx)
+      att_block = warp.zero(att_block.after(kv_idx))
       att_block = warp.mma_ABt(att_block, q_reg, k_reg)
 
       max_vec_last = warp.copy(max_vec_last, max_vec)
       max_vec = warp.row_reduce(max_vec, att_block, lambda a, b: a.maximum(b))
-      att_block = warp.map(att_block, lambda x, idx: (x + max_vec[idx[0], 0] * UOp.const(dtypes.float32, -1.)).exp2())
-      max_vec_last = warp.map(max_vec_last, lambda x, idx: (x + max_vec[*idx] * UOp.const(dtypes.float32, -1.)).exp2())
+      att_block = warp.map(att_block, lambda x, idx: (x - max_vec[idx[0], 0, (idx[2]%4)//2]).exp2())
+      max_vec_last = warp.map(max_vec_last, lambda x, idx: (x - max_vec[*idx]).exp2())
       norm_vec = warp.map(norm_vec, lambda x, idx: x * max_vec_last[*idx])
       norm_vec = warp.row_reduce(norm_vec, att_block, lambda a, b: a + b)
 
       att_block_mma = warp.copy(att_block_mma, att_block)
       v_reg = warp.load(v_reg, v_smem, transpose=True)
 
-      o_reg = warp.map(o_reg, lambda x, idx: x * max_vec_last[idx[0], 0])
+      o_reg = warp.map(o_reg, lambda x, idx: x * max_vec_last[idx[0], 0, (idx[2]%4)//2])
       o_reg = warp.mma_AB(o_reg, att_block_mma, v_reg)
     o_reg = ker.endrange()
 
-    o_reg = warp.map(o_reg, lambda x, idx: x / norm_vec[idx[0], 0])
+    o_reg = warp.map(o_reg, lambda x, idx: x / norm_vec[idx[0], 0, (idx[2]%4)//2])
 
     qo_smem = warp.store(qo_smem, o_reg)
     o = warp.store(o, qo_smem, (batch, q_seq, head, 0), (), axis=1)
