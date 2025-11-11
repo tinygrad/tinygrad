@@ -155,10 +155,11 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
+        metadata = [str(m) for m in (ei.arg['metadata'] or ())]
         info = f"{sym_infer(p.estimates.ops, ei.arg['var_vals'])/(t:=dur*1e3):.2f} GFLOPS {sym_infer(p.estimates.mem, ei.arg['var_vals'])/t:4.1f}"+ \
-               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{[str(m) for m in (ei.arg['metadata'] or ())]}"
+               f"|{sym_infer(p.estimates.lds,ei.arg['var_vals'])/t:.1f} GB/s\n{metadata}"
         key = ei.key
-        prg_execs.setdefault(p.function_name, []).append({"ts":st-start_ts, "dur":dur, "info":info, "key":key})
+        prg_execs.setdefault(p.function_name, []).append({"ts":st-start_ts, "dur":dur, "info":str(metadata), "key":key})
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
