@@ -36,9 +36,7 @@ const updateProgress = ({ start, err }) => {
   d3.select("#custom").html("");
   if (err) {
     displaySelection("#custom");
-    const div = d3.create("div").classed("raw-text", true);
-    div.append(() => codeBlock(err, "txt"));
-    document.getElementById("custom").replaceChildren(div.node());
+    d3.select("#custom").append(() => d3.create("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node());
   }
 }
 
