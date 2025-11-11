@@ -81,10 +81,10 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             return k
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (128 if NOLOCALS else 2048), False):
-    for sz in [16]:
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
+    for axis, sz in itertools.product((0, 1, 2), (16,)):
       try:
-        k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+        k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
         break
       except KernelOptError: pass
 
