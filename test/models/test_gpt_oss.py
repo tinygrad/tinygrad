@@ -62,7 +62,7 @@ class TestGptOss(unittest.TestCase):
     torch_params["layer_types"] = torch_params["layer_types"][:torch_params["num_hidden_layers"]]
 
     # tinygrad model
-    model = GptOss.from_pretrained(model_path, params, fakeweights)
+    model = GptOss(**params) if fakeweights else GptOss.from_pretrained(model_path, params, fakeweights)
 
     # torch model
     hf_logging.set_verbosity_error() # Suppress warning from loading smaller params

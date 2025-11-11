@@ -231,16 +231,12 @@ class Transformer:
 
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
-    # load model
     model = Transformer(**params)
-
-    # load weights
-    if not fakeweights:
-      weights = load(str(model_path / "model.safetensors.index.json"))
-      weights = convert_from_huggingface(weights, params["num_blocks"])
-      weights = fix_mxfp4(weights, params["num_blocks"])
-      # weights = fix_bf16(weights) # todo: do we need ??
-      load_state_dict(model, weights, strict=False, consume=True)
+    weights = load(str(model_path / "model.safetensors.index.json"))
+    weights = convert_from_huggingface(weights, params["num_blocks"])
+    weights = fix_mxfp4(weights, params["num_blocks"])
+    # weights = fix_bf16(weights) # todo: do we need ??
+    load_state_dict(model, weights, strict=False, consume=True)
     return model
 
 def main(args):
