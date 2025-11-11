@@ -25,13 +25,20 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ start }) => {
+const updateProgress = ({ start, err }) => {
   clearTimeout(timeout);
   const msg = document.getElementById("progress-message");
   msg.style.display = "none";
   if (start) {
     msg.innerText = "Rendering new graph...";
     timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
+  }
+  d3.select("#custom").html("");
+  if (err) {
+    displaySelection("#custom");
+    const div = d3.create("div").classed("raw-text", true);
+    div.append(() => codeBlock(err, "txt"));
+    document.getElementById("custom").replaceChildren(div.node());
   }
 }
 
@@ -138,11 +145,7 @@ function renderDag(graph, additions, recenter, layoutOpts) {
   };
   worker.onerror = (e) => {
     e.preventDefault();
-    updateProgress({ start:false });
-    displaySelection("#custom");
-    const div = d3.create("div").classed("raw-text", true);
-    div.append(() => codeBlock("Error in graph layout:\n"+e.message, "txt"));
-    document.querySelector("#custom").replaceChildren(div.node());
+    updateProgress({ err:"Error in graph layout:\n"+e.message });
   }
 }
 
