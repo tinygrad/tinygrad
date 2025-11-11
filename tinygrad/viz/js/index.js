@@ -735,8 +735,13 @@ async function main() {
     } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
     if (ckey.includes("src")) {
       let curr = "";
+      let graphed = 0;
       for (const [i,r] of ret.runs.entries()) {
         const div = d3.create("div").style("display", "flex");
+        if (r.graphed) {
+          graphed += 1;
+          continue;
+        }
         if (r.metadata != curr) { metadata.appendChild(codeBlock(r.metadata, "txt")); curr = r.metadata; }
         div.append("a").text(formatTime(r.ts)).on("click", async () => {
           if (!data) await renderProfiler();
@@ -745,6 +750,10 @@ async function main() {
         });
         div.append("span").text(formatTime(r.dur)).style("margin-left", "8px").style("text-wrap", "nowrap");
         div.append("span").text(r.flops).style("margin-left", "8px").style("text-wrap", "nowrap");
+        metadata.appendChild(div.node());
+      }
+      if (graphed > 0) {
+        const div = d3.create("div").text(`+${graphed} Graphed`)
         metadata.appendChild(div.node());
       }
     }

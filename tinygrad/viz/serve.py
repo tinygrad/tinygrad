@@ -160,8 +160,12 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
         # the next 2 lines are mostly like realize.py, without the spacing
         ops_str = f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS"
         mem_str = f"{membw*1e-9:.0f}|{ldsbw*1e-9:.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else f"{membw*1e-12:.0f}|{ldsbw*1e-12:.0f} TB/s"
-        info = "\n".join([ops_str, mem_str, (metadata_str:=",".join([str(m) for m in (ei.arg['metadata'] or ())]))])
-        prg_execs.setdefault(p.function_name, []).append({"ts":st-start_ts, "dur":dur, "metadata":metadata_str, "flops":ops_str, "key":(key:=ei.key)})
+        fmt:list[str] = [ops_str, mem_str]
+        if (metadata_str:=",".join([str(m) for m in (ei.arg['metadata'] or ())])): fmt.append(metadata_str)
+        if (graphed:=isinstance(e, ProfileGraphEntry)): fmt.append("(Graphed)")
+        info = "\n".join(fmt)
+        prg_execs.setdefault(p.function_name, []).append({"ts":st-start_ts, "dur":dur, "metadata":metadata_str, "flops":ops_str, "key":(key:=ei.key),
+                                                          "graphed":graphed})
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
