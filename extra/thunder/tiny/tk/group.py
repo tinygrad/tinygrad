@@ -1,10 +1,9 @@
-import math, functools
+import math
 from typing import cast, Callable
-from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad import dtypes
+from tinygrad.uop.ops import AxisType, UOp, Ops
 from tinygrad.dtype import AddrSpace, PtrDType
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.tiles import TILE_ROW_DIM, TILE_COL_DIM, RT_BASE_TILE_NEPT, slots
