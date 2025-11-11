@@ -28,7 +28,6 @@ def mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
 keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap().items()}
 
 def compare_state_dicts(model, torch_model):
-
   state, torch_state = get_state_dict(model), torch_model.state_dict()
   assert len(state) == len(torch_state), f"State Mismatch: tinygrad model contains {len(state)} state objects but torch model contains {len(torch_state)} state objects:"
   for k, v in tqdm(state.items(), desc='Model State Dict'):
@@ -38,7 +37,6 @@ def compare_state_dicts(model, torch_model):
     # check dtype, shape, and value
     np.testing.assert_allclose(v.numpy(), torch_v.float().cpu().numpy(), strict=True, atol=1e-6,
                                err_msg=f"tinygrad:\tk={k}\tv.dtype={v.dtype}\tv.shape={v.shape}\npytorch:\tk={torch_k}\tv.dtype={torch_v.dtype}\tv.shape={torch_v.shape}\n{v.numpy()=}\n{torch_v.float().cpu().numpy()=}")
-    del k, v, torch_k, torch_v
 
 class TestGptOss(unittest.TestCase):
   def get_model(self, fakeweights:bool):
