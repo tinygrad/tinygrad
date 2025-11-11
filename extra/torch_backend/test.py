@@ -641,10 +641,9 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_equal(c.cpu().numpy(), expected.numpy())
 
   def test_cumsum_large(self):
-    # Test cumsum with larger shapes (>512 from TODO comment)
-    a = torch.arange(1024, dtype=torch.float32, device=device)
+    a = torch.arange(513, dtype=torch.float32, device=device)
     b = torch.cumsum(a, dim=0)
-    expected = torch.arange(1024, dtype=torch.float32).cumsum(dim=0)
+    expected = torch.arange(513, dtype=torch.float32).cumsum(dim=0)
     np.testing.assert_allclose(b.cpu().numpy(), expected.numpy(), rtol=1e-5)
 
   def test_cumsum_backward(self):

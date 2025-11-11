@@ -7,9 +7,9 @@ from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from enum import Enum, auto
-import os, torch.lib
+import os
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect, itertools
+import torch, pathlib, math, operator, functools, inspect
 from typing import List, Tuple
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
@@ -778,7 +778,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.scatter.value_reduce": Tensor.scatter,
   "aten.gather": lambda self, dim, index: self.gather(dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
-  "aten.repeat": lambda x,*repeats: Tensor.repeat(x,*repeats).contiguous(), # not a view
+  "aten.repeat": Tensor.repeat,
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": inplace_fn("self")(lambda self:
@@ -815,8 +815,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.linspace": lambda start, stop, steps, dtype=None, **kwargs:
     Tensor.linspace(start, stop, steps, **({"dtype": _from_torch_dtype(dtype)} if dtype is not None else {})),
   "aten.topk": Tensor.topk,
-  "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value).contiguous(),
-  "aten.cumsum": lambda self, dim: self.cumsum(dim).contiguous(), # TODO: fix test_simple_cumsum, fails without contiguous for shapes >512
+  "aten.constant_pad_nd": lambda self, padding, value=0.0: self.pad(padding, mode="constant", value=value),
+  "aten.cumsum": lambda self, dim: (self.contiguous() if prod(self.shape) > 512 else self).cumsum(dim),
   "aten.logsumexp": lambda self, axis, keepdim=False: self.logsumexp(axis[0], keepdim=keepdim),
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
