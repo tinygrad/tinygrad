@@ -414,6 +414,31 @@ class TestTorchBackend(unittest.TestCase):
     a[2:] *= 2
     np.testing.assert_equal(a.cpu().numpy(), [3, 6, 6, 8])
 
+  def test_chained_slice_column(self):
+    a = torch.arange(16, dtype=torch.float32, device=device).reshape(4, 4)
+    torch_res = a[:, 1:2][:, 0:1].cpu().numpy()
+    cpu_res = torch.arange(16, dtype=torch.float32).reshape(4, 4)[:, 1:2][:, 0:1].numpy()
+    np.testing.assert_equal(torch_res, cpu_res)
+
+  def test_slice_with_step(self):
+    a = torch.arange(20, dtype=torch.float32, device=device)
+    torch_res = a[::2][1:4].cpu().numpy()
+    cpu_res = torch.arange(20, dtype=torch.float32)[::2][1:4].numpy()
+    np.testing.assert_equal(torch_res, cpu_res)
+
+  def test_dot_vector_matrix(self):
+    a = torch.arange(65, dtype=torch.float32, device=device)
+    b = torch.arange(65*45, dtype=torch.float32, device=device).reshape(65, 45)
+    torch_res = a.matmul(b).reshape(-1).cpu().numpy()
+    cpu_res = torch.arange(65, dtype=torch.float32).matmul(torch.arange(65*45, dtype=torch.float32).reshape(65, 45)).numpy()
+    np.testing.assert_equal(torch_res, cpu_res)
+
+  def test_alias_passthrough(self):
+    a = torch.randn(3, 3, device=device)
+    alias_view = torch.ops.aten.alias(a)
+    alias_view += 1
+    np.testing.assert_equal(a.cpu().numpy(), alias_view.cpu().numpy())
+
   def test_realize_with_views_offset_preservation(self):
     a = torch.tensor([10, 20, 30, 40], device=device)
     b = a[2:]  # view starting at offset 2
