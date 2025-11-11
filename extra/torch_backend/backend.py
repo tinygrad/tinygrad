@@ -285,30 +285,19 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 def _as_strided_impl(tensor:Tensor, size, stride, storage_offset):
   base = canonical_base(tensor)
-  if len(size) == 1 and len(stride) == 1 and stride[0] == 1:
-    start = storage_offset
-    end = storage_offset + size[0]
-    ops = (("shrink", ((start, end),)), ("reshape", tuple(size)))
-    ret = base[start:end].reshape(tuple(size))
-    ret._view_base = base
-    ret._view_ops = _get_view_ops(base) + ops
-    ret._view_st = _apply_view_st(_get_view_st(base), ops)
-    if not hasattr(base, "_views"): base._views = set()
-    base._views.add(weakref.ref(ret))
-    return ret
   try:
     ops, st = _strided_view_ops(tuple(base.shape), tuple(size), tuple(stride), storage_offset)
     ret = _apply_view_ops(base, ops)
+    ret._view_base = base
+    if not hasattr(base, "_views"): base._views = set()
+    base._views.add(weakref.ref(ret))
+    ret._view_ops = ops
+    ret._view_st = st
+    return ret
   except Exception:
-    ret = base.contiguous().reshape(size)
-    ops = (("reshape", tuple(size)),)
-    st = ShapeTracker.from_shape(tuple(size))
-  ret._view_base = base
-  if not hasattr(base, "_views"): base._views = set()
-  base._views.add(weakref.ref(ret))
-  ret._view_ops = ops
-  ret._view_st = st
-  return ret
+    flat = base.contiguous().reshape((-1,))
+    total = int(prod(size))
+    return flat[storage_offset:storage_offset+total].reshape(tuple(size))
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):

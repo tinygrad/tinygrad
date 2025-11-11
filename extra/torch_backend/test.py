@@ -439,6 +439,13 @@ class TestTorchBackend(unittest.TestCase):
     alias_view += 1
     np.testing.assert_equal(a.cpu().numpy(), alias_view.cpu().numpy())
 
+  def test_split_simple_vector(self):
+    a = torch.arange(10, dtype=torch.float32, device=device)
+    torch_chunks = a.split([1,4,5])
+    cpu_chunks = torch.arange(10, dtype=torch.float32).split([1,4,5])
+    for tc, cc in zip(torch_chunks, cpu_chunks):
+      np.testing.assert_equal(tc.cpu().numpy(), cc.cpu().numpy())
+
   def test_split_matches_torch(self):
     a = torch.arange(10, dtype=torch.float32, device=device)
     torch_chunks = a.split([1,4,5])
