@@ -27,9 +27,8 @@ def compare_state_dicts(model, torch_model):
   from tinygrad.apps.llm2 import get_keymap
 
   # map tinygrad to hf state_dict keys
-  num_blocks = len(model.blk)
   def mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
-  keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap(num_blocks).items()}
+  keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap().items()}
 
   state, torch_state = get_state_dict(model), torch_model.state_dict()
   assert len(state) == len(torch_state), f"State Mismatch: tinygrad model contains {len(state)} state objects but torch model contains {len(torch_state)} state objects:"
@@ -72,9 +71,8 @@ class TestGptOss(unittest.TestCase):
 
     # set fakeweights equal to each other
     if fakeweights:
-      num_blocks = len(model.blk)
       def mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
-      keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap(num_blocks).items()}
+      keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap().items()}
       state, torch_state = get_state_dict(model), torch_model.state_dict()
       for k, v in tqdm(state.items(), desc='Model State Dict'):
         torch_k = keymap[k]
@@ -85,7 +83,7 @@ class TestGptOss(unittest.TestCase):
 
   def test_model(self):
     # compare model architecture and weights (shape, dtype, values)
-    # if fakeweights, only compare model architecture and weight shapes
+    # if fakeweights, only compare model architecture and weight shapes (dtype, values will always be the same)
     model, torch_model = self.get_model(getenv("FAKEWEIGHTS", 1))
     compare_state_dicts(model, torch_model)
 

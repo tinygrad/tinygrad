@@ -47,7 +47,8 @@ def download_weights(model:str, total_num_weights:int) -> Path:
     fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
   return Path(os.path.dirname(model_path))
 
-def get_keymap(num_blocks):
+def get_keymap():
+  num_blocks = getenv("GPT_OSS_LAYERS", MODELS["20B"]["params"]["num_blocks"])
   return {
     "model.embed_tokens.weight": "token_embd.weight",
     **{f"model.layers.{l}.input_layernorm.weight": f"blk.{l}.attn_norm.weight" for l in range(num_blocks)},
@@ -64,9 +65,9 @@ def get_keymap(num_blocks):
     "lm_head.weight": "output.weight",
   }
 
-def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int):
+def convert_from_huggingface(weights:dict[str, Tensor]):
   # map hf to tinygrad state_dict keys
-  keymap = get_keymap(num_blocks)
+  keymap = get_keymap()
   sd = {}
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
@@ -77,7 +78,7 @@ def convert_from_huggingface(weights:dict[str, Tensor], num_blocks: int):
     sd[keymap[k]] = v
   return sd
 
-def fix_mxfp4(weights, num_blocks) -> Tensor:
+def fix_mxfp4(weights) -> Tensor:
   def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
     """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
@@ -89,6 +90,7 @@ def fix_mxfp4(weights, num_blocks) -> Tensor:
     return out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
 
   # only dequantize ffn_gate_up_proj and ffn_down_proj
+  num_blocks = getenv("GPT_OSS_LAYERS", MODELS["20B"]["params"]["num_blocks"])
   for l in range(num_blocks):
     for d in ['gate_up', 'down']:
       blocks, scales = f'blk.{l}.ffn_{d}_proj_blocks', f'blk.{l}.ffn_{d}_proj_scales'
@@ -233,8 +235,8 @@ class Transformer:
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
     model = Transformer(**params)
     weights = load(str(model_path / "model.safetensors.index.json"))
-    weights = convert_from_huggingface(weights, params["num_blocks"])
-    weights = fix_mxfp4(weights, params["num_blocks"])
+    weights = convert_from_huggingface(weights)
+    weights = fix_mxfp4(weights)
     # weights = fix_bf16(weights) # todo: do we need ??
     load_state_dict(model, weights, strict=False, consume=True)
     return model
