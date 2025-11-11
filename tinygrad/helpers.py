@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, traceback
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -245,6 +245,7 @@ class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
   ret:Any=None
+  tb:str|None=field(default_factory=lambda: "".join(traceback.format_stack(inspect.currentframe().f_back)) if VIZ >= 2 else None)
 
 class ProfileEvent: pass
 
