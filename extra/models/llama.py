@@ -1,7 +1,7 @@
 from typing import Union, Optional, Any
 import collections, math
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEBUG
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -34,10 +34,10 @@ def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
   return x.repeat((1, 1, 1, n_rep)).reshape(bs, seqlen, n_kv_heads * n_rep, head_dim)
 
 class Attention:
-  def __init__(self, dim, n_heads, n_kv_heads=None, head_dim=None, max_context=0, linear=nn.Linear, qk_norm:float|None=None):
+  def __init__(self, dim, n_heads, n_kv_heads=None, max_context=0, linear=nn.Linear, qk_norm:float|None=None):
     self.n_heads = n_heads
     self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads # n_kv_heads != n_heads implies MQA [arxiv/2307.09288, A.2.1]
-    self.head_dim = dim // n_heads if head_dim is None else head_dim
+    self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
     self.max_context = max_context
 
@@ -89,6 +89,20 @@ class Attention:
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+    if getenv("STUB_ATTENTION"):
+      # TODO: do we need mask?
+      from tinygrad.uop.ops import UOp, KernelInfo
+      def fa_custom_forward(attn:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
+        return UOp.sink(arg=KernelInfo(name="fa_custom_forward"))
+      def fa_custom_backward(out_q:UOp, out_k:UOp, out_v:UOp, grad:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
+        return UOp.sink(arg=KernelInfo(name="fa_custom_backward"))
+      def fa_backward(grad:UOp, kernel:UOp) -> tuple[None, UOp, UOp, UOp]:
+        grad_q = Tensor.empty_like(q:=Tensor(kernel.src[1]))
+        grad_k = Tensor.empty_like(k:=Tensor(kernel.src[2]))
+        grad_v = Tensor.empty_like(v:=Tensor(kernel.src[3]))
+        ck = Tensor.custom_kernel(grad_q, grad_k, grad_v, Tensor(grad), q, k, v, fxn=fa_custom_backward)[:3]
+        return (None, ck[0].uop, ck[1].uop, ck[2].uop)
+      attn = Tensor.empty_like(attn).custom_kernel(xq, keys, values, fxn=fa_custom_forward, grad_fxn=fa_backward)[0]
     attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
@@ -104,19 +118,14 @@ class FeedForward:
     return self.w2(w1 * w3)
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, head_dim:int, norm_eps:float, max_context:int, linear=nn.Linear,
-               feed_forward=FeedForward, qk_norm=None, sliding_window:int=0):
-    self.attention = Attention(dim, n_heads, n_kv_heads, head_dim, max_context, linear, qk_norm)
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int, linear=nn.Linear,
+               feed_forward=FeedForward, qk_norm=None):
+    self.attention = Attention(dim, n_heads, n_kv_heads, max_context, linear, qk_norm)
     self.feed_forward = feed_forward(dim, hidden_dim, linear)
     self.attention_norm = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm = nn.RMSNorm(dim, norm_eps)
-    self.sliding_window = sliding_window
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
-    if self.sliding_window:
-      seqlen = x.shape[1]
-      sliding_mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
-      mask = sliding_mask if mask is None else mask+sliding_mask
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
     return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
@@ -173,20 +182,21 @@ def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
 
 class Transformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size, linear=nn.Linear, embedding=nn.Embedding,
-               n_kv_heads=None, head_dim=None, rope_theta=10000, max_context=1024, jit=True, feed_forward=FeedForward, qk_norm=None, disable_kv_cache=False):
-    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, head_dim, norm_eps, 0 if disable_kv_cache else max_context,
+               n_kv_heads=None, rope_theta=10000, max_context=1024, jit=True, feed_forward=FeedForward, qk_norm=None, disable_kv_cache=False):
+    self.layers = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, 0 if disable_kv_cache else max_context,
                                     linear, feed_forward=feed_forward, qk_norm=qk_norm) for _ in range(n_layers)]
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = embedding(vocab_size, dim)
     self.output = nn.Linear(dim, vocab_size, bias=False) if embedding == nn.Embedding else linear(dim, vocab_size, bias=False)
     self.max_context = max_context
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads if head_dim is None else head_dim, self.max_context * 2, rope_theta).contiguous().requires_grad_(False)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, self.max_context * 2, rope_theta).contiguous().requires_grad_(False)
     self.forward_jit = TinyJit(self.forward) if jit else None
 
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
+
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
     logits = self.output(self.norm(h))
