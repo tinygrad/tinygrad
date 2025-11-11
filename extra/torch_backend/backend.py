@@ -7,12 +7,14 @@ from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
 from tinygrad.shape.shapetracker import ShapeTracker, View
 from enum import Enum, auto
-import torch.lib
+import os, torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect, itertools
 from typing import List, Tuple
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
+_ext_dir = os.environ.setdefault("TORCH_EXTENSIONS_DIR", str(pathlib.Path(__file__).resolve().parents[2] / ".torch_extensions"))
+pathlib.Path(_ext_dir).mkdir(parents=True, exist_ok=True)
 
 # https://pytorch.org/docs/stable/torch.compiler_ir.html
 
@@ -48,6 +50,9 @@ def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", s
 def _ensure_view_tracking(tensor: Tensor) -> Tensor:
   if not hasattr(tensor, "_view_ops"): tensor._view_ops = tuple()
   if not hasattr(tensor, "_view_st"): tensor._view_st = ShapeTracker.from_shape(tuple(tensor.shape))
+  elif tensor._view_st.shape != tuple(tensor.shape):
+    tensor._view_ops = tuple()
+    tensor._view_st = ShapeTracker.from_shape(tuple(tensor.shape))
   return tensor
 def _get_view_ops(tensor: Tensor) -> tuple:
   return _ensure_view_tracking(tensor)._view_ops
@@ -172,6 +177,8 @@ view_ops = {
 }
 
 for k,(fn, recorder) in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(k, fn, recorder))
+
+torch.library.impl("aten::alias", "privateuseone")(wrap_view_op("aten::alias", lambda self: self, lambda *a, **k: ()))
 
 # in place operations with views
 def realize_with_views(self: Tensor, views: Tensor):
