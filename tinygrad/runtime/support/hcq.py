@@ -3,7 +3,7 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited
+from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited, lo32
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
