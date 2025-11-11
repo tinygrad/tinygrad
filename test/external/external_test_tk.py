@@ -384,7 +384,6 @@ class TestTK(unittest.TestCase):
 
     with Context(DEBUG=0):
       a = Tensor.rand(1, 1, BLOCK_SIZE, N, dtype="float32")
-      # a = Tensor.arange(1 * 1 * BLOCK_SIZE * N).reshape(1, 1, BLOCK_SIZE, N).cast(dtypes.float32).contiguous()
       b = Tensor.empty(1, 1, BLOCK_SIZE, N, dtype="float32")
       Tensor.realize(a, b)
 
