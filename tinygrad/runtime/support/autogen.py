@@ -98,8 +98,8 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
           case CK.VAR_DECL if c.linkage == LK.INTERNAL:
             if (c.type.kind == TK.CONSTANTARRAY and c.type.get_array_element_type().get_canonical().kind in ints and
                 (init:=last(c)).kind == CK.INIT_LIST_EXPR and all(re.match(r"\[.*\].*=", readext(f, c.extent)) for c in init.get_children())):
-              macros += [f"{c.spelling} = {{{','.join(f'{readext(f, next(it:=c.get_children()).extent)}:{readext(f, next(it).extent)}'
-                                                      for c in init.get_children())}}}"]
+              cs = init.get_children()
+              macros += [f"{c.spelling} = {{{','.join(f'{readext(f,next(it:=c.get_children()).extent)}:{readext(f,next(it).extent)}' for c in cs)}}}"]
             elif c.type.get_canonical().kind in ints: macros += [f"{c.spelling} = {readext(f, last(c).extent)}"]
             else: macros += [f"{c.spelling} = {tname(c.type)}({readext(f, last(c).extent)})"]
           case CK.VAR_DECL if c.linkage == LK.EXTERNAL and dll:
