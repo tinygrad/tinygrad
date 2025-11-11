@@ -191,10 +191,12 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map();
-async function focusShape(shape) {
+// TODO: there should be only one of these shape maps
+var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map(), shapeMap = new Map();
+// TODO: factor out history, rendering and state
+async function focusShape(shape, skipHistory) {
   if (canvasZoom == null) await renderProfiler();
-  saveToHistory({ shape:focusedShape });
+  if (!skipHistory) saveToHistory({ shape:focusedShape });
   focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
 }
@@ -226,8 +228,6 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/device)
   const colorMap = new Map();
-  // map shapes by event key
-  const shapeMap = new Map();
   data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
@@ -738,7 +738,11 @@ async function main() {
       for (const [i,r] of ret.runs.entries()) {
         const div = d3.create("div").style("display", "flex");
         if (r.metadata != curr) { metadata.appendChild(codeBlock(r.metadata, "txt")); curr = r.metadata; }
-        div.append("a").text(formatTime(r.ts)).on("click", () => switchCtx(-1));
+        div.append("a").text(formatTime(r.ts)).on("click", async () => {
+          if (!data) await renderProfiler();
+          switchCtx(-1);
+          focusShape(shapeMap.get(r.key), true);
+        });
         div.append("span").text(formatTime(r.dur)).style("margin-left", "8px").style("text-wrap", "nowrap");
         div.append("span").text(r.flops).style("margin-left", "8px").style("text-wrap", "nowrap");
         metadata.appendChild(div.node());
