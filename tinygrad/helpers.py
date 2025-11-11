@@ -245,7 +245,7 @@ class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
   ret:Any=None
-  tb:str|None=field(default_factory=lambda: "".join(traceback.format_stack(inspect.currentframe().f_back)) if VIZ >= 2 else None)
+  tb:str|None=field(default_factory=lambda: "".join(traceback.format_stack(unwrap(inspect.currentframe()).f_back)) if VIZ >= 2 else None)
 
 class ProfileEvent: pass
 
