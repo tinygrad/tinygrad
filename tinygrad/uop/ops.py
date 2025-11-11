@@ -217,10 +217,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # ops with custom handling
       case Ops.KERNEL: return self.arg.ast._shape
-      case Ops.STORE:
-        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-        if self.dtype is not dtypes.void: return self.src[0].src[0].shape
-        return None
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -272,7 +268,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE}):
+    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
       # TODO: remove this hack for 3 op assign
       input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
       if len(input_shapes) == 0: return None
