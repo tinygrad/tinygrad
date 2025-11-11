@@ -48,6 +48,11 @@ def range_str(u:UOp, color=False) -> str:
   ret = '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
   return colored(ret, axis_colors[u.arg[-1]]) if color else ret
 
+def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
+  ret = ','.join([range_str(x, color=color) for x in sorted(rngs, key=lambda x: x.arg)])
+  if pad is not None: ret += " " * (pad-ansilen(ret))
+  return ret
+
 def consumer_map_from_toposort(lst:Iterable[UOp]):
   ret: dict[UOp, dict[UOp, None]] = {}
   for u in lst:
@@ -212,10 +217,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # ops with custom handling
       case Ops.KERNEL: return self.arg.ast._shape
-      case Ops.STORE:
-        if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-        if self.dtype is not dtypes.void: return self.src[0].src[0].shape
-        return None
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -267,7 +268,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE}):
+    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
       # TODO: remove this hack for 3 op assign
       input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
       if len(input_shapes) == 0: return None
@@ -554,7 +555,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # in these four, if the shape doesn't change we can return self
   def forced_reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=False)
   #def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=True)
-  def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
+  #def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
   #def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
   def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, same_shape_noop=True)
 
@@ -784,8 +785,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop high level syntactic sugar ***
 
-  def shrink_to(self, arg:tuple[sint, ...]): return self.shrink(tuple([(0,x) for x in arg]))
-
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     lookup = {AddrSpace.GLOBAL: Ops.DEFINE_GLOBAL, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
@@ -851,10 +850,10 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 # ***** uop helpers *****
 
 def print_uops(uops:list[UOp]):
+  uops_index = {u:i for i,u in enumerate(uops)}
   for i,u in enumerate(uops):
-    formatted_srcs = [(uops.index(x) if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    formatted_range = ','.join([range_str(r, color=True) for r in sorted(u.ranges, key=lambda x: x.arg)])
-    print(f"{i:4d} {str(u.op):20s}: {(formatted_range)+' '*(10-ansilen(formatted_range))} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
+    formatted_srcs = [(uops_index[x] if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
+    print(f"{i:4d} {str(u.op):20s}: {multirange_str(u.ranges, color=True, pad=10)} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
 
 # ***** pattern matcher *****
 

@@ -188,6 +188,7 @@ nv_status_codes = {}
     extra/nv_gpu_driver/g_rpc-message-header.h \
     extra/nv_gpu_driver/gsp_static_config.h \
     extra/nv_gpu_driver/vbios.h \
+    extra/nv_gpu_driver/pci_exp_table.h \
     --clang-args="-DRPC_MESSAGE_STRUCTURES -DRPC_STRUCTURES -include $NVKERN_SRC/src/common/sdk/nvidia/inc/nvtypes.h -I$NVKERN_SRC/src/nvidia/generated -I$NVKERN_SRC/src/common/inc -I$NVKERN_SRC/src/nvidia/inc -I$NVKERN_SRC/src/nvidia/interface/ -I$NVKERN_SRC/src/nvidia/inc/kernel -I$NVKERN_SRC/src/nvidia/inc/libraries -I$NVKERN_SRC/src/nvidia/arch/nvalloc/common/inc -I$NVKERN_SRC/kernel-open/nvidia-uvm -I$NVKERN_SRC/kernel-open/common/inc -I$NVKERN_SRC/src/common/sdk/nvidia/inc -I$NVKERN_SRC/src/nvidia/arch/nvalloc/unix/include -I$NVKERN_SRC/src/common/sdk/nvidia/inc/ctrl" \
     -o $BASE/nv/nv.py
 
@@ -549,7 +550,6 @@ elif [ "$1" == "kfd" ]; then generate_kfd
 elif [ "$1" == "nv" ]; then generate_nv
 elif [ "$1" == "amd" ]; then generate_amd
 elif [ "$1" == "am" ]; then generate_am
-elif [ "$1" == "nvdrv" ]; then generate_nvdrv
 elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring

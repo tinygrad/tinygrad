@@ -5,7 +5,7 @@ from typing import Any, Generic, TypeVar, Iterator, Sequence, cast, Generator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
 from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, AMD_LLVM
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, AMD_LLVM, select_first_inited
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -291,18 +291,14 @@ class Compiled:
     if len(enable_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {enable_comps}")
     for _, comp_pair in disable_comps: self.compilers.remove(comp_pair)
 
-    try: self.renderer, self.compiler = next(self._get_available_compilers([list(enable_comps)[0][1]] if len(enable_comps) == 1 else self.compilers))
-    except StopIteration as exc: raise RuntimeError(f"no usable compilers for {self.device}") from exc
+    self.renderer, self.compiler = select_first_inited([list(enable_comps)[0][1]] if len(enable_comps) == 1 else self.compilers,
+                                                       f"No compiler for {self.device} is available")
 
     if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
 
   def _get_compiler_envvar(self, c):
     compiler_name = f"{unwrap_class_type(c).__name__.upper().removesuffix('COMPILER').removeprefix(devname:=self.device.split(':')[0].upper())}"
     return f"{devname}_{compiler_name if len(compiler_name) > 0 else unwrap_class_type(c).__name__.upper()}"
-
-  def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
-    for renderer, compiler in compilers:
-      with contextlib.suppress(Exception): yield renderer(), compiler()
 
   def synchronize(self):
     """
@@ -343,6 +339,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     if device == "CL": return not CI and not OSX
+    if device == "QCOM": return False # QCOM compiler is flaky with half
     if device in ["CUDA", "NV"]: return not CI
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)

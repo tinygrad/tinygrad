@@ -89,10 +89,18 @@ class NV_FLCN(NV_IP):
     self.prep_booter()
 
   def prep_ucode(self):
-    expansion_rom_off, bit_addr = {"GA": 0x16600, "AD": 0x14e00}[self.nvdev.chip_name[:2]], 0x1b0
-    vbios_bytes = bytes(array.array('I', self.nvdev.mmio[0x00300000//4:(0x00300000+0x98e00)//4]))
+    vbios_bytes, vbios_off = memoryview(bytes(array.array('I', self.nvdev.mmio[0x00300000//4:(0x00300000+0x100000)//4]))), 0
+    while True:
+      pci_blck = vbios_bytes[vbios_off + nv.OFFSETOF_PCI_EXP_ROM_PCI_DATA_STRUCT_PTR:].cast('H')[0]
+      imglen = vbios_bytes[vbios_off + pci_blck + nv.OFFSETOF_PCI_DATA_STRUCT_IMAGE_LEN:].cast('H')[0] * nv.PCI_ROM_IMAGE_BLOCK_SIZE
+      match vbios_bytes[vbios_off + pci_blck + nv.OFFSETOF_PCI_DATA_STRUCT_CODE_TYPE]:
+        case nv.NV_BCRT_HASH_INFO_BASE_CODE_TYPE_VBIOS_BASE: block_size = imglen
+        case nv.NV_BCRT_HASH_INFO_BASE_CODE_TYPE_VBIOS_EXT:
+          expansion_rom_off = vbios_off - block_size
+          break
+      vbios_off += imglen
 
-    bit_header = nv.BIT_HEADER_V1_00.from_buffer_copy(vbios_bytes[bit_addr:bit_addr + ctypes.sizeof(nv.BIT_HEADER_V1_00)])
+    bit_header = nv.BIT_HEADER_V1_00.from_buffer_copy(vbios_bytes[(bit_addr:=0x1b0):bit_addr + ctypes.sizeof(nv.BIT_HEADER_V1_00)])
     assert bit_header.Signature == 0x00544942, f"Invalid BIT header signature {hex(bit_header.Signature)}"
 
     for i in range(bit_header.TokenEntries):

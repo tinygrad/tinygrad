@@ -34,7 +34,6 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
         # check if it simplifies
         if count_divmod(nidx) <= count_divmod(u):
           u = nidx
-          continue
   return u
 
 pm_simplify_ranges = PatternMatcher([

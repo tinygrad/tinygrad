@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import subprocess, ctypes, pathlib, traceback
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str, pyrender
-from tinygrad.uop.ops import print_uops, range_start
+from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
@@ -78,11 +78,14 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
         label += f"\n{x.op.name}{idx} {arg}" + (f" {x.src[0].op}" if len(x.src) else "")
     try:
       if len(rngs:=u.ranges):
-        label += f"\n({','.join([range_str(x, color=True) for x in sorted(rngs, key=lambda x: x.arg[0:-1])])})"
-      if u.op not in {Ops.BUFFER, Ops.KERNEL, Ops.ASSIGN, Ops.COPY, Ops.SINK, *GroupOp.Buffer} and u._shape is not None:
+        label += f"\n({multirange_str(rngs, color=True)})"
+      if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         label += f"\n{u.render()}"
+        ranges: list[UOp] = []
+        for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
+        if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
       if u.op in {Ops.END, Ops.REDUCE} and len(trngs:=list(UOp.sink(*u.src[range_start[u.op]:]).ranges)):
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
@@ -201,14 +204,20 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     return ctxs.append({"name":"Counters", "steps":[step]})
   try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
-  try:
-    rctx = decode(profile)
-    steps = [{"name":str(x[0]), "depth":0, "data":{"rows":[(e.inst, e.time, e.time-x[1][i-1].time if i else 0, e.dur, e.stall,
-                                                            str(e.typ).split("_")[-1]) for i,e in enumerate(x[1])],
-                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":[]},
-              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.inst_execs.items())]
-    if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
+  if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  steps:list[dict] = []
+  for name,waves in rctx.inst_execs.items():
+    if (r:=ref_map.get(name)): name = ctxs[r]["name"]
+    steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                  "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
+    for w in waves:
+      rows = [(e.inst, e.time, e.time-(w.insts[i-1].time if i else 0), e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(w.insts)]
+      summary = [{"label":"Total Cycles", "value":w.insts[-1].time-w.insts[0].time if w.insts else 0}, {"label":"CU", "value":w.cu},
+                 {"label":"SIMD", "value":w.simd}]
+      steps.append({"name":f"Wave {w.wave_id}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
@@ -268,8 +277,11 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
   return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
-def get_stdout(f:Callable) -> str:
-  with redirect_stdout(buf:=io.StringIO()): f()
+def get_stdout(f: Callable) -> str:
+  buf = io.StringIO()
+  try:
+    with redirect_stdout(buf), redirect_stderr(buf): f()
+  except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
 def get_render(i:int, j:int, fmt:str) -> dict|None:
@@ -277,8 +289,8 @@ def get_render(i:int, j:int, fmt:str) -> dict|None:
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
   if fmt == "src": return {"src":prg.src, "lang":"cpp"}
-  lib = (compiler:=Device[prg.device].compiler).compile(prg.src)
-  disasm_str = get_stdout(lambda: compiler.disassemble(lib))
+  compiler = Device[prg.device].compiler
+  disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(prg.src)))
   from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
   if isinstance(compiler, LLVMCompiler):
     mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
