@@ -16,9 +16,10 @@ BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
 
 #Parse C-style defines: <regname>_<field_x>__SHIFT and <regname>_<field_y>__MASK from the adreno module into the following format:
 # qreg.<regname>(<field_x>=..., <field_y>=..., ..., <field_n>=...)
-def _qreg_exec(reg, __val=0, **kwargs):
+def _qreg_exec(__reg, __val=0, **kwargs):
   for k, v in kwargs.items():
-    __val |= (getattr(adreno, f'{reg[4:]}_{k.upper()}') if v else 0) if type(v) is bool else (v << getattr(adreno, f'{reg[4:]}_{k.upper()}__SHIFT'))
+    reg_name = f'{__reg[4:]}_{k.removeprefix('_').upper()}'
+    __val |= (getattr(adreno, reg_name) if v else 0) if type(v) is bool else (v << getattr(adreno, f'{reg_name}__SHIFT'))
   return __val
 qreg: Any = type("QREG", (object,), {name[4:].lower(): functools.partial(_qreg_exec, name) for name in adreno.__dict__.keys() if name[:4] == 'REG_'})
 
@@ -63,18 +64,20 @@ class QCOMComputeQueue(HWQueue):
     self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
     return self
 
-  def signal(self, signal:QCOMSignal, value=0, ts=False):
+  def signal(self, signal:QCOMSignal, value=0):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     if QCOMDevice.gpu_id < 700:
-      self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
-               *data64_le(signal.timestamp_addr if ts else signal.value_addr), qreg.cp_event_write_3(value & 0xFFFFFFFF))
+      self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS), *data64_le(signal.value_addr), lo32(value))
       self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
     return self
 
-  def timestamp(self, signal:QCOMSignal): return self.signal(signal, 0, ts=True)
+  def timestamp(self, signal:QCOMSignal):
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
+    self.cmd(adreno.CP_REG_TO_MEM, qreg.cp_reg_to_mem_0(reg=adreno.REG_A6XX_CP_ALWAYS_ON_COUNTER, cnt=2, _64b=True),*data64_le(signal.timestamp_addr))
+    return self
 
   def wait(self, signal:QCOMSignal, value=0):
     self.cmd(adreno.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=adreno.WRITE_GE, poll=adreno.POLL_MEMORY),*data64_le(signal.value_addr),
