@@ -24,6 +24,8 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
                    forward_only=False, vals=None, low=-2, high=2):
   if tinygrad_fxn is None: tinygrad_fxn = torch_fxn
   ts, tst = prepare_test_op(low, high, shps, vals, forward_only)
+  # Force PyTorch tensors to CPU to avoid Tinygrad's 'tiny' device backend hijacking torch ops under TINY_BACKEND=1.
+  ts = [t.cpu() for t in ts]
 
   st = time.monotonic()
   out = torch_fxn(*ts)
