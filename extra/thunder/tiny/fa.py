@@ -13,10 +13,9 @@ from extra.thunder.tiny.tk.tiles import gl, st, rt, rv
 NUM_WORKERS = 1
 PIPE_STAGES = 3
 
-B, N, H, D = 1, 16, 1, 64
+B, N, H, D = 2, 32, 2, 64
 
 ROWS = 16 * (64 // D)
-BLOCK_SIZE=16
 
 def fa_ker():
   with Kernel((N // (ROWS*NUM_WORKERS), H, B), NUM_WORKERS * WARP_THREADS) as ker:
@@ -64,14 +63,14 @@ def fa_ker():
       att_block = warp.zero(att_block.after(kv_idx))
       att_block = warp.mma_ABt(att_block, q_reg, k_reg)
 
-      max_vec_last = warp.copy(max_vec_last, max_vec)
+      max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
       max_vec = warp.row_reduce(max_vec, att_block, lambda a, b: a.maximum(b))
       att_block = warp.map(att_block, lambda x, idx: (x - max_vec[idx[0], 0, (idx[2]%4)//2]).exp2())
       max_vec_last = warp.map(max_vec_last, lambda x, idx: (x - max_vec[*idx]).exp2())
       norm_vec = warp.map(norm_vec, lambda x, idx: x * max_vec_last[*idx])
       norm_vec = warp.row_reduce(norm_vec, att_block, lambda a, b: a + b)
 
-      att_block_mma = warp.copy(att_block_mma, att_block)
+      att_block_mma = warp.copy(att_block_mma.after(kv_idx), att_block)
       v_reg = warp.load(v_reg, v_smem, transpose=True)
 
       o_reg = warp.map(o_reg, lambda x, idx: x * max_vec_last[idx[0], 0, (idx[2]%4)//2])
@@ -86,14 +85,11 @@ def fa_ker():
     return ker.finish()
 
 if __name__ == "__main__":
-  Tensor.manual_seed(42)
-
   with Context(DEBUG=0):
-    q = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
-    k = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
-    v = Tensor.arange(B * N * H * D).reshape(B, N, H, D).cast(dtypes.bfloat16).contiguous()
-    # v = Tensor.ones(B, N, H, D, dtype="bfloat16").contiguous()
-    out = Tensor.empty(B, N, H, D, dtype="bfloat16")
+    q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+    k = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+    v = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+    out = Tensor.empty(B, N, H, D, dtype=dtypes.bfloat16)
     Tensor.realize(q, k, v, out)
 
   sink = fa_ker()
@@ -110,9 +106,11 @@ if __name__ == "__main__":
   print(f"{attn_flops/(min(times)*1e12):3f} TFLOPS")
 
   out = out.float()
-  print(out.tolist())
 
-  ref = q.scaled_dot_product_attention(k, v).float()
-  print(ref.tolist())
+  q_permuted = q.permute(0, 2, 1, 3)
+  k_permuted = k.permute(0, 2, 1, 3)
+  v_permuted = v.permute(0, 2, 1, 3)
+  ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted).float()
+  ref = ref.permute(0, 2, 1, 3)
 
   print((ref - out).mean().item(), (ref - out).max().item())
