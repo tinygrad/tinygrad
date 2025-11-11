@@ -285,8 +285,24 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 def _as_strided_impl(tensor:Tensor, size, stride, storage_offset):
   base = canonical_base(tensor)
-  ops, st = _strided_view_ops(tuple(base.shape), tuple(size), tuple(stride), storage_offset)
-  ret = _apply_view_ops(base, ops)
+  if len(size) == 1 and len(stride) == 1 and stride[0] == 1:
+    start = storage_offset
+    end = storage_offset + size[0]
+    ops = (("shrink", ((start, end),)), ("reshape", tuple(size)))
+    ret = base[start:end].reshape(tuple(size))
+    ret._view_base = base
+    ret._view_ops = _get_view_ops(base) + ops
+    ret._view_st = _apply_view_st(_get_view_st(base), ops)
+    if not hasattr(base, "_views"): base._views = set()
+    base._views.add(weakref.ref(ret))
+    return ret
+  try:
+    ops, st = _strided_view_ops(tuple(base.shape), tuple(size), tuple(stride), storage_offset)
+    ret = _apply_view_ops(base, ops)
+  except Exception:
+    ret = base.contiguous().reshape(size)
+    ops = (("reshape", tuple(size)),)
+    st = ShapeTracker.from_shape(tuple(size))
   ret._view_base = base
   if not hasattr(base, "_views"): base._views = set()
   base._views.add(weakref.ref(ret))
@@ -542,7 +558,11 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
-    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()).clone())
+    src_arr = torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()).clone()
+    if dest.is_contiguous():
+      dest.copy_(src_arr)
+    else:
+      dest.numpy()[...] = src_arr.cpu().numpy()
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
     # TODO we need to properly match dest shape and strides, not blindly assign

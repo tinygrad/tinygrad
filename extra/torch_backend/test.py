@@ -439,6 +439,25 @@ class TestTorchBackend(unittest.TestCase):
     alias_view += 1
     np.testing.assert_equal(a.cpu().numpy(), alias_view.cpu().numpy())
 
+  def test_split_matches_torch(self):
+    a = torch.arange(10, dtype=torch.float32, device=device)
+    torch_chunks = a.split([1,4,5])
+    tiny_chunks = [chunk.cpu().numpy() for chunk in torch_chunks]
+    cpu_chunks = [torch.arange(10, dtype=torch.float32).split([1,4,5])[i].numpy() for i in range(3)]
+    for tr, cr in zip(tiny_chunks, cpu_chunks): np.testing.assert_equal(tr, cr)
+
+  def test_sum_matches_torch(self):
+    a = torch.arange(6, dtype=torch.float32, device=device).reshape(2,3)
+    torch_res = a.sum().cpu().numpy()
+    cpu_res = torch.arange(6, dtype=torch.float32).reshape(2,3).sum().numpy()
+    np.testing.assert_equal(torch_res, cpu_res)
+
+  def test_view_matches_torch(self):
+    a = torch.arange(6, dtype=torch.float32, device=device)
+    torch_res = a.view(2, 3).cpu().numpy()
+    cpu_res = torch.arange(6, dtype=torch.float32).view(2, 3).numpy()
+    np.testing.assert_equal(torch_res, cpu_res)
+
   def test_realize_with_views_offset_preservation(self):
     a = torch.tensor([10, 20, 30, 40], device=device)
     b = a[2:]  # view starting at offset 2
