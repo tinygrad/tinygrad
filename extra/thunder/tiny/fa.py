@@ -13,7 +13,7 @@ from extra.thunder.tiny.tk.tiles import gl, st, rt, rv
 NUM_WORKERS = 1
 PIPE_STAGES = 3
 
-B, N, H, D = 2, 32, 2, 64
+B, N, H, D = 16, 16, 16, 64
 
 ROWS = 16 * (64 // D)
 
