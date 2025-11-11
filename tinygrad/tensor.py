@@ -4133,14 +4133,16 @@ class Tensor(OpMixin):
     # hack for non multiples of 4 on cin
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
       x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
-      cin = round_up(cin, 4)
+      added_input_channels = 4 - (cin % 4)
+      cin = cin + added_input_channels
       w = w.pad_to(None, None, cin, None, None)
       x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
 
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
     if rcout % 4 != 0 and not (rcout == 1 and groups%4 == 0):
-      rcout, added_output_channels = round_up(rcout, 4), rcout - round_up(rcout, 4)
+      added_output_channels = 4 - (rcout % 4)
+      rcout += added_output_channels
       cout = groups * rcout
       w = w.pad_to(None, rcout, None, None, None)
 
