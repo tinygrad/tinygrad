@@ -56,12 +56,19 @@ class PrgExec:
   simd:int
   def __str__(self): return f"{self.name},{self.wave},{self.cu},{self.simd}"
 
+@dataclasses.dataclass(frozen=True)
+class WaveExec:
+  wave_id:int
+  cu:int
+  simd:int
+  insts:list[InstExec]
+
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
     self.wave_events:dict[PrgExec, dict[int, InstInfo]] = {}
-    self.disasms:dict[int, tuple[str, int]] = {}
-    self.inst_execs:dict[PrgExec, list[InstExec]] = {}
+    self.disasms:dict[tuple[str, int], tuple[str, int]] = {}
+    self.inst_execs:dict[str, list[WaveExec]] = {}
 
     for prog in prog_evs:
       arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
@@ -85,14 +92,14 @@ class _ROCParseCtx:
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
-      inst_disasm = self.disasms[(self.active_kern, inst_ev.pc.address)][0]
+      inst_disasm = self.disasms[(unwrap(self.active_kern), unwrap(inst_ev.pc.address))][0]
       asm.setdefault(inst_ev.pc.address, InstInfo(typ=inst_typ, inst=inst_disasm))
       asm[inst_ev.pc.address].on_ev(inst_ev)
       inst_execs.append(InstExec(inst_typ, inst_disasm, inst_ev.stall, inst_ev.duration, inst_ev.time))
 
     if ev.instructions_size > 0:
-      self.wave_events[key:=PrgExec(self.active_kern, ev.wave_id, ev.cu, ev.simd)] = asm
-      self.inst_execs[key] = inst_execs
+      self.wave_events[key:=PrgExec(unwrap(self.active_kern), ev.wave_id, ev.cu, ev.simd)] = asm
+      self.inst_execs.setdefault(key.name, []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, inst_execs))
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}
@@ -125,7 +132,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
-    instr, mem_size_ptr[0] = ROCParseCtx.disasms[(ROCParseCtx.active_kern, pc.address)]
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[(unwrap(ROCParseCtx.active_kern), pc.address)]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0

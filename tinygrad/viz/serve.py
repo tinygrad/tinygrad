@@ -204,15 +204,20 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     return ctxs.append({"name":"Counters", "steps":[step]})
   try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
-  try:
-    rctx = decode(profile)
-    summary = [[{"label":"Total Cycles", "value":x[-1].time-x[0].time if x else 0}] for i,x in enumerate(rctx.inst_execs.values())]
-    steps = [{"name":str(x[0]), "depth":0, "data":{"rows":[(e.inst, e.time, e.time-x[1][i-1].time if i else 0, e.dur, e.stall,
-                                                            str(e.typ).split("_")[-1]) for i,e in enumerate(x[1])],
-                                              "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary[i]},
-              "query":f"/render?ctx={len(ctxs)}&step={i}&fmt=counters"} for i,x in enumerate(rctx.inst_execs.items())]
-    if not steps: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
+  if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  steps:list[dict] = []
+  for name,waves in rctx.inst_execs.items():
+    if (r:=ref_map.get(name)): name = ctxs[r]["name"]
+    steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                  "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
+    for w in waves:
+      rows = [(e.inst, e.time, e.time-(w.insts[i-1].time if i else 0), e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(w.insts)]
+      summary = [{"label":"Total Cycles", "value":w.insts[-1].time-w.insts[0].time if w.insts else 0}, {"label":"CU", "value":w.cu},
+                 {"label":"SIMD", "value":w.simd}]
+      steps.append({"name":f"Wave {w.wave_id}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:

@@ -653,7 +653,7 @@ async function main() {
         u.li = list.appendChild(document.createElement("ul"));
         u.li.id = `step-${i}-${j}`;
         const p = u.li.appendChild(document.createElement("p"));
-        p.innerText = `${u.name}`+(u.match_count ? ` - ${u.match_count}` : '');
+        p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
         p.onclick = (e) => {
           e.stopPropagation();
           const subrewrites = getSubrewrites(e.currentTarget.parentElement);
@@ -664,7 +664,7 @@ async function main() {
       }
       for (const l of ul.querySelectorAll("ul > ul > p")) {
         const subrewrites = getSubrewrites(l.parentElement);
-        if (subrewrites.length > 0) { l.innerText += ` (${subrewrites.length})`; l.parentElement.classList.add("has-children"); }
+        if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
     return setState({ currentCtx:-1 });
