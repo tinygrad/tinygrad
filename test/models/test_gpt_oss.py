@@ -1,8 +1,9 @@
 import unittest, pathlib
-import torch
 import numpy as np
 from tinygrad import Tensor
+from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import getenv, tqdm
+from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, get_keymap, MODELS
 
 from icecream import ic
 
@@ -22,13 +23,11 @@ TORCH_PARAMS = {
   }
 }
 
-def compare_state_dicts(model, torch_model):
-  from tinygrad.nn.state import get_state_dict
-  from tinygrad.apps.llm2 import get_keymap
+# map tinygrad to hf state_dict keys
+def mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
+keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap().items()}
 
-  # map tinygrad to hf state_dict keys
-  def mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
-  keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap().items()}
+def compare_state_dicts(model, torch_model):
 
   state, torch_state = get_state_dict(model), torch_model.state_dict()
   assert len(state) == len(torch_state), f"State Mismatch: tinygrad model contains {len(state)} state objects but torch model contains {len(torch_state)} state objects:"
@@ -43,19 +42,18 @@ def compare_state_dicts(model, torch_model):
 
 class TestGptOss(unittest.TestCase):
   def get_model(self, fakeweights:bool):
+    import torch
     from transformers import logging as hf_logging, GptOssForCausalLM as TorchGptOss, GptOssConfig
-    from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, MODELS
-    from tinygrad.nn.state import get_state_dict
-    from tinygrad.apps.llm2 import get_keymap
 
     print(f"Loading {'fake' if fakeweights else 'real'} weights for GptOss.")
     Tensor.manual_seed(42)
     np.random.seed(42)
+    hf_logging.set_verbosity_error() # Suppress warning from loading smaller params
 
     # load model weights
     model_path = pathlib.Path('') if fakeweights else download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
 
-    # params with smaller values for testing
+    # override params with smaller values for testing
     params = MODELS["20B"]["params"] | {'num_blocks': getenv("GPT_OSS_LAYERS", 1), 'max_context': 8}
     torch_params = TORCH_PARAMS["20B"]["params"] | {'num_hidden_layers': getenv("GPT_OSS_LAYERS", 1), 'initial_context_length': 8}
     torch_params["layer_types"] = torch_params["layer_types"][:torch_params["num_hidden_layers"]]
@@ -64,15 +62,12 @@ class TestGptOss(unittest.TestCase):
     model = GptOss(**params) if fakeweights else GptOss.from_pretrained(model_path, params, fakeweights)
 
     # torch model
-    hf_logging.set_verbosity_error() # Suppress warning from loading smaller params
     torch_config, torch_device = GptOssConfig(**torch_params), torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     torch_model = TorchGptOss(torch_config) if fakeweights else TorchGptOss.from_pretrained(model_path, config=torch_config, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
     torch_model = torch_model.to(torch_device).eval()
 
     # set fakeweights equal to each other
     if fakeweights:
-      def mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
-      keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap().items()}
       state, torch_state = get_state_dict(model), torch_model.state_dict()
       for k, v in tqdm(state.items(), desc='Model State Dict'):
         torch_k = keymap[k]
@@ -88,6 +83,8 @@ class TestGptOss(unittest.TestCase):
     compare_state_dicts(model, torch_model)
 
   def test_forward(self):
+    import torch
+
     B, T = 2, 5
     model, torch_model = self.get_model(getenv("FAKEWEIGHTS", 1))
     input_ids = np.random.randint(torch_model.vocab_size, size=(B, T))
