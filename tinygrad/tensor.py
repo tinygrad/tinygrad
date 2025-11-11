@@ -299,7 +299,7 @@ class Tensor(OpMixin):
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    return self.replace(self._apply_uop(UOp.assign, x))
+    return self.replace(self._apply_uop(lambda x,y: x.after(x.store(y)), x))
 
   def detach(self) -> Tensor:
     """
