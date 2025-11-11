@@ -9,7 +9,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, colored
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -347,6 +347,10 @@ class QCOMDevice(HCQCompiled):
 
     # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
     if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
+
+    if PROFILE and self.gpu_id[:2] < (7, 3) and int(FileIOInterface('/sys/class/kgsl/kgsl-3d0/idle_timer', os.O_RDONLY).read(), 0) < 4000000000:
+      print(colored("WARNING: gpu can go into suspend mode and reset timestamps. "
+                    "Run 'echo \"4294947000\" | sudo tee /sys/class/kgsl/kgsl-3d0/idle_timer' to prevent idle state.", "yellow"))
 
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
