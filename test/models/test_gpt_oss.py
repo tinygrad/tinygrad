@@ -57,8 +57,8 @@ class TestGptOss(unittest.TestCase):
     model_path = pathlib.Path('') if fakeweights else download_weights(MODELS["20B"]["model"], MODELS["20B"]["total_num_weights"])
 
     # params with smaller values for testing
-    params = MODELS["20B"]["params"] | {'num_blocks': 1, 'max_context': 8}
-    torch_params = TORCH_PARAMS["20B"]["params"] | {'num_hidden_layers': 1, 'initial_context_length': 8}
+    params = MODELS["20B"]["params"] | {'num_blocks': getenv("GPT_OSS_LAYERS", 1), 'max_context': 8}
+    torch_params = TORCH_PARAMS["20B"]["params"] | {'num_hidden_layers': getenv("GPT_OSS_LAYERS", 1), 'initial_context_length': 8}
     torch_params["layer_types"] = torch_params["layer_types"][:torch_params["num_hidden_layers"]]
 
     # tinygrad model
