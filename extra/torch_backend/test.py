@@ -671,21 +671,18 @@ class TestTorchBackend(unittest.TestCase):
     np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
 
   def test_constant_pad_nd_1d(self):
-    # Test 1D constant padding
     a = torch.tensor([1, 2, 3], dtype=torch.float32, device=device)
     b = torch.nn.functional.pad(a, (1, 2), mode='constant', value=0)
     expected = torch.tensor([0, 1, 2, 3, 0, 0], dtype=torch.float32)
     np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
 
   def test_constant_pad_nd_2d(self):
-    # Test 2D constant padding
     a = torch.arange(6, dtype=torch.float32, device=device).reshape(2, 3)
     b = torch.nn.functional.pad(a, (1, 1, 1, 1), mode='constant', value=0)
     expected = torch.nn.functional.pad(torch.arange(6, dtype=torch.float32).reshape(2, 3), (1, 1, 1, 1), mode='constant', value=0)
     np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
 
   def test_constant_pad_nd_2d_backward(self):
-    # Test 2D constant padding with gradients
     a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32, device=device, requires_grad=True)
     b = torch.nn.functional.pad(a, (1, 1, 1, 1), mode='constant', value=0)
     loss = b.sum()

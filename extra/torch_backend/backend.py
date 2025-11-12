@@ -1,12 +1,9 @@
 from __future__ import annotations
 import functools, weakref
-from typing import Callable, Sequence, cast
-from dataclasses import dataclass
-from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten
-from tinygrad.uop.symbolic import sym
+from tinygrad.helpers import getenv, prod
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, resolve, smax, smin, ssimplify
-from .uop_view import is_view, canonical_base, derived_views, register_view, view_spec_from_uop, collect_movement_chain, update_view_region, assign_view_value, MovementChain
+from tinygrad.uop.ops import Ops
+from .uop_view import maybe_realize_storage, _as_strided_impl, register_view, view_spec_from_uop, update_view_region, view_ops
 
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
@@ -52,18 +49,6 @@ torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
 
-# track view relationships for in place operations (imported from uop_view)
-# is_view, canonical_base, derived_views, register_view are now imported
-
-def _flip_axes(obj, flips):
-  axes = tuple(i for i, f in enumerate(flips) if f)
-  return obj.flip(axes) if axes else obj
-
-def _slice_tensor(tensor: Tensor, dim=0, start=None, end=None, step=1):
-  slices = [slice(None)] * tensor.ndim
-  slices[dim] = slice(start, end, step)
-  return tensor[tuple(slices)]
-
 def wrap_view_op(_name, fn, recorder):
   def _wrap(*args,**kwargs):
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
@@ -75,120 +60,11 @@ def wrap_view_op(_name, fn, recorder):
     return wrap(ret)
   return _wrap
 
-def _record_simple(name, value_fn):
-  return lambda parent, args, kwargs, ret: ((name, value_fn(parent, args, kwargs, ret)),)
-
-_record_reshape = _record_simple("reshape", lambda _parent, _args, _kwargs, ret: tuple(ret.shape))
-_record_expand = _record_simple("expand", lambda _parent, _args, _kwargs, ret: tuple(ret.shape))
-_record_bitcast = _record_simple("bitcast", lambda _parent, _args, _kwargs, ret: ret.dtype)
-_record_detach = _record_simple("detach", lambda *_: None)
-
-def _record_permute_from_order(order): return (("permute", tuple(order)),)
-def _record_transpose_dims(parent, dim0, dim1):
-  ndim = parent.ndim
-  dim0 %= ndim
-  dim1 %= ndim
-  order = list(range(ndim))
-  order[dim0], order[dim1] = order[dim1], order[dim0]
-  return _record_permute_from_order(order)
-def _record_select(parent, args, kwargs, ret):
-  _, dim, idx = args
-  ndim = parent.ndim
-  dim = dim % ndim
-  dim_size = parent.shape[dim]
-  if idx < 0: idx += dim_size
-  idx = max(0, min(dim_size-1, idx))
-  parent_shape = tuple(parent.shape)
-  shrink_arg = tuple((idx, idx+1) if i == dim else (0, parent_shape[i]) for i in range(ndim))
-  return (("shrink", shrink_arg), ("reshape", tuple(ret.shape)))
-def _record_slice(parent, args, kwargs, ret):
-  _, *rest = args
-  dim = kwargs.get("dim", rest[0] if len(rest) > 0 else 0)
-  start = kwargs.get("start", rest[1] if len(rest) > 1 else None)
-  end = kwargs.get("end", rest[2] if len(rest) > 2 else None)
-  step = kwargs.get("step", rest[3] if len(rest) > 3 else 1)
-  dim = dim % parent.ndim
-  size = parent.shape[dim]
-  step = kwargs.get("step", step)
-  step = 1 if step is None else step
-  if step <= 0: raise NotImplementedError("slice with non-positive step is not supported")
-  start = kwargs.get("start", start)
-  end = kwargs.get("end", end)
-  start = 0 if start is None else start
-  end = size if end is None else end
-  if start < 0: start += size
-  if end < 0: end += size
-  start = max(0, min(size, start))
-  end = max(0, min(size, end))
-  if step > 1 and end < start: end = start
-  return (("slice", (dim, start, end, step)),)
-
-view_ops = {
-  "aten.view": (Tensor.reshape, _record_reshape),
-  "aten._unsafe_view": (Tensor.reshape, _record_reshape),  # when are views unsafe, and do we care?
-  "aten.view.dtype": (lambda self,dtype: self.bitcast(_from_torch_dtype(dtype)), _record_bitcast),
-  "aten.expand": (Tensor.expand, _record_expand),
-  "aten.permute": (Tensor.permute, lambda parent, args, kwargs, ret: _record_permute_from_order(args[1:])),
-  "aten.t": (Tensor.transpose, lambda parent, args, kwargs, ret: _record_transpose_dims(parent, -2, -1)),
-  "aten.transpose.int": (Tensor.transpose, lambda parent, args, kwargs, ret: _record_transpose_dims(parent, args[1], args[2])),
-  "aten.squeeze.dim": (Tensor.squeeze, _record_reshape),
-  "aten.unsqueeze": (Tensor.unsqueeze, _record_reshape),
-  "aten.detach": (Tensor.detach, _record_detach),
-  "aten.select.int": (lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)], _record_select),
-  "aten.slice.Tensor": (_slice_tensor, _record_slice),
-}
 
 for k,(fn, recorder) in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(k, fn, recorder))
 
 torch.library.impl("aten::alias", "privateuseone")(wrap_view_op("aten::alias", lambda self: self, lambda *a, **k: ()))
 
-
-# in place operations with views
-def rebuild_view_from_chain(base: Tensor, view: Tensor, chain: MovementChain):
-  """Rebuild a view tensor from its base using a pre-collected movement chain."""
-  # Build the view by applying the movement operations to the base
-  ret = base
-  for op, arg in chain:
-    if op == Ops.RESHAPE: ret = ret.reshape(arg)
-    elif op == Ops.EXPAND: ret = ret.expand(arg)
-    elif op == Ops.SHRINK: ret = ret.shrink(arg)
-    elif op == Ops.PERMUTE: ret = ret.permute(arg)
-    elif op == Ops.FLIP:
-      axes = tuple(i for i, f in enumerate(arg) if f)
-      ret = ret.flip(axes) if axes else ret
-    else: raise NotImplementedError(f"rebuild_view_from_chain does not support {op}")
-  view.replace(ret)
-
-def realize_with_views(self: Tensor, views: list[Tensor]):
-  # Collect all movement chains BEFORE realizing, since realization will change the UOp tree
-  view_chains: list[tuple[Tensor, MovementChain]] = []
-  as_strided_views: list[tuple[Tensor, tuple]] = []
-  
-  for v in views:
-    if is_view(v):
-      # Check if this is an as_strided view (stored in _view_op)
-      if hasattr(v, '_view_op') and v._view_op[0] == 'as_strided':
-        as_strided_views.append((v, v._view_op[1]))  # (view, (size, stride, offset))
-      else:
-        chain, chain_base = collect_movement_chain(v)
-        view_chains.append((v, chain))
-  
-  # Now realize the base
-  if not self.uop.is_contiguous(): self.replace(self.contiguous())
-  self.replace(self.clone().realize())
-  
-  # Rebuild each view using its pre-collected chain
-  for v, chain in view_chains:
-    rebuild_view_from_chain(self, v, chain)
-  
-  # Rebuild as_strided views
-  for v, (size, stride, offset) in as_strided_views:
-    rebuilt = _as_strided_impl(self, size, stride, offset)
-    v.replace(rebuilt)
-
-def maybe_realize_storage(self: Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
-  return realize
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
   def decorator(fn):
@@ -281,29 +157,6 @@ def fill_scalar(x, y):
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-
-def _as_strided_impl(tensor:Tensor, size, stride, storage_offset):
-  """Fallback implementation of as_strided using gather indices."""
-  base = canonical_base(tensor)
-  flat = base.contiguous().reshape((-1,))
-  
-  # Build gather indices for the strided view
-  from tinygrad.helpers import argsort
-  indices = []
-  for idx in range(int(prod(size))):
-    offset = storage_offset
-    remaining = idx
-    for dim_size, dim_stride in zip(reversed(size), reversed(stride)):
-      dim_idx = remaining % dim_size
-      offset += dim_idx * dim_stride
-      remaining //= dim_size
-    indices.append(offset)
-  
-  # Gather and reshape
-  idx_tensor = Tensor(indices, dtype=dtypes.int32, device=base.device)
-  ret = flat[idx_tensor].reshape(tuple(size))
-  register_view(ret, base, ("as_strided", (size, stride, storage_offset)))
-  return ret
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
