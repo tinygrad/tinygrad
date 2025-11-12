@@ -94,6 +94,9 @@ class TestOps(unittest.TestCase):
   def helper_test_exception(self, shps, torch_fxn, tinygrad_fxn=None, expected=None, forward_only=False, exact=False, vals=None, low=-1.5, high=1.5):
     if getenv("MOCKGPU") and Device.DEFAULT == "NV": self.skipTest('helper_test_exception fails in CI CUDA')
     ts, tst = prepare_test_op(low, high, shps, vals, forward_only)
+    # Force PyTorch tensors to CPU to avoid Tinygrad's 'tiny' device backend hijacking torch ops under TINY_BACKEND=1.
+    ts = [t.cpu() for t in ts]
+
     if tinygrad_fxn is None:
       tinygrad_fxn = torch_fxn
     with self.assertRaises(expected) as torch_cm:
@@ -2810,16 +2813,15 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[None,b,2,d,None], lambda x: x[None,j,2,o,None])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[...,1,d,None], lambda x: x[...,1,o,None])
 
-  @unittest.skip("Temporarily skip")
   def test_slice_fancy_indexing_with_tensors(self):
     # indexing using idx with different dim
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor(1)],
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]], device=x.device), torch.tensor(1, device=x.device)],
                             lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor(1)])
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([1]), torch.tensor([[0,0,0],[0,0,0]])],
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([1], device=x.device), torch.tensor([[0,0,0],[0,0,0]], device=x.device)],
                             lambda x: x[Tensor([1]), Tensor([[0,0,0],[0,0,0]])])
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]]), torch.tensor([2,1,1])],
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,0,0],[0,0,0]], device=x.device), torch.tensor([2,1,1], device=x.device)],
                             lambda x: x[Tensor([[0,0,0],[0,0,0]]), Tensor([2,1,1])])
-    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,1,-1],[-1,-2,0]]), torch.tensor([2,1,-1])],
+    helper_test_op([(2,3)], lambda x: x[torch.tensor([[0,1,-1],[-1,-2,0]], device=x.device), torch.tensor([2,1,-1], device=x.device)],
                             lambda x: x[Tensor([[0,1,-1],[-1,-2,0]]), Tensor([2,1,-1])])
 
   @slow_test
@@ -2864,11 +2866,11 @@ class TestOps(unittest.TestCase):
     # this is fine
     helper_test_op([(5, 6)], lambda x: x[[True, False, 2]])
 
-  @unittest.skip("Temporary skip")
+
   def test_gather(self):
     # indices cannot have gradient
     # indices cannot be negative (torch gather)
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=0, index=b), lambda x: x.gather(dim=0, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=1, index=b), lambda x: x.gather(dim=1, index=a))
@@ -2877,21 +2879,20 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=-1, index=b), lambda x: x.gather(dim=-1, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=-2, index=b), lambda x: x.gather(dim=-2, index=a))
     helper_test_op([(4,5,6)], lambda x: x.gather(dim=-3, index=b), lambda x: x.gather(dim=-3, index=a))
-    self.helper_test_exception([(4,5,6)], lambda x: x.gather(dim=0, index=torch.tensor([1], dtype=torch.int64)),
+    self.helper_test_exception([(4,5,6)], lambda x: x.gather(dim=0, index=torch.tensor([1], dtype=torch.int64, device="cpu")),
                                           lambda x: x.gather(dim=0, index=Tensor([1], dtype=dtypes.int32)), expected=(RuntimeError, AssertionError))
     self.helper_test_exception([(2,1,1)], lambda x: x.gather(dim=0, index=b),
                                           lambda x: x.gather(dim=0, index=a), expected=(RuntimeError, AssertionError))
-    helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
+    helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False, device="cpu")),
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[1., 2., 3.]])
     # gather with inf values
-    helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False)),
+    helper_test_op(None, lambda x: x.gather(dim=0, index=torch.tensor([2, 1, 0, 1, 2], requires_grad=False, device="cpu")),
                          lambda x: x.gather(dim=0, index=Tensor([2, 1, 0, 1, 2])),
                          vals=[[-float("inf"), 2., 3.]])
 
-  @unittest.skip("Temporary skip")
   def test_scatter(self):
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     for dim in (0,1,2,-1,-2,-3):
       helper_test_op([(4,5,6), (4,5,6)], lambda x,src: x.scatter(dim=dim, index=b, src=src),
@@ -2916,16 +2917,15 @@ class TestOps(unittest.TestCase):
       lambda x: x.scatter(dim=1, index=a, src=float("inf")), forward_only=True)
 
     # overlapping indices with 0s
-    b = torch.tensor([0,0], requires_grad=False)
+    b = torch.tensor([0,0], requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op(None,
       lambda x,src: x.scatter(0, b, src),
       lambda x,src: x.scatter(0, a, src), forward_only=True,
       vals=[[1.,2.,3.,4.], [1.,0.]])
 
-  @unittest.skip("Temporary skip")
   def test_scatter_add(self):
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="add"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="add"), forward_only=True)
@@ -2936,9 +2936,8 @@ class TestOps(unittest.TestCase):
         lambda x: x.scatter(1, b, float("nan"), reduce="add"),
         lambda x: x.scatter(1, a, float("nan"), reduce="add"), forward_only=True)
 
-  @unittest.skip("Temporary skip")
   def test_scatter_mul(self):
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     helper_test_op([(4,5,6)], lambda x: x.scatter(dim=1, index=b, value=float("inf"), reduce="multiply"),
       lambda x: x.scatter(dim=1, index=a, src=float("inf"), reduce="multiply"), forward_only=True)
@@ -2954,9 +2953,8 @@ class TestOps(unittest.TestCase):
       Tensor.ones(4).scatter(dim=1, index=Tensor([0]), src=Tensor.ones(4), reduce="add")
 
   @slow_test
-  @unittest.skip("Temporary skip")
   def test_scatter_reduce(self):
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), requires_grad=False)
     for reduce in ("sum", "prod", "mean", "amin", "amax"):
       for dim in (-1,1,-3):
@@ -2967,18 +2965,17 @@ class TestOps(unittest.TestCase):
           lambda x,src: x.scatter_reduce(dim=dim, index=b, src=src, reduce=reduce, include_self=False),
           lambda x,src: x.scatter_reduce(dim=dim, index=a, src=src, reduce=reduce, include_self=False), forward_only=True)
 
-  @unittest.skip("Temporary skip")
   def test_scatter_reduce_prod_zeros(self):
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     x = Tensor.zeros([4,5,6]).float()
-    y = torch.zeros([4,5,6]).float()
+    y = torch.zeros([4,5,6], device="cpu").float()
     helper_test_op([(4,5,6)],
       lambda src: y.scatter_reduce(dim=1, index=b, src=src, reduce="prod"),
       lambda src: x.scatter_reduce(dim=1, index=a, src=src, reduce="prod"), forward_only=True)
 
   def test_scatter_reduce_errors(self):
-    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False)
+    b = torch.randint(3, size=[3,4,5], dtype=torch.int64, requires_grad=False, device="cpu")
     a = Tensor(b.detach().cpu().numpy().astype(np.int32), dtype=dtypes.int32, requires_grad=False)
     # invalid reduce arg
     self.helper_test_exception([(4,5,6), (4,5,6)],

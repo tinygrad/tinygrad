@@ -204,7 +204,7 @@ class TestTorchBackend(unittest.TestCase):
     b = torch.linalg.det(a)
     np.testing.assert_equal(b.cpu().numpy(), 120.0)
 
-  
+
   def test_linalg_cross(self):
     a = torch.tensor([[1, 0, 0], [0, 1, 0]], dtype=torch.float32, device=device)
     b = torch.tensor([[0, 0, 1]], dtype=torch.float32, device=device)
