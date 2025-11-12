@@ -66,6 +66,7 @@ class TestTiming(unittest.TestCase):
     def custom_vrcp(A, B):
       op = custom("float a = 0.0;")
       op = custom("float b = (*(data1_1+0));", op)
+      #op = custom('asm volatile("v_mul_f32_e32 %2 %2 %1" : "+v"(a) : "v"(b));', op)
       op = custom('asm volatile("v_rcp_f32_e32 %2 %1" : "+v"(a) : "v"(b));', op)
       op = custom('asm volatile("v_add_f32_e64 %1 %1 1.0" : "+v"(a));', op)
       op = custom("*(data0_1+0) = a;", op)
@@ -74,12 +75,12 @@ class TestTiming(unittest.TestCase):
     inp = Tensor([-2.0]).realize()
     with save_sqtt() as sqtt:
       Tensor.custom_kernel(out, inp, fxn=custom_vrcp)[0].realize()
+
+    wave = list(sqtt.values())[0][0]
+    for i in range(len(wave.insts)):
+      if wave.insts[i].inst.startswith("global_store"):
+        print(f"store diff {wave.insts[i].time-(wave.insts[i-1].time)}")
     self.assertEqual(out.item(), 0.5)
-    insts = list(sqtt.values())[0][0].insts
-    for i in range(len(insts)):
-      if insts[i].inst.startswith("v_rcp_f32_e32"): break
-    print(insts[i])
-    print(insts[i+1])
 
   def test_wmma(self):
     with save_sqtt() as sqtt:
