@@ -268,7 +268,10 @@ async function renderProfiler() {
         html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
         html.append("div").classed("args", true);
         if (e.info != null) html.append("p").style("white-space", "pre-wrap").text(e.info);
-        if (shapeRef != null) html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
+        if (shapeRef != null) {
+          html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
+          html.append("a").text("View program").on("click", () => switchCtx(shapeRef.ctx, ctxs[shapeRef.ctx+1].steps.findIndex(s => s.name==="View Program")));
+        }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         if (key != null) shapeMetadata.set(key, html.node());

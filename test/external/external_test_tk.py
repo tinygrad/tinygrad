@@ -1,4 +1,4 @@
-import unittest
+import unittest, math
 
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.engine.realize import ExecItem, get_runner
@@ -6,7 +6,6 @@ import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
-from extra.thunder.tiny.tk.tiles import gl, st, rt, rv
 
 class TestTK(unittest.TestCase):
   def test_simple_matmul(self):
@@ -15,17 +14,17 @@ class TestTK(unittest.TestCase):
     with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      c = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.bfloat16)
-      b = gl((1, 1, N, N), dtypes.bfloat16)
+      c = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.bfloat16)
+      b = ker.gl((1, 1, N, N), dtypes.bfloat16)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
@@ -65,17 +64,17 @@ class TestTK(unittest.TestCase):
     with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      c = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.bfloat16)
-      b = gl((1, 1, N, N), dtypes.bfloat16)
+      c = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.bfloat16)
+      b = ker.gl((1, 1, N, N), dtypes.bfloat16)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
@@ -115,14 +114,14 @@ class TestTK(unittest.TestCase):
     with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.float32)
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
@@ -153,16 +152,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.float32)
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      max_reg = rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      max_reg = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_SIZE):
         max_reg = warp.neg_inf(max_reg.after(tile_row))
@@ -200,16 +199,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, M), dtypes.float32)
-      a = gl((1, 1, N, M), dtypes.float32)
+      b = ker.gl((1, 1, N, M), dtypes.float32)
+      a = ker.gl((1, 1, N, M), dtypes.float32)
 
-      a_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      a_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      max_reg = rv(BLOCK_N, dtypes.float32, "ortho")
+      max_reg = ker.rv(BLOCK_N, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_N):
         max_reg = warp.neg_inf(max_reg.after(tile_row))
@@ -247,16 +246,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.float32)
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      sum_reg = rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      sum_reg = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_SIZE):
         sum_reg = warp.zero(sum_reg.after(tile_row))
@@ -294,16 +293,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, M), dtypes.float32)
-      a = gl((1, 1, N, M), dtypes.float32)
+      b = ker.gl((1, 1, N, M), dtypes.float32)
+      a = ker.gl((1, 1, N, M), dtypes.float32)
 
-      a_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      a_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      sum_reg = rv(BLOCK_N, dtypes.float32, "ortho")
+      sum_reg = ker.rv(BLOCK_N, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_N):
         sum_reg = warp.zero(sum_reg.after(tile_row))
@@ -332,6 +331,68 @@ class TestTK(unittest.TestCase):
     b = b.float()
 
     ref = a.float().sum(axis=3, keepdim=True).expand(a.shape)
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
+
+  def test_softmax(self):
+    N = 32
+    BLOCK_SIZE = 16
+    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
+      a = ker.gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      max_vec_last = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      max_vec = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      norm_vec = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
+
+      max_vec = warp.neg_inf(max_vec)
+      norm_vec = warp.zero(norm_vec)
+
+      for tile_col in ker.range(N // BLOCK_SIZE):
+        a_smem = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
+        a_reg = warp.load(a_reg, a_smem)
+
+        a_reg = warp.map(a_reg, lambda x: x * (1.0 / math.log(2)))
+
+        max_vec_last = warp.copy(max_vec_last.after(tile_col), max_vec)
+        max_vec = warp.row_reduce(max_vec, a_reg, lambda a, b: a.maximum(b))
+        a_reg = warp.map(a_reg, lambda x, idx: (x - max_vec[idx[0], 0, (idx[2]%4)//2]).exp2())
+        max_vec_last = warp.map(max_vec_last, lambda x, idx: (x - max_vec[*idx]).exp2())
+        norm_vec = warp.map(norm_vec, lambda x, idx: x * max_vec_last[*idx])
+        norm_vec = warp.row_reduce(norm_vec, a_reg, lambda a, b: a + b)
+      norm_vec = ker.endrange()
+
+      for tile_col in ker.range(N // BLOCK_SIZE):
+        a_smem = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
+        a_reg = warp.load(a_reg, a_smem)
+
+        a_reg = warp.map(a_reg, lambda x: x * (1.0 / math.log(2)))
+        a_reg = warp.map(a_reg, lambda x, idx: (x - max_vec[idx[0], 0, (idx[2]%4)//2]).exp2())
+        a_reg = warp.map(a_reg, lambda x, idx: x / norm_vec[idx[0], 0, (idx[2]%4)//2])
+
+        a_smem = warp.store(a_smem, a_reg)
+        b = warp.store(b, a_smem, (0, 0, 0, tile_col), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, BLOCK_SIZE, N, dtype="float32")
+      b = Tensor.empty(1, 1, BLOCK_SIZE, N, dtype="float32")
+      Tensor.realize(a, b)
+
+    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    for _ in range(5): ei.run(wait=True)
+    b = b.float()
+    print(b.tolist())
+
+    ref = a.float().softmax(axis=3)
+    print(ref.tolist())
 
     np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
 
