@@ -29,54 +29,6 @@ def apply_mop(t: Tensor, mop_arg: Tuple[MovementOps, Tuple]) -> Tensor:
 def make_scratch_st(st: ShapeTracker) -> ShapeTracker:
   return ShapeTracker.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
 
-def _safe_expand(t: Tensor, new_shape):
-  if len(new_shape) != len(t.shape):
-    t = t.reshape((1, *t.shape))
-  return t.expand(new_shape)
-
-# def _as_strided(t: Tensor, shape, stride, storage_offset):
-#   t = t.uop.base
-#   shape_stride = list(zip(shape, stride))
-#   order = sorted(range(len(stride)), key=lambda i: (-stride[i], -shape[i]))
-#   ordered_pairs = [shape_stride[i] for i in order]
-#   buffer_size = sum([(shape[i]-1)*stride[i] for i in range(len(shape))]) + 1
-#   assert storage_offset + buffer_size <= t.shape[0], f"requested buffer size {storage_offset + buffer_size} out of bounds for current buffer size {buffer_size}"
-#   t = t.shrink(((storage_offset, storage_offset + buffer_size),))
-#   broadcast_idx = -1
-#   if ordered_pairs[0][0]*ordered_pairs[0][1] > buffer_size: 
-#     t = t.pad(((0, (ordered_pairs[0][0] * ordered_pairs[0][1]) - buffer_size),))
-#   for i,(sh, st) in enumerate(ordered_pairs):
-#     if i+1<len(ordered_pairs) and st < ordered_pairs[i+1][0]*ordered_pairs[i+1][1]:
-#       rem_buffer = ordered_pairs[i-1][1] if i>0 else buffer_size
-#       t = t.expand(sh, *(s[0] for s in ordered_pairs[:i]), rem_buffer)
-#       # expand_shape = (sh, *[s[0] for s in ordered_pairs[:i]], rem_buffer)
-#       # t = _safe_expand(t, expand_shape)
-#       t = t.permute(*(range(1,i+1)), 0, i+1)
-#       t = t.reshape(*(s[0] for s in ordered_pairs[:i]), sh*rem_buffer)
-#       t = t.pad((*((0,0) for _ in range(i)), (0, sh*st)))
-#       t = t.reshape(*(s[0] for s in ordered_pairs[:i+1]), rem_buffer+st)
-#       ordered_pairs[i] = (ordered_pairs[i][0], rem_buffer+st)
-#     else:
-#       # handle 0 strides (broadcast)
-#       if st == 0:
-#           broadcast_idx = i
-#           break # remaining all the other strides will be 0 since we are in reverse sorted order wrt strides
-#       t = t.shrink((*((0,s[0]) for s in ordered_pairs[:i]), (0, sh*st + 1)))
-#       t = t.reshape(*[s[0] for s in ordered_pairs[:i+1]], st)
-#   # check for broadcasts (0 strides)
-#   if broadcast_idx != -1:
-#     # expand along the remaining dims starting from broadcast_idx
-#     for i in range(broadcast_idx, len(ordered_pairs)):
-#       t = t.expand(*(s[0] for s in ordered_pairs[:i+1]))
-#       if i != len(ordered_pairs)-1: t = t.reshape(*(s[0] for s in ordered_pairs[:i+1]), 1)
-#   else:
-#     # final shrink and reshape
-#     t = t.shrink((*[(0,s[0]) for s in ordered_pairs], (0,1)))
-#     t = t.reshape(tuple(s[0] for s in ordered_pairs))
-#   # permute if required
-#   if order != list(range(len(order))): t = t.permute(tuple(order.index(i) for i in range(len(stride))))
-#   return t
-
 # ShapeTracker to an equivalent series of MovementOps (https://github.com/tinygrad/tinygrad/pull/2216)
 def to_movement_ops(t: Tensor) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []

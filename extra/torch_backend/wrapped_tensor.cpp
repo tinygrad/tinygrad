@@ -112,6 +112,7 @@ int register_hook() {
 }
 int temp_register_hook = register_hook();
 
+// have to change here, remove the st and views properties.
 at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();

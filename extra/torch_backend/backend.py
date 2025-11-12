@@ -177,17 +177,99 @@ def cached_to_movement_ops(shape, t) -> list:
 
 # from tinygrad.shape.shapetracker import ShapeTracker, View
 from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+
+def take(base, idx):
+    """replicating torch.tensor.take, docs: https://docs.pytorch.org/docs/stable/generated/torch.take.html"""
+    flat = base.flatten()
+    r = Tensor.arange(flat.numel()).reshape(1, -1)
+    mask = (r == idx.reshape(-1, 1))
+    out = (mask * flat.reshape(1, -1)).sum(axis=1)
+    return out.reshape(idx.shape)
+
 @wrap_view_op
-def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
+def _as_strided(tensor:Tensor, sizes, strides, storage_offset=None):
   # multiple as_strided do not compound
   base = canonical_base(tensor)
   # TODO: this is heavyweight
-  # st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
   ret = base
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride)
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-  for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-  return ret
+  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, sizes, strides)
+  if prod(sizes) == 1: return ret.flatten()[storage_offset].reshape(sizes)
+
+  sizes  = tuple(int(s) for s in sizes)
+  strides = tuple(int(st) for st in strides)
+  n = len(sizes)
+  assert n == len(strides)
+  assert all(s >= 0 for s in sizes)
+
+  if any(s == 0 for s in sizes):
+    return ret.zeros_like()
+
+  # adjust storage_offset for neg strides
+  off_adj = storage_offset + sum((sizes[i]-1)*strides[i] for i in range(n) if strides[i] < 0)
+  strides_abs = tuple(abs(st) for st in strides)
+
+  # OOB check
+  max_index = off_adj + sum((sizes[i]-1)*strides_abs[i] for i in range(n))
+  min_index = off_adj
+  assert isinstance(ret.numel(), int), f"Expected int, got {type(ret.numel())}"
+  assert min_index < 0 or max_index >= ret.numel(), "as_strided: out of bounds"
+
+  # canonical contiguous strides
+  canon = [0]*n
+  if n:
+      canon[-1] = 1
+      for i in range(n-2, -1, -1):
+          canon[i] = canon[i+1] * max(sizes[i+1], 1)
+  canon = tuple(canon)
+
+  # fast path A: exact canonical (no broadcast)
+  if strides_abs == canon and all(st != 0 for st in strides):
+      flat = ret.narrow(0, off_adj, prod(sizes))
+      flat = ret.shrink(((off_adj, off_adj + prod(sizes)), *[(0, s[0]) for s in ret.shape[1:]]))
+      out = flat.reshape(sizes)
+      # flips for neg strides
+      neg_axes = [i for i in range(n) if strides[i] < 0]
+      if neg_axes:
+          out = out.flip(neg_axes)
+      return out
+
+  # faster path B: canonical-or-zero per axis (broadcast)
+  if all(st == 0 or st == c for st, c in zip(strides_abs, canon)):
+      cont_axes = [i for i in range(n) if strides_abs[i] == canon[i]]
+      cont_sizes = [sizes[i] for i in cont_axes]
+      cont_numel = prod(cont_sizes) if cont_sizes else 1
+      flat = ret.shrink(((off_adj, off_adj + cont_numel), *[(0, s[0]) for s in ret.shape[1:]]))
+      core = flat.reshape(cont_sizes if cont_sizes else ())
+
+      # place cont axes, insert 1s for broadcast axes
+      shape_with_ones = []
+      j = 0
+      for i in range(n):
+          if strides_abs[i] == canon[i]:
+              shape_with_ones.append(cont_sizes[j]); j += 1
+          else:
+              shape_with_ones.append(1)
+      out = core.reshape(tuple(shape_with_ones)).expand(sizes)
+      neg_axes = [i for i in range(n) if strides[i] < 0]
+      if neg_axes:
+          out = out.flip(neg_axes)
+      return out
+
+  # general path: build indices and gather
+  idx = None
+  for d in range(n):
+      vec = Tensor.arange(sizes[d], dtype=ret.dtype, device=ret.device) * strides[d]
+      shape_b = [1]*n; shape_b[d] = sizes[d]
+      vec = vec.reshape(shape_b)
+      idx = vec if idx is None else idx + vec
+  idx = idx + storage_offset
+
+  if idx.min().item() < 0 or idx.max().item() >= ret.numel():
+      raise RuntimeError("as_strided: out of bounds")
+
+  flat = take(ret.flatten(), idx.reshape(-1))
+  out = flat.reshape(sizes)
+  return out
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
