@@ -761,16 +761,13 @@ async function main() {
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
   metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
   if (step.trace) {
-    const tracePre = d3.create("pre");
-    const trace = tracePre.append("code").classed("hljs", true);
+    const trace = d3.create("pre").append("code").classed("hljs", true);
     for (let i=step.trace.length-1; i>=0; i--) {
       const [fp, lineno, fn, code] = step.trace[i];
-      const div = trace.append("div").style("margin-bottom", "2px").style("display", "flex");
-      div.append("p").text(fn);
-      div.append(() => pathLink(fp, lineno).node()).style("margin-left", "1ch");
-      trace.append("div").html(hljs.highlight(code, { language:"python" }).value).style("margin-bottom", "1ex");
+      trace.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
+      trace.append("div").html(hljs.highlight(code, { language: "python" }).value).style("margin-bottom", "1ex");
     }
-    metadata.insertBefore(tracePre.node(), codeElement);
+    metadata.insertBefore(trace.node().parentNode, codeElement);
   }
   // ** rewrite steps
   if (step.match_count >= 1) {
