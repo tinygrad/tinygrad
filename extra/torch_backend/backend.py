@@ -166,9 +166,8 @@ def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
   n = len(size)
   assert n == len(strides)
   assert all(s >= 0 for s in size)
-
   if any(s == 0 for s in size):
-    # match torch: empty or zeros? torch returns a view with numel==0
+    # TODO: match torch: empty or zeros? torch returns a view with numel==0
     return wrap(Tensor.zeros(size, device=ret.device, dtype=ret.dtype))
 
   # handle single-element trivial case
@@ -181,16 +180,13 @@ def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
     return wrap(val.reshape(size))
 
   storage_offset = 0 if storage_offset is None else int(storage_offset)
-
   # adjust storage_offset for neg strides
   off_adj = storage_offset + sum((size[i]-1) * strides[i] for i in range(n) if strides[i] < 0)
   strides_abs = tuple(abs(st) for st in strides)
-
   # OOB check
   max_index = off_adj + sum((size[i]-1) * strides_abs[i] for i in range(n))
   min_index = off_adj
   assert min_index < 0 or max_index >= ret.numel(), f"as_strided: out of bounds (min={min_index}, max={max_index}, base={ret.numel()})"
-
   # canonical contiguous strides
   canon = [0] * n
   if n:
@@ -203,7 +199,7 @@ def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
   if strides_abs == canon and all(st != 0 for st in strides):
     total = prod(size)
     # shrink first axis (flat buffer) from off_adj to off_adj + total
-    flat = ret.shrink(((off_adj, off_adj + total),))
+    flat = ret.shrink(((off_adj, off_adj + prod(sizes)), *[(0, s[0]) for s in ret.shape[1:]]))
     out = flat.reshape(size)
     # flips for neg strides
     neg_axes = [i for i in range(n) if strides[i] < 0]
@@ -216,9 +212,7 @@ def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
     cont_axes = [i for i in range(n) if strides_abs[i] == canon[i]]
     cont_sizes = [size[i] for i in cont_axes]
     cont_numel = prod(cont_sizes) if cont_sizes else 1
-
-    # shrink the flat base window
-    flat = ret.shrink(((off_adj, off_adj + cont_numel),))
+    flat = ret.shrink(((off_adj, off_adj + cont_numel), *[(0, s[0]) for s in ret.shape[1:]]))
     core = flat.reshape(tuple(cont_sizes) if cont_sizes else ())
 
     # build shape_with_ones and possibly permute if cont_axes not sorted
@@ -243,14 +237,12 @@ def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
     vec = Tensor.arange(size[d], device=ret.device) * int(strides[d])
     shape_b = [1] * n
     shape_b[d] = size[d]
-    vec = vec.reshape(tuple(shape_b))
+    vec = vec.reshape(shape_b)
     idx = vec if idx is None else idx + vec
-
   idx = idx + off_adj
   assert idx.min().item() < 0 or idx.max().item() >= ret.numel(), "as_strided: out of bounds"
 
-  flat_indices = idx.reshape(-1)
-  flat = take(ret.flatten(), flat_indices)
+  flat = take(ret.flatten(), idx.reshape(-1))
   out = flat.reshape(size)
   return wrap(out)
 
