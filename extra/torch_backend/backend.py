@@ -6,7 +6,7 @@ from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, resolve, smax, smin, ssimplify
-from .view_tracking import View, ShapeTracker, get_buffer_size, to_movement_ops, strides_for_shape, MovementOps
+from .view_tracking import View, ShapeTracker, MovementOps, to_movement_ops
 
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
@@ -351,97 +351,6 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
 def _reshape_alias(tensor:torch.Tensor, size, stride):
   return wrap(_as_strided_impl(unwrap(tensor), size, stride, tensor.storage_offset()))
 
-class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto()  # noqa: E702
-
-def _apply_st_mop(st: ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> ShapeTracker:
-  mop, arg = mop_arg
-  if mop is MovementOps.RESHAPE:
-    if arg == (-1,): return st.reshape((prod(st.shape),))
-    return st.reshape(arg)
-  if mop is MovementOps.PERMUTE: return st.permute(arg)
-  if mop is MovementOps.EXPAND:
-    if len(arg) != len(st.shape): st = st.reshape((1, *st.shape))
-    return st.expand(arg)
-  if mop is MovementOps.PAD: return st.pad(arg)
-  if mop is MovementOps.SHRINK: return st.shrink(arg)
-  if mop is MovementOps.STRIDE:
-    assert all(x in (-1, 1) for x in arg)
-    return st.flip(tuple(i for i,x in enumerate(arg) if x == -1))
-  raise ValueError(f"invalid movement op {mop}")
-
-def _make_scratch_st(st: ShapeTracker) -> ShapeTracker:
-  first = st.views[0]
-  return ShapeTracker.from_shape(( _get_buffer_size(first.shape, first.strides, first.offset, first.mask), ))
-
-def _to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
-  to_apply: List[Tuple[MovementOps, Tuple]] = []
-  for i, v in enumerate(st.views):
-    real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
-    offset = (v.offset or 0) + sum(stp*(s-1) for s,stp in zip(real_shape, v.strides) if stp < 0)
-    real_offset = offset + (sum(x*stp for (x,_),stp in zip(v.mask, v.strides)) if v.mask else 0)
-    real_real_shape = [s for s,stp in zip(real_shape, v.strides) if stp]
-    strides: List[int] = [abs(stp) if isinstance(stp, int) else stp for stp in v.strides if stp]
-    buffer_size = sum((s-1)*stp for s,stp in zip(real_real_shape, strides)) + 1
-    if i: buffer_size = prod(st.views[i-1].shape) - real_offset if real_shape else 1
-    def sort_by_strides(shape, strides):
-      paired = sorted(zip(shape, strides), key=lambda k: (k[1], -k[0]), reverse=True)
-      order = sorted(range(len(strides)), key=lambda k: (strides[k], -real_real_shape[k]), reverse=True)
-      return paired, order
-    ordered_shape_strides, order = sort_by_strides(real_real_shape, strides)
-    to_apply.extend([(MovementOps.RESHAPE, (-1,)), (MovementOps.SHRINK, ((real_offset, real_offset+buffer_size),))])
-    if strides:
-      if (ordered_shape_strides[0][0]*ordered_shape_strides[0][1]) - buffer_size > 0:
-        to_apply.append((MovementOps.PAD, ((0, (ordered_shape_strides[0][0] * ordered_shape_strides[0][1]) - buffer_size),)))
-      for j, shape_stride in enumerate(ordered_shape_strides):
-        if j < len(ordered_shape_strides)-1 and shape_stride[1] < ordered_shape_strides[j+1][0]*ordered_shape_strides[j+1][1]:
-          remaining_buffer = ordered_shape_strides[j-1][1] if j > 0 else buffer_size
-          to_apply.append((MovementOps.EXPAND, (shape_stride[0], *(s[0] for s in ordered_shape_strides[:j]), remaining_buffer)))
-          to_apply.append((MovementOps.PERMUTE, (*range(1, j+1), 0, j+1)))
-          to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:j]), shape_stride[0]*remaining_buffer)))
-          to_apply.append((MovementOps.PAD, (*((0,0) for _ in range(j)), (0, shape_stride[0]*shape_stride[1]))))
-          to_apply.append((MovementOps.RESHAPE, (*(s[0] for s in ordered_shape_strides[:j+1]), remaining_buffer+shape_stride[1])))
-          ordered_shape_strides[j] = (ordered_shape_strides[j][0], remaining_buffer+shape_stride[1])
-        else:
-          to_apply.append((MovementOps.SHRINK, (*((0, s[0]) for s in ordered_shape_strides[:j]), (0, shape_stride[0]*shape_stride[1]))))
-          to_apply.append((MovementOps.RESHAPE, (*[s[0] for s in ordered_shape_strides[:j+1]], shape_stride[1])))
-      to_apply.extend([(MovementOps.SHRINK, (*[(0, s[0]) for s in ordered_shape_strides], (0,1))), (MovementOps.RESHAPE, tuple(s[0] for s in ordered_shape_strides))])
-      if order != list(range(len(order))): to_apply.append((MovementOps.PERMUTE, tuple(order.index(i) for i in range(len(strides)))))
-    to_apply.append((MovementOps.RESHAPE, tuple(s if stp else 1 for s,stp in zip(real_shape, v.strides))))
-    if any(stp < 0 for stp in v.strides): to_apply.append((MovementOps.STRIDE, tuple(-1 if stp < 0 else 1 for stp in v.strides)))
-    if v.mask is not None:
-      pre_expand = tuple((x,s-y) if stp != 0 else (0,0) for (x,y),s,stp in zip(v.mask, v.shape, v.strides))
-      post_expand = tuple((x,s-y) if stp == 0 else (0,0) for (x,y),s,stp in zip(v.mask, v.shape, v.strides))
-      if any(x != (0,0) for x in pre_expand):
-        to_apply.append((MovementOps.PAD, pre_expand))
-        real_shape = tuple(x+s[0]+s[1] for x,s in zip(real_shape, pre_expand))
-    if any(s != 1 and stp == 0 for s,stp in zip(real_shape, v.strides)): to_apply.append((MovementOps.EXPAND, real_shape))
-    if v.mask is not None:
-      post_expand = tuple((x,s-y) if stp == 0 else (0,0) for (x,y),s,stp in zip(v.mask, v.shape, v.strides))
-      if any(x != (0,0) for x in post_expand): to_apply.append((MovementOps.PAD, post_expand))
-
-  scratch_st = _make_scratch_st(st)
-  ret: List[Tuple[MovementOps, Tuple]] = []
-  seen: dict[ShapeTracker, List[Tuple[MovementOps, Tuple]]] = {}
-  for mop_arg in to_apply:
-    scratch_st = _apply_st_mop(scratch_st, mop_arg)
-    if scratch_st in seen:
-      ret = seen[scratch_st][:]
-    else:
-      if ret and ret[-1][0] is MovementOps.RESHAPE and mop_arg[0] is MovementOps.RESHAPE:
-        ret[-1] = mop_arg
-      else:
-        if mop_arg == (MovementOps.RESHAPE, -1): mop_arg = (MovementOps.RESHAPE, (prod(st.shape),))
-        ret.append(mop_arg)
-      seen[scratch_st] = ret[:]
-  return ret
-
-def _get_buffer_size(shape, strides, offset, mask):
-  real_shape = tuple(y-x for x,y in mask) if mask else shape
-  offset = offset + sum(stp * (s-1) for s,stp in zip(real_shape, strides) if stp < 0)
-  real_offset = offset + (sum(x*stp for (x,_),stp in zip(mask, strides)) if mask else 0)
-  real_real_shape = [s for s,stp in zip(real_shape, strides) if stp]
-  strides = [abs(stp) if isinstance(stp, int) else stp for stp in strides if stp]
-  return real_offset + sum((s-1)*stp for s, stp in zip(real_real_shape, strides)) + 1
 
 def _movement_to_view_op(mop: MovementOps, arg: Tuple) -> Tuple[str, Tuple]:
   if mop is MovementOps.RESHAPE: return ("reshape", tuple(arg))
@@ -455,7 +364,7 @@ def _movement_to_view_op(mop: MovementOps, arg: Tuple) -> Tuple[str, Tuple]:
 def _strided_view_ops(base_shape: tuple, size: tuple, stride: tuple, storage_offset: int) -> tuple[tuple, ...]:
   st = ShapeTracker.from_shape(base_shape)
   st = ShapeTracker(st.views + (View.create(size, stride, storage_offset),))
-  mops = _to_movement_ops(st)
+  mops = to_movement_ops(st)
   if mops and mops[0] == (MovementOps.RESHAPE, base_shape): mops = mops[1:]
   return tuple(_movement_to_view_op(mop, arg) for mop,arg in mops)
 
