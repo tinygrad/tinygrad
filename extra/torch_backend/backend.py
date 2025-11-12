@@ -158,7 +158,7 @@ def take(base, idx):
 
 @wrap_view_op
 def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
-  ret = unwrap(tensor)
+  ret = tensor
   if TORCH_DEBUG >= 1:
     print("**** as_strided", tensor.shape, size, strides, storage_offset)
   size  = tuple(int(s) for s in size)
