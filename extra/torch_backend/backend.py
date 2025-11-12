@@ -3,17 +3,13 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from __future__ import annotations
-import functools
-import weakref
-from typing import Callable
-from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.uop.symbolic import sym
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
+import functools, weakref
+from typing import Callable, Sequence, cast
 from dataclasses import dataclass
-from typing import cast, Sequence
+from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten
+from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import resolve, UOp, Variable, sint, smax, smin, sint_to_uop, Ops, ssimplify
-from tinygrad.helpers import prod, all_int, flatten
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, resolve, smax, smin, ssimplify
 
 @functools.cache
 def canonicalize_strides(shape:tuple[sint, ...], strides:tuple[sint, ...]) -> tuple[sint, ...]:
@@ -360,11 +356,6 @@ class ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
     return ShapeTracker(self.views + (View.create(new_shape), ))
 
-  def mop(self, op, arg): return mops[op](self, arg)
-
-mops: dict[Ops, Callable] = {Ops.RESHAPE: ShapeTracker.reshape, Ops.PERMUTE: ShapeTracker.permute, Ops.EXPAND: ShapeTracker.expand,
-                             Ops.SHRINK: ShapeTracker.shrink, Ops.FLIP: ShapeTracker.flip, Ops.PAD: ShapeTracker.pad}
-
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
@@ -494,10 +485,14 @@ def wrap_view_op(_name, fn, recorder):
     ret._view_st = _apply_view_st(parent_st, new_ops)
     return wrap(ret)
   return _wrap
-def _record_reshape(parent, args, kwargs, ret): return (("reshape", tuple(ret.shape)),)
-def _record_expand(parent, args, kwargs, ret): return (("expand", tuple(ret.shape)),)
-def _record_bitcast(parent, args, kwargs, ret): return (("bitcast", ret.dtype),)
-def _record_detach(parent, args, kwargs, ret): return (("detach", None),)
+def _record_simple(name, value_fn):
+  return lambda parent, args, kwargs, ret: ((name, value_fn(parent, args, kwargs, ret)),)
+
+_record_reshape = _record_simple("reshape", lambda _parent, _args, _kwargs, ret: tuple(ret.shape))
+_record_expand = _record_simple("expand", lambda _parent, _args, _kwargs, ret: tuple(ret.shape))
+_record_bitcast = _record_simple("bitcast", lambda _parent, _args, _kwargs, ret: ret.dtype)
+_record_detach = _record_simple("detach", lambda *_: None)
+
 def _record_permute_from_order(order): return (("permute", tuple(order)),)
 def _record_transpose_dims(parent, dim0, dim1):
   ndim = parent.ndim
