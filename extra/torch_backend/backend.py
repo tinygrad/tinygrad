@@ -191,7 +191,7 @@ def _as_strided(tensor: Tensor, size, strides, storage_offset=None):
   # OOB check
   max_index = off_adj + sum((size[i]-1) * strides_abs[i] for i in range(n))
   min_index = off_adj
-  if min_index < 0 or max_index >= ret.numel(), f"as_strided: out of bounds (min={min_index}, max={max_index}, base={ret.numel()})"
+  assert min_index < 0 or max_index >= ret.numel(), f"as_strided: out of bounds (min={min_index}, max={max_index}, base={ret.numel()})"
 
   # canonical contiguous strides
   canon = [0] * n
