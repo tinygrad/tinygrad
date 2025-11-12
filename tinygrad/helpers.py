@@ -242,17 +242,19 @@ def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_count
 
 @functools.cache
 def lines(fn) -> list[str]:
-  with open(fn) as f: return f.readlines()
+  try:
+    with open(fn) as f: return f.readlines()
+  except (FileNotFoundError, OSError): return []
 
 def printable(loc:tuple[str, int]) -> str:
   try: return lines(loc[0])[loc[1]-1].strip()
-  except FileNotFoundError: return "<missing>"
+  except IndexError: return "<missing>"
 
 def get_stacktrace(frm, max_frames=30) -> tuple[tuple, ...]:
   ret:list[tuple] = []
   for i in range(max_frames):
-    if (frm:=frm.f_back) is None or not os.path.isfile((fc:=frm.f_code).co_filename): break
-    ret.append((fc.co_filename, frm.f_lineno, fc.co_name, printable((fc.co_filename, frm.f_lineno))))
+    if (frm:=frm.f_back) is None: break
+    ret.append(((fc:=frm.f_code).co_filename, frm.f_lineno, fc.co_name, printable((fc.co_filename, frm.f_lineno))))
   return tuple(ret)
 
 @dataclass(frozen=True)
