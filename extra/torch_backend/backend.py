@@ -343,6 +343,10 @@ def select_backward(grad_out, input_sizes, dim, index):
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
 
+@torch.library.impl("aten::alias", "privateuseone")
+@wrap_view_op
+def alias(self): return self
+
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride if stride != [] else None, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
 

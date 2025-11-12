@@ -1430,11 +1430,20 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([1, 2, 3]).diag().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(12).reshape(3, 4)
+    print(t.diagonal(offset=1).numpy())
+    ```
     """
-    if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
-    return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
+    if offset == 0 and dim1 == 0 and dim2 == 1 and self.ndim == 2 and self.shape[0] == self.shape[1]:
+      return self.flatten().pad(((0, self.shape[0]))).reshape(self.shape[0], self.shape[0]+1)[:, 0]
+    d1, d2 = sorted((self._resolve_dim(dim1), self._resolve_dim(dim2)))
+    x = self.permute([i for i in range(self.ndim) if i not in (d1, d2)] + [d1, d2])
+    size = smax(0, smin(x.shape[-2] - smax(0, -offset), x.shape[-1] - smax(0, offset)))
+    return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device) if size == 0 else \
+           x[..., (idx := Tensor.arange(size, device=self.device)) + smax(0, -offset), idx + smax(0, offset)]  # type: ignore[operator]
 
-  def diagonal(self) -> Tensor:
+  def diagonal(self, foffset=0, dim1=0, dim2=1) -> Tensor:
     """
     Returns a view of input tensor with its main diagonal elements.
 
