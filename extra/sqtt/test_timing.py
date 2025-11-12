@@ -1,7 +1,7 @@
 import os
 os.environ["PYTHONPATH"] = "."
 os.environ["SQTT"] = "1"
-os.environ["AMD"] = "1"
+if "DEV" not in os.environ: os.environ["DEV"] = "AMD"
 os.environ["VIZ"] = "1"
 os.environ["AMD_LLVM"] = "0"
 
@@ -16,7 +16,7 @@ from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.roc import decode, InstExec, PrgExec
 
-dev = Device["AMD"]
+dev = Device[os.environ["DEV"]]
 
 def custom(arg:str, s:UOp|None=None) -> UOp: return UOp(Ops.CUSTOM, src=(s,) if s is not None else (), arg=arg)
 
@@ -39,9 +39,10 @@ def save_sqtt():
   sqtt:dict[PrgExec, list[InstExec]] = {}
   yield sqtt
   # decode sqtt
-  rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
-  assert len(rctx.inst_execs) > 0, "empty sqtt output"
-  sqtt.update(rctx.inst_execs)
+  if os.environ["DEV"] == "AMD":
+    rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
+    assert len(rctx.inst_execs) > 0, "empty sqtt output"
+    sqtt.update(rctx.inst_execs)
 
 class TestTiming(unittest.TestCase):
   def test_v_add(self):
