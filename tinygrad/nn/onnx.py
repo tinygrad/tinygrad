@@ -1124,6 +1124,16 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return output.flatten(start_dim=2) if len(original_input_shape) == 3 else output.permute(0, 2, 1, 3)
 
   # ***** Indexing Ops *****
+  def NonZero(x:Tensor):
+    mask = (x!=0).flatten()
+    flat_idx = Tensor.arange(mask.numel(), dtype=dtypes.int64, device=x.device).masked_select(mask)
+    if flat_idx.ndim == 0: flat_idx = flat_idx.reshape(1)
+    if x.ndim == 0:
+      return Tensor.zeros((0, flat_idx.shape[0]), dtype=dtypes.int64, device=x.device, requires_grad=False)
+    strides = [prod(int(s) for s in x.shape[i+1:]) if i+1 < x.ndim else 1 for i in range(x.ndim)]
+    coords = [((flat_idx // stride) % int(dim)) for stride, dim in zip(strides, x.shape)]
+    return Tensor.stack(*coords, dim=0)
+
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
 
   def Gather(x:Tensor, indices:Tensor, axis:int=0):
