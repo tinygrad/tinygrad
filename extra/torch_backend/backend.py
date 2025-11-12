@@ -274,9 +274,7 @@ def select_backward(grad_out, input_sizes, dim, index):
 
 @torch.library.impl("aten::alias", "privateuseone")
 @wrap_view_op
-def alias(self):
-  # alias is a no-op view operation - just return the tensor as-is
-  return self
+def alias(self): return self
 
 def avg_pool(self, kernel_size, stride=[], padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
   return wrap(unwrap(self).avg_pool2d(kernel_size, stride if stride != [] else None, padding=padding, ceil_mode=ceil_mode, count_include_pad=count_include_pad))
@@ -301,34 +299,7 @@ for dim in [1, 2, 3]:
   for pad_type, mode in [("replication", "replicate"), ("reflection", "reflect")]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
-
-class CircularPadFunction(torch.autograd.Function):
-  @staticmethod
-  def forward(ctx, input, padding):
-    ctx.save_for_backward(input)
-    ctx.padding = padding
-    return wrap(unwrap(input).pad(padding, mode="circular"))
-
-  @staticmethod
-  def backward(ctx, grad_out):
-    input, = ctx.saved_tensors
-    padding = ctx.padding
-    tiny_input = unwrap(input)
-    tiny_grad_out = unwrap(grad_out)
-    out = tiny_input.pad(padding, mode="circular")
-    grad_input = out.gradient(tiny_input, gradient=tiny_grad_out)[0]
-    return wrap(grad_input), None
-
-def circular_pad(input, padding):
-  return CircularPadFunction.apply(input, padding)
-
-# Implement torch._C._nn.pad to handle circular mode directly
-_original_torch_pad = torch._C._nn.pad
-def _custom_pad(input, pad, mode='constant', value=0):
-  if mode == 'circular' and hasattr(input, 'is_tiny') and input.is_tiny:
-    return circular_pad(input, pad)
-  return _original_torch_pad(input, pad, mode, value)
-torch._C._nn.pad = _custom_pad
+  torch.library.impl(f"aten::circular_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="circular"))
 
 def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 for i,pre in enumerate(["", "bi", "tri"]):
