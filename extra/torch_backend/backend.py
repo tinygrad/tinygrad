@@ -388,7 +388,6 @@ for dim in [1, 2, 3]:
   for pad_type, mode in [("replication", "replicate"), ("reflection", "reflect")]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
-    torch.library.impl(f"aten::circular_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="circular"))
 
 def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 for i,pre in enumerate(["", "bi", "tri"]):
