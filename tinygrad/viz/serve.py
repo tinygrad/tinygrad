@@ -225,8 +225,10 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     for w in waves:
-      rows = [(e.inst, e.time, e.time-(w.insts[i-1].time+w.insts[i-1].dur if i else w.begin_time),
-               e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(w.insts)]
+      rows, prev_instr = [], w.begin_time
+      for i,e in enumerate(w.insts):
+        rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+        prev_instr = max(prev_instr, e.time + e.dur)
       summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"CU", "value":w.cu},
                  {"label":"SIMD", "value":w.simd}]
       steps.append({"name":f"Wave {w.wave_id}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
