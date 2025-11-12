@@ -4111,18 +4111,17 @@ class Tensor(OpMixin):
 
   def image_dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    x, dx, dw = self, self.ndim, w.ndim
-    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
-    if x.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {x.shape} and {w.shape}")
+    if not (self.ndim > 0 and w.ndim > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {self.ndim=}, {w.ndim=}")
+    if self.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {self.shape} and {w.shape}")
 
     bs, groups, cin, cout = prod(self.shape[0:-2]), prod(w.shape[0:-2]), w.shape[-2], w.shape[-1]
-    out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout, )
+    out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout,)
 
     # NOTE: with NHWC we can remove the transposes
     # bs x groups*cin x H x W
-    cx = self.transpose(self.ndim-1, self.ndim-2).reshape((bs//groups, groups*cin, -1, 1))
+    cx = self.transpose(self.ndim-1, self.ndim-2).reshape(bs//groups, groups*cin, -1, 1)
     # groups*cout x cin x H, W
-    cw = w.transpose(w.ndim-1, w.ndim-2).reshape((groups*cout, cin, 1, 1))
+    cw = w.transpose(w.ndim-1, w.ndim-2).reshape(groups*cout, cin, 1, 1)
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
@@ -4135,10 +4134,9 @@ class Tensor(OpMixin):
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
       x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
       added_input_channels = 4 - (cin % 4)
-      w = w.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(w.ndim)))
-      x = x.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(x.ndim)))
       cin = cin + added_input_channels
-      x = x.reshape(bs, groups*cin, iy, ix)
+      w = w.pad_to(None, None, cin, None, None)
+      x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
 
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
@@ -4146,7 +4144,7 @@ class Tensor(OpMixin):
       added_output_channels = 4 - (rcout % 4)
       rcout += added_output_channels
       cout = groups * rcout
-      w = w.pad(tuple((0, added_output_channels) if i == 1 else None for i in range(w.ndim)))
+      w = w.pad_to(None, rcout, None, None, None)
 
     # packed (note: flipping bs and iy would make the auto-padding work)
     x = x.permute(0,2,3,1)

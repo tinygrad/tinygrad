@@ -217,10 +217,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # ops with custom handling
       case Ops.KERNEL: return self.arg.ast._shape
-      #case Ops.STORE:
-      #  if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-      #  if self.dtype is not dtypes.void: return self.src[0].src[0].shape
-      #  return None
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
