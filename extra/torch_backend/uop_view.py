@@ -1,23 +1,19 @@
 from __future__ import annotations
 import weakref
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import GroupOp, Ops, UOp, sint
 from tinygrad.helpers import canonicalize_strides, strides_for_shape, prod
 from tinygrad.dtype import _from_torch_dtype
 
-class ViewSpec(NamedTuple):
-  strides: tuple[sint, ...]
-  offset: sint
-
 def _movement_chain(uop: UOp|Tensor) -> list[tuple[Ops, Any]]:
-  chain, cur = [], (uop.uop if isinstance(uop, Tensor) else uop)
+  # Walk up the UOp graph collecting movement operations
+  parents, cur = [], (uop.uop if isinstance(uop, Tensor) else uop)
   while cur.op in {Ops.DETACH, Ops.BITCAST, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.MULTI} or cur.op in GroupOp.Movement:
-    if cur.op in GroupOp.Movement and cur.op is not Ops.PAD: chain.append((cur.op, cur.marg))
+    if cur.op in GroupOp.Movement and cur.op is not Ops.PAD: parents.append((cur.op, cur.marg))
     if not cur.src: break
     cur = cur.src[0]
-  chain.reverse()
-  return chain
+  return list(reversed(parents))
 
 def _compute_strides(uop: UOp|Tensor) -> tuple[tuple[sint, ...], sint]:
   chain = _movement_chain(uop)
@@ -60,9 +56,8 @@ def _apply_chain(base: Tensor, chain: list[tuple[Ops, Any]]) -> Tensor:
     elif op == Ops.FLIP: ret = ret.flip(tuple(i for i, f in enumerate(arg) if f))
   return ret
 
-def register_view(ret:Tensor, parent:Tensor, op_info:tuple[str, Any]|None=None):
+def register_view(ret:Tensor, parent:Tensor):
   ret._view_base = parent
-  if op_info is not None: ret._view_op = op_info
   if not hasattr(ret, "_view_perm"): ret._view_perm = getattr(parent, "_view_perm", tuple(range(parent.ndim)))
   base = _canonical_base(parent)
   if not hasattr(base, "_views"): base._views = set()
@@ -122,43 +117,19 @@ def _slice_tensor(tensor: Tensor, dim=0, start=None, end=None, step=1):
   slices = [slice(None)] * tensor.ndim
   slices[dim] = slice(start, end, step)
   return tensor[tuple(slices)]
-def _record_simple(name, value_fn): return lambda p, a, k, r: ((name, value_fn(p, a, k, r)),)
-def _record_permute_from_order(order): return (("permute", tuple(order)),)
-def _record_transpose_dims(parent, dim0, dim1):
-  order = list(range(parent.ndim))
-  order[dim0 % parent.ndim], order[dim1 % parent.ndim] = order[dim1 % parent.ndim], order[dim0 % parent.ndim]
-  return _record_permute_from_order(order)
-def _record_select(parent, args, kwargs, ret):
-  _, dim, idx = args
-  dim, dim_size = dim % parent.ndim, parent.shape[dim % parent.ndim]
-  idx = (idx + dim_size if idx < 0 else idx)
-  idx = max(0, min(dim_size - 1, idx))
-  shrink_arg = tuple((idx, idx+1) if i == dim else (0, parent.shape[i]) for i in range(parent.ndim))
-  return (("shrink", shrink_arg), ("reshape", tuple(ret.shape)))
-def _record_slice(parent, args, kwargs, ret):
-  _, *rest = args
-  dim = kwargs.get("dim", rest[0] if rest else 0) % parent.ndim
-  size = parent.shape[dim]
-  start = kwargs.get("start", rest[1] if len(rest) > 1 else None)
-  end = kwargs.get("end", rest[2] if len(rest) > 2 else None)
-  step = kwargs.get("step", rest[3] if len(rest) > 3 else 1) or 1
-  if step <= 0: raise NotImplementedError("slice with non-positive step")
-  start = max(0, min(size, (start or 0) + (size if start and start < 0 else 0)))
-  end = max(0, min(size, (end or size) + (size if end and end < 0 else 0)))
-  if step > 1 and end < start: end = start
-  return (("slice", (dim, start, end, step)),)
 
+# Map torch ops to tinygrad functions - UOp graph already records the operations
 view_ops = {
-  "aten.view": (Tensor.reshape, _record_simple("reshape", lambda p, a, k, r: tuple(r.shape))),
-  "aten._unsafe_view": (Tensor.reshape, _record_simple("reshape", lambda p, a, k, r: tuple(r.shape))),
-  "aten.view.dtype": (lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)), _record_simple("bitcast", lambda p, a, k, r: r.dtype)),
-  "aten.expand": (Tensor.expand, _record_simple("expand", lambda p, a, k, r: tuple(r.shape))),
-  "aten.permute": (Tensor.permute, lambda p, a, k, r: _record_permute_from_order(a[1:])),
-  "aten.t": (Tensor.transpose, lambda p, a, k, r: _record_transpose_dims(p, -2, -1)),
-  "aten.transpose.int": (Tensor.transpose, lambda p, a, k, r: _record_transpose_dims(p, a[1], a[2])),
-  "aten.squeeze.dim": (Tensor.squeeze, _record_simple("reshape", lambda p, a, k, r: tuple(r.shape))),
-  "aten.unsqueeze": (Tensor.unsqueeze, _record_simple("reshape", lambda p, a, k, r: tuple(r.shape))),
-  "aten.detach": (Tensor.detach, _record_simple("detach", lambda *_: None)),
-  "aten.select.int": (lambda self, dim, idx: self[(slice(None),) * (dim % self.ndim) + (idx,)], _record_select),
-  "aten.slice.Tensor": (_slice_tensor, _record_slice),
+  "aten.view": Tensor.reshape,
+  "aten._unsafe_view": Tensor.reshape,
+  "aten.view.dtype": lambda self, dtype: self.bitcast(_from_torch_dtype(dtype)),
+  "aten.expand": Tensor.expand,
+  "aten.permute": Tensor.permute,
+  "aten.t": Tensor.transpose,
+  "aten.transpose.int": Tensor.transpose,
+  "aten.squeeze.dim": Tensor.squeeze,
+  "aten.unsqueeze": Tensor.unsqueeze,
+  "aten.detach": Tensor.detach,
+  "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim % self.ndim) + (idx,)],
+  "aten.slice.Tensor": _slice_tensor,
 }

@@ -2,13 +2,14 @@ from __future__ import annotations
 import functools, weakref
 from tinygrad.helpers import getenv, prod
 from tinygrad.dtype import dtypes
-from .uop_view import ViewSpec, maybe_realize_storage, _as_strided_impl, register_view, _compute_strides, ViewSpec, update_shrink_region, view_ops
+from .uop_view import maybe_realize_storage, _as_strided_impl, register_view, _compute_strides, update_shrink_region, view_ops
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, prod
+from tinygrad.uop.ops import sint
+from typing import NamedTuple
 import os
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect
-from typing import List, Tuple
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 _ext_dir = os.environ.setdefault("TORCH_EXTENSIONS_DIR", str(pathlib.Path(__file__).resolve().parents[2] / ".torch_extensions"))
@@ -18,6 +19,11 @@ pathlib.Path(_ext_dir).mkdir(parents=True, exist_ok=True)
 
 def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.index or 0}"
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
+
+class ViewSpec(NamedTuple):
+  strides: tuple[sint, ...]
+  offset: sint
+
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
@@ -45,21 +51,19 @@ torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
 
-def wrap_view_op(_name, fn, recorder):
+def wrap_view_op(_name, fn):
   def _wrap(*args,**kwargs):
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     parent = args[0]
     ret = fn(*args,**kwargs)
-    op_info = tuple(recorder(parent, args, kwargs, ret))
-    register_view(ret, parent, op_info[0] if len(op_info) == 1 else None)
+    register_view(ret, parent)
     return wrap(ret)
   return _wrap
 
+for k, fn in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(k, fn))
 
-for k,(fn, recorder) in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(k, fn, recorder))
-
-torch.library.impl("aten::alias", "privateuseone")(wrap_view_op("aten::alias", lambda self: self, lambda *a, **k: ()))
+torch.library.impl("aten::alias", "privateuseone")(wrap_view_op("aten::alias", lambda self: self))
 
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
@@ -392,7 +396,7 @@ decomps = [
   #aten.var_mean,
   #aten.var,
   #aten.rsqrt,
-  #aten.max_pool2d_with_indices,
+  aten.max_pool2d_with_indices,
   # NOTE: these are prims
   #aten.digamma,
   #aten.erfinv,
