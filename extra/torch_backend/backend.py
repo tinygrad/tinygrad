@@ -197,9 +197,8 @@ def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
 
   # fast path A: exact canonical (no broadcast)
   if strides_abs == canon and all(st != 0 for st in strides):
-    total = prod(size)
-    # shrink first axis (flat buffer) from off_adj to off_adj + total
-    flat = ret.shrink(((off_adj, off_adj + prod(sizes)), *[(0, s[0]) for s in ret.shape[1:]]))
+    # shrink first axis (flat buffer) from off_adj to off_adj + prod(size)
+    flat = ret.shrink(((off_adj, off_adj + prod(size)), *[(0, s[0]) for s in ret.shape[1:]]))
     out = flat.reshape(size)
     # flips for neg strides
     neg_axes = [i for i in range(n) if strides[i] < 0]
