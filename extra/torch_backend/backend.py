@@ -257,8 +257,13 @@ def _reshape_alias(tensor:torch.Tensor, size, stride):
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
   if TORCH_DEBUG: print(f"empty_strided {size=} {stride=} {dtype=} {layout=} {device=} {pin_memory=}")
-  ret = Tensor.empty(*size, dtype=_from_torch_dtype(dtype), device=_from_torch_device(device)).contiguous()
-  # TODO: should return with requested strides
+  size, stride = tuple(size), tuple(stride)
+  storage_size = 1 + sum((s - 1) * st for s, st in zip(size, stride) if s > 0) if size != 1 else 1
+  _dtype, _device = _from_torch_dtype(dtype), _from_torch_device(device)
+  base = Tensor.empty(storage_size, dtype=_dtype, device=_device).contiguous()
+  ret = Tensor.empty(*size, dtype=_dtype, device=_device).contiguous()
+  ret._strided_base, ret._base_size = base, storage_size
+  ret._torch_strides, ret._torch_offset = stride, 0
   return wrap(ret)
 
 @torch.library.impl("aten::empty.memory_format", "privateuseone")
@@ -364,6 +369,7 @@ for dim in [1, 2, 3]:
   for pad_type, mode in [("replication", "replicate"), ("reflection", "reflect")]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
+    torch.library.impl(f"aten::circular_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode="circular"))
 
 def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
 for i,pre in enumerate(["", "bi", "tri"]):
@@ -380,24 +386,22 @@ def scatter_add(self, dim, index, src, out):
 
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
+  tiny_dest = unwrap(dest) if dest.is_tiny else None
+  if tiny_dest is not None: tiny_dest.realize()
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    src,dest = unwrap(src),unwrap(dest)
-    # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
-    dest.assign(src.cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(dest)
+    src = unwrap(src)
+    if dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
+    tiny_dest.assign(src.cast(cast_dtype).to(to_device))
+    Tensor.realize(tiny_dest)
   elif src.is_tiny and dest.is_cpu:
-    # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    # TODO we need to properly match dest shape and strides, not blindly assign
-    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(unwrap(dest))
+    dest.assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
+    if realize: Tensor.realize(dest)
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
@@ -688,7 +692,6 @@ if TORCH_DEBUG:
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
 # NOTE: patch torch optimizer step to avoid continously growing the computation graph
-import weakref
 _torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
 def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
 def get_real_tinygrad_buffers():
