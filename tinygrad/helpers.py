@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
@@ -240,11 +240,29 @@ class Profiling(contextlib.ContextDecorator):
 
 def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_counter_ns())/1000
 
+@functools.cache
+def lines(fn) -> list[str]:
+  try:
+    with open(fn, encoding="utf-8") as f: return f.readlines()
+  except (FileNotFoundError, OSError): return []
+
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except IndexError: return "<missing>"
+
+def get_stacktrace(frm, max_frames=30) -> tuple[tuple, ...]:
+  ret:list[tuple] = []
+  for i in range(max_frames):
+    if (frm:=frm.f_back) is None: break
+    ret.append(((fc:=frm.f_code).co_filename, frm.f_lineno, fc.co_name, printable((fc.co_filename, frm.f_lineno))))
+  return tuple(ret)
+
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
   ret:Any=None
+  tb:tuple[tuple, ...]|None=field(default_factory=lambda: get_stacktrace(sys._getframe(1)) if VIZ else None)
 
 class ProfileEvent: pass
 
@@ -361,10 +379,12 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 
 # *** Exec helpers
 
+def system(cmd, **kwargs): return subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
-    print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
+    print(system(f"{objdump_tool} -d {f.name}"))
 
 def capstone_flatdump(lib: bytes):
   try: import capstone
@@ -441,6 +461,13 @@ class tqdm(Generic[T]):
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+class disable_gc(contextlib.ContextDecorator):
+  def __enter__(self):
+    self._was_enabled = gc.isenabled()
+    if self._was_enabled: gc.disable()
+  def __exit__(self, *exc):
+    if self._was_enabled: gc.enable()
 
 # *** universal support for code object pickling
 
