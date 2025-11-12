@@ -12,6 +12,11 @@ MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000,
 class PCIBarInfo: addr:int; size:int # noqa: E702
 
 class _System:
+  def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
+    if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
+      os.system(cmd:=f"sudo sh -c 'echo {value} > {path}'")
+      if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value): raise RuntimeError(f"{msg}. Please run {cmd} manually.")
+
   @functools.cached_property
   def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
@@ -26,9 +31,7 @@ class _System:
 
   @functools.cached_property
   def pagemap(self) -> FileIOInterface:
-    if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
-      os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
-      assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
+    self.write_sysfs("/proc/sys/vm/compact_unevictable_allowed", "0", "Failed to disable migration of locked pages")
     return FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
   @functools.cached_property
