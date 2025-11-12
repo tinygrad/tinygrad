@@ -6,7 +6,7 @@ from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, resolve, smax, smin, ssimplify
-from .view_tracking import View, ShapeTracker, MovementOps, to_movement_ops
+from .uop_view import is_view, canonical_base, derived_views, register_view, view_spec_from_uop, collect_movement_chain, update_view_region, assign_view_value, MovementChain
 
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
@@ -29,8 +29,7 @@ def _to_torch_device(device: str): return torch.device("tiny", int(device.partit
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
 def wrap(x:Tensor) -> torch.Tensor:
-  _ensure_view_tracking(x)
-  _get_view_st(x)
+  x._view_spec = view_spec_from_uop(x)
   return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
@@ -47,116 +46,30 @@ torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
-# track view relationships for in place operations
-def is_view(tensor: Tensor): return hasattr(tensor, "_view_base")
-def canonical_base(view: Tensor):
-  base = getattr(view, "_view_base", view)
-  return _ensure_view_tracking(base)
-def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
-def _ensure_view_tracking(tensor: Tensor) -> Tensor:
-  shape = tuple(tensor.shape)
-  if not hasattr(tensor, "_view_ops"): tensor._view_ops = tuple()
-  if getattr(tensor, "_view_shape", None) != shape:
-    tensor._view_ops = tuple()
-    tensor._view_shape = shape
-  return tensor
-def _get_view_ops(tensor: Tensor) -> tuple:
-  return _ensure_view_tracking(tensor)._view_ops
-def _get_view_st(tensor: Tensor) -> ShapeTracker:
-  tensor = _ensure_view_tracking(tensor)
-  base = canonical_base(tensor)
-  base_shape = getattr(base, "_view_shape", tuple(base.shape))
-  st = _apply_view_st(ShapeTracker.from_shape(base_shape), tensor._view_ops)
-  target_shape = tuple(tensor.shape)
-  if st.shape != target_shape:
-    try: st = st.reshape(target_shape)
-    except Exception: st = ShapeTracker.from_shape(target_shape)
-  tensor._view_st = st
-  return st
 
-def _apply_ops(target, ops: tuple, handlers: dict[str, Callable]):
-  ret = target
-  for op, args in ops:
-    handler = handlers.get(op)
-    if handler is None: raise ValueError(f"unknown view op {op}")
-    ret = handler(ret, args)
-  return ret
-
-def _expand_st(st: ShapeTracker, shape: tuple[int, ...]) -> ShapeTracker:
-  cur_shape = st.shape
-  if len(shape) != len(cur_shape):
-    added = (1,) * (len(shape) - len(cur_shape))
-    st = st.reshape(added + cur_shape)
-  return st.expand(shape)
+# track view relationships for in place operations (imported from uop_view)
+# is_view, canonical_base, derived_views, register_view are now imported
 
 def _flip_axes(obj, flips):
   axes = tuple(i for i, f in enumerate(flips) if f)
   return obj.flip(axes) if axes else obj
-
-def _slice_view(st: ShapeTracker, args):
-  dim, start, end, step = args
-  return st.slice(dim, start, end, step)
 
 def _slice_tensor(tensor: Tensor, dim=0, start=None, end=None, step=1):
   slices = [slice(None)] * tensor.ndim
   slices[dim] = slice(start, end, step)
   return tensor[tuple(slices)]
 
-def _reshape_st(st: ShapeTracker, shape: tuple[int, ...]) -> ShapeTracker:
-  if -1 not in shape: return st.reshape(shape)
-  assert shape.count(-1) == 1, f"invalid reshape target {shape}"
-  known = prod([dim for dim in shape if dim != -1])
-  total = prod(st.shape)
-  assert isinstance(total, int) and known != 0 and total % known == 0, f"can't infer reshape dim for {st.shape=} -> {shape=}"
-  inferred = total // known
-  new_shape = list(shape)
-  new_shape[new_shape.index(-1)] = inferred
-  return st.reshape(tuple(new_shape))
-
-_ST_VIEW_HANDLERS = {
-  "reshape": _reshape_st,
-  "expand": _expand_st,
-  "permute": lambda st, axis: st.permute(axis),
-  "pad": lambda st, arg: st.pad(arg),
-  "shrink": lambda st, arg: st.shrink(arg),
-  "flip": _flip_axes,
-  "slice": _slice_view,
-  "bitcast": lambda st, _: st,
-  "detach": lambda st, _: st,
-}
-
-_TENSOR_VIEW_HANDLERS = {
-  "reshape": lambda t, shape: t.reshape(shape),
-  "expand": lambda t, shape: t.expand(shape),
-  "permute": lambda t, axis: t.permute(axis),
-  "pad": lambda t, arg: t.pad(arg),
-  "shrink": lambda t, arg: t.shrink(arg),
-  "flip": _flip_axes,
-  "slice": lambda t, args: _slice_tensor(t, *args),
-  "bitcast": lambda t, dtype: t.bitcast(dtype),
-  "detach": lambda t, _: t.detach(),
-}
-
-def _apply_view_st(st: ShapeTracker, ops: tuple) -> ShapeTracker:
-  return _apply_ops(st, ops, _ST_VIEW_HANDLERS)
-
-def _apply_view_ops(tensor: Tensor, ops: tuple) -> Tensor:
-  return _apply_ops(tensor, ops, _TENSOR_VIEW_HANDLERS)
 def wrap_view_op(_name, fn, recorder):
   def _wrap(*args,**kwargs):
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     parent = args[0]
     ret = fn(*args,**kwargs)
-    ret._view_base = base = canonical_base(parent)
-    if not hasattr(base, "_views"): base._views = set()
-    base._views.add(weakref.ref(ret))
-    parent_ops = _get_view_ops(parent)
-    new_ops = tuple(recorder(parent, args, kwargs, ret))
-    ret._view_ops = parent_ops + new_ops
-    ret._view_shape = tuple(ret.shape)
+    op_info = tuple(recorder(parent, args, kwargs, ret))
+    register_view(ret, parent, op_info[0] if len(op_info) == 1 else None)
     return wrap(ret)
   return _wrap
+
 def _record_simple(name, value_fn):
   return lambda parent, args, kwargs, ret: ((name, value_fn(parent, args, kwargs, ret)),)
 
@@ -210,6 +123,7 @@ view_ops = {
   "aten._unsafe_view": (Tensor.reshape, _record_reshape),  # when are views unsafe, and do we care?
   "aten.view.dtype": (lambda self,dtype: self.bitcast(_from_torch_dtype(dtype)), _record_bitcast),
   "aten.expand": (Tensor.expand, _record_expand),
+  "aten.permute": (Tensor.permute, lambda parent, args, kwargs, ret: _record_permute_from_order(args[1:])),
   "aten.t": (Tensor.transpose, lambda parent, args, kwargs, ret: _record_transpose_dims(parent, -2, -1)),
   "aten.transpose.int": (Tensor.transpose, lambda parent, args, kwargs, ret: _record_transpose_dims(parent, args[1], args[2])),
   "aten.squeeze.dim": (Tensor.squeeze, _record_reshape),
@@ -223,15 +137,79 @@ for k,(fn, recorder) in view_ops.items(): torch.library.impl(k.replace("aten.", 
 
 torch.library.impl("aten::alias", "privateuseone")(wrap_view_op("aten::alias", lambda self: self, lambda *a, **k: ()))
 
+# Diag operations
+def _diag_impl(self, diagonal=0):
+  t = unwrap(self)
+  if t.ndim == 1: return wrap(t.diag())
+  else: return wrap(t.diagonal())
+
+def _diagonal_impl(self, offset=0, dim1=0, dim2=1):
+  t = unwrap(self)
+  # tinygrad's diagonal doesn't support offset/dim arguments, so we need to use a workaround
+  # For now, just use the basic diagonal() for offset=0, dim1=0, dim2=1
+  if offset == 0 and dim1 == 0 and dim2 == 1:
+    return wrap(t.diagonal())
+  else:
+    # Fall back to manual implementation for non-default args
+    # Permute to bring dim1 and dim2 to the last two dimensions
+    ndim = t.ndim
+    dims = list(range(ndim))
+    dims[dim1], dims[-2] = dims[-2], dims[dim1]
+    dims[dim2], dims[-1] = dims[-1], dims[dim2]
+    t_perm = t.permute(dims)
+    # Extract diagonal
+    size = min(t_perm.shape[-2], t_perm.shape[-1])
+    diag = t_perm[..., range(size), range(size)]
+    return wrap(diag)
+
+torch.library.impl("aten::diag", "privateuseone")(_diag_impl)
+torch.library.impl("aten::diag", "AutogradPrivateUse1")(_diag_impl)
+torch.library.impl("aten::diagonal", "privateuseone")(_diagonal_impl)
+torch.library.impl("aten::diagonal", "AutogradPrivateUse1")(_diagonal_impl)
+
 # in place operations with views
-def realize_with_views(self: Tensor, views: Tensor):
+def rebuild_view_from_chain(base: Tensor, view: Tensor, chain: MovementChain):
+  """Rebuild a view tensor from its base using a pre-collected movement chain."""
+  # Build the view by applying the movement operations to the base
+  ret = base
+  for op, arg in chain:
+    if op == Ops.RESHAPE: ret = ret.reshape(arg)
+    elif op == Ops.EXPAND: ret = ret.expand(arg)
+    elif op == Ops.SHRINK: ret = ret.shrink(arg)
+    elif op == Ops.PERMUTE: ret = ret.permute(arg)
+    elif op == Ops.FLIP:
+      axes = tuple(i for i, f in enumerate(arg) if f)
+      ret = ret.flip(axes) if axes else ret
+    else: raise NotImplementedError(f"rebuild_view_from_chain does not support {op}")
+  view.replace(ret)
+
+def realize_with_views(self: Tensor, views: list[Tensor]):
+  # Collect all movement chains BEFORE realizing, since realization will change the UOp tree
+  view_chains: list[tuple[Tensor, MovementChain]] = []
+  as_strided_views: list[tuple[Tensor, tuple]] = []
+  
+  for v in views:
+    if is_view(v):
+      # Check if this is an as_strided view (stored in _view_op)
+      if hasattr(v, '_view_op') and v._view_op[0] == 'as_strided':
+        as_strided_views.append((v, v._view_op[1]))  # (view, (size, stride, offset))
+      else:
+        chain, chain_base = collect_movement_chain(v)
+        view_chains.append((v, chain))
+  
+  # Now realize the base
   if not self.uop.is_contiguous(): self.replace(self.contiguous())
   self.replace(self.clone().realize())
-  for v in views:
-    ops = getattr(v, "_view_ops", None)
-    if not ops: continue
-    ret = _apply_view_ops(self, tuple(ops))
-    v.replace(ret)
+  
+  # Rebuild each view using its pre-collected chain
+  for v, chain in view_chains:
+    rebuild_view_from_chain(self, v, chain)
+  
+  # Rebuild as_strided views
+  for v, (size, stride, offset) in as_strided_views:
+    rebuilt = _as_strided_impl(self, size, stride, offset)
+    v.replace(rebuilt)
+
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
   return realize
@@ -313,34 +291,43 @@ def index_tensor(x, y):
 def zero_(x):
   if TORCH_DEBUG: print(f"zero_ {x.shape}")
   tt = unwrap(x)
-  tt.assign(tt.zeros_like())
+  if not update_view_region(tt, lambda region: region.zeros_like()):
+    tt.assign(tt.zeros_like())
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
 @inplace_fn("x")
 def fill_scalar(x, y):
   if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
   tt = unwrap(x)
-  tt.assign(tt.full_like(y))
+  if not update_view_region(tt, lambda region: region.full_like(y)):
+    tt.assign(tt.full_like(y))
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 
 def _as_strided_impl(tensor:Tensor, size, stride, storage_offset):
+  """Fallback implementation of as_strided using gather indices."""
   base = canonical_base(tensor)
-  try:
-    ops = _strided_view_ops(tuple(base.shape), tuple(size), tuple(stride), storage_offset)
-    ret = _apply_view_ops(base, ops)
-    ret._view_base = base
-    if not hasattr(base, "_views"): base._views = set()
-    base._views.add(weakref.ref(ret))
-    ret._view_ops = ops
-    ret._view_shape = tuple(ret.shape)
-    return ret
-  except Exception:
-    flat = base.contiguous().reshape((-1,))
-    total = int(prod(size))
-    return flat[storage_offset:storage_offset+total].reshape(tuple(size))
+  flat = base.contiguous().reshape((-1,))
+  
+  # Build gather indices for the strided view
+  from tinygrad.helpers import argsort
+  indices = []
+  for idx in range(int(prod(size))):
+    offset = storage_offset
+    remaining = idx
+    for dim_size, dim_stride in zip(reversed(size), reversed(stride)):
+      dim_idx = remaining % dim_size
+      offset += dim_idx * dim_stride
+      remaining //= dim_size
+    indices.append(offset)
+  
+  # Gather and reshape
+  idx_tensor = Tensor(indices, dtype=dtypes.int32, device=base.device)
+  ret = flat[idx_tensor].reshape(tuple(size))
+  register_view(ret, base, ("as_strided", (size, stride, storage_offset)))
+  return ret
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
@@ -351,22 +338,6 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
 def _reshape_alias(tensor:torch.Tensor, size, stride):
   return wrap(_as_strided_impl(unwrap(tensor), size, stride, tensor.storage_offset()))
 
-
-def _movement_to_view_op(mop: MovementOps, arg: Tuple) -> Tuple[str, Tuple]:
-  if mop is MovementOps.RESHAPE: return ("reshape", tuple(arg))
-  if mop is MovementOps.PERMUTE: return ("permute", tuple(arg))
-  if mop is MovementOps.EXPAND: return ("expand", tuple(arg))
-  if mop is MovementOps.PAD: return ("pad", tuple(arg))
-  if mop is MovementOps.SHRINK: return ("shrink", tuple(arg))
-  if mop is MovementOps.STRIDE: return ("flip", tuple(x == -1 for x in arg))
-  raise ValueError(f"unsupported movement op {mop}")
-
-def _strided_view_ops(base_shape: tuple, size: tuple, stride: tuple, storage_offset: int) -> tuple[tuple, ...]:
-  st = ShapeTracker.from_shape(base_shape)
-  st = ShapeTracker(st.views + (View.create(size, stride, storage_offset),))
-  mops = to_movement_ops(st)
-  if mops and mops[0] == (MovementOps.RESHAPE, base_shape): mops = mops[1:]
-  return tuple(_movement_to_view_op(mop, arg) for mop,arg in mops)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
