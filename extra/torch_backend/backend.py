@@ -217,43 +217,43 @@ def _as_strided(tensor:Tensor, sizes, strides, storage_offset=None):
   # canonical contiguous strides
   canon = [0]*n
   if n:
-      canon[-1] = 1
-      for i in range(n-2, -1, -1):
-          canon[i] = canon[i+1] * max(sizes[i+1], 1)
+    canon[-1] = 1
+    for i in range(n-2, -1, -1):
+      canon[i] = canon[i+1] * max(sizes[i+1], 1)
   canon = tuple(canon)
 
   # fast path A: exact canonical (no broadcast)
   if strides_abs == canon and all(st != 0 for st in strides):
-      flat = ret.narrow(0, off_adj, prod(sizes))
-      flat = ret.shrink(((off_adj, off_adj + prod(sizes)), *[(0, s[0]) for s in ret.shape[1:]]))
-      out = flat.reshape(sizes)
-      # flips for neg strides
-      neg_axes = [i for i in range(n) if strides[i] < 0]
-      if neg_axes:
-          out = out.flip(neg_axes)
-      return out
+    flat = ret.narrow(0, off_adj, prod(sizes))
+    flat = ret.shrink(((off_adj, off_adj + prod(sizes)), *[(0, s[0]) for s in ret.shape[1:]]))
+    out = flat.reshape(sizes)
+    # flips for neg strides
+    neg_axes = [i for i in range(n) if strides[i] < 0]
+    if neg_axes:
+      out = out.flip(neg_axes)
+    return out
 
   # faster path B: canonical-or-zero per axis (broadcast)
   if all(st == 0 or st == c for st, c in zip(strides_abs, canon)):
-      cont_axes = [i for i in range(n) if strides_abs[i] == canon[i]]
-      cont_sizes = [sizes[i] for i in cont_axes]
-      cont_numel = prod(cont_sizes) if cont_sizes else 1
-      flat = ret.shrink(((off_adj, off_adj + cont_numel), *[(0, s[0]) for s in ret.shape[1:]]))
-      core = flat.reshape(cont_sizes if cont_sizes else ())
+    cont_axes = [i for i in range(n) if strides_abs[i] == canon[i]]
+    cont_sizes = [sizes[i] for i in cont_axes]
+    cont_numel = prod(cont_sizes) if cont_sizes else 1
+    flat = ret.shrink(((off_adj, off_adj + cont_numel), *[(0, s[0]) for s in ret.shape[1:]]))
+    core = flat.reshape(cont_sizes if cont_sizes else ())
 
-      # place cont axes, insert 1s for broadcast axes
-      shape_with_ones = []
-      j = 0
-      for i in range(n):
-          if strides_abs[i] == canon[i]:
-              shape_with_ones.append(cont_sizes[j]); j += 1
-          else:
-              shape_with_ones.append(1)
-      out = core.reshape(tuple(shape_with_ones)).expand(sizes)
-      neg_axes = [i for i in range(n) if strides[i] < 0]
-      if neg_axes:
-          out = out.flip(neg_axes)
-      return out
+    # place cont axes, insert 1s for broadcast axes
+    shape_with_ones = []
+    j = 0
+    for i in range(n):
+      if strides_abs[i] == canon[i]:
+        shape_with_ones.append(cont_sizes[j]); j += 1
+      else:
+        shape_with_ones.append(1)
+    out = core.reshape(tuple(shape_with_ones)).expand(sizes)
+    neg_axes = [i for i in range(n) if strides[i] < 0]
+    if neg_axes:
+      out = out.flip(neg_axes)
+    return out
 
   # general path: build indices and gather
   idx = None
