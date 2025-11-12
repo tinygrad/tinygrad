@@ -22,18 +22,19 @@ from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
 from transformers import AutoTokenizer
 
-from typing import TypedDict
+# from typing import TypedDict
 
 # adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 # MODELS:dict[str, dict[str, int | float | str | dict[str, int | float | dict[str, int | float]]]]
 
-class ModelConfig(TypedDict):
-    params: dict[str, int | float | dict[str, int | float]]
-    total_num_weights: int
-    model: str
-    tokenizer: str
+# class ModelConfig(TypedDict):
+#     params: dict[str, int | float | dict[str, int | float]]
+#     total_num_weights: int
+#     model: str
+#     tokenizer: str
 
-MODELS: dict[str, ModelConfig] = {
+# adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
+MODELS = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24, "n_experts": 32,
                "n_active_experts": 4, "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
@@ -112,9 +113,10 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, 
   assert (Hd & 1) == 0, "RoPE requires an even head dimension"
   half = Hd // 2
   freqs = (base ** (-(Tensor.arange(half, dtype="float32") / half)))
+  t_start_pos = start_pos if isinstance(start_pos, int) else Tensor(start_pos)
 
-  def rotate(x_pairs, freqs):
-    angles = ((Tensor.arange(T, dtype="float32") + start_pos)[:, None] * freqs[None, :]).reshape(1, 1, T, half)
+  def rotate(x_pairs:Tensor, freqs:Tensor) -> Tensor:
+    angles = ((Tensor.arange(T, dtype="float32") + t_start_pos)[:, None] * freqs[None, :]).reshape(1, 1, T, half)
     # contiguous here allows RoPE to be pruned in the JIT
     cos, sin = angles.cos().cast(x_pairs.dtype).contiguous(), angles.sin().cast(x_pairs.dtype).contiguous() # todo: cast to float32 ??
     return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin, x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1)
@@ -242,7 +244,7 @@ class Transformer:
 
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
-    model = Transformer(**params)
+    model = Transformer(**params) # type: ignore[arg-type]
     num_blocks = len(model.blk)
     weights = load(str(model_path / "model.safetensors.index.json"))
     weights = convert_from_huggingface(weights, num_blocks)
@@ -255,7 +257,7 @@ def main(args):
   if args.seed is not None: Tensor.manual_seed(args.seed)
 
   model_info = MODELS[args.size]
-  model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"])
+  model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"]) # type: ignore[arg-type]
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
   expected = [12194,    11,  1495,   553,   481,    30,   357,   939,  8975,    13]
 
@@ -265,7 +267,7 @@ def main(args):
     from transformers import GptOssForCausalLM
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     print(f"Using {device}")
-    fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1])
+    fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1]) # type: ignore[attr-defined]
     model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=device)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
     generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   1495,   553,   481,    30]], device='cuda:0')
@@ -276,7 +278,7 @@ def main(args):
 
   # build model
   with Timing("load weights: ", enabled=DEBUG >= 1):
-    model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights)
+    model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights) # type: ignore[arg-type]
 
   outputted = args.prompt
   start_pos, toks, tok_tensor = 0, tokenizer(outputted)["input_ids"], None
@@ -286,7 +288,7 @@ def main(args):
   for _ in range(args.count):
     GlobalCounters.reset()
     if DEBUG >= 1: print("")
-    next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1)
+    next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or (len(toks)-start_pos) > 1 else tok_tensor.reshape(1, 1) # type: ignore[attr-defined]
     tok_tensor = model(next_tok, start_pos)
     tok = tok_tensor.item()
 
