@@ -94,17 +94,6 @@ class View:
   mask:tuple[tuple[sint, sint], ...]|None
   contiguous:bool
 
-  def to_valid_uop(self, idxs:Sequence[UOp]|None=None) -> UOp:
-    """valid.where(idx, INVALID)"""
-    if idxs is None: idxs = [UOp.range(s, i) for i,s in enumerate(self.shape)]
-    iexpr = sint_to_uop(self.offset)
-    where = UOp.const(dtypes.bool, True)
-    for idx,sh,st,m in zip(idxs, self.shape, self.strides, self.mask if self.mask is not None else itertools.repeat(None)):
-      iexpr = iexpr + idx*sint_to_uop(st)
-      if m is not None:
-        if resolve(m[0] != 0): where &= (idx >= sint_to_uop(m[0]))
-        if resolve(m[1] != sh): where &= (idx < sint_to_uop(m[1]))
-    return where.where(iexpr, UOp.invalid())
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def size(self) -> int:
@@ -141,48 +130,9 @@ class View:
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-  def vars(self) -> set[Variable]:
-    flatten_mask = tuple(x for m in self.mask for x in m) if self.mask is not None else tuple()
-    return functools.reduce(operator.or_, [x.vars() for x in self.shape+self.strides+(self.offset,)+flatten_mask if isinstance(x, UOp)], set())
 
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def unbind(self) -> tuple[View, dict[Variable, int]]:
-    var_unboundvar_val = [(v, v.unbind()) for v in self.vars() if v.op is Ops.BIND]
-    unbound_vars = {v:uv for v,(uv,_) in var_unboundvar_val}
-    return self.substitute(unbound_vars), dict(x[1] for x in var_unboundvar_val)
-
-  def substitute(self, dvars:dict[UOp, UOp]):
-    def _substitute(x:sint): return x if isinstance(x, int) else x.substitute(dvars)
-    new_shape = tuple(map(_substitute, self.shape))
-    new_strides = tuple(map(_substitute, self.strides))
-    new_offset = _substitute(self.offset)
-    new_mask = tuple((_substitute(x[0]), _substitute(x[1])) for x in self.mask) if self.mask is not None else None
-    return View.create(new_shape, new_strides, new_offset, new_mask)
-
-  @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, vm1:View) -> View|None:
-    vm2 = self
-    if vm2.contiguous or vm1.size() == 0: return vm1
-    if vm1.contiguous and vm1.shape == vm2.shape: return vm2
-    if vm1.contiguous and vm1.size() == vm2.size() and (ret := vm2.reshape(vm1.shape)) is not None: return ret
-    if vm1.mask:
-      if (new_vm1 := vm1.shrink(vm1.mask)) == vm1 or (merged := vm2 + new_vm1) is None: return None
-      return merged.pad(tuple((b,s-e) for (b,e),s in zip(vm1.mask, vm1.shape)))
-    if not all_int(vm1.shape):
-      # if all strides are 0 and vm2 is unmasked, return vm1
-      if all(x == 0 for x in vm2.strides+vm1.strides) and vm2.mask is None: return vm1
-      return None
-
-    # Project vm1's offset and strides on to vm2.
-    origin = [ssimplify(o) for o in unravel(vm2.shape, vm1.offset)]
-    terms: list[list[tuple[int, sint]]] = [[] for _ in vm2.shape]
-    strides: list[sint] = [0] * len(vm1.shape)
-    for d1, st in enumerate(vm1.strides):
-      if st == 0: continue
-      for d2, (o, s1) in enumerate(zip(origin, unravel(vm2.shape, vm1.offset + st))):
-        if not resolve((s1 := s1 - o)!=0): continue  # if s1 can possibly be 0
-        terms[d2].append((d1, s1))
-        strides[d1] += ssimplify(s1 * vm2.strides[d2])
+    # View merging is incomplete/complex - always return None to skip simplification
     return None
 
   def __unsafe_resize(self, arg: tuple[tuple[sint, sint], ...], mask=None) -> View:
@@ -381,23 +331,6 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
       seen[scratch_st] = ret[:]
   return ret
 
-@functools.cache
-def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
-  import itertools
-  idx = views[-1].to_valid_uop(_idxs)
-  for view in reversed(views[0:-1]):
-    idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
-  with Context(TRACK_MATCH_STATS=0):
-    return graph_rewrite(idx, sym, name="indexing sym @ 1")
-
-@functools.cache
-def views_to_is_expanded(views: tuple[View, ...]) -> tuple[bool, ...]:
-  # NOTE: return if each dim is expanded
-  if len(views) == 1 and views[-1].mask is None: return tuple([bool(st==0) for st in views[-1].strides])
-  idx = views_to_valid_uop(views).get_idx()
-  used_ranges = [x.arg[0] for x in idx.toposort() if x.op is Ops.RANGE]
-  return tuple([i not in used_ranges for i in range(len(views[-1].shape))])
-
 @dataclass(frozen=True, order=True)
 class ShapeTracker:
   views: tuple[View, ...]
@@ -418,16 +351,6 @@ class ShapeTracker:
 
   @property
   def size(self) -> int: return self.views[-1].size()
-
-  def vars(self) -> set[Variable]: return set().union(*[v.vars() for v in self.views])
-
-  @property
-  def var_vals(self) -> dict[str, int]: return merge_dicts([{(vu:=v.unbind())[0].expr:vu[1]} for v in self.vars()])
-
-  def unbind(self) -> tuple[ShapeTracker, dict[Variable, int]]:
-    unbound_views, var_vals = zip(*[v.unbind() for v in self.views])
-    if all(len(x) == 0 for x in var_vals): return self, {}
-    return ShapeTracker(tuple(unbound_views)), merge_dicts(var_vals)
 
   def simplify(self) -> ShapeTracker:
     if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
