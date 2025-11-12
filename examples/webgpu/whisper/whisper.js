@@ -109,6 +109,7 @@ function initDb() {
 const getDevice = async (GPU) => {
     if (!GPU) return false;
     const adapter = await GPU.requestAdapter();
+    if (!adapter) return false;
     // let limits = Object.fromEntries(LIMITS_KEYS.map(x => [x, adapter.limits[x]]));
     // let limits = adapter.limits;
     // console.log(limits);
