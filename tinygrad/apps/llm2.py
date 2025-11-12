@@ -22,10 +22,18 @@ from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
 from transformers import AutoTokenizer
 
-from icecream import install
-install()
+from typing import TypedDict
 
-MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] = {
+# adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
+# MODELS:dict[str, dict[str, int | float | str | dict[str, int | float | dict[str, int | float]]]]
+
+class ModelConfig(TypedDict):
+    params: dict[str, int | float | dict[str, int | float]]
+    total_num_weights: int
+    model: str
+    tokenizer: str
+
+MODELS: dict[str, ModelConfig] = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24, "n_experts": 32,
                "n_active_experts": 4, "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
@@ -47,8 +55,7 @@ def download_weights(model:str, total_num_weights:int) -> Path:
     fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
   return Path(os.path.dirname(model_path))
 
-def get_keymap():
-  num_blocks = getenv("GPT_OSS_LAYERS", MODELS["20B"]["params"]["num_blocks"])
+def get_keymap(num_blocks) -> dict[str, str]:
   return {
     "model.embed_tokens.weight": "token_embd.weight",
     **{f"model.layers.{l}.input_layernorm.weight": f"blk.{l}.attn_norm.weight" for l in range(num_blocks)},
@@ -65,9 +72,9 @@ def get_keymap():
     "lm_head.weight": "output.weight",
   }
 
-def convert_from_huggingface(weights:dict[str, Tensor]):
+def convert_from_huggingface(weights:dict[str, Tensor], num_blocks:int) -> dict[str, Tensor]:
   # map hf to tinygrad state_dict keys
-  keymap = get_keymap()
+  keymap = get_keymap(num_blocks)
   sd = {}
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
@@ -78,8 +85,8 @@ def convert_from_huggingface(weights:dict[str, Tensor]):
     sd[keymap[k]] = v
   return sd
 
-def fix_mxfp4(weights) -> Tensor:
-  def dequantize_mxfp4(blocks: Tensor, scales: Tensor) -> Tensor:
+def fix_mxfp4(weights:dict[str, Tensor], num_blocks:int) -> dict[str, Tensor]:
+  def dequantize_mxfp4(blocks:Tensor, scales:Tensor) -> Tensor:
     """Dequantize MXFP4 to float32. blocks: (*batch, num_blocks, 16), scales: (*batch, num_blocks) -> (*batch, num_blocks*32)"""
     assert blocks.shape[:-1] == scales.shape and blocks.shape[-1] == 16
     MXFP4_ID, MXFP4_NUM_ELEMENTS = 39, 32
@@ -90,7 +97,6 @@ def fix_mxfp4(weights) -> Tensor:
     return out.reshape(*scales.shape, 2, -1).permute(0, 2, 4, 3, 1).reshape(block_size, -1, n_blocks)
 
   # only dequantize ffn_gate_up_proj and ffn_down_proj
-  num_blocks = getenv("GPT_OSS_LAYERS", MODELS["20B"]["params"]["num_blocks"])
   for l in range(num_blocks):
     for d in ['gate_up', 'down']:
       blocks, scales = f'blk.{l}.ffn_{d}_proj_blocks', f'blk.{l}.ffn_{d}_proj_scales'
@@ -127,9 +133,8 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, 
   freqs = interpolation * (1 - mask) + extrapolation * mask
   return rotate(x.reshape(B, H, T, 2, half).transpose(-1, -2) * attn_scale, freqs).transpose(-1, -2).reshape(B, H, T, Hd)
 
-
 # swiglu arxiv.org/pdf/2002.05202v1
-def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0):
+def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0) -> Tensor:
   x_glu, x_up = x[..., ::2].clamp(None, limit), x[..., 1::2].clamp(-limit, limit)
   return x_glu * (alpha * x_glu).sigmoid() * (x_up + 1)
 
@@ -210,7 +215,7 @@ class TransformerBlock:
     attn = self.attn_o(attn)                                                              # (B,T,D)    -> (B,T,D)
     return x + attn                                                                       # (B,T,D)    -> (B,T,D)
 
-  def __call__(self, x: Tensor, start_pos: int|UOp):
+  def __call__(self, x: Tensor, start_pos: int|UOp) -> Tensor:
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
@@ -238,9 +243,10 @@ class Transformer:
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
     model = Transformer(**params)
+    num_blocks = len(model.blk)
     weights = load(str(model_path / "model.safetensors.index.json"))
-    weights = convert_from_huggingface(weights)
-    weights = fix_mxfp4(weights)
+    weights = convert_from_huggingface(weights, num_blocks)
+    weights = fix_mxfp4(weights, num_blocks)
     # weights = fix_bf16(weights) # todo: do we need ??
     load_state_dict(model, weights, strict=False, consume=True)
     return model

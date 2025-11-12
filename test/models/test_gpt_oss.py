@@ -5,6 +5,9 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import getenv, tqdm
 from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, get_keymap, MODELS
 
+from icecream import install
+install()
+
 # https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 TORCH_PARAMS = {
   "20B": {
@@ -26,8 +29,9 @@ TORCH_PARAMS = {
 }
 
 # map tinygrad to hf state_dict keys
+num_blocks = getenv("GPT_OSS_LAYERS", 1)
 def mxfp4_keymap(s): return s.replace('_blocks', '').replace('_scales', '')
-keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap().items()}
+keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_keymap(num_blocks).items()}
 
 def compare_state_dicts(model, torch_model):
   state, torch_state = get_state_dict(model), torch_model.state_dict()
@@ -62,7 +66,7 @@ class TestGptOss(unittest.TestCase):
     model = GptOss(**params) if fakeweights else GptOss.from_pretrained(model_path, params, fakeweights)
 
     # torch model
-    torch_device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
+    torch_device = torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     torch_model = TorchGptOss(GptOssConfig(**torch_params)) if fakeweights else TorchGptOss.from_pretrained(
       model_path, config=GptOssConfig(**torch_params), ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
     torch_model = torch_model.to(torch_device).eval()
