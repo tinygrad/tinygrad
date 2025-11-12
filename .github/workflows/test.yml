@@ -89,7 +89,6 @@ jobs:
         clang -O2 recognize.c -lm -o recognize
         cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
-  # TODO: fix the torch backend and reenable
   torchbackend:
     name: Torch Backend Tests
     runs-on: ubuntu-latest
