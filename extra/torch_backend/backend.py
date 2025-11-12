@@ -3,7 +3,6 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -34,18 +33,12 @@ torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
-# track view relationships for in place operations
-def is_view(tensor: Tensor): return hasattr(tensor, "_view_base")
-def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
-def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
+# wrap view operations - Tensor's UOp graph already handles view tracking
 def wrap_view_op(fn):
   def _wrap(*args,**kwargs):
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     ret = fn(*args,**kwargs)
-    ret._view_base = base = canonical_base(args[0])
-    if not hasattr(base, "_views"): base._views = set()
-    base._views.add(weakref.ref(ret))
     return wrap(ret)
   return _wrap
 
@@ -67,31 +60,7 @@ view_ops = {
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
-_movement_ops = {Ops.RESHAPE, Ops.PERMUTE, Ops.EXPAND, Ops.PAD, Ops.SHRINK, Ops.FLIP}
-_pad_shrink_ops = {Ops.PAD, Ops.SHRINK}
-_op_to_method = {
-  Ops.RESHAPE: Tensor.reshape, Ops.PERMUTE: Tensor.permute, Ops.EXPAND: Tensor.expand,
-  Ops.PAD: Tensor.pad, Ops.SHRINK: Tensor.shrink, Ops.FLIP: Tensor.flip
-}
-def realize_with_views(self: Tensor, views: list[Tensor]):
-  original_base_uop = self.uop
-  self.replace(self.contiguous().clone().realize())
-  for v in views:
-    v_uop = v.uop
-    if v_uop.base.op is Ops.BUFFER_VIEW: continue
-    # extract movement ops from view's UOp graph
-    mops, current = [], v_uop
-    while current is not original_base_uop and len(current.src) > 0:
-      if current.op in _movement_ops:
-        mops.append((current.op, current.marg if current.op in _pad_shrink_ops else (current.arg if current.arg is not None else current.shape)))
-      current = current.src[0]
-    # reconstruct view from realized base
-    ret = self
-    for op, arg in reversed(mops): ret = _op_to_method[op](ret, arg)
-    v.replace(ret)
-def maybe_realize_storage(self: Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
-  return realize
+# simplified inplace decorator - Tensor's built-in realization handles everything
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
   def decorator(fn):
@@ -100,9 +69,8 @@ def inplace_fn(outvars: str|list[str]):
       bound = sig.bind(*args, **kwargs)
       outs = [kwargs.get(v, bound.arguments.get(v)) for v in outvars]
       outs = [unwrap(o) if isinstance(o, torch.Tensor) else o for o in outs]
-      realize = any(maybe_realize_storage(o) for o in outs)
       ret = fn(*args, **kwargs)
-      if realize: Tensor.realize(*(o for o in outs))
+      Tensor.realize(*outs)
       return ret
     return wrapper
   return decorator
@@ -385,7 +353,7 @@ def scatter_add(self, dim, index, src, out):
 @torch.library.impl("aten::_copy_from", "privateuseone")
 def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   tiny_dest = unwrap(dest) if dest.is_tiny else None
-  if tiny_dest is not None: maybe_realize_storage(tiny_dest)
+  if tiny_dest is not None: tiny_dest.realize()
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
