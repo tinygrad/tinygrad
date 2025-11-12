@@ -3,34 +3,193 @@ import ctypes
 from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
-class _anonstruct0(Struct): pass
+class union_PM4_MES_TYPE_3_HEADER_0(Struct): pass
+uint32_t = ctypes.c_uint32
+union_PM4_MES_TYPE_3_HEADER_0._fields_ = [
+  ('reserved1', uint32_t,8),
+  ('opcode', uint32_t,8),
+  ('count', uint32_t,14),
+  ('type', uint32_t,2),
+]
+union_PM4_MES_TYPE_3_HEADER._anonymous_ = ['_0']
+union_PM4_MES_TYPE_3_HEADER._fields_ = [
+  ('_0', union_PM4_MES_TYPE_3_HEADER_0),
+  ('u32All', uint32_t),
+]
 enum_mes_set_resources_queue_type_enum = CEnum(ctypes.c_uint32)
 queue_type__mes_set_resources__kernel_interface_queue_kiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__kernel_interface_queue_kiq', 0)
 queue_type__mes_set_resources__hsa_interface_queue_hiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_interface_queue_hiq', 1)
 queue_type__mes_set_resources__hsa_debug_interface_queue = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_debug_interface_queue', 4)
 
 class struct_pm4_mes_set_resources(Struct): pass
-class _anonunion1(ctypes.Union): pass
-class _anonunion2(ctypes.Union): pass
-class _anonstruct3(Struct): pass
-class _anonunion4(ctypes.Union): pass
-class _anonstruct5(Struct): pass
-class _anonunion6(ctypes.Union): pass
-class _anonstruct7(Struct): pass
+class struct_pm4_mes_set_resources_0(ctypes.Union): pass
+struct_pm4_mes_set_resources_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', uint32_t),
+]
+class struct_pm4_mes_set_resources_1(ctypes.Union): pass
+class struct_pm4_mes_set_resources_1_bitfields2(Struct): pass
+struct_pm4_mes_set_resources_1_bitfields2._fields_ = [
+  ('vmid_mask', uint32_t,16),
+  ('unmap_latency', uint32_t,8),
+  ('reserved1', uint32_t,5),
+  ('queue_type', enum_mes_set_resources_queue_type_enum,3),
+]
+struct_pm4_mes_set_resources_1._fields_ = [
+  ('bitfields2', struct_pm4_mes_set_resources_1_bitfields2),
+  ('ordinal2', uint32_t),
+]
+class struct_pm4_mes_set_resources_2(ctypes.Union): pass
+class struct_pm4_mes_set_resources_2_bitfields7(Struct): pass
+struct_pm4_mes_set_resources_2_bitfields7._fields_ = [
+  ('oac_mask', uint32_t,16),
+  ('reserved2', uint32_t,16),
+]
+struct_pm4_mes_set_resources_2._fields_ = [
+  ('bitfields7', struct_pm4_mes_set_resources_2_bitfields7),
+  ('ordinal7', uint32_t),
+]
+class struct_pm4_mes_set_resources_3(ctypes.Union): pass
+class struct_pm4_mes_set_resources_3_bitfields8(Struct): pass
+struct_pm4_mes_set_resources_3_bitfields8._fields_ = [
+  ('gds_heap_base', uint32_t,10),
+  ('reserved3', uint32_t,1),
+  ('gds_heap_size', uint32_t,10),
+  ('reserved4', uint32_t,11),
+]
+struct_pm4_mes_set_resources_3._fields_ = [
+  ('bitfields8', struct_pm4_mes_set_resources_3_bitfields8),
+  ('ordinal8', uint32_t),
+]
+struct_pm4_mes_set_resources._anonymous_ = ['_0', '_1', '_2', '_3']
+struct_pm4_mes_set_resources._fields_ = [
+  ('_0', struct_pm4_mes_set_resources_0),
+  ('_1', struct_pm4_mes_set_resources_1),
+  ('queue_mask_lo', uint32_t),
+  ('queue_mask_hi', uint32_t),
+  ('gws_mask_lo', uint32_t),
+  ('gws_mask_hi', uint32_t),
+  ('_2', struct_pm4_mes_set_resources_2),
+  ('_3', struct_pm4_mes_set_resources_3),
+]
 class struct_pm4_mes_runlist(Struct): pass
-class _anonunion8(ctypes.Union): pass
-class _anonunion9(ctypes.Union): pass
-class _anonstruct10(Struct): pass
-class _anonunion11(ctypes.Union): pass
-class _anonstruct12(Struct): pass
+class struct_pm4_mes_runlist_0(ctypes.Union): pass
+struct_pm4_mes_runlist_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', uint32_t),
+]
+class struct_pm4_mes_runlist_1(ctypes.Union): pass
+class struct_pm4_mes_runlist_1_bitfields2(Struct): pass
+struct_pm4_mes_runlist_1_bitfields2._fields_ = [
+  ('reserved1', uint32_t,2),
+  ('ib_base_lo', uint32_t,30),
+]
+struct_pm4_mes_runlist_1._fields_ = [
+  ('bitfields2', struct_pm4_mes_runlist_1_bitfields2),
+  ('ordinal2', uint32_t),
+]
+class struct_pm4_mes_runlist_2(ctypes.Union): pass
+class struct_pm4_mes_runlist_2_bitfields4(Struct): pass
+struct_pm4_mes_runlist_2_bitfields4._fields_ = [
+  ('ib_size', uint32_t,20),
+  ('chain', uint32_t,1),
+  ('offload_polling', uint32_t,1),
+  ('chained_runlist_idle_disable', uint32_t,1),
+  ('valid', uint32_t,1),
+  ('process_cnt', uint32_t,4),
+  ('reserved3', uint32_t,4),
+]
+struct_pm4_mes_runlist_2._fields_ = [
+  ('bitfields4', struct_pm4_mes_runlist_2_bitfields4),
+  ('ordinal4', uint32_t),
+]
+struct_pm4_mes_runlist._anonymous_ = ['_0', '_1', '_2']
+struct_pm4_mes_runlist._fields_ = [
+  ('_0', struct_pm4_mes_runlist_0),
+  ('_1', struct_pm4_mes_runlist_1),
+  ('ib_base_hi', uint32_t),
+  ('_2', struct_pm4_mes_runlist_2),
+]
 class struct_pm4_mes_map_process(Struct): pass
-class _anonunion13(ctypes.Union): pass
-class _anonunion14(ctypes.Union): pass
-class _anonstruct15(Struct): pass
-class _anonunion16(ctypes.Union): pass
-class _anonstruct17(Struct): pass
+class struct_pm4_mes_map_process_0(ctypes.Union): pass
+struct_pm4_mes_map_process_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', uint32_t),
+]
+class struct_pm4_mes_map_process_1(ctypes.Union): pass
+class struct_pm4_mes_map_process_1_bitfields2(Struct): pass
+struct_pm4_mes_map_process_1_bitfields2._fields_ = [
+  ('pasid', uint32_t,16),
+  ('reserved1', uint32_t,1),
+  ('exec_cleaner_shader', uint32_t,1),
+  ('debug_vmid', uint32_t,4),
+  ('new_debug', uint32_t,1),
+  ('reserved2', uint32_t,1),
+  ('diq_enable', uint32_t,1),
+  ('process_quantum', uint32_t,7),
+]
+struct_pm4_mes_map_process_1._fields_ = [
+  ('bitfields2', struct_pm4_mes_map_process_1_bitfields2),
+  ('ordinal2', uint32_t),
+]
+class struct_pm4_mes_map_process_2(ctypes.Union): pass
+class struct_pm4_mes_map_process_2_bitfields14(Struct): pass
+struct_pm4_mes_map_process_2_bitfields14._fields_ = [
+  ('num_gws', uint32_t,7),
+  ('sdma_enable', uint32_t,1),
+  ('num_oac', uint32_t,4),
+  ('gds_size_hi', uint32_t,4),
+  ('gds_size', uint32_t,6),
+  ('num_queues', uint32_t,10),
+]
+struct_pm4_mes_map_process_2._fields_ = [
+  ('bitfields14', struct_pm4_mes_map_process_2_bitfields14),
+  ('ordinal14', uint32_t),
+]
+struct_pm4_mes_map_process._anonymous_ = ['_0', '_1', '_2']
+struct_pm4_mes_map_process._fields_ = [
+  ('_0', struct_pm4_mes_map_process_0),
+  ('_1', struct_pm4_mes_map_process_1),
+  ('vm_context_page_table_base_addr_lo32', uint32_t),
+  ('vm_context_page_table_base_addr_hi32', uint32_t),
+  ('sh_mem_bases', uint32_t),
+  ('sh_mem_config', uint32_t),
+  ('sq_shader_tba_lo', uint32_t),
+  ('sq_shader_tba_hi', uint32_t),
+  ('sq_shader_tma_lo', uint32_t),
+  ('sq_shader_tma_hi', uint32_t),
+  ('reserved6', uint32_t),
+  ('gds_addr_lo', uint32_t),
+  ('gds_addr_hi', uint32_t),
+  ('_2', struct_pm4_mes_map_process_2),
+  ('completion_signal_lo', uint32_t),
+  ('completion_signal_hi', uint32_t),
+]
 class struct_PM4_MES_MAP_PROCESS_VM(Struct): pass
-class _anonunion18(ctypes.Union): pass
+class struct_PM4_MES_MAP_PROCESS_VM_0(ctypes.Union): pass
+struct_PM4_MES_MAP_PROCESS_VM_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', uint32_t),
+]
+struct_PM4_MES_MAP_PROCESS_VM._anonymous_ = ['_0']
+struct_PM4_MES_MAP_PROCESS_VM._fields_ = [
+  ('_0', struct_PM4_MES_MAP_PROCESS_VM_0),
+  ('reserved1', uint32_t),
+  ('vm_context_cntl', uint32_t),
+  ('reserved2', uint32_t),
+  ('vm_context_page_table_end_addr_lo32', uint32_t),
+  ('vm_context_page_table_end_addr_hi32', uint32_t),
+  ('vm_context_page_table_start_addr_lo32', uint32_t),
+  ('vm_context_page_table_start_addr_hi32', uint32_t),
+  ('reserved3', uint32_t),
+  ('reserved4', uint32_t),
+  ('reserved5', uint32_t),
+  ('reserved6', uint32_t),
+  ('reserved7', uint32_t),
+  ('reserved8', uint32_t),
+  ('completion_signal_lo32', uint32_t),
+  ('completion_signal_hi32', uint32_t),
+]
 enum_mes_map_queues_queue_sel_enum = CEnum(ctypes.c_uint32)
 queue_sel__mes_map_queues__map_to_specified_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_specified_queue_slots_vi', 0)
 queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi', 1)
@@ -52,11 +211,51 @@ extended_engine_sel__mes_map_queues__sdma0_to_7_sel = enum_mes_map_queues_extend
 extended_engine_sel__mes_map_queues__sdma8_to_15_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__sdma8_to_15_sel', 2)
 
 class struct_pm4_mes_map_queues(Struct): pass
-class _anonunion19(ctypes.Union): pass
-class _anonunion20(ctypes.Union): pass
-class _anonstruct21(Struct): pass
-class _anonunion22(ctypes.Union): pass
-class _anonstruct23(Struct): pass
+class struct_pm4_mes_map_queues_0(ctypes.Union): pass
+struct_pm4_mes_map_queues_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', uint32_t),
+]
+class struct_pm4_mes_map_queues_1(ctypes.Union): pass
+class struct_pm4_mes_map_queues_1_bitfields2(Struct): pass
+struct_pm4_mes_map_queues_1_bitfields2._fields_ = [
+  ('reserved1', uint32_t,2),
+  ('extended_engine_sel', enum_mes_map_queues_extended_engine_sel_enum,2),
+  ('queue_sel', enum_mes_map_queues_queue_sel_enum,2),
+  ('reserved5', uint32_t,6),
+  ('gws_control_queue', uint32_t,1),
+  ('reserved2', uint32_t,8),
+  ('queue_type', enum_mes_map_queues_queue_type_enum,3),
+  ('reserved3', uint32_t,2),
+  ('engine_sel', enum_mes_map_queues_engine_sel_enum,3),
+  ('num_queues', uint32_t,3),
+]
+struct_pm4_mes_map_queues_1._fields_ = [
+  ('bitfields2', struct_pm4_mes_map_queues_1_bitfields2),
+  ('ordinal2', uint32_t),
+]
+class struct_pm4_mes_map_queues_2(ctypes.Union): pass
+class struct_pm4_mes_map_queues_2_bitfields3(Struct): pass
+struct_pm4_mes_map_queues_2_bitfields3._fields_ = [
+  ('reserved3', uint32_t,1),
+  ('check_disable', uint32_t,1),
+  ('doorbell_offset', uint32_t,26),
+  ('reserved4', uint32_t,4),
+]
+struct_pm4_mes_map_queues_2._fields_ = [
+  ('bitfields3', struct_pm4_mes_map_queues_2_bitfields3),
+  ('ordinal3', uint32_t),
+]
+struct_pm4_mes_map_queues._anonymous_ = ['_0', '_1', '_2']
+struct_pm4_mes_map_queues._fields_ = [
+  ('_0', struct_pm4_mes_map_queues_0),
+  ('_1', struct_pm4_mes_map_queues_1),
+  ('_2', struct_pm4_mes_map_queues_2),
+  ('mqd_addr_lo', uint32_t),
+  ('mqd_addr_hi', uint32_t),
+  ('wptr_addr_lo', uint32_t),
+  ('wptr_addr_hi', uint32_t),
+]
 enum_mes_query_status_interrupt_sel_enum = CEnum(ctypes.c_uint32)
 interrupt_sel__mes_query_status__completion_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__completion_status', 0)
 interrupt_sel__mes_query_status__process_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__process_status', 1)
@@ -74,12 +273,50 @@ engine_sel__mes_query_status__sdma0_queue = enum_mes_query_status_engine_sel_enu
 engine_sel__mes_query_status__sdma1_queue = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__sdma1_queue', 3)
 
 class struct_pm4_mes_query_status(Struct): pass
-class _anonunion24(ctypes.Union): pass
-class _anonunion25(ctypes.Union): pass
-class _anonstruct26(Struct): pass
-class _anonunion27(ctypes.Union): pass
-class _anonstruct28(Struct): pass
-class _anonstruct29(Struct): pass
+class struct_pm4_mes_query_status_0(ctypes.Union): pass
+struct_pm4_mes_query_status_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', uint32_t),
+]
+class struct_pm4_mes_query_status_1(ctypes.Union): pass
+class struct_pm4_mes_query_status_1_bitfields2(Struct): pass
+struct_pm4_mes_query_status_1_bitfields2._fields_ = [
+  ('context_id', uint32_t,28),
+  ('interrupt_sel', enum_mes_query_status_interrupt_sel_enum,2),
+  ('command', enum_mes_query_status_command_enum,2),
+]
+struct_pm4_mes_query_status_1._fields_ = [
+  ('bitfields2', struct_pm4_mes_query_status_1_bitfields2),
+  ('ordinal2', uint32_t),
+]
+class struct_pm4_mes_query_status_2(ctypes.Union): pass
+class struct_pm4_mes_query_status_2_bitfields3a(Struct): pass
+struct_pm4_mes_query_status_2_bitfields3a._fields_ = [
+  ('pasid', uint32_t,16),
+  ('reserved1', uint32_t,16),
+]
+class struct_pm4_mes_query_status_2_bitfields3b(Struct): pass
+struct_pm4_mes_query_status_2_bitfields3b._fields_ = [
+  ('reserved2', uint32_t,2),
+  ('doorbell_offset', uint32_t,26),
+  ('engine_sel', enum_mes_query_status_engine_sel_enum,3),
+  ('reserved3', uint32_t,1),
+]
+struct_pm4_mes_query_status_2._fields_ = [
+  ('bitfields3a', struct_pm4_mes_query_status_2_bitfields3a),
+  ('bitfields3b', struct_pm4_mes_query_status_2_bitfields3b),
+  ('ordinal3', uint32_t),
+]
+struct_pm4_mes_query_status._anonymous_ = ['_0', '_1', '_2']
+struct_pm4_mes_query_status._fields_ = [
+  ('_0', struct_pm4_mes_query_status_0),
+  ('_1', struct_pm4_mes_query_status_1),
+  ('_2', struct_pm4_mes_query_status_2),
+  ('addr_lo', uint32_t),
+  ('addr_hi', uint32_t),
+  ('data_lo', uint32_t),
+  ('data_hi', uint32_t),
+]
 enum_mes_unmap_queues_action_enum = CEnum(ctypes.c_uint32)
 action__mes_unmap_queues__preempt_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__preempt_queues', 0)
 action__mes_unmap_queues__reset_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__reset_queues', 1)
@@ -102,18 +339,85 @@ extended_engine_sel__mes_unmap_queues__legacy_engine_sel = enum_mes_unmap_queues
 extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel = enum_mes_unmap_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel', 1)
 
 class struct_pm4_mes_unmap_queues(Struct): pass
-class _anonunion30(ctypes.Union): pass
-class _anonunion31(ctypes.Union): pass
-class _anonstruct32(Struct): pass
-class _anonunion33(ctypes.Union): pass
-class _anonstruct34(Struct): pass
-class _anonstruct35(Struct): pass
-class _anonunion36(ctypes.Union): pass
-class _anonstruct37(Struct): pass
-class _anonunion38(ctypes.Union): pass
-class _anonstruct39(Struct): pass
-class _anonunion40(ctypes.Union): pass
-class _anonstruct41(Struct): pass
+class struct_pm4_mes_unmap_queues_0(ctypes.Union): pass
+struct_pm4_mes_unmap_queues_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', uint32_t),
+]
+class struct_pm4_mes_unmap_queues_1(ctypes.Union): pass
+class struct_pm4_mes_unmap_queues_1_bitfields2(Struct): pass
+struct_pm4_mes_unmap_queues_1_bitfields2._fields_ = [
+  ('action', enum_mes_unmap_queues_action_enum,2),
+  ('extended_engine_sel', enum_mes_unmap_queues_extended_engine_sel_enum,2),
+  ('queue_sel', enum_mes_unmap_queues_queue_sel_enum,2),
+  ('reserved2', uint32_t,20),
+  ('engine_sel', enum_mes_unmap_queues_engine_sel_enum,3),
+  ('num_queues', uint32_t,3),
+]
+struct_pm4_mes_unmap_queues_1._fields_ = [
+  ('bitfields2', struct_pm4_mes_unmap_queues_1_bitfields2),
+  ('ordinal2', uint32_t),
+]
+class struct_pm4_mes_unmap_queues_2(ctypes.Union): pass
+class struct_pm4_mes_unmap_queues_2_bitfields3a(Struct): pass
+struct_pm4_mes_unmap_queues_2_bitfields3a._fields_ = [
+  ('pasid', uint32_t,16),
+  ('reserved3', uint32_t,16),
+]
+class struct_pm4_mes_unmap_queues_2_bitfields3b(Struct): pass
+int32_t = ctypes.c_int32
+struct_pm4_mes_unmap_queues_2_bitfields3b._fields_ = [
+  ('reserved4', uint32_t,2),
+  ('doorbell_offset0', uint32_t,26),
+  ('reserved5', int32_t,4),
+]
+struct_pm4_mes_unmap_queues_2._fields_ = [
+  ('bitfields3a', struct_pm4_mes_unmap_queues_2_bitfields3a),
+  ('bitfields3b', struct_pm4_mes_unmap_queues_2_bitfields3b),
+  ('ordinal3', uint32_t),
+]
+class struct_pm4_mes_unmap_queues_3(ctypes.Union): pass
+class struct_pm4_mes_unmap_queues_3_bitfields4(Struct): pass
+struct_pm4_mes_unmap_queues_3_bitfields4._fields_ = [
+  ('reserved6', uint32_t,2),
+  ('doorbell_offset1', uint32_t,26),
+  ('reserved7', uint32_t,4),
+]
+struct_pm4_mes_unmap_queues_3._fields_ = [
+  ('bitfields4', struct_pm4_mes_unmap_queues_3_bitfields4),
+  ('ordinal4', uint32_t),
+]
+class struct_pm4_mes_unmap_queues_4(ctypes.Union): pass
+class struct_pm4_mes_unmap_queues_4_bitfields5(Struct): pass
+struct_pm4_mes_unmap_queues_4_bitfields5._fields_ = [
+  ('reserved8', uint32_t,2),
+  ('doorbell_offset2', uint32_t,26),
+  ('reserved9', uint32_t,4),
+]
+struct_pm4_mes_unmap_queues_4._fields_ = [
+  ('bitfields5', struct_pm4_mes_unmap_queues_4_bitfields5),
+  ('ordinal5', uint32_t),
+]
+class struct_pm4_mes_unmap_queues_5(ctypes.Union): pass
+class struct_pm4_mes_unmap_queues_5_bitfields6(Struct): pass
+struct_pm4_mes_unmap_queues_5_bitfields6._fields_ = [
+  ('reserved10', uint32_t,2),
+  ('doorbell_offset3', uint32_t,26),
+  ('reserved11', uint32_t,4),
+]
+struct_pm4_mes_unmap_queues_5._fields_ = [
+  ('bitfields6', struct_pm4_mes_unmap_queues_5_bitfields6),
+  ('ordinal6', uint32_t),
+]
+struct_pm4_mes_unmap_queues._anonymous_ = ['_0', '_1', '_2', '_3', '_4', '_5']
+struct_pm4_mes_unmap_queues._fields_ = [
+  ('_0', struct_pm4_mes_unmap_queues_0),
+  ('_1', struct_pm4_mes_unmap_queues_1),
+  ('_2', struct_pm4_mes_unmap_queues_2),
+  ('_3', struct_pm4_mes_unmap_queues_3),
+  ('_4', struct_pm4_mes_unmap_queues_4),
+  ('_5', struct_pm4_mes_unmap_queues_5),
+]
 enum_mec_release_mem_event_index_enum = CEnum(ctypes.c_uint32)
 event_index__mec_release_mem__end_of_pipe = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__end_of_pipe', 5)
 event_index__mec_release_mem__shader_done = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__shader_done', 6)
@@ -150,18 +454,106 @@ data_sel__mec_release_mem__send_cp_perfcounter_hi_lo = enum_mec_release_mem_data
 data_sel__mec_release_mem__store_gds_data_to_memory = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__store_gds_data_to_memory', 5)
 
 class struct_pm4_mec_release_mem(Struct): pass
-class _anonunion42(ctypes.Union): pass
-class _anonunion43(ctypes.Union): pass
-class _anonstruct44(Struct): pass
-class _anonunion45(ctypes.Union): pass
-class _anonstruct46(Struct): pass
-class _anonunion47(ctypes.Union): pass
-class _anonstruct48(Struct): pass
-class _anonstruct49(Struct): pass
-class _anonunion50(ctypes.Union): pass
-class _anonunion51(ctypes.Union): pass
-class _anonstruct52(Struct): pass
-class _anonunion53(ctypes.Union): pass
+class struct_pm4_mec_release_mem_0(ctypes.Union): pass
+struct_pm4_mec_release_mem_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', ctypes.c_uint32),
+]
+class struct_pm4_mec_release_mem_1(ctypes.Union): pass
+class struct_pm4_mec_release_mem_1_bitfields2(Struct): pass
+struct_pm4_mec_release_mem_1_bitfields2._fields_ = [
+  ('event_type', ctypes.c_uint32,6),
+  ('reserved1', ctypes.c_uint32,2),
+  ('event_index', enum_mec_release_mem_event_index_enum,4),
+  ('tcl1_vol_action_ena', ctypes.c_uint32,1),
+  ('tc_vol_action_ena', ctypes.c_uint32,1),
+  ('reserved2', ctypes.c_uint32,1),
+  ('tc_wb_action_ena', ctypes.c_uint32,1),
+  ('tcl1_action_ena', ctypes.c_uint32,1),
+  ('tc_action_ena', ctypes.c_uint32,1),
+  ('reserved3', uint32_t,1),
+  ('tc_nc_action_ena', uint32_t,1),
+  ('tc_wc_action_ena', uint32_t,1),
+  ('tc_md_action_ena', uint32_t,1),
+  ('reserved4', uint32_t,3),
+  ('cache_policy', enum_mec_release_mem_cache_policy_enum,2),
+  ('reserved5', uint32_t,2),
+  ('pq_exe_status', enum_mec_release_mem_pq_exe_status_enum,1),
+  ('reserved6', uint32_t,2),
+]
+struct_pm4_mec_release_mem_1._fields_ = [
+  ('bitfields2', struct_pm4_mec_release_mem_1_bitfields2),
+  ('ordinal2', ctypes.c_uint32),
+]
+class struct_pm4_mec_release_mem_2(ctypes.Union): pass
+class struct_pm4_mec_release_mem_2_bitfields3(Struct): pass
+struct_pm4_mec_release_mem_2_bitfields3._fields_ = [
+  ('reserved7', uint32_t,16),
+  ('dst_sel', enum_mec_release_mem_dst_sel_enum,2),
+  ('reserved8', uint32_t,6),
+  ('int_sel', enum_mec_release_mem_int_sel_enum,3),
+  ('reserved9', uint32_t,2),
+  ('data_sel', enum_mec_release_mem_data_sel_enum,3),
+]
+struct_pm4_mec_release_mem_2._fields_ = [
+  ('bitfields3', struct_pm4_mec_release_mem_2_bitfields3),
+  ('ordinal3', ctypes.c_uint32),
+]
+class struct_pm4_mec_release_mem_3(ctypes.Union): pass
+class struct_pm4_mec_release_mem_3_bitfields4(Struct): pass
+struct_pm4_mec_release_mem_3_bitfields4._fields_ = [
+  ('reserved10', uint32_t,2),
+  ('address_lo_32b', ctypes.c_uint32,30),
+]
+class struct_pm4_mec_release_mem_3_bitfields4b(Struct): pass
+struct_pm4_mec_release_mem_3_bitfields4b._fields_ = [
+  ('reserved11', uint32_t,3),
+  ('address_lo_64b', uint32_t,29),
+]
+struct_pm4_mec_release_mem_3._fields_ = [
+  ('bitfields4', struct_pm4_mec_release_mem_3_bitfields4),
+  ('bitfields4b', struct_pm4_mec_release_mem_3_bitfields4b),
+  ('reserved12', uint32_t),
+  ('ordinal4', ctypes.c_uint32),
+]
+class struct_pm4_mec_release_mem_4(ctypes.Union): pass
+struct_pm4_mec_release_mem_4._fields_ = [
+  ('address_hi', uint32_t),
+  ('reserved13', uint32_t),
+  ('ordinal5', uint32_t),
+]
+class struct_pm4_mec_release_mem_5(ctypes.Union): pass
+class struct_pm4_mec_release_mem_5_bitfields6c(Struct): pass
+struct_pm4_mec_release_mem_5_bitfields6c._fields_ = [
+  ('dw_offset', uint32_t,16),
+  ('num_dwords', uint32_t,16),
+]
+struct_pm4_mec_release_mem_5._fields_ = [
+  ('data_lo', uint32_t),
+  ('cmp_data_lo', uint32_t),
+  ('bitfields6c', struct_pm4_mec_release_mem_5_bitfields6c),
+  ('reserved14', uint32_t),
+  ('ordinal6', uint32_t),
+]
+class struct_pm4_mec_release_mem_6(ctypes.Union): pass
+struct_pm4_mec_release_mem_6._fields_ = [
+  ('data_hi', uint32_t),
+  ('cmp_data_hi', uint32_t),
+  ('reserved15', uint32_t),
+  ('reserved16', uint32_t),
+  ('ordinal7', uint32_t),
+]
+struct_pm4_mec_release_mem._anonymous_ = ['_0', '_1', '_2', '_3', '_4', '_5', '_6']
+struct_pm4_mec_release_mem._fields_ = [
+  ('_0', struct_pm4_mec_release_mem_0),
+  ('_1', struct_pm4_mec_release_mem_1),
+  ('_2', struct_pm4_mec_release_mem_2),
+  ('_3', struct_pm4_mec_release_mem_3),
+  ('_4', struct_pm4_mec_release_mem_4),
+  ('_5', struct_pm4_mec_release_mem_5),
+  ('_6', struct_pm4_mec_release_mem_6),
+  ('int_ctxid', uint32_t),
+]
 enum_WRITE_DATA_dst_sel_enum = CEnum(ctypes.c_uint32)
 dst_sel___write_data__mem_mapped_register = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__mem_mapped_register', 0)
 dst_sel___write_data__tc_l2 = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__tc_l2', 2)
@@ -182,10 +574,14 @@ cache_policy___write_data__lru = enum_WRITE_DATA_cache_policy_enum.define('cache
 cache_policy___write_data__stream = enum_WRITE_DATA_cache_policy_enum.define('cache_policy___write_data__stream', 1)
 
 class struct_pm4_mec_write_data_mmio(Struct): pass
-class _anonunion54(ctypes.Union): pass
-class _anonunion55(ctypes.Union): pass
-class _anonunion55_bitfields2(Struct): pass
-_anonunion55_bitfields2._fields_ = [
+class struct_pm4_mec_write_data_mmio_0(ctypes.Union): pass
+struct_pm4_mec_write_data_mmio_0._fields_ = [
+  ('header', union_PM4_MES_TYPE_3_HEADER),
+  ('ordinal1', ctypes.c_uint32),
+]
+class struct_pm4_mec_write_data_mmio_1(ctypes.Union): pass
+class struct_pm4_mec_write_data_mmio_1_bitfields2(Struct): pass
+struct_pm4_mec_write_data_mmio_1_bitfields2._fields_ = [
   ('reserved1', ctypes.c_uint32,8),
   ('dst_sel', ctypes.c_uint32,4),
   ('reserved2', ctypes.c_uint32,4),
@@ -197,22 +593,30 @@ _anonunion55_bitfields2._fields_ = [
   ('cache_policy', ctypes.c_uint32,2),
   ('reserved5', ctypes.c_uint32,5),
 ]
-_anonunion55._fields_ = [
-  ('bitfields2', _anonunion55_bitfields2),
+struct_pm4_mec_write_data_mmio_1._fields_ = [
+  ('bitfields2', struct_pm4_mec_write_data_mmio_1_bitfields2),
   ('ordinal2', ctypes.c_uint32),
 ]
-class _anonunion56(ctypes.Union): pass
-class _anonunion56_bitfields3(Struct): pass
-_anonunion56_bitfields3._fields_ = [
+class struct_pm4_mec_write_data_mmio_2(ctypes.Union): pass
+class struct_pm4_mec_write_data_mmio_2_bitfields3(Struct): pass
+struct_pm4_mec_write_data_mmio_2_bitfields3._fields_ = [
   ('dst_mmreg_addr', ctypes.c_uint32,18),
   ('reserved6', ctypes.c_uint32,14),
 ]
-_anonunion56._fields_ = [
-  ('bitfields3', _anonunion56_bitfields3),
+struct_pm4_mec_write_data_mmio_2._fields_ = [
+  ('bitfields3', struct_pm4_mec_write_data_mmio_2_bitfields3),
   ('ordinal3', ctypes.c_uint32),
 ]
-_anonenum57 = CEnum(ctypes.c_uint32)
-CACHE_FLUSH_AND_INV_TS_EVENT = _anonenum57.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20)
+struct_pm4_mec_write_data_mmio._anonymous_ = ['_0', '_1', '_2']
+struct_pm4_mec_write_data_mmio._fields_ = [
+  ('_0', struct_pm4_mec_write_data_mmio_0),
+  ('_1', struct_pm4_mec_write_data_mmio_1),
+  ('_2', struct_pm4_mec_write_data_mmio_2),
+  ('reserved7', uint32_t),
+  ('data', uint32_t),
+]
+_anonenum0 = CEnum(ctypes.c_uint32)
+CACHE_FLUSH_AND_INV_TS_EVENT = _anonenum0.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20)
 
 PACKET_TYPE0 = 0
 PACKET_TYPE1 = 1
