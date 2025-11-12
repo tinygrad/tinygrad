@@ -240,11 +240,29 @@ class Profiling(contextlib.ContextDecorator):
 
 def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_counter_ns())/1000
 
+@functools.cache
+def lines(fn) -> list[str]:
+  try:
+    with open(fn, encoding="utf-8") as f: return f.readlines()
+  except (FileNotFoundError, OSError): return []
+
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except IndexError: return "<missing>"
+
+def get_stacktrace(frm, max_frames=30) -> tuple[tuple, ...]:
+  ret:list[tuple] = []
+  for i in range(max_frames):
+    if (frm:=frm.f_back) is None: break
+    ret.append(((fc:=frm.f_code).co_filename, frm.f_lineno, fc.co_name, printable((fc.co_filename, frm.f_lineno))))
+  return tuple(ret)
+
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
   ret:Any=None
+  tb:tuple[tuple, ...]|None=field(default_factory=lambda: get_stacktrace(sys._getframe(1)) if VIZ else None)
 
 class ProfileEvent: pass
 
