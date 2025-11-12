@@ -3,12 +3,11 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from __future__ import annotations
-import functools, itertools, operator
-from typing import Callable, Sequence, cast, List, Tuple
+import functools
+from typing import Callable, cast, List, Tuple
 from dataclasses import dataclass
-from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten, canonicalize_strides, strides_for_shape
-from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, Variable, sint, sint_to_uop, resolve, smax, smin, ssimplify
+from tinygrad.helpers import getenv, prod, all_int, flatten, canonicalize_strides, strides_for_shape
+from tinygrad.uop.ops import UOp, sint, resolve, smax, smin, ssimplify
 from enum import Enum, auto
 
 @functools.cache
@@ -72,13 +71,6 @@ class View:
   offset:sint
   mask:tuple[tuple[sint, sint], ...]|None
   contiguous:bool
-
-
-  @functools.cache  # pylint: disable=method-cache-max-size-none
-  def size(self) -> int:
-    ret = prod([x.vmax if isinstance(x, UOp) else x for x in self.shape])
-    assert isinstance(ret, int), f"{ret=} is not int"
-    return ret
 
   @staticmethod
   @functools.cache
@@ -309,11 +301,6 @@ def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
 class ShapeTracker:
   views: tuple[View, ...]
 
-  def __add__(self, st:ShapeTracker) -> ShapeTracker:
-    ret = self
-    for v in st.views: ret = ShapeTracker(ret.views + (v,)).simplify() # one view at a time = better simplification
-    return ret
-
   @staticmethod
   def from_shape(shape:tuple[sint, ...], strides:tuple[sint, ...]|None=None) -> ShapeTracker: return ShapeTracker((View.create(shape, strides),))
 
@@ -324,12 +311,10 @@ class ShapeTracker:
   def shape(self) -> tuple[sint, ...]: return self.views[-1].shape
 
   @property
-  def size(self) -> int: return self.views[-1].size()
-
-  def simplify(self) -> ShapeTracker:
-    if len(self.views) >= 2 and (new_view := self.views[-2] + self.views[-1]) is not None:
-      return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
-    return self
+  def size(self) -> int:
+    ret = prod([x.vmax if isinstance(x, UOp) else x for x in self.views[-1].shape])
+    assert isinstance(ret, int), f"{ret=} is not int"
+    return ret
 
   def _with_last_view(self, fn: Callable[[View], View]) -> ShapeTracker:
     return ShapeTracker(self.views[:-1] + (fn(self.views[-1]), ))
