@@ -551,6 +551,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
+const pathLink = (fp, lineno) => d3.create("a").attr("href", "vscode://file/"+fp+":"+lineno).text(`${fp.split("/").at(-1)}:${lineno}`);
 function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   // plaintext renders like a terminal print, otherwise render with syntax highlighting
@@ -559,11 +560,7 @@ function codeBlock(st, language, { loc, wrap }={}) {
   code.className = "hljs";
   const ret = document.createElement("pre");
   if (wrap) ret.className = "wrap";
-  if (loc != null) {
-    const link = ret.appendChild(document.createElement("a"));
-    link.href = "vscode://file/"+loc.join(":");
-    link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
-  }
+  if (loc != null) ret.appendChild(pathLink(loc[0], loc[1]).style("margin-bottom", "4px").node());
   ret.appendChild(code);
   return ret;
 }
@@ -763,7 +760,18 @@ async function main() {
   // ** right sidebar code blocks
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
   metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
-  if (step.trace) metadata.insertBefore(codeBlock(step.trace, "txt", { wrap:false }), codeElement);
+  if (step.trace) {
+    const tracePre = d3.create("pre");
+    const trace = tracePre.append("code").classed("hljs", true);
+    for (let i=step.trace.length-1; i>=0; i--) {
+      const [fp, lineno, fn, code] = step.trace[i];
+      const div = trace.append("div").style("margin-bottom", "2px").style("display", "flex");
+      div.append("p").text(fn);
+      div.append(() => pathLink(fp, lineno).node()).style("margin-left", "1ch");
+      trace.append("div").html(hljs.highlight(code, { language:"python" }).value).style("margin-bottom", "1ex");
+    }
+    metadata.insertBefore(tracePre.node(), codeElement);
+  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));
