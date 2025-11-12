@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, weakref
 from tinygrad.helpers import getenv, prod
 from tinygrad.dtype import dtypes
-from .uop_view import ViewSpec, maybe_realize_storage, _as_strided_impl, register_view, _compute_strides, ViewSpec, update_view_region, view_ops
+from .uop_view import ViewSpec, maybe_realize_storage, _as_strided_impl, register_view, _compute_strides, ViewSpec, update_shrink_region, view_ops
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, prod
 import os
@@ -139,7 +139,7 @@ def index_tensor(x, y):
 def zero_(x):
   if TORCH_DEBUG: print(f"zero_ {x.shape}")
   tt = unwrap(x)
-  if not update_view_region(tt, lambda region: region.zeros_like()):
+  if not update_shrink_region(tt, lambda region: region.zeros_like()):
     tt.assign(tt.zeros_like())
 
 @torch.library.impl("aten::fill_.Scalar", "privateuseone")
@@ -147,7 +147,7 @@ def zero_(x):
 def fill_scalar(x, y):
   if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
   tt = unwrap(x)
-  if not update_view_region(tt, lambda region: region.full_like(y)):
+  if not update_shrink_region(tt, lambda region: region.full_like(y)):
     tt.assign(tt.full_like(y))
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")

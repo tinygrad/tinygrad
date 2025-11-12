@@ -58,33 +58,29 @@ def register_view(ret:Tensor, parent:Tensor, op_info:tuple[str, Any]|None=None):
   if not hasattr(base, "_views"): base._views = set()
   base._views.add(weakref.ref(ret))
 
-def update_view_region(tt:Tensor, updater:Callable[[Tensor], Tensor]) -> bool:
+def update_shrink_region(tt:Tensor, updater:Callable[[Tensor], Tensor]) -> bool:
   if not hasattr(tt, '_view_base'): return False
   base = _canonical_base(tt)
-  if not base.uop.is_contiguous(): base.replace(base.contiguous())
   chain = _movement_chain(tt)
-  # Rebuild view from base
+  # Only handle SHRINK chains
+  if not (all(op == Ops.SHRINK for op, _ in chain) or not chain): return False
+  if not base.uop.is_contiguous(): base.replace(base.contiguous())
+  # Apply shrinks to get view region
   view_region = base
   for op, arg in chain:
-    if op == Ops.RESHAPE: view_region = view_region.reshape(arg)
-    elif op == Ops.EXPAND: view_region = view_region.expand(arg)
-    elif op == Ops.SHRINK: view_region = view_region.shrink(arg)
-    elif op == Ops.PERMUTE: view_region = view_region.permute(arg)
-    elif op == Ops.FLIP: view_region = view_region.flip(tuple(i for i, f in enumerate(arg) if f))
+    if op == Ops.SHRINK: view_region = view_region.shrink(arg)
   new_region = updater(view_region)
-  # Update base for simple shrink chains
-  if all(op == Ops.SHRINK for op, _ in chain) or not chain:
-    slices = [slice(None)] * len(base.shape)
-    for op, arg in chain:
-      for dim, (start, end) in enumerate(arg):
-        old_start = slices[dim].start or 0
-        slices[dim] = slice(old_start + start, old_start + end)
-    updated_base = base.clone()
-    updated_base[tuple(slices)] = new_region
-    base.replace(updated_base)
-    tt.replace(new_region)
-    return True
-  return False
+  # Update base with the new region
+  slices = [slice(None)] * len(base.shape)
+  for op, arg in chain:
+    for dim, (start, end) in enumerate(arg):
+      old_start = slices[dim].start or 0
+      slices[dim] = slice(old_start + start, old_start + end)
+  updated_base = base.clone()
+  updated_base[tuple(slices)] = new_region
+  base.replace(updated_base)
+  tt.replace(new_region)
+  return True
 
 def _as_strided_impl(tensor:Tensor, size, stride, storage_offset):
   base = _canonical_base(tensor)
@@ -97,31 +93,25 @@ def _as_strided_impl(tensor:Tensor, size, stride, storage_offset):
       remaining //= dim_size
     indices.append(offset)
   ret = flat[Tensor(indices, dtype=dtypes.int32, device=base.device)].reshape(tuple(size))
-  register_view(ret, base, ("as_strided", (size, stride, storage_offset)))
+  register_view(ret, base)
+  ret._as_strided_params = (size, stride, storage_offset)
   return ret
 
 def maybe_realize_storage(self: Tensor) -> bool:
   if not hasattr(self, "_view_base"): return False
   base = _canonical_base(self)
   views = [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
-  # Collect chains before realizing
-  view_chains = []
-  for v in views:
-    if hasattr(v, '_view_op') and v._view_op[0] == 'as_strided':
-      view_chains.append((v, v._view_op[1], True))
-    else:
-      view_chains.append((v, _movement_chain(v), False))
   # Realize base
   if not base.uop.is_contiguous(): base.replace(base.contiguous())
   base.replace(base.clone().realize())
   # Rebuild views
-  for v, chain_or_args, is_as_strided in view_chains:
-    if is_as_strided:
-      size, stride, offset = chain_or_args
+  for v in views:
+    if hasattr(v, '_as_strided_params'):
+      size, stride, offset = v._as_strided_params
       v.replace(_as_strided_impl(base, size, stride, offset))
     else:
       ret = base
-      for op, arg in chain_or_args:
+      for op, arg in _movement_chain(v):
         if op == Ops.RESHAPE: ret = ret.reshape(arg)
         elif op == Ops.EXPAND: ret = ret.expand(arg)
         elif op == Ops.SHRINK: ret = ret.shrink(arg)
@@ -131,11 +121,11 @@ def maybe_realize_storage(self: Tensor) -> bool:
   return True
 
 # View operation definitions
+
 def _slice_tensor(tensor: Tensor, dim=0, start=None, end=None, step=1):
   slices = [slice(None)] * tensor.ndim
   slices[dim] = slice(start, end, step)
   return tensor[tuple(slices)]
-
 def _record_simple(name, value_fn): return lambda p, a, k, r: ((name, value_fn(p, a, k, r)),)
 def _record_permute_from_order(order): return (("permute", tuple(order)),)
 def _record_transpose_dims(parent, dim0, dim1):
