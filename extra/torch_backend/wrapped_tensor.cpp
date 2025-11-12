@@ -97,6 +97,8 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
     this->storage_offset_ = storage_offset;
+    this->refresh_numel();
+    this->refresh_contiguous();
   }
 };
 }
