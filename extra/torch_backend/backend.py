@@ -29,7 +29,12 @@ def _to_torch_device(device: str): return torch.device("tiny", int(device.partit
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
 def wrap(x:Tensor) -> torch.Tensor:
-  x._view_spec = view_spec_from_uop(x)
+  # PyTorch doesn't support negative strides, so make contiguous if needed
+  view_spec = view_spec_from_uop(x)
+  if any(s < 0 for s in view_spec.strides):
+    x = x.contiguous()
+    view_spec = view_spec_from_uop(x)  # Recalculate for the contiguous tensor
+  x._view_spec = view_spec
   return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
@@ -137,35 +142,6 @@ for k,(fn, recorder) in view_ops.items(): torch.library.impl(k.replace("aten.", 
 
 torch.library.impl("aten::alias", "privateuseone")(wrap_view_op("aten::alias", lambda self: self, lambda *a, **k: ()))
 
-# Diag operations
-def _diag_impl(self, diagonal=0):
-  t = unwrap(self)
-  if t.ndim == 1: return wrap(t.diag())
-  else: return wrap(t.diagonal())
-
-def _diagonal_impl(self, offset=0, dim1=0, dim2=1):
-  t = unwrap(self)
-  # tinygrad's diagonal doesn't support offset/dim arguments, so we need to use a workaround
-  # For now, just use the basic diagonal() for offset=0, dim1=0, dim2=1
-  if offset == 0 and dim1 == 0 and dim2 == 1:
-    return wrap(t.diagonal())
-  else:
-    # Fall back to manual implementation for non-default args
-    # Permute to bring dim1 and dim2 to the last two dimensions
-    ndim = t.ndim
-    dims = list(range(ndim))
-    dims[dim1], dims[-2] = dims[-2], dims[dim1]
-    dims[dim2], dims[-1] = dims[-1], dims[dim2]
-    t_perm = t.permute(dims)
-    # Extract diagonal
-    size = min(t_perm.shape[-2], t_perm.shape[-1])
-    diag = t_perm[..., range(size), range(size)]
-    return wrap(diag)
-
-torch.library.impl("aten::diag", "privateuseone")(_diag_impl)
-torch.library.impl("aten::diag", "AutogradPrivateUse1")(_diag_impl)
-torch.library.impl("aten::diagonal", "privateuseone")(_diagonal_impl)
-torch.library.impl("aten::diagonal", "AutogradPrivateUse1")(_diagonal_impl)
 
 # in place operations with views
 def rebuild_view_from_chain(base: Tensor, view: Tensor, chain: MovementChain):
@@ -560,6 +536,9 @@ decomps = [
   aten.leaky_relu_backward,
   aten.nll_loss2d_forward,
   aten.unfold_backward,
+  # diagonal operations
+  aten.diag_embed,
+  aten.diagonal_backward,
   # NOTE: many of these don't work or cause infinite loops
   #aten.var_mean,
   #aten.var,
@@ -733,6 +712,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.roll": Tensor.roll,
   "aten.logcumsumexp": Tensor.logcumsumexp,
   "aten.lerp.Tensor": Tensor.lerp,
+  "aten.diagonal_scatter": lambda input, src, offset=0, dim1=0, dim2=1: (
+    input + src.diag() if offset == 0 and dim1 == 0 and dim2 == 1 and input.ndim == 2 
+    else NotImplemented
+  ),
   "aten.ones_like": lambda self, dtype=None, device=None, **kwargs:
     self.ones_like(**{k: v for k, v in {"dtype": _from_torch_dtype(dtype) if dtype else None,
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
@@ -757,6 +740,12 @@ for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::")
 
 @torch.library.impl("aten::equal", "privateuseone")
 def equal(x: torch.Tensor, y: torch.Tensor): return (x==y).all().item()
+
+@torch.library.impl("prims::mask_tensor", "privateuseone")
+def mask_tensor(mask: torch.Tensor, t: torch.Tensor):
+  if TORCH_DEBUG: print(f"prims::mask_tensor called! mask.shape={mask.shape}, t.shape={t.shape}")
+  mask, t = unwrap(mask), unwrap(t)
+  return wrap(t.logical_and(mask) if t.dtype == dtypes.bool else Tensor.where(mask, t, 0))
 
 if TORCH_DEBUG:
   from torch.utils._python_dispatch import TorchDispatchMode
@@ -806,3 +795,16 @@ def _optimizer_patched_init(self, *args, **kwargs):
   _optimizer_init(self, *args, **kwargs)
   self.register_step_post_hook(realize_optimizer_step)
 torch.optim.Optimizer.__init__ = _optimizer_patched_init
+
+# Patch torch.Tensor.cpu() to handle negative strides
+_original_cpu = torch.Tensor.cpu
+def _patched_cpu(self, memory_format=torch.preserve_format):
+  # If tensor is on tiny device and has negative strides, make it contiguous first
+  if self.device.type == 'tiny' and hasattr(self, 'stride'):
+    strides = self.stride()
+    if any(s < 0 for s in strides):
+      if TORCH_DEBUG: print(f"cpu(): making contiguous due to negative strides: {strides}")
+      # Force a contiguous copy by cloning
+      self = self.clone()
+  return _original_cpu(self, memory_format=memory_format)
+torch.Tensor.cpu = _patched_cpu
