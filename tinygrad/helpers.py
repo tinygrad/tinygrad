@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
@@ -441,6 +441,13 @@ class tqdm(Generic[T]):
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+class disable_gc(contextlib.ContextDecorator):
+  def __enter__(self):
+    self._was_enabled = gc.isenabled()
+    if self._was_enabled: gc.disable()
+  def __exit__(self, *exc):
+    if self._was_enabled: gc.enable()
 
 # *** universal support for code object pickling
 
