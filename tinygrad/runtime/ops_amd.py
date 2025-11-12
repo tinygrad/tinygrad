@@ -594,7 +594,8 @@ class AMDProgram(HCQProgram):
       self.dev.synchronize()
 
       for se, buf in enumerate(self.dev.sqtt_buffers):
-        wptr = ((self.dev.sqtt_wptrs.cpu_view().view(fmt='I')[se]&0x1FFFFFFF)-(((buf.va_addr//32)&0x1FFFFFFF) if self.dev.target[0] == 11 else 0))*32
+        wptr = (self.dev.sqtt_wptrs.cpu_view().view(fmt='I')[se] & 0x1FFFFFFF) * 32
+        if self.dev.target[:2] == (11, 0): wptr -= ((buf.va_addr // 32) & 0x1FFFFFFF) * 32
 
         if DEBUG >= 5: print(f'\t{self.dev.device}: SE {se} blob size {wptr:#x}')
         assert wptr >= 0 and wptr <= buf.size, f"{wptr} > {buf.size}, should never happen"
