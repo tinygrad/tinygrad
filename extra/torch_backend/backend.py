@@ -613,13 +613,6 @@ if TORCH_DEBUG:
 import weakref
 _torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
 def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
-def get_real_tinygrad_buffers():
-  res = set()
-  for mod in _torch_modules_with_buffers:
-    for _,b in mod.named_buffers(recurse=False):
-      if b is not None and b.is_tiny:
-        res.add(unwrap(b))
-  return res
 torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
 
 from torch.nn.modules import Module
@@ -639,8 +632,12 @@ def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
   for state_dict in optimizer.state.values():
     for _, value in state_dict.items():
       if torch.is_tensor(value): tinygrad_tensors.append(value)
+  # Also collect buffers from registered modules
+  for mod in _torch_modules_with_buffers:
+    for _,b in mod.named_buffers(recurse=False):
+      if b is not None and b.is_tiny:
+        tinygrad_tensors.append(b)
   real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if x.is_tiny]
-  real_tinygrad_tensors += get_real_tinygrad_buffers()
   if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
 
 _optimizer_init = torch.optim.Optimizer.__init__
