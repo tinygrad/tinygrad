@@ -149,12 +149,12 @@ def fill_scalar(x, y):
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 def take(base, idx):
-    """replicating torch.tensor.take, docs: https://docs.pytorch.org/docs/stable/generated/torch.take.html"""
-    flat = base.flatten()
-    r = Tensor.arange(flat.numel()).reshape(1, -1)
-    mask = (r == idx.reshape(-1, 1))
-    out = (mask * flat.reshape(1, -1)).sum(axis=1)
-    return out.reshape(idx.shape)
+  """replicating torch.tensor.take, docs: https://docs.pytorch.org/docs/stable/generated/torch.take.html"""
+  flat = base.flatten()
+  r = Tensor.arange(flat.numel()).reshape(1, -1)
+  mask = (r == idx.reshape(-1, 1))
+  out = (mask * flat.reshape(1, -1)).sum(axis=1)
+  return out.reshape(idx.shape)
 
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, strides, storage_offset=None):
@@ -226,15 +226,15 @@ def _as_strided(tensor:Tensor, size, strides, storage_offset=None):
   # general path: build indices and gather
   idx = None
   for d in range(n):
-      vec = Tensor.arange(size[d], dtype=ret.dtype, device=ret.device) * strides[d]
-      shape_b = Tensor.ones(n).tolist()
-      shape_b[d] = size[d]
-      vec = vec.reshape(shape_b)
-      idx = vec if idx is None else idx + vec
+    vec = Tensor.arange(size[d], dtype=ret.dtype, device=ret.device) * strides[d]
+    shape_b = Tensor.ones(n).tolist()
+    shape_b[d] = size[d]
+    vec = vec.reshape(shape_b)
+    idx = vec if idx is None else idx + vec
   idx = idx + storage_offset
 
   if idx.min().item() < 0 or idx.max().item() >= ret.numel():
-      raise RuntimeError("as_strided: out of bounds")
+    raise RuntimeError("as_strided: out of bounds")
 
   flat = take(ret.flatten(), idx.reshape(-1))
   out = flat.reshape(size)

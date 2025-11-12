@@ -127,10 +127,10 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
     strides.resize(sizes.size());
     int64_t stride = 1;
     for (int i = sizes.size() - 1; i >= 0; i--) {
-        strides[i] = stride;
-        if (sizes[i] > 1) {
-          stride *= sizes[i];
-        }
+      strides[i] = stride;
+      if (sizes[i] > 1) {
+        stride *= sizes[i];
+      }
     }
   }
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
