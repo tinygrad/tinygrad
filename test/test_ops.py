@@ -3048,7 +3048,7 @@ class TestOps(unittest.TestCase):
 
   def test_cross_entropy_class_indices(self):
     classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
-    helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes, device=x.device)),
+    helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes)),
                               lambda x: x.cross_entropy(Tensor(classes)))
     self.helper_test_exception([(32,10), (32,1)], lambda x,y: torch.nn.functional.cross_entropy(x, y),
                                                   lambda x,y: x.cross_entropy(y), expected=(AssertionError, RuntimeError))
@@ -3065,7 +3065,7 @@ class TestOps(unittest.TestCase):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, label_smoothing=ls),
                                          lambda x,y: x.cross_entropy(y, label_smoothing=ls))
       classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
-      helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes, device=x.device), label_smoothing=ls),
+      helper_test_op([(32,10)], lambda x: torch.nn.functional.cross_entropy(x, torch.tensor(classes), label_smoothing=ls),
                                 lambda x: x.cross_entropy(Tensor(classes), label_smoothing=ls))
 
   def test_sparse_categorical_crossentropy(self):
