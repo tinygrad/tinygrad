@@ -5,9 +5,6 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import getenv, tqdm
 from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, get_keymap, MODELS
 
-from icecream import install
-install()
-
 # https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 TORCH_PARAMS = {
   "20B": {
