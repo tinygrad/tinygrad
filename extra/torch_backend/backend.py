@@ -157,12 +157,10 @@ def take(base, idx):
   return out.reshape(idx.shape)
 
 @wrap_view_op
-def _as_strided(tensor: Tensor, size, strides, storage_offset=None):
+def _as_strided(tensor: torch.Tensor, size, strides, storage_offset=None):
   ret = unwrap(tensor)
   if TORCH_DEBUG >= 1:
     print("**** as_strided", tensor.shape, size, strides, storage_offset)
-
-  # normalize inputs
   size  = tuple(int(s) for s in size)
   strides = tuple(int(st) for st in strides)
   n = len(size)
@@ -170,21 +168,21 @@ def _as_strided(tensor: Tensor, size, strides, storage_offset=None):
   assert all(s >= 0 for s in size)
 
   if any(s == 0 for s in size):
-    # return zeros-like with required shape (match torch: empty or zeros? torch returns a view with numel==0)
+    # match torch: empty or zeros? torch returns a view with numel==0
     return wrap(Tensor.zeros(size, device=ret.device, dtype=ret.dtype))
 
   # handle single-element trivial case
   if prod(size) == 1:
     # pick the single element via adjusted offset
     storage_offset = 0 if storage_offset is None else int(storage_offset)
-    # compute off_adj for negative strides
+    # compute off_adj for neg strides
     off_adj = storage_offset + sum((size[i]-1)*strides[i] for i in range(n) if strides[i] < 0)
     val = ret.flatten()[off_adj]
     return wrap(val.reshape(size))
 
   storage_offset = 0 if storage_offset is None else int(storage_offset)
 
-  # adjust storage_offset for negative strides
+  # adjust storage_offset for neg strides
   off_adj = storage_offset + sum((size[i]-1) * strides[i] for i in range(n) if strides[i] < 0)
   strides_abs = tuple(abs(st) for st in strides)
 
@@ -203,12 +201,11 @@ def _as_strided(tensor: Tensor, size, strides, storage_offset=None):
 
   # fast path A: exact canonical (no broadcast)
   if strides_abs == canon and all(st != 0 for st in strides):
-    # slice flat region via shrink
     total = prod(size)
     # shrink first axis (flat buffer) from off_adj to off_adj + total
     flat = ret.shrink(((off_adj, off_adj + total),))
     out = flat.reshape(size)
-    # apply flips for negative strides
+    # flips for neg strides
     neg_axes = [i for i in range(n) if strides[i] < 0]
     if neg_axes:
       out = out.flip(neg_axes)
@@ -229,12 +226,12 @@ def _as_strided(tensor: Tensor, size, strides, storage_offset=None):
     j = 0
     for i in range(n):
       if strides_abs[i] == canon[i]:
-        shape_with_ones.append(cont_sizes[j]); j += 1
+        shape_with_ones.append(cont_sizes[j])
+        j += 1
       else:
         shape_with_ones.append(1)
 
     out = core.reshape(tuple(shape_with_ones)).expand(size)
-
     neg_axes = [i for i in range(n) if strides[i] < 0]
     if neg_axes:
       out = out.flip(neg_axes)
@@ -250,13 +247,11 @@ def _as_strided(tensor: Tensor, size, strides, storage_offset=None):
     idx = vec if idx is None else idx + vec
 
   idx = idx + off_adj
-
   assert idx.min().item() < 0 or idx.max().item() >= ret.numel(), "as_strided: out of bounds"
 
   flat_indices = idx.reshape(-1)
   flat = take(ret.flatten(), flat_indices)
   out = flat.reshape(size)
-
   return wrap(out)
 
 @torch.library.impl("aten::as_strided", "privateuseone")
