@@ -159,10 +159,7 @@ for i in [
 
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
-  if any(_y is not None and _y.ndim != x.ndim for _y in y):
-    raise RuntimeError(f"self.ndim must equal index.ndim, self.ndim={x.ndim}, index.ndim={[getattr(_y, 'ndim', None) for _y in y]}")
-  xs = unwrap(x)
-  return wrap(xs[[unwrap(_y.to(x.device)) if _y is not None else slice(None) for _y in y]])
+  return wrap(unwrap(x)[[unwrap(_y.to(x.device)) if _y is not None else slice(None) for _y in y]])
 
 @torch.library.impl("aten::zero_", "privateuseone")
 @inplace_fn("x")
