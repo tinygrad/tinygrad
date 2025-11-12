@@ -288,7 +288,7 @@ def main(args):
   for _ in range(args.count):
     GlobalCounters.reset()
     if DEBUG >= 1: print("")
-    next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if len(toks)-start_pos > 1 else tok_tensor.reshape(1, 1) # type: ignore[attr-defined]
+    next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or len(toks)-start_pos > 1 else tok_tensor.reshape(1, 1) # type: ignore[attr-defined]
     tok_tensor = model(next_tok, start_pos)
     tok = tok_tensor.item()
 
