@@ -6,22 +6,10 @@ from __future__ import annotations
 import functools, itertools, operator
 from typing import Callable, Sequence, cast, List, Tuple
 from dataclasses import dataclass
-from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten
-from tinygrad.uop.symbolic import sym
+from tinygrad.helpers import merge_dicts, getenv, prod, all_int, flatten, canonicalize_strides, strides_for_shape
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context, resolve, smax, smin, ssimplify
+from tinygrad.uop.ops import UOp, Ops, Variable, sint, sint_to_uop, resolve, smax, smin, ssimplify
 from enum import Enum, auto
-
-@functools.cache
-def canonicalize_strides(shape:tuple[sint, ...], strides:tuple[sint, ...]) -> tuple[sint, ...]:
-  return tuple(0 if s == 1 else st for s, st in zip(shape, strides))
-
-@functools.cache
-def strides_for_shape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
-  if not shape: return ()
-  import itertools, operator
-  strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
-  return canonicalize_strides(shape, strides)
 
 @functools.cache
 def merge_dims(shape:tuple[int, ...], strides:tuple[int, ...], mask:tuple[tuple[int, int], ...]|None=None) -> tuple[tuple[int, int, int], ...]:
@@ -77,15 +65,6 @@ def _reshape_mask(_mask:tuple[tuple[sint, sint], ...]|None, old_shape:tuple[sint
 
   return tuple(reversed(new_mask))
 
-def unravel(shape:tuple[sint, ...], offset:sint) -> list[sint]:
-  # find the position of offset on each dimension based on shape
-  # similar to unravel_index in numpy/torch
-  acc, idxs = 1, []
-  for d in reversed(shape):
-    idxs.append((offset//acc)%d)
-    acc *= d
-  return idxs[::-1]
-
 @dataclass(frozen=True)
 class View:
   shape:tuple[sint, ...]
@@ -130,21 +109,6 @@ class View:
     return View(shape, strides, offset, mask, contiguous)
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
-
-  def __add__(self, vm1:View) -> View|None:
-    # View merging is incomplete/complex - always return None to skip simplification
-    return None
-
-  def __unsafe_resize(self, arg: tuple[tuple[sint, sint], ...], mask=None) -> View:
-    offset = sum([s * x[0] for s, x in zip(self.strides,arg)])
-    if self.mask:
-      # move the old mask
-      nmask = tuple([(smax(0, smin(mx-ax,ay-ax)), smax(0, smin(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
-      # merge the masks if we have two
-      mask = tuple([(smax(mx1, mx2), smin(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)]) if mask is not None else nmask
-    return View.create(tuple([y-x for x,y in arg]), self.strides, self.offset+offset, mask)
-
-  @functools.cache  # pylint: disable=method-cache-max-size-none
   def pad(self, arg: tuple[tuple[sint, sint], ...]) -> View:
     assert len(arg) == len(self.shape), f"invalid pad {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
@@ -152,7 +116,11 @@ class View:
     if any(resolve(b!=0) or resolve(e!=0) for b, e in arg):
       zvarg = tuple([(-b,s+e) for s,(b,e) in zip(self.shape, arg)])
       mask = tuple([(b,s+b) for s,(b,_) in zip(self.shape, arg)])
-      return self.__unsafe_resize(zvarg, mask=mask)
+      offset = sum([s * x[0] for s, x in zip(self.strides, zvarg)])
+      if self.mask:
+        nmask = tuple([(smax(0, smin(mx-ax,ay-ax)), smax(0, smin(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, zvarg)])
+        mask = tuple([(smax(mx1, mx2), smin(my1, my2)) for (mx1, my1), (mx2, my2) in zip(nmask, mask)])
+      return View.create(tuple([y-x for x,y in zvarg]), self.strides, self.offset+offset, mask)
     return self
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
@@ -160,7 +128,13 @@ class View:
     assert len(arg) == len(self.shape), f"invalid shrink {arg} for {self.shape}"
     # NOTE: not checking for symbolic arg
     for s,(b,e) in zip(self.shape,arg): assert not all_int([s,b,e]) or (0<=b<=e<=s), f"invalid shrink {arg} for {self.shape}"
-    return self.__unsafe_resize(arg)
+    offset = sum([s * x[0] for s, x in zip(self.strides, arg)])
+    if self.mask:
+      nmask = tuple([(smax(0, smin(mx-ax,ay-ax)), smax(0, smin(my-ax,ay-ax))) for (mx,my),(ax,ay) in zip(self.mask, arg)])
+      mask = nmask
+    else:
+      mask = None
+    return View.create(tuple([y-x for x,y in arg]), self.strides, self.offset+offset, mask)
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def slice(self, dim:int, start:int, end:int, step:int) -> View:
     assert 0 <= dim < len(self.shape), f"invalid dim {dim} for shape {self.shape}"
