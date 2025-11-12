@@ -684,8 +684,8 @@ class TestTorchBackend(unittest.TestCase):
     expected = torch.nn.functional.pad(torch.arange(6, dtype=torch.float32).reshape(2, 3), (1, 1, 1, 1), mode='constant', value=0)
     np.testing.assert_equal(b.cpu().numpy(), expected.numpy())
 
-  def test_constant_pad_nd_backward(self):
-    # Test constant_pad_nd with gradients
+  def test_constant_pad_nd_2d_backward(self):
+    # Test 2D constant padding with gradients
     a = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32, device=device, requires_grad=True)
     b = torch.nn.functional.pad(a, (1, 1, 1, 1), mode='constant', value=0)
     loss = b.sum()
@@ -693,6 +693,41 @@ class TestTorchBackend(unittest.TestCase):
     # Gradient only flows to original elements, not padding
     expected_grad = torch.ones((2, 2), dtype=torch.float32)
     np.testing.assert_allclose(a.grad.cpu().numpy(), expected_grad.numpy(), rtol=1e-5)
+
+  def test_negative_strides_cumsum_backward(self):
+    # Test that cumsum backward doesn't produce negative strides
+    a = torch.randn(5, device=device, requires_grad=True)
+    b = torch.cumsum(a, dim=0)
+    b.sum().backward()
+    # Should be able to call .cpu() on gradient without stride issues
+    grad = a.grad.cpu().numpy()
+    self.assertEqual(len(grad), 5)
+
+  def test_cumsum_fix_gradient_values(self):
+    # Test cumsum gradient computation matches expected values
+    a = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.cumsum(a, dim=0)
+    loss = b.sum()
+    loss.backward()
+    expected = np.array([4.0, 3.0, 2.0, 1.0])
+    np.testing.assert_allclose(a.grad.cpu().numpy(), expected, rtol=1e-5)
+
+  def test_diag_operations_comprehensive(self):
+    # Test diag 1D to 2D
+    a = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device=device, requires_grad=True)
+    b = torch.diag(a)
+    expected = [[1, 0, 0], [0, 2, 0], [0, 0, 3]]
+    np.testing.assert_equal(b.detach().cpu().numpy(), expected)
+    
+    # Test diag 2D to 1D
+    c = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float32, device=device)
+    d = torch.diag(c)
+    np.testing.assert_equal(d.cpu().numpy(), [1, 5, 9])
+    
+    # Test diagonal operation
+    e = torch.randn(5, 5, dtype=torch.float32, device=device, requires_grad=True)
+    f = torch.diagonal(e)
+    self.assertEqual(f.shape, (5,))
 
 if __name__ == "__main__":
   unittest.main()
