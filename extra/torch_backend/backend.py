@@ -19,9 +19,13 @@ def _to_torch_device(device: str): return torch.device("tiny", int(device.partit
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
 def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
-def unwrap(x:torch.Tensor) -> Tensor:
-  assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
-  return mod.unwrap(x)
+def unwrap(x: torch.Tensor) -> Tensor:
+    assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
+    if not x.device.type.startswith("tiny"):
+        # Auto-move CPU tensors to tiny backend
+        print(f"[unwrap] auto-moving {tuple(x.shape)} from {x.device} -> tiny")
+        x = x.to("tiny")
+    return mod.unwrap(x)
 class TinyBackend:
   def is_initialized(self): return True
   def is_available(self): return True
@@ -368,7 +372,8 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
+    # unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
+    unwrap(dest).assign(Tensor(src.detach().numpy()).cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(unwrap(dest))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
@@ -630,7 +635,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.unfold": Tensor.unfold,
 }}
 
-def wrap_fxn(k,f):
+def wrap_fxn(k, f):
   def nf(*args, **kwargs):
     if TORCH_DEBUG:
       print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
@@ -638,10 +643,25 @@ def wrap_fxn(k,f):
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     out = f(*args, **kwargs)
-    if isinstance(out, Tensor): return wrap(out)
-    elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
-    else: raise RuntimeError(f"unknown output type {type(out)}")
+
+    if isinstance(out, Tensor):
+      wrapped = wrap(out)
+      # ✅ If this call happens in autograd backward, return on CPU
+      if torch.is_grad_enabled() and not any(a.requires_grad for a in args if isinstance(a, torch.Tensor)):
+        wrapped = wrapped.cpu()
+      return wrapped
+
+    elif isinstance(out, tuple):
+      outs = tuple(wrap(x) for x in out)
+      # same logic for tuples
+      if torch.is_grad_enabled() and not any(a.requires_grad for a in args if isinstance(a, torch.Tensor)):
+        outs = tuple(o.cpu() for o in outs)
+      return outs
+
+    else:
+      raise RuntimeError(f"unknown output type {type(out)}")
   return nf
+
 
 for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
 
