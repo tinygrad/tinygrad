@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, math, sys, weakref
+import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Any, cast
@@ -9,7 +9,8 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, colored
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE
+from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -348,9 +349,8 @@ class QCOMDevice(HCQCompiled):
     # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
     if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
 
-    if PROFILE and self.gpu_id[:2] < (7, 3) and int(FileIOInterface('/sys/class/kgsl/kgsl-3d0/idle_timer', os.O_RDONLY).read(), 0) < 4000000000:
-      print(colored("WARNING: gpu can go into suspend mode and reset timestamps. "
-                    "Run 'echo \"4294947000\" | sudo tee /sys/class/kgsl/kgsl-3d0/idle_timer' to prevent idle state.", "yellow"))
+    if PROFILE and self.gpu_id[:2] < (7, 3):
+      System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
@@ -376,3 +376,7 @@ class QCOMDevice(HCQCompiled):
       self.synchronize()
       self._gpu_free(self._stack)
       self._stack = self._gpu_alloc(sz)
+
+  def _at_profile_finalize(self):
+    super()._at_profile_finalize()
+    with contextlib.suppress(RuntimeError): System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", "10", "Failed to reenable suspend mode")

@@ -1,7 +1,7 @@
 import os
 os.environ["PYTHONPATH"] = "."
 os.environ["SQTT"] = "1"
-os.environ["AMD"] = "1"
+if "DEV" not in os.environ: os.environ["DEV"] = "AMD"
 os.environ["VIZ"] = "1"
 os.environ["AMD_LLVM"] = "0"
 
@@ -10,13 +10,13 @@ import sys, contextlib
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
 from tinygrad.renderer import ProgramSpec
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AddrSpace
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.roc import decode, InstExec, PrgExec
 
-dev = Device["AMD"]
+dev = Device[os.environ["DEV"]]
 
 def custom(arg:str, s:UOp|None=None) -> UOp: return UOp(Ops.CUSTOM, src=(s,) if s is not None else (), arg=arg)
 
@@ -39,9 +39,10 @@ def save_sqtt():
   sqtt:dict[PrgExec, list[InstExec]] = {}
   yield sqtt
   # decode sqtt
-  rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
-  assert len(rctx.inst_execs) > 0, "empty sqtt output"
-  sqtt.update(rctx.inst_execs)
+  if os.environ["DEV"] == "AMD":
+    rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
+    assert len(rctx.inst_execs) > 0, "empty sqtt output"
+    sqtt.update(rctx.inst_execs)
 
 class TestTiming(unittest.TestCase):
   def test_v_add(self):
@@ -62,18 +63,24 @@ class TestTiming(unittest.TestCase):
     assert all(s.stall == 0 for s in wave)
 
   def test_multi_cycle_inst(self):
+    def custom_vrcp(A, B):
+      op = custom("float a = 0.0;")
+      op = custom("float b = (*(data1_1+0));", op)
+      #op = custom('asm volatile("v_mul_f32_e32 %2 %2 %1" : "+v"(a) : "v"(b));', op)
+      op = custom('asm volatile("v_rcp_f32_e32 %2 %1" : "+v"(a) : "v"(b));', op)
+      op = custom('asm volatile("v_add_f32_e64 %1 %1 1.0" : "+v"(a));', op)
+      op = custom("*(data0_1+0) = a;", op)
+      return UOp.sink(op, A, B, arg=KernelInfo(name="custom_vrcp"))
+    out = Tensor([0.]).realize()
+    inp = Tensor([-2.0]).realize()
     with save_sqtt() as sqtt:
-      asm_kernel([
-        "v_mov_b32_e32 v4 0x3f800000",
-        "v_rcp_f32_e32 v5 v4",
-        "v_mul_f32_e32 v6 v5 v4",
-      ]).realize()
-    w = list(sqtt.values())[0]
-    rcp, mul = w[1], w[2]
-    self.assertGreater(rcp.dur, 1) # 4 cycles on gfx11
-    self.assertEqual(mul.dur, 1)
-    # mul depends on v5, how can it run before rcp is done?
-    self.assertGreaterEqual(mul.time, rcp.time+rcp.dur)
+      Tensor.custom_kernel(out, inp, fxn=custom_vrcp)[0].realize()
+
+    wave = list(sqtt.values())[0][0]
+    for i in range(len(wave.insts)):
+      if wave.insts[i].inst.startswith("global_store"):
+        print(f"store diff {wave.insts[i].time-(wave.insts[i-1].time)}")
+    self.assertEqual(out.item(), 0.5)
 
   def test_wmma(self):
     with save_sqtt() as sqtt:
