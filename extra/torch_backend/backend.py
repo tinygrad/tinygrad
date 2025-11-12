@@ -5,11 +5,10 @@
 import sys
 sys.path.append("extra/")
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect
+import torch, pathlib, math, operator, functools, inspect, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -36,18 +35,12 @@ torch._register_device_module("tiny", TinyBackend())
 torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
-# track view relationships for in place operations
-def is_view(tensor: Tensor): return hasattr(tensor, "_view_base")
-def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
-def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
+# view tracking now handled by uop graph
 def wrap_view_op(fn):
   def _wrap(*args,**kwargs):
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
     kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
     ret = fn(*args,**kwargs)
-    ret._view_base = base = canonical_base(args[0])
-    if not hasattr(base, "_views"): base._views = set()
-    base._views.add(weakref.ref(ret))
     return wrap(ret)
   return _wrap
 
@@ -62,23 +55,12 @@ view_ops = {
   "aten.unsqueeze": Tensor.unsqueeze,
   "aten.detach": Tensor.detach,
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
+  "aten.diagonal": Tensor.diagonal,
+  "aten.permute": Tensor.permute,
+  "aten.squeeze": Tensor.squeeze,
 }
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
-
-# in place operations with views
-def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.st.contiguous: self.replace(self.contiguous())
-  self.replace(self.clone().realize())
-  for v in views:
-    if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
-    ret = self
-    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
-    v.replace(ret)
-def maybe_realize_storage(self: Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
-  return realize
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
   def decorator(fn):
@@ -89,7 +71,7 @@ def inplace_fn(outvars: str|list[str]):
       outs = [unwrap(o) if isinstance(o, torch.Tensor) else o for o in outs]
       realize = any(maybe_realize_storage(o) for o in outs)
       ret = fn(*args, **kwargs)
-      if realize: Tensor.realize(*(o for o in outs))
+      Tensor.realize(*outs)
       return ret
     return wrapper
   return decorator
@@ -168,15 +150,6 @@ def fill_scalar(x, y):
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
-
-@functools.cache
-def cached_to_movement_ops(shape, t) -> list:
-  mops = to_movement_ops(t)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-  return mops
-
-# from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
 
 def take(base, idx):
     """replicating torch.tensor.take, docs: https://docs.pytorch.org/docs/stable/generated/torch.take.html"""
@@ -269,7 +242,7 @@ def _as_strided(tensor:Tensor, sizes, strides, storage_offset=None):
 
   flat = take(ret.flatten(), idx.reshape(-1))
   out = flat.reshape(sizes)
-  return out
+  return wrap(out)
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
@@ -278,7 +251,8 @@ def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
 def _reshape_alias(tensor:torch.Tensor, size, stride):
-  return _as_strided(tensor, size, stride)
+  if TORCH_DEBUG >= 1: print(f"**** _reshape_alias {tensor.shape=} {size=} {stride=}")
+  return _as_strided(tensor, size, stride, storage_offset=0) # 0 storage offset
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
