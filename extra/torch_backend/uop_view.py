@@ -50,6 +50,16 @@ def _canonical_base(view: Tensor) -> Tensor:
   while hasattr(view, "_view_base") and id(view) not in seen: seen.add(id(view)); view = view._view_base
   return view
 
+def _apply_chain(base: Tensor, chain: list[tuple[Ops, Any]]) -> Tensor:
+  ret = base
+  for op, arg in chain:
+    if op == Ops.RESHAPE: ret = ret.reshape(arg)
+    elif op == Ops.EXPAND: ret = ret.expand(arg)
+    elif op == Ops.SHRINK: ret = ret.shrink(arg)
+    elif op == Ops.PERMUTE: ret = ret.permute(arg)
+    elif op == Ops.FLIP: ret = ret.flip(tuple(i for i, f in enumerate(arg) if f))
+  return ret
+
 def register_view(ret:Tensor, parent:Tensor, op_info:tuple[str, Any]|None=None):
   ret._view_base = parent
   if op_info is not None: ret._view_op = op_info
@@ -66,9 +76,7 @@ def update_shrink_region(tt:Tensor, updater:Callable[[Tensor], Tensor]) -> bool:
   if not (all(op == Ops.SHRINK for op, _ in chain) or not chain): return False
   if not base.uop.is_contiguous(): base.replace(base.contiguous())
   # Apply shrinks to get view region
-  view_region = base
-  for op, arg in chain:
-    if op == Ops.SHRINK: view_region = view_region.shrink(arg)
+  view_region = _apply_chain(base, chain)
   new_region = updater(view_region)
   # Update base with the new region
   slices = [slice(None)] * len(base.shape)
@@ -101,23 +109,11 @@ def maybe_realize_storage(self: Tensor) -> bool:
   if not hasattr(self, "_view_base"): return False
   base = _canonical_base(self)
   views = [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
-  # Realize base
   if not base.uop.is_contiguous(): base.replace(base.contiguous())
   base.replace(base.clone().realize())
   # Rebuild views
   for v in views:
-    if hasattr(v, '_as_strided_params'):
-      size, stride, offset = v._as_strided_params
-      v.replace(_as_strided_impl(base, size, stride, offset))
-    else:
-      ret = base
-      for op, arg in _movement_chain(v):
-        if op == Ops.RESHAPE: ret = ret.reshape(arg)
-        elif op == Ops.EXPAND: ret = ret.expand(arg)
-        elif op == Ops.SHRINK: ret = ret.shrink(arg)
-        elif op == Ops.PERMUTE: ret = ret.permute(arg)
-        elif op == Ops.FLIP: ret = ret.flip(tuple(i for i, f in enumerate(arg) if f))
-      v.replace(ret)
+     v.replace(_as_strided_impl(base, *v._as_strided_params) if hasattr(v, '_as_strided_params') else _apply_chain(base, _movement_chain(v)))
   return True
 
 # View operation definitions
