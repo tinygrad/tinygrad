@@ -409,16 +409,16 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   cast_dtype = _from_torch_dtype(dest.dtype)
   if src.is_tiny and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    src = unwrap(src)
-    if dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
-    tiny_dest.assign(src.cast(cast_dtype).to(to_device))
+    tiny_src = unwrap(src)
+    if tiny_dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
+    tiny_dest.assign(tiny_src.cast(cast_dtype).to(to_device))
     Tensor.realize(tiny_dest)
   elif src.is_tiny and dest.is_cpu:
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
-    dest.assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
+    tiny_dest.assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
     Tensor.realize(dest)
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
