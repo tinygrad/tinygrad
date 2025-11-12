@@ -67,7 +67,6 @@ def inplace_fn(outvars: str|list[str]):
       bound = sig.bind(*args, **kwargs)
       outs = [kwargs.get(v, bound.arguments.get(v)) for v in outvars]
       outs = [unwrap(o) if isinstance(o, torch.Tensor) else o for o in outs]
-      realize = any(maybe_realize_storage(o) for o in outs)
       ret = fn(*args, **kwargs)
       Tensor.realize(*outs)
       return ret
@@ -159,10 +158,8 @@ def take(base, idx):
 
 @wrap_view_op
 def _as_strided(tensor:Tensor, sizes, strides, storage_offset=None):
-  # multiple as_strided do not compound
-  base = canonical_base(tensor)
   # TODO: this is heavyweight
-  ret = base
+  ret = tensor
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, sizes, strides)
   if prod(sizes) == 1: return ret.flatten()[storage_offset].reshape(sizes)
 
@@ -210,14 +207,15 @@ def _as_strided(tensor:Tensor, sizes, strides, storage_offset=None):
     cont_sizes = [sizes[i] for i in cont_axes]
     cont_numel = prod(cont_sizes) if cont_sizes else 1
     flat = ret.shrink(((off_adj, off_adj + cont_numel), *[(0, s[0]) for s in ret.shape[1:]]))
-    core = flat.reshape(cont_sizes if cont_sizes else ())
+    core = flat.reshape(cont_sizes or ())
 
     # place cont axes, insert 1s for broadcast axes
     shape_with_ones = []
     j = 0
     for i in range(n):
       if strides_abs[i] == canon[i]:
-        shape_with_ones.append(cont_sizes[j]); j += 1
+        shape_with_ones.append(cont_sizes[j])
+        j += 1
       else:
         shape_with_ones.append(1)
     out = core.reshape(tuple(shape_with_ones)).expand(sizes)
@@ -230,7 +228,8 @@ def _as_strided(tensor:Tensor, sizes, strides, storage_offset=None):
   idx = None
   for d in range(n):
       vec = Tensor.arange(sizes[d], dtype=ret.dtype, device=ret.device) * strides[d]
-      shape_b = [1]*n; shape_b[d] = sizes[d]
+      shape_b = [1]*n 
+      shape_b[d] = sizes[d]
       vec = vec.reshape(shape_b)
       idx = vec if idx is None else idx + vec
   idx = idx + storage_offset
