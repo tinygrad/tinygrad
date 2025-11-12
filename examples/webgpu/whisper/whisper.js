@@ -286,7 +286,7 @@ const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61,
  * @param {Float32Array[]} audio_features_batch
  * @returns {Promise<Decoder_Result[]>}
  */
-async function decodeOne(nets, decode_sequences, decoder_state, audio_features_batch) {
+async function decodeOneBatch(nets, decode_sequences, decoder_state, audio_features_batch) {
     let audio_features = audio_features_batch[0];
     // const { max_context_length } = decode_sequence;
 
@@ -342,7 +342,7 @@ async function decodeOne(nets, decode_sequences, decoder_state, audio_features_b
  * @param {float} temperature
  * @returns {Promise<Decoder_Result>}
  */
-async function decodeOne2(decode_sequence, decodeOne_result, temperature) {
+async function applyDecoderResults(decode_sequence, decodeOne_result, temperature) {
     const { context, context_prompt_length, max_context_length, last_eos_logprob } = decode_sequence;
 
     let result = decodeOne_result;
@@ -505,7 +505,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
                 return;
             }
 
-            let decode_results = await decodeOne(nets, sequences, decoder_state, audio_features_batch);
+            let decode_results = await decodeOneBatch(nets, sequences, decoder_state, audio_features_batch);
             for (let idx = 0; idx < sequences.length; ++idx) {
                 if (cancelToken.cancelled) {
                     inferLoopContext.is_done = true;
@@ -514,7 +514,7 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
                 if (sequences[idx].context.at(-1) === TOK_EOS) continue;
                 let seek = seeks_batch[idx];
 
-                let decode_result = await decodeOne2(sequences[idx], decode_results[idx], temperature);
+                let decode_result = await applyDecoderResults(sequences[idx], decode_results[idx], temperature);
                 let keep_going = decode_result.keep_going;
                 sequences[idx].context = decode_result.context;
                 sequences[idx].avg_logprob = decode_result.avg_logprob;
@@ -525,7 +525,6 @@ async function inferLoop(nets, log_specs_full, previous_context, temperature, au
                 const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
                 let pendingText = format_text(detokenized, sequences[idx].avg_logprob, seek, seek_end);
                 pendingTexts[idx] = pendingText;
-                // console.log(pendingText);
 
                 // if (!keep_going) break;
             }
@@ -719,7 +718,7 @@ export {
     batch_repeat_helper as batch_double_helper,
     decoder_helper,
     rebuild_cache_tail_index,
-    decodeOne,
+    decodeOneBatch as decodeOne,
     inferLoop,
     transcribeAudio
 };
