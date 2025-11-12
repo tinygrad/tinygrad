@@ -60,7 +60,6 @@ view_ops = {
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
-# simplified inplace decorator - Tensor's built-in realization handles everything
 def inplace_fn(outvars: str|list[str]):
   if type(outvars) is str: outvars = [outvars]
   def decorator(fn):
@@ -116,12 +115,6 @@ def _linalg_eigh(self, UPLO: str = 'U'):
 def _linalg_det(self: torch.Tensor):
   result = aten._linalg_det(self.cpu())
   return result[0].tiny(), result[1].tiny(), result[2].tiny()
-
-@torch.library.impl("aten::diag_embed", "privateuseone")
-def diag_embed(input, offset=0, dim1=-2, dim2=-1):
-  if input.ndim == 1 and offset == 0 and dim1 == -2 and dim2 == -1:
-    return wrap(unwrap(input).diag())
-  return aten.diag_embed(input.cpu(), offset, dim1, dim2).tiny()
 
 def upsample_backward(grad_out, output_size, input_size, *args, f=None): return f(grad_out.cpu(), output_size, input_size, *args).tiny()
 
