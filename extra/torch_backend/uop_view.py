@@ -1,30 +1,32 @@
 from __future__ import annotations
 import weakref
-from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import GroupOp, Ops, UOp, sint
 from tinygrad.helpers import canonicalize_strides, strides_for_shape, prod
 from tinygrad.dtype import _from_torch_dtype
 
-@dataclass(frozen=True)
-class ViewSpec:
-  shape: tuple[sint, ...]
+class _ViewSpec(NamedTuple):
   strides: tuple[sint, ...]
   offset: sint
 
-def _collect_movement_chain(uop: UOp|Tensor) -> tuple[list[tuple[Ops, Any]], UOp]:
+def _movement_chain(uop: UOp|Tensor) -> list[tuple[Ops, Any]]:
   chain, cur = [], (uop.uop if isinstance(uop, Tensor) else uop)
   while cur.op in {Ops.DETACH, Ops.BITCAST, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.MULTI} or cur.op in GroupOp.Movement:
     if cur.op in GroupOp.Movement and cur.op is not Ops.PAD: chain.append((cur.op, cur.marg))
     if not cur.src: break
     cur = cur.src[0]
   chain.reverse()
-  return chain, cur
+  return chain
 
-def view_spec_from_uop(uop: UOp|Tensor) -> ViewSpec:
-  chain, base = _collect_movement_chain(uop)
-  shape, strides, offset = base.shape, strides_for_shape(base.shape), 0
+def _compute_strides(uop: UOp|Tensor) -> tuple[tuple[sint, ...], sint]:
+  chain = _movement_chain(uop)
+  cur = uop.uop if isinstance(uop, Tensor) else uop
+  while cur.op in {Ops.DETACH, Ops.BITCAST, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.MULTI} or cur.op in GroupOp.Movement:
+    if cur.op in GroupOp.Movement and cur.op is not Ops.PAD: break
+    if not cur.src: break
+    cur = cur.src[0]
+  shape, strides, offset = cur.shape, strides_for_shape(cur.shape), 0
   for op, arg in chain:
     if op is Ops.RESHAPE: shape, strides = tuple(arg), strides_for_shape(arg)
     elif op is Ops.EXPAND:
@@ -34,13 +36,14 @@ def view_spec_from_uop(uop: UOp|Tensor) -> ViewSpec:
         if old_idx < len(shape) and ns == shape[old_idx]: old_idx += 1
       shape, strides = tuple(arg), tuple(new_strides)
     elif op is Ops.SHRINK:
-      offset += sum(start * strides[i] for i, (start, _) in enumerate(arg))
-      shape, strides = tuple(end - start for start, end in arg), tuple(strides[i] for i in range(len(arg)))
+      offset += sum(start * strides[i] for i, (start, _) in enumerate(arg) if i < len(strides))
+      shape = tuple(end - start for start, end in arg)
+      strides = tuple(strides[i] for i in range(len(shape)) if i < len(strides))
     elif op is Ops.PERMUTE: shape, strides = tuple(shape[i] for i in arg), tuple(strides[i] for i in arg)
     elif op is Ops.FLIP:
       offset += sum((shape[i] - 1) * strides[i] for i, f in enumerate(arg) if f)
       strides = tuple(-strides[i] if arg[i] else strides[i] for i in range(len(arg)))
-  return ViewSpec(shape, canonicalize_strides(shape, strides), offset)
+  return canonicalize_strides(shape, strides), offset
 
 def _canonical_base(view: Tensor) -> Tensor:
   seen = set()
@@ -59,7 +62,7 @@ def update_view_region(tt:Tensor, updater:Callable[[Tensor], Tensor]) -> bool:
   if not hasattr(tt, '_view_base'): return False
   base = _canonical_base(tt)
   if not base.uop.is_contiguous(): base.replace(base.contiguous())
-  chain, _ = _collect_movement_chain(tt)
+  chain = _movement_chain(tt)
   # Rebuild view from base
   view_region = base
   for op, arg in chain:
@@ -107,7 +110,7 @@ def maybe_realize_storage(self: Tensor) -> bool:
     if hasattr(v, '_view_op') and v._view_op[0] == 'as_strided':
       view_chains.append((v, v._view_op[1], True))
     else:
-      view_chains.append((v, _collect_movement_chain(v)[0], False))
+      view_chains.append((v, _movement_chain(v), False))
   # Realize base
   if not base.uop.is_contiguous(): base.replace(base.contiguous())
   base.replace(base.clone().realize())
