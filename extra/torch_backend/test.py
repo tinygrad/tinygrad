@@ -219,7 +219,6 @@ class TestTorchBackend(unittest.TestCase):
     a = torch.ones(4, device=device)
     print(str(a))
 
-  @unittest.skip("failed")
   def test_floor_div(self):
     a = torch.tensor([10., 7., 5.], device=device)
     b = torch.tensor([3., 2., 2.], device=device)
@@ -247,12 +246,6 @@ class TestTorchBackend(unittest.TestCase):
   def test_diagonal_cube(self): self._test_diagonal(3, 3, 3)
   def test_diagonal_rectangular(self): self._test_diagonal(4, 5, 6)
   def test_diagonal_4d(self): self._test_diagonal(2, 3, 4, 5)
-
-  def test_frac(self):
-    a = torch.tensor([1.2, -2.3, 3.0], device=device)
-    out = torch.frac(a)
-    correct = torch.tensor([ 0.2000, -0.3000,  0.0000])
-    assert torch.allclose(out, correct)
 
 if __name__ == "__main__":
   unittest.main()

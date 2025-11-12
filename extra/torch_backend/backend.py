@@ -2,8 +2,6 @@
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
-import sys
-sys.path.append("extra/")
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv, prod
 import torch.lib
@@ -567,7 +565,6 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.sum.IntList_out": lambda self,axis,keepdim=False,dtype=None:
     self.sum(axis if axis is None or len(axis) else None, keepdim,
                          dtype = _from_torch_dtype(dtype) if dtype is not None else None),
-  "aten.frac.out": lambda self: self - self.floor(),
 }}
 
 # we add the "out" here
@@ -661,7 +658,6 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
                                         "device": _from_torch_device(device) if device else None}.items() if v is not None}),
   "aten.max.dim": lambda self, dim, keepdim=False: (self.max(dim, keepdim), self.argmax(dim, keepdim).cast(dtype=dtypes.int64)),
   "aten.unfold": Tensor.unfold,
-  "aten.frac": lambda self: self - self.floor()
 }}
 
 def wrap_fxn(k,f):
