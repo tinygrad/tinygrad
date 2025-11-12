@@ -5,21 +5,23 @@ from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import getenv, tqdm
 from tinygrad.apps.llm2 import Transformer as GptOss, download_weights, get_keymap, MODELS
 
-from icecream import ic
-
+# https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 TORCH_PARAMS = {
   "20B": {
     "params": {
-      "architectures": ["GptOssForCausalLM"], "attention_bias": True, "attention_dropout": 0.0, "eos_token_id": 200002, "experts_per_token": 4, "head_dim": 64, "hidden_act": "silu",
-      "hidden_size": 2880, "initial_context_length": 4096, "initializer_range": 0.02, "intermediate_size": 2880, "layer_types": [
-        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention",
-        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention",
-        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention"],
-      "max_position_embeddings": 131072, "model_type": "gpt_oss", "num_attention_heads": 64, "num_experts_per_tok": 4, "num_hidden_layers": 24, "num_key_value_heads": 8,
-      "num_local_experts": 32, "output_router_logits": False, "pad_token_id": 199999, "quantization_config": {"modules_to_not_convert": [
-        "model.layers.*.self_attn", "model.layers.*.mlp.router", "model.embed_tokens", "lm_head"], "quant_method": "mxfp4"}, "rms_norm_eps": 1e-05, "rope_scaling": {
-        "beta_fast": 32.0, "beta_slow": 1.0, "factor": 32.0, "original_max_position_embeddings": 4096, "rope_type": "yarn", "truncate": False}, "rope_theta": 150000,
-      "router_aux_loss_coef": 0.9, "sliding_window": 128, "swiglu_limit": 7.0, "tie_word_embeddings": False, "transformers_version": "4.57.0", "use_cache": True, "vocab_size": 201088},
+      "architectures": ["GptOssForCausalLM"], "attention_bias": True, "attention_dropout": 0.0, "eos_token_id": 200002, "experts_per_token": 4,
+      "head_dim": 64, "hidden_act": "silu", "hidden_size": 2880, "initial_context_length": 4096, "initializer_range": 0.02,
+      "intermediate_size": 2880, "layer_types": [
+        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention","full_attention", "sliding_attention",
+        "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention",
+        "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention",
+        "full_attention", "sliding_attention", "full_attention"], "max_position_embeddings": 131072, "model_type": "gpt_oss",
+      "num_attention_heads": 64, "num_experts_per_tok": 4, "num_hidden_layers": 24, "num_key_value_heads": 8, "num_local_experts": 32,
+      "output_router_logits": False, "pad_token_id": 199999, "quantization_config": {"modules_to_not_convert":
+        ["model.layers.*.self_attn","model.layers.*.mlp.router", "model.embed_tokens", "lm_head"], "quant_method": "mxfp4"}, "rms_norm_eps": 1e-05,
+      "rope_scaling": {"beta_fast": 32.0, "beta_slow": 1.0, "factor": 32.0, "original_max_position_embeddings": 4096, "rope_type": "yarn",
+                       "truncate": False}, "rope_theta": 150000, "router_aux_loss_coef": 0.9, "sliding_window": 128, "swiglu_limit": 7.0,
+      "tie_word_embeddings": False, "transformers_version": "4.57.0", "use_cache": True, "vocab_size": 201088},
   }
 }
 
@@ -29,7 +31,7 @@ keymap = {mxfp4_keymap(tg_key): mxfp4_keymap(hf_key) for hf_key, tg_key in get_k
 
 def compare_state_dicts(model, torch_model):
   state, torch_state = get_state_dict(model), torch_model.state_dict()
-  assert len(state) == len(torch_state), f"State Mismatch: tinygrad model contains {len(state)} state objects but torch model contains {len(torch_state)} state objects:"
+  assert len(state) == len(torch_state), f"State Mismatch: tinygrad has {len(state)} objects in state dict but torch has {len(torch_state)} objects"
   for k, v in tqdm(state.items(), desc='Model State Dict'):
     torch_k = keymap[k]
     torch_v = torch_state[torch_k]
@@ -60,8 +62,9 @@ class TestGptOss(unittest.TestCase):
     model = GptOss(**params) if fakeweights else GptOss.from_pretrained(model_path, params, fakeweights)
 
     # torch model
-    torch_config, torch_device = GptOssConfig(**torch_params), torch.device("cpu") # torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    torch_model = TorchGptOss(torch_config) if fakeweights else TorchGptOss.from_pretrained(model_path, config=torch_config, ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
+    torch_device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
+    torch_model = TorchGptOss(GptOssConfig(**torch_params)) if fakeweights else TorchGptOss.from_pretrained(
+      model_path, config=GptOssConfig(**torch_params), ignore_mismatched_sizes=True, local_files_only=True, cache_dir=model_path)
     torch_model = torch_model.to(torch_device).eval()
 
     # set fakeweights equal to each other

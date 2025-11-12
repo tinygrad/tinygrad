@@ -18,9 +18,8 @@ import argparse, math, os
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
 from tinygrad.helpers import fetch, getenv, DEBUG, Timing, GlobalCounters
-from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor, get_parameters
+from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
-from extra.models.llama import fix_bf16
 from transformers import AutoTokenizer
 
 from icecream import install
@@ -28,8 +27,8 @@ install()
 
 MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] = {
   "20B": {
-    "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24, "n_experts": 32, "n_active_experts": 4,
-               "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
+    "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24, "n_experts": 32,
+               "n_active_experts": 4, "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
                "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
                },
     "total_num_weights": 3,
@@ -41,7 +40,8 @@ MODELS:dict[str, dict[str, int|str|dict[str, int|float, dict[str, int|float]]]] 
 # ***** model loading *****
 
 def download_weights(model:str, total_num_weights:int) -> Path:
-  model_path = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json", "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
+  model_path = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json",
+                     "model.safetensors.index.json", subdir=(subdir:=model.split('/')[-1]))
   for i in range(total_num_weights):
     filename = f"model-{i:05d}-of-{total_num_weights-1:05d}.safetensors"
     fetch(f"https://huggingface.co/{model}/resolve/main/{filename}?download=true", filename, subdir=subdir)
@@ -100,7 +100,8 @@ def fix_mxfp4(weights) -> Tensor:
 
 # ****** model architecture *****
 
-def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, ntk_alpha:float=1, ntk_beta:float=32, initial_context_length:int=4096) -> Tensor:
+def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, ntk_alpha:float=1, ntk_beta:float=32,
+               initial_context_length:int=4096) -> Tensor:
   B, H, T, Hd = x.shape
   assert (Hd & 1) == 0, "RoPE requires an even head dimension"
   half = Hd // 2
@@ -133,10 +134,11 @@ def swiglu(x:Tensor, alpha: float = 1.702, limit: float = 7.0):
   return x_glu * (alpha * x_glu).sigmoid() * (x_up + 1)
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int, norm_eps:float, max_context:int=0, sliding_window:int=0):
+  def __init__(self, dim:int, hidden_dim:int, head_dim:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int,
+               norm_eps:float, max_context:int=0, sliding_window:int=0):
     self.n_heads                = n_heads
     self.n_kv_heads             = n_kv_heads
-    self.head_dim               = head_dim if head_dim else dim // n_heads
+    self.head_dim               = head_dim or dim // n_heads
     self.sliding_window         = sliding_window
     self.max_context            = max_context
 
@@ -212,8 +214,10 @@ class TransformerBlock:
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
-  def __init__(self, dim, hidden_dim, head_dim, num_blocks, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, rope_params, vocab_size, sliding_window, max_context):
-    self.blk          = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context, sliding_window*(i%2==0)) for i in range(num_blocks)]
+  def __init__(self, dim:int, hidden_dim:int, head_dim:int, num_blocks:int, n_heads:int, n_kv_heads:int, n_experts:int, n_active_experts:int,
+               norm_eps:float, rope_params:dict, vocab_size:int, sliding_window:int, max_context:int):
+    self.blk          = [TransformerBlock(dim, hidden_dim, head_dim, n_heads, n_kv_heads, n_experts, n_active_experts, norm_eps, max_context,
+                                          sliding_window*(i%2==0)) for i in range(num_blocks)]
     self.token_embd   = nn.Embedding(vocab_size, dim)
     self.output_norm  = nn.RMSNorm(dim, norm_eps)
     self.output       = nn.Linear(dim, vocab_size, bias=False)

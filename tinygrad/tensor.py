@@ -1303,8 +1303,8 @@ class Tensor(OpMixin):
     """
     dim = self._resolve_dim(dim)
     for arg in args:
-      assert arg.ndim==self.ndim, f"all tensors must have the same number of dimensions, got {arg.ndim=} and {self.ndim=}"
-      assert all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim), f"all tensors must have the same shape except in the cat dimension, got {arg.shape=} and {self.shape=} on {dim=}"
+      assert arg.ndim==self.ndim, f"ndim mismatch: {arg.ndim} vs {self.ndim}"
+      assert all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim), f"shape mismatch at dim {dim}: {arg.shape} vs {self.shape}"
     tensors = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
