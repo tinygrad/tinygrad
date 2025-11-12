@@ -378,6 +378,7 @@ import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
 def wrap(x:Tensor) -> torch.Tensor:
   _ensure_view_tracking(x)
+  _get_view_st(x)
   return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
@@ -401,16 +402,25 @@ def canonical_base(view: Tensor):
   return _ensure_view_tracking(base)
 def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
 def _ensure_view_tracking(tensor: Tensor) -> Tensor:
+  shape = tuple(tensor.shape)
   if not hasattr(tensor, "_view_ops"): tensor._view_ops = tuple()
-  if not hasattr(tensor, "_view_st"): tensor._view_st = ShapeTracker.from_shape(tuple(tensor.shape))
-  elif tensor._view_st.shape != tuple(tensor.shape):
+  if getattr(tensor, "_view_shape", None) != shape:
     tensor._view_ops = tuple()
-    tensor._view_st = ShapeTracker.from_shape(tuple(tensor.shape))
+    tensor._view_shape = shape
   return tensor
 def _get_view_ops(tensor: Tensor) -> tuple:
   return _ensure_view_tracking(tensor)._view_ops
 def _get_view_st(tensor: Tensor) -> ShapeTracker:
-  return _ensure_view_tracking(tensor)._view_st
+  tensor = _ensure_view_tracking(tensor)
+  base = canonical_base(tensor)
+  base_shape = getattr(base, "_view_shape", tuple(base.shape))
+  st = _apply_view_st(ShapeTracker.from_shape(base_shape), tensor._view_ops)
+  target_shape = tuple(tensor.shape)
+  if st.shape != target_shape:
+    try: st = st.reshape(target_shape)
+    except Exception: st = ShapeTracker.from_shape(target_shape)
+  tensor._view_st = st
+  return st
 
 def _apply_ops(target, ops: tuple, handlers: dict[str, Callable]):
   ret = target
@@ -440,8 +450,19 @@ def _slice_tensor(tensor: Tensor, dim=0, start=None, end=None, step=1):
   slices[dim] = slice(start, end, step)
   return tensor[tuple(slices)]
 
+def _reshape_st(st: ShapeTracker, shape: tuple[int, ...]) -> ShapeTracker:
+  if -1 not in shape: return st.reshape(shape)
+  assert shape.count(-1) == 1, f"invalid reshape target {shape}"
+  known = prod([dim for dim in shape if dim != -1])
+  total = prod(st.shape)
+  assert isinstance(total, int) and known != 0 and total % known == 0, f"can't infer reshape dim for {st.shape=} -> {shape=}"
+  inferred = total // known
+  new_shape = list(shape)
+  new_shape[new_shape.index(-1)] = inferred
+  return st.reshape(tuple(new_shape))
+
 _ST_VIEW_HANDLERS = {
-  "reshape": lambda st, shape: st.reshape(shape),
+  "reshape": _reshape_st,
   "expand": _expand_st,
   "permute": lambda st, axis: st.permute(axis),
   "pad": lambda st, arg: st.pad(arg),
@@ -479,10 +500,9 @@ def wrap_view_op(_name, fn, recorder):
     if not hasattr(base, "_views"): base._views = set()
     base._views.add(weakref.ref(ret))
     parent_ops = _get_view_ops(parent)
-    parent_st = _get_view_st(parent)
     new_ops = tuple(recorder(parent, args, kwargs, ret))
     ret._view_ops = parent_ops + new_ops
-    ret._view_st = _apply_view_st(parent_st, new_ops)
+    ret._view_shape = tuple(ret.shape)
     return wrap(ret)
   return _wrap
 def _record_simple(name, value_fn):
@@ -657,13 +677,13 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 def _as_strided_impl(tensor:Tensor, size, stride, storage_offset):
   base = canonical_base(tensor)
   try:
-    ops, st = _strided_view_ops(tuple(base.shape), tuple(size), tuple(stride), storage_offset)
+    ops = _strided_view_ops(tuple(base.shape), tuple(size), tuple(stride), storage_offset)
     ret = _apply_view_ops(base, ops)
     ret._view_base = base
     if not hasattr(base, "_views"): base._views = set()
     base._views.add(weakref.ref(ret))
     ret._view_ops = ops
-    ret._view_st = st
+    ret._view_shape = tuple(ret.shape)
     return ret
   except Exception:
     flat = base.contiguous().reshape((-1,))
@@ -780,12 +800,12 @@ def _movement_to_view_op(mop: MovementOps, arg: Tuple) -> Tuple[str, Tuple]:
   if mop is MovementOps.STRIDE: return ("flip", tuple(x == -1 for x in arg))
   raise ValueError(f"unsupported movement op {mop}")
 
-def _strided_view_ops(base_shape: tuple, size: tuple, stride: tuple, storage_offset: int) -> tuple[tuple, ShapeTracker]:
+def _strided_view_ops(base_shape: tuple, size: tuple, stride: tuple, storage_offset: int) -> tuple[tuple, ...]:
   st = ShapeTracker.from_shape(base_shape)
   st = ShapeTracker(st.views + (View.create(size, stride, storage_offset),))
   mops = _to_movement_ops(st)
   if mops and mops[0] == (MovementOps.RESHAPE, base_shape): mops = mops[1:]
-  return tuple(_movement_to_view_op(mop, arg) for mop,arg in mops), st
+  return tuple(_movement_to_view_op(mop, arg) for mop,arg in mops)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
