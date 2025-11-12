@@ -1434,7 +1434,7 @@ class Tensor(OpMixin):
     if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
     return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
 
-  def diagonal(self, foffset=0, dim1=0, dim2=1) -> Tensor:
+  def diagonal(self, offset=0, dim1=0, dim2=1) -> Tensor:
     """
     Returns a view of input tensor with its main diagonal elements.
 

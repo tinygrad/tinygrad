@@ -9,21 +9,21 @@ from tinygrad.tensor import Tensor
 
 class MovementOps(Enum): RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); STRIDE = auto(); AS_STRIDED = auto() # noqa: E702
 
-def apply_mop(t: Tensor, mop_arg: Tuple[MovementOps, Tuple]) -> Tensor:
+def apply_mop(st: Tensor|ShapeTracker, mop_arg: Tuple[MovementOps, Tuple]) -> ShapeTracker:
   mop, arg = mop_arg
   if mop == MovementOps.RESHAPE:
     # shapetracker doesn't allow flattening with -1 but required for MovementOps.RESHAPE
-    if arg == (-1,): return t.reshape((prod(t.shape),))
-    return t.reshape(arg)
-  if mop == MovementOps.PERMUTE: return t.permute(arg)
+    if arg == (-1,): return st.reshape((prod(st.shape),))
+    return st.reshape(arg)
+  if mop == MovementOps.PERMUTE: return st.permute(arg)
   if mop == MovementOps.EXPAND:
-    if len(arg) != len(t.shape): t = t.reshape((1,*t.shape))
-    return t.expand(arg)
-  if mop == MovementOps.PAD: return t.pad(arg)
-  if mop == MovementOps.SHRINK: return t.shrink(arg)
+    if len(arg) != len(st.shape): st = st.reshape((1,*st.shape))
+    return st.expand(arg)
+  if mop == MovementOps.PAD: return st.pad(arg)
+  if mop == MovementOps.SHRINK: return st.shrink(arg)
   if mop == MovementOps.STRIDE:
     assert all(x in [-1, 1] for x in arg)
-    return t.flip(tuple(i for i,x in enumerate(arg) if x == -1))
+    return st.flip(tuple(i for i,x in enumerate(arg) if x == -1))
   raise ValueError("invalid mop")
 
 def make_scratch_st(st: ShapeTracker) -> ShapeTracker:
