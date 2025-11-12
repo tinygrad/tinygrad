@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
@@ -99,16 +99,6 @@ def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
   if not shape: return ()
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
-
-def strides_to_permutation(size:tuple[int, ...], stride:tuple[int, ...]) -> tuple[tuple[int, ...], tuple[int, ...]]|None:
-  if not size: return ((), ())
-  shape_strides = [(s, st) for s,st in zip(size, stride) if s != 1]
-  if not shape_strides: return None
-  permute_indexes = [len(shape_strides)-1-y for y in argsort([x[1] for x in shape_strides])]
-  if tuple(permute_indexes) == tuple(range(len(permute_indexes))): return None
-  intermediate_shape = tuple([shape_strides[x][0] for x in argsort(permute_indexes)])
-  if tuple([shape_strides[i][1] for i in argsort(permute_indexes)]) != strides_for_shape(intermediate_shape): return None
-  return (tuple(permute_indexes), intermediate_shape)
 
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
@@ -451,6 +441,13 @@ class tqdm(Generic[T]):
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+class disable_gc(contextlib.ContextDecorator):
+  def __enter__(self):
+    self._was_enabled = gc.isenabled()
+    if self._was_enabled: gc.disable()
+  def __exit__(self, *exc):
+    if self._was_enabled: gc.enable()
 
 # *** universal support for code object pickling
 
