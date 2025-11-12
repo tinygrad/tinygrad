@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 import tempfile
 from typing import Optional, Union, Literal, List
@@ -206,6 +207,15 @@ MODEL_NAME = "tiny.en"
 DECODER_BATCH_SIZE = 32
 
 if __name__ == '__main__':
+  try:
+    import subprocess
+    tinygrad_revision_bytes = subprocess.run("git rev-parse --short HEAD", cwd=Path(__file__).parents[3], stdout=subprocess.PIPE).stdout
+    tinygrad_revision = tinygrad_revision_bytes.decode('utf8').strip()
+
+  except Exception as e:
+    print("couldn't get git revision:", file=sys.stderr)
+    print(e, file=sys.stderr)
+
   def tofull(sd):
     return {k: v.float() for k,v in sd.items()}
 
@@ -334,4 +344,8 @@ if __name__ == '__main__':
   export_vocab()
 
   metadata_dict = {"model_name": MODEL_NAME, "decoder_batch_size": DECODER_BATCH_SIZE, "max_size_per_tensor_in_bytes": max_size_per_tensor_in_bytes}
+  try:
+    metadata_dict["tinygrad_revision"] = tinygrad_revision
+  except NameError:
+    pass
   (dirname / "model_metadata.json").write_text(json.dumps(metadata_dict), encoding="utf8")
