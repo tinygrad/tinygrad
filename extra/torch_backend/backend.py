@@ -2,13 +2,9 @@ from __future__ import annotations
 import functools, weakref
 from tinygrad.helpers import getenv, prod
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops
-from .uop_view import maybe_realize_storage, _as_strided_impl, register_view, _compute_strides, _ViewSpec, update_view_region, view_ops
-
+from .uop_view import ViewSpec, maybe_realize_storage, _as_strided_impl, register_view, _compute_strides, ViewSpec, update_view_region, view_ops
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
-from enum import Enum, auto
 import os
 TORCH_DEBUG = getenv("TORCH_DEBUG")
 import torch, pathlib, math, operator, functools, inspect
@@ -31,7 +27,7 @@ def wrap(x:Tensor) -> torch.Tensor:
   if any(s < 0 for s in strides):
     x = x.contiguous()
     strides, offset = _compute_strides(x)
-  x._view_spec = _ViewSpec(strides, offset)
+  x._view_spec = ViewSpec(strides, offset)
   return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"

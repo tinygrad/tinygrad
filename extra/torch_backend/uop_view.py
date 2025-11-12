@@ -6,7 +6,7 @@ from tinygrad.uop.ops import GroupOp, Ops, UOp, sint
 from tinygrad.helpers import canonicalize_strides, strides_for_shape, prod
 from tinygrad.dtype import _from_torch_dtype
 
-class _ViewSpec(NamedTuple):
+class ViewSpec(NamedTuple):
   strides: tuple[sint, ...]
   offset: sint
 
@@ -39,7 +39,7 @@ def _compute_strides(uop: UOp|Tensor) -> tuple[tuple[sint, ...], sint]:
       offset += sum(start * strides[i] for i, (start, _) in enumerate(arg) if i < len(strides))
       shape = tuple(end - start for start, end in arg)
       strides = tuple(strides[i] for i in range(len(shape)) if i < len(strides))
-    elif op is Ops.PERMUTE: shape, strides = tuple(shape[i] for i in arg), tuple(strides[i] for i in arg)
+    elif op is Ops.PERMUTE: shape, strides = tuple(shape[i] for i in arg if i < len(shape)), tuple(strides[i] for i in arg if i < len(strides))
     elif op is Ops.FLIP:
       offset += sum((shape[i] - 1) * strides[i] for i, f in enumerate(arg) if f)
       strides = tuple(-strides[i] if arg[i] else strides[i] for i in range(len(arg)))
