@@ -114,6 +114,14 @@ int temp_register_hook = register_hook();
 
 
 at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
+  if (!py::hasattr(py_obj, "uop")) {
+    throw std::runtime_error("wrap_tensor: missing uop attribute (not a Tinygrad Tensor)");
+  }
+  auto uop = py_obj.attr("uop");
+  if (!py::hasattr(uop, "_shape")) {
+    throw std::runtime_error("wrap_tensor: uop has no _shape");
+  }
+
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("uop").attr("_shape").cast<std::vector<int64_t>>();
   std::vector<int64_t> strides(sizes.size());

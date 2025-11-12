@@ -3035,9 +3035,11 @@ class TestOps(unittest.TestCase):
                                          lambda x,y: x.binary_crossentropy_logits(y.clip(0,1), reduction=r))
   def test_binary_crossentropy_logits_pos_weights(self):
     pos_weight = [0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
-    helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,y.clip(0,1),
-                                                                                                        pos_weight=torch.tensor(pos_weight)),
-                                       lambda x,y: x.binary_crossentropy_logits(y.clip(0,1),pos_weight=Tensor(pos_weight)))
+    helper_test_op(
+      [(32,10), (32,10)],
+      lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(
+        x,y.clip(0,1),pos_weight=torch.tensor(pos_weight, device=x.device)),
+      lambda x,y: x.binary_crossentropy_logits(y.clip(0,1),pos_weight=Tensor(pos_weight)))
 
   def test_cross_entropy_class_probabilities(self):
     helper_test_op([(32,), (32,)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
@@ -3126,7 +3128,9 @@ class TestOps(unittest.TestCase):
     weight = np.random.normal(0, 1, (10,)).astype(np.float32).tolist()
     for r in ("mean", "sum", "none"):
       helper_test_op([(32,10)],
-        lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target), torch.tensor(weight), reduction=r),
+        lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                               torch.tensor(target, device=x.device),
+                                              torch.tensor(weight, device=x.device), reduction=r),
         lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), Tensor(weight), reduction=r))
 
   def test_nll_loss_3d_weight(self):
@@ -3134,7 +3138,9 @@ class TestOps(unittest.TestCase):
     weight = np.random.normal(0, 1, (10,)).astype(np.float32).tolist()
     for r in ("mean", "sum", "none"):
       helper_test_op([(32,10,3,3,3)],
-          lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target), torch.tensor(weight), reduction=r),
+          lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                                torch.tensor(target, device=x.device),
+                                                torch.tensor(weight, device=x.device), reduction=r),
           lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), Tensor(weight), reduction=r))
 
   def test_nll_loss_ignore_index(self):
@@ -3142,7 +3148,8 @@ class TestOps(unittest.TestCase):
               [1.5, 2.5, -0.5],
               [0.0, -2.0, 1.0]]
     target = [0, 1, 2]
-    helper_test_op(None, lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target), ignore_index=1),
+    helper_test_op(None, lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1),
+                                                                torch.tensor(target), ignore_index=1),
                          lambda x: x.log_softmax().nll_loss(Tensor(target), ignore_index=1),
                          vals=[logits])
 
