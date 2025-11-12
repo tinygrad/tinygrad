@@ -399,7 +399,7 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
     dest.assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(dest)
+    Tensor.realize(dest)
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
