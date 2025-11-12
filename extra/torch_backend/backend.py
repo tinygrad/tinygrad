@@ -254,7 +254,7 @@ def _as_strided(tensor: Tensor, size, strides, storage_offset=None):
   assert idx.min().item() < 0 or idx.max().item() >= ret.numel(), "as_strided: out of bounds"
 
   flat_indices = idx.reshape(-1)
-  flat = take(ret.flatten(), flat_indices)    
+  flat = take(ret.flatten(), flat_indices)
   out = flat.reshape(size)
 
   return wrap(out)
