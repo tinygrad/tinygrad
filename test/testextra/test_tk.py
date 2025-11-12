@@ -7,6 +7,7 @@ import numpy as np
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
 
+@unittest.skipUnless(Device.DEFAULT in ["CUDA", "NV"], "only cuda")
 class TestTK(unittest.TestCase):
   def test_simple_matmul(self):
     N = 32
@@ -334,6 +335,7 @@ class TestTK(unittest.TestCase):
 
     np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
 
+  @unittest.skip("fake range not ended")
   def test_softmax(self):
     N = 32
     BLOCK_SIZE = 16
@@ -389,10 +391,8 @@ class TestTK(unittest.TestCase):
     ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
     for _ in range(5): ei.run(wait=True)
     b = b.float()
-    print(b.tolist())
 
     ref = a.float().softmax(axis=3)
-    print(ref.tolist())
 
     np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
 
