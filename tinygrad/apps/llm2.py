@@ -212,7 +212,7 @@ class TransformerBlock:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
 
-    attn = q.scaled_dot_product_attention(k, v, sink=s, attn_mask=mask, enable_gqa=True)  # (B,H,T,Hd) (B,KvH,T,Hd) (B,KvH,T,Hd) -> (B,H,T,Hd)
+    attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, sink=s, enable_gqa=True)  # (B,H,T,Hd) (B,KvH,T,Hd) (B,KvH,T,Hd) -> (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                         # (B,H,T,Hd) -> (B,T,D)
     attn = self.attn_o(attn)                                                              # (B,T,D)    -> (B,T,D)
     return x + attn                                                                       # (B,T,D)    -> (B,T,D)
