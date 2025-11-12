@@ -1,6 +1,6 @@
 import subprocess, hashlib, tempfile, ctypes, re, pathlib
 from typing import Callable
-from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
+from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv, system
 import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.device import Compiler, CompileError
 
@@ -37,7 +37,7 @@ def cuda_disassemble(lib:bytes, arch:str):
     fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
     with open(fn, "wb") as f: f.write(lib)
     subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn], check=False, stderr=subprocess.DEVNULL) # optional ptx -> sass step for CUDA=1
-    print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
+    print(system(f'nvdisasm {fn}'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
 class CUDACompiler(Compiler):

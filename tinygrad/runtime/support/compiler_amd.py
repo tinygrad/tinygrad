@@ -1,4 +1,5 @@
-import ctypes, subprocess
+import ctypes
+from tinygrad.helpers import system
 import tinygrad.runtime.autogen.comgr as comgr
 assert comgr.AMD_COMGR_LANGUAGE_HIP == 4
 try:
@@ -13,7 +14,7 @@ from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
 
 def amdgpu_disassemble(lib:bytes):
-  asm = subprocess.check_output(["llvm-objdump" if OSX else "/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib).decode("utf-8").splitlines()
+  asm = system(f"{'llvm-objdump' if OSX else '/opt/rocm/llvm/bin/llvm-objdump'} -d -", input=lib).splitlines()
   while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
   print("\n".join(asm))
 

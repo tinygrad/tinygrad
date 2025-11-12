@@ -6,7 +6,6 @@ import numpy as np
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
-from extra.thunder.tiny.tk.tiles import gl, st, rt, rv
 
 class TestTK(unittest.TestCase):
   def test_simple_matmul(self):
@@ -15,17 +14,17 @@ class TestTK(unittest.TestCase):
     with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      c = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.bfloat16)
-      b = gl((1, 1, N, N), dtypes.bfloat16)
+      c = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.bfloat16)
+      b = ker.gl((1, 1, N, N), dtypes.bfloat16)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
@@ -65,17 +64,17 @@ class TestTK(unittest.TestCase):
     with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      c = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.bfloat16)
-      b = gl((1, 1, N, N), dtypes.bfloat16)
+      c = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.bfloat16)
+      b = ker.gl((1, 1, N, N), dtypes.bfloat16)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
-      c_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
@@ -115,14 +114,14 @@ class TestTK(unittest.TestCase):
     with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.float32)
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
@@ -153,16 +152,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.float32)
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      max_reg = rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      max_reg = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_SIZE):
         max_reg = warp.neg_inf(max_reg.after(tile_row))
@@ -200,16 +199,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, M), dtypes.float32)
-      a = gl((1, 1, N, M), dtypes.float32)
+      b = ker.gl((1, 1, N, M), dtypes.float32)
+      a = ker.gl((1, 1, N, M), dtypes.float32)
 
-      a_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      a_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      max_reg = rv(BLOCK_N, dtypes.float32, "ortho")
+      max_reg = ker.rv(BLOCK_N, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_N):
         max_reg = warp.neg_inf(max_reg.after(tile_row))
@@ -247,16 +246,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, N), dtypes.float32)
-      a = gl((1, 1, N, N), dtypes.float32)
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      sum_reg = rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      sum_reg = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_SIZE):
         sum_reg = warp.zero(sum_reg.after(tile_row))
@@ -294,16 +293,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, N, M), dtypes.float32)
-      a = gl((1, 1, N, M), dtypes.float32)
+      b = ker.gl((1, 1, N, M), dtypes.float32)
+      a = ker.gl((1, 1, N, M), dtypes.float32)
 
-      a_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_smem = st((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_smem = ker.st((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      a_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
-      b_reg = rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      a_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
+      b_reg = ker.rt((BLOCK_N, BLOCK_M), dtypes.float32)
 
-      sum_reg = rv(BLOCK_N, dtypes.float32, "ortho")
+      sum_reg = ker.rv(BLOCK_N, dtypes.float32, "ortho")
 
       for tile_row in ker.range(N // BLOCK_N):
         sum_reg = warp.zero(sum_reg.after(tile_row))
@@ -341,16 +340,16 @@ class TestTK(unittest.TestCase):
     with Kernel((1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
-      b = gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
-      a = gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
+      b = ker.gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
+      a = ker.gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
 
-      a_smem = st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      a_reg = rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
-      max_vec_last = rv(BLOCK_SIZE, dtypes.float32, "ortho")
-      max_vec = rv(BLOCK_SIZE, dtypes.float32, "ortho")
-      norm_vec = rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      max_vec_last = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      max_vec = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
+      norm_vec = ker.rv(BLOCK_SIZE, dtypes.float32, "ortho")
 
       max_vec = warp.neg_inf(max_vec)
       norm_vec = warp.zero(norm_vec)
@@ -384,7 +383,6 @@ class TestTK(unittest.TestCase):
 
     with Context(DEBUG=0):
       a = Tensor.rand(1, 1, BLOCK_SIZE, N, dtype="float32")
-      # a = Tensor.arange(1 * 1 * BLOCK_SIZE * N).reshape(1, 1, BLOCK_SIZE, N).cast(dtypes.float32).contiguous()
       b = Tensor.empty(1, 1, BLOCK_SIZE, N, dtype="float32")
       Tensor.realize(a, b)
 

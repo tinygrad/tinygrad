@@ -6,7 +6,7 @@ from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import TILE_ROW_DIM, TILE_COL_DIM, RT_BASE_TILE_NEPT, slots
+from extra.thunder.tiny.tk.tiles import RT
 
 class Group:
   def __init__(self, warps:int, ker):
@@ -125,11 +125,8 @@ class Group:
   def row_reduce(self, vec:UOp, src:UOp, op:Callable[[UOp, UOp], UOp]):
     assert self.warps == 1
 
-    red_local = UOp.placeholder((self.group_threads, 2), src.dtype.base, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot)
-    slots.shared_slot += 1
-
-    red_reg = UOp.placeholder((2,), src.dtype.base, addrspace=AddrSpace.REG, slot=slots.register_slot)
-    slots.register_slot += 1
+    red_local = self.ker.alloc((self.group_threads, 2), src.dtype.base, AddrSpace.LOCAL)
+    red_reg = self.ker.alloc((2,), src.dtype.base, AddrSpace.REG)
 
     for height in self.ker.range(src.shape[-3], track=False):
       i = UOp.range(red_reg.size, Group.clear_rid)
@@ -176,7 +173,7 @@ class Group:
 
       load_i_height = UOp.range(dst.shape[-3], Group.load_rid)
       load_i_width = UOp.range(dst.shape[-2], Group.load_rid+1)
-      load_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.load_rid+2)
+      load_i_inner = UOp.range(RT.BASE_TILE_NEPT, Group.load_rid+2)
       Group.load_rid += 3
 
       if self.warps % 4 == 0: local_warpid = (self.warpid // 4) + (self.warpid % 4) * (self.warps // 4)
@@ -184,14 +181,14 @@ class Group:
       warp_laneid = self.threadIdx_x % WARP_THREADS
 
       if not transpose:
-        row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
-        col = load_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
+        row = (local_warpid * dst.shape[-3] + load_i_height) * RT.TILE_ROW_DIM + (warp_laneid // 4)
+        col = load_i_width * RT.TILE_COL_DIM + 2 * (warp_laneid % 4)
 
         row_offset = ((load_i_inner % 4) // 2) * 8
         col_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
       else:
-        row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + 2 * (warp_laneid % 4)
-        col = load_i_width * TILE_COL_DIM + (warp_laneid // 4)
+        row = (local_warpid * dst.shape[-3] + load_i_height) * RT.TILE_ROW_DIM + 2 * (warp_laneid % 4)
+        col = load_i_width * RT.TILE_COL_DIM + (warp_laneid // 4)
 
         row_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
         col_offset = ((load_i_inner % 4) // 2) * 8
@@ -240,15 +237,15 @@ class Group:
 
       store_i_height = UOp.range(src.shape[-3], Group.store_rid)
       store_i_width = UOp.range(src.shape[-2], Group.store_rid+1)
-      store_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.store_rid+2)
+      store_i_inner = UOp.range(RT.BASE_TILE_NEPT, Group.store_rid+2)
       Group.store_rid += 3
 
       if self.warps % 4 == 0: local_warpid = (self.warpid // 4) + (self.warpid % 4) * (self.warps // 4)
       else: local_warpid = self.warpid
       warp_laneid = self.threadIdx_x % WARP_THREADS
 
-      row = (local_warpid * src.shape[-3] + store_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
-      col = store_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
+      row = (local_warpid * src.shape[-3] + store_i_height) * RT.TILE_ROW_DIM + (warp_laneid // 4)
+      col = store_i_width * RT.TILE_COL_DIM + 2 * (warp_laneid % 4)
 
       row_offset = ((store_i_inner % 4) // 2) * 8
       col_offset = (store_i_inner % 2) + (store_i_inner // 4) * 8

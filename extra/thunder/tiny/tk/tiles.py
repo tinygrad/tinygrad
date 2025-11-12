@@ -1,52 +1,45 @@
-import math
-from typing import cast, Callable
-from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
-from tinygrad.dtype import AddrSpace, PtrDType
-from tinygrad.helpers import getenv, prod
+from tinygrad.dtype import AddrSpace
 
 from extra.thunder.tiny.tk import WARP_THREADS
 
-class _Slots:
-  def __init__(self):
-    self.global_slot = 0
-    self.shared_slot = 0
-    self.register_slot = 0
-slots = _Slots()
+class GL:
+  def __init__(self, shape, dtype, ker):
+    self.shape, self.dtype = shape, dtype
+    self._uop = ker.alloc(shape, dtype, AddrSpace.GLOBAL)
 
-def gl(shape, dtype):
-  slots.global_slot += 1
-  return UOp.placeholder(shape, dtype, slot=slots.global_slot-1)
+class ST:
+  def __init__(self, shape, dtype, ker):
+    self.shape, self.dtype = shape, dtype
+    self._uop = ker.alloc(shape, dtype, AddrSpace.LOCAL)
 
-shared_slot = 0
-def st(shape, dtype):
-  slots.shared_slot += 1
-  return UOp.placeholder(shape, dtype, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot-1)
+class RT:
+  TILE_ROW_DIM, TILE_COL_DIM = 16, 16
+  BASE_TILE_NE = TILE_ROW_DIM * TILE_COL_DIM
+  BASE_TILE_NEPT = BASE_TILE_NE // WARP_THREADS
 
-TILE_ROW_DIM, TILE_COL_DIM = 16, 16
-RT_BASE_TILE_NE = TILE_ROW_DIM * TILE_COL_DIM
-RT_BASE_TILE_NEPT = RT_BASE_TILE_NE // WARP_THREADS
-register_slot = 0
-def rt(shape, dtype):
-  assert len(shape) == 2
+  def __init__(self, shape, dtype, ker):
+    assert len(shape) == 2
+    assert shape[0] % RT.TILE_ROW_DIM == 0
+    assert shape[1] % RT.TILE_COL_DIM == 0
 
-  height = shape[0] // TILE_ROW_DIM
-  width = shape[1] // TILE_COL_DIM
+    height = shape[0] // RT.TILE_ROW_DIM
+    width = shape[1] // RT.TILE_COL_DIM
 
-  slots.register_slot += 1
-  return UOp.placeholder((height, width, RT_BASE_TILE_NEPT), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)
+    self.shape, self.dtype = (height, width, self.BASE_TILE_NEPT), dtype
+    self._uop = ker.alloc(self.shape, dtype, AddrSpace.REG)
 
-def rv(length, dtype, layout="naive"):
-  tiles = length // TILE_ROW_DIM
-  match layout:
-    case "naive":
-      inner_dim = 1
-      outer_dim = (tiles + 1) // 2
-    case "ortho":
-      inner_dim = 1
-      outer_dim = tiles
-    case _: raise NotImplementedError(f"rv layout {layout} not implemented")
+class RV:
+  def __init__(self, length, dtype, layout, ker):
+    tiles = length // RT.TILE_ROW_DIM
 
-  slots.register_slot += 1
-  return UOp.placeholder((outer_dim, inner_dim, 2), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)
+    match layout:
+      case "naive":
+        inner_dim = 1
+        outer_dim = (tiles + 1) // 2
+      case "ortho":
+        inner_dim = 1
+        outer_dim = tiles
+      case _: raise NotImplementedError(f"rv layout {layout} not implemented")
+
+    self.shape, self.dtype = (outer_dim, inner_dim, 2), dtype
+    self._uop = ker.alloc(self.shape, dtype, AddrSpace.REG)
