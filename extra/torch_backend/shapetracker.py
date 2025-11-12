@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import functools
 from typing import Callable
 from tinygrad.helpers import merge_dicts, getenv
-from tinygrad.shape.view import View, unravel
+from .view import View, unravel
 from tinygrad.uop.symbolic import sym
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
 

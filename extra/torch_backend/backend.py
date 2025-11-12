@@ -5,7 +5,7 @@
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
-from tinygrad.shape.shapetracker import ShapeTracker, View
+from .shapetracker import ShapeTracker, View
 from enum import Enum, auto
 import os
 TORCH_DEBUG = getenv("TORCH_DEBUG")
