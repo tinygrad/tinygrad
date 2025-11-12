@@ -2,15 +2,13 @@
 # A001 Variable `input` is shadowing a Python builtin
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
-# ShapeTracker allows movement operations to a buffer that don't require a copy to be made.
 from __future__ import annotations
-from dataclasses import dataclass
 import functools
+import weakref
 from typing import Callable
 from tinygrad.helpers import merge_dicts, getenv
 from tinygrad.uop.symbolic import sym
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, Variable, sint, sint_to_uop, Context
-import functools, operator, itertools
 from dataclasses import dataclass
 from typing import cast, Sequence
 from tinygrad.dtype import dtypes
@@ -24,6 +22,7 @@ def canonicalize_strides(shape:tuple[sint, ...], strides:tuple[sint, ...]) -> tu
 @functools.cache
 def strides_for_shape(shape:tuple[sint, ...]) -> tuple[sint, ...]:
   if not shape: return ()
+  import itertools, operator
   strides = tuple(itertools.accumulate(reversed(shape[1:]), operator.mul, initial=1))[::-1]
   return canonicalize_strides(shape, strides)
 
@@ -294,6 +293,7 @@ class View:
 
 @functools.cache
 def views_to_valid_uop(views: tuple[View, ...], _idxs:tuple[UOp, ...]|None=None) -> UOp:
+  import itertools
   idx = views[-1].to_valid_uop(_idxs)
   for view in reversed(views[0:-1]):
     idx = view.to_valid_uop([sint_to_uop(i) for i in unravel(view.shape, idx)])
@@ -344,14 +344,17 @@ class ShapeTracker:
       return ShapeTracker(self.views[:-2] + (new_view,)).simplify()
     return self
 
+  def _with_last_view(self, fn: Callable[[View], View]) -> ShapeTracker:
+    return ShapeTracker(self.views[:-1] + (fn(self.views[-1]), ))
+
   # *** under this line are the movement ops ***
 
-  def pad(self, arg: tuple[tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].pad(arg), ))
-  def shrink(self, arg: tuple[tuple[sint, sint], ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].shrink(arg), ))
-  def expand(self, new_shape: tuple[sint, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].expand(new_shape), ))
-  def permute(self, axis: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].permute(axis), ))
-  def flip(self, mul: tuple[int, ...]) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].flip(mul), ))
-  def slice(self, dim:int, start:int, end:int, step:int) -> ShapeTracker: return ShapeTracker(self.views[0:-1] + (self.views[-1].slice(dim, start, end, step), ))
+  def pad(self, arg: tuple[tuple[sint, sint], ...]) -> ShapeTracker: return self._with_last_view(lambda v: v.pad(arg))
+  def shrink(self, arg: tuple[tuple[sint, sint], ...]) -> ShapeTracker: return self._with_last_view(lambda v: v.shrink(arg))
+  def expand(self, new_shape: tuple[sint, ...]) -> ShapeTracker: return self._with_last_view(lambda v: v.expand(new_shape))
+  def permute(self, axis: tuple[int, ...]) -> ShapeTracker: return self._with_last_view(lambda v: v.permute(axis))
+  def flip(self, mul: tuple[int, ...]) -> ShapeTracker: return self._with_last_view(lambda v: v.flip(mul))
+  def slice(self, dim:int, start:int, end:int, step:int) -> ShapeTracker: return self._with_last_view(lambda v: v.slice(dim, start, end, step))
 
   def reshape(self, new_shape: tuple[sint, ...]) -> ShapeTracker:
     if getenv("MERGE_VIEW", 1) and (new_view := self.views[-1].reshape(new_shape)) is not None: return ShapeTracker(self.views[0:-1] + (new_view,))
@@ -362,18 +365,9 @@ class ShapeTracker:
 mops: dict[Ops, Callable] = {Ops.RESHAPE: ShapeTracker.reshape, Ops.PERMUTE: ShapeTracker.permute, Ops.EXPAND: ShapeTracker.expand,
                              Ops.SHRINK: ShapeTracker.shrink, Ops.FLIP: ShapeTracker.flip, Ops.PAD: ShapeTracker.pad}
 
-
-
-
-
-
-
-
-
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
-from .shapetracker import ShapeTracker, View
 from enum import Enum, auto
 import os
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -426,46 +420,64 @@ def _get_view_ops(tensor: Tensor) -> tuple:
   return _ensure_view_tracking(tensor)._view_ops
 def _get_view_st(tensor: Tensor) -> ShapeTracker:
   return _ensure_view_tracking(tensor)._view_st
+
+def _apply_ops(target, ops: tuple, handlers: dict[str, Callable]):
+  ret = target
+  for op, args in ops:
+    handler = handlers.get(op)
+    if handler is None: raise ValueError(f"unknown view op {op}")
+    ret = handler(ret, args)
+  return ret
+
+def _expand_st(st: ShapeTracker, shape: tuple[int, ...]) -> ShapeTracker:
+  cur_shape = st.shape
+  if len(shape) != len(cur_shape):
+    added = (1,) * (len(shape) - len(cur_shape))
+    st = st.reshape(added + cur_shape)
+  return st.expand(shape)
+
+def _flip_axes(obj, flips):
+  axes = tuple(i for i, f in enumerate(flips) if f)
+  return obj.flip(axes) if axes else obj
+
+def _slice_view(st: ShapeTracker, args):
+  dim, start, end, step = args
+  return st.slice(dim, start, end, step)
+
+def _slice_tensor(tensor: Tensor, dim=0, start=None, end=None, step=1):
+  slices = [slice(None)] * tensor.ndim
+  slices[dim] = slice(start, end, step)
+  return tensor[tuple(slices)]
+
+_ST_VIEW_HANDLERS = {
+  "reshape": lambda st, shape: st.reshape(shape),
+  "expand": _expand_st,
+  "permute": lambda st, axis: st.permute(axis),
+  "pad": lambda st, arg: st.pad(arg),
+  "shrink": lambda st, arg: st.shrink(arg),
+  "flip": _flip_axes,
+  "slice": _slice_view,
+  "bitcast": lambda st, _: st,
+  "detach": lambda st, _: st,
+}
+
+_TENSOR_VIEW_HANDLERS = {
+  "reshape": lambda t, shape: t.reshape(shape),
+  "expand": lambda t, shape: t.expand(shape),
+  "permute": lambda t, axis: t.permute(axis),
+  "pad": lambda t, arg: t.pad(arg),
+  "shrink": lambda t, arg: t.shrink(arg),
+  "flip": _flip_axes,
+  "slice": lambda t, args: _slice_tensor(t, *args),
+  "bitcast": lambda t, dtype: t.bitcast(dtype),
+  "detach": lambda t, _: t.detach(),
+}
+
 def _apply_view_st(st: ShapeTracker, ops: tuple) -> ShapeTracker:
-  ret = st
-  for op,args in ops:
-    if op == "reshape": ret = ret.reshape(args)
-    elif op == "expand":
-      cur_shape = ret.shape
-      if len(args) != len(cur_shape):
-        added = (1,) * (len(args) - len(cur_shape))
-        ret = ret.reshape(added + cur_shape)
-      ret = ret.expand(args)
-    elif op == "permute": ret = ret.permute(args)
-    elif op == "pad": ret = ret.pad(args)
-    elif op == "shrink": ret = ret.shrink(args)
-    elif op == "flip":
-      axes = tuple(i for i,f in enumerate(args) if f)
-      ret = ret.flip(axes) if axes else ret
-    elif op == "slice":
-      dim, start, end, step = args
-      ret = ret.slice(dim, start, end, step)
-    elif op in ("bitcast", "detach"): continue
-    else: raise ValueError(f"unknown view op {op}")
-  return ret
+  return _apply_ops(st, ops, _ST_VIEW_HANDLERS)
+
 def _apply_view_ops(tensor: Tensor, ops: tuple) -> Tensor:
-  ret = tensor
-  for op,args in ops:
-    if op == "reshape": ret = ret.reshape(args)
-    elif op == "expand": ret = ret.expand(args)
-    elif op == "permute": ret = ret.permute(args)
-    elif op == "pad": ret = ret.pad(args)
-    elif op == "shrink": ret = ret.shrink(args)
-    elif op == "flip":
-      axes = tuple(i for i,f in enumerate(args) if f)
-      ret = ret.flip(axes) if axes else ret
-    elif op == "slice":
-      dim, start, end, step = args
-      ret = _slice_tensor(ret, dim, start, end, step)
-    elif op == "bitcast": ret = ret.bitcast(args)
-    elif op == "detach": ret = ret.detach()
-    else: raise ValueError(f"unknown view op {op}")
-  return ret
+  return _apply_ops(tensor, ops, _TENSOR_VIEW_HANDLERS)
 def wrap_view_op(_name, fn, recorder):
   def _wrap(*args,**kwargs):
     args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
@@ -504,10 +516,6 @@ def _record_select(parent, args, kwargs, ret):
   parent_shape = tuple(parent.shape)
   shrink_arg = tuple((idx, idx+1) if i == dim else (0, parent_shape[i]) for i in range(ndim))
   return (("shrink", shrink_arg), ("reshape", tuple(ret.shape)))
-def _slice_tensor(self, dim=0, start=None, end=None, step=1):
-  slices = [slice(None)] * self.ndim
-  slices[dim] = slice(start, end, step)
-  return self[tuple(slices)]
 def _record_slice(parent, args, kwargs, ret):
   _, *rest = args
   dim = kwargs.get("dim", rest[0] if len(rest) > 0 else 0)
