@@ -2,13 +2,31 @@
 import ctypes
 from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-class _anonstruct0(Struct): pass
-MCTP_HEADER = _anonstruct0
-class _anonstruct1(Struct): pass
-NVDM_PAYLOAD_COT = _anonstruct1
-class MESSAGE_QUEUE_INIT_ARGUMENTS(Struct): pass
-NvU64 = ctypes.c_uint64
+class MCTP_HEADER(Struct): pass
 NvU32 = ctypes.c_uint32
+NvU8 = ctypes.c_ubyte
+NvU16 = ctypes.c_uint16
+MCTP_HEADER._fields_ = [
+  ('constBlob', NvU32),
+  ('msgType', NvU8),
+  ('vendorId', NvU16),
+]
+class NVDM_PAYLOAD_COT(Struct): pass
+NvU64 = ctypes.c_uint64
+NVDM_PAYLOAD_COT._fields_ = [
+  ('version', NvU16),
+  ('size', NvU16),
+  ('gspFmcSysmemOffset', NvU64),
+  ('frtsSysmemOffset', NvU64),
+  ('frtsSysmemSize', NvU32),
+  ('frtsVidmemOffset', NvU64),
+  ('frtsVidmemSize', NvU32),
+  ('hash384', (NvU32 * 12)),
+  ('publicKey', (NvU32 * 96)),
+  ('signature', (NvU32 * 96)),
+  ('gspBootArgsSysmemOffset', NvU64),
+]
+class MESSAGE_QUEUE_INIT_ARGUMENTS(Struct): pass
 NvLength = ctypes.c_uint64
 MESSAGE_QUEUE_INIT_ARGUMENTS._fields_ = [
   ('sharedMemPhysAddr', NvU64),
@@ -78,20 +96,104 @@ struct_GSP_FMC_BOOT_PARAMS._fields_ = [
   ('gspSpdmParams', GSP_SPDM_PARAMS),
 ]
 GSP_FMC_BOOT_PARAMS = struct_GSP_FMC_BOOT_PARAMS
-class _anonstruct2(Struct): pass
-class _anonunion3(ctypes.Union): pass
-class _anonstruct4(Struct): pass
-class _anonstruct5(Struct): pass
-class _anonunion6(ctypes.Union): pass
-class _anonstruct7(Struct): pass
-class _anonstruct8(Struct): pass
-GspFwWprMeta = _anonstruct2
-class _anonstruct9(Struct): pass
-GspFwHeapFreeRegion = _anonstruct9
-class _anonstruct10(Struct): pass
-GspFwHeapFreeList = _anonstruct10
-class _anonstruct11(Struct): pass
-GspFwSRMeta = _anonstruct11
+class GspFwWprMeta(Struct): pass
+class GspFwWprMeta_0(ctypes.Union): pass
+class GspFwWprMeta_0_0(Struct): pass
+GspFwWprMeta_0_0._fields_ = [
+  ('sysmemAddrOfSignature', NvU64),
+  ('sizeOfSignature', NvU64),
+]
+class GspFwWprMeta_0_1(Struct): pass
+GspFwWprMeta_0_1._fields_ = [
+  ('gspFwHeapFreeListWprOffset', NvU32),
+  ('unused0', NvU32),
+  ('unused1', NvU64),
+]
+GspFwWprMeta_0._anonymous_ = ['_0', '_1']
+GspFwWprMeta_0._fields_ = [
+  ('_0', GspFwWprMeta_0_0),
+  ('_1', GspFwWprMeta_0_1),
+]
+class GspFwWprMeta_1(ctypes.Union): pass
+class GspFwWprMeta_1_0(Struct): pass
+GspFwWprMeta_1_0._fields_ = [
+  ('partitionRpcAddr', NvU64),
+  ('partitionRpcRequestOffset', NvU16),
+  ('partitionRpcReplyOffset', NvU16),
+  ('elfCodeOffset', NvU32),
+  ('elfDataOffset', NvU32),
+  ('elfCodeSize', NvU32),
+  ('elfDataSize', NvU32),
+  ('lsUcodeVersion', NvU32),
+]
+class GspFwWprMeta_1_1(Struct): pass
+GspFwWprMeta_1_1._fields_ = [
+  ('partitionRpcPadding', (NvU32 * 4)),
+  ('sysmemAddrOfCrashReportQueue', NvU64),
+  ('sizeOfCrashReportQueue', NvU32),
+  ('lsUcodeVersionPadding', (NvU32 * 1)),
+]
+GspFwWprMeta_1._anonymous_ = ['_0', '_1']
+GspFwWprMeta_1._fields_ = [
+  ('_0', GspFwWprMeta_1_0),
+  ('_1', GspFwWprMeta_1_1),
+]
+GspFwWprMeta._anonymous_ = ['_0', '_1']
+GspFwWprMeta._fields_ = [
+  ('magic', NvU64),
+  ('revision', NvU64),
+  ('sysmemAddrOfRadix3Elf', NvU64),
+  ('sizeOfRadix3Elf', NvU64),
+  ('sysmemAddrOfBootloader', NvU64),
+  ('sizeOfBootloader', NvU64),
+  ('bootloaderCodeOffset', NvU64),
+  ('bootloaderDataOffset', NvU64),
+  ('bootloaderManifestOffset', NvU64),
+  ('_0', GspFwWprMeta_0),
+  ('gspFwRsvdStart', NvU64),
+  ('nonWprHeapOffset', NvU64),
+  ('nonWprHeapSize', NvU64),
+  ('gspFwWprStart', NvU64),
+  ('gspFwHeapOffset', NvU64),
+  ('gspFwHeapSize', NvU64),
+  ('gspFwOffset', NvU64),
+  ('bootBinOffset', NvU64),
+  ('frtsOffset', NvU64),
+  ('frtsSize', NvU64),
+  ('gspFwWprEnd', NvU64),
+  ('fbSize', NvU64),
+  ('vgaWorkspaceOffset', NvU64),
+  ('vgaWorkspaceSize', NvU64),
+  ('bootCount', NvU64),
+  ('_1', GspFwWprMeta_1),
+  ('gspFwHeapVfPartitionCount', NvU8),
+  ('flags', NvU8),
+  ('padding', (NvU8 * 2)),
+  ('pmuReservedSize', NvU32),
+  ('verified', NvU64),
+]
+class GspFwHeapFreeRegion(Struct): pass
+GspFwHeapFreeRegion._fields_ = [
+  ('offs', NvU32),
+  ('length', NvU32),
+]
+class GspFwHeapFreeList(Struct): pass
+GspFwHeapFreeList._fields_ = [
+  ('magic', NvU64),
+  ('nregions', NvU32),
+  ('regions', (GspFwHeapFreeRegion * 128)),
+]
+class GspFwSRMeta(Struct): pass
+GspFwSRMeta._fields_ = [
+  ('magic', NvU64),
+  ('revision', NvU64),
+  ('sysmemAddrOfSuspendResumeData', NvU64),
+  ('sizeOfSuspendResumeData', NvU64),
+  ('internal', (NvU32 * 32)),
+  ('flags', NvU32),
+  ('subrevision', NvU32),
+  ('padding', (NvU32 * 22)),
+]
 class RM_RISCV_UCODE_DESC(Struct): pass
 RM_RISCV_UCODE_DESC._fields_ = [
   ('version', NvU32),
@@ -425,7 +527,7 @@ NV_VGPU_MSG_EVENT_FECS_ERROR = rpc_events.define('NV_VGPU_MSG_EVENT_FECS_ERROR',
 NV_VGPU_MSG_EVENT_RECOVERY_ACTION = rpc_events.define('NV_VGPU_MSG_EVENT_RECOVERY_ACTION', 4130)
 NV_VGPU_MSG_EVENT_NUM_EVENTS = rpc_events.define('NV_VGPU_MSG_EVENT_NUM_EVENTS', 4131)
 
-LibosAddress = ctypes.c_int32
+LibosAddress = ctypes.c_uint64
 LibosMemoryRegionKind = CEnum(ctypes.c_uint32)
 LIBOS_MEMORY_REGION_NONE = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_NONE', 0)
 LIBOS_MEMORY_REGION_CONTIGUOUS = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_CONTIGUOUS', 1)
@@ -436,8 +538,14 @@ LIBOS_MEMORY_REGION_LOC_NONE = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_
 LIBOS_MEMORY_REGION_LOC_SYSMEM = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_SYSMEM', 1)
 LIBOS_MEMORY_REGION_LOC_FB = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_FB', 2)
 
-class _anonstruct12(Struct): pass
-LibosMemoryRegionInitArgument = _anonstruct12
+class LibosMemoryRegionInitArgument(Struct): pass
+LibosMemoryRegionInitArgument._fields_ = [
+  ('id8', LibosAddress),
+  ('pa', LibosAddress),
+  ('size', LibosAddress),
+  ('kind', NvU8),
+  ('loc', NvU8),
+]
 class msgqTxHeader(Struct): pass
 msgqTxHeader._fields_ = [
   ('version', NvU32),
@@ -454,7 +562,6 @@ msgqRxHeader._fields_ = [
   ('readPtr', NvU32),
 ]
 class msgqMetadata(Struct): pass
-NvU8 = ctypes.c_ubyte
 msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_void_p)
 msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p)
 msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32)
@@ -503,7 +610,6 @@ struct_rpc_set_guest_system_info_v03_00._fields_ = [
 rpc_set_guest_system_info_v03_00 = struct_rpc_set_guest_system_info_v03_00
 rpc_set_guest_system_info_v = struct_rpc_set_guest_system_info_v03_00
 class struct_rpc_set_guest_system_info_ext_v15_02(Struct): pass
-NvU16 = ctypes.c_uint16
 struct_rpc_set_guest_system_info_ext_v15_02._fields_ = [
   ('guestDriverBranch', (ctypes.c_char * 256)),
   ('domain', NvU32),
@@ -3942,11 +4048,33 @@ struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02._fields_ = [
 rpc_ctrl_subdevice_get_libos_heap_stats_v29_02 = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 rpc_ctrl_subdevice_get_libos_heap_stats_v = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 class struct_GSP_MSG_QUEUE_ELEMENT(Struct): pass
+struct_GSP_MSG_QUEUE_ELEMENT._fields_ = [
+  ('authTagBuffer', (NvU8 * 16)),
+  ('aadBuffer', (NvU8 * 16)),
+  ('checkSum', NvU32),
+  ('seqNum', NvU32),
+  ('elemCount', NvU32),
+  ('padding', NvU32),
+]
 GSP_MSG_QUEUE_ELEMENT = struct_GSP_MSG_QUEUE_ELEMENT
 class union_rpc_message_rpc_union_field_v03_00(ctypes.Union): pass
+union_rpc_message_rpc_union_field_v03_00._fields_ = [
+  ('spare', NvU32),
+  ('cpuRmGfid', NvU32),
+]
 rpc_message_rpc_union_field_v03_00 = union_rpc_message_rpc_union_field_v03_00
 rpc_message_rpc_union_field_v = union_rpc_message_rpc_union_field_v03_00
 class struct_rpc_message_header_v03_00(Struct): pass
+struct_rpc_message_header_v03_00._fields_ = [
+  ('header_version', NvU32),
+  ('signature', NvU32),
+  ('length', NvU32),
+  ('function', NvU32),
+  ('rpc_result', NvU32),
+  ('rpc_result_private', NvU32),
+  ('sequence', NvU32),
+  ('u', rpc_message_rpc_union_field_v),
+]
 rpc_message_header_v03_00 = struct_rpc_message_header_v03_00
 rpc_message_header_v = struct_rpc_message_header_v03_00
 class struct_PACKED_REGISTRY_ENTRY(Struct): pass
@@ -4347,15 +4475,41 @@ struct_GspSystemInfo._fields_ = [
   ('hostPageSize', NvU64),
 ]
 GspSystemInfo = struct_GspSystemInfo
-class _anonstruct13(Struct): pass
-_anonstruct13._packed_ = True
-FALCON_APPLICATION_INTERFACE_HEADER_V1 = _anonstruct13
-class _anonstruct14(Struct): pass
-_anonstruct14._packed_ = True
-FALCON_APPLICATION_INTERFACE_ENTRY_V1 = _anonstruct14
-class _anonstruct15(Struct): pass
-_anonstruct15._packed_ = True
-FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3 = _anonstruct15
+class FALCON_APPLICATION_INTERFACE_HEADER_V1(Struct): pass
+FALCON_APPLICATION_INTERFACE_HEADER_V1._packed_ = True
+FALCON_APPLICATION_INTERFACE_HEADER_V1._fields_ = [
+  ('version', NvU8),
+  ('headerSize', NvU8),
+  ('entrySize', NvU8),
+  ('entryCount', NvU8),
+]
+class FALCON_APPLICATION_INTERFACE_ENTRY_V1(Struct): pass
+FALCON_APPLICATION_INTERFACE_ENTRY_V1._packed_ = True
+FALCON_APPLICATION_INTERFACE_ENTRY_V1._fields_ = [
+  ('id', NvU32),
+  ('dmemOffset', NvU32),
+]
+class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3(Struct): pass
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._packed_ = True
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._fields_ = [
+  ('signature', NvU32),
+  ('version', NvU16),
+  ('size', NvU16),
+  ('cmd_in_buffer_offset', NvU32),
+  ('cmd_in_buffer_size', NvU32),
+  ('cmd_out_buffer_offset', NvU32),
+  ('cmd_out_buffer_size', NvU32),
+  ('nvf_img_data_buffer_offset', NvU32),
+  ('nvf_img_data_buffer_size', NvU32),
+  ('printfBufferHdr', NvU32),
+  ('ucode_build_time_stamp', NvU32),
+  ('ucode_signature', NvU32),
+  ('init_cmd', NvU32),
+  ('ucode_feature', NvU32),
+  ('ucode_cmd_mask0', NvU32),
+  ('ucode_cmd_mask1', NvU32),
+  ('multiTgtTbl', NvU32),
+]
 class struct_BIT_HEADER_V1_00(Struct): pass
 struct_BIT_HEADER_V1_00._packed_ = True
 struct_BIT_HEADER_V1_00._fields_ = [
@@ -4427,28 +4581,82 @@ FALCON_UCODE_DESC_V3._fields_ = [
   ('SignatureVersions', ctypes.c_uint16),
   ('Reserved', ctypes.c_uint16),
 ]
-class _anonstruct16(Struct): pass
-_anonstruct16._packed_ = True
-FWSECLIC_READ_VBIOS_DESC = _anonstruct16
-class _anonstruct17(Struct): pass
-_anonstruct17._packed_ = True
-FWSECLIC_FRTS_REGION_DESC = _anonstruct17
-class _anonstruct18(Struct): pass
-_anonstruct18._packed_ = True
-FWSECLIC_FRTS_CMD = _anonstruct18
+class FWSECLIC_READ_VBIOS_DESC(Struct): pass
+FWSECLIC_READ_VBIOS_DESC._packed_ = True
+FWSECLIC_READ_VBIOS_DESC._fields_ = [
+  ('version', NvU32),
+  ('size', NvU32),
+  ('gfwImageOffset', NvU64),
+  ('gfwImageSize', NvU32),
+  ('flags', NvU32),
+]
+class FWSECLIC_FRTS_REGION_DESC(Struct): pass
+FWSECLIC_FRTS_REGION_DESC._packed_ = True
+FWSECLIC_FRTS_REGION_DESC._fields_ = [
+  ('version', NvU32),
+  ('size', NvU32),
+  ('frtsRegionOffset4K', NvU32),
+  ('frtsRegionSize', NvU32),
+  ('frtsRegionMediaType', NvU32),
+]
+class FWSECLIC_FRTS_CMD(Struct): pass
+FWSECLIC_FRTS_CMD._packed_ = True
+FWSECLIC_FRTS_CMD._fields_ = [
+  ('readVbiosDesc', FWSECLIC_READ_VBIOS_DESC),
+  ('frtsRegionDesc', FWSECLIC_FRTS_REGION_DESC),
+]
 class struct__PCI_EXP_ROM_STANDARD(Struct): pass
+struct__PCI_EXP_ROM_STANDARD._fields_ = [
+  ('sig', NvU16),
+  ('reserved', (NvU8 * 22)),
+  ('pciDataStrucPtr', NvU16),
+  ('sizeOfBlock', NvU32),
+]
 PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD
 PPCI_EXP_ROM_STANDARD = ctypes.POINTER(struct__PCI_EXP_ROM_STANDARD)
 class struct__PCI_EXP_ROM_NBSI(Struct): pass
+struct__PCI_EXP_ROM_NBSI._fields_ = [
+  ('sig', NvU16),
+  ('reserved', (NvU8 * 20)),
+  ('nbsiDataOffset', NvU16),
+  ('pciDataStrucPtr', NvU16),
+  ('sizeOfBlock', NvU32),
+]
 PCI_EXP_ROM_NBSI = struct__PCI_EXP_ROM_NBSI
 PPCI_EXP_ROM_NBSI = ctypes.POINTER(struct__PCI_EXP_ROM_NBSI)
 class union__PCI_EXP_ROM(ctypes.Union): pass
+union__PCI_EXP_ROM._fields_ = [
+  ('standard', PCI_EXP_ROM_STANDARD),
+  ('nbsi', PCI_EXP_ROM_NBSI),
+]
 PCI_EXP_ROM = union__PCI_EXP_ROM
 PPCI_EXP_ROM = ctypes.POINTER(union__PCI_EXP_ROM)
 class struct__PCI_DATA_STRUCT(Struct): pass
+struct__PCI_DATA_STRUCT._fields_ = [
+  ('sig', NvU32),
+  ('vendorID', NvU16),
+  ('deviceID', NvU16),
+  ('deviceListPtr', NvU16),
+  ('pciDataStructLen', NvU16),
+  ('pciDataStructRev', NvU8),
+  ('classCode', (NvU8 * 3)),
+  ('imageLen', NvU16),
+  ('vendorRomRev', NvU16),
+  ('codeType', NvU8),
+  ('lastImage', NvU8),
+  ('maxRunTimeImageLen', NvU16),
+]
 PCI_DATA_STRUCT = struct__PCI_DATA_STRUCT
 PPCI_DATA_STRUCT = ctypes.POINTER(struct__PCI_DATA_STRUCT)
 class struct__NV_PCI_DATA_EXT_STRUCT(Struct): pass
+struct__NV_PCI_DATA_EXT_STRUCT._fields_ = [
+  ('signature', NvU32),
+  ('nvPciDataExtRev', NvU16),
+  ('nvPciDataExtLen', NvU16),
+  ('subimageLen', NvU16),
+  ('privLastImage', NvU8),
+  ('flags', NvU8),
+]
 NV_PCI_DATA_EXT_STRUCT = struct__NV_PCI_DATA_EXT_STRUCT
 PNV_PCI_DATA_EXT_STRUCT = ctypes.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0

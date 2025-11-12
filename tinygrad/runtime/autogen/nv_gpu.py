@@ -45,60 +45,154 @@ struct_NV2080_ALLOC_PARAMETERS._fields_ = [
 ]
 NV2080_ALLOC_PARAMETERS = struct_NV2080_ALLOC_PARAMETERS
 class struct__cl2080_tag0(Struct): pass
+struct__cl2080_tag0._fields_ = [
+  ('Reserved00', (NvV32 * 1984)),
+]
 class volatile_struct__cl2080_tag0(Struct): pass
 Nv2080Typedef = volatile_struct__cl2080_tag0
+volatile_struct__cl2080_tag0._fields_ = [
+  ('Reserved00', (NvV32 * 1984)),
+]
 Nv20Subdevice0 = volatile_struct__cl2080_tag0
 class struct_Nv2080HdcpStatusChangeNotificationRec(Struct): pass
+struct_Nv2080HdcpStatusChangeNotificationRec._fields_ = [
+  ('displayId', NvU32),
+  ('hdcpStatusChangeNotif', NvU32),
+]
 Nv2080HdcpStatusChangeNotification = struct_Nv2080HdcpStatusChangeNotificationRec
 class struct_Nv2080PStateChangeNotificationRec(Struct): pass
-class _anonstruct2(Struct): pass
+class struct_Nv2080PStateChangeNotificationRec_timeStamp(Struct): pass
+struct_Nv2080PStateChangeNotificationRec_timeStamp._fields_ = [
+  ('nanoseconds', (NvU32 * 2)),
+]
+struct_Nv2080PStateChangeNotificationRec._fields_ = [
+  ('timeStamp', struct_Nv2080PStateChangeNotificationRec_timeStamp),
+  ('NewPstate', NvU32),
+]
 Nv2080PStateChangeNotification = struct_Nv2080PStateChangeNotificationRec
 class struct_Nv2080ClocksChangeNotificationRec(Struct): pass
-class _anonstruct3(Struct): pass
+class struct_Nv2080ClocksChangeNotificationRec_timeStamp(Struct): pass
+struct_Nv2080ClocksChangeNotificationRec_timeStamp._fields_ = [
+  ('nanoseconds', (NvU32 * 2)),
+]
+struct_Nv2080ClocksChangeNotificationRec._fields_ = [
+  ('timeStamp', struct_Nv2080ClocksChangeNotificationRec_timeStamp),
+]
 Nv2080ClocksChangeNotification = struct_Nv2080ClocksChangeNotificationRec
 class struct_Nv2080WorkloadModulationChangeNotificationRec(Struct): pass
-class _anonstruct4(Struct): pass
+class struct_Nv2080WorkloadModulationChangeNotificationRec_timeStamp(Struct): pass
+struct_Nv2080WorkloadModulationChangeNotificationRec_timeStamp._fields_ = [
+  ('nanoseconds', (NvU32 * 2)),
+]
+NvBool = ctypes.c_ubyte
+struct_Nv2080WorkloadModulationChangeNotificationRec._fields_ = [
+  ('timeStamp', struct_Nv2080WorkloadModulationChangeNotificationRec_timeStamp),
+  ('WorkloadModulationEnabled', NvBool),
+]
 Nv2080WorkloadModulationChangeNotification = struct_Nv2080WorkloadModulationChangeNotificationRec
-class _anonstruct5(Struct): pass
-Nv2080HotplugNotification = _anonstruct5
-class _anonstruct6(Struct): pass
-Nv2080PowerEventNotification = _anonstruct6
+class Nv2080HotplugNotification(Struct): pass
+Nv2080HotplugNotification._fields_ = [
+  ('plugDisplayMask', NvU32),
+  ('unplugDisplayMask', NvU32),
+]
+class Nv2080PowerEventNotification(Struct): pass
+Nv2080PowerEventNotification._fields_ = [
+  ('bSwitchToAC', NvBool),
+  ('bGPUCapabilityChanged', NvBool),
+  ('displayMaskAffected', NvU32),
+]
 class struct_Nv2080DpIrqNotificationRec(Struct): pass
+struct_Nv2080DpIrqNotificationRec._fields_ = [
+  ('displayId', NvU32),
+]
 Nv2080DpIrqNotification = struct_Nv2080DpIrqNotificationRec
 class struct_Nv2080DstateXusbPpcNotificationRec(Struct): pass
+struct_Nv2080DstateXusbPpcNotificationRec._fields_ = [
+  ('dstateXusb', NvU32),
+  ('dstatePpc', NvU32),
+]
 Nv2080DstateXusbPpcNotification = struct_Nv2080DstateXusbPpcNotificationRec
 class struct_Nv2080XusbPpcConnectStateNotificationRec(Struct): pass
+struct_Nv2080XusbPpcConnectStateNotificationRec._fields_ = [
+  ('bConnected', NvBool),
+]
 Nv2080XusbPpcConnectStateNotification = struct_Nv2080XusbPpcConnectStateNotificationRec
 class struct_Nv2080ACPIEvent(Struct): pass
+struct_Nv2080ACPIEvent._fields_ = [
+  ('event', NvU32),
+]
 Nv2080ACPIEvent = struct_Nv2080ACPIEvent
 class struct__NV2080_COOLER_DIAG_ZONE_NOTIFICATION_REC(Struct): pass
+struct__NV2080_COOLER_DIAG_ZONE_NOTIFICATION_REC._fields_ = [
+  ('currentZone', NvU32),
+]
 NV2080_COOLER_DIAG_ZONE_NOTIFICATION_REC = struct__NV2080_COOLER_DIAG_ZONE_NOTIFICATION_REC
 class struct__NV2080_THERM_DIAG_ZONE_NOTIFICATION_REC(Struct): pass
+struct__NV2080_THERM_DIAG_ZONE_NOTIFICATION_REC._fields_ = [
+  ('currentZone', NvU32),
+]
 NV2080_THERM_DIAG_ZONE_NOTIFICATION_REC = struct__NV2080_THERM_DIAG_ZONE_NOTIFICATION_REC
 class struct_Nv2080AudioHdcpRequestRec(Struct): pass
+struct_Nv2080AudioHdcpRequestRec._fields_ = [
+  ('displayId', NvU32),
+  ('requestedState', NvU32),
+]
 Nv2080AudioHdcpRequest = struct_Nv2080AudioHdcpRequestRec
 class struct_Nv2080GC5GpuReadyParams(Struct): pass
+struct_Nv2080GC5GpuReadyParams._fields_ = [
+  ('event', NvU32),
+  ('sciIntr0', NvU32),
+  ('sciIntr1', NvU32),
+]
 Nv2080GC5GpuReadyParams = struct_Nv2080GC5GpuReadyParams
-class _anonstruct7(Struct): pass
-Nv2080PrivRegAccessFaultNotification = _anonstruct7
+class Nv2080PrivRegAccessFaultNotification(Struct): pass
+Nv2080PrivRegAccessFaultNotification._fields_ = [
+  ('errAddr', NvU32),
+]
 class struct_Nv2080DstateHdaCodecNotificationRec(Struct): pass
+struct_Nv2080DstateHdaCodecNotificationRec._fields_ = [
+  ('dstateHdaCodec', NvU32),
+]
 Nv2080DstateHdaCodecNotification = struct_Nv2080DstateHdaCodecNotificationRec
 class struct_Nv2080HdmiFrlRequestNotificationRec(Struct): pass
+struct_Nv2080HdmiFrlRequestNotificationRec._fields_ = [
+  ('displayId', NvU32),
+]
 Nv2080HdmiFrlRequestNotification = struct_Nv2080HdmiFrlRequestNotificationRec
 class struct__NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS(Struct): pass
+NvU8 = ctypes.c_ubyte
+struct__NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS._fields_ = [
+  ('platformPowerModeIndex', NvU8),
+  ('platformPowerModeMask', NvU8),
+  ('eventReason', NvU8),
+]
 NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS = struct__NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS
 class struct__NV2080_NOTIFIERS_USE_GC6_REDUCED_THRESHOLD_UPDATE(Struct): pass
+struct__NV2080_NOTIFIERS_USE_GC6_REDUCED_THRESHOLD_UPDATE._fields_ = [
+  ('workloadType', NvU8),
+]
 NV2080_NOTIFIERS_USE_GC6_REDUCED_THRESHOLD_UPDATE = struct__NV2080_NOTIFIERS_USE_GC6_REDUCED_THRESHOLD_UPDATE
-class _anonstruct8(Struct): pass
-Nv2080QosIntrNotification = _anonstruct8
-class _anonstruct9(Struct): pass
-Nv2080EccDbeNotification = _anonstruct9
-class _anonstruct10(Struct): pass
-Nv2080LpwrDifrPrefetchNotification = _anonstruct10
-class _anonstruct11(Struct): pass
-Nv2080NvlinkLnkChangeNotification = _anonstruct11
-class _anonstruct12(Struct): pass
-Nv2080VrrSetTimeoutNotification = _anonstruct12
+class Nv2080QosIntrNotification(Struct): pass
+Nv2080QosIntrNotification._fields_ = [
+  ('engineType', NvU32),
+]
+class Nv2080EccDbeNotification(Struct): pass
+Nv2080EccDbeNotification._fields_ = [
+  ('physAddress', NvU64),
+]
+class Nv2080LpwrDifrPrefetchNotification(Struct): pass
+Nv2080LpwrDifrPrefetchNotification._fields_ = [
+  ('l2CacheSize', NvU32),
+]
+class Nv2080NvlinkLnkChangeNotification(Struct): pass
+Nv2080NvlinkLnkChangeNotification._fields_ = [
+  ('GpuId', NvU32),
+  ('linkId', NvU32),
+]
+class Nv2080VrrSetTimeoutNotification(Struct): pass
+Nv2080VrrSetTimeoutNotification._fields_ = [
+  ('head', NvU32),
+]
 class struct_Nvc56fControl_struct(Struct): pass
 struct_Nvc56fControl_struct._fields_ = [
   ('Ignored00', (NvU32 * 16)),
@@ -138,12 +232,56 @@ volatile_struct_Nvc56fControl_struct._fields_ = [
 ]
 AmpereAControlGPFifo = volatile_struct_Nvc56fControl_struct
 class struct_Nvc86fControl_struct(Struct): pass
+struct_Nvc86fControl_struct._fields_ = [
+  ('Ignored00', (NvU32 * 16)),
+  ('Put', NvU32),
+  ('Get', NvU32),
+  ('Reference', NvU32),
+  ('PutHi', NvU32),
+  ('Ignored01', (NvU32 * 2)),
+  ('TopLevelGet', NvU32),
+  ('TopLevelGetHi', NvU32),
+  ('GetHi', NvU32),
+  ('Ignored02', (NvU32 * 7)),
+  ('Ignored03', NvU32),
+  ('Ignored04', (NvU32 * 1)),
+  ('GPGet', NvU32),
+  ('GPPut', NvU32),
+  ('Ignored05', (NvU32 * 92)),
+]
 class volatile_struct_Nvc86fControl_struct(Struct): pass
 Nvc86fControl = volatile_struct_Nvc86fControl_struct
+volatile_struct_Nvc86fControl_struct._fields_ = [
+  ('Ignored00', (NvU32 * 16)),
+  ('Put', NvU32),
+  ('Get', NvU32),
+  ('Reference', NvU32),
+  ('PutHi', NvU32),
+  ('Ignored01', (NvU32 * 2)),
+  ('TopLevelGet', NvU32),
+  ('TopLevelGetHi', NvU32),
+  ('GetHi', NvU32),
+  ('Ignored02', (NvU32 * 7)),
+  ('Ignored03', NvU32),
+  ('Ignored04', (NvU32 * 1)),
+  ('GPGet', NvU32),
+  ('GPPut', NvU32),
+  ('Ignored05', (NvU32 * 92)),
+]
 HopperAControlGPFifo = volatile_struct_Nvc86fControl_struct
 class struct_Nvc96fControl_struct(Struct): pass
+struct_Nvc96fControl_struct._fields_ = [
+  ('Ignored00', (NvU32 * 35)),
+  ('GPPut', NvU32),
+  ('Ignored01', (NvU32 * 92)),
+]
 class volatile_struct_Nvc96fControl_struct(Struct): pass
 Nvc96fControl = volatile_struct_Nvc96fControl_struct
+volatile_struct_Nvc96fControl_struct._fields_ = [
+  ('Ignored00', (NvU32 * 35)),
+  ('GPPut', NvU32),
+  ('Ignored01', (NvU32 * 92)),
+]
 BlackwellAControlGPFifo = volatile_struct_Nvc96fControl_struct
 class struct_NV83DE_ALLOC_PARAMETERS(Struct): pass
 struct_NV83DE_ALLOC_PARAMETERS._fields_ = [
@@ -326,7 +464,6 @@ class UVM_REGION_COMMIT_PARAMS(Struct): pass
 UvmStream = ctypes.c_uint64
 class struct_nv_uuid(Struct): pass
 NvProcessorUuid = struct_nv_uuid
-NvU8 = ctypes.c_ubyte
 struct_nv_uuid._fields_ = [
   ('uuid', (NvU8 * 16)),
 ]
@@ -555,7 +692,6 @@ UVM_MEM_MAP_PARAMS._fields_ = [
   ('rmStatus', NV_STATUS),
 ]
 class UVM_DEBUG_ACCESS_MEMORY_PARAMS(Struct): pass
-NvBool = ctypes.c_ubyte
 UVM_DEBUG_ACCESS_MEMORY_PARAMS._fields_ = [
   ('sessionIndex', NvS32),
   ('baseAddress', NvU64),
