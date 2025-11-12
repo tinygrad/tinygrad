@@ -144,7 +144,7 @@ class BufferXfer(BufferCopy):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, type, bytes, tuple[int, ...], bool], CompiledRunner] = {}
+method_cache: dict[tuple[str, type, int, tuple[int, ...], bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
   context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
