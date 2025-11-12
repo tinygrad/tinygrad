@@ -242,7 +242,7 @@ def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_count
 
 @functools.cache
 def lines(fn) -> list[str]:
-  with open(fn) as f: return f.readlines()
+  with open(fn, encoding="utf-8") as f: return f.readlines()
 
 def printable(loc:tuple[str, int]) -> str:
   try: return lines(loc[0])[loc[1]-1].strip()
