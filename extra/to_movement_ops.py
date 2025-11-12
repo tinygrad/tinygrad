@@ -30,13 +30,8 @@ def make_scratch_st(st: ShapeTracker) -> ShapeTracker:
   return ShapeTracker.from_shape((get_buffer_size(st.views[0].shape, st.views[0].strides, st.views[0].offset, st.views[0].mask),))
 
 # ShapeTracker to an equivalent series of MovementOps (https://github.com/tinygrad/tinygrad/pull/2216)
-def to_movement_ops(t: Tensor) -> List[Tuple[MovementOps, Tuple]]:
+def to_movement_ops(st: ShapeTracker) -> List[Tuple[MovementOps, Tuple]]:
   to_apply:List[Tuple[MovementOps, Tuple]] = []
-  t = t.uop.base
-  shape_stride = list(zip(shape, stride))
-  order = sorted(range(len(stride)), key=lambda i: (-stride[i], -shape[i]))
-  ordered_pairs = [shape_stride[i] for i in order]
-  buffer_size = sum([(shape[i]-1)*stride[i] for i in range(len(shape))]) + 1
   for i, v in enumerate(st.views):
     real_shape = tuple(y-x for x,y in v.mask) if v.mask else v.shape
     offset = (v.offset or 0) + sum(st*(s-1) for s,st in zip(real_shape, v.strides) if st<0)
