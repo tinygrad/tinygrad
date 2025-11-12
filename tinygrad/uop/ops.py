@@ -131,8 +131,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(*new_args)
   def rtag(self, tag=True): return self.replace(tag=tag)
   @functools.cached_property
-  def key(self) -> bytes:
-    return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
+  def key(self) -> int:
+    return hash((self.op, self.dtype, self.arg, tuple(s.key for s in self.src)))
   def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=(%s))")
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
