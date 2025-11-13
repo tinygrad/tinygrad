@@ -61,7 +61,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/pyproject.toml') }}-${{ env.PYTHON_CACHE_VERSION }}
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/pyproject.toml') }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -70,13 +70,13 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+        key: downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
       with:
         path: ~/Library/Caches/tinygrad/downloads/
-        key: osx-downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+        key: osx-downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
 
     # **** Python deps ****
 
@@ -187,7 +187,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives/
-        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.APT_CACHE_VERSION }}
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
@@ -247,7 +247,7 @@ runs:
         cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.BUILD_CACHE_VERSION }}
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
     - name: Clone/compile gpuocelot
       if: inputs.ocelot == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
