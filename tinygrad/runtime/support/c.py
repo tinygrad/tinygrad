@@ -1,6 +1,7 @@
 import ctypes, functools, sys
 from typing import TYPE_CHECKING
 from tinygrad.helpers import flatten
+from _ctypes import _SimpleCData
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   import tinygrad.runtime.support.hcq as hcq, fcntl
@@ -56,8 +57,8 @@ else:
       for nm, ty, bf in [(f[0], f[1], f[2] if len(f) == 3 else 0) for f in fields]:
         if bf == 0: offset = (offset + 7) & ~7
         mask = (1 << (sz:=ctypes.sizeof(ty)*8 if bf == 0 else bf)) - 1
-        def fget(self, mask, off, ty): return (ty.from_buffer(memoryview(self._data)[(st:=off//8):st+ctypes.sizeof(ty)])
-                                               if issubclass(ty, ctypes.Structure) else (int.from_bytes(self._data, sys.byteorder)>>off)&mask)
+        def fget(self, mask, off, ty): return ((int.from_bytes(self._data, sys.byteorder)>>off)&mask if issubclass(ty, _SimpleCData) else
+                                               ty.from_buffer(memoryview(self._data)[(st:=off//8):st+ctypes.sizeof(ty)]))
         def fset(self, val, mask, off): self._data[:] = (((int.from_bytes(self._data, sys.byteorder) & ~(mask<<off))|((val&mask)<<off))
                                                               .to_bytes(len(self._data), sys.byteorder))
         setattr(cls, nm, property(functools.partial(fget, mask=mask, off=offset, ty=ty), functools.partial(fset, mask=mask, off=offset)))
