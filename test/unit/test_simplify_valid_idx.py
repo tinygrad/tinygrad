@@ -5,16 +5,17 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.symbolic import simplify_valid
 from tinygrad.helpers import Context
+from test.unit.test_uop_symbolic import check_uop_against_string
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
-    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx.valid(valid)),
+    UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), arg=0).index(idx.valid(valid), ptr=True),
     UOp.const(dtypes.float, 0.0)
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.index.vec(2), idx).valid(valid)),
+    UOp(Ops.DEFINE_GLOBAL, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.index.vec(2), idx).valid(valid), ptr=True),
     UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
@@ -40,17 +41,17 @@ class TestHelpers(unittest.TestCase):
     self.assertTrue(f2.is_increasing())
     self.assertTrue(f3.is_increasing())
 
-    rng = UOp(Ops.RANGE, dtypes.int, arg=(2, True), src=(UOp(Ops.CONST, dtypes.int, arg=5, src=()),))
+    rng = UOp.range(5, 2)
     self.assertTrue(rng.is_increasing())
     self.assertTrue((rng+2).is_increasing())
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
-    with Context(NOOPT=1):
+    with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(load.sink()).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
-    self.assertEqual(idx.render(simplify=False), sidx)
-    self.assertEqual(valid.render(simplify=False), svalid)
+    check_uop_against_string(self, idx, sidx)
+    check_uop_against_string(self, valid, svalid)
 
   def test_cumsum(self):
     gidx0 = Special("gidx0", 5)
@@ -186,13 +187,13 @@ class TestValidIdxSimplification(unittest.TestCase):
     print("The expressions are not equivalent.")
     print(s.model())
 
-  @unittest.expectedFailure  # TODO: improve uop_given_valid
   def test_valid_becomes_const2(self):
     ridx0 = Range(0, 4)
     ridx1 = Range(1, 4)
     ridx2 = Range(2, 4)
     ridx3 = Range(3, 4)
-    idx= ((ridx0+ridx1+ridx2+ridx3+28)//30)
+    # TODO: this should also work without the extra nesting
+    idx = (((ridx0+ridx1)+(ridx2+ridx3)+28)//30)
     valid = ((ridx0+ridx1)<1).ne(True) & ((ridx2+ridx3)<1).ne(True)
     load = get_gated_load_uop(valid, idx)
     self.check(load,
@@ -212,16 +213,16 @@ class TestValidIdxSimplification(unittest.TestCase):
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
-    with Context(NOOPT=1):
+    with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(load.sink()).src[0]
     idx = load.src[0].src[1]
     self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
     idx0, idx1 = idx.src[0], idx.src[1]
-    self.assertEqual(idx0.render(simplify=False), sidx0)
-    self.assertEqual(idx1.render(simplify=False), sidx1)
+    check_uop_against_string(self, idx0, sidx0)
+    check_uop_against_string(self, idx1, sidx1)
     if svalid is not None:
-      self.assertEqual(load.src[0].src[2].render(simplify=False), svalid)
+      check_uop_against_string(self, load.src[0].src[2], svalid)
     else:
       self.assertEqual(len(load.src[0].src), 2, "svalid is None but load still has a valid")
 
@@ -282,7 +283,8 @@ class TestImageSimplification(unittest.TestCase):
 
     # empty -> invalid
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
-    load = full_rewrite_to_sink(load.sink()).src[0]
+    with Context(NOOPT=1, SPEC=0):
+      load = full_rewrite_to_sink(load.sink()).src[0]
     self.assertEqual(load.op, Ops.VECTORIZE)
     self.assertEqual(load.dtype.count, 4)
 

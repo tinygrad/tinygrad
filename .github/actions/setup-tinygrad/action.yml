@@ -41,6 +41,10 @@ inputs:
     description: "Install LLVM?"
     required: false
     default: 'false'
+  mesa:
+    description: "Install mesa"
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -57,7 +61,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/setup.py') }}-${{ env.PYTHON_CACHE_VERSION }}
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/pyproject.toml') }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -66,13 +70,13 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+        key: downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
       with:
         path: ~/Library/Caches/tinygrad/downloads/
-        key: osx-downloads-cache-${{ inputs.key }}-${{ env.DOWNLOAD_CACHE_VERSION }}
+        key: osx-downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
 
     # **** Python deps ****
 
@@ -183,7 +187,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: /var/cache/apt/archives/
-        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.APT_CACHE_VERSION }}
+        key: ${{ runner.os }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
@@ -243,7 +247,7 @@ runs:
         cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.BUILD_CACHE_VERSION }}
+        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
     - name: Clone/compile gpuocelot
       if: inputs.ocelot == 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
@@ -289,3 +293,13 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'macOS'
       shell: bash
       run: brew install llvm@20
+
+    # **** mesa ****
+    - name: Install mesa (linux)
+      if: inputs.mesa == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: sudo curl -L https://github.com/sirhcm/tinymesa/releases/download/tinymesa-32dc66c/libtinymesa_cpu-mesa-25.2.4-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
+    - name: Install mesa (macOS)
+      if: inputs.mesa == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: brew install sirhcm/tinymesa/tinymesa_cpu

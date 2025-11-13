@@ -5,7 +5,7 @@ from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
 from tinygrad.runtime.ops_cpu import CPUAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -123,10 +123,9 @@ class ClangCompiler(Compiler):
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
-    with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output([getenv("CC", 'clang'), *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
-                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
-      return pathlib.Path(output_file.name).read_bytes()
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+      system(f"{getenv('CC','clang')} {' '.join(self.args)} -O2 -Wall -Werror -x c -fPIC -ffreestanding -nostdlib - -o {f.name}", input=src.encode())
+      return pathlib.Path(f.name).read_bytes()
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 

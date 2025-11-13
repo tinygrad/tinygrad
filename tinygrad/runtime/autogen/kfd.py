@@ -24,6 +24,8 @@ def _IOR(base, nr, type): return functools.partial(_do_ioctl, 2, ord(base) if is
 def _IOWR(base, nr, type): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, type)
 
 class AsDictMixin:
+    import sys
+    if sys.version_info >= (3, 14): _layout_ = 'ms'
     @classmethod
     def as_dict(cls, self):
         result = {}

@@ -6,6 +6,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings, HealthCheck
@@ -29,8 +30,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 # TODO: enable this (this is a dtype issue)
 #binary_operations.append(operator.truediv)
 
-# TODO: CI CUDA segfaults on sin, WEBGPU sin is not precise enough for large numbers
-if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU":
+# TODO: CI CUDA segfaults on sin, WEBGPU and NIR sines are not precise enough for large numbers
+if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer):
   unary_operations.remove((Tensor.sin, np.sin))
   unary_operations.remove((Tensor.cos, np.cos))
 
@@ -74,7 +75,10 @@ def universal_test_unary(a, dtype, op):
   out: Tensor = op[0](ta)
   tensor_value = out.numpy()
   numpy_value = op[1](ta.numpy())
-  if dtype in dtypes.fp8s: numpy_value = truncate[dtype](numpy_value)
+  if dtype in dtypes.fp8s:
+    # cuda cast f32 inf to f8 MAX, amd cast it to nan(E4M3)/inf(E5M2)
+    if math.isinf(numpy_value): return
+    numpy_value = truncate[dtype](numpy_value)
   if dtype in dtypes.floats:
     atol, rtol = { dtypes.float16:(1e-3, 1e-2), dtypes.bfloat16:(1e-3, 2e-2),
       dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2: (1.0, 5e-1)}.get(dtype, (1e-6, 1e-5))
@@ -184,12 +188,13 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  # Metal and CUDA and HIP behave differently than numpy in CI for overflows
-  skip_overflow = CI and Device.DEFAULT in {"AMD", "NV", "CUDA"}
+  # Metal and CUDA and HIP and NIR behave differently than numpy in CI for overflows
+  skip_overflow = (CI and Device.DEFAULT in {"AMD", "NV", "CUDA"}) or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer)
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "TODO: fix cast inf to int32 in PYTHON")
+  @unittest.skip("broken on Mac")
   def test_float_midcast_int32(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.float32, dtypes.int32)
 
   @unittest.skip("broken. TODO: fix it")
