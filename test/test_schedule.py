@@ -370,6 +370,7 @@ class TestSchedule(unittest.TestCase):
 
   # NOTE: this is causing "LAZYCACHE=1 incorrectly reuses contiguous const" #4562
   # should contiguous dedup?
+  @unittest.skip("we do the exact opposite now")
   def test_dedup_contiguous(self):
     a = Tensor.ones(4).contiguous()
     b = Tensor.ones(4).contiguous()
@@ -446,7 +447,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
   def test_fold_conv_batchnorm_optim(self):
     # this is too high
-    for optim, cnt in [(nn.optim.Adam, 30), (nn.optim.SGD, 13)]:
+    for optim, cnt in [(nn.optim.Adam, 27), (nn.optim.SGD, 7)]:
       with self.subTest(optim=optim.__name__):
         with Tensor.train():
           img = Tensor.ones(1,3,4,4)
@@ -710,7 +711,7 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(b.buffer.numpy(), [12])
 
   # unlike schedule, kernelize can be called multiple times on a Tensor
-  def test_double_kerenlize(self):
+  def test_double_kernelize(self):
     a = Tensor.empty(10)
     b = Tensor.empty(10)
     c = (a+b)
@@ -759,7 +760,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_pow_neg_05_is_rsqrt(self):
     t = Tensor([1.0, 2.0, 3.0]) ** -0.5
-    self.assertEqual(self._alu_from_tensor(t), [Ops.RECIP, Ops.SQRT])
+    self.assertEqual(self._alu_from_tensor(t), [Ops.RECIPROCAL, Ops.SQRT])
 
   def test_pow_2_has_1_mul(self):
     t = Tensor([1.0, 2.0, 3.0]) ** Tensor(2.0)
@@ -1041,13 +1042,12 @@ class TestSchedule(unittest.TestCase):
       compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
       np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
-    with Context(FUSE_ATTENTION=1):
-      out = Tensor.scaled_dot_product_attention(q,k,v)
-      run_schedule(check_schedule(out, 4)) # TODO: should be 1?
-      if getenv("CHECK", 1):
-        import torch
-        compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
-        np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
+    out = Tensor.scaled_dot_product_attention(q,k,v)
+    run_schedule(check_schedule(out, 4)) # TODO: should be 1?
+    if getenv("CHECK", 1):
+      import torch
+      compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
+      np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
   def test_ugly_reduceop_pairing(self):
     Tensor.manual_seed(0)
@@ -1220,7 +1220,7 @@ class TestSchedule(unittest.TestCase):
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
       layer(x).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 16)
+      check_schedule(opt.schedule_step(), 19)
 
   def test_adam_conv_fuse(self):
     with Tensor.train():
@@ -1230,7 +1230,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
       opt.zero_grad()
       c1(img).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 16)
+      check_schedule(opt.schedule_step(), 19)
 
   def test_adam_2convs_fuse(self):
     with Tensor.train():
@@ -1241,7 +1241,7 @@ class TestSchedule(unittest.TestCase):
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
-      check_schedule(opt.schedule_step(), 18)
+      check_schedule(opt.schedule_step(), 21)
 
   def test_sgd_conv_fuse(self):
     with Tensor.train():
@@ -1502,6 +1502,18 @@ class TestSchedule(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
+  def test_fuse_arange_avg_pool2d_ceil_mode(self):
+    x = Tensor.avg_pool2d(Tensor.empty(1,1,6,6), kernel_size=(3,3), padding=1, stride=3, ceil_mode=True)
+    sched = check_schedule(x, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 1)
+
+  def test_fuse_arange_pad_circular_mode_bw(self):
+    x = Tensor.empty(1,1,5,5,5)
+    out = x.pad((1,2,3,5,1,2), mode="circular")
+    g = out.sum().gradient(x)[0]
+    sched = check_schedule(g, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 0)
+
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_base_change_expand_expand(self):
@@ -1560,6 +1572,13 @@ class TestSchedule(unittest.TestCase):
 
   def test_conv2d(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
   def test_conv2d_fused(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
+
+  def test_resnet_conv2d(self):
+    x = Tensor.empty(1, 8, 32, 32)
+    w1 = Tensor.empty(8, 8, 3, 3)
+    w2 = Tensor.empty(8, 8, 1, 1)
+    out = x.conv2d(w1).conv2d(w2)
+    check_schedule(out, 2)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)
@@ -1863,7 +1882,7 @@ class TestSchedule(unittest.TestCase):
     yt = Tensor.randn(BS, 10).realize()
     with Context(SPLIT_REDUCEOP=0):
       loss = yt.sparse_categorical_crossentropy(Y_train[samples])
-      run_schedule(check_schedule(loss, 5))
+      run_schedule(check_schedule(loss, 4))
       loss_fused = loss.numpy()
     loss_ref = torch.nn.CrossEntropyLoss()(torch.tensor(yt.numpy()), torch.tensor(Y_train.numpy())[torch.tensor(samples.numpy())])
     np.testing.assert_allclose(loss_fused, loss_ref.numpy(), atol=1e-6, rtol=1e-6)
@@ -2076,6 +2095,11 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(b, 0, filter_sink=False)
     assert b.item() == 1
 
+  def test_one_hot_with_copy(self):
+    y = Tensor([1, 2, 3]).to("CPU")
+    x = y.one_hot(10)
+    check_schedule(x, 3, filter_sink=False)
+
   def test_const_copy_multi(self):
     x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"])
     check_schedule(x, 0, filter_sink=False)
@@ -2085,7 +2109,7 @@ class TestCopyFolding(unittest.TestCase):
     a = Tensor.arange(3).realize()
     zeros = Tensor.zeros(3).realize()
     b = (a*zeros).to("CPU")
-    run_schedule(check_schedule(b, 2, filter_sink=False)) # TODO: 0?
+    run_schedule(check_schedule(b, 0, filter_sink=False))
     self.assertListEqual(b.tolist(), [0, 0, 0])
     self.assertEqual(b.device, "CPU")
 
@@ -2157,8 +2181,8 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk_contiguous(self):
-    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
-    a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
+    with open(temp('dt_arange_4_permute_contig'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_buffer())
+    a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute_contig')}")
     b = a.reshape(2, 2).permute(1, 0).contiguous().to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
@@ -2261,7 +2285,7 @@ class TestContiguous(unittest.TestCase):
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
     b = a.expand((4, 4)).contiguous().contiguous()
-    check_schedule(b, 2) # TODO: should be 1?
+    check_schedule(b, 1)
 
   def test_view_does_not_realize(self):
     a = Tensor.empty(4)

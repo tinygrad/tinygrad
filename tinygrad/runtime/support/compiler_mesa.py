@@ -1,6 +1,6 @@
-import base64, ctypes, pathlib, tempfile, hashlib, subprocess
+import base64, ctypes, pathlib, tempfile, hashlib
 from tinygrad.device import Compiler
-from tinygrad.helpers import cpu_objdump
+from tinygrad.helpers import cpu_objdump, system
 import tinygrad.runtime.autogen.mesa as mesa
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 try: import tinygrad.runtime.autogen.llvm as llvm
@@ -82,5 +82,5 @@ class NAKCompiler(NIRCompiler):
     try:
       fn = (pathlib.Path(tempfile.gettempdir()) / f"tinynak_{hashlib.md5(lib).hexdigest()}").as_posix()
       with open(fn, "wb") as f: f.write(lib[ctypes.sizeof(mesa.struct_nak_shader_info):])
-      print(subprocess.check_output(['nvdisasm', "-b", f"SM{self.arch[3:]}", fn]).decode('utf-8'))
+      print(system(f"nvdisasm -b SM{self.arch[3:]} {fn}"))
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")

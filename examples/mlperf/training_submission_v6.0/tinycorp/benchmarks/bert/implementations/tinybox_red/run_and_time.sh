@@ -15,7 +15,7 @@ export IGNORE_JIT_FIRST_BEAM=1
 export BASEDIR="/raid/datasets/wiki"
 
 # pip install -e ".[mlperf]"
-export LOGMLPERF=1
+export LOGMLPERF=${LOGMLPERF:-1}
 
 export SEED=$RANDOM
 DATETIME=$(date "+%m%d%H%M")

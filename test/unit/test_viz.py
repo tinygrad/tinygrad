@@ -148,12 +148,20 @@ class TestViz(BaseTestViz):
     a2 = uop_to_json(a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
+  def test_colored_label_multiline(self):
+    arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
+    src = [Tensor.empty(1).uop for _ in range(10)]
+    a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
+    exec_rewrite(a, [PatternMatcher([])])
+    a2 = next(get_viz_details(0, 0))["graph"][id(a)]
+    self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
+
   def test_inf_loop(self):
-    a = UOp.variable('a', 0, 10)
-    b = a.replace(op=Ops.CONST)
+    a = UOp.const(dtypes.int, 3)
+    b = UOp.const(dtypes.int, 4)
     pm = PatternMatcher([
-      (UPat(Ops.DEFINE_VAR, name="x"), lambda x: x.replace(op=Ops.CONST)),
-      (UPat(Ops.CONST, name="x"), lambda x: x.replace(op=Ops.DEFINE_VAR)),
+      (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
+      (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
     with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
     graphs = flatten(x["graph"].values() for x in get_viz_details(0, 0))
@@ -164,8 +172,8 @@ class TestViz(BaseTestViz):
     self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
 
   def test_const_node_visibility(self):
-    a = UOp.variable("a", 0, 10)
-    z = UOp.const(dtypes.index, 0)
+    a = UOp.variable("a", 0, 10, dtype=dtypes.int)
+    z = UOp.const(a.dtype, 0)
     alu = a*z
     exec_rewrite(alu, [sym])
     lst = get_viz_list()
@@ -358,8 +366,8 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
         else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIBB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-class TestVizProfiler(unittest.TestCase):
-  def test_perfetto_node(self):
+class TestVizProfiler(BaseTestViz):
+  def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
@@ -373,7 +381,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(event['dur'], 10)
     assert event['ref'] is None
 
-  def test_perfetto_copy_node(self):
+  def test_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileRangeEvent(device='NV:2', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
@@ -391,7 +399,7 @@ class TestVizProfiler(unittest.TestCase):
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
-  def test_perfetto_graph(self):
+  def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
             ProfileDeviceEvent(device='NV:1', comp_tdiff=decimal.Decimal(-500), copy_tdiff=decimal.Decimal(-50)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_25_4n2', st_id=0, en_id=1, is_copy=False),
@@ -427,6 +435,12 @@ class TestVizProfiler(unittest.TestCase):
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     sz = len(get_profile(prof))
     self.assertLessEqual(sz/n_events, 26)
+
+  def test_calltrace(self):
+    def fxn(): return Tensor.empty(10).mul(2).realize()
+    fxn()
+    trace = get_viz_list()[0]["steps"][0]["trace"]
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in trace), str(trace)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):

@@ -1,11 +1,10 @@
 import os, sys, pickle, time, re
 import numpy as np
+if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device, dtypes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.engine.realize import CompiledRunner
-
-import onnx
 from tinygrad.nn.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
@@ -40,7 +39,7 @@ def compile(onnx_file):
   np.testing.assert_equal(test_val, ret, "JIT run failed")
   print("jit run validated")
 
-  # checks from compile2
+  # check gated read_image usage
   kernel_count = 0
   read_image_count = 0
   gated_read_image_count = 0
@@ -96,6 +95,7 @@ def test_vs_compile(run, inputs, test_val=None):
   return val
 
 def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
+  import onnx
   import onnxruntime as ort
   
   onnx_inputs = {k:v.numpy() for k,v in new_inputs.items()}
@@ -121,6 +121,12 @@ def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   print("test vs onnx passed")
   return timings
 
+def bench(run, inputs):
+  from extra.bench_log import WallTimeEvent, BenchEvent
+  for _ in range(10):
+    with WallTimeEvent(BenchEvent.STEP):
+      run(**inputs).numpy()
+
 if __name__ == "__main__":
   onnx_file = fetch(OPENPILOT_MODEL)
   inputs, outputs = compile(onnx_file)
@@ -128,6 +134,8 @@ if __name__ == "__main__":
   with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
 
   test_vs_compile(pickle_loaded, inputs, outputs)
-  if not getenv("FLOAT16"):
+  if getenv("SELFTEST"):
     test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
 
+  if getenv("BENCHMARK_LOG", ""):
+    bench(pickle_loaded, inputs)

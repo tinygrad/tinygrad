@@ -51,7 +51,7 @@ class TestFusionOp(unittest.TestCase):
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
     sched = a.schedule()
-    self.assertEqual(len(sched), 1)
+    self.assertEqual(len(sched), 0)
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
