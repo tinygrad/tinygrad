@@ -300,6 +300,12 @@ class TestRangeify(unittest.TestCase):
     w2 = Tensor.empty(12, 8, 3, 3)
     x.conv2d(w1).conv2d(w2).realize()
 
+  def test_resnet_conv2d(self):
+    x = Tensor.empty(1, 8, 32, 32)
+    w1 = Tensor.empty(8, 8, 3, 3)
+    w2 = Tensor.empty(8, 8, 1, 1)
+    x.conv2d(w1).conv2d(w2).realize()
+
   def test_xception_conv2d(self):
     # NOTE: this fusion is bad, it's recomputing the inner many times
     x = Tensor.empty(1, 4, 32, 32)

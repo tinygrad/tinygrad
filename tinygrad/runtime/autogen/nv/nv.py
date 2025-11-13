@@ -7357,6 +7357,113 @@ class struct_c__SA_FWSECLIC_FRTS_CMD(Structure):
      ]
 
 FWSECLIC_FRTS_CMD = struct_c__SA_FWSECLIC_FRTS_CMD
+PCIEXPTBL_H = True # macro
+NV_BCRT_HASH_INFO_BASE_CODE_TYPE_VBIOS_BASE = 0x00 # macro
+NV_BCRT_HASH_INFO_BASE_CODE_TYPE_VBIOS_EXT = 0xE0 # macro
+PCI_EXP_ROM_SIGNATURE = 0xaa55 # macro
+PCI_EXP_ROM_SIGNATURE_NV = 0x4e56 # macro
+PCI_EXP_ROM_SIGNATURE_NV2 = 0xbb77 # macro
+def IS_VALID_PCI_ROM_SIG(sig):  # macro
+   return ((sig==0xaa55) or (sig==0x4e56) or (sig==0xbb77))
+OFFSETOF_PCI_EXP_ROM_SIG = 0x0 # macro
+OFFSETOF_PCI_EXP_ROM_NBSI_DATA_OFFSET = 0x16 # macro
+OFFSETOF_PCI_EXP_ROM_PCI_DATA_STRUCT_PTR = 0x18 # macro
+PCI_DATA_STRUCT_SIGNATURE = 0x52494350 # macro
+PCI_DATA_STRUCT_SIGNATURE_NV = 0x5344504E # macro
+PCI_DATA_STRUCT_SIGNATURE_NV2 = 0x53494752 # macro
+def IS_VALID_PCI_DATA_SIG(sig):  # macro
+   return ((sig==0x52494350) or (sig==0x5344504E) or (sig==0x53494752))
+# PCI_LAST_IMAGE = NVBIT ( 7 ) # macro
+PCI_ROM_IMAGE_BLOCK_SIZE = 512 # macro
+OFFSETOF_PCI_DATA_STRUCT_SIG = 0x0 # macro
+OFFSETOF_PCI_DATA_STRUCT_VENDOR_ID = 0x4 # macro
+OFFSETOF_PCI_DATA_STRUCT_LEN = 0xa # macro
+OFFSETOF_PCI_DATA_STRUCT_CLASS_CODE = 0xd # macro
+OFFSETOF_PCI_DATA_STRUCT_CODE_TYPE = 0x14 # macro
+OFFSETOF_PCI_DATA_STRUCT_IMAGE_LEN = 0x10 # macro
+OFFSETOF_PCI_DATA_STRUCT_LAST_IMAGE = 0x15 # macro
+NV_PCI_DATA_EXT_SIG = 0x4544504E # macro
+NV_PCI_DATA_EXT_REV_10 = 0x100 # macro
+NV_PCI_DATA_EXT_REV_11 = 0x101 # macro
+OFFSETOF_PCI_DATA_EXT_STRUCT_SIG = 0x0 # macro
+OFFSETOF_PCI_DATA_EXT_STRUCT_LEN = 0x6 # macro
+OFFSETOF_PCI_DATA_EXT_STRUCT_REV = 0x4 # macro
+OFFSETOF_PCI_DATA_EXT_STRUCT_SUBIMAGE_LEN = 0x8 # macro
+OFFSETOF_PCI_DATA_EXT_STRUCT_LAST_IMAGE = 0xa # macro
+OFFSETOF_PCI_DATA_EXT_STRUCT_FLAGS = 0xb # macro
+PCI_DATA_EXT_STRUCT_FLAGS_CHECKSUM_DISABLED = 0x04 # macro
+class struct__PCI_EXP_ROM_STANDARD(Structure):
+    pass
+
+struct__PCI_EXP_ROM_STANDARD._pack_ = 1 # source:False
+struct__PCI_EXP_ROM_STANDARD._fields_ = [
+    ('sig', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 22),
+    ('pciDataStrucPtr', ctypes.c_uint16),
+    ('sizeOfBlock', ctypes.c_uint32),
+]
+
+PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD
+PPCI_EXP_ROM_STANDARD = ctypes.POINTER(struct__PCI_EXP_ROM_STANDARD)
+class struct__PCI_EXP_ROM_NBSI(Structure):
+    pass
+
+struct__PCI_EXP_ROM_NBSI._pack_ = 1 # source:False
+struct__PCI_EXP_ROM_NBSI._fields_ = [
+    ('sig', ctypes.c_uint16),
+    ('reserved', ctypes.c_ubyte * 20),
+    ('nbsiDataOffset', ctypes.c_uint16),
+    ('pciDataStrucPtr', ctypes.c_uint16),
+    ('sizeOfBlock', ctypes.c_uint32),
+]
+
+PCI_EXP_ROM_NBSI = struct__PCI_EXP_ROM_NBSI
+PPCI_EXP_ROM_NBSI = ctypes.POINTER(struct__PCI_EXP_ROM_NBSI)
+class union__PCI_EXP_ROM(Union):
+    _pack_ = 1 # source:False
+    _fields_ = [
+    ('standard', PCI_EXP_ROM_STANDARD),
+    ('nbsi', PCI_EXP_ROM_NBSI),
+     ]
+
+PCI_EXP_ROM = union__PCI_EXP_ROM
+PPCI_EXP_ROM = ctypes.POINTER(union__PCI_EXP_ROM)
+class struct__PCI_DATA_STRUCT(Structure):
+    pass
+
+struct__PCI_DATA_STRUCT._pack_ = 1 # source:False
+struct__PCI_DATA_STRUCT._fields_ = [
+    ('sig', ctypes.c_uint32),
+    ('vendorID', ctypes.c_uint16),
+    ('deviceID', ctypes.c_uint16),
+    ('deviceListPtr', ctypes.c_uint16),
+    ('pciDataStructLen', ctypes.c_uint16),
+    ('pciDataStructRev', ctypes.c_ubyte),
+    ('classCode', ctypes.c_ubyte * 3),
+    ('imageLen', ctypes.c_uint16),
+    ('vendorRomRev', ctypes.c_uint16),
+    ('codeType', ctypes.c_ubyte),
+    ('lastImage', ctypes.c_ubyte),
+    ('maxRunTimeImageLen', ctypes.c_uint16),
+]
+
+PCI_DATA_STRUCT = struct__PCI_DATA_STRUCT
+PPCI_DATA_STRUCT = ctypes.POINTER(struct__PCI_DATA_STRUCT)
+class struct__NV_PCI_DATA_EXT_STRUCT(Structure):
+    pass
+
+struct__NV_PCI_DATA_EXT_STRUCT._pack_ = 1 # source:False
+struct__NV_PCI_DATA_EXT_STRUCT._fields_ = [
+    ('signature', ctypes.c_uint32),
+    ('nvPciDataExtRev', ctypes.c_uint16),
+    ('nvPciDataExtLen', ctypes.c_uint16),
+    ('subimageLen', ctypes.c_uint16),
+    ('privLastImage', ctypes.c_ubyte),
+    ('flags', ctypes.c_ubyte),
+]
+
+NV_PCI_DATA_EXT_STRUCT = struct__NV_PCI_DATA_EXT_STRUCT
+PNV_PCI_DATA_EXT_STRUCT = ctypes.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
 __all__ = \
     ['ACPI_DATA', 'ACPI_DSM_CACHE', 'ACPI_DSM_FUNCTION_COUNT',
     'ACPI_DSM_FUNCTION_CURRENT', 'ACPI_DSM_FUNCTION_GPS',
@@ -7480,12 +7587,16 @@ __all__ = \
     'NVDM_TYPE_UEFI_XTL_DEBUG_INTR',
     'NVGPU_ENGINE_CAPS_MASK_ARRAY_MAX', 'NVGPU_ENGINE_CAPS_MASK_BITS',
     'NV_ACPI_GENERIC_FUNC_COUNT',
+    'NV_BCRT_HASH_INFO_BASE_CODE_TYPE_VBIOS_BASE',
+    'NV_BCRT_HASH_INFO_BASE_CODE_TYPE_VBIOS_EXT',
     'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_AVAILABLE',
     'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_FLAGS_VERSION_UNAVAILABLE',
     'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V1',
     'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V2',
     'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V3',
     'NV_BIT_FALCON_UCODE_DESC_HEADER_VDESC_VERSION_V4',
+    'NV_PCI_DATA_EXT_REV_10', 'NV_PCI_DATA_EXT_REV_11',
+    'NV_PCI_DATA_EXT_SIG', 'NV_PCI_DATA_EXT_STRUCT',
     'NV_RPC_UPDATE_PDE_BAR_1', 'NV_RPC_UPDATE_PDE_BAR_2',
     'NV_RPC_UPDATE_PDE_BAR_INVALID', 'NV_RPC_UPDATE_PDE_BAR_TYPE',
     'NV_RPC_UPDATE_PDE_BAR_TYPE__enumvalues',
@@ -7775,8 +7886,31 @@ __all__ = \
     'NV_VGPU_PTE_64_INDEX_SHIFT', 'NV_VGPU_PTE_64_PAGE_SIZE',
     'NV_VGPU_PTE_64_SIZE', 'NV_VGPU_PTE_INDEX_MASK',
     'NV_VGPU_PTE_INDEX_SHIFT', 'NV_VGPU_PTE_PAGE_SIZE',
-    'NV_VGPU_PTE_SIZE', 'PACKED_REGISTRY_ENTRY',
-    'PACKED_REGISTRY_TABLE', 'REGISTRY_TABLE_ENTRY_TYPE_BINARY',
+    'NV_VGPU_PTE_SIZE', 'OFFSETOF_PCI_DATA_EXT_STRUCT_FLAGS',
+    'OFFSETOF_PCI_DATA_EXT_STRUCT_LAST_IMAGE',
+    'OFFSETOF_PCI_DATA_EXT_STRUCT_LEN',
+    'OFFSETOF_PCI_DATA_EXT_STRUCT_REV',
+    'OFFSETOF_PCI_DATA_EXT_STRUCT_SIG',
+    'OFFSETOF_PCI_DATA_EXT_STRUCT_SUBIMAGE_LEN',
+    'OFFSETOF_PCI_DATA_STRUCT_CLASS_CODE',
+    'OFFSETOF_PCI_DATA_STRUCT_CODE_TYPE',
+    'OFFSETOF_PCI_DATA_STRUCT_IMAGE_LEN',
+    'OFFSETOF_PCI_DATA_STRUCT_LAST_IMAGE',
+    'OFFSETOF_PCI_DATA_STRUCT_LEN', 'OFFSETOF_PCI_DATA_STRUCT_SIG',
+    'OFFSETOF_PCI_DATA_STRUCT_VENDOR_ID',
+    'OFFSETOF_PCI_EXP_ROM_NBSI_DATA_OFFSET',
+    'OFFSETOF_PCI_EXP_ROM_PCI_DATA_STRUCT_PTR',
+    'OFFSETOF_PCI_EXP_ROM_SIG', 'PACKED_REGISTRY_ENTRY',
+    'PACKED_REGISTRY_TABLE', 'PCIEXPTBL_H',
+    'PCI_DATA_EXT_STRUCT_FLAGS_CHECKSUM_DISABLED', 'PCI_DATA_STRUCT',
+    'PCI_DATA_STRUCT_SIGNATURE', 'PCI_DATA_STRUCT_SIGNATURE_NV',
+    'PCI_DATA_STRUCT_SIGNATURE_NV2', 'PCI_EXP_ROM',
+    'PCI_EXP_ROM_NBSI', 'PCI_EXP_ROM_SIGNATURE',
+    'PCI_EXP_ROM_SIGNATURE_NV', 'PCI_EXP_ROM_SIGNATURE_NV2',
+    'PCI_EXP_ROM_STANDARD', 'PCI_ROM_IMAGE_BLOCK_SIZE',
+    'PNV_PCI_DATA_EXT_STRUCT', 'PPCI_DATA_STRUCT', 'PPCI_EXP_ROM',
+    'PPCI_EXP_ROM_NBSI', 'PPCI_EXP_ROM_STANDARD',
+    'REGISTRY_TABLE_ENTRY_TYPE_BINARY',
     'REGISTRY_TABLE_ENTRY_TYPE_DWORD',
     'REGISTRY_TABLE_ENTRY_TYPE_STRING',
     'REGISTRY_TABLE_ENTRY_TYPE_UNKNOWN', 'RM_ENGINE_TYPE',
@@ -8343,6 +8477,8 @@ __all__ = \
     'struct_UpdateBarPde_v15_00',
     'struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS',
     'struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS',
+    'struct__NV_PCI_DATA_EXT_STRUCT', 'struct__PCI_DATA_STRUCT',
+    'struct__PCI_EXP_ROM_NBSI', 'struct__PCI_EXP_ROM_STANDARD',
     'struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00',
     'struct_alloc_object_FERMI_VASPACE_A_v03_00',
     'struct_alloc_object_GF100_DISP_SW_v03_00',
@@ -8595,7 +8731,7 @@ __all__ = \
     'union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04',
     'union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D',
     'union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04',
-    'union_alloc_object_params_v25_08',
+    'union__PCI_EXP_ROM', 'union_alloc_object_params_v25_08',
     'union_alloc_object_params_v26_00',
     'union_alloc_object_params_v27_00',
     'union_alloc_object_params_v29_06', 'union_c__SA_GspFwWprMeta_0',
