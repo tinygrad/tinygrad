@@ -436,6 +436,12 @@ class TestVizProfiler(BaseTestViz):
     sz = len(get_profile(prof))
     self.assertLessEqual(sz/n_events, 26)
 
+  def test_calltrace(self):
+    def fxn(): return Tensor.empty(10).mul(2).realize()
+    fxn()
+    trace = get_viz_list()[0]["steps"][0]["trace"]
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in trace), str(trace)
+
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):
     dur_mins = 72

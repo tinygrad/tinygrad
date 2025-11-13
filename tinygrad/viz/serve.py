@@ -7,7 +7,8 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, printable, GroupOp, srender, sint, sym_infer, range_str, pyrender
+from tinygrad.helpers import printable
+from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
 from tinygrad.renderer import ProgramSpec
@@ -30,7 +31,7 @@ ref_map:dict[Any, int] = {}
 def get_rewrites(t:RewriteTrace) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
-    steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc),
+    steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc), "trace":k.tb if j == 0 else None,
               "query":f"/ctxs?ctx={i}&idx={j}", "depth":s.depth} for j,s in enumerate(v)]
     if isinstance(k.ret, ProgramSpec):
       steps.append({"name":"View UOp List", "query":f"/render?ctx={i}&fmt=uops", "depth":0})
@@ -155,9 +156,10 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
         flops = sym_infer(p.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
-        membw, ldsbw = sym_infer(p.estimates.mem, var_vals)/t, sym_infer(p.estimates.lds, var_vals)
+        membw, ldsbw = sym_infer(p.estimates.mem, var_vals)/t, sym_infer(p.estimates.lds, var_vals)/t
         fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
-               f"{membw*1e-9:.0f}|{ldsbw*1e-9:.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else f"{membw*1e-12:.0f}|{ldsbw*1e-12:.0f} TB/s"]
+              (f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")+" mem",
+              (f"{ldsbw*1e-9:.0f} GB/s" if ldsbw < 1e15 else f"{ldsbw*1e-12:.0f} TB/s")+" lds"]
         if (metadata_str:=",".join([str(m) for m in (ei.arg['metadata'] or ())])): fmt.append(metadata_str)
         if isinstance(e, ProfileGraphEntry): fmt.append("(batched)")
         key = ei.key
@@ -216,12 +218,23 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     if (r:=ref_map.get(name)): name = ctxs[r]["name"]
     steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
                   "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
+
+    # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
+    #           The idle time can be caused by:
+    #             * Arbiter loss
+    #             * Source or destination register dependency
+    #             * Instruction cache miss
+    # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
+    # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     for w in waves:
-      rows = [(e.inst, e.time, e.time-(w.insts[i-1].time if i else 0), e.dur, e.stall, str(e.typ).split("_")[-1]) for i,e in enumerate(w.insts)]
-      summary = [{"label":"Total Cycles", "value":w.insts[-1].time-w.insts[0].time if w.insts else 0}, {"label":"CU", "value":w.cu},
+      rows, prev_instr = [], w.begin_time
+      for i,e in enumerate(w.insts):
+        rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+        prev_instr = max(prev_instr, e.time + e.dur)
+      summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"CU", "value":w.cu},
                  {"label":"SIMD", "value":w.simd}]
       steps.append({"name":f"Wave {w.wave_id}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Wait", "Duration", "Stall", "Type"], "summary":summary}})
+                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}})
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
