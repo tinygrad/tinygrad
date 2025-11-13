@@ -15,7 +15,6 @@ def unwrap(x):
 def wrap(x, ker, cls):
   if isinstance(x, UOp): return cls(x, ker)
   if isinstance(x, (list, tuple)): return type(x)(wrap(y, ker, cls) for y in x)
-  print("wrap", type(x))
   return x
 
 def autowrap(source_cls, blacklist=None):
@@ -28,7 +27,6 @@ def autowrap(source_cls, blacklist=None):
 
   def decorator(cls):
     def __getattr__(self, name):
-      print("name", name)
       val = getattr(self._uop, name)
       if callable(val):
         @functools.wraps(val)
