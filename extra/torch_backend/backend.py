@@ -314,6 +314,49 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
 
+@torch.library.impl("aten::one_hot", "privateuseone")
+def one_hot(self: torch.Tensor, num_classes: int):
+  # tinygrad has Tensor.one_hot; map ATen directly
+  return wrap(unwrap(self).one_hot(num_classes))
+
+@torch.library.impl("aten::_to_copy", "privateuseone")
+def _to_copy(self: torch.Tensor, dtype=None, layout=None, device=None, non_blocking=False, memory_format=None, pin_memory=False):
+  # implement dtype/device conversions; layout/memory_format/pin_memory are ignored or no-ops
+  tt = unwrap(self)
+  if dtype is not None: tt = tt.cast(_from_torch_dtype(dtype))
+  if device is not None: tt = tt.to(_from_torch_device(device))
+  # NOTE: keep tensors contiguous to better match torch semantics in many callsites
+  return wrap(tt.contiguous())
+
+@torch.library.impl("aten::to.device", "privateuseone")
+def to_device(self: torch.Tensor, device, non_blocking=False, copy=False, memory_format=None):
+  # route to _to_copy semantics
+  return _to_copy(self, device=device, memory_format=memory_format)
+
+@torch.library.impl("aten::to.dtype", "privateuseone")
+def to_dtype(self: torch.Tensor, dtype, non_blocking=False, copy=False, memory_format=None):
+  return _to_copy(self, dtype=dtype, memory_format=memory_format)
+
+@torch.library.impl("aten::to.dtype_layout", "privateuseone")
+def to_dtype_layout(self: torch.Tensor, dtype, layout, device=None, non_blocking=False, pin_memory=False, memory_format=None):
+  return _to_copy(self, dtype=dtype, device=device, memory_format=memory_format, pin_memory=pin_memory)
+
+@torch.library.impl("aten::to.other", "privateuseone")
+def to_other(self: torch.Tensor, other: torch.Tensor, non_blocking=False, copy=False, memory_format=None):
+  tgt_dtype = other.dtype
+  tgt_device = other.device
+  return _to_copy(self, dtype=tgt_dtype, device=tgt_device, memory_format=memory_format)
+
+@torch.library.impl("aten::contiguous", "privateuseone")
+def contiguous(self: torch.Tensor, memory_format=None):
+  return wrap(unwrap(self).contiguous())
+
+@torch.library.impl("aten::copy_", "privateuseone")
+@inplace_fn("self")
+def copy_(self: torch.Tensor, src: torch.Tensor, non_blocking: bool=False):
+  unwrap(self).assign(unwrap(src).contiguous())
+  return self
+
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 @inplace_fn("out")
 def scatter_add(self, dim, index, src, out):
@@ -538,6 +581,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
   "aten.max": Tensor.max,
+  "aten.amax": lambda self, dim=None, keepdim=False: self.max(axis=dim, keepdim=keepdim),
+  "aten.amin": lambda self, dim=None, keepdim=False: self.min(axis=dim, keepdim=keepdim),
   "aten.mm": Tensor.matmul,
   "aten.mv": Tensor.matmul,
   "aten.dot": Tensor.dot,
@@ -545,6 +590,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.isnan": Tensor.isnan,
   "aten.std.correction": Tensor.std,
   "aten.std_mean.correction": Tensor.std_mean,
+  "aten.std_mean": Tensor.std_mean,
   "aten.var.correction": Tensor.var,
   "aten.var_mean.correction": Tensor.var_mean,
   "aten.scatter.value": Tensor.scatter,
