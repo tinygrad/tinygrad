@@ -1,10 +1,7 @@
 name: Autogen
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '12'
-  PYTHON_CACHE_VERSION: '4'
-  APT_CACHE_VERSION: '1'
-  BUILD_CACHE_VERSION: '1'
+  CACHE_VERSION: '13'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -14,10 +11,10 @@ on:
     branches:
       - master
   pull_request:
-    paths: 
+    paths:
     - 'tinygrad/runtime/autogen/**/*'
   workflow_dispatch:
-    paths: 
+    paths:
     - 'tinygrad/runtime/autogen/**/*'
 
 jobs:
