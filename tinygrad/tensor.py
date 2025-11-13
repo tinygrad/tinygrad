@@ -1454,9 +1454,10 @@ class Tensor(OpMixin):
       return self.flatten().pad(((0, self.shape[0]))).reshape(self.shape[0], self.shape[0]+1)[:, 0]
     d1, d2 = sorted((self._resolve_dim(dim1), self._resolve_dim(dim2)))
     x = self.permute([i for i in range(self.ndim) if i not in (d1, d2)] + [d1, d2])
-    size = smax(0, smin(x.shape[-2] - smax(0, -offset), x.shape[-1] - smax(0, offset)))
-    return Tensor.empty(*x.shape[:-2], 0, dtype=self.dtype, device=self.device) if size == 0 else \
-           x[..., (idx := Tensor.arange(size, device=self.device)) + smax(0, -offset), idx + smax(0, offset)]  # type: ignore[operator]
+    start_row, start_col = smax(0, -offset), smax(0, offset)
+    size = smax(0, smin(x.shape[-2] - start_row, x.shape[-1] - start_col))
+    idx = Tensor.arange(size, device=self.device)
+    return x[..., idx + start_row, idx + start_col]   # type: ignore[operator]
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """

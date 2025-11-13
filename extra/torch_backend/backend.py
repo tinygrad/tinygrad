@@ -266,6 +266,26 @@ def select_backward(grad_out, input_sizes, dim, index):
   grad_input[slices] = unwrap(grad_out)
   return wrap(grad_input)
 
+@torch.library.impl("aten::diagonal_backward", "privateuseone")
+def diagonal_backward(grad_out, input_sizes, offset, dim1, dim2):
+  grad_input = Tensor.zeros(tuple(input_sizes)).contiguous()
+  grad_out = unwrap(grad_out)
+  ndim = len(input_sizes)
+  dim1 = dim1 if dim1 >= 0 else dim1 + ndim
+  dim2 = dim2 if dim2 >= 0 else dim2 + ndim
+  d1, d2 = sorted((dim1, dim2))
+  size = max(0, min(input_sizes[d1] - max(0, -offset), input_sizes[d2] - max(0, offset)))
+  if size == 0: return wrap(grad_input)
+  idx = Tensor.arange(size, device=grad_input.device)
+  perm_order = [i for i in range(ndim) if i not in (d1, d2)] + [d1, d2]
+  grad_input_permuted = grad_input.permute(perm_order).contiguous()
+  perm_indices = [slice(None)] * (ndim - 2) + [idx + max(0, -offset), idx + max(0, offset)]
+  grad_input_permuted[tuple(perm_indices)] = grad_out
+  inv_perm = [0] * ndim
+  for i, pos in enumerate(perm_order): inv_perm[pos] = i
+  grad_input = grad_input_permuted.permute(inv_perm)
+  return wrap(grad_input)
+
 @torch.library.impl("aten::alias", "privateuseone")
 @wrap_view_op
 def alias(self): return self
