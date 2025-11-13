@@ -1457,7 +1457,7 @@ class Tensor(OpMixin):
     start_row, start_col = smax(0, -offset), smax(0, offset)
     size = smax(0, smin(x.shape[-2] - start_row, x.shape[-1] - start_col))
     idx = Tensor.arange(size, device=self.device)
-    return x[..., idx + start_row, idx + start_col]   # type: ignore[operator]
+    return x[..., idx + smax(0, -offset), idx + smax(0, offset)]  # type: ignore[operator]
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """

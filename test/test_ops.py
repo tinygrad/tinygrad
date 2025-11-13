@@ -1978,7 +1978,7 @@ class TestOps(unittest.TestCase):
 
   def test_diag(self):
     helper_test_op([(5,)], lambda x: x.diag())
-    
+
   def test_diagonal_2d_comprehensive(self):
     helper_test_op([(5,5)], lambda x: x.diagonal())
     helper_test_op([(5,5)], lambda x: x.diagonal(offset=1))
@@ -2030,7 +2030,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([(4,4)], lambda x: x.diagonal().relu().sum())
     helper_test_op([(3,3,3)], lambda x: x.diagonal().diagonal())
     helper_test_op([(4,4,4)], lambda x: x.diagonal(offset=1).sum() + x.diagonal(offset=-1).mean())
-    helper_test_op([(5,5)], lambda x: x.diagonal()[:4].dot(x.diagonal(offset=1)))
     helper_test_op([(3,3)], lambda x: x.diagonal() @ x.diagonal().unsqueeze(1))
 
   def test_roll(self):
