@@ -56,7 +56,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
           lines.append(f"class {nm}({'Struct' if decl.kind==CK.STRUCT_DECL else 'ctypes.Union'}): pass")
           if typedef: lines.append(f"{typedef} = {nm}")
         if (is_packed:=(CK.PACKED_ATTR in attrs(decl)) or ((N:=t.get_align()) != max([f.type.get_align() for f in t.get_fields()], default=N))):
-          if (N:=t.get_align()): raise NotImplementedError(f"aligned records unsupported when N != 1 ({N=})")
+          if (N:=t.get_align()) != 1: raise NotImplementedError(f"aligned records unsupported when N != 1 ({N=})")
         acnt = itertools.count().__next__
         ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]

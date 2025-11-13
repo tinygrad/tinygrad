@@ -1,5 +1,6 @@
 import ctypes, functools, sys
 from typing import TYPE_CHECKING
+from tinygrad.helpers import flatten
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   import tinygrad.runtime.support.hcq as hcq, fcntl
@@ -62,7 +63,14 @@ else:
         setattr(cls, nm, property(functools.partial(fget, mask=mask, off=offset, ty=ty), functools.partial(fset, mask=mask, off=offset)))
         offset += sz
 
+      def pget(ty, s): return getattr(ty, f'_packed_{s}_', []) if getattr(ty, '_packed_', False) else getattr(ty, f'_{s}_', [])
+      def get_aty(anm, fs=fields): return next(f[1] for f in fs if f[0] == anm)
+      def get_fnms(ty): return [f[0] for f in pget(ty, 'fields')]
+
       if hasattr(cls, '_anonymous_'):
+        for anm, aty in [(a, get_aty(anm)) for a in getattr(cls, '_anonymous_', [])]:
+          for fnm in (get_fnms(aty) + flatten([get_fnms(get_aty(aanm, pget(aty, 'field'))) for aanm in pget(aty, 'anonymous')])):
+            setattr(cls, fnm, property(lambda self: getattr(getattr(self, anm), fnm), lambda self, v: setattr(getattr(self, anm), fnm, v)))
         setattr(cls, '_packed_anonymous_', cls._anonymous_)
         setattr(cls, '_anonymous_', [])
       type(ctypes.Structure).__setattr__(cls, '_fields_', [('_data', ctypes.c_ubyte * ((offset + 7) // 8))])
@@ -75,13 +83,3 @@ else:
         for f,v in zip(self._packed_fields_, args): setattr(self, f[0], v)
         for k,v in kwargs.items(): setattr(self, k, v)
       else: super().__init__(*args, **kwargs)
-    def __getattr__(self, k):
-      for c in [getattr(self, f) for f in getattr(self, '_packed_anonymous_', [])]:
-        try: return getattr(c, k)
-        except AttributeError: pass
-      raise AttributeError(f"{type(self).__name__} has no field '{k}'")
-    def __setattr__(self, k, v):
-      for c in [getattr(self, f) for f in getattr(self, '_packed_anonymous_', [])]:
-        if hasattr(c, k): return setattr(c, k, v)
-      raise AttributeError(f"{type(self).__name__} has no field '{k}'")
-

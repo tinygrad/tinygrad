@@ -50,6 +50,68 @@ struct_io_uring_sqe_2._fields_ = [
   ('uring_cmd_flags', ctypes.c_uint32),
 ]
 class struct_io_uring_sqe_3(ctypes.Union): pass
+struct_io_uring_sqe_3._packed_ = True
+struct_io_uring_sqe_3._fields_ = [
+  ('buf_index', ctypes.c_uint16),
+  ('buf_group', ctypes.c_uint16),
+]
+class struct_io_uring_sqe_4(ctypes.Union): pass
+class struct_io_uring_sqe_4_0(Struct): pass
+struct_io_uring_sqe_4_0._fields_ = [
+  ('addr_len', ctypes.c_uint16),
+  ('__pad3', (ctypes.c_uint16 * 1)),
+]
+struct_io_uring_sqe_4._anonymous_ = ['_0']
+struct_io_uring_sqe_4._fields_ = [
+  ('splice_fd_in', ctypes.c_int32),
+  ('file_index', ctypes.c_uint32),
+  ('_0', struct_io_uring_sqe_4_0),
+]
+class struct_io_uring_sqe_5(ctypes.Union): pass
+class struct_io_uring_sqe_5_0(Struct): pass
+struct_io_uring_sqe_5_0._fields_ = [
+  ('addr3', ctypes.c_uint64),
+  ('__pad2', (ctypes.c_uint64 * 1)),
+]
+struct_io_uring_sqe_5._anonymous_ = ['_0']
+struct_io_uring_sqe_5._fields_ = [
+  ('_0', struct_io_uring_sqe_5_0),
+  ('cmd', (ctypes.c_ubyte * 0)),
+]
+struct_io_uring_sqe._anonymous_ = ['_0', '_1', '_2', '_3', '_4', '_5']
+struct_io_uring_sqe._fields_ = [
+  ('opcode', ctypes.c_ubyte),
+  ('flags', ctypes.c_ubyte),
+  ('ioprio', ctypes.c_uint16),
+  ('fd', ctypes.c_int32),
+  ('_0', struct_io_uring_sqe_0),
+  ('_1', struct_io_uring_sqe_1),
+  ('len', ctypes.c_uint32),
+  ('_2', struct_io_uring_sqe_2),
+  ('user_data', ctypes.c_uint64),
+  ('_3', struct_io_uring_sqe_3),
+  ('personality', ctypes.c_uint16),
+  ('_4', struct_io_uring_sqe_4),
+  ('_5', struct_io_uring_sqe_5),
+]
+size_t = ctypes.c_uint64
+struct_io_uring_sq._fields_ = [
+  ('khead', ctypes.POINTER(ctypes.c_uint32)),
+  ('ktail', ctypes.POINTER(ctypes.c_uint32)),
+  ('kring_mask', ctypes.POINTER(ctypes.c_uint32)),
+  ('kring_entries', ctypes.POINTER(ctypes.c_uint32)),
+  ('kflags', ctypes.POINTER(ctypes.c_uint32)),
+  ('kdropped', ctypes.POINTER(ctypes.c_uint32)),
+  ('array', ctypes.POINTER(ctypes.c_uint32)),
+  ('sqes', ctypes.POINTER(struct_io_uring_sqe)),
+  ('sqe_head', ctypes.c_uint32),
+  ('sqe_tail', ctypes.c_uint32),
+  ('ring_sz', size_t),
+  ('ring_ptr', ctypes.c_void_p),
+  ('ring_mask', ctypes.c_uint32),
+  ('ring_entries', ctypes.c_uint32),
+  ('pad', (ctypes.c_uint32 * 2)),
+]
 class struct_io_uring_cq(Struct): pass
 class struct_io_uring_cqe(Struct): pass
 struct_io_uring_cqe._fields_ = [
@@ -58,7 +120,6 @@ struct_io_uring_cqe._fields_ = [
   ('flags', ctypes.c_uint32),
   ('big_cqe', (ctypes.c_uint64 * 0)),
 ]
-size_t = ctypes.c_uint64
 struct_io_uring_cq._fields_ = [
   ('khead', ctypes.POINTER(ctypes.c_uint32)),
   ('ktail', ctypes.POINTER(ctypes.c_uint32)),
@@ -170,6 +231,11 @@ _anonunion2._fields_ = [
   ('install_fd_flags', ctypes.c_uint32),
 ]
 class _anonunion3(ctypes.Union): pass
+_anonunion3._packed_ = True
+_anonunion3._fields_ = [
+  ('buf_index', ctypes.c_uint16),
+  ('buf_group', ctypes.c_uint16),
+]
 class _anonunion4(ctypes.Union): pass
 class _anonunion4_0(Struct): pass
 _anonunion4_0._fields_ = [

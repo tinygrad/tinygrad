@@ -3,10 +3,84 @@ import ctypes
 from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class struct_SMU14_Firmware_Footer(Struct): pass
+uint32_t = ctypes.c_uint32
+struct_SMU14_Firmware_Footer._packed_ = True
+struct_SMU14_Firmware_Footer._fields_ = [
+  ('Signature', uint32_t),
+]
 SMU14_Firmware_Footer = struct_SMU14_Firmware_Footer
 class SMU_Firmware_Header(Struct): pass
+SMU_Firmware_Header._packed_ = True
+SMU_Firmware_Header._fields_ = [
+  ('ImageVersion', uint32_t),
+  ('ImageVersion2', uint32_t),
+  ('Padding0', (uint32_t * 3)),
+  ('SizeFWSigned', uint32_t),
+  ('Padding1', (uint32_t * 25)),
+  ('FirmwareType', uint32_t),
+  ('Filler', (uint32_t * 32)),
+]
 class FwStatus_t(Struct): pass
+FwStatus_t._packed_ = True
+FwStatus_t._fields_ = [
+  ('DpmHandlerID', uint32_t,8),
+  ('ActivityMonitorID', uint32_t,8),
+  ('DpmTimerID', uint32_t,8),
+  ('DpmHubID', uint32_t,4),
+  ('DpmHubTask', uint32_t,4),
+  ('CclkSyncStatus', uint32_t,8),
+  ('Ccx0CpuOff', uint32_t,2),
+  ('Ccx1CpuOff', uint32_t,2),
+  ('GfxOffStatus', uint32_t,2),
+  ('VddOff', uint32_t,1),
+  ('InWhisperMode', uint32_t,1),
+  ('ZstateStatus', uint32_t,4),
+  ('spare0', uint32_t,4),
+  ('DstateFun', uint32_t,4),
+  ('DstateDev', uint32_t,4),
+  ('P2JobHandler', uint32_t,24),
+  ('RsmuPmiP2PendingCnt', uint32_t,8),
+  ('PostCode', uint32_t,32),
+  ('MsgPortBusy', uint32_t,24),
+  ('RsmuPmiP1Pending', uint32_t,1),
+  ('DfCstateExitPending', uint32_t,1),
+  ('Ccx0Pc6ExitPending', uint32_t,1),
+  ('Ccx1Pc6ExitPending', uint32_t,1),
+  ('WarmResetPending', uint32_t,1),
+  ('spare1', uint32_t,3),
+  ('IdleMask', uint32_t,32),
+]
 class FwStatus_t_v14_0_1(Struct): pass
+FwStatus_t_v14_0_1._packed_ = True
+FwStatus_t_v14_0_1._fields_ = [
+  ('DpmHandlerID', uint32_t,8),
+  ('ActivityMonitorID', uint32_t,8),
+  ('DpmTimerID', uint32_t,8),
+  ('DpmHubID', uint32_t,4),
+  ('DpmHubTask', uint32_t,4),
+  ('CclkSyncStatus', uint32_t,8),
+  ('ZstateStatus', uint32_t,4),
+  ('Cpu1VddOff', uint32_t,4),
+  ('DstateFun', uint32_t,4),
+  ('DstateDev', uint32_t,4),
+  ('GfxOffStatus', uint32_t,2),
+  ('Cpu0Off', uint32_t,2),
+  ('Cpu1Off', uint32_t,2),
+  ('Cpu0VddOff', uint32_t,2),
+  ('P2JobHandler', uint32_t,32),
+  ('PostCode', uint32_t,32),
+  ('MsgPortBusy', uint32_t,15),
+  ('RsmuPmiP1Pending', uint32_t,1),
+  ('RsmuPmiP2PendingCnt', uint32_t,8),
+  ('DfCstateExitPending', uint32_t,1),
+  ('Pc6EntryPending', uint32_t,1),
+  ('Pc6ExitPending', uint32_t,1),
+  ('WarmResetPending', uint32_t,1),
+  ('Mp0ClkPending', uint32_t,1),
+  ('InWhisperMode', uint32_t,1),
+  ('spare2', uint32_t,2),
+  ('IdleMask', uint32_t,32),
+]
 FEATURE_PWR_DOMAIN_e = CEnum(ctypes.c_uint32)
 FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0)
 FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1)
@@ -132,7 +206,6 @@ SwI2cRequest_t._fields_ = [
   ('SwI2cCmds', (SwI2cCmd_t * 24)),
 ]
 class SwI2cRequestExternal_t(Struct): pass
-uint32_t = ctypes.c_uint32
 SwI2cRequestExternal_t._fields_ = [
   ('SwI2cRequest', SwI2cRequest_t),
   ('Spare', (uint32_t * 8)),

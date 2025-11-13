@@ -261,6 +261,14 @@ struct_libusb_platform_descriptor._fields_ = [
   ('CapabilityData', (uint8_t * 0)),
 ]
 class struct_libusb_control_setup(Struct): pass
+struct_libusb_control_setup._packed_ = True
+struct_libusb_control_setup._fields_ = [
+  ('bmRequestType', uint8_t),
+  ('bRequest', uint8_t),
+  ('wValue', uint16_t),
+  ('wIndex', uint16_t),
+  ('wLength', uint16_t),
+]
 class struct_libusb_context(Struct): pass
 class struct_libusb_device(Struct): pass
 class struct_libusb_device_handle(Struct): pass
