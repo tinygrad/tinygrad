@@ -366,8 +366,8 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
         else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIBB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-class TestVizProfiler(unittest.TestCase):
-  def test_perfetto_node(self):
+class TestVizProfiler(BaseTestViz):
+  def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
@@ -381,7 +381,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(event['dur'], 10)
     assert event['ref'] is None
 
-  def test_perfetto_copy_node(self):
+  def test_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileRangeEvent(device='NV:2', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
@@ -399,7 +399,7 @@ class TestVizProfiler(unittest.TestCase):
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
-  def test_perfetto_graph(self):
+  def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
             ProfileDeviceEvent(device='NV:1', comp_tdiff=decimal.Decimal(-500), copy_tdiff=decimal.Decimal(-50)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_25_4n2', st_id=0, en_id=1, is_copy=False),
@@ -435,6 +435,12 @@ class TestVizProfiler(unittest.TestCase):
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     sz = len(get_profile(prof))
     self.assertLessEqual(sz/n_events, 26)
+
+  def test_calltrace(self):
+    def fxn(): return Tensor.empty(10).mul(2).realize()
+    fxn()
+    trace = get_viz_list()[0]["steps"][0]["trace"]
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in trace), str(trace)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):

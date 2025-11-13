@@ -12,6 +12,11 @@ MAP_FIXED, MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0x10, 0 if OSX else 0x2000,
 class PCIBarInfo: addr:int; size:int # noqa: E702
 
 class _System:
+  def write_sysfs(self, path:str, value:str, msg:str, expected:str|None=None):
+    if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value):
+      os.system(cmd:=f"sudo sh -c 'echo {value} > {path}'")
+      if FileIOInterface(path, os.O_RDONLY).read().splitlines()[0] != (expected or value): raise RuntimeError(f"{msg}. Please run {cmd} manually.")
+
   @functools.cached_property
   def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
@@ -26,9 +31,7 @@ class _System:
 
   @functools.cached_property
   def pagemap(self) -> FileIOInterface:
-    if FileIOInterface(reloc_sysfs:="/proc/sys/vm/compact_unevictable_allowed", os.O_RDONLY).read()[0] != "0":
-      os.system(cmd:=f"sudo sh -c 'echo 0 > {reloc_sysfs}'")
-      assert FileIOInterface(reloc_sysfs, os.O_RDONLY).read()[0] == "0", f"Failed to disable migration of locked pages. Please run {cmd} manually."
+    self.write_sysfs("/proc/sys/vm/compact_unevictable_allowed", "0", "Failed to disable migration of locked pages")
     return FileIOInterface("/proc/self/pagemap", os.O_RDONLY)
 
   @functools.cached_property
@@ -90,12 +93,12 @@ class _System:
     if data is not None: sysmem_view[:len(data)] = data
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
 
-  def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
+  def pci_scan_bus(self, target_vendor:int, target_devices:list[tuple[int, list[int]]]) -> list[str]:
     result = []
     for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
       vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
       device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
-      if vendor == target_vendor and device in target_devices: result.append(pcibus)
+      if vendor == target_vendor and any((device & mask) in devlist for mask, devlist in target_devices): result.append(pcibus)
     return sorted(result)
 
   def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
@@ -244,7 +247,7 @@ class LNXPCIIfaceBase:
   dev_impl:PCIDevImplBase
   gpus:ClassVar[list[str]] = []
 
-  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
+  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size):
     if len((cls:=type(self)).gpus) == 0:
       cls.gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices))
 

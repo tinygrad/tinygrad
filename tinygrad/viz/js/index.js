@@ -25,13 +25,18 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ start }) => {
+const updateProgress = ({ start, err }) => {
   clearTimeout(timeout);
   const msg = document.getElementById("progress-message");
   msg.style.display = "none";
   if (start) {
     msg.innerText = "Rendering new graph...";
     timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
+  }
+  d3.select("#custom").html("");
+  if (err) {
+    displaySelection("#custom");
+    d3.select("#custom").append(() => d3.create("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node());
   }
 }
 
@@ -136,6 +141,10 @@ function renderDag(graph, additions, recenter, layoutOpts) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
+  worker.onerror = (e) => {
+    e.preventDefault();
+    updateProgress({ err:"Error in graph layout:\n"+e.message });
+  }
 }
 
 // ** profiler graph
@@ -259,7 +268,10 @@ async function renderProfiler() {
         html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
         html.append("div").classed("args", true);
         if (e.info != null) html.append("p").style("white-space", "pre-wrap").text(e.info);
-        if (shapeRef != null) html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
+        if (shapeRef != null) {
+          html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
+          html.append("a").text("View program").on("click", () => switchCtx(shapeRef.ctx, ctxs[shapeRef.ctx+1].steps.findIndex(s => s.name==="View Program")));
+        }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         if (key != null) shapeMetadata.set(key, html.node());
@@ -539,6 +551,7 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
 
 // **** main VIZ interfacae
 
+const pathLink = (fp, lineno) => d3.create("a").attr("href", "vscode://file/"+fp+":"+lineno).text(`${fp.split("/").at(-1)}:${lineno}`);
 function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   // plaintext renders like a terminal print, otherwise render with syntax highlighting
@@ -547,11 +560,7 @@ function codeBlock(st, language, { loc, wrap }={}) {
   code.className = "hljs";
   const ret = document.createElement("pre");
   if (wrap) ret.className = "wrap";
-  if (loc != null) {
-    const link = ret.appendChild(document.createElement("a"));
-    link.href = "vscode://file/"+loc.join(":");
-    link.textContent = `${loc[0].split("/").at(-1)}:${loc[1]}`+"\n\n";
-  }
+  if (loc != null) ret.appendChild(pathLink(loc[0], loc[1]).style("margin-bottom", "4px").node());
   ret.appendChild(code);
   return ret;
 }
@@ -751,6 +760,15 @@ async function main() {
   // ** right sidebar code blocks
   const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
   metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  if (step.trace) {
+    const trace = d3.create("pre").append("code").classed("hljs", true);
+    for (let i=step.trace.length-1; i>=0; i--) {
+      const [fp, lineno, fn, code] = step.trace[i];
+      trace.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
+      trace.append("div").html(hljs.highlight(code, { language: "python" }).value).style("margin-bottom", "1ex");
+    }
+    metadata.insertBefore(trace.node().parentNode, codeElement);
+  }
   // ** rewrite steps
   if (step.match_count >= 1) {
     const rewriteList = metadata.appendChild(document.createElement("div"));

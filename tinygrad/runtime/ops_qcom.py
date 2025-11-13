@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, math, sys, weakref
+import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Any, cast
@@ -9,16 +9,18 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE
+from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
 
 #Parse C-style defines: <regname>_<field_x>__SHIFT and <regname>_<field_y>__MASK from the adreno module into the following format:
 # qreg.<regname>(<field_x>=..., <field_y>=..., ..., <field_n>=...)
-def _qreg_exec(reg, __val=0, **kwargs):
+def _qreg_exec(__reg, __val=0, **kwargs):
   for k, v in kwargs.items():
-    __val |= (getattr(adreno, f'{reg[4:]}_{k.upper()}') if v else 0) if type(v) is bool else (v << getattr(adreno, f'{reg[4:]}_{k.upper()}__SHIFT'))
+    reg_name = f"{__reg[4:]}_{k.removeprefix('_').upper()}"
+    __val |= (getattr(adreno, reg_name) if v else 0) if type(v) is bool else (v << getattr(adreno, f'{reg_name}__SHIFT'))
   return __val
 qreg: Any = type("QREG", (object,), {name[4:].lower(): functools.partial(_qreg_exec, name) for name in adreno.__dict__.keys() if name[:4] == 'REG_'})
 
@@ -67,18 +69,20 @@ class QCOMComputeQueue(HWQueue):
     self._cache_flush(write_back=True, invalidate=True, sync=True, memsync=True)
     return self
 
-  def signal(self, signal:QCOMSignal, value=0, ts=False):
+  def signal(self, signal:QCOMSignal, value=0):
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
     if self.dev.gpu_id[:2] < (7, 3):
-      self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS, timestamp=ts),
-               *data64_le(signal.timestamp_addr if ts else signal.value_addr), qreg.cp_event_write_3(value & 0xFFFFFFFF))
+      self.cmd(adreno.CP_EVENT_WRITE, qreg.cp_event_write_0(event=adreno.CACHE_FLUSH_TS), *data64_le(signal.value_addr), lo32(value))
       self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     else:
       # TODO: support devices starting with 8 Gen 1. Also, 700th series have convenient CP_GLOBAL_TIMESTAMP and CP_LOCAL_TIMESTAMP
       raise RuntimeError('CP_EVENT_WRITE7 is not supported')
     return self
 
-  def timestamp(self, signal:QCOMSignal): return self.signal(signal, 0, ts=True)
+  def timestamp(self, signal:QCOMSignal):
+    self.cmd(adreno.CP_WAIT_FOR_IDLE)
+    self.cmd(adreno.CP_REG_TO_MEM, qreg.cp_reg_to_mem_0(reg=adreno.REG_A6XX_CP_ALWAYS_ON_COUNTER, cnt=2, _64b=True),*data64_le(signal.timestamp_addr))
+    return self
 
   def wait(self, signal:QCOMSignal, value=0):
     self.cmd(adreno.CP_WAIT_REG_MEM, qreg.cp_wait_reg_mem_0(function=adreno.WRITE_GE, poll=adreno.POLL_MEMORY),*data64_le(signal.value_addr),
@@ -345,6 +349,9 @@ class QCOMDevice(HCQCompiled):
     # a7xx start with 730x or 'Cxxx', a8xx starts 'Exxx'
     if self.gpu_id[:2] >= (7, 3): raise RuntimeError(f"Unsupported GPU: chip_id={info.chip_id:#x}")
 
+    if PROFILE and self.gpu_id[:2] < (7, 3):
+      System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
+
     compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
                      functools.partial(QCOMComputeQueue, self), None)
@@ -369,3 +376,7 @@ class QCOMDevice(HCQCompiled):
       self.synchronize()
       self._gpu_free(self._stack)
       self._stack = self._gpu_alloc(sz)
+
+  def _at_profile_finalize(self):
+    super()._at_profile_finalize()
+    with contextlib.suppress(RuntimeError): System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", "10", "Failed to reenable suspend mode")

@@ -254,23 +254,6 @@ generate_ib() {
   fixup $BASE/ib.py
 }
 
-generate_libc() {
-  clang2py -k cdefstum \
-    $(dpkg -L libc6-dev | grep sys/mman.h) \
-    $(dpkg -L libc6-dev | grep sys/syscall.h) \
-    /usr/include/string.h \
-    /usr/include/elf.h \
-    /usr/include/unistd.h \
-    /usr/include/asm-generic/mman-common.h \
-    -o $BASE/libc.py
-
-  sed -i "s\import ctypes\import ctypes, ctypes.util, os\g" $BASE/libc.py
-  sed -i "s\FIXME_STUB\libc\g" $BASE/libc.py
-  sed -i "s\FunctionFactoryStub()\None if (libc_path := ctypes.util.find_library('c')) is None else ctypes.CDLL(libc_path, use_errno=True)\g" $BASE/libc.py
-
-  fixup $BASE/libc.py
-}
-
 generate_llvm() {
   INC="$(llvm-config-14 --includedir)"
   clang2py -k cdefstum \
@@ -554,7 +537,6 @@ elif [ "$1" == "sqtt" ]; then generate_sqtt
 elif [ "$1" == "qcom" ]; then generate_qcom
 elif [ "$1" == "io_uring" ]; then generate_io_uring
 elif [ "$1" == "ib" ]; then generate_ib
-elif [ "$1" == "libc" ]; then generate_libc
 elif [ "$1" == "llvm" ]; then generate_llvm
 elif [ "$1" == "kgsl" ]; then generate_kgsl
 elif [ "$1" == "adreno" ]; then generate_adreno
@@ -563,6 +545,6 @@ elif [ "$1" == "vfio" ]; then generate_vfio
 elif [ "$1" == "webgpu" ]; then generate_webgpu
 elif [ "$1" == "libusb" ]; then generate_libusb
 elif [ "$1" == "mesa" ]; then generate_mesa
-elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_libc; generate_am; generate_webgpu; generate_mesa
+elif [ "$1" == "all" ]; then generate_opencl; generate_hip; generate_comgr; generate_cuda; generate_nvrtc; generate_hsa; generate_kfd; generate_nv; generate_amd; generate_io_uring; generate_am; generate_webgpu; generate_mesa
 else echo "usage: $0 <type>"
 fi
