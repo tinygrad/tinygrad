@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import getenv, prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import TILE_ROW_DIM, TILE_COL_DIM, RT_BASE_TILE_NEPT, slots
+from extra.thunder.tiny.tk.tiles import RT
 
 class Group:
   def __init__(self, warps:int, ker):
@@ -32,7 +32,11 @@ class Group:
 
     i = UOp.range(reg.size, Group.clear_rid)
     Group.clear_rid += 1
-    return reg.reshape((reg.size,))[i].set(value, end=i).after(reg).reshape(reg.shape)
+
+    reg_store = reg.reshape((reg.size,))[i].store(value).end(i)
+
+    self.ker.push_store(reg_store, reg)
+    return reg.after(reg_store).reshape(reg.shape)
 
   def zero(self, reg:UOp): return self.clear(reg, 0)
   def neg_inf(self, reg:UOp): return self.clear(reg, -math.inf)
@@ -122,27 +126,38 @@ class Group:
   def row_reduce(self, vec:UOp, src:UOp, op:Callable[[UOp, UOp], UOp]):
     assert self.warps == 1
 
-    red_local = UOp.placeholder((self.group_threads, 2), src.dtype.base, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot)
-    slots.shared_slot += 1
+    red_local = self.ker.alloc((self.group_threads, 2), src.dtype.base, AddrSpace.LOCAL)
+    red_reg = self.ker.alloc((2,), src.dtype.base, AddrSpace.REG)
 
     for height in self.ker.range(src.shape[-3], track=False):
+      i = UOp.range(red_reg.size, Group.clear_rid)
+      Group.clear_rid += 1
+      red_reg = red_reg.after(height, *[tkr._rng for tkr in self.ker.range_stack])
+      reg_store = red_reg.flatten()[i].store(0.).end(i)
+      red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
+
       for i_outer in self.ker.range(2, track=False):
         for width in self.ker.range(src.shape[-2], AxisType.REDUCE, track=False):
           for i_inner in self.ker.range(4, AxisType.REDUCE, track=False):
             elem_index = i_inner + 2 * (i_inner // 2) + i_outer * 2
-            vec_store = vec[height, 0, i_outer].store(op(vec[height, 0, i_outer], src[height, width, elem_index])).end(width, i_inner, i_outer)
-            vec = vec.after(vec_store).reshape(vec.shape)
+            reg_store = red_reg[i_outer].store(op(red_reg[i_outer], src[height, width, elem_index])).end(i_inner, width, i_outer)
+            red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
       # store to shared memory
       for i_outer in self.ker.range(2, track=False):
-        red_local_store = red_local[self.laneid, i_outer].store(vec[height, 0, i_outer]).end(i_outer)
-        red_local = red_local.after(red_local_store).reshape(red_local.shape)
+        red_local_store = red_local[self.laneid, i_outer].store(red_reg[i_outer]).end(i_outer)
+        red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
 
       # reduce from shared memory
       for i_outer in self.ker.range(2, track=False):
         for i_inner in self.ker.range(3, AxisType.REDUCE, track=False):
-          offset = (self.laneid // 4) * 4 + ((self.laneid + 1 + i_inner) % 4)
-          vec_store = vec[height, 0, i_outer].store(op(vec[height, 0, i_outer], red_local[offset, i_outer])).end(i_inner, i_outer)
+          offset = (self.laneid // 4) * 4 + ((self.laneid + i_inner + 1) % 4)
+          reg_store = red_reg[i_outer].store(op(red_reg[i_outer], red_local[offset, i_outer])).end(i_inner, i_outer)
+          red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
+
+      # reduce with vec
+      for i_outer in self.ker.range(2, track=False):
+        vec_store = vec[height, 0, i_outer].store(op(vec[height, 0, i_outer], red_reg[i_outer])).end(i_outer, height)
 
     self.ker.push_store(vec_store, vec)
     return vec.after(vec_store).reshape(vec.shape)
@@ -159,7 +174,7 @@ class Group:
 
       load_i_height = UOp.range(dst.shape[-3], Group.load_rid)
       load_i_width = UOp.range(dst.shape[-2], Group.load_rid+1)
-      load_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.load_rid+2)
+      load_i_inner = UOp.range(RT.BASE_TILE_NEPT, Group.load_rid+2)
       Group.load_rid += 3
 
       if self.warps % 4 == 0: local_warpid = (self.warpid // 4) + (self.warpid % 4) * (self.warps // 4)
@@ -167,14 +182,14 @@ class Group:
       warp_laneid = self.threadIdx_x % WARP_THREADS
 
       if not transpose:
-        row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
-        col = load_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
+        row = (local_warpid * dst.shape[-3] + load_i_height) * RT.TILE_ROW_DIM + (warp_laneid // 4)
+        col = load_i_width * RT.TILE_COL_DIM + 2 * (warp_laneid % 4)
 
         row_offset = ((load_i_inner % 4) // 2) * 8
         col_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
       else:
-        row = (local_warpid * dst.shape[-3] + load_i_height) * TILE_ROW_DIM + 2 * (warp_laneid % 4)
-        col = load_i_width * TILE_COL_DIM + (warp_laneid // 4)
+        row = (local_warpid * dst.shape[-3] + load_i_height) * RT.TILE_ROW_DIM + 2 * (warp_laneid % 4)
+        col = load_i_width * RT.TILE_COL_DIM + (warp_laneid // 4)
 
         row_offset = (load_i_inner % 2) + (load_i_inner // 4) * 8
         col_offset = ((load_i_inner % 4) // 2) * 8
@@ -223,15 +238,15 @@ class Group:
 
       store_i_height = UOp.range(src.shape[-3], Group.store_rid)
       store_i_width = UOp.range(src.shape[-2], Group.store_rid+1)
-      store_i_inner = UOp.range(RT_BASE_TILE_NEPT, Group.store_rid+2)
+      store_i_inner = UOp.range(RT.BASE_TILE_NEPT, Group.store_rid+2)
       Group.store_rid += 3
 
       if self.warps % 4 == 0: local_warpid = (self.warpid // 4) + (self.warpid % 4) * (self.warps // 4)
       else: local_warpid = self.warpid
       warp_laneid = self.threadIdx_x % WARP_THREADS
 
-      row = (local_warpid * src.shape[-3] + store_i_height) * TILE_ROW_DIM + (warp_laneid // 4)
-      col = store_i_width * TILE_COL_DIM + 2 * (warp_laneid % 4)
+      row = (local_warpid * src.shape[-3] + store_i_height) * RT.TILE_ROW_DIM + (warp_laneid // 4)
+      col = store_i_width * RT.TILE_COL_DIM + 2 * (warp_laneid % 4)
 
       row_offset = ((store_i_inner % 4) // 2) * 8
       col_offset = (store_i_inner % 2) + (store_i_inner // 4) * 8

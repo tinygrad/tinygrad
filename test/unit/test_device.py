@@ -81,20 +81,20 @@ class TestCompiler(unittest.TestCase):
   def test_compile_cached(self):
     diskcache_put("key", "123", None) # clear cache
     getenv.cache_clear()
-    with Context(DISABLE_COMPILER_CACHE=0):
+    with Context(CCACHE=1):
       self.assertEqual(MockCompiler("key").compile_cached("123"), str.encode("123"))
       self.assertEqual(diskcache_get("key", "123"), str.encode("123"))
 
   def test_compile_cached_disabled(self):
     diskcache_put("disabled_key", "123", None) # clear cache
     getenv.cache_clear()
-    with Context(DISABLE_COMPILER_CACHE=1):
+    with Context(CCACHE=0):
       self.assertEqual(MockCompiler("disabled_key").compile_cached("123"), str.encode("123"))
       self.assertIsNone(diskcache_get("disabled_key", "123"))
 
   def test_device_compile(self):
     getenv.cache_clear()
-    with Context(DISABLE_COMPILER_CACHE=1):
+    with Context(CCACHE=0):
       a = Tensor([0.,1.], device=Device.DEFAULT).realize()
       (a + 1).realize()
 
