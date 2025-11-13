@@ -41,16 +41,16 @@ class TestLinearizer(unittest.TestCase):
     np.testing.assert_equal(b.numpy(), tb)
 
   def test_cast_there_and_back(self):
-    tst = Tensor.ones(16, dtype=dtypes.float).contiguous().realize()
-    out = tst.exp2().cast(dtypes.bfloat16).cast(dtypes.float).cast(dtypes.bfloat16) * 2
+    tst = Tensor.ones(16, dtype=dtypes.int).contiguous().realize()
+    out = tst.neg().cast(dtypes.char).cast(dtypes.int).cast(dtypes.char) * 2
     ast = helper_linearizer_opt(out)
     uops = get_program(ast, opts=[]).uops
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 1)
 
   @unittest.expectedFailure
   def test_cast_back_and_there(self):
-    tst = Tensor.ones(16, dtype=dtypes.float).contiguous().realize()
-    out = tst.exp2().cast(dtypes.bfloat16).cast(dtypes.float) * 2
+    tst = Tensor.ones(16, dtype=dtypes.int).contiguous().realize()
+    out = tst.neg().cast(dtypes.char).cast(dtypes.int) * 2
     ast = helper_linearizer_opt(out)
     uops = get_program(ast, opts=[]).uops
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
