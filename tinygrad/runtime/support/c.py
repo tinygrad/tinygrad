@@ -51,16 +51,21 @@ else:
 
     @staticmethod
     def _build(cls, fields):
-      o = 0
-      for n,t,b in [(f[0], f[1], f[2] if len(f) == 3 else 0) for f in fields]:
-        if b == 0: o = (o + 7) & ~7
-        m = (1 << (sz:=ctypes.sizeof(t)*8 if b == 0 else b)) - 1
-        def _s(self,v,m,s,b): self._data[:] = ((int.from_bytes(self._data,sys.byteorder)&~(m<<s))|((v&m)<<s)).to_bytes(len(self._data), sys.byteorder)
-        setattr(cls, n, property(functools.partial(lambda self,m,s:(int.from_bytes(self._data,sys.byteorder)>>s)&m,m=m,s=o),
-                                 functools.partial(_s,m=m,s=o,b=b)))
-        o += sz
+      offset = 0
+      for nm, ty, bf in [(f[0], f[1], f[2] if len(f) == 3 else 0) for f in fields]:
+        if bf == 0: offset = (offset + 7) & ~7
+        mask = (1 << (sz:=ctypes.sizeof(ty)*8 if bf == 0 else bf)) - 1
+        def fget(self, mask, off, ty): return (ty.from_buffer(memoryview(self._data)[(st:=off//8):st+ctypes.sizeof(ty)])
+                                               if issubclass(ty, ctypes.Structure) else (int.from_bytes(self._data, sys.byteorder)>>off)&mask)
+        def fset(self, val, mask, off): self._data[:] = (((int.from_bytes(self._data, sys.byteorder) & ~(mask<<off))|((val&mask)<<off))
+                                                              .to_bytes(len(self._data), sys.byteorder))
+        setattr(cls, nm, property(functools.partial(fget, mask=mask, off=offset, ty=ty), functools.partial(fset, mask=mask, off=offset)))
+        offset += sz
 
-      type(ctypes.Structure).__setattr__(cls, '_fields_', [('_data', ctypes.c_ubyte * ((o + 7) // 8))])
+      if hasattr(cls, '_anonymous_'):
+        setattr(cls, '_packed_anonymous_', cls._anonymous_)
+        setattr(cls, '_anonymous_', [])
+      type(ctypes.Structure).__setattr__(cls, '_fields_', [('_data', ctypes.c_ubyte * ((offset + 7) // 8))])
       type(ctypes.Structure).__setattr__(cls, '_packed_', True)
       setattr(cls, '_packed_fields_', fields)
 
@@ -70,4 +75,13 @@ else:
         for f,v in zip(self._packed_fields_, args): setattr(self, f[0], v)
         for k,v in kwargs.items(): setattr(self, k, v)
       else: super().__init__(*args, **kwargs)
+    def __getattr__(self, k):
+      for c in [getattr(self, f) for f in getattr(self, '_packed_anonymous_', [])]:
+        try: return getattr(c, k)
+        except AttributeError: pass
+      raise AttributeError(f"{type(self).__name__} has no field '{k}'")
+    def __setattr__(self, k, v):
+      for c in [getattr(self, f) for f in getattr(self, '_packed_anonymous_', [])]:
+        if hasattr(c, k): return setattr(c, k, v)
+      raise AttributeError(f"{type(self).__name__} has no field '{k}'")
 

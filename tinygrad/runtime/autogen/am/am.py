@@ -2341,308 +2341,43 @@ NPS_INFO = table.define('NPS_INFO', 5)
 TOTAL_TABLES = table.define('TOTAL_TABLES', 6)
 
 class struct_table_info(Struct): pass
-uint16_t = ctypes.c_uint16
-struct_table_info._fields_ = [
-  ('offset', uint16_t),
-  ('checksum', uint16_t),
-  ('size', uint16_t),
-  ('padding', uint16_t),
-]
 table_info = struct_table_info
 class struct_binary_header(Struct): pass
-struct_binary_header._fields_ = [
-  ('binary_signature', uint32_t),
-  ('version_major', uint16_t),
-  ('version_minor', uint16_t),
-  ('binary_checksum', uint16_t),
-  ('binary_size', uint16_t),
-  ('table_list', (table_info * 6)),
-]
 binary_header = struct_binary_header
 class struct_die_info(Struct): pass
-struct_die_info._fields_ = [
-  ('die_id', uint16_t),
-  ('die_offset', uint16_t),
-]
 die_info = struct_die_info
 class struct_ip_discovery_header(Struct): pass
-class struct_ip_discovery_header_0(ctypes.Union): pass
-class struct_ip_discovery_header_0_0(Struct): pass
+class _anonunion0(ctypes.Union): pass
+class _anonstruct1(Struct): pass
 uint8_t = ctypes.c_ubyte
-struct_ip_discovery_header_0_0._fields_ = [
+_anonstruct1._fields_ = [
   ('base_addr_64_bit', uint8_t,1),
   ('reserved', uint8_t,7),
   ('reserved2', uint8_t),
 ]
-struct_ip_discovery_header_0._anonymous_ = ['_0']
-struct_ip_discovery_header_0._fields_ = [
-  ('padding', (uint16_t * 1)),
-  ('_0', struct_ip_discovery_header_0_0),
-]
-struct_ip_discovery_header._anonymous_ = ['_0']
-struct_ip_discovery_header._fields_ = [
-  ('signature', uint32_t),
-  ('version', uint16_t),
-  ('size', uint16_t),
-  ('id', uint32_t),
-  ('num_dies', uint16_t),
-  ('die_info', (die_info * 16)),
-  ('_0', struct_ip_discovery_header_0),
-]
 ip_discovery_header = struct_ip_discovery_header
 class struct_ip(Struct): pass
-struct_ip._fields_ = [
-  ('hw_id', uint16_t),
-  ('number_instance', uint8_t),
-  ('num_base_address', uint8_t),
-  ('major', uint8_t),
-  ('minor', uint8_t),
-  ('revision', uint8_t),
-  ('harvest', uint8_t,4),
-  ('reserved', uint8_t,4),
-  ('base_address', (uint32_t * 0)),
-]
 ip = struct_ip
 class struct_ip_v3(Struct): pass
-struct_ip_v3._fields_ = [
-  ('hw_id', uint16_t),
-  ('instance_number', uint8_t),
-  ('num_base_address', uint8_t),
-  ('major', uint8_t),
-  ('minor', uint8_t),
-  ('revision', uint8_t),
-  ('sub_revision', uint8_t,4),
-  ('variant', uint8_t,4),
-  ('base_address', (uint32_t * 0)),
-]
 ip_v3 = struct_ip_v3
 class struct_ip_v4(Struct): pass
-struct_ip_v4._fields_ = [
-  ('hw_id', uint16_t),
-  ('instance_number', uint8_t),
-  ('num_base_address', uint8_t),
-  ('major', uint8_t),
-  ('minor', uint8_t),
-  ('revision', uint8_t),
-]
 ip_v4 = struct_ip_v4
 class struct_die_header(Struct): pass
-struct_die_header._fields_ = [
-  ('die_id', uint16_t),
-  ('num_ips', uint16_t),
-]
 die_header = struct_die_header
 class struct_ip_structure(Struct): pass
 class struct_die(Struct): pass
-class struct_die_0(ctypes.Union): pass
-struct_die_0._fields_ = [
-  ('ip_list', ctypes.POINTER(ip)),
-  ('ip_v3_list', ctypes.POINTER(ip_v3)),
-  ('ip_v4_list', ctypes.POINTER(ip_v4)),
-]
-struct_die._anonymous_ = ['_0']
-struct_die._fields_ = [
-  ('die_header', ctypes.POINTER(die_header)),
-  ('_0', struct_die_0),
-]
-struct_ip_structure._fields_ = [
-  ('header', ctypes.POINTER(ip_discovery_header)),
-  ('die', struct_die),
-]
+class _anonunion2(ctypes.Union): pass
 ip_structure = struct_ip_structure
 class struct_gpu_info_header(Struct): pass
-struct_gpu_info_header._fields_ = [
-  ('table_id', uint32_t),
-  ('version_major', uint16_t),
-  ('version_minor', uint16_t),
-  ('size', uint32_t),
-]
 class struct_gc_info_v1_0(Struct): pass
-struct_gc_info_v1_0._fields_ = [
-  ('header', struct_gpu_info_header),
-  ('gc_num_se', uint32_t),
-  ('gc_num_wgp0_per_sa', uint32_t),
-  ('gc_num_wgp1_per_sa', uint32_t),
-  ('gc_num_rb_per_se', uint32_t),
-  ('gc_num_gl2c', uint32_t),
-  ('gc_num_gprs', uint32_t),
-  ('gc_num_max_gs_thds', uint32_t),
-  ('gc_gs_table_depth', uint32_t),
-  ('gc_gsprim_buff_depth', uint32_t),
-  ('gc_parameter_cache_depth', uint32_t),
-  ('gc_double_offchip_lds_buffer', uint32_t),
-  ('gc_wave_size', uint32_t),
-  ('gc_max_waves_per_simd', uint32_t),
-  ('gc_max_scratch_slots_per_cu', uint32_t),
-  ('gc_lds_size', uint32_t),
-  ('gc_num_sc_per_se', uint32_t),
-  ('gc_num_sa_per_se', uint32_t),
-  ('gc_num_packer_per_sc', uint32_t),
-  ('gc_num_gl2a', uint32_t),
-]
 class struct_gc_info_v1_1(Struct): pass
-struct_gc_info_v1_1._fields_ = [
-  ('header', struct_gpu_info_header),
-  ('gc_num_se', uint32_t),
-  ('gc_num_wgp0_per_sa', uint32_t),
-  ('gc_num_wgp1_per_sa', uint32_t),
-  ('gc_num_rb_per_se', uint32_t),
-  ('gc_num_gl2c', uint32_t),
-  ('gc_num_gprs', uint32_t),
-  ('gc_num_max_gs_thds', uint32_t),
-  ('gc_gs_table_depth', uint32_t),
-  ('gc_gsprim_buff_depth', uint32_t),
-  ('gc_parameter_cache_depth', uint32_t),
-  ('gc_double_offchip_lds_buffer', uint32_t),
-  ('gc_wave_size', uint32_t),
-  ('gc_max_waves_per_simd', uint32_t),
-  ('gc_max_scratch_slots_per_cu', uint32_t),
-  ('gc_lds_size', uint32_t),
-  ('gc_num_sc_per_se', uint32_t),
-  ('gc_num_sa_per_se', uint32_t),
-  ('gc_num_packer_per_sc', uint32_t),
-  ('gc_num_gl2a', uint32_t),
-  ('gc_num_tcp_per_sa', uint32_t),
-  ('gc_num_sdp_interface', uint32_t),
-  ('gc_num_tcps', uint32_t),
-]
 class struct_gc_info_v1_2(Struct): pass
-struct_gc_info_v1_2._fields_ = [
-  ('header', struct_gpu_info_header),
-  ('gc_num_se', uint32_t),
-  ('gc_num_wgp0_per_sa', uint32_t),
-  ('gc_num_wgp1_per_sa', uint32_t),
-  ('gc_num_rb_per_se', uint32_t),
-  ('gc_num_gl2c', uint32_t),
-  ('gc_num_gprs', uint32_t),
-  ('gc_num_max_gs_thds', uint32_t),
-  ('gc_gs_table_depth', uint32_t),
-  ('gc_gsprim_buff_depth', uint32_t),
-  ('gc_parameter_cache_depth', uint32_t),
-  ('gc_double_offchip_lds_buffer', uint32_t),
-  ('gc_wave_size', uint32_t),
-  ('gc_max_waves_per_simd', uint32_t),
-  ('gc_max_scratch_slots_per_cu', uint32_t),
-  ('gc_lds_size', uint32_t),
-  ('gc_num_sc_per_se', uint32_t),
-  ('gc_num_sa_per_se', uint32_t),
-  ('gc_num_packer_per_sc', uint32_t),
-  ('gc_num_gl2a', uint32_t),
-  ('gc_num_tcp_per_sa', uint32_t),
-  ('gc_num_sdp_interface', uint32_t),
-  ('gc_num_tcps', uint32_t),
-  ('gc_num_tcp_per_wpg', uint32_t),
-  ('gc_tcp_l1_size', uint32_t),
-  ('gc_num_sqc_per_wgp', uint32_t),
-  ('gc_l1_instruction_cache_size_per_sqc', uint32_t),
-  ('gc_l1_data_cache_size_per_sqc', uint32_t),
-  ('gc_gl1c_per_sa', uint32_t),
-  ('gc_gl1c_size_per_instance', uint32_t),
-  ('gc_gl2c_per_gpu', uint32_t),
-]
 class struct_gc_info_v1_3(Struct): pass
-struct_gc_info_v1_3._fields_ = [
-  ('header', struct_gpu_info_header),
-  ('gc_num_se', uint32_t),
-  ('gc_num_wgp0_per_sa', uint32_t),
-  ('gc_num_wgp1_per_sa', uint32_t),
-  ('gc_num_rb_per_se', uint32_t),
-  ('gc_num_gl2c', uint32_t),
-  ('gc_num_gprs', uint32_t),
-  ('gc_num_max_gs_thds', uint32_t),
-  ('gc_gs_table_depth', uint32_t),
-  ('gc_gsprim_buff_depth', uint32_t),
-  ('gc_parameter_cache_depth', uint32_t),
-  ('gc_double_offchip_lds_buffer', uint32_t),
-  ('gc_wave_size', uint32_t),
-  ('gc_max_waves_per_simd', uint32_t),
-  ('gc_max_scratch_slots_per_cu', uint32_t),
-  ('gc_lds_size', uint32_t),
-  ('gc_num_sc_per_se', uint32_t),
-  ('gc_num_sa_per_se', uint32_t),
-  ('gc_num_packer_per_sc', uint32_t),
-  ('gc_num_gl2a', uint32_t),
-  ('gc_num_tcp_per_sa', uint32_t),
-  ('gc_num_sdp_interface', uint32_t),
-  ('gc_num_tcps', uint32_t),
-  ('gc_num_tcp_per_wpg', uint32_t),
-  ('gc_tcp_l1_size', uint32_t),
-  ('gc_num_sqc_per_wgp', uint32_t),
-  ('gc_l1_instruction_cache_size_per_sqc', uint32_t),
-  ('gc_l1_data_cache_size_per_sqc', uint32_t),
-  ('gc_gl1c_per_sa', uint32_t),
-  ('gc_gl1c_size_per_instance', uint32_t),
-  ('gc_gl2c_per_gpu', uint32_t),
-  ('gc_tcp_size_per_cu', uint32_t),
-  ('gc_tcp_cache_line_size', uint32_t),
-  ('gc_instruction_cache_size_per_sqc', uint32_t),
-  ('gc_instruction_cache_line_size', uint32_t),
-  ('gc_scalar_data_cache_size_per_sqc', uint32_t),
-  ('gc_scalar_data_cache_line_size', uint32_t),
-  ('gc_tcc_size', uint32_t),
-  ('gc_tcc_cache_line_size', uint32_t),
-]
 class struct_gc_info_v2_0(Struct): pass
-struct_gc_info_v2_0._fields_ = [
-  ('header', struct_gpu_info_header),
-  ('gc_num_se', uint32_t),
-  ('gc_num_cu_per_sh', uint32_t),
-  ('gc_num_sh_per_se', uint32_t),
-  ('gc_num_rb_per_se', uint32_t),
-  ('gc_num_tccs', uint32_t),
-  ('gc_num_gprs', uint32_t),
-  ('gc_num_max_gs_thds', uint32_t),
-  ('gc_gs_table_depth', uint32_t),
-  ('gc_gsprim_buff_depth', uint32_t),
-  ('gc_parameter_cache_depth', uint32_t),
-  ('gc_double_offchip_lds_buffer', uint32_t),
-  ('gc_wave_size', uint32_t),
-  ('gc_max_waves_per_simd', uint32_t),
-  ('gc_max_scratch_slots_per_cu', uint32_t),
-  ('gc_lds_size', uint32_t),
-  ('gc_num_sc_per_se', uint32_t),
-  ('gc_num_packer_per_sc', uint32_t),
-]
 class struct_gc_info_v2_1(Struct): pass
-struct_gc_info_v2_1._fields_ = [
-  ('header', struct_gpu_info_header),
-  ('gc_num_se', uint32_t),
-  ('gc_num_cu_per_sh', uint32_t),
-  ('gc_num_sh_per_se', uint32_t),
-  ('gc_num_rb_per_se', uint32_t),
-  ('gc_num_tccs', uint32_t),
-  ('gc_num_gprs', uint32_t),
-  ('gc_num_max_gs_thds', uint32_t),
-  ('gc_gs_table_depth', uint32_t),
-  ('gc_gsprim_buff_depth', uint32_t),
-  ('gc_parameter_cache_depth', uint32_t),
-  ('gc_double_offchip_lds_buffer', uint32_t),
-  ('gc_wave_size', uint32_t),
-  ('gc_max_waves_per_simd', uint32_t),
-  ('gc_max_scratch_slots_per_cu', uint32_t),
-  ('gc_lds_size', uint32_t),
-  ('gc_num_sc_per_se', uint32_t),
-  ('gc_num_packer_per_sc', uint32_t),
-  ('gc_num_tcp_per_sh', uint32_t),
-  ('gc_tcp_size_per_cu', uint32_t),
-  ('gc_num_sdp_interface', uint32_t),
-  ('gc_num_cu_per_sqc', uint32_t),
-  ('gc_instruction_cache_size_per_sqc', uint32_t),
-  ('gc_scalar_data_cache_size_per_sqc', uint32_t),
-  ('gc_tcc_size', uint32_t),
-]
 class struct_harvest_info_header(Struct): pass
-struct_harvest_info_header._fields_ = [
-  ('signature', uint32_t),
-  ('version', uint32_t),
-]
 harvest_info_header = struct_harvest_info_header
 class struct_harvest_info(Struct): pass
-struct_harvest_info._fields_ = [
-  ('hw_id', uint16_t),
-  ('number_instance', uint8_t),
-  ('reserved', uint8_t),
-]
 harvest_info = struct_harvest_info
 class struct_harvest_table(Struct): pass
 struct_harvest_table._fields_ = [
@@ -2651,80 +2386,16 @@ struct_harvest_table._fields_ = [
 ]
 harvest_table = struct_harvest_table
 class struct_mall_info_header(Struct): pass
-struct_mall_info_header._fields_ = [
-  ('table_id', uint32_t),
-  ('version_major', uint16_t),
-  ('version_minor', uint16_t),
-  ('size_bytes', uint32_t),
-]
 class struct_mall_info_v1_0(Struct): pass
-struct_mall_info_v1_0._fields_ = [
-  ('header', struct_mall_info_header),
-  ('mall_size_per_m', uint32_t),
-  ('m_s_present', uint32_t),
-  ('m_half_use', uint32_t),
-  ('m_mall_config', uint32_t),
-  ('reserved', (uint32_t * 5)),
-]
 class struct_mall_info_v2_0(Struct): pass
-struct_mall_info_v2_0._fields_ = [
-  ('header', struct_mall_info_header),
-  ('mall_size_per_umc', uint32_t),
-  ('reserved', (uint32_t * 8)),
-]
 class struct_vcn_info_header(Struct): pass
-struct_vcn_info_header._fields_ = [
-  ('table_id', uint32_t),
-  ('version_major', uint16_t),
-  ('version_minor', uint16_t),
-  ('size_bytes', uint32_t),
-]
 class struct_vcn_instance_info_v1_0(Struct): pass
 class union__fuse_data(ctypes.Union): pass
-class union__fuse_data_bits(Struct): pass
-union__fuse_data_bits._fields_ = [
-  ('av1_disabled', uint32_t,1),
-  ('vp9_disabled', uint32_t,1),
-  ('hevc_disabled', uint32_t,1),
-  ('h264_disabled', uint32_t,1),
-  ('reserved', uint32_t,28),
-]
-union__fuse_data._fields_ = [
-  ('bits', union__fuse_data_bits),
-  ('all_bits', uint32_t),
-]
-struct_vcn_instance_info_v1_0._fields_ = [
-  ('instance_num', uint32_t),
-  ('fuse_data', union__fuse_data),
-  ('reserved', (uint32_t * 2)),
-]
+class _anonstruct3(Struct): pass
 class struct_vcn_info_v1_0(Struct): pass
-struct_vcn_info_v1_0._fields_ = [
-  ('header', struct_vcn_info_header),
-  ('num_of_instances', uint32_t),
-  ('instance_info', (struct_vcn_instance_info_v1_0 * 4)),
-  ('reserved', (uint32_t * 4)),
-]
 class struct_nps_info_header(Struct): pass
-struct_nps_info_header._fields_ = [
-  ('table_id', uint32_t),
-  ('version_major', uint16_t),
-  ('version_minor', uint16_t),
-  ('size_bytes', uint32_t),
-]
 class struct_nps_instance_info_v1_0(Struct): pass
-uint64_t = ctypes.c_uint64
-struct_nps_instance_info_v1_0._fields_ = [
-  ('base_address', uint64_t),
-  ('limit_address', uint64_t),
-]
 class struct_nps_info_v1_0(Struct): pass
-struct_nps_info_v1_0._fields_ = [
-  ('header', struct_nps_info_header),
-  ('nps_type', uint32_t),
-  ('count', uint32_t),
-  ('instance_info', (struct_nps_instance_info_v1_0 * 12)),
-]
 enum_amd_hw_ip_block_type = CEnum(ctypes.c_uint32)
 GC_HWIP = enum_amd_hw_ip_block_type.define('GC_HWIP', 1)
 HDP_HWIP = enum_amd_hw_ip_block_type.define('HDP_HWIP', 2)

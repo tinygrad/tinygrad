@@ -1241,9 +1241,6 @@ struct_CUDA_RESOURCE_VIEW_DESC_st._fields_ = [
 CUDA_RESOURCE_VIEW_DESC_v1 = struct_CUDA_RESOURCE_VIEW_DESC_st
 CUDA_RESOURCE_VIEW_DESC = struct_CUDA_RESOURCE_VIEW_DESC_st
 class struct_CUtensorMap_st(Struct): pass
-struct_CUtensorMap_st._fields_ = [
-  ('opaque', (cuuint64_t * 16)),
-]
 CUtensorMap = struct_CUtensorMap_st
 enum_CUtensorMapDataType_enum = CEnum(ctypes.c_uint32)
 CU_TENSOR_MAP_DATA_TYPE_UINT8 = enum_CUtensorMapDataType_enum.define('CU_TENSOR_MAP_DATA_TYPE_UINT8', 0)
