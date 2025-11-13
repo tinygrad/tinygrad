@@ -1798,18 +1798,67 @@ AMD_SIGNAL_KIND_DOORBELL = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_DOORBE
 AMD_SIGNAL_KIND_LEGACY_DOORBELL = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_LEGACY_DOORBELL', -2)
 
 class struct_amd_signal_s(Struct): pass
-class _anonunion1(ctypes.Union): pass
+class struct_amd_signal_s_0(ctypes.Union): pass
 int64_t = ctypes.c_int64
-_anonunion1._fields_ = [
+struct_amd_signal_s_0._fields_ = [
   ('value', int64_t),
   ('legacy_hardware_doorbell_ptr', ctypes.POINTER(uint32_t)),
   ('hardware_doorbell_ptr', ctypes.POINTER(uint64_t)),
 ]
-class _anonunion2(ctypes.Union): pass
+class struct_amd_signal_s_1(ctypes.Union): pass
 class struct_amd_queue_s(Struct): pass
 amd_queue_t = struct_amd_queue_s
-amd_signal_t = struct_amd_signal_s
 amd_queue_properties32_t = ctypes.c_uint32
+struct_amd_queue_s._fields_ = [
+  ('hsa_queue', hsa_queue_t),
+  ('caps', uint32_t),
+  ('reserved1', (uint32_t * 3)),
+  ('write_dispatch_id', uint64_t),
+  ('group_segment_aperture_base_hi', uint32_t),
+  ('private_segment_aperture_base_hi', uint32_t),
+  ('max_cu_id', uint32_t),
+  ('max_wave_id', uint32_t),
+  ('max_legacy_doorbell_dispatch_id_plus_1', uint64_t),
+  ('legacy_doorbell_lock', uint32_t),
+  ('reserved2', (uint32_t * 9)),
+  ('read_dispatch_id', uint64_t),
+  ('read_dispatch_id_field_base_byte_offset', uint32_t),
+  ('compute_tmpring_size', uint32_t),
+  ('scratch_resource_descriptor', (uint32_t * 4)),
+  ('scratch_backing_memory_location', uint64_t),
+  ('scratch_backing_memory_byte_size', uint64_t),
+  ('scratch_wave64_lane_byte_size', uint32_t),
+  ('queue_properties', amd_queue_properties32_t),
+  ('scratch_last_used_index', uint64_t),
+  ('queue_inactive_signal', hsa_signal_t),
+  ('reserved4', (uint32_t * 2)),
+  ('alt_scratch_last_used_index', uint64_t),
+  ('alt_scratch_backing_memory_location', uint64_t),
+  ('alt_scratch_backing_memory_byte_size', uint64_t),
+  ('alt_scratch_dispatch_limit_x', uint32_t),
+  ('alt_scratch_dispatch_limit_y', uint32_t),
+  ('alt_scratch_dispatch_limit_z', uint32_t),
+  ('alt_scratch_wave64_lane_byte_size', uint32_t),
+  ('alt_compute_tmpring_size', uint32_t),
+  ('reserved5', uint32_t),
+]
+struct_amd_signal_s_1._fields_ = [
+  ('queue_ptr', ctypes.POINTER(amd_queue_t)),
+  ('reserved2', uint64_t),
+]
+struct_amd_signal_s._anonymous_ = ['_0', '_1']
+struct_amd_signal_s._fields_ = [
+  ('kind', amd_signal_kind64_t),
+  ('_0', struct_amd_signal_s_0),
+  ('event_mailbox_ptr', uint64_t),
+  ('event_id', uint32_t),
+  ('reserved1', uint32_t),
+  ('start_ts', uint64_t),
+  ('end_ts', uint64_t),
+  ('_1', struct_amd_signal_s_1),
+  ('reserved3', (uint32_t * 2)),
+]
+amd_signal_t = struct_amd_signal_s
 enum_amd_queue_properties_t = CEnum(ctypes.c_int32)
 AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_SHIFT = enum_amd_queue_properties_t.define('AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_SHIFT', 0)
 AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_WIDTH = enum_amd_queue_properties_t.define('AMD_QUEUE_PROPERTIES_ENABLE_TRAP_HANDLER_WIDTH', 1)
@@ -1836,7 +1885,6 @@ AMD_QUEUE_CAPS_ASYNC_RECLAIM_SHIFT = enum_amd_queue_capabilities_t.define('AMD_Q
 AMD_QUEUE_CAPS_ASYNC_RECLAIM_WIDTH = enum_amd_queue_capabilities_t.define('AMD_QUEUE_CAPS_ASYNC_RECLAIM_WIDTH', 1)
 AMD_QUEUE_CAPS_ASYNC_RECLAIM = enum_amd_queue_capabilities_t.define('AMD_QUEUE_CAPS_ASYNC_RECLAIM', 1)
 
-amd_queue_t = struct_amd_queue_s
 amd_kernel_code_version32_t = ctypes.c_uint32
 enum_amd_kernel_code_version_t = CEnum(ctypes.c_uint32)
 AMD_KERNEL_CODE_VERSION_MAJOR = enum_amd_kernel_code_version_t.define('AMD_KERNEL_CODE_VERSION_MAJOR', 1)
@@ -2129,14 +2177,14 @@ struct_amd_runtime_loader_debug_info_s._fields_ = [
 amd_runtime_loader_debug_info_t = struct_amd_runtime_loader_debug_info_s
 class struct_BrigModuleHeader(Struct): pass
 BrigModule_t = ctypes.POINTER(struct_BrigModuleHeader)
-_anonenum3 = CEnum(ctypes.c_uint32)
-HSA_EXT_STATUS_ERROR_INVALID_PROGRAM = _anonenum3.define('HSA_EXT_STATUS_ERROR_INVALID_PROGRAM', 8192)
-HSA_EXT_STATUS_ERROR_INVALID_MODULE = _anonenum3.define('HSA_EXT_STATUS_ERROR_INVALID_MODULE', 8193)
-HSA_EXT_STATUS_ERROR_INCOMPATIBLE_MODULE = _anonenum3.define('HSA_EXT_STATUS_ERROR_INCOMPATIBLE_MODULE', 8194)
-HSA_EXT_STATUS_ERROR_MODULE_ALREADY_INCLUDED = _anonenum3.define('HSA_EXT_STATUS_ERROR_MODULE_ALREADY_INCLUDED', 8195)
-HSA_EXT_STATUS_ERROR_SYMBOL_MISMATCH = _anonenum3.define('HSA_EXT_STATUS_ERROR_SYMBOL_MISMATCH', 8196)
-HSA_EXT_STATUS_ERROR_FINALIZATION_FAILED = _anonenum3.define('HSA_EXT_STATUS_ERROR_FINALIZATION_FAILED', 8197)
-HSA_EXT_STATUS_ERROR_DIRECTIVE_MISMATCH = _anonenum3.define('HSA_EXT_STATUS_ERROR_DIRECTIVE_MISMATCH', 8198)
+_anonenum1 = CEnum(ctypes.c_uint32)
+HSA_EXT_STATUS_ERROR_INVALID_PROGRAM = _anonenum1.define('HSA_EXT_STATUS_ERROR_INVALID_PROGRAM', 8192)
+HSA_EXT_STATUS_ERROR_INVALID_MODULE = _anonenum1.define('HSA_EXT_STATUS_ERROR_INVALID_MODULE', 8193)
+HSA_EXT_STATUS_ERROR_INCOMPATIBLE_MODULE = _anonenum1.define('HSA_EXT_STATUS_ERROR_INCOMPATIBLE_MODULE', 8194)
+HSA_EXT_STATUS_ERROR_MODULE_ALREADY_INCLUDED = _anonenum1.define('HSA_EXT_STATUS_ERROR_MODULE_ALREADY_INCLUDED', 8195)
+HSA_EXT_STATUS_ERROR_SYMBOL_MISMATCH = _anonenum1.define('HSA_EXT_STATUS_ERROR_SYMBOL_MISMATCH', 8196)
+HSA_EXT_STATUS_ERROR_FINALIZATION_FAILED = _anonenum1.define('HSA_EXT_STATUS_ERROR_FINALIZATION_FAILED', 8197)
+HSA_EXT_STATUS_ERROR_DIRECTIVE_MISMATCH = _anonenum1.define('HSA_EXT_STATUS_ERROR_DIRECTIVE_MISMATCH', 8198)
 
 hsa_ext_module_t = ctypes.POINTER(struct_BrigModuleHeader)
 class struct_hsa_ext_program_s(Struct): pass
@@ -2201,26 +2249,26 @@ struct_hsa_ext_finalizer_1_00_pfn_s._fields_ = [
   ('hsa_ext_program_finalize', ctypes.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_isa_t, int32_t, hsa_ext_control_directives_t, ctypes.POINTER(ctypes.c_char), hsa_code_object_type_t, ctypes.POINTER(hsa_code_object_t))),
 ]
 hsa_ext_finalizer_1_00_pfn_t = struct_hsa_ext_finalizer_1_00_pfn_s
-_anonenum4 = CEnum(ctypes.c_uint32)
-HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED = _anonenum4.define('HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED', 12288)
-HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED = _anonenum4.define('HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED', 12289)
-HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED = _anonenum4.define('HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED', 12290)
-HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED = _anonenum4.define('HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED', 12291)
+_anonenum2 = CEnum(ctypes.c_uint32)
+HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED', 12288)
+HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED', 12289)
+HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED', 12290)
+HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED = _anonenum2.define('HSA_EXT_STATUS_ERROR_SAMPLER_DESCRIPTOR_UNSUPPORTED', 12291)
 
-_anonenum5 = CEnum(ctypes.c_uint32)
-HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS', 12288)
-HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS', 12289)
-HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS', 12290)
-HSA_EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS', 12291)
-HSA_EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS', 12292)
-HSA_EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS', 12293)
-HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS', 12294)
-HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS', 12295)
-HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS', 12296)
-HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES = _anonenum5.define('HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES', 12297)
-HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES = _anonenum5.define('HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES', 12298)
-HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS = _anonenum5.define('HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS', 12299)
-HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT = _anonenum5.define('HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT', 12300)
+_anonenum3 = CEnum(ctypes.c_uint32)
+HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS', 12288)
+HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS', 12289)
+HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS', 12290)
+HSA_EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS', 12291)
+HSA_EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS', 12292)
+HSA_EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS', 12293)
+HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS', 12294)
+HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS', 12295)
+HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS', 12296)
+HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES = _anonenum3.define('HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES', 12297)
+HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES = _anonenum3.define('HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES', 12298)
+HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS = _anonenum3.define('HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS', 12299)
+HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT = _anonenum3.define('HSA_EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT', 12300)
 
 hsa_ext_image_channel_type_t = CEnum(ctypes.c_uint32)
 HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8 = hsa_ext_image_channel_type_t.define('HSA_EXT_IMAGE_CHANNEL_TYPE_SNORM_INT8', 0)
