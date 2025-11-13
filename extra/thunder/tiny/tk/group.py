@@ -44,10 +44,7 @@ class Group:
   copy_rid = 300
   def copy(self, dst:UOp, src:UOp):
     assert self.warps == 1
-
     assert dst.shape == src.shape
-    assert cast(PtrDType, dst.dtype).addrspace == AddrSpace.REG
-    assert cast(PtrDType, src.dtype).addrspace == AddrSpace.REG
 
     rngs_for_shape = tuple(UOp.range(dim, Group.copy_rid + i) for i, dim in enumerate(dst.shape))
     Group.copy_rid += len(dst.shape)
