@@ -1979,58 +1979,8 @@ class TestOps(unittest.TestCase):
   def test_diag(self):
     helper_test_op([(5,)], lambda x: x.diag())
 
-  def test_diagonal_2d_comprehensive(self):
+  def test_diagonal(self):
     helper_test_op([(5,5)], lambda x: x.diagonal())
-    helper_test_op([(5,5)], lambda x: x.diagonal(offset=1))
-    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-1))
-    helper_test_op([(5,5)], lambda x: x.diagonal(offset=4))
-    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-4))
-    helper_test_op([(5,5)], lambda x: x.diagonal(offset=5))
-    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-5))
-    helper_test_op([(2,3)], lambda x: x.diagonal())
-    helper_test_op([(2,3)], lambda x: x.diagonal(offset=1))
-    helper_test_op([(2,3)], lambda x: x.diagonal(offset=-1))
-    helper_test_op([(3,2)], lambda x: x.diagonal())
-    helper_test_op([(3,2)], lambda x: x.diagonal(offset=1))
-    helper_test_op([(3,2)], lambda x: x.diagonal(offset=-1))
-    helper_test_op([(2,3)], lambda x: x.diagonal(offset=10))
-    helper_test_op([(3,2)], lambda x: x.diagonal(offset=-10))
-
-  def test_diagonal_nd_comprehensive(self):
-    helper_test_op([(2,3,4)], lambda x: x.diagonal())
-    helper_test_op([(2,3,4)], lambda x: x.diagonal(offset=1))
-    helper_test_op([(2,3,4)], lambda x: x.diagonal(offset=-1))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal())
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=1, dim2=3))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=0, dim2=2))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=2, dim2=3))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(offset=1, dim1=0, dim2=2))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(offset=-1, dim1=1, dim2=3))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(offset=2, dim1=0, dim2=3))
-    helper_test_op([(2,3,4,5,6)], lambda x: x.diagonal(dim1=1, dim2=3))
-    helper_test_op([(2,3,4,5,6)], lambda x: x.diagonal(offset=1, dim1=2, dim2=4))
-    helper_test_op([(2,3,4,5,6)], lambda x: x.diagonal(dim1=0, dim2=2))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=-3, dim2=-1))
-    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=-4, dim2=-2))
-
-  def test_diagonal_non_contiguous_comprehensive(self):
-    helper_test_op([(3,4,5)], lambda x: x.transpose(0,1).diagonal())
-    helper_test_op([(3,4,5)], lambda x: x.transpose(1,2).diagonal())
-    helper_test_op([(4,5,6)], lambda x: x.transpose(0,2).diagonal(dim1=1, dim2=2))
-    helper_test_op([(2,3,4,5)], lambda x: x.permute(0,2,1,3).diagonal(dim1=1, dim2=2))
-    helper_test_op([(2,3,4,5)], lambda x: x.permute(1,0,3,2).diagonal(dim1=0, dim2=3))
-    helper_test_op([(3,4,5,6)], lambda x: x.permute(2,0,1,3).diagonal(dim1=1, dim2=2))
-    helper_test_op([(6,6)], lambda x: x[::2, ::2].diagonal())
-    helper_test_op([(4,5,6)], lambda x: x[:, 1:4, 2:5].diagonal())
-
-  def test_diagonal_complex_operations(self):
-    helper_test_op([(3,3)], lambda x: x.diagonal().sum())
-    helper_test_op([(3,3)], lambda x: x.diagonal().mean())
-    helper_test_op([(4,4)], lambda x: x.diagonal().square().sum())
-    helper_test_op([(4,4)], lambda x: x.diagonal().relu().sum())
-    helper_test_op([(3,3,3)], lambda x: x.diagonal().diagonal())
-    helper_test_op([(4,4,4)], lambda x: x.diagonal(offset=1).sum() + x.diagonal(offset=-1).mean())
-    helper_test_op([(3,3)], lambda x: x.diagonal() @ x.diagonal().unsqueeze(1))
 
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))

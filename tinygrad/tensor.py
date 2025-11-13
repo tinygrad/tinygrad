@@ -1435,8 +1435,10 @@ class Tensor(OpMixin):
     return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
 
   def diagonal(self, offset=0, dim1=0, dim2=1) -> Tensor:
+    # TODO: Implement offset=0, dim1=0, dim2=1 to match PyTorch behavior
+    # Currently keeping these parameters for Torch compatibility but not implemented yet
     """
-    Returns a view of input tensor with its diagonal elements from the specified 2D plane.
+    Returns a view of input tensor with its main diagonal elements.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(3, 3)
@@ -1445,19 +1447,9 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.diagonal().numpy())
     ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(12).reshape(3, 4)
-    print(t.diagonal(offset=1).numpy())
-    ```
     """
-    if offset == 0 and dim1 == 0 and dim2 == 1 and self.ndim == 2 and self.shape[0] == self.shape[1]:
-      return self.flatten().pad(((0, self.shape[0]))).reshape(self.shape[0], self.shape[0]+1)[:, 0]
-    d1, d2 = sorted((self._resolve_dim(dim1), self._resolve_dim(dim2)))
-    x = self.permute([i for i in range(self.ndim) if i not in (d1, d2)] + [d1, d2])
-    start_row, start_col = smax(0, -offset), smax(0, offset)
-    size = smax(0, smin(x.shape[-2] - start_row, x.shape[-1] - start_col))
-    idx = Tensor.arange(size, device=self.device)
-    return x[..., idx + smax(0, -offset), idx + smax(0, offset)]  # type: ignore[operator]
+    if self.ndim != 2 or (n:=self.shape[0]) != self.shape[1]: raise ValueError(f"only 2-D square tensor is supported, getting {self.shape=}")
+    return self.flatten().pad(((0, n))).reshape(n, n+1)[:, 0]
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """
