@@ -1982,6 +1982,42 @@ class TestOps(unittest.TestCase):
   def test_diagonal(self):
     helper_test_op([(5,5)], lambda x: x.diagonal())
 
+  def test_diagonal_offset_positive(self):
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=1))
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=2))
+    helper_test_op([(3,4)], lambda x: x.diagonal(offset=1))
+    helper_test_op([(4,3)], lambda x: x.diagonal(offset=2))
+
+  def test_diagonal_offset_negative(self):
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-1))
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-2))
+    helper_test_op([(3,4)], lambda x: x.diagonal(offset=-1))
+    helper_test_op([(4,3)], lambda x: x.diagonal(offset=-2))
+
+  def test_diagonal_offset_edge(self):
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=4))
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-4))
+
+  def test_diagonal_3d(self):
+    helper_test_op([(2,3,4)], lambda x: x.diagonal())
+    helper_test_op([(2,3,4)], lambda x: x.diagonal(offset=1))
+    helper_test_op([(2,3,4)], lambda x: x.diagonal(offset=-1))
+
+  def test_diagonal_dims(self):
+    helper_test_op([(3,4,5)], lambda x: x.diagonal(dim1=0, dim2=1))
+    helper_test_op([(3,4,5)], lambda x: x.diagonal(dim1=0, dim2=2))
+    helper_test_op([(3,4,5)], lambda x: x.diagonal(dim1=1, dim2=2))
+
+  def test_diagonal_dims_offset(self):
+    helper_test_op([(3,4,5)], lambda x: x.diagonal(offset=1, dim1=0, dim2=1))
+    helper_test_op([(3,4,5)], lambda x: x.diagonal(offset=-1, dim1=0, dim2=2))
+    helper_test_op([(3,4,5)], lambda x: x.diagonal(offset=2, dim1=1, dim2=2))
+
+  def test_diagonal_4d(self):
+    helper_test_op([(2,3,4,5)], lambda x: x.diagonal())
+    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=1, dim2=3))
+    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(offset=1, dim1=0, dim2=2))
+
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
     helper_test_op([(2, 4)], lambda x: x.roll((1,)))
