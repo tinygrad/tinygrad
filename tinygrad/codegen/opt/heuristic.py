@@ -99,7 +99,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   for axis in k.upcastable_dims:
     # for Schedule, we check if the range is used in INDEX gates or WHERE gates
     is_masked = any(any(o is k.rngs[axis] for o in u.src[0].backward_slice) for u in k.ast.backward_slice if u.op is Ops.WHERE)
-    if k.full_shape[axis] <= 7 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
+    if k.full_shape[axis] <= 4 and is_masked and prod(k.full_shape[j] for j in to_upcast) * k.full_shape[axis] <= 7 * 7:
       if DEBUG >= 4: print(f"upcasting masked axis : {axis}")
       to_upcast.append(axis)
   for axis in to_upcast[::-1]: k.apply_opt(Opt(OptOps.UPCAST, axis, 0))
