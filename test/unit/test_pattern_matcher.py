@@ -50,7 +50,7 @@ class TestPatternMatcher(unittest.TestCase):
     def fxn(ctx, x):
       ctx.append(True)
       assert len(x.src) == 0
-      return UOp(Ops.CONST, src=(UOp(Ops.CONST),))
+      return x.replace(src=(UOp(Ops.DEVICE, arg="blah"),))
     matcher = PatternMatcher([(UPat(Ops.CONST, src=(), name="x"), fxn)])
     c1 = UOp(Ops.CONST, dtypes.float, arg=1.0)
     # second rewrite shouldn't match anything

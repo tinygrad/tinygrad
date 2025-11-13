@@ -7,13 +7,15 @@ from enum import Enum, auto
 
 class InvalidTypeMetaClass(type):
   instance:None|InvalidType = None
-  def __call__(cls, *args, **kwargs):
+  def __call__(cls):
     if (ret:=InvalidTypeMetaClass.instance) is not None: return ret
     InvalidTypeMetaClass.instance = ret = super().__call__()
     return ret
 
 class InvalidType(metaclass=InvalidTypeMetaClass):
   def __eq__(self, other): return self is other
+  def __lt__(self, other): return self is not other
+  def __gt__(self, other): return self is not other
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
   def __reduce__(self): return (InvalidType, ())  # Return the global Invalid instance
@@ -47,7 +49,7 @@ class DType(metaclass=DTypeMetaClass):
   @staticmethod
   def new(priority:int, itemsize:int, name:str, fmt:FmtStr|None): return DType(priority, itemsize, name, fmt, 1, None)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count != 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   @property
   def base(self): return self
@@ -61,7 +63,7 @@ class DType(metaclass=DTypeMetaClass):
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
-  def nbytes(self): raise RuntimeError("only ptr types have nbytes")
+  def nbytes(self) -> int: raise RuntimeError("only ptr types have nbytes")
   @property
   def min(self): return dtypes.min(self)
   @property
@@ -82,7 +84,7 @@ class PtrDType(DType):
     if isinstance(self, ImageDType):
       return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
     return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL): raise RuntimeError("can't make a pointer from a pointer")
+  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType: raise RuntimeError("can't make a pointer from a pointer")
   def nbytes(self) -> int:
     if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
     return self.size*self.itemsize
@@ -183,7 +185,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
-  all = floats + ints + (bool, index)
+  all = floats + ints + (bool, index) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())
@@ -219,9 +221,9 @@ def can_safe_cast(dt0:DType, dt1:DType) -> bool:
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
     case dtypes.index: return dt0 in dtypes.ints
-    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16,
+    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16, *dtypes.fp8s,
       dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
-    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
+    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
     case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
     case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
     case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)

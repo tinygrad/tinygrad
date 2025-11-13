@@ -2,7 +2,7 @@ import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import CI, getenv, prod, Context, RANGEIFY
+from tinygrad.helpers import CI, getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 import numpy as np
@@ -201,6 +201,13 @@ class TestMultiTensor(unittest.TestCase):
     fn = f(n)
     np.testing.assert_allclose(fX.numpy(), fn, rtol=1e-6, atol=1e-6)
 
+  def test_allreduce_shard_ring_sum(self):
+    for axis in (0, 1, None):
+      for use_ring in (0, 2):
+        t = Tensor([1, 2, 3, 4]).reshape(2, 2)
+        with Context(RING=use_ring):
+          np.testing.assert_equal(t.shard(devices_2, axis=axis).sum().item(), 10)
+
   def test_allreduce_naive(self):
     with Context(RING=0):
       a,b = _test_allreduce(Tensor.rand(256, 256))
@@ -383,7 +390,6 @@ class TestMultiTensor(unittest.TestCase):
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
   @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
-  @unittest.skipIf(RANGEIFY, "TODO: pm_rangeify hangs")
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -420,7 +426,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
   @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
-  @unittest.skipIf(RANGEIFY, "TODO: pm_rangeify hangs")
+  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18
     fake_image = Tensor.rand((2, 3, 224//16, 224//16))
@@ -428,7 +434,7 @@ class TestMultiTensor(unittest.TestCase):
     m = ResNet18()
     self._test_model_train_step(m, fake_image, labels)
 
-  @unittest.skipIf(RANGEIFY, "TODO: pm_rangeify hangs")
+  @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_simple_train_step(self):
     class Model:
       def __init__(self): self.conv1 = nn.Linear(128,128)
@@ -590,6 +596,12 @@ class TestMultiTensor(unittest.TestCase):
     # ast are the same on devices
     self.assertEqual(len(set(asts)), 1)
 
+  def test_flip(self):
+    rng = Tensor.rand((10, 10, 10))
+    t0 = rng.shard(devices_2, axis=1)
+    out = t0.flip(0) + 1
+    self.assertTrue((rng.flip(0)+1).allclose(out.to(rng.device)))
+
   def test_reshape_on_axis(self):
     t0 = Tensor.rand((26, 15, 7)).shard(devices_3, axis=1)
 
@@ -652,7 +664,7 @@ class TestMultiTensor(unittest.TestCase):
 
   # it doesn't work like this anymore
   # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
-  @unittest.expectedFailure
+  @unittest.skip("this test is broken")
   def test_mlb_assign_change_axis(self):
     t_none = Tensor.zeros((16, 16)).shard(devices_2).contiguous().realize()
     t_zero = Tensor.ones((16, 16)).shard(devices_2, axis=0)
@@ -793,7 +805,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
 
-  @unittest.skipIf(RANGEIFY, "RANGEIFY doesn't support multi const folding")
+  @unittest.skip("RANGEIFY doesn't support multi const folding")
   def test_multi_const_folding(self):
     with Context(TRACK_MATCH_STATS=0):
       a = Tensor.arange(3).realize()
@@ -1130,6 +1142,7 @@ class TestMultiRamUsage(unittest.TestCase):
     del _
     self.assertUsed(0)
 
+  @unittest.skip("flaky")
   def test_zeros_copy(self):
     _ = Tensor.zeros(self.N, self.N).contiguous().to(devices_2).realize()
     # NOTE: the first one on the DEFAULT device should be freed

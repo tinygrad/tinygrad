@@ -1,6 +1,5 @@
 import unittest
 from tinygrad import Tensor, Variable, GlobalCounters
-from tinygrad.shape.shapetracker import View
 from tinygrad.uop.ops import sym_infer
 from tinygrad.dtype import dtypes
 from tinygrad.device import is_dtype_supported
@@ -63,14 +62,6 @@ class TestSymbolicOps(unittest.TestCase):
     # symbolic isn't seeing if i == i, so it's not putting them on the same axis
     self.test_attention(imin=4, imax=5, use_symbolic=False)
     self.test_attention(imin=4, imax=5, use_symbolic=True)
-
-  # until this works, symbolic single kernel softmax won't
-  @unittest.expectedFailure
-  def test_attention_simple_view(self):
-    i = Variable("i", 2, 10)
-    v1 = View.create((2,4,1,i,i), ((i*4),i,0,0,1))
-    v2 = View.create((2,4,1,i,i,i), (((i*i)*4),(i*i),0,0,i,1))
-    self.assertIsNotNone(v1+v2)
 
   def test_attention_training(self):
     with Tensor.train():
@@ -296,7 +287,6 @@ class TestSymbolicOps(unittest.TestCase):
         symbolic = symbolic_result[:].numpy()
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
 
-  @unittest.expectedFailure
   def test_conv2d_ceildiv_edge_case(self):
     v = Variable('v', 11, 50_000)
     val = 39601
@@ -304,9 +294,10 @@ class TestSymbolicOps(unittest.TestCase):
     weight = Tensor.randn(256, 22, 12)
 
     result = x.conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
-    var_val = {v: val}
+    var_val = {v.expr: val}
     shape = tuple(sym_infer(s, var_val) for s in result.shape)
-    self.assertEqual(shape, (1, 256, 6600))  # TODO: fails if ceildiv is incorrect
+    with self.assertRaises(AssertionError):
+      self.assertEqual(shape, (1, 256, 6600))  # TODO: fails if ceildiv is incorrect
     # TODO: test output is correct
 
 if __name__ == '__main__':

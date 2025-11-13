@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>tinygrad viz</title>
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
   <script src="assets/d3js.org/d3.v7.min.js" charset="utf-8"></script>
@@ -32,35 +33,58 @@
     font-size: 14px;
     overflow: hidden;
     background-color: #08090e;
+    scrollbar-color: #686977 #151720;
   }
+  ::-webkit-scrollbar-track { background: #151720; }
+  ::-webkit-scrollbar-thumb { background: #686977; }
   a {
     color: #4a90e2;
+    text-decoration: underline;
+    cursor: pointer;
+    display: block;
   }
   ul {
     padding: 0;
-    opacity: 0.6;
     white-space: nowrap;
     cursor: pointer;
   }
-  ul.active {
+  ul > p {
+    opacity: 0.6;
+  }
+  ul.active > p {
     opacity: 1;
   }
   ul > ul {
     display: none;
+    margin-left: 6px;
+  }
+  ul.has-children > p::before {
+    content:"▸ ";
+  }
+  ul.has-children.expanded > p::before {
+    content:"▾ ";
   }
   ul.expanded > ul {
     display: block;
   }
-  ul.disabled {
+  ul.disabled > p {
     opacity: 0.4;
+  }
+  ul.disabled {
     pointer-events: none;
   }
   label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    line-height: 1;
+    user-select: none;
+    cursor: pointer;
   }
-  .graph svg {
+  input {
+    outline: none;
+  }
+  #graph svg {
     width: 100%;
     height: 100%;
   }
@@ -131,18 +155,18 @@
     position: relative;
     height: 100%;
   }
-  .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
+  .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
-  .ctx-list > ul > * + * {
+  ul > * + *, .args > * + * {
     margin-top: 4px;
   }
-  .graph {
+  #graph {
     position: absolute;
     inset: 0;
     z-index: 1;
   }
-  .profiler, .disasm {
+  #profiler, #custom {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
@@ -223,6 +247,9 @@
     max-height: 30vh;
     padding: 8px;
   }
+  pre.full-height code.hljs {
+    max-height: none;
+  }
   #progress-message {
     position: absolute;
     z-index: 2;
@@ -257,11 +284,15 @@
     height: fit-content;
   }
   .raw-text {
-    padding: 0 8px;
+    padding-left: 15px;
     width: 100%;
     height: 100%;
     max-height: 100vh;
     overflow-x: auto;
+  }
+  .raw-text > pre {
+    display: inline-block;
+    min-width: 100%;
   }
   .raw-text code {
     max-height: none !important;
@@ -315,15 +346,6 @@
     font-size: 0.95em;
     letter-spacing: 0.03em;
   }
-  .legend {
-    display: flex;
-    align-items: center;
-  }
-  .legend > div {
-    width: 0.95em;
-    height: 0.95em;
-    margin-right: 4px;
-  }
   </style>
 </head>
 <body>
@@ -340,9 +362,8 @@
     </div>
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
-    <div class="view profiler"></div>
-    <div class="view disasm"></div>
-    <div class="view graph">
+    <div class="view" id="profiler"></div>
+    <div class="view" id="graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
           <g id="edges"></g>
@@ -356,6 +377,7 @@
         </defs>
       </svg>
     </div>
+    <div class="view" id="custom"></div>
     <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
   <div id="tooltip" class="wrap"></div>

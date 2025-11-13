@@ -838,7 +838,7 @@ class TestJitRandom(unittest.TestCase):
     tst = {0:[], 1:[]}
     for r in [0,1]:
       Tensor.manual_seed(1337)
-      with Context(RANGEIFY=r):
+      with Context(JIT=r):
         _ = Tensor.randint(4, high=3)
         # this second one makes the behavior different
         _ = Tensor.randint(4, high=3)

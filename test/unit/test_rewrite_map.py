@@ -28,6 +28,22 @@ class TestRewriteMap(unittest.TestCase):
     self.assertIs(sub_map[a+b], e)
     self.assertIs(sub_map[(a+b)*c], f)
 
+  def test_multistage_substitute(self):
+    a = UOp.variable('a', 0, 10)
+    b = UOp.variable('b', 0, 10)
+    c = UOp.variable('c', 0, 10)
+    d = UOp.variable('d', 0, 10)
+    sub1 = {a+b:c}
+    start = (a+b)*c
+    # stage 1: (a+b)*c -> c*c
+    sub_map1 = graph_rewrite_map(start, _substitute, sub1, bottom_up=True)
+    self.assertIs(sub_map1[(a+b)*c], c*c)
+    # stage 2: c*c -> d
+    sub2 = {c*c:d}
+    sub_map2 = graph_rewrite_map(sub_map1[start], _substitute, sub2, input_map=sub_map1, bottom_up=True)
+    # (a+b)*c -> c*c -> d
+    self.assertIs(sub_map2[(a+b)*c], d)
+
   def test_add_zero(self):
     # Build a small graph: add(0, add(const=0, const=5))
     zero_node = UOp.const(dtypes.index, 0)
@@ -128,11 +144,11 @@ class TestRewriteMap(unittest.TestCase):
       yz_sum_zero  = yz_sum + zero_node   -> rewrites to yz_sum
       yz_neg       = -yz_sum_zero        -> -(y+z)
       yz_dneg      = -yz_neg             -> y+z    (double neg gone)
-      x_plus_yz    = x_var + yz_dneg     -> (x+y)+z  (add nodes get sorted)
-      double_neg_x = -(-x_plus_yz)       -> (x+y)+z
-      final_expr   = double_neg_x * one_node -> (x+y)+z
+      x_plus_yz    = x_var + yz_dneg     -> x + (y+z)
+      double_neg_x = -(-x_plus_yz)       -> x + (y+z)
+      final_expr   = double_neg_x * one_node -> x + (y+z)
 
-    We expect the final result to be ((x+y)+z).
+    We expect the final result to be (x + (y+z)).
     Each original node should map to the final node that replaces it,
     which might be structurally equivalent but not the same reference.
     """
@@ -147,9 +163,9 @@ class TestRewriteMap(unittest.TestCase):
     yz_sum_zero = yz_sum + zero_node    # (y + z) + 0
     yz_neg = -yz_sum_zero               # -(y+z)
     yz_dneg = -yz_neg                   # -(-(y+z)) -> (y+z)
-    x_plus_yz = x_var + yz_dneg         # x + (y+z) -> (x+y)+z
-    double_neg_x = -(-x_plus_yz)        # neg(neg(x+(y+z))) -> (x+y)+z
-    final_expr = double_neg_x * one_node  # ((x+y)+z) * 1 -> (x+y)+z
+    x_plus_yz = x_var + yz_dneg         # x + (y+z)
+    double_neg_x = -(-x_plus_yz)        # neg(neg(x+(y+z))) -> x+(y+z)
+    final_expr = double_neg_x * one_node  # (x+(y+z)) * 1 -> x+(y+z)
 
     node_map = graph_rewrite_map(final_expr, symbolic)
 
@@ -166,15 +182,14 @@ class TestRewriteMap(unittest.TestCase):
     # -(-(y+z)) => (y+z)
     self.assertEqual(node_map[yz_dneg], yz_sum)
 
-    # x + (y+z) => (x+y)+z
-    expected_xyz = (x_var + y_var) + z_var
-    self.assertEqual(node_map[x_plus_yz], expected_xyz)
+    # x + (y+z) => might get recreated if yz_dneg was changed, so compare to x + yz_sum
+    self.assertEqual(node_map[x_plus_yz], x_var + yz_sum)
 
-    # -(-(x+(y+z))) => (x+y)+z
-    self.assertEqual(node_map[double_neg_x], expected_xyz)
+    # -(-(x+(y+z))) => x + (y+z)
+    self.assertEqual(node_map[double_neg_x], x_var + yz_sum)
 
-    # ((x+y)+z) * 1 => (x+y)+z
-    self.assertEqual(node_map[final_expr], expected_xyz)
+    # (x+(y+z)) * 1 => x+(y+z)
+    self.assertEqual(node_map[final_expr], x_var + yz_sum)
 
     # Unchanged atomic nodes map to themselves
     self.assertEqual(node_map[x_var], x_var)

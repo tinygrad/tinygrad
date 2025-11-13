@@ -1,7 +1,7 @@
 import random
 import z3
 from tinygrad import dtypes
-from tinygrad.uop.spec import uops_to_z3, z3_cdiv
+from tinygrad.uop.validate import uops_to_z3, z3_cdiv
 from tinygrad.uop.ops import UOp
 from tinygrad.uop.decompositions import fast_idiv
 random.seed(42)

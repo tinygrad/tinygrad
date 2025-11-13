@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, FUSE_CONV_BW, Profiling
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -707,7 +707,7 @@ def train_unet3d():
   ```BASEDIR=<folder_path> ./examples/mlperf/scripts/setup_kits19_dataset.sh```
 
   2) To start training the model, run the following:
-  ```time PYTHONPATH=. WANDB=1 TRAIN_BEAM=3 FUSE_CONV_BW=1 GPUS=6 BS=6 MODEL=unet3d python3 examples/mlperf/model_train.py```
+  ```time PYTHONPATH=. WANDB=1 TRAIN_BEAM=3 GPUS=6 BS=6 MODEL=unet3d python3 examples/mlperf/model_train.py```
   """
   from examples.mlperf.losses import dice_ce_loss
   from examples.mlperf.metrics import dice_score
@@ -749,7 +749,6 @@ def train_unet3d():
     "train_beam": TRAIN_BEAM,
     "eval_beam": EVAL_BEAM,
     "wino": WINO.value,
-    "fuse_conv_bw": FUSE_CONV_BW.value,
     "gpus": GPUS,
     "default_float": dtypes.default_float.name
   }
@@ -1189,7 +1188,9 @@ def train_bert():
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*GBS, "step_num": i})
       if getenv("RESET_STEP"): train_step_bert.reset()
-      elif getenv("FREE_INTERMEDIATE", 1) and train_step_bert.captured is not None: train_step_bert.captured.free_intermediates()
+      elif getenv("FREE_INTERMEDIATE", 0) and train_step_bert.captured is not None:
+        # TODO: FREE_INTERMEDIATE nan'ed after jit step 2
+        train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
@@ -1223,7 +1224,7 @@ def train_bert():
           return
 
       if getenv("RESET_STEP"): eval_step_bert.reset()
-      elif getenv("FREE_INTERMEDIATE", 1) and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
+      elif getenv("FREE_INTERMEDIATE", 0) and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
 
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
@@ -1309,7 +1310,7 @@ def train_llama3():
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
   EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
 
-  # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 FUSE_ARANGE=1 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
+  # LR=1e-4 TRAIN_ON_VAL=1 DEFAULT_FLOAT=bfloat16 JITBEAM=2 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B WARMUP_STEPS=36 DECAY_STEPS=360 SEQLEN=512 PYTHONPATH=. AMD=1 AMD_LLVM=0 MODEL=llama3 python3 examples/mlperf/model_train.py
   # trains to 7
 
   opt_adamw_beta_1 = 0.9

@@ -17,7 +17,7 @@ def ioctls_from_header():
   pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_(IOW?R?)\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   matches = re.findall(pattern, hdr, re.MULTILINE)
   return type("KFD_IOCTLS", (object, ), {name: int(nr, 0x10) for name, _, nr, _ in matches}), \
-         {int(nr, 0x10): getattr(kfd, "struct_"+sname) for name, idir, nr, sname in matches}
+         {int(nr, 0x10): getattr(kfd, "struct_"+sname, None) for name, idir, nr, sname in matches}
 kfd_ioctls, kfd_headers = ioctls_from_header()
 
 class KFDFileDesc(VirtFileDesc):
@@ -85,6 +85,8 @@ class AMDDriver(VirtDriver):
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
         functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id))),
+      VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/power_dpm_force_performance_level',
+               functools.partial(TextFileDesc, text='profile_standard\n')),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0',
                functools.partial(DirFileDesc, child_names=[str(am.GC_HWID), str(am.SDMA0_HWID), str(am.NBIF_HWID)])),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0/{am.GC_HWID}', functools.partial(DirFileDesc, child_names=['0'])),
@@ -115,6 +117,10 @@ class AMDDriver(VirtDriver):
     struct = kfd_headers[nr].from_address(argp)
 
     if nr == kfd_ioctls.AMDKFD_IOC_ACQUIRE_VM: pass
+    elif nr == kfd_ioctls.AMDKFD_IOC_RUNTIME_ENABLE: pass
+    elif nr == kfd_ioctls.AMDKFD_IOC_GET_VERSION:
+      struct.major_version = 1
+      struct.minor_version = 14
     elif nr == kfd_ioctls.AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
       if struct.gpu_id not in self.gpus: return -1
       struct.handle = self._alloc_handle()

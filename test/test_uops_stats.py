@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor
-from tinygrad.helpers import getenv, GlobalCounters, EMULATE, RANGEIFY
+from tinygrad.helpers import getenv, GlobalCounters, EMULATE
 from tinygrad.engine.realize import lower_schedule_item, ProgramSpec, get_program
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import full_rewrite
@@ -51,11 +51,8 @@ class TestMemoryCount(unittest.TestCase):
     a = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
     b = Tensor.empty(1024, 1, dtype=dtypes.uint8).expand(1024, 1024)
     _, mem = get_stats(a+b)
-    if RANGEIFY:
-      # rangeify is smart!
-      self.assertEqual(mem, 1024 + 2*1024)  # 2 lil reads + 1 lil write
-    else:
-      self.assertEqual(mem, 1024*1024 + 2*1024)  # 2 lil reads + 1 write
+    # rangeify is smart!
+    self.assertEqual(mem, 1024 + 2*1024)  # 2 lil reads + 1 lil write
 
   def test_self_add(self):
     a = Tensor.empty(1024, 1024, dtype=dtypes.uint8)
@@ -144,8 +141,8 @@ class TestUOpsStats(unittest.TestCase):
     globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
     o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
-    u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))
-    u2 = UOp(Ops.LOAD, dtypes.int, (globl.index(o2),))
+    u1 = globl.index(o1)
+    u2 = globl.index(o2)
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(Ops.MUL, dtypes.int, (u1,u2))
     u5 = UOp(Ops.ADD, dtypes.int, (u4,u3))
@@ -154,8 +151,8 @@ class TestUOpsStats(unittest.TestCase):
     globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
     o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
     o2 = UOp(Ops.CONST, dtypes.int, tuple(), 2)
-    u1 = UOp(Ops.LOAD, dtypes.int, (globl.index(o1),))
-    u2 = UOp(Ops.LOAD, dtypes.int, (globl.index(o2),))
+    u1 = globl.index(o1)
+    u2 = globl.index(o2)
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(Ops.MULACC, dtypes.int, (u1,u2,u3))
     uops_fma = full_rewrite(u4.sink())

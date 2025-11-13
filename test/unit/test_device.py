@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-import unittest, os, subprocess, sys
+import unittest, os, subprocess
 from tinygrad import Tensor
-from tinygrad.device import Device, Compiler
+from tinygrad.device import Device, Compiler, enumerate_devices_str
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI
 
 class TestDevice(unittest.TestCase):
@@ -30,7 +30,7 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subproccess causes memory violation?
   def test_env_overwrite_default_compiler(self):
-    expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept RuntimeError: pass"
+    expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept Exception: pass"
 
     if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
@@ -81,29 +81,26 @@ class TestCompiler(unittest.TestCase):
   def test_compile_cached(self):
     diskcache_put("key", "123", None) # clear cache
     getenv.cache_clear()
-    with Context(DISABLE_COMPILER_CACHE=0):
+    with Context(CCACHE=1):
       self.assertEqual(MockCompiler("key").compile_cached("123"), str.encode("123"))
       self.assertEqual(diskcache_get("key", "123"), str.encode("123"))
 
   def test_compile_cached_disabled(self):
     diskcache_put("disabled_key", "123", None) # clear cache
     getenv.cache_clear()
-    with Context(DISABLE_COMPILER_CACHE=1):
+    with Context(CCACHE=0):
       self.assertEqual(MockCompiler("disabled_key").compile_cached("123"), str.encode("123"))
       self.assertIsNone(diskcache_get("disabled_key", "123"))
 
   def test_device_compile(self):
     getenv.cache_clear()
-    with Context(DISABLE_COMPILER_CACHE=1):
+    with Context(CCACHE=0):
       a = Tensor([0.,1.], device=Device.DEFAULT).realize()
       (a + 1).realize()
 
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):
-    p = subprocess.run([sys.executable, "-m", "tinygrad.device"],stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-      env={**os.environ, "DEBUG": "1"}, timeout=40,)
-    out = (p.stdout + p.stderr).decode()
-    self.assertEqual(p.returncode, 0, msg=out)
+    out = '\n'.join(enumerate_devices_str())
     self.assertIn("CPU", out) # for sanity check
 
 if __name__ == "__main__":

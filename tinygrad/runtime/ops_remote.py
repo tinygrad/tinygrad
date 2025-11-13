@@ -176,7 +176,7 @@ class RemoteHandler:
     self.sessions: defaultdict[SessionKey, RemoteSession] = defaultdict(RemoteSession)
 
     try: self.ib_ctx: IBCtx|None = IBCtx(getenv("IB_DEV", 0))
-    except (IndexError, AttributeError): self.ib_ctx = None
+    except (RuntimeError, IndexError, AttributeError): self.ib_ctx = None
     self.ib_lock = asyncio.Lock()
     self.ib_conns: dict[str, IBConn|None] = {}
     self.iova_cache: dict[tuple[SessionKey, int], tuple[int, int, int]] = {}
@@ -424,7 +424,7 @@ class RemoteConnection:
     conns = RemoteConnection.all.keys()
     datas = {conn: conn.req.serialize() for conn in conns}
     reqs, hashes, hash_datas = sum(len(c.req._q) for c in conns), sum(len(c.req._h) for c in conns), sum(len(data) for data in datas.values())
-    resps = []
+    ret, resps = None, []
     with Timing(f"*** send {reqs:-3d} requests {hashes:-3d} hashes with len {hash_datas/1024:.2f} kB in ", enabled=DEBUG>=3):
       for conn,data in datas.items(): conn.conn.request("POST", "/batch", data)
       for conn in datas.keys():

@@ -263,18 +263,23 @@ if __name__ == "__main__":
   parser.add_argument('--timing', action='store_true', help="Print timing per step")
   parser.add_argument('--seed', type=int, help="Set the random latent seed")
   parser.add_argument('--guidance', type=float, default=7.5, help="Prompt strength")
+  parser.add_argument('--fakeweights', action='store_true', help="Skip loading checkpoints and use fake weights")
   args = parser.parse_args()
 
   model = StableDiffusion()
 
   # load in weights
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
-    load_state_dict(model, torch_load(fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt'))['state_dict'], strict=False)
+    if not args.fakeweights:
+      model_bin = fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt')
+      load_state_dict(model, torch_load(model_bin)['state_dict'], verbose=False, strict=False, realize=False)
 
     if args.fp16:
       for k,v in get_state_dict(model).items():
         if k.startswith("model"):
-          v.replace(v.cast(dtypes.float16).realize())
+          v.replace(v.cast(dtypes.float16))
+
+    Tensor.realize(*get_state_dict(model).values())
 
   # run through CLIP to get context
   tokenizer = Tokenizer.ClipTokenizer()

@@ -1,9 +1,56 @@
 import unittest
-from tinygrad import Tensor, nn
-from tinygrad.helpers import RANGEIFY, Context, GlobalCounters
-from tinygrad.uop.ops import UOp
+from tinygrad import Tensor, nn, Device
+from tinygrad.helpers import Context, GlobalCounters, CI, getenv, PCONTIG, DEBUG
+from tinygrad.uop.ops import graph_rewrite, PatternMatcher, UPat, Ops
+from tinygrad.codegen.opt import OptOps, Opt
+from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
+class TestDoubleMatmul(unittest.TestCase):
+  def setUp(self):
+    with Context(DEBUG=0):
+      self.a, self.b, self.c = [Tensor.randn(16, 16).contiguous().realize() for _ in range(3)]
+      self.ref = (self.a @ self.b @ self.c).realize()
+
+  def _test(self, opts):
+    with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
+      out = (self.a @ self.b @ self.c).contiguous(arg=opts).realize()
+
+    with Context(DEBUG=0):
+      err = (out-self.ref).square()
+      self.assertLess(err.max().item(), 1e-4)
+      self.assertLess(err.mean().item(), 1e-6)
+
+  def test_baseline(self): self._test(())
+  def test_upcast_0(self): self._test((Opt(OptOps.UPCAST, 0, 4),))
+  def test_upcast_1(self): self._test((Opt(OptOps.UPCAST, 1, 4),))
+  def test_upcast_2(self): self._test((Opt(OptOps.UPCAST, 2, 4),))
+  def test_upcast_01(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4)))
+  def test_upcast_01_mismatch(self): self._test((Opt(OptOps.UPCAST, 0, 2), Opt(OptOps.UPCAST, 1, 4)))
+  def test_upcast_02(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 2, 4)))
+  def test_upcast_12(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4)))
+
+  def test_unroll_0(self): self._test((Opt(OptOps.UNROLL, 0, 4),))
+  def test_unroll_1(self): self._test((Opt(OptOps.UNROLL, 1, 4),))
+  def test_unroll_01(self): self._test((Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+
+  def test_upcast_0_unroll_0(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 0, 4)))
+  def test_upcast_1_unroll_0(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)))
+  def test_upcast_2_unroll_0(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 0, 4)))
+
+  def test_upcast_0_unroll_1(self): self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+  def test_upcast_1_unroll_1(self): self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 1, 4)))
+  def test_upcast_2_unroll_1(self): self._test((Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 1, 4)))
+
+  def test_upcast_1_unroll_1_small(self): self._test((Opt(OptOps.UPCAST, 1, 2), Opt(OptOps.UNROLL, 1, 2)))
+  def test_upcast_1_unroll_1_rev(self): self._test((Opt(OptOps.UNROLL, 1, 2), Opt(OptOps.UPCAST, 1, 2)))
+
+  def test_upcast_01_unroll_01(self):
+    self._test((Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+  def test_upcast_12_unroll_01(self):
+    self._test((Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UPCAST, 2, 4), Opt(OptOps.UNROLL, 0, 4), Opt(OptOps.UNROLL, 1, 4)))
+
 class TestRangeifyAssign(unittest.TestCase):
   def test_assign_permuted(self):
     A = Tensor.empty(4, 4, dtype='int')
@@ -18,8 +65,99 @@ class TestRangeifyAssign(unittest.TestCase):
     self.assertListEqual(lst, lst3)
     self.assertListEqual(lst2, B.permute(1, 0).tolist())
 
+class TestRangeifyEdgeCase(unittest.TestCase):
+  def test_matmul_relu_cat(self):
+    a = Tensor.ones(100, 512).contiguous().realize()
+    c = Tensor.ones(1, 512).contiguous().realize()
+    cm = Tensor.ones(512, 512)
+    c = c @ cm
+    c = c.relu()
+
+    res = Tensor.cat(a, c, dim=0)
+    self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
+
+if getenv("BIG") > 2:
+  # llama 8B (8192)
+  BS, HEADS, SEQLEN, EMB = 4, 32, 8192, 128
+elif getenv("BIG") > 1:
+  # llama 8B
+  BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
+elif getenv("BIG") > 0:
+  # bigger
+  BS, HEADS, SEQLEN, EMB = 4, 32, 128, 128
+else:
+  BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
+
+def fa():
+  Tensor.manual_seed(1337)
+  with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
+  GlobalCounters.reset()
+  return q.scaled_dot_product_attention(k, v)
+
+def fa_bw():
+  Tensor.manual_seed(1337)
+  with Context(DEBUG=0):
+    q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize().requires_grad_() for _ in range(3)]
+    attn_output = nn.Linear(HEADS*EMB, HEADS*EMB, bias=False)
+    attn_output.weight.requires_grad_().realize()
+    target = Tensor.rand(BS, SEQLEN, HEADS*EMB).contiguous().realize()
+
+  GlobalCounters.reset()
+  attn = q.scaled_dot_product_attention(k, v).contiguous().contiguous_backward()
+  attn = attn.transpose(1, 2).reshape(BS, SEQLEN, -1)
+  out = attn_output(attn)
+  loss = (out - target).square().mean()
+  loss.backward()
+  #ret = [out, Tensor.stack(q.grad, k.grad, v.grad, dim=-1)]
+  #ret = [out, Tensor.stack(q.grad, k.grad, dim=-1), v.grad]
+  ret = [out, q.grad, k.grad, v.grad]
+  Tensor.realize(*ret)
+  return ret
+
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "broken in LVP and PTX")
+class TestPcontig(unittest.TestCase):
+  def test_flash_attention_bw(self):
+    with Context(PCONTIG=max(2, PCONTIG.value), DEBUG=2):
+      grads = fa_bw()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+
+    with Context(PCONTIG=0, DEBUG=2):
+      cmp_grads = fa_bw()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+
+    with Context(DEBUG=0):
+      mses = [((x-y)**2).sum().item() for x,y in zip(grads, cmp_grads)]
+    mse = sum(mses)
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-6)
+
+  def test_flash_attention(self, opts=None):
+    with Context(PCONTIG=2, DEBUG=max(2, DEBUG.value)):
+      ret = fa().realize() if opts is None else fa().contiguous(arg=opts).realize()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+    with Context(DEBUG=2):
+      cmp = fa().realize()
+      print(f"{GlobalCounters.global_ops/1e9:.2f} GFLOPS")
+    with Context(DEBUG=0):
+      mse = ((cmp-ret)**2).sum().item()
+    print(f"mse: {mse}")
+    self.assertLessEqual(mse, 1e-6)
+
+  def test_flash_attention_opt(self):
+    opts = ()
+    # columns in top matrix
+    opts += (Opt(OptOps.UPCAST, 0, 4),)
+    # columns in bottom matrix
+    opts += (Opt(OptOps.UPCAST, 3, 4),)
+    # rows in all the matrix
+    opts += (Opt(OptOps.UPCAST, 4, 4),)
+    self.test_flash_attention(opts)
+
+# *** non CI rangeify tests below this line ***
+
 N = 256
 
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeifyOpt(unittest.TestCase):
   def test_randperm(self):
     Tensor.randperm(10000).realize()
@@ -55,7 +193,7 @@ class TestRangeifyOpt(unittest.TestCase):
     A = Tensor.empty(8,8,8,8).permute(1,0,3,2).flatten()
     A.sum().realize()
 
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
+@unittest.skipIf(CI, "useless in CI, doesn't test anything")
 class TestRangeify(unittest.TestCase):
   def test_groupnorm(self):
     # ranges 1 and 3 are merging
@@ -72,6 +210,7 @@ class TestRangeify(unittest.TestCase):
     ret = A.sum(axis=2).contiguous(arg=(1,)).sum(axis=1)
     ret.realize()
 
+  @unittest.skip("RANGEIFY=0 does nothing")
   def test_double_gemm_real(self):
     def go():
       with Context(DEBUG=0):
@@ -161,6 +300,12 @@ class TestRangeify(unittest.TestCase):
     w2 = Tensor.empty(12, 8, 3, 3)
     x.conv2d(w1).conv2d(w2).realize()
 
+  def test_resnet_conv2d(self):
+    x = Tensor.empty(1, 8, 32, 32)
+    w1 = Tensor.empty(8, 8, 3, 3)
+    w2 = Tensor.empty(8, 8, 1, 1)
+    x.conv2d(w1).conv2d(w2).realize()
+
   def test_xception_conv2d(self):
     # NOTE: this fusion is bad, it's recomputing the inner many times
     x = Tensor.empty(1, 4, 32, 32)
@@ -201,104 +346,58 @@ class TestRangeify(unittest.TestCase):
     out = blk._feed_forward(x)
     out.realize()
 
-  def test_flash_attention(self):
-    BS, HEADS, SEQLEN, EMB = 4, 2, 16, 8
-
-    # bigger
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 1024, 64
-
-    # llama 8B
-    #BS, HEADS, SEQLEN, EMB = 4, 32, 2048, 128
-
-    def fa():
-      Tensor.manual_seed(1337)
-      with Context(DEBUG=0): q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
-      return q.scaled_dot_product_attention(k, v).realize()
-
-    with Context(DEBUG=4):
-      GlobalCounters.reset()
-      ret = fa()
-    with Context(RANGEIFY=0):
-      with Context(DEBUG=2):
-        GlobalCounters.reset()
-        cmp = fa()
-      with Context(DEBUG=0):
-        mse = ((cmp-ret)**2).sum().item()
-    print(f"mse: {mse}")
-    self.assertLessEqual(mse, 1e-6)
-
 # contiguous + reduce can support ranges?
 
-@unittest.skip("okay to disable this for now")
-@unittest.skipIf(RANGEIFY<1, "tests only for RANGEIFY")
-class TestOuterworld(unittest.TestCase):
-  def test_passthrough_range(self):
-    t = Tensor.rand(10, 10).realize()
+@unittest.skip("pm_rangeify no longer exists. test this in a different way")
+class TestRangeifyPM(unittest.TestCase):
+  def setUp(self): self.base = Tensor.empty(10*10).reshape(10, 10).contiguous()
+  def assert_same(self, a, b):
+    def run_pm_rangeify(t:Tensor):
+      from tinygrad.schedule.rangeify import pm_rangeify, RangeifyContext
+      sink = t.uop.sink()
+      pm_realize = PatternMatcher([(UPat(Ops.CONTIGUOUS, name="x"), lambda x: x.replace(op=Ops.REALIZE))])
+      sink = graph_rewrite(sink, pm_realize)
+      return graph_rewrite(sink, pm_rangeify, ctx=RangeifyContext())
+    self.assertIs(run_pm_rangeify(a.contiguous()), run_pm_rangeify(b.contiguous()))
 
-    # passthrough ranges
-    a = UOp.range(10, -1)
-    sel = t[a]
-    cpy = sel.contiguous(a).realize()
+  def test_nothing_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.pad(((0,0),(0,1)))
+    self.assert_same(a, b)
 
-    self.assertTrue((t==cpy).all().item())
+  def test_reshape_match(self):
+    a = self.base
+    b = self.base.reshape(100).reshape(10, 10)
+    self.assert_same(a, b)
 
-  def test_flip_range(self):
-    t = Tensor.rand(10, 10).realize()
+  def test_permute_reshape_match(self):
+    a = self.base
+    b = self.base.permute(1,0).reshape(100).reshape(10, 10).permute(1,0)
+    self.assert_same(a, b)
 
-    # passthrough ranges
-    a = UOp.range(10, -1)
-    sel = t[9-a]
-    cpy = sel.contiguous(a).realize()
+  def test_padded_permute_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.permute(1,0).pad(((0,1),(0,0))).permute(1,0)
+    self.assert_same(a, b)
 
-    self.assertTrue((t.flip(0)==cpy).all().item())
+  @unittest.expectedFailure
+  def test_padded_reshape_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.reshape(100).reshape(10, 10).pad(((0,0),(0,1)))
+    self.assert_same(a, b)
 
-  def test_vmap(self):
-    def f(x): return x.sum(axis=0)*2
+  @unittest.expectedFailure
+  def test_padded_permute_reshape_match(self):
+    a = self.base.pad(((0,0),(0,1)))
+    b = self.base.permute(1,0).reshape(100).reshape(10, 10).pad(((0,1),(0,0))).permute(1,0)
+    self.assert_same(a, b)
 
-    x = Tensor.ones(3, 10, 2).contiguous()
-
-    # vmap across axis 0
-    a = UOp.range(3, -1)
-    out = f(x[a])
-    out = out.contiguous(a)
-
-    # 3x2 grid of 20
-    out.realize()
-    print(out.numpy())
-
-  @unittest.skip("opts don't work")
-  def test_triple_gemm(self):
-    x = Tensor.rand(1, 16).realize()
-    W = Tensor.rand(3, 16, 16).realize()
-
-    manual = (x @ W[0] @ W[1] @ W[2]).contiguous().realize()
-
-    a = UOp.range(3, -1)
-    x = x.assign(x @ W[a])
-    out = x.contiguous(a)[-1].contiguous().realize()
-
-    self.assertTrue((manual==out).all().item())
-
-  def test_setitem_pyrange(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    for i in range(10):
-      o[i] = t[i]
-    o.realize()
-    self.assertTrue((t==o).all().item())
-
-  @unittest.skip("TODO: fix this")
-  def test_setitem(self):
-    with Context(DEBUG=0):
-      t = Tensor.rand(10).realize()
-      o = Tensor.empty(10)
-    GlobalCounters.reset()
-    i = UOp.range(10, -1)
-    o[i] = t[i]
-    o.contiguous(i).realize()
-    self.assertTrue((t==o).all().item())
+  # why is this failing?
+  @unittest.expectedFailure
+  def test_cross_pad_match(self):
+    a = self.base.pad(((0,0),(0,1))).pad(((0,1),(0,0)))
+    b = self.base.pad(((0,1),(0,0))).pad(((0,0),(0,1)))
+    self.assert_same(a, b)
 
 if __name__ == '__main__':
   unittest.main()

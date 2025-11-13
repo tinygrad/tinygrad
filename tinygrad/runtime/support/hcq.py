@@ -1,12 +1,13 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
-import contextlib, decimal, statistics, time, ctypes, array, os, struct, traceback, collections
+import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, round_up, ProfileRangeEvent
+from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
+from tinygrad.runtime.support.memory import BumpAllocator
 
 class MMIOInterface:
   def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
@@ -56,20 +57,14 @@ if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockFileIOInterf
 
 # **************** for HCQ Compatible Devices ****************
 
+def hcq_filter_visible_devices(dev):
+  return [dev[x] for x in ids] if (ids:=[int(x) for x in (getenv('HCQ_VISIBLE_DEVICES', '')).split(',') if x.strip()]) else dev
+
 SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
 QueueType = TypeVar('QueueType', bound='HWQueue')
-
-class BumpAllocator:
-  def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
-  def alloc(self, size:int, alignment:int=1) -> int:
-    if round_up(self.ptr, alignment) + size > self.size:
-      if not self.wrap: raise RuntimeError("Out of memory")
-      self.ptr = 0
-    self.ptr = (res:=round_up(self.ptr, alignment)) + size
-    return res + self.base
 
 class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   """
@@ -269,20 +264,20 @@ class HCQSignal(Generic[HCQDeviceType]):
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]|None=None, queue:HWQueue|None=None):
   st, en = (dev.new_signal(), dev.new_signal()) if enabled else (None, None)
+  assert queue is not None or queue_type is not None, "Either queue or queue_type must be provided"
 
   if enabled and queue is not None: queue.timestamp(st)
-  elif enabled:
-    assert queue_type is not None
+  elif enabled and queue_type is not None:
     queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(st).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
   try: yield (st, en)
   finally:
     if enabled and queue is not None: queue.timestamp(en)
-    elif enabled:
-      assert queue_type is not None
+    elif enabled and queue_type is not None:
       queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
-    if enabled and PROFILE: dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, queue_type is dev.hw_copy_queue_t))
+    if enabled and PROFILE:
+      dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, (queue_type or type(queue)) is dev.hw_copy_queue_t))
 
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=()):
@@ -318,7 +313,7 @@ class HCQProgram(Generic[HCQDeviceType]):
     Returns:
       Arguments state with the given buffers and values set for the program.
     """
-    argsbuf = kernargs or self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(self.kernargs_alloc_size),
+    argsbuf = kernargs or self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(self.kernargs_alloc_size, 8),
                                                        size=self.kernargs_alloc_size)
     return self.args_state_t(argsbuf, self, bufs, vals=vals)
 
@@ -414,6 +409,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       for dev in HCQCompiled.peer_groups[pg]: cast(HCQAllocator, dev.allocator).map(alc)
     return self.signal_t(base_buf=HCQCompiled.signal_pool[pg].pop(), owner=self, **kwargs)
 
+  def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
+
   def _at_profile_finalize(self):
     self.synchronize() # Expect device to be synchronizes
 
@@ -427,7 +424,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
     if self.hw_copy_queue_t is None: gpu2cpu_copy_time_diff = decimal.Decimal(0)
     else: gpu2cpu_copy_time_diff = statistics.median([_sync(self, self.hw_copy_queue_t) for _ in range(40)])
-    Compiled.profile_events += [ProfileDeviceEvent(self.device, gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff)]
+    Compiled.profile_events += [ProfileDeviceEvent(self.device, gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff, props=self.device_props())]
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
@@ -440,19 +437,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
-  def _make_no_iface_error(self, errs:str, err_short:str) -> RuntimeError:
-    # Keep it in a separate function to avoid creating a traceback <-> locals ref cycle
-    e = RuntimeError(f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
-    if hasattr(e, "add_note"): e.add_note(errs + err_short)
-    return e
-
   def _select_iface(self, *ifaces:Type):
-    errs, err_short = "", ""
     if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val.upper()))
-    for iface_t in ifaces:
-      try: return iface_t(self, self.device_id)
-      except Exception as e: errs, err_short = errs + f"\n{iface_t.__name__}: {traceback.format_exc()}", err_short + f"\n{iface_t.__name__}: {e}."
-    raise self._make_no_iface_error(errs, err_short)
+    return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in ifaces],
+                               f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
@@ -517,7 +505,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
 
         lsize = min(self.b[self.b_next].size, src.nbytes - i)
-        self.b[self.b_next].cpu_view().view(size=lsize, fmt='B')[:] = src[i:i+lsize]
+        self.b[self.b_next].cpu_view().view(size=lsize, fmt='B')[:] = src.cast('B')[i:i+lsize]
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                                   .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
@@ -549,7 +537,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
                                   .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(cp_size, dest.nbytes-i)) \
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.dev.timeline_signal.wait(self.dev.timeline_value - 1)
-        dest[i:i+lsize] = self.b[0].cpu_view().view(size=lsize, fmt='B')[:]
+        dest.cast('B')[i:i+lsize] = self.b[0].cpu_view().view(size=lsize, fmt='B')[:]
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQDeviceType, dest_dev:HCQDeviceType):
     cast(HCQAllocator, src_dev.allocator).map(dest)

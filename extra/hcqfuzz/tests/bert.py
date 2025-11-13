@@ -7,7 +7,6 @@ bert_train_params = {
   "GPUS": 6,
   "BS": 96,
   "EVAL_BS": 96,
-  "FUSE_ARANGE": 1,
   "BASEDIR": "/raid/datasets/wiki",
 }
 

@@ -1,8 +1,7 @@
-import math
+import math, functools, operator
 from tinygrad.uop.ops import UOp, Ops, sint, PatternMatcher, UPat, KernelInfo, ssimplify, AxisType, sint_to_uop
-from tinygrad.helpers import all_int, dedup
-from tinygrad.dtype import dtypes
-from tinygrad.shape.view import get_contraction
+from tinygrad.helpers import all_int, dedup, get_contraction
+from tinygrad.dtype import dtypes, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
 
 def _group_dims(dims:tuple[sint, ...], max_sizes:tuple[int, ...]):
@@ -27,28 +26,35 @@ def _split_dims(dims, max_sizes):
   return tuple(_dims[:2] if _dims[2] == 1 else _dims[0] if _dims[1:3] == [1,1] else _dims)
 
 def get_grouped_dims(prefix, dims:tuple[sint, ...], max_sizes:tuple[int, ...]|None, reverse=False) -> list[UOp]:
-  if reverse: dims = dims[::-1]
-  # try to group first: (a, b, c, d) -> (ab, c, d)
-  limited = (grouped if (grouped := _group_dims(dims, max_sizes)) else dims) if max_sizes is not None else dims
-  # check if grouping failed
-  if max_sizes is not None and len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
-  # try to split up dims: (a,) -> (b, c)
-  if limited == dims: limited = _split_dims(dims, max_sizes) if max_sizes is not None else dims
-  ret = raw_idxs = [UOp(Ops.SPECIAL, dtypes.index, (sint_to_uop(s),), (f"{prefix}{i}")) for i,s in enumerate(limited)]
+  if reverse: return get_grouped_dims(prefix, dims[::-1], max_sizes)[::-1]
+  if max_sizes is None: limited = dims
+  else:
+    # try to group first: (a, b, c, d) -> (ab, c, d)
+    limited = grouped if (grouped := _group_dims(dims, max_sizes)) else dims
+    # check if grouping failed
+    if len(limited) > len(max_sizes): raise RuntimeError(f"cannot limit dim {dims=}, {max_sizes=}")
+    # try to split up dims: (a,) -> (b, c)
+    if limited == dims: limited = _split_dims(dims, max_sizes)
+  raw_idxs = [UOp(Ops.SPECIAL, dtypes.index, (sint_to_uop(s),), (f"{prefix}{i}")) for i,s in enumerate(limited)]
   if len(limited) < len(dims):
     ret = []
-    if (contraction:=get_contraction(dims, limited)) is None: raise AssertionError(f"get_contraction should not be None {dims=} {limited=}")
+    if (contraction:=get_contraction(dims, limited)) is None: raise RuntimeError(f"get_contraction should not be None {dims=} {limited=}")
     for idx, contraction_group in zip(raw_idxs, contraction):
       for c in contraction_group[:-1]:
         ret.append(idx % dims[c])
         idx //= dims[c]
       ret.append(idx)
-  elif len(limited) > len(dims):
-    a, b = len(limited), len(dims)
-    if a == 2 and b == 1: ret = [raw_idxs[0] * limited[1] + raw_idxs[1]]
-    if a == 3 and b == 1: ret = [raw_idxs[0] * (limited[1] * limited[2]) + raw_idxs[1] * limited[2] + raw_idxs[2]]
-    if a == 3 and b == 2: ret = [raw_idxs[0] * limited[1] + raw_idxs[1], raw_idxs[2]]
-  return ret[::-1] if reverse else ret
+    return ret
+  elif (a:=len(limited)) > (b:=len(dims)):
+    if a == 2 and b == 1: return [raw_idxs[0] * limited[1] + raw_idxs[1]]
+    if a == 3 and b == 1: return [(raw_idxs[0] * limited[1] + raw_idxs[1]) * limited[2] + raw_idxs[2]]
+    if a == 3 and b == 2: return [raw_idxs[0] * limited[1] + raw_idxs[1], raw_idxs[2]]
+  elif limited != dims:
+    # Convert to 1D
+    flat = raw_idxs[0]*limited[1]+raw_idxs[1] if len(dims) == 2 else raw_idxs[0]*(limited[1]*limited[2])+raw_idxs[1]*limited[2]+raw_idxs[2]
+    # Get back original indices from 1D
+    return [flat//dims[1], flat%dims[1]] if len(dims) == 2 else [flat//(dims[2]*dims[1]), (flat//dims[2])%dims[1], flat%dims[2]]
+  return raw_idxs
 
 def add_gpudims(ctx:Renderer, s:UOp):
   if s.arg is None: return None
@@ -80,6 +86,14 @@ def add_gpudims(ctx:Renderer, s:UOp):
   # apply to multiple ranges
   subs = {}
   for r in s_topo:
+    # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
+    if r.op is Ops.STORE and r.buf_target().ptrdtype.addrspace == AddrSpace.GLOBAL:
+      idx = r.src[0]
+      missing_locals = [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]
+      if len(missing_locals):
+        assert len(idx.src) == 2, "index has 2 sources"
+        mask: UOp = functools.reduce(operator.and_, [x.eq(0) for x in missing_locals])
+        subs[idx] = idx.replace(src=(idx.src[0], mask.broadcast(idx.src[1].dtype.count).where(idx.src[1], Invalid)))
     if r.op is not Ops.RANGE: continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0:-1])

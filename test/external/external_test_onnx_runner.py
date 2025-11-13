@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
-from tinygrad.frontend.onnx import OnnxRunner, OnnxDataType
+from tinygrad.nn.onnx import OnnxRunner, OnnxDataType
 from hypothesis import given, strategies as st
 
 # copied from test_const_folding.py
