@@ -9,6 +9,7 @@ torch.set_num_threads(1)
 from tinygrad.helpers import getenv
 CUDA = getenv("CUDA", 1)
 MPS = getenv("MPS", 0)
+if getenv("FP16_ACC"): torch.backends.cuda.matmul.allow_fp16_accumulation = True
 
 for dtype in [torch.float32, torch.float16, torch.bfloat16]:
   for N in [256, 512, 1024, 2048, 4096]:
