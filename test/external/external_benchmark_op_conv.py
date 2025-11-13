@@ -11,6 +11,27 @@ from tinygrad.dtype import ImageDType, Invalid
 
 # PYTHONPATH="." DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
+def vision_conv_5():
+  c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.imageh((128, 1536, 4)), (), 0)
+  c2 = UOp.range(256, 1, AxisType.LOOP)
+  c5 = UOp.range(24, 2, AxisType.LOOP)
+  c8 = UOp.range(128, 0, AxisType.LOOP)
+  c14 = c5<12
+  c15 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(393216), (), 1)
+  c20 = c8*256+c2+c5*32768
+  c24 = c14.where((c20%393216), UOp.const(dtypes.index, Invalid))
+  c28 = c14.where(c15.index(c24).cast(dtypes.float), UOp.const(dtypes.float, 0.0))
+  c29 = UOp(Ops.DEFINE_GLOBAL, dtypes.uchar.ptr(393216), (), 2)
+  c35 = (c14!=True).where(((c20+-393216)%393216), UOp.const(dtypes.index, Invalid))
+  c38 = c14.where(UOp.const(dtypes.float, 0.0), c29.index(c35).cast(dtypes.float))
+  c40 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(24), (), 3)
+  c45 = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(24), (), 4)
+  c48 = (c28+c38+c40.index(c5)*-1.0)*c45.index(c5).reciprocal()
+  c50 = c0.index((c2*24+c5+c8*6144), ptr=True).store(c48).end(c8, c2, c5)
+  opts = None
+
+  return c50.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
+
 def vision_conv_143():
   c0 = UOp(Ops.DEFINE_GLOBAL, dtypes.imageh((16, 1024, 4)), (), 0)
   c2 = UOp.range(32, 3, AxisType.LOOP)
@@ -84,7 +105,7 @@ def dm_conv_172():
   # (Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.GROUPTOP, axis=1, arg=32), Opt(op=OptOps.UNROLL, axis=1, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=8), Opt(op=OptOps.UNROLL, axis=0, arg=4), Opt(op=OptOps.GROUP, axis=1, arg=0))
   return c55.sink(arg=KernelInfo(name="conv", opts_to_apply=opts))
 
-ast = {143: vision_conv_143, 153: vision_conv_153, 172: dm_conv_172}[getenv("NUM", 143)]()
+ast = {5: vision_conv_5, 143: vision_conv_143, 153: vision_conv_153, 172: dm_conv_172}[getenv("NUM", 5)]()
 
 compiler = Device.default.compiler
 renderer = Device.default.renderer
