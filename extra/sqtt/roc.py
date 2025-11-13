@@ -60,7 +60,8 @@ class _ROCParseCtx:
     x = next(self.sqtt_evs, None)
     self.active_kern = x.kern if x is not None else None
     self.active_se = x.se if x is not None else None
-    return x
+    self.active_blob = (ctypes.c_ubyte * len(x.blob)).from_buffer_copy(x.blob) if x is not None else None
+    return self.active_blob
 
   def on_occupancy_ev(self, ev):
     if DEBUG >= 5: print("OCC", ev.time, self.active_se, ev.cu, ev.simd, ev.wave_id, ev.start)
@@ -91,10 +92,10 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
   def copy_cb(buf, buf_size, data_ptr):
-    if (prof:=ROCParseCtx.next_sqtt()) is None: return 0
-    buf[0] = ctypes.cast((ctypes.c_ubyte * len(prof.blob)).from_buffer_copy(prof.blob), ctypes.POINTER(ctypes.c_ubyte))
-    buf_size[0] = len(prof.blob)
-    return len(prof.blob)
+    if (prof_info:=ROCParseCtx.next_sqtt()) is None: return 0
+    buf[0] = ctypes.cast(prof_info, ctypes.POINTER(ctypes.c_ubyte))
+    buf_size[0] = len(prof_info)
+    return len(prof_info)
 
   @rocprof.rocprof_trace_decoder_trace_callback_t
   def trace_cb(record_type, events_ptr, n, data_ptr):
