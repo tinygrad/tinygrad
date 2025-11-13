@@ -64,13 +64,13 @@ else:
         setattr(cls, nm, property(functools.partial(fget, mask=mask, off=offset, ty=ty), functools.partial(fset, mask=mask, off=offset)))
         offset += sz
 
-      def pget(ty, s): return getattr(ty, f'_packed_{s}_', []) if getattr(ty, '_packed_', False) else getattr(ty, f'_{s}_', [])
+      def pget(ty, s): return getattr(ty, f'_packed_{s}_', getattr(ty, f'_{s}_', []))
       def get_aty(anm, fs=fields): return next(f[1] for f in fs if f[0] == anm)
-      def get_fnms(ty): return [f[0] for f in pget(ty, 'fields')]
+      def get_fnms(ty): return [f[0] for f in pget(ty, 'fields') if f[0] not in pget(ty, 'anonymous')]
 
       if hasattr(cls, '_anonymous_'):
-        for anm, aty in [(a, get_aty(a)) for a in getattr(cls, '_anonymous_', [])]:
-          for fnm in (get_fnms(aty) + flatten([get_fnms(get_aty(aanm, pget(aty, 'field'))) for aanm in pget(aty, 'anonymous')])):
+        for anm, aty in [(a, get_aty(a)) for a in cls._anonymous_]:
+          for fnm in (get_fnms(aty) + flatten([get_fnms(get_aty(aanm, pget(aty, 'fields'))) for aanm in pget(aty, 'anonymous')])):
             setattr(cls, fnm, property(lambda self: getattr(getattr(self, anm), fnm), lambda self, v: setattr(getattr(self, anm), fnm, v)))
         setattr(cls, '_packed_anonymous_', cls._anonymous_)
         setattr(cls, '_anonymous_', [])
