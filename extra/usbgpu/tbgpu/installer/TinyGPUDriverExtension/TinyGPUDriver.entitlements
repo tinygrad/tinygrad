@@ -5,15 +5,11 @@
 	<key>com.apple.developer.driverkit.transport.pci</key>
 	<array>
 		<dict>
-			<key>IOPCIMatch</key>
-			<string>0x00001002&amp;0x0000FFFF</string>
-		</dict>
-		<dict>
-			<key>IOPCIMatch</key>
-			<string>0x000010de&amp;0x0000FFFF</string>
+			<key>IOPCIPrimaryMatch</key>
+			<string>0xFFFFFFFF&amp;0x00000000</string>
 		</dict>
 	</array>
-	<key>com.apple.developer.driverkit.allow-any-userclient-access</key>
+	<key>com.apple.developer.driverkit.allow-third-party-userclients</key>
 	<true/>
 	<key>com.apple.developer.driverkit</key>
 	<true/>
