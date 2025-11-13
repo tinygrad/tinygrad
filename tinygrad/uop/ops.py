@@ -4,7 +4,6 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.mixin import OpMixin
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
@@ -106,6 +105,9 @@ class recursive_property(property):
       for s in x.toposort(lambda z: not hasattr(z, self.nm)):
         s.__dict__[self.nm] = val = self.fxn(s)
     return val
+
+# we import this late so we can use resolve/smax in mixins
+from tinygrad.mixin import OpMixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
