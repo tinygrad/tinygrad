@@ -93,12 +93,12 @@ class _System:
     if data is not None: sysmem_view[:len(data)] = data
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
 
-  def pci_scan_bus(self, target_vendor:int, target_devices:list[int]) -> list[str]:
+  def pci_scan_bus(self, target_vendor:int, target_devices:list[tuple[int, list[int]]]) -> list[str]:
     result = []
     for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
       vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
       device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
-      if vendor == target_vendor and device in target_devices: result.append(pcibus)
+      if vendor == target_vendor and any((device & mask) in devlist for mask, devlist in target_devices): result.append(pcibus)
     return sorted(result)
 
   def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
@@ -247,7 +247,7 @@ class LNXPCIIfaceBase:
   dev_impl:PCIDevImplBase
   gpus:ClassVar[list[str]] = []
 
-  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
+  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size):
     if len((cls:=type(self)).gpus) == 0:
       cls.gpus = hcq_filter_visible_devices(System.pci_scan_bus(vendor, devices))
 
