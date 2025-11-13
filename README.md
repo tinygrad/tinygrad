@@ -21,17 +21,76 @@ tinygrad: For something between [PyTorch](https://github.com/pytorch/pytorch) an
 
 ---
 
-Despite tinygrad's size, it is a fully featured deep learning framework.
+> A small, hackable deep learning library with its own compiler.
+> Tensors, autograd, and codegen – all in a codebase you can actually read.
 
-Due to its extreme simplicity, it is the easiest framework to add new accelerators to, with support for both inference and training. If XLA is CISC, tinygrad is RISC.
+tinygrad is an end-to-end deep learning stack:
 
-tinygrad is now beta software, we [raised some money](https://geohot.github.io/blog/jekyll/update/2023/05/24/the-tiny-corp-raised-5M.html) to make it good. Someday, we will tape out chips.
+- **Tensor library** with autograd
+- **IR and compiler** that fuse and lower kernels
+- **JIT + graph execution**
+- **Basic nn / optim / datasets** for real training
 
-## Features
+It’s inspired by PyTorch (ergonomics), JAX (functional transforms and IR-based AD), and TVM (scheduling and codegen), but stays intentionally tiny and hackable.
 
-### LLaMA and Stable Diffusion
+---
 
-tinygrad can run [LLaMA](/docs/showcase.md#llama) and [Stable Diffusion](/docs/showcase.md#stable-diffusion)!
+## Why tinygrad?
+
+### 1. Understandable from top to bottom
+
+- A single IR (`UOp`) powers **autograd, scheduling, and codegen**.
+- No giant hidden C++/CUDA stack: almost everything is in Python.
+- You can read the whole system in a weekend and modify it without getting lost.
+
+### 2. Built-in compiler stack
+
+- Range analysis, vectorization, memory planning, and load/store rewriting.
+- BEAM search over schedules for better performance.
+- Graph execution on devices to reduce launch overhead (CUDA-graphs-style).
+
+You’re not just calling a black-box BLAS – you own the compiler.
+
+### 3. Feels like a DL library, not just a compiler
+
+- `Tensor` with autograd, broadcasting, and device placement.
+- `Optimizer` API, basic `nn` building blocks (normalization, embeddings, etc.).
+- Built-in loaders for classic datasets (MNIST, CIFAR-10, …).
+- JIT to capture and replay compute kernels.
+
+You can actually **train models** without wiring a separate framework on top.
+
+### 4. Future-proof by design
+
+- Pluggable device backends with explicit codegen.
+- Great playground for **new hardware** and compiler ideas.
+- Small enough to be used in research, teaching, and embedded contexts.
+
+---
+
+## How tinygrad compares
+
+**PyTorch**
+
+- ✅ Similar: eager `Tensor` API, autograd, `optim`, basic datasets and layers.
+- ✅ You can write familiar training loops.
+- 🔁 Unlike PyTorch, the entire compiler and IR are visible and hackable.
+
+**JAX**
+
+- ✅ IR-based autodiff over primitives (like JAXPR + XLA).
+- ✅ Function-level JIT (`TinyJit`) that captures and replays kernels.
+- 🔁 Fewer functional transforms (no full `vmap`/`pmap` yet), but far easier to read.
+
+**TVM**
+
+- ✅ Multiple lowering passes, scheduling, and BEAM search over kernels.
+- ✅ Device “graphs” for batched execution.
+- 🔁 tinygrad also ships the **front-end framework** (tensors, nn, optim), not just the compiler.
+
+If PyTorch is a full-size truck and JAX/TVM are industrial robots, tinygrad is a **sports car** with the engine exposed.
+
+---
 
 ### Laziness
 
