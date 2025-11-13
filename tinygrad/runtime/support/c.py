@@ -69,7 +69,7 @@ else:
       def get_fnms(ty): return [f[0] for f in pget(ty, 'fields')]
 
       if hasattr(cls, '_anonymous_'):
-        for anm, aty in [(a, get_aty(anm)) for a in getattr(cls, '_anonymous_', [])]:
+        for anm, aty in [(a, get_aty(a)) for a in getattr(cls, '_anonymous_', [])]:
           for fnm in (get_fnms(aty) + flatten([get_fnms(get_aty(aanm, pget(aty, 'field'))) for aanm in pget(aty, 'anonymous')])):
             setattr(cls, fnm, property(lambda self: getattr(getattr(self, anm), fnm), lambda self, v: setattr(getattr(self, anm), fnm, v)))
         setattr(cls, '_packed_anonymous_', cls._anonymous_)
