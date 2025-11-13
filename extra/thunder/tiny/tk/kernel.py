@@ -6,7 +6,8 @@ from extra.thunder.tiny.tk.tiles import GL, ST, RT, RV
 
 class _tk_range:
   user_rid = 0
-  def __init__(self, end:int, axis_type:AxisType): self.end, self.axis_type, self.done = end, axis_type, False
+  def __init__(self, end:int, axis_type:AxisType):
+    self.end, self.axis_type, self.done = end, axis_type, False
   def __iter__(self): return self
   def __next__(self):
     if not self.done:
@@ -14,6 +15,7 @@ class _tk_range:
       _tk_range.user_rid += 1
       self._rng = UOp.range(self.end, _tk_range.user_rid-1, axis_type=self.axis_type)
       return self._rng
+
     raise StopIteration
 
 class Kernel(AbstractContextManager):
@@ -73,16 +75,18 @@ class Kernel(AbstractContextManager):
   def rt(self, shape, dtype): return RT(shape, dtype, self)._uop
   def rv(self, length, dtype, layout="naive"): return RV(length, dtype, layout, self)._uop
 
-  def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
+  def push_store(self, store:UOp, uop:UOp):
+    self.store_stack.append((store, uop))
+    return uop.after(store)
 
   def finish(self):
     # end all ranges
     rngs = []
     while self.range_stack: rngs.append(self.range_stack.pop(0)._rng)
 
-    return self.store_stack.pop()[0].end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
+    return self.store_stack[-1][0].end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
   def endrange(self):
-    last_store = self.store_stack.pop()
+    last_store = self.store_stack[-1]
     last_range = self.range_stack.pop()
     return last_store[1].after(last_store[0].barrier().end(last_range._rng)).reshape(last_store[1].shape)

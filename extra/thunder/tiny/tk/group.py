@@ -1,10 +1,9 @@
-import math, functools
+import math
 from typing import cast, Callable
-from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad import dtypes
+from tinygrad.uop.ops import AxisType, UOp, Ops
 from tinygrad.dtype import AddrSpace, PtrDType
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.tiles import RT
@@ -27,7 +26,7 @@ class Group:
   # ops that only work on a single warp
 
   clear_rid = 1000
-  def clear(self, reg:UOp, value:float=0):
+  def clear(self, reg:UOp, value:float=0, afters=()):
     assert self.warps == 1
 
     i = UOp.range(reg.size, Group.clear_rid)
@@ -36,10 +35,10 @@ class Group:
     reg_store = reg.reshape((reg.size,))[i].store(value).end(i)
 
     self.ker.push_store(reg_store, reg)
-    return reg.after(reg_store).reshape(reg.shape)
+    return reg.after(UOp.group(*((reg_store,)+afters))).reshape(reg.shape)
 
-  def zero(self, reg:UOp): return self.clear(reg, 0)
-  def neg_inf(self, reg:UOp): return self.clear(reg, -math.inf)
+  def zero(self, reg:UOp, afters=()): return self.clear(reg, 0, afters=afters)
+  def neg_inf(self, reg:UOp, afters=()): return self.clear(reg, -math.inf, afters=afters)
 
   copy_rid = 300
   def copy(self, dst:UOp, src:UOp):
