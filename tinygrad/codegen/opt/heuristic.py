@@ -73,16 +73,18 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3:
               print(f"MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_BLOCKSIZE=} {MV_THREADS_PER_ROW=} {MV_ROWS_PER_THREAD=}")
-            if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+            try:
+              if MV_THREADS_PER_ROW > 1: k.apply_opt(Opt(OptOps.GROUP, 0, MV_THREADS_PER_ROW))
+            except KernelOptError: pass
             if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
             if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
             return k
 
   # are we grouping? (requires local shape support)
-  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= 2048, False):
-    for sz in [16]:
+  if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):
+    for axis, sz in itertools.product((0, 1, 2), (16,)):
       try:
-        k.apply_opt(Opt(OptOps.GROUPTOP, 0, sz))
+        k.apply_opt(Opt(OptOps.GROUPTOP, axis, sz))
         break
       except KernelOptError: pass
 
@@ -105,7 +107,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # potentially do more upcasts of non reduce axes based on a heuristic
   is_dsp = k.ren is not None and k.ren.device == "DSP"
   upcasted_axis: set[int] = set()
-  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024):
+  while resolve(prod(k.output_shape[i] for i in k.upcastable_dims) >= 1024) and (k.upcast_size() < 32):
     xb_choices = []
     # consider all upcastable axes with 3 or 4 upcast (128 on the DSP)
     for axis, upcast_amount in itertools.product(k.upcastable_dims, ([128] if not len(upcasted_axis) else []) if is_dsp else [3,4]):
@@ -133,8 +135,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # if last reduce dim is small(ish), loop unroll the reduce
   # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
   try:
-    upcast_size = prod(k.full_shape[a] for a in k.axes_of(AxisType.UPCAST, AxisType.UNROLL))
-    if k.unrollable_dims and (upcast_size <= 4 or not k.axes_of(AxisType.UNROLL)) and (upcast_size < 64):
+    if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
       if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
         k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
         # if it's small, upcast a second reduce dimension too

@@ -1042,13 +1042,12 @@ class TestSchedule(unittest.TestCase):
       compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
       np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
-    with Context(FUSE_ATTENTION=1):
-      out = Tensor.scaled_dot_product_attention(q,k,v)
-      run_schedule(check_schedule(out, 4)) # TODO: should be 1?
-      if getenv("CHECK", 1):
-        import torch
-        compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
-        np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
+    out = Tensor.scaled_dot_product_attention(q,k,v)
+    run_schedule(check_schedule(out, 4)) # TODO: should be 1?
+    if getenv("CHECK", 1):
+      import torch
+      compare = torch.nn.functional.scaled_dot_product_attention(torch.tensor(q.numpy()),torch.tensor(k.numpy()),torch.tensor(v.numpy()))
+      np.testing.assert_allclose(out.numpy(), compare.numpy(), atol=1e-6, rtol=1e-3)
 
   def test_ugly_reduceop_pairing(self):
     Tensor.manual_seed(0)
@@ -1503,6 +1502,18 @@ class TestSchedule(unittest.TestCase):
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
+  def test_fuse_arange_avg_pool2d_ceil_mode(self):
+    x = Tensor.avg_pool2d(Tensor.empty(1,1,6,6), kernel_size=(3,3), padding=1, stride=3, ceil_mode=True)
+    sched = check_schedule(x, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 1)
+
+  def test_fuse_arange_pad_circular_mode_bw(self):
+    x = Tensor.empty(1,1,5,5,5)
+    out = x.pad((1,2,3,5,1,2), mode="circular")
+    g = out.sum().gradient(x)[0]
+    sched = check_schedule(g, 1)
+    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 0)
+
   # TODO like openpilot with imagef
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_base_change_expand_expand(self):
@@ -1561,6 +1572,13 @@ class TestSchedule(unittest.TestCase):
 
   def test_conv2d(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
   def test_conv2d_fused(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4)
+
+  def test_resnet_conv2d(self):
+    x = Tensor.empty(1, 8, 32, 32)
+    w1 = Tensor.empty(8, 8, 3, 3)
+    w2 = Tensor.empty(8, 8, 1, 1)
+    out = x.conv2d(w1).conv2d(w2)
+    check_schedule(out, 2)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half) and is_dtype_supported(dtypes.ulong), "need half and ulong")
   def test_conv2d_half(self): _test_conv2d(5 if SPLIT_REDUCEOP else 4, dtype=dtypes.half)

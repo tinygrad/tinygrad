@@ -389,12 +389,12 @@ class NVKIface:
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, map_flags=0, cpu_addr=None, **kwargs) -> HCQBuffer:
     # Uncached memory is "system". Use huge pages only for gpu memory.
-    page_size = (4 << (12 if OSX else 10)) if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << (12 if OSX else 10)))
+    page_size = mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (mmap.PAGESIZE if MOCKGPU else 4 << 10))
     size = round_up(size, page_size)
-    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access)
+    va_addr = self._alloc_gpu_vaddr(size, alignment=page_size, force_low=cpu_access) if (alloced:=cpu_addr is None) else cpu_addr
 
     if host:
-      va_addr = cpu_addr or FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
+      if alloced: va_addr = FileIOInterface.anon_mmap(va_addr, size, mmap.PROT_READ|mmap.PROT_WRITE, MAP_FIXED|mmap.MAP_SHARED|mmap.MAP_ANONYMOUS, 0)
 
       flags = (nv_gpu.NVOS02_FLAGS_PHYSICALITY_NONCONTIGUOUS << 4) | (nv_gpu.NVOS02_FLAGS_COHERENCY_CACHED << 12) \
             | (nv_gpu.NVOS02_FLAGS_MAPPING_NO_MAP << 30)
@@ -456,8 +456,8 @@ class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x10de, devices=[0x2204, 0x2684, 0x2b85], bars=[0, 1], vram_bar=1,
-      va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
+    super().__init__(dev, dev_id, vendor=0x10de, devices=[(0xff00, [0x2200, 0x2400, 0x2500, 0x2600, 0x2700, 0x2800, 0x2b00, 0x2c00, 0x2d00, 0x2f00])],
+      bars=[0, 1], vram_bar=1, va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     if not OSX: System.reserve_hugepages(64)
 
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
@@ -471,7 +471,7 @@ class PCIIface(PCIIfaceBase):
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
     # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
-    page_size = (2 << 20) if size >= (8 << 20) and not uncached and not host else (4 << 10)
+    page_size = mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << 10))
     return super().alloc(round_up(size, page_size), host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, **kwargs)
 
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
