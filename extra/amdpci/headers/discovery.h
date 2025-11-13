@@ -23,8 +23,6 @@
 
  #ifndef _DISCOVERY_H_
  #define _DISCOVERY_H_
-
-#include <stdint.h>
  
  #define PSP_HEADER_SIZE                 256
  #define BINARY_SIGNATURE                0x28211407
