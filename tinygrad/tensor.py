@@ -172,7 +172,7 @@ class Tensor(OpMixin):
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
-    if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
+    if (metadata:=_METADATA.get()) is not None and TRACEMETA >= 1: all_metadata[new_uop] = (metadata,)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
 
@@ -4178,7 +4178,7 @@ _METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
 
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if _METADATA.get() is not None: return fn(*args, **kwargs)
+    if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)
