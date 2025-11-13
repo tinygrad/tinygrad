@@ -157,7 +157,6 @@ class Group:
   # ops that can work across multiple warps
 
   LOAD_INNER = 8
-  load_rid = 100
   def load(self, dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
     dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
@@ -217,7 +216,6 @@ class Group:
     return dst.after(dst_store.barrier()).reshape(dst.shape)
 
   STORE_INNER = 8
-  store_rid = 200
   def store(self, dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
     dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
