@@ -1,12 +1,13 @@
 import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
-from tinygrad.helpers import temp, unwrap, DEBUG
+from tinygrad.helpers import temp, unwrap, DEBUG, getenv
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
 from tinygrad.runtime.autogen import llvm, rocprof
 from tinygrad.runtime.support.elf import elf_loader
 
-import gc
-gc.disable()
+if not getenv("PYGC", 1):
+  import gc
+  gc.disable()
 
 # to pass NULL to callbacks
 llvm.LLVMCreateDisasmCPUFeatures.argtypes = tuple(llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5]) + (ctypes.c_void_p, ctypes.c_void_p)
