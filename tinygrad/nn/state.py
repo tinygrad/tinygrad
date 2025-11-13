@@ -1,4 +1,4 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
+import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
@@ -360,12 +360,17 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
 def png_load(t:Tensor) -> Tensor:
   f = io.BufferedReader(TensorIO(t))
   assert f.read(8) == b'\x89PNG\r\n\x1a\n', "not a PNG"
+  idats = []
   while (slen:=f.read(4)):
-    len, typ = struct.unpack(">I", slen)[0], f.read(4)
-    dat = f.read(len)
+    ilen, typ = struct.unpack(">I", slen)[0], f.read(4)
+    dat = f.read(ilen)
     if typ == b'IHDR':
       width, height, depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", dat)
-      print(width, height, depth, color_type)
-
-    print(len, typ)
+      assert depth == 8 and color_type == 2 and compression == 0 and filter_method == 0 and interlace == 0, "only RGB PNG is supported"
+    if typ == b'IDAT':
+      idats.append(dat)
+    if DEBUG >= 3: print(ilen, typ)
     f.seek(4, 1)
+  decompressed = Tensor(zlib.decompress(b''.join(idats)))
+  # the first pixel in each scanline is a filter pixel
+  return decompressed.reshape(height, width*3+1)[:, 1:].reshape(height, width, 3)
