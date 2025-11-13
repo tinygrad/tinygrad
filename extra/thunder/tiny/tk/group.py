@@ -30,7 +30,7 @@ class Group:
   def clear(self, reg:UOp, value:float=0):
     assert self.warps == 1
 
-    rngs_for_shape = tuple(UOp.range(dim, Group.copy_rid + i) for i, dim in enumerate(reg.shape))
+    rngs_for_shape = tuple(UOp.range(dim, Group.clear_rid + i) for i, dim in enumerate(reg.shape))
     Group.clear_rid += len(reg.shape)
 
     reg_store = reg[*rngs_for_shape].store(value).end(*rngs_for_shape)
