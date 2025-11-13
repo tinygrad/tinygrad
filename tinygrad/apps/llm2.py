@@ -22,17 +22,6 @@ from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
 from transformers import AutoTokenizer
 
-# from typing import TypedDict
-
-# adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
-# MODELS:dict[str, dict[str, int | float | str | dict[str, int | float | dict[str, int | float]]]]
-
-# class ModelConfig(TypedDict):
-#     params: dict[str, int | float | dict[str, int | float]]
-#     total_num_weights: int
-#     model: str
-#     tokenizer: str
-
 # adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 MODELS = {
   "20B": {
