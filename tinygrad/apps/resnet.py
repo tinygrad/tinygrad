@@ -41,9 +41,10 @@ class ResNet50:
     return self.fc(x)
 
 if __name__ == "__main__":
+  test_url = "https://upload.wikimedia.org/wikipedia/en/d/d4/Norwegian_Forest_Cat_in_Norway.png"
+  img = nn.state.png_load(Tensor.from_url(sys.argv[1] if len(sys.argv) > 1 else test_url))
   model = ResNet50()
   state_dict = nn.state.safe_load(Tensor.from_url("https://huggingface.co/timm/resnet50.a1_in1k/resolve/main/model.safetensors"))
   nn.state.load_state_dict(model, state_dict)
-  img = nn.state.png_load(Tensor.from_url(sys.argv[1] if len(sys.argv) > 1 else "https://upload.wikimedia.org/wikipedia/commons/0/05/Cat.png"))
-  value = model(img.rearrange("h w c -> 1 c h w")).argmax().item()
-  print(nn.datasets.imagenet_labels()[value])
+  value = model(img.rearrange("h w c -> 1 c h w").float()/255).argmax().item()
+  print(value, nn.datasets.imagenet_labels()[value])

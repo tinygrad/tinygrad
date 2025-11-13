@@ -364,13 +364,15 @@ def png_load(t:Tensor) -> Tensor:
   while (slen:=f.read(4)):
     ilen, typ = struct.unpack(">I", slen)[0], f.read(4)
     dat = f.read(ilen)
+    if DEBUG >= 3: print(ilen, typ)
     if typ == b'IHDR':
       width, height, depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", dat)
-      assert depth == 8 and color_type == 2 and compression == 0 and filter_method == 0 and interlace == 0, "only RGB PNG is supported"
+      assert compression == 0 and filter_method == 0 and interlace == 0, "weird PNG"
+      assert depth == 8 and color_type in [2, 6], f"only RGB/RGBA PNG is supported {depth=} {color_type=}"
+      real_depth = 3 if color_type == 2 else 4
     if typ == b'IDAT':
       idats.append(dat)
-    if DEBUG >= 3: print(ilen, typ)
     f.seek(4, 1)
   decompressed = Tensor(zlib.decompress(b''.join(idats)))
   # the first pixel in each scanline is a filter pixel
-  return decompressed.reshape(height, width*3+1)[:, 1:].reshape(height, width, 3)
+  return decompressed.reshape(height, width*real_depth+1)[:, 1:].reshape(height, width, real_depth)[:, :, :3]
