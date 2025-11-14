@@ -14,7 +14,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, AddrSpace
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.device import Device, ProfileDeviceEvent
 
-from extra.sqtt.roc import decode, InstExec, PrgExec
+from extra.sqtt.roc import decode, WaveExec
 
 dev = Device[os.environ["DEV"]]
 
@@ -36,7 +36,7 @@ def asm_kernel(instrs:list[str], l:int=1, g:int=1) -> Tensor:
 def save_sqtt():
   # clear the old traces
   dev.profile_events.clear()
-  sqtt:dict[PrgExec, list[InstExec]] = {}
+  sqtt:dict[str, list[WaveExec]] = {}
   yield sqtt
   # decode sqtt
   if os.environ["DEV"] == "AMD":
