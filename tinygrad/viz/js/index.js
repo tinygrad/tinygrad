@@ -191,16 +191,27 @@ function tabulate(rows) {
   return root;
 }
 
+const Formats = Object.freeze({ EXEC:0, BUFFER:1 });
 const setMetadata = (data) => {
-  if (data == null) { metadata.innerHTML = ""; return; }
-  metadata.innerHTML = data;
+  if (data?.fmt == null) { metadata.innerHTML = ""; return; }
+  const div = d3.create("div").classed("info", true);
+  if (data.fmt === Formats.EXEC) {
+    const [name, dur, ...rest] = data.tooltipText.split("\n");
+    div.append(() => tabulate([["Name", colored(name)], ["Duration", dur], ["Start Time", formatTime(data.st)]]).node());
+    if (rest.length) div.append("p").style("white-space", "pre-wrap").text(rest.join("\n"));
+    if (data.ctx != null) {
+      div.append("a").text("View codegen rewrite").on("click", () => switchCtx(data.ctx, data.step));
+      div.append("a").text("View program").on("click", () => switchCtx(data.ctx, ctxs[data.ctx+1].steps.findIndex(s => s.name==="View Program")));
+    }
+  }
+  metadata.replaceChildren(div.node());
 }
 
 var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMap = new Map();
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return setMetadata(shapeMetadata.get(focusedShape));
+  return setMetadata(shapeMap.get(focusedShape));
 }
 
 async function renderProfiler() {
@@ -267,21 +278,9 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        /*
-        const html = d3.create("div").classed("info", true);
-        html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
-        html.append("div").classed("args", true);
-        if (e.info != null) html.append("p").style("white-space", "pre-wrap").text(e.info);
-        if (shapeRef != null) {
-          html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
-          html.append("a").text("View program").on("click", () => switchCtx(shapeRef.ctx, ctxs[shapeRef.ctx+1].steps.findIndex(s => s.name==="View Program")));
-        }
-        // tiny device events go straight to the rewrite rule
-        const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        if (key != null) shapeMetadata.set(key, html.node());
-        */
         const arg = {tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef};
-        if (e.key != null) shapeMap.set(e.key, arg);
+        // tiny device events go straight to the rewrite rule
+        if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${j}`; shapeMap.set(arg.key, arg) }
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -684,7 +683,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
