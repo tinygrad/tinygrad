@@ -68,10 +68,10 @@ class Kernel(AbstractContextManager):
 
     return uop
 
-  def gl(self, shape, dtype): return GL(shape, dtype, self)._uop
-  def st(self, shape, dtype): return ST(shape, dtype, self)._uop
-  def rt(self, shape, dtype): return RT(shape, dtype, self)._uop
-  def rv(self, length, dtype, layout="naive"): return RV(length, dtype, layout, self)._uop
+  def gl(self, shape, dtype): return GL.create(shape, dtype, self)
+  def st(self, shape, dtype): return ST.create(shape, dtype, self)
+  def rt(self, shape, dtype): return RT.create(shape, dtype, self)
+  def rv(self, length, dtype, layout="naive"): return RV.create(length, dtype, layout, self)
 
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
 
@@ -80,7 +80,7 @@ class Kernel(AbstractContextManager):
     rngs = []
     while self.range_stack: rngs.append(self.range_stack.pop(0)._rng)
 
-    return self.store_stack.pop()[0].end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
+    return self.store_stack.pop()[0]._uop.end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
   def endrange(self):
     last_store = self.store_stack.pop()
