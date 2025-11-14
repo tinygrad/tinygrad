@@ -3,14 +3,14 @@
     .p2align 8
     .type matmul,@function
 matmul:
-    s_mov_b32 s1, INTERNAL_LOOP
-    s_mov_b32 s2, 0
-    inner_loop:
-        INSTRUCTION
-        s_sub_u32 s1, s1, 1
-        s_cmp_lg_i32 s1, s2
-        s_cbranch_scc1 inner_loop
-    s_endpgm
+  s_mov_b32 s1, INTERNAL_LOOP
+  s_mov_b32 s2, 0
+  inner_loop:
+    INSTRUCTION
+    s_sub_u32 s1, s1, 1
+    s_cmp_lg_i32 s1, s2
+    s_cbranch_scc1 inner_loop
+  s_endpgm
 
 .rodata
 .p2align 6

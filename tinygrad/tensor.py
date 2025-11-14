@@ -172,7 +172,7 @@ class Tensor(OpMixin):
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
-    if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
+    if (metadata:=_METADATA.get()) is not None and TRACEMETA >= 1: all_metadata[new_uop] = (metadata,)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
 
@@ -2092,25 +2092,6 @@ class Tensor(OpMixin):
       .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output], dtype=dtype).permute(rhs_order)
 
   # ***** processing ops *****
-
-  def _pool(self, k_:tuple[sint, ...], stride:int|tuple[int, ...]=1, dilation:int|tuple[int, ...]=1) -> Tensor:
-    assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
-    s_, d_ = make_tuple(stride, len(k_)), make_tuple(dilation, len(k_))
-    assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
-    noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
-    assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
-    o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
-    # input size scaling factor to make sure shrink for stride is possible
-    f_ = [smax(1, ceildiv(o*s - d, i)) for o,s,i,d in zip(o_,s_,i_,d_)]
-    # repeats such that we don't need padding
-    x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
-    # handle dilation
-    x = x.shrink_to(noop + [k*(i*f+d) for k,i,d,f in zip(k_,i_,d_,f_)]).reshape(noop + flatten((k,(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)))
-    # handle stride
-    x = x.shrink_to(noop + flatten((k,o*s) for k,o,s in zip(k_,o_,s_))).reshape(noop + flatten((k,o,s) for k,o,s in zip(k_,o_,s_)))
-    x = x.shrink_to(noop + flatten((k,o,1) for k,o in zip(k_,o_))).reshape(noop + flatten((k,o) for k,o in zip(k_,o_)))
-    # permute to move reduce to the end
-    return x.permute(*range(len(noop)), *[len(noop)+i*2+1 for i in range(len(i_))], *[len(noop)+i*2 for i in range(len(i_))])
 
   def _resolve_pool_pads(self, padding:int|Sequence[int], dims:int) -> Sequence[int]:
     if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
@@ -4197,7 +4178,7 @@ _METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
 
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if _METADATA.get() is not None: return fn(*args, **kwargs)
+    if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)
