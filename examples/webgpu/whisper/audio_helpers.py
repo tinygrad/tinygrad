@@ -1,6 +1,5 @@
 from typing import Optional
 
-import numpy as np
 from tinygrad import Tensor
 
 from tinygrad.dtype import DTypeLike, dtypes
@@ -146,10 +145,10 @@ def resample(x, L, M, num_taps=64):
   fc = 0.5 / max(L, M)
   t = Tensor.arange(-num_taps//2, num_taps//2 + 1)
   # NOTE(irwin): poor man's sinc
-  h:Tensor = (t * fc * np.pi).sin() / (t * fc * np.pi)
+  h:Tensor = (t * fc * math.pi).sin() / (t * fc * math.pi)
   # hack fix NaN
   h[num_taps//2] = 1.0
-  h *= 0.54 - 0.46 * (2 * np.pi * (t + num_taps//2) / num_taps).cos()  # hamming
+  h *= 0.54 - 0.46 * (2 * math.pi * (t + num_taps//2) / num_taps).cos()  # hamming
   h /= h.sum()
   # TODO(irwin): contiguous sped up things before replacing decimation with stride=M, retest if still relevant
   upsampled = x.reshape(-1, 1, x.shape[-1]).pad((None, (0, L-1), None)).transpose(1, 2).flatten(1).unsqueeze(1)
