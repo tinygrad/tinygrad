@@ -107,6 +107,9 @@ _tensor_spec = PatternMatcher([
   # REDUCE with an outerworld range
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
 
+  # FOLD in Tensor graph is between two shaped objects
+  (UPat(Ops.FOLD, src=(UPat(), UPat())), lambda: True),
+
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 ])+movement_ops+shared_spec
@@ -172,8 +175,9 @@ kernel_spec = PatternMatcher([
   # bufferize can be on anything
   (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
 
-  # reduce must be on ranges
+  # reduce/fold must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
+  (UPat(Ops.FOLD, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[2:])),
 ])+movement_ops+shared_codegen_spec+shared_spec
 
 # ***** UOp spec in linearized programs *****

@@ -93,7 +93,7 @@ class Ops(FastEnum):
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
 
   # scan
-  SCAN = auto()
+  FOLD = auto()
 
   # errors/placeholders
   REWRITE_ERROR = auto(); SENTINEL = auto()

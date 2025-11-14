@@ -308,7 +308,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
   if len(reduce_range) == 0: return ret
   return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0))
 
-def scan_to_store(x:UOp):
+def fold_to_store(x:UOp):
   _, acc, ranges = x.src[0], x.src[1], x.src[2:]
   assert acc.op is Ops.INDEX
   buf = acc.src[0]
@@ -319,8 +319,8 @@ def scan_to_store(x:UOp):
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+STORE
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
-  # SCAN -> STORE
-  (UPat(Ops.SCAN, name="x"), scan_to_store),
+  # FOLD -> STORE
+  (UPat(Ops.FOLD, name="x"), fold_to_store),
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
