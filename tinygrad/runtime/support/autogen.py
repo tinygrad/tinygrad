@@ -1,6 +1,6 @@
 import ctypes.util, importlib.metadata, itertools, re, functools, os
 from tinygrad.helpers import flatten, unwrap
-assert importlib.metadata.version('clang')[:2] == "20", f'clang version 20 required, pip install "clang==20.1.0"'
+assert importlib.metadata.version('clang')[:2] == "20", 'clang version 20 required, pip install "clang==20.1.0"'
 from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, TypeKind as TK
 from clang.cindex import PrintingPolicy as PP, PrintingPolicyProperty as PPP, SourceRange
 

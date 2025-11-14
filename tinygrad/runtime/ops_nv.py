@@ -28,17 +28,6 @@ def nv_iowr(fd:FileIOInterface, nr, args, cmd=None):
   ret = fd.ioctl(cmd or ((3 << 30) | (ctypes.sizeof(args) & 0x1FFF) << 16 | (ord('F') & 0xFF) << 8 | (nr & 0xFF)), args)
   if ret != 0: raise RuntimeError(f"ioctl returned {ret}")
 
-def uvm_ioctl(cmd, sttyp, fd:FileIOInterface, **kwargs):
-  ret = fd.ioctl(cmd, made:=sttyp(**kwargs))
-  if ret != 0: raise RuntimeError(f"ioctl(uvm) returned {ret}")
-  if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl returned {get_error_str(made.rmStatus)}")
-  return made
-
-def make_uvm_type():
-  return type("NVUVM", (object,), {name.replace("UVM_", "").lower(): functools.partial(uvm_ioctl, dt, getattr(nv_gpu, name+"_PARAMS"))
-              for name,dt in nv_gpu.__dict__.items() if name.startswith("UVM_") and nv_gpu.__dict__.get(name+"_PARAMS")})
-uvm = make_uvm_type()
-
 class QMD:
   fields: dict[str, dict[str, tuple[int, int]]] = {}
 
@@ -317,12 +306,11 @@ class NVKIface:
       NVKIface.fd_uvm = FileIOInterface("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       self.fd_uvm_2 = FileIOInterface("/dev/nvidia-uvm", os.O_RDWR | os.O_CLOEXEC)
       NVKIface.root = self.rm_alloc(0, nv_gpu.NV01_ROOT_CLIENT, None, root=0)
+
       drvver = self.rm_control(self.root, nv_gpu.NV0000_CTRL_CMD_SYSTEM_GET_BUILD_VERSION_V2, nv_gpu.NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS())
       if int(drvver.driverVersionBuffer.decode().split('.')[0], 10) >= 580:
         from tinygrad.runtime.autogen import nv_580
         globals()['nv_gpu'] = nv_580
-        # globals()['uvm'] = make_uvm_type()
-        # uvm = make_uvm_type()
 
       self.uvm(nv_gpu.UVM_INITIALIZE, nv_gpu.UVM_INITIALIZE_PARAMS())
 
@@ -358,19 +346,11 @@ class NVKIface:
   def uvm(self, cmd, params, fd=None):
     nv_iowr(fd or self.fd_uvm, None, params, cmd=cmd)
     if params.rmStatus != 0: raise RuntimeError(f"uvm returned {get_error_str(params.rmStatus)}")
-    # def uvm_ioctl(cmd, sttyp, fd:FileIOInterface, **kwargs):
-    # ret = fd.ioctl(cmd, made:=sttyp(**kwargs))
-    # if ret != 0: raise RuntimeError(f"ioctl(uvm) returned {ret}")
-    # if made.rmStatus != 0: raise RuntimeError(f"uvm_ioctl returned {get_error_str(made.rmStatus)}")
-    # return made
-    # return uvm_ioctl(cmd, sttyp, self.fd_uvm, hClient=self.root, **kwargs)
 
   def setup_usermode(self):
-    # print(nv_gpu)
-    clsinfo = self.rm_control(self.dev.nvdevice, nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST, nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS(numClasses=0))
+    clsnum = self.rm_control(self.dev.nvdevice, nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST, nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS(numClasses=0))
     clsinfo = self.rm_control(self.dev.nvdevice, nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST, nv_gpu.NV0080_CTRL_GPU_GET_CLASSLIST_PARAMS(
-      numClasses=clsinfo.numClasses, classList=mv_address(classlist:=memoryview(bytearray(clsinfo.numClasses * 4)).cast('I'))))
-
+      numClasses=clsnum.numClasses, classList=mv_address(classlist:=memoryview(bytearray(clsnum.numClasses * 4)).cast('I'))))
     self.nvclasses = {classlist[i] for i in range(clsinfo.numClasses)}
     self.usermode_class:int = next(c for c in [nv_gpu.HOPPER_USERMODE_A, nv_gpu.TURING_USERMODE_A] if c in self.nvclasses)
     self.gpfifo_class:int = next(c for c in [nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_CHANNEL_GPFIFO_A] if c in self.nvclasses)
@@ -385,8 +365,6 @@ class NVKIface:
       flags=nv_gpu.NV2080_GPU_CMD_GPU_GET_GID_FLAGS_FORMAT_BINARY, length=16))
     self.gpu_uuid = nv_gpu.struct_nv_uuid(uuid=(ctypes.c_ubyte*16)(*[raw_uuid.data[i] for i in range(16)]))
 
-    # uvm.register_gpu(self.fd_uvm, rmCtrlFd=-1, gpu_uuid=self.gpu_uuid)
-    # uvm.register_gpu_vaspace(self.fd_uvm, gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hVaSpace=vaspace)
     self.uvm(nv_gpu.UVM_REGISTER_GPU, nv_gpu.UVM_REGISTER_GPU_PARAMS(rmCtrlFd=-1, gpu_uuid=self.gpu_uuid))
     self.uvm(nv_gpu.UVM_REGISTER_GPU_VASPACE, nv_gpu.UVM_REGISTER_GPU_VASPACE_PARAMS(
       gpuUuid=self.gpu_uuid, rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hVaSpace=vaspace))
@@ -456,7 +434,6 @@ class NVKIface:
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
-    # uvm.free(self.fd_uvm, base=cast(int, mem.va_addr), length=mem.size)
     self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=cast(int, mem.va_addr), length=mem.size))
     if mem.meta.has_cpu_mapping: FileIOInterface.munmap(cast(int, mem.va_addr), mem.size)
 
@@ -464,7 +441,6 @@ class NVKIface:
     if create_range: self.uvm(nv_gpu.UVM_CREATE_EXTERNAL_RANGE, nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS(base=va_base, length=size))
     attrs = (nv_gpu.UvmGpuMappingAttributes*256)(nv_gpu.UvmGpuMappingAttributes(gpuUuid=self.gpu_uuid, gpuMappingType=1))
 
-    # NOTE: va_addr is set to make rawbufs compatible with HCQBuffer protocol.
     self.uvm(nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION, uvm_map:=nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS(base=va_base, length=size,
       rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid],
       has_cpu_mapping=has_cpu_mapping))
