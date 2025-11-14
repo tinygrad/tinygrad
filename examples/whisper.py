@@ -4,6 +4,7 @@ import sys, base64, multiprocessing, itertools, collections, math
 from typing import Optional, Union, Literal, List
 
 from tinygrad import Tensor, TinyJit, Variable, nn
+from tinygrad.dtype import DTypeLike, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
@@ -162,6 +163,100 @@ class Whisper:
     self.is_multilingual = dims["n_vocab"] == 51865
     self.batch_size = batch_size
 
+# rewritten from numpy
+def rfftfreq(n, d=1.0, device=None):
+  val = 1.0 / (n * d)
+  N = n // 2 + 1
+  results = Tensor.arange(N, device=device)
+  return results * val
+
+# just like in librosa
+def fft_frequencies(sr:float, n_fft:int):
+  return rfftfreq(n=n_fft, d=1.0 / sr)
+
+def hz_to_mel(freq:Tensor)->Tensor:
+  # Fill in the linear part
+  f_min = 0.0
+  f_sp = 200.0 / 3
+
+  mels = (freq - f_min) / f_sp
+
+  # Fill in the log-scale part
+
+  min_log_hz = 1000.0  # beginning of log region (Hz)
+
+  if freq >= min_log_hz:
+    min_log_mel = (min_log_hz - f_min) / f_sp  # same (Mels)
+    logstep = Tensor(6.4).log() / 27.0  # step size for log region
+
+    mels = min_log_mel + Tensor(freq / min_log_hz).log() / logstep
+
+  return mels
+
+def mel_to_hz(mels:Tensor)->Tensor:
+  # Fill in the linear scale
+  f_min = 0.0
+  f_sp = 200.0 / 3
+  freqs = f_min + f_sp * mels
+
+  # And now the nonlinear scale
+  min_log_hz = 1000.0  # beginning of log region (Hz)
+  min_log_mel = (min_log_hz - f_min) / f_sp  # same (Mels)
+  logstep = Tensor(6.4).log() / 27.0  # step size for log region
+
+  # If we have vector data, vectorize
+  log_t = mels >= min_log_mel
+  freqs = log_t.where(min_log_hz * ((logstep * (mels - min_log_mel)).exp()), freqs)
+
+  return freqs
+
+def mel_frequencies(n_mels: int = 128, *, fmin: float = 0.0, fmax: float = 11025.0)->Tensor:
+  # 'Center freqs' of mel bands - uniformly spaced between limits
+  min_mel = hz_to_mel(fmin)
+  max_mel = hz_to_mel(fmax)
+
+  mels = Tensor.linspace(min_mel, max_mel, n_mels)
+
+  hz = mel_to_hz(mels)
+  return hz
+
+def mel(
+  *,
+  sr: float,
+  n_fft: int,
+  n_mels: int = 128,
+  fmin: float = 0.0,
+  fmax: Optional[float] = None,
+  dtype: DTypeLike = dtypes.float32,
+) -> Tensor:
+
+  if fmax is None:
+    fmax = float(sr) / 2
+
+  # Initialize the weights
+  n_mels = int(n_mels)
+  weights = Tensor.zeros((n_mels, int(1 + n_fft // 2)), dtype=dtype).contiguous()
+
+  # Center freqs of each FFT bin
+  fftfreqs = fft_frequencies(sr=sr, n_fft=n_fft)
+
+  # 'Center freqs' of mel bands - uniformly spaced between limits
+  mel_f = mel_frequencies(n_mels + 2, fmin=fmin, fmax=fmax)
+
+  fdiff = mel_f[1:] - mel_f[:-1]
+  # ramps = np.subtract.outer(mel_f, fftfreqs)
+  ramps = mel_f[None].T.expand(-1, fftfreqs.shape[-1]) - fftfreqs
+
+  lower = -ramps[:n_mels] / fdiff[:n_mels][None].T
+  upper = ramps[2:n_mels + 2] / fdiff[1:n_mels + 1][None].T
+  weights = lower.minimum(upper).maximum(0)
+
+
+  # Slaney-style mel is scaled to be approx constant energy per channel
+  enorm = 2.0 / (mel_f[2 : n_mels + 2] - mel_f[:n_mels])
+  weights *= enorm[:, None]
+
+  return weights
 
 RATE = 16000
 SEGMENT_SECONDS=30
