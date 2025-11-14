@@ -81,9 +81,7 @@ def __getattr__(nm):
                             "/opt/rocm/include/hip/hiprtc.h", "/opt/rocm/include/hip/hip_runtime_api.h", "/opt/rocm/include/hip/driver_types.h"],
                             args=["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"])
     case "comgr" | "comgr_3":
-      try: use_3 = nm == "comgr_3" or int(system("dpkg-query -f '${version}' -W comgr")[1]) >= 3
-      except FileNotFoundError: use_3 = nm == "comgr_3"
-      return load("comgr_3" if use_3 else "comgr", [
+      return load("comgr_3" if nm == "comgr_3" else "comgr", [
         "os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so'", "'/usr/local/lib/libamd_comgr.dylib'", "'/opt/homebrew/lib/libamd_comgr.dylib'"
       ], ["/opt/rocm/include/amd_comgr/amd_comgr.h"], args=["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"])
     case "hsa": return load("hsa", ["os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so'", "find_library('hsa-runtime64')"], [
