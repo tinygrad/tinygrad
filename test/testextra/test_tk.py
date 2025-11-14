@@ -152,6 +152,44 @@ class TestTK(unittest.TestCase):
 
     np.testing.assert_allclose(b.numpy(), ref.numpy())
 
+  def test_add(self):
+    N = 32
+    BLOCK_SIZE = 16
+    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      for tile_row in ker.range(N // BLOCK_SIZE):
+        for tile_col in ker.range(N // BLOCK_SIZE):
+          a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, tile_col), axis=2)
+          a_reg = warp.load(a_reg, a_smem)
+
+          a_reg += 1
+
+          a_smem = warp.store(a_smem, a_reg)
+          b = warp.store(b, a_smem, (0, 0, tile_row, tile_col), (), axis=2)
+
+      sink = ker.finish()
+
+      with Context(DEBUG=0):
+        a = Tensor.rand(1, 1, N, N, dtype="float32").contiguous()
+        b = Tensor.empty(1, 1, N, N, dtype="float32")
+        Tensor.realize(a, b)
+
+      ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+      for _ in range(5): ei.run(wait=True)
+      b = b.float()
+
+      ref = a.float() + 1
+
+      np.testing.assert_allclose(b.numpy(), ref.numpy())
+
   def test_max(self):
     N = 16
     BLOCK_SIZE = 16
@@ -365,13 +403,13 @@ class TestTK(unittest.TestCase):
         a_smem = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
         a_reg = warp.load(a_reg, a_smem)
 
-        a_reg = warp.map(a_reg, lambda x: x * (1.0 / math.log(2)))
+        a_reg *= 1.0 / math.log(2)
 
         max_vec_last = warp.copy(max_vec_last.after(tile_col), max_vec)
         max_vec = warp.row_reduce(max_vec, a_reg, lambda a, b: a.maximum(b))
-        a_reg = warp.map(a_reg, lambda x, idx: (x - max_vec[idx[0], 0, (idx[2]%4)//2]).exp2())
-        max_vec_last = warp.map(max_vec_last, lambda x, idx: (x - max_vec[*idx]).exp2())
-        norm_vec = warp.map(norm_vec, lambda x, idx: x * max_vec_last[*idx])
+        a_reg = (a_reg - max_vec).exp2()
+        max_vec_last = (max_vec_last - max_vec).exp2()
+        norm_vec *= max_vec_last
         norm_vec = warp.row_reduce(norm_vec, a_reg, lambda a, b: a + b)
       norm_vec = ker.endrange()
 
@@ -379,9 +417,9 @@ class TestTK(unittest.TestCase):
         a_smem = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
         a_reg = warp.load(a_reg, a_smem)
 
-        a_reg = warp.map(a_reg, lambda x: x * (1.0 / math.log(2)))
-        a_reg = warp.map(a_reg, lambda x, idx: (x - max_vec[idx[0], 0, (idx[2]%4)//2]).exp2())
-        a_reg = warp.map(a_reg, lambda x, idx: x / norm_vec[idx[0], 0, (idx[2]%4)//2])
+        a_reg *= 1.0 / math.log(2)
+        a_reg = (a_reg - max_vec).exp2()
+        a_reg /= norm_vec
 
         a_smem = warp.store(a_smem, a_reg)
         b = warp.store(b, a_smem, (0, 0, 0, tile_col), (), axis=2)
