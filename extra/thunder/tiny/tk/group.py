@@ -178,14 +178,14 @@ class Group:
         for width in self.ker.range(dst.shape[-2], track=False):
           for inner in self.ker.range(RT.BASE_TILE_NEPT, track=False):
             if not transpose:
-              row = (local_warpid * dst.shape[-3] + height) * RT.TILE_ROW_DIM + (warp_laneid // 4)
-              col = width * RT.TILE_COL_DIM + 2 * (warp_laneid % 4)
+              row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS + (warp_laneid // 4)
+              col = width * RT.BASE_TILE_COLS + 2 * (warp_laneid % 4)
 
               row_offset = ((inner % 4) // 2) * 8
               col_offset = (inner % 2) + (inner // 4) * 8
             else:
-              row = (local_warpid * dst.shape[-3] + height) * RT.TILE_ROW_DIM + 2 * (warp_laneid % 4)
-              col = width * RT.TILE_COL_DIM + (warp_laneid // 4)
+              row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS + 2 * (warp_laneid % 4)
+              col = width * RT.BASE_TILE_COLS + (warp_laneid // 4)
 
               row_offset = (inner % 2) + (inner // 4) * 8
               col_offset = ((inner % 4) // 2) * 8
@@ -237,8 +237,8 @@ class Group:
       for height in self.ker.range(src.shape[-3], track=False):
         for width in self.ker.range(src.shape[-2], track=False):
           for inner in self.ker.range(RT.BASE_TILE_NEPT, track=False):
-            row = (local_warpid * src.shape[-3] + height) * RT.TILE_ROW_DIM + (warp_laneid // 4)
-            col = width * RT.TILE_COL_DIM + 2 * (warp_laneid % 4)
+            row = (local_warpid * src.shape[-3] + height) * RT.BASE_TILE_ROWS + (warp_laneid // 4)
+            col = width * RT.BASE_TILE_COLS + 2 * (warp_laneid % 4)
 
             row_offset = ((inner % 4) // 2) * 8
             col_offset = (inner % 2) + (inner // 4) * 8
