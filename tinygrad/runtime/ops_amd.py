@@ -188,14 +188,9 @@ class AMDComputeQueue(HWQueue):
   ### SQTT ###
 
   def sqtt_setup_exec(self, prg, global_size):
-    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(
-      _0=sqtt.union_rgp_sqtt_marker_pipeline_bind_0(_0=sqtt.struct_rgp_sqtt_marker_pipeline_bind_0_0(
-        identifier=sqtt.RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE, bind_point=(__BIND_POINT_COMPUTE:=1))),
-      _1=sqtt.union_rgp_sqtt_marker_pipeline_bind_1(api_pso_hash=data64_le(prg.libhash[0]))))
-
-    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event(
-      _0=sqtt.union_rgp_sqtt_marker_event_0(_0=sqtt.struct_rgp_sqtt_marker_event_0_0(has_thread_dims=1)),
-      _2=sqtt.union_rgp_sqtt_marker_event_2(cmd_id=next(prg.dev.sqtt_next_cmd_id))), *global_size)
+    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_pipeline_bind(identifier=sqtt.RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE,
+                                                                 bind_point=(__BIND_POINT_COMPUTE:=1), api_pso_hash=data64_le(prg.libhash[0])))
+    self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event(has_thread_dims=1, cmd_id=next(prg.dev.sqtt_next_cmd_id)), *global_size)
 
     se_cap = max(prod([x if isinstance(x, int) else 1 for x in global_size]) // 4, 1) // 32
     for xcc in range(self.dev.xccs):

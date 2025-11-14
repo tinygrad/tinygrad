@@ -1,10 +1,10 @@
 from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
-from tinygrad.helpers import DEBUG, OSX, unwrap
+from tinygrad.helpers import DEBUG, OSX, unwrap, charptr
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
-import tinygrad.runtime.autogen.mesa as mesa
+from tinygrad.runtime.autogen import mesa
 import base64, ctypes, ctypes.util, struct, functools, inspect
 
 def g(s:str): return getattr(mesa, s)
@@ -51,7 +51,7 @@ def nir_instr(nc=1, bs=lambda: None, intrins=None, srcs=None, has_def=True, df=N
       instr = f(*args, **kwargs)
       if has_def: mesa.nir_def_init(instr.contents.instr, getattr(instr.contents, "def"), go(nc), go(bs))
       for k, v in go(intrins or {}).items():
-        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic].index_map[g(f"NIR_INTRINSIC_{k}")]
+        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic.value].index_map[g(f"NIR_INTRINSIC_{k}")]
         assert idx > 0
         instr.contents.const_index[idx - 1] = go(v)
       for i, src in enumerate(go(srcs or [])): ctypes.cast(instr.contents.src, ctypes.POINTER(mesa.nir_src))[i] = go(src)
@@ -177,7 +177,7 @@ class NIRRenderer(Renderer):
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
-        if u.arg is not None: self.b.shader.contents.info.name = mesa.char_pointer_cast(u.arg.function_name)
+        if u.arg is not None: self.b.shader.contents.info.name = charptr(u.arg.function_name.encode())
       elif u.op == Ops.DEFINE_LOCAL:
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.dtype.nbytes()
@@ -210,19 +210,20 @@ class NIRRenderer(Renderer):
 
     return ret
 
-class NAKRenderer(NIRRenderer):
-  device = "NV"
+class NIRRendererWithOpts(NIRRenderer):
   def __init__(self, dev=None, nir_options=None):
     self.dev, self._nir_options = dev, nir_options
     super().__init__()
 
-  def __reduce__(self): return NAKRenderer, (None, self.nir_options,)
+  def __reduce__(self): return self.__class__, (None, self.nir_options)
 
   @property
   def nir_options(self):
     if self._nir_options is None: self._nir_options = self.dev.compiler.nir_options
     return self._nir_options
 
+class NAKRenderer(NIRRendererWithOpts):
+  device = "NV"
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
        lambda self, b, dtype, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
@@ -242,3 +243,10 @@ class LVPRenderer(NIRRenderer):
     super().prerender(uops)
     self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
 
+class IR3Renderer(NIRRendererWithOpts):
+  device = "QCOM"
+  param = LVPRenderer.param
+
+  def prerender(self, uops:list[UOp]):
+    super().prerender(uops)
+    self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])

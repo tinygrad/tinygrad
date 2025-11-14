@@ -1,14 +1,10 @@
 import ctypes
 from tinygrad.helpers import system
-import tinygrad.runtime.autogen.comgr as comgr
-assert comgr.AMD_COMGR_LANGUAGE_HIP == 4
+from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
-  if major.value >= 3:
-    # in comgr 3 the values of enums in headers were changed: https://github.com/ROCm/llvm-project/issues/272
-    import tinygrad.runtime.autogen.comgr_3 as comgr # type: ignore[no-redef]
-    assert comgr.AMD_COMGR_LANGUAGE_HIP == 3
-except AttributeError: pass  # ignore if ROCm isn't installed
+  assert comgr.AMD_COMGR_LANGUAGE_HIP == 3 if major.value >= 3 else 4
+except AttributeError: assert comgr.AMD_COMGR_LANGUAGE_HIP == 3 # if rocm is not installed, use old values
 from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p

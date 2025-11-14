@@ -164,7 +164,7 @@ def cuStreamWaitEvent(stream: Any, event, flags: int) -> int: return orig_cuda.C
 def cuCtxSynchronize() -> int: return orig_cuda.CUDA_SUCCESS
 
 def cuGetErrorString(error: int, pStr) -> int:
-  error_str = orig_cuda.cudaError_enum__enumvalues.get(error, "Unknown CUDA error").encode()
+  error_str = orig_cuda.enum_cudaError_enum.get(error, "Unknown CUDA error").encode()
   buf = ctypes.create_string_buffer(error_str)
   # Set the pointer to point to our error string buffer
   pStr._obj.value = ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))
