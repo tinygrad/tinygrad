@@ -215,9 +215,9 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
   for name,waves in rctx.inst_execs.items():
-    if (r:=ref_map.get(name)): name = ctxs[r]["name"]
-    steps.append({"name":name, "depth":0, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                  "data":{"src":trace.keys[r].ret.src if r else name, "lang":"cpp"}})
+    prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
+    steps.append({"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                  "depth":0, "data":{"src":prg.src if prg is not None else name, "lang":"cpp"}})
 
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
