@@ -153,5 +153,5 @@ jobs:
     - name: Verify comgr (3) autogen
       run: |
         mv tinygrad/runtime/autogen/comgr_3.py /tmp/comgr_3.py.bak
-        python3 -c "from tinygrad.runtime.autogen import comgr"
+        python3 -c "from tinygrad.runtime.autogen import comgr_3"
         diff /tmp/comgr_3.py.bak tinygrad/runtime/autogen/comgr_3.py
