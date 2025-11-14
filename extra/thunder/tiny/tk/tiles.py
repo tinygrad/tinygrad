@@ -100,8 +100,8 @@ class ST:
 
 @autowrap(UOp)
 class RT(TileMathMixin):
-  TILE_ROW_DIM, TILE_COL_DIM = 16, 16
-  BASE_TILE_NE = TILE_ROW_DIM * TILE_COL_DIM
+  BASE_TILE_ROWS, BASE_TILE_COLS = 16, 16
+  BASE_TILE_NE = BASE_TILE_ROWS * BASE_TILE_COLS
   BASE_TILE_NEPT = BASE_TILE_NE // WARP_THREADS
 
   def __init__(self, uop, ker):
@@ -110,11 +110,11 @@ class RT(TileMathMixin):
   @classmethod
   def create(cls, shape, dtype, ker):
     assert len(shape) == 2
-    assert shape[0] % RT.TILE_ROW_DIM == 0
-    assert shape[1] % RT.TILE_COL_DIM == 0
+    assert shape[0] % RT.BASE_TILE_ROWS == 0
+    assert shape[1] % RT.BASE_TILE_COLS == 0
 
-    height = shape[0] // RT.TILE_ROW_DIM
-    width = shape[1] // RT.TILE_COL_DIM
+    height = shape[0] // RT.BASE_TILE_ROWS
+    width = shape[1] // RT.BASE_TILE_COLS
 
     uop = ker.alloc((height, width, RT.BASE_TILE_NEPT), dtype, AddrSpace.REG)
     return cls(uop, ker)
@@ -126,7 +126,7 @@ class RV(TileMathMixin):
 
   @classmethod
   def create(cls, length, dtype, layout, ker):
-    tiles = length // RT.TILE_ROW_DIM
+    tiles = length // RT.BASE_TILE_ROWS
 
     match layout:
       case "naive":
