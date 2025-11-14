@@ -1,8 +1,7 @@
-from dataclasses import dataclass
 import functools
 from tinygrad.dtype import AddrSpace
-from tinygrad.mixin import OpMixin
-from tinygrad.uop.ops import UOp, UOpMetaClass
+from tinygrad.mixin import MathMixin
+from tinygrad.uop.ops import UOp, Ops
 
 from extra.thunder.tiny.tk import WARP_THREADS
 
@@ -27,7 +26,8 @@ def autowrap(source_cls, blacklist=None):
 
   def decorator(cls):
     def __getattr__(self, name):
-      val = getattr(self._uop, name)
+      uop = object.__getattribute__(self, "_uop")
+      val = getattr(uop, name)
       if callable(val):
         @functools.wraps(val)
         def proxy(*args, **kwargs):
@@ -39,18 +39,44 @@ def autowrap(source_cls, blacklist=None):
 
     for name in dir(source_cls):
       if name in blacklist or not name.startswith("__"): continue
-      if name in cls.__dict__: continue
 
-      original = getattr(source_cls, name)
-      if callable(original):
-        def make_proxy(op_name, func):
-          def proxy(self, *args, **kwargs):
-            return wrap(func(self._uop, *unwrap(args), **unwrap(kwargs)), self.ker, cls)
-          return proxy
-        setattr(cls, name, make_proxy(name, original))
+      for base in cls.mro():
+        if base is source_cls: break
+        if name in base.__dict__: break
+      else:
+        original = getattr(source_cls, name)
+        if callable(original):
+          def make_proxy(op_name, func):
+            def proxy(self, *args, **kwargs):
+              return wrap(func(self._uop, *unwrap(args), **unwrap(kwargs)), self.ker, cls)
+            return proxy
+          setattr(cls, name, make_proxy(name, original))
 
     return cls
   return decorator
+
+class TileMathMixin(MathMixin):
+  def alu(self, op, *src, inner_op=lambda x:x):
+    assert isinstance(self, (RT, RV))
+    if len(src) == 0:
+      if self._uop._shape is None: uop = UOp.alu(self._uop, op)
+      else: uop = self.ker.warp.map(self._uop, lambda x: UOp.alu(x, op))
+    elif len(src) == 1:
+      if self._uop._shape is None: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
+      elif isinstance(src[0], (int,float,bool)): uop = self.ker.warp.map(self._uop, lambda x: UOp.alu(x, op, inner_op(x.ufix(src[0]))))
+      elif src[0]._shape is None: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
+      else:
+        if isinstance(self, RT) and isinstance(src[0], RV): uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[idx[0], 0, (idx[2]%4)//2])))
+        else: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[*idx])))
+    else: raise NotImplementedError
+    return type(self)(uop, self.ker)
+  def const_like(self, b): return b
+
+  # override ops that do compute on the src uop
+  def sub(self, x, reverse=False):
+    return self.ufix(x).alu(Ops.ADD, self, inner_op=lambda y: -y) if reverse else self.alu(Ops.ADD, self.ufix(x), inner_op=lambda y: -y)
+  def div(self, x, reverse=False):
+    return self.ufix(x).alu(Ops.MUL, self, inner_op=lambda y: 1/y) if reverse else self.alu(Ops.MUL, self.ufix(x), inner_op=lambda y: 1/y)
 
 @autowrap(UOp)
 class GL:
@@ -73,7 +99,7 @@ class ST:
     return cls(uop, ker)
 
 @autowrap(UOp)
-class RT(OpMixin):
+class RT(TileMathMixin):
   TILE_ROW_DIM, TILE_COL_DIM = 16, 16
   BASE_TILE_NE = TILE_ROW_DIM * TILE_COL_DIM
   BASE_TILE_NEPT = BASE_TILE_NE // WARP_THREADS
@@ -93,17 +119,8 @@ class RT(OpMixin):
     uop = ker.alloc((height, width, RT.BASE_TILE_NEPT), dtype, AddrSpace.REG)
     return cls(uop, ker)
 
-  def alu(self, op, *src, **kwargs):
-    assert len(src) == 1
-    uop = self.ker.warp.map(self, lambda x, idx: UOp.alu(x, op, src[0][*idx], **kwargs))
-    return RT(uop, self.ker)
-  def const_like(self, b): return RT(UOp.const_like(self._uop, b), self.ker)
-  def _mop(self, op, arg): return RT(UOp._mop(self._uop, op, arg), self.ker)
-  @property
-  def shape(self): return self._uop.shape
-
 @autowrap(UOp)
-class RV(OpMixin):
+class RV(TileMathMixin):
   def __init__(self, uop, ker):
     self._uop, self.ker = uop, ker
 
@@ -123,11 +140,4 @@ class RV(OpMixin):
     uop = ker.alloc((outer_dim, inner_dim, 2), dtype, AddrSpace.REG)
     return RV(uop, ker)
 
-  def alu(self, op, *src, **kwargs):
-    assert len(src) == 1
-    uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, src[0].uop[*idx], **kwargs))
-    return RV(uop, self.ker)
-  def const_like(self, b): return RV(UOp.const_like(self._uop, b), self.ker)
-  def _mop(self, op, arg): return RV(UOp._mop(self._uop, op, arg), self.ker)
-  @property
-  def shape(self): return self._uop.shape
+ALL_TILES = UOp | GL | ST | RT | RV
