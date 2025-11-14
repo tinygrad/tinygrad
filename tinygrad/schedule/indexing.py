@@ -54,7 +54,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
   if x.op is Ops.AFTER and x.src[1].op is Ops.KERNEL: return None
   new_srcs = []
-  for s in x.src:
+  for i,s in enumerate(x.src):
     new_src = s
     if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.AFTER and s.src[1].op is Ops.KERNEL):
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
@@ -65,7 +65,9 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
       # None in the device assigns it a number later
       opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
       new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
-      if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
+      if x in ctx.range_map:
+        # for scan we use the output ranges on the 2nd arg
+        new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][int(x.op is Ops.SCAN and i == 1)]) if i in realized_ranges])
     new_srcs.append(new_src)
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
@@ -84,6 +86,13 @@ def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
+def add_ranges_to_scan(ctx:IndexingContext, x:UOp):
+  if x not in ctx.range_map: return None
+  new_ranges = [r for r,ar in zip(*ctx.range_map[x]) if r is not ar and r not in x.src]
+  ret = x.replace(src=x.src+tuple(new_ranges))
+  ctx.range_map[ret] = ctx.range_map[x]
+  return ret
+
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
@@ -97,6 +106,8 @@ def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
 pm_apply_rangeify = PatternMatcher([
   # REDUCE_AXIS -> REDUCE
   (UPat(Ops.REDUCE_AXIS, name="x"), convert_reduce_axis_to_reduce_with_ranges),
+  # SCAN -> SCAN (with new ranges)
+  (UPat(Ops.SCAN, name="x"), add_ranges_to_scan),
   # PAD -> WHERE
   (UPat(Ops.PAD, name="x"), convert_pad_to_where_to_keep_behavior_local),
   # add third op to assign
@@ -244,6 +255,9 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
       rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
+    if x.op is Ops.SCAN:
+      rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if resolve(x.src[1].shape[i] == 1) else r \
+                   for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)
