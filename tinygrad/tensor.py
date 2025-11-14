@@ -1509,6 +1509,9 @@ class Tensor(OpMixin):
 
   # ***** reduce ops *****
 
+  def scan(self, init:Tensor) -> Tensor:
+    return self._apply_uop(UOp.scan, init)
+
   def _reduce(self, op:Ops, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     axis = tuple(self._resolve_dim(x) for x in (range(self.ndim) if axis is None else make_tuple(axis, 1)))
     if self.ndim == 0: axis = ()
