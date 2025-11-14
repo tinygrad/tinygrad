@@ -223,10 +223,6 @@ runs:
           jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
           sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
         cargo build --release --manifest-path ./extra/remu/Cargo.toml
-    - name: Setup SQTT decoder (linux)
-      if: inputs.amd == 'true' && runner.os == 'Linux'
-      shell: bash
-      run: sudo "$(which python3)" ./extra/sqtt/install_sqtt_decoder.py
 
     # **** gpuocelot ****
 
