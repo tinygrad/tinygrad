@@ -7,7 +7,6 @@ from tinygrad.helpers import CI, fetch, CPU_LLVM
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
 import numpy as np
-import librosa
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test
@@ -130,6 +129,7 @@ class TestWhisper(unittest.TestCase):
 
 class TestSTFT(unittest.TestCase):
   def test_stft_librosa(self):
+    import librosa
     N_FFT = 400
     HOP_LENGTH = 160
     BS = 16
