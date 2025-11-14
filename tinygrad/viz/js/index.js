@@ -192,6 +192,7 @@ function tabulate(rows) {
 }
 
 const Formats = Object.freeze({ EXEC:0, BUFFER:1 });
+const Modes = Object.freeze({ 0:"read", 1:"write", 2:"read+write" });
 const setMetadata = (data) => {
   if (data?.fmt == null) { metadata.innerHTML = ""; return; }
   const div = d3.create("div").classed("info", true);
@@ -199,6 +200,18 @@ const setMetadata = (data) => {
     const [name, dur, ...rest] = data.tooltipText.split("\n");
     div.append(() => tabulate([["Name", colored(name)], ["Duration", dur], ["Start Time", formatTime(data.st)]]).node());
     if (rest.length) div.append("p").style("white-space", "pre-wrap").text(rest.join("\n"));
+    const args = div.append("div").classed("args", true);
+    const bufs = new Array(data.bufs.length);
+    for (let i=0; i<data.bufs.length; i++) {
+      const buf = shapeMap.get(data.bufs[i]);
+      const { num, mode } = buf.users.find(u => u.shape === data.key);
+      bufs[num] = d3.create("p").text(`${Modes[mode]}@data${num}`).style("cursor", "pointer").on("click", () => {
+        const device = document.getElementById(buf.key.split("-")[0]);
+        if (!isExpanded(device)) device.click();
+        focusShape(buf);
+      }).node();
+    }
+    for (const b of bufs) args.append(() => b);
     if (data.ctx != null) {
       div.append("a").text("View codegen rewrite").on("click", () => switchCtx(data.ctx, data.step));
       div.append("a").text("View program").on("click", () => switchCtx(data.ctx, ctxs[data.ctx+1].steps.findIndex(s => s.name==="View Program")));
@@ -212,8 +225,7 @@ const setMetadata = (data) => {
     const kernels = div.append("div").classed("args", true);
     for (let i=0; i<data.users?.length; i++) {
       const { repr, num, mode, shape } = data.users[i];
-      const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
-      const p = kernels.append("p").append(() => colored(`[${i}] ${repr} ${bufInfo}`));
+      const p = kernels.append("p").append(() => colored(`[${i}] ${repr} ${Modes[mode]}@data${num}`));
       if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape({key:shape}));
     }
   }
@@ -294,7 +306,7 @@ async function renderProfiler() {
         }
         const arg = {tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef};
         // tiny device events go straight to the rewrite rule
-        if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${j}`; shapeMap.set(arg.key, arg) }
+        if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${j}`; arg.bufs = []; shapeMap.set(arg.key, arg) }
         if (e.key != null) shapeKeys.set(e.key, arg.key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -335,6 +347,10 @@ async function renderProfiler() {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
         const arg = {tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\n${formatTime(dur)}`, fmt:Formats.BUFFER, users, key:`${k}-${num}`};
+        for (let u=0; u<users?.length; u++) {
+          const shape = users[u].shape;
+          if (shape != null) shapeMap.get(shape).bufs.push(arg.key);
+        }
         shapeMap.set(arg.key, arg);
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
