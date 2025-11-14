@@ -7,7 +7,7 @@ from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import getenv, prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import RT
+from extra.thunder.tiny.tk.tiles import ALL_TILES, GL, ST, RT, RV
 
 class Group:
   def __init__(self, warps:int, ker):
@@ -27,7 +27,8 @@ class Group:
   # ops that only work on a single warp
 
   clear_rid = 1000
-  def clear(self, reg:UOp, value:float=0):
+  def clear(self, reg:ALL_TILES, value:float=0):
+    reg = cast(UOp, reg)
     assert self.warps == 1
 
     rngs_for_shape = tuple(UOp.range(dim, Group.clear_rid + i) for i, dim in enumerate(reg.shape))
@@ -38,11 +39,12 @@ class Group:
     self.ker.push_store(reg_store, reg)
     return reg.after(reg_store).reshape(reg.shape)
 
-  def zero(self, reg:UOp): return self.clear(reg, 0)
-  def neg_inf(self, reg:UOp): return self.clear(reg, -math.inf)
+  def zero(self, reg:ALL_TILES): return self.clear(reg, 0)
+  def neg_inf(self, reg:ALL_TILES): return self.clear(reg, -math.inf)
 
   copy_rid = 300
-  def copy(self, dst:UOp, src:UOp):
+  def copy(self, dst:ALL_TILES, src:ALL_TILES):
+    dst, src = cast(UOp, dst), cast(UOp, src)
     assert self.warps == 1
     assert dst.shape == src.shape
 
@@ -54,7 +56,8 @@ class Group:
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
 
-  def mma_AB(self, c:UOp, a:UOp, b:UOp, after=True):
+  def mma_AB(self, c:UOp|RT, a:UOp|RT, b:UOp|RT, after=True):
+    c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
     for height in self.ker.range(c.shape[-3], track=False):
@@ -76,7 +79,8 @@ class Group:
     self.ker.push_store(c_store, c)
     return c.after(c_store).reshape(c.shape) if after else c_store
 
-  def mma_ABt(self, c:UOp, a:UOp, b:UOp, after=True):
+  def mma_ABt(self, c:UOp|RT, a:UOp|RT, b:UOp|RT, after=True):
+    c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
     for height in self.ker.range(c.shape[-3], track=False):
@@ -99,7 +103,8 @@ class Group:
     return c.after(c_store).reshape(c.shape) if after else c_store
 
   map_rid = 400
-  def map(self, a:UOp, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
+  def map(self, a:ALL_TILES, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
+    a = cast(UOp, a)
     assert self.warps == 1
 
     rngs_for_shape = tuple(UOp.range(dim, Group.map_rid + i) for i, dim in enumerate(a.shape))
@@ -115,7 +120,8 @@ class Group:
     self.ker.push_store(a_store, a)
     return a.after(a_store).reshape(a.shape)
 
-  def row_reduce(self, vec:UOp, src:UOp, op:Callable[[UOp, UOp], UOp]):
+  def row_reduce(self, vec:UOp|RV, src:UOp|RT, op:Callable[[UOp, UOp], UOp]):
+    vec, src = cast(UOp, vec), cast(UOp, src)
     assert self.warps == 1
 
     red_local = self.ker.alloc((self.group_threads, 2), src.dtype.base, AddrSpace.LOCAL)
@@ -157,7 +163,8 @@ class Group:
   # ops that can work across multiple warps
 
   LOAD_INNER = 8
-  def load(self, dst:UOp, src:UOp, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
+  def load(self, dst:ALL_TILES, src:ALL_TILES, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
+    dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
     dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
     if dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.LOCAL:
@@ -216,7 +223,8 @@ class Group:
     return dst.after(dst_store.barrier()).reshape(dst.shape)
 
   STORE_INNER = 8
-  def store(self, dst:UOp, src:UOp, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
+  def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
+    dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
     dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
     if src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.LOCAL:
