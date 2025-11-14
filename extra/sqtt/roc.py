@@ -105,7 +105,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
       case rocprof.ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE:
         for ev in (rocprof.rocprofiler_thread_trace_decoder_wave_t * n).from_address(events_ptr): ROCParseCtx.on_wave_ev(ev)
       case _:
-        if DEBUG >= 5: print(rocprof.rocprofiler_thread_trace_decoder_record_type_t__enumvalues[record_type], events_ptr, n)
+        if DEBUG >= 5: print(rocprof.enum_rocprofiler_thread_trace_decoder_record_type_t.get(record_type), events_ptr, n)
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
