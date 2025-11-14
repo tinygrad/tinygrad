@@ -34,15 +34,22 @@ def warp_perspective_tinygrad(src:Tensor, M_inv:Tensor) -> Tensor:
 if __name__ == "__main__":
   from tinygrad.engine.jit import TinyJit
   update_img_jit = TinyJit(warp_perspective_tinygrad, prune=True)
-  inputs = [Tensor.randn(1928,1208).realize(), Tensor.randn(3,3).realize()]
 
   step_times = []
   for _ in range(10):
+    # regenerate inputs
+    inputs = [Tensor.randn(1928,1208), Tensor.randn(3,3)]
+    Tensor.realize(*inputs)
+    Device.default.synchronize()
+
+    # do the warp
     st = time.perf_counter()
     out = update_img_jit(*inputs)
     mt = time.perf_counter()
     val = out.contiguous().realize()
     Device.default.synchronize()
     et = time.perf_counter()
+
+    # measure the time
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
