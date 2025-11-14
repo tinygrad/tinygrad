@@ -230,7 +230,7 @@ jobs:
         python-version: '3.11'
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
-      run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y . --ignore-paths='tinygrad/runtime/autogen'
+      run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.11.0
