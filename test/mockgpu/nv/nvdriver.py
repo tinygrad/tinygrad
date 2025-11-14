@@ -1,5 +1,5 @@
 import ctypes, mmap, collections, functools, os
-import tinygrad.runtime.autogen.nv_gpu as nv_gpu
+from tinygrad.runtime.autogen import nv_570 as nv_gpu
 from typing import Any
 from tinygrad.helpers import to_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
@@ -153,8 +153,10 @@ class NVDriver(VirtDriver):
                  51059, 51069, 51071, 51632, 51639, 51639, 51706, 52019, 222, 50287, 50273, 50031, 50017] # from ada102
       params.numClasses = len(classes)
       if struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
-        clslist = to_mv(params.classList, params.numClasses * 4).cast('I')
-        for i,c in enumerate(classes): clslist[i] = c
+        if params.classList and params.numClasses > 0:
+          clslist = to_mv(params.classList, params.numClasses * 4).cast('I')
+          for i,c in enumerate(classes): clslist[i] = c
+        else: params.numClasses = len(classes)
       else:
         for i,c in enumerate(classes): params.classList[i] = c
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO:
@@ -192,6 +194,9 @@ class NVDriver(VirtDriver):
       params.mmuFaultInfoList[0].faultAddress = int(os.environ['MOCKGPU_EMU_FAULTADDR'], base=16)
       params.mmuFaultInfoList[0].faultType = 1
       params.mmuFaultInfoList[0].accessType = 1
+    elif struct.cmd == nv_gpu.NV0000_CTRL_CMD_SYSTEM_GET_BUILD_VERSION_V2:
+      params = nv_gpu.NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS.from_address(params_ptr)
+      params.driverVersionBuffer = b"570.00.00\0"
     else: raise RuntimeError(f"Unknown {struct.cmd} to rm_control")
     return 0
 

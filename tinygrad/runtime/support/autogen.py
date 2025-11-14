@@ -1,9 +1,9 @@
 import ctypes.util, importlib.metadata, itertools, re, functools, os
 from tinygrad.helpers import flatten, unwrap
+assert importlib.metadata.version('clang')[:2] == "20", 'clang version 20 required, pip install "clang==20.1.0"'
 from clang.cindex import Config, Index, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, TypeKind as TK
 from clang.cindex import PrintingPolicy as PP, PrintingPolicyProperty as PPP, SourceRange
 
-assert importlib.metadata.version('clang')[:2] == "20"
 if not Config.loaded: Config.set_library_file(os.getenv("LIBCLANG_PATH", ctypes.util.find_library("clang-20")))
 
 def fst(c): return next(c.get_children())
@@ -47,7 +47,6 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
         return types[t.spelling][0]
       case TK.RECORD:
         # TODO: packed unions
-        # TODO: pragma pack support
         # check for forward declaration
         if t.spelling in types: types[t.spelling] = (nm:=types[t.spelling][0]), len(list(t.get_fields())) != 0
         else:
@@ -56,11 +55,15 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
           else: types[t.spelling] = (nm:=t.spelling.replace(' ', '_').replace('::', '_')), len(list(t.get_fields())) != 0
           lines.append(f"class {nm}({'Struct' if decl.kind==CK.STRUCT_DECL else 'ctypes.Union'}): pass")
           if typedef: lines.append(f"{typedef} = {nm}")
+        if (is_packed:=(CK.PACKED_ATTR in attrs(decl)) or ((N:=t.get_align()) != max([f.type.get_align() for f in t.get_fields()], default=N))):
+          if t.get_align() != 1:
+            print(f"WARNING: ignoring alignment={t.get_align()} on {t.spelling}")
+            is_packed = False
         acnt = itertools.count().__next__
         ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(f.type, nm+fn[1:-1])}" if f.is_anonymous_record_decl() else f"'{f.spelling}', "+
             tname(f.type, f'{nm}_{f.spelling}'))+(f',{f.get_bitfield_width()}' if f.is_bitfield() else '')+")," for f in t.get_fields()]
         lines.extend(([f"{nm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
-                     ([f"{nm}._packed_ = True"] * (CK.PACKED_ATTR in attrs(decl)))+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
+                     ([f"{nm}._packed_ = True"] * is_packed)+([f"{nm}._fields_ = [",*ll,"]"] if ll else []))
         return nm
       case TK.ENUM:
         # TODO: C++ and GNU C have forward declared enums

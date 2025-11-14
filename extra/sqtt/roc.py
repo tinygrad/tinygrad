@@ -72,7 +72,7 @@ class _ROCParseCtx:
     inst_execs:list[InstExec] = []
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
-      inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
+      inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst_ev.category)
       inst_disasm = self.disasms[(unwrap(self.active_kern), unwrap(inst_ev.pc.address))][0]
       inst_execs.append(InstExec(inst_typ, inst_disasm, inst_ev.stall, inst_ev.duration, inst_ev.time))
 
@@ -105,7 +105,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
       case rocprof.ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE:
         for ev in (rocprof.rocprofiler_thread_trace_decoder_wave_t * n).from_address(events_ptr): ROCParseCtx.on_wave_ev(ev)
       case _:
-        if DEBUG >= 5: print(rocprof.rocprofiler_thread_trace_decoder_record_type_t__enumvalues[record_type], events_ptr, n)
+        if DEBUG >= 5: print(rocprof.enum_rocprofiler_thread_trace_decoder_record_type_t.get(record_type), events_ptr, n)
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
