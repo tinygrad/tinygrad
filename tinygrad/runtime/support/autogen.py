@@ -1,9 +1,10 @@
 import ctypes.util, importlib.metadata, itertools, re, functools, os
 from tinygrad.helpers import flatten, unwrap, fromimport
+
+assert importlib.metadata.version('clang')[:2] == "20", 'clang version 20 required, pip install "clang==20.1.0"'
 from clang.cindex import Config, Index, Cursor, Type, CursorKind as CK, TranslationUnit as TU, LinkageKind as LK, TokenKind as ToK, TypeKind as TK
 from clang.cindex import PrintingPolicy as PP, PrintingPolicyProperty as PPP, SourceRange
 
-assert importlib.metadata.version('clang')[:2] == "20", 'clang version 20 required, pip install "clang==20.1.0"'
 libclang = functools.partial(fromimport, "tinygrad.runtime.autogen.libclang") # we can't actually import this, because then we can't generate it
 
 if not Config.loaded: Config.set_library_file(os.getenv("LIBCLANG_PATH", ctypes.util.find_library("clang-20")))
