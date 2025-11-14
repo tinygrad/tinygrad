@@ -207,7 +207,15 @@ const setMetadata = (data) => {
   if (data.fmt === Formats.BUFFER) {
     const lines = data.tooltipText.split("\n");
     const rows = ["DType", "Len", "Size", "Lifetime"].map((s,i) => ([s, lines[i]]));
+    if (data.users != null) rows.push(["Users", data.users.length]);
     div.append(() => tabulate(rows).node());
+    const kernels = div.append("div").classed("args", true);
+    for (let i=0; i<data.users?.length; i++) {
+      const { repr, num, mode, shape } = data.users[i];
+      const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
+      const p = kernels.append("p").append(() => colored(`[${i}] ${repr} ${bufInfo}`));
+      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape({key:shape}));
+    }
   }
   metadata.replaceChildren(div.node());
 }
