@@ -162,14 +162,14 @@ class TransformerBlock:
     (B, T, D), E = x.shape, self.n_experts
 
     # Select top-k experts
-    x_norm = self.ffn_norm(x)                                             # (B,T,D) -> (B,T,D)
+    x_norm = self.ffn_norm(x)                                             # (B,T,D)  -> (B,T,D)
     x_norm = x_norm.reshape(B*T, D)                                       # (B,T,D)  -> (B*T,D)
     logits, sel = self.ffn_gate(x_norm).topk(self.n_active_experts, -1)   # (B*T,D)  -> (B,T,k), (B,T,k)
     probs = Tensor.zeros(B*T, E).scatter(1, sel, logits.softmax(-1))      # (B*T,k)  -> (B*T,E)
 
     # run MoE
-    x_norm = x_norm.repeat(E, 1).reshape(E, B*T, D)                                               # (B*T,D) -> (E,B*T,D)
-    probs = probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)                                 # (B*T,E) -> (E,B,T,1)
+    x_norm = x_norm.repeat(E, 1).reshape(E, B*T, D)                                               # (B*T,D)                         -> (E,B*T,D)
+    probs = probs.transpose(0, 1).reshape(E, B, -1).unsqueeze(-1)                                 # (B*T,E)                         -> (E,B,T,1)
     x_up_gate = swiglu(x_norm @ self.ffn_gate_up_proj + self.ffn_gate_up_proj_bias.unsqueeze(1))  # (E,B*T,D) (E,D,D2*2) (E,1,D2*2) -> (E,B*T,D2)
     x_down = x_up_gate @ self.ffn_down_proj + self.ffn_down_proj_bias.unsqueeze(1)                # (E,B*T,D2) (E,D2,D) (E,1,D)     -> (E,B*T,D)
     x_out = (x_down.reshape(E, B, T, D) * probs).sum(0)                                           # (E,B,T,D) (E,B,T,1)             -> (B,T,D)
