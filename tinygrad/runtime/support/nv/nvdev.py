@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
-from tinygrad.helpers import getenv, DEBUG, fetch, getbits
+from tinygrad.helpers import getenv, DEBUG, fetch, getbits, wait_cond
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import System, PCIDevice, PCIDevImplBase
@@ -120,6 +120,7 @@ class NVDev(PCIDevImplBase):
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
       self.pci_dev.reset()
       time.sleep(0.5)
+      wait_cond(lambda: self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read(), value=0)
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
     self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
