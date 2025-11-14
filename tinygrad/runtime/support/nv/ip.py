@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
 from typing import cast, Any
-from tinygrad.runtime.autogen import nv, nv_gpu, pci
+from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
 from tinygrad.helpers import to_mv, lo32, hi32, DEBUG, round_up, round_down, mv_address, fetch, wait_cond
 from tinygrad.runtime.support.system import System
 from tinygrad.runtime.support.elf import elf_loader
