@@ -1,5 +1,5 @@
 import ctypes, time
-from tinygrad.runtime.autogen import nv_gpu
+from tinygrad.runtime.autogen import nv_570 as nv_gpu
 from enum import Enum, auto
 from test.mockgpu.gpu import VirtGPU
 from test.mockgpu.helpers import _try_dlopen_gpuocelot
