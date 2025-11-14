@@ -30,8 +30,8 @@ def __getattr__(nm):
     case "nvrtc": return load("nvrtc", ["find_library('nvrtc')"], ["/usr/include/nvrtc.h"])
     case "nvjitlink": load("nvjitlink", ["find_library('nvJitLink')"], [root/"extra/nvJitLink.h"])
     case "kfd": return load("kfd", [], ["/usr/include/linux/kfd_ioctl.h"])
-    case "nv_gpu":
-      return load("nv_gpu", [], [
+    case "nv_570":
+      return load("nv_570", [], [
         *[root/"extra/nv_gpu_driver"/s for s in ["clc6c0qmd.h","clcec0qmd.h"]], "{}/kernel-open/common/inc/nvmisc.h",
         *[f"{{}}/src/common/sdk/nvidia/inc/class/cl{s}.h" for s in ["0000", "0080", "2080", "2080_notification", "c56f", "c86f", "c96f", "c761",
                                                                     "83de", "c6c0", "cdc0"]],
