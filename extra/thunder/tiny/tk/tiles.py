@@ -1,4 +1,5 @@
 import functools
+from dataclasses import dataclass
 from tinygrad.dtype import AddrSpace
 from tinygrad.mixin import MathMixin
 from tinygrad.uop.ops import UOp, Ops
@@ -98,6 +99,33 @@ class ST:
     uop = ker.alloc(shape, dtype, AddrSpace.LOCAL)
     return cls(uop, ker)
 
+@dataclass(frozen=True)
+class RTLayout:
+  rows: int
+  cols: int
+  stride: int
+
+  @property
+  def num_elements(self):
+    return self.rows * self.cols
+
+  @property
+  def elements_per_thread(self):
+    return self.num_elements // WARP_THREADS
+
+  @property
+  def num_strides(self):
+    return self.elements_per_thread // self.stride
+
+RT_16X16 = RTLayout(rows=16, cols=16, stride=4)
+RT_32X32 = RTLayout(rows=32, cols=32, stride=4)
+RT_32X32_8 = RTLayout(rows=32, cols=32, stride=8)
+RT_16X32 = RTLayout(rows=16, cols=32, stride=8)
+RT_32X16 = RTLayout(rows=32, cols=16, stride=8)
+RT_32X16_4 = RTLayout(rows=32, cols=16, stride=4)
+RT_16X32_4 = RTLayout(rows=16, cols=32, stride=4)
+RT_16X128 = RTLayout(rows=16, cols=128, stride=16)
+
 @autowrap(UOp)
 class RT(TileMathMixin):
   TILE_ROW_DIM, TILE_COL_DIM = 16, 16
@@ -108,15 +136,15 @@ class RT(TileMathMixin):
     self._uop, self.ker = uop, ker
 
   @classmethod
-  def create(cls, shape, dtype, ker):
+  def create(cls, shape, dtype, layout:RTLayout, ker):
     assert len(shape) == 2
-    assert shape[0] % RT.TILE_ROW_DIM == 0
-    assert shape[1] % RT.TILE_COL_DIM == 0
+    assert shape[0] % layout.rows == 0
+    assert shape[1] % layout.cols == 0
 
-    height = shape[0] // RT.TILE_ROW_DIM
-    width = shape[1] // RT.TILE_COL_DIM
+    height = shape[0] // layout.rows
+    width = shape[1] // layout.cols
 
-    uop = ker.alloc((height, width, RT.BASE_TILE_NEPT), dtype, AddrSpace.REG)
+    uop = ker.alloc((height, width, layout.elements_per_thread), dtype, AddrSpace.REG)
     return cls(uop, ker)
 
 @autowrap(UOp)

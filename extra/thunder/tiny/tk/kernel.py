@@ -2,7 +2,7 @@ from contextlib import AbstractContextManager
 from tinygrad.uop.ops import UOp, KernelInfo, AxisType, AddrSpace
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
-from extra.thunder.tiny.tk.tiles import GL, ST, RT, RV
+from extra.thunder.tiny.tk.tiles import GL, ST, RT_16X16, RT, RV
 
 class _tk_range:
   user_rid = 0
@@ -70,7 +70,7 @@ class Kernel(AbstractContextManager):
 
   def gl(self, shape, dtype): return GL.create(shape, dtype, self)
   def st(self, shape, dtype): return ST.create(shape, dtype, self)
-  def rt(self, shape, dtype): return RT.create(shape, dtype, self)
+  def rt(self, shape, dtype, layout=RT_16X16): return RT.create(shape, dtype, layout, self)
   def rv(self, length, dtype, layout="naive"): return RV.create(length, dtype, layout, self)
 
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
