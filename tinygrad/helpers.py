@@ -1,8 +1,8 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, tarfile
 from dataclasses import dataclass, field
-from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast
+from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -44,7 +44,8 @@ def fully_flatten(l):
     return flattened
   return [l]
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
-def strip_parens(fst:str): return fst[1:-1] if fst[0] == '(' and fst[-1] == ')' and fst[1:-1].find('(') <= fst[1:-1].find(')') else fst
+def _is_balanced(s:str) -> bool: return (d := 0, all((d := d + (c == '(') - (c == ')')) >= 0 for c in s))[1] and d == 0
+def strip_parens(fst:str) -> str: return fst[1:-1] if fst and fst[0]=='(' and fst[-1] == ')' and _is_balanced(fst[1:-1]) else fst
 def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def round_down(num:int, amt:int) -> int: return -round_up(-num, amt)
@@ -85,6 +86,9 @@ def word_wrap(x, wrap=80):
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
+def panic(e:Exception|None=None):
+  if e is None: raise RuntimeError("PANIC!")
+  raise e
 
 @functools.cache
 def canonicalize_strides(shape:tuple[T, ...], strides:tuple[T, ...]) -> tuple[T, ...]:
@@ -110,6 +114,13 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg: str) -> tuple[T,...]|T:
+  excs = []
+  for typ in candidates:
+    try: return tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+    except Exception as e: excs.append(e)
+  raise ExceptionGroup(err_msg, excs)
+
 def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
@@ -123,8 +134,13 @@ def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+
 
 @functools.cache
 def to_function_name(s:str): return ''.join([c if c in (string.ascii_letters+string.digits+'_') else f'{ord(c):02X}' for c in ansistrip(s)])
+@overload
+def getenv(key:str) -> int: ...
+@overload
+def getenv(key:str, default:T) -> T: ...
 @functools.cache
-def getenv(key:str, default=0): return type(default)(os.getenv(key, default))
+def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default))
+
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 
@@ -157,20 +173,22 @@ TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
 PICKLE_BUFFERS, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("LRU", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
-DISABLE_COMPILER_CACHE, BLOCK_REORDER = ContextVar("DISABLE_COMPILER_CACHE", 0), ContextVar("BLOCK_REORDER", 1)
-QUANTIZE, VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("QUANTIZE", 0), ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
+VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
-FUSE_ATTENTION = ContextVar("FUSE_ATTENTION", 0)
 EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
-CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 1)
+CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
 VIZ = PROFILE = ContextVar("VIZ", 0)
-SPEC = ContextVar("SPEC", 0)
+SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
-REAL_SUBSTITUTE = ContextVar("REAL_SUBSTITUTE", 0)
+DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
+# set to 1, this uses tuplize in the linearizer sort order
+TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
+# set to 0 to disable the compiler cache
+CCACHE = ContextVar("CCACHE", 1)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -178,7 +196,6 @@ class Metadata:
   caller: str
   backward: bool = False
   def __hash__(self): return hash(self.name)
-  def __repr__(self): return str(self) + (f" - {self.caller}" if self.caller else "")
   def __str__(self): return self.name + (" bw" if self.backward else "")
 
 # **************** global state Counters ****************
@@ -224,11 +241,29 @@ class Profiling(contextlib.ContextDecorator):
 
 def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_counter_ns())/1000
 
+@functools.cache
+def lines(fn) -> list[str]:
+  try:
+    with open(fn, encoding="utf-8") as f: return f.readlines()
+  except (FileNotFoundError, OSError): return []
+
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except IndexError: return "<missing>"
+
+def get_stacktrace(frm, max_frames=30) -> tuple[tuple, ...]:
+  ret:list[tuple] = []
+  for i in range(max_frames):
+    if (frm:=frm.f_back) is None: break
+    ret.append(((fc:=frm.f_code).co_filename, frm.f_lineno, fc.co_name, printable((fc.co_filename, frm.f_lineno))))
+  return tuple(ret)
+
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
   ret:Any=None
+  tb:tuple[tuple, ...]|None=field(default_factory=lambda: get_stacktrace(sys._getframe(1)) if VIZ else None)
 
 class ProfileEvent: pass
 
@@ -349,10 +384,12 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 
 # *** Exec helpers
 
+def system(cmd, **kwargs): return subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
-    print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
+    print(system(f"{objdump_tool} -d {f.name}"))
 
 def capstone_flatdump(lib: bytes):
   try: import capstone
@@ -383,6 +420,7 @@ def to_mv(ptr:int, sz:int) -> memoryview: return memoryview((ctypes.c_uint8 * sz
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
+def charptr(s:str|bytes): return ctypes.cast(ctypes.c_char_p(s if isinstance(s, bytes) else s.encode()), ctypes.POINTER(ctypes.c_char))
 @functools.cache
 def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
   class CStruct(ctypes.Structure):
@@ -429,6 +467,13 @@ class tqdm(Generic[T]):
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+class disable_gc(contextlib.ContextDecorator):
+  def __enter__(self):
+    self._was_enabled = gc.isenabled()
+    if self._was_enabled: gc.disable()
+  def __exit__(self, *exc):
+    if self._was_enabled: gc.enable()
 
 # *** universal support for code object pickling
 

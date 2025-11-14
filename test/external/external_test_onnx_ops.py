@@ -272,6 +272,10 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_qlinearmatmul_2D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 2)
   def test_qlinearmatmul_3D_int8_float32(self): self._run_qlinearmatmul_test(np.int8, np.float32, 3)
 
+  def test_reduce_l2_half(self):
+    inputs = {"data": np.random.randn(1, 1, 32, 32, 32).astype(np.half)*100}
+    self.helper_test_single_op("ReduceL2", inputs, {}, ["reduced"])
+
 class TestTrainingOnnxOps(TestOnnxOps):
   # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
   DOMAIN = AI_ONNX_PREVIEW_TRAINING_DOMAIN

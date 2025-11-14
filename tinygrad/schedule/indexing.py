@@ -51,7 +51,7 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.KERNEL}: return None
+  if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
   if x.op is Ops.AFTER and x.src[1].op is Ops.KERNEL: return None
   new_srcs = []
   for s in x.src:
@@ -141,6 +141,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
 
 @profile_matches
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
+  if debug: print("**************************")
   rctx = IndexingContext()
 
   # get ops to realize
@@ -154,6 +155,10 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   ending_ranges: dict[UOp, list[UOp]] = {}
   for x in tsink_reverse_toposort:
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
+
+    # no ranges on kernels, they are internal
+    if x.op is Ops.KERNEL: continue
+
     if x.dtype.scalar() == dtypes.index: continue  # TODO: why do I need this?
     ending_ranges[x] = sum([ending_ranges.get(u, []) for u in consumer_map[x]], [])
 
@@ -234,7 +239,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # if the EXPAND is used to inject a range, we don't mark it as ending_ranges. otherwise we do.
     # NOTE: this doesn't actually always end a range, but this is why convs are realized, so for now we need it
     if x.op is Ops.EXPAND and all(isinstance(y, int) or y.op is not Ops.RANGE for y in x.shape):
-      ending_ranges[x] = list(UOp.sink(*[ro for ri, ro in zip(rngs, out_rngs) if ri is not ro]).ranges.keys())
+      ending_ranges[x] += list(UOp.sink(*[ro for ri, ro in zip(rngs, out_rngs) if ri is not ro]).ranges.keys())
 
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
@@ -242,15 +247,23 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)
-      disp = []
-      for i, (ri, ro) in enumerate(zip([r.render() for r in rngs], [r.render() for r in out_rngs])):
-        rng = f"{ri}" if ri == ro else f"{ri} -> {ro}"
-        if realized_ranges is not None and i in realized_ranges: rng = colored(rng, "yellow")
-        disp.append("["+rng+"]")
-      print("***" if x in rctx.realize_map else "   ", len(consumer_map[x]), f"{str(x.op):20s}", ''.join(disp))
+      if x.op is Ops.RESHAPE or len(rngs) != len(out_rngs):
+        disp = render_ranges(rngs, realized=realized_ranges) + " -> " + render_ranges(out_rngs, realized=realized_ranges)
+      else:
+        disp = render_ranges(rngs, out_rngs, realized=realized_ranges)
+      print("***" if x in rctx.realize_map else "   ",
+            f"{len(consumer_map[x]):2d} {str(x.op):20s} {str(x._shape):35s} {len(ending_ranges[x]):2d}", disp)
 
     # assign to the range map. rngs are the input ranges, out_rngs are the output ranges, from the x op.
     rctx.range_map[x] = (rngs, out_rngs)
 
   tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
   return tsink, rctx
+
+def render_ranges(*rngs_list, realized) -> str:
+  disp = []
+  for i, rs in enumerate(zip(*[[r.render() for r in rngs] for rngs in rngs_list])):
+    rng = rs[0] if all_same(rs) else " -> ".join(rs)
+    if realized is not None and i in realized: rng = colored(rng, "yellow")
+    disp.append("["+rng+"]")
+  return ''.join(disp)
