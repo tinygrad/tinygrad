@@ -89,7 +89,7 @@ def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   return ret
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
-  if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
+  if (x in ctx.range_map or x.src[0].op is Ops.INDEX): return x.src[0]
 
 def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
   if assign.src[1].op is Ops.KERNEL: return None
@@ -213,6 +213,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       out_rngs = tuple(_out_rngs)
 
       # we have to (partially) realize here if there's new ranges
+      print(_realize_axis)
       if len(_realize_axis): rctx.realize_map[x] = _realize_axis
 
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
