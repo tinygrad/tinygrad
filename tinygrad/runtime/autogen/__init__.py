@@ -60,7 +60,7 @@ def __getattr__(nm):
       "-I{}/src/common/inc", "-I{}/src/nvidia/inc", "-I{}/src/nvidia/interface/", "-I{}/src/nvidia/inc/kernel", "-I{}/src/nvidia/inc/libraries",
       "-I{}/src/nvidia/arch/nvalloc/common/inc", "-I{}/kernel-open/nvidia-uvm", "-I{}/kernel-open/common/inc", "-I{}/src/common/sdk/nvidia/inc",
       "-I{}/src/nvidia/arch/nvalloc/unix/include", "-I{}/src/common/sdk/nvidia/inc/ctrl"
-    ], tarball=nv_src, anon_names={
+    ], tarball=nv_src["nv_570"], anon_names={
       "{}/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h:8": "rpc_fns",
       "{}/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h:244": "rpc_events"
     })
