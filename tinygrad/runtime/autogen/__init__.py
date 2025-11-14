@@ -123,8 +123,8 @@ python3 src/compiler/builtin_types_h.py gen/builtin_types.h""", cwd=path, shell=
   prolog=["import gzip, base64", "from tinygrad.helpers import OSX"], epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
       return load("libclang", ["os.getenv('LIBCLANG_PATH', find_library('clang-20'))"],
-                  lambda: [system("llvm-config-20 --includedir")+"/clang-c/Index.h"], args=lambda: system("llvm-config-20 --cflags").split(),
-                  types={"CXString":"ci._CXString","CXType":"ci.Type","CXCursor":"ci.Cursor"}, prolog=["import clang.cindex as ci"])
+                  lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
+                  args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
       return load("metal", ["find_library('Metal')"],[f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],

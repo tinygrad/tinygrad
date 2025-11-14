@@ -27,15 +27,12 @@ except (ValueError,AttributeError): pass
 try: nir_debug_print_shader = (ctypes.c_bool * 15).in_dll(dll, 'nir_debug_print_shader')
 except (ValueError,AttributeError): pass
 nir_component_mask_t = ctypes.c_uint16
-# void nir_process_debug_variable(void)
 try: (nir_process_debug_variable:=dll.nir_process_debug_variable).restype, nir_process_debug_variable.argtypes = None, []
 except AttributeError: pass
 
-# bool nir_component_mask_can_reinterpret(nir_component_mask_t mask, unsigned int old_bit_size, unsigned int new_bit_size)
 try: (nir_component_mask_can_reinterpret:=dll.nir_component_mask_can_reinterpret).restype, nir_component_mask_can_reinterpret.argtypes = ctypes.c_bool, [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_component_mask_t nir_component_mask_reinterpret(nir_component_mask_t mask, unsigned int old_bit_size, unsigned int new_bit_size)
 try: (nir_component_mask_reinterpret:=dll.nir_component_mask_reinterpret).restype, nir_component_mask_reinterpret.argtypes = nir_component_mask_t, [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -112,11 +109,9 @@ nir_const_value._fields_ = [
   ('i64', int64_t),
   ('u64', uint64_t),
 ]
-# nir_const_value nir_const_value_for_float(double b, unsigned int bit_size)
 try: (nir_const_value_for_float:=dll.nir_const_value_for_float).restype, nir_const_value_for_float.argtypes = nir_const_value, [ctypes.c_double, ctypes.c_uint32]
 except AttributeError: pass
 
-# double nir_const_value_as_float(nir_const_value value, unsigned int bit_size)
 try: (nir_const_value_as_float:=dll.nir_const_value_as_float).restype, nir_const_value_as_float.argtypes = ctypes.c_double, [nir_const_value, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -915,7 +910,6 @@ struct_nir_src._fields_ = [
   ('ssa', ctypes.POINTER(nir_def)),
 ]
 nir_src = struct_nir_src
-# bool nir_src_is_divergent(nir_src *src)
 try: (nir_src_is_divergent:=dll.nir_src_is_divergent).restype, nir_src_is_divergent.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_src)]
 except AttributeError: pass
 
@@ -949,11 +943,9 @@ nir_type_float16 = nir_alu_type.define('nir_type_float16', 144)
 nir_type_float32 = nir_alu_type.define('nir_type_float32', 160)
 nir_type_float64 = nir_alu_type.define('nir_type_float64', 192)
 
-# nir_alu_type nir_get_nir_type_for_glsl_base_type(enum glsl_base_type base_type)
 try: (nir_get_nir_type_for_glsl_base_type:=dll.nir_get_nir_type_for_glsl_base_type).restype, nir_get_nir_type_for_glsl_base_type.argtypes = nir_alu_type, [enum_glsl_base_type]
 except AttributeError: pass
 
-# enum glsl_base_type nir_get_glsl_base_type_for_nir_type(nir_alu_type base_type)
 try: (nir_get_glsl_base_type_for_nir_type:=dll.nir_get_glsl_base_type_for_nir_type).restype, nir_get_glsl_base_type_for_nir_type.argtypes = enum_glsl_base_type, [nir_alu_type]
 except AttributeError: pass
 
@@ -1450,7 +1442,6 @@ nir_op_vec8 = nir_op.define('nir_op_vec8', 488)
 nir_last_opcode = nir_op.define('nir_last_opcode', 488)
 nir_num_opcodes = nir_op.define('nir_num_opcodes', 489)
 
-# nir_op nir_type_conversion_op(nir_alu_type src, nir_alu_type dst, nir_rounding_mode rnd)
 try: (nir_type_conversion_op:=dll.nir_type_conversion_op).restype, nir_type_conversion_op.argtypes = nir_op, [nir_alu_type, nir_alu_type, nir_rounding_mode]
 except AttributeError: pass
 
@@ -1473,15 +1464,12 @@ nir_atomic_op_inc_wrap = nir_atomic_op.define('nir_atomic_op_inc_wrap', 14)
 nir_atomic_op_dec_wrap = nir_atomic_op.define('nir_atomic_op_dec_wrap', 15)
 nir_atomic_op_ordered_add_gfx12_amd = nir_atomic_op.define('nir_atomic_op_ordered_add_gfx12_amd', 16)
 
-# nir_op nir_atomic_op_to_alu(nir_atomic_op op)
 try: (nir_atomic_op_to_alu:=dll.nir_atomic_op_to_alu).restype, nir_atomic_op_to_alu.argtypes = nir_op, [nir_atomic_op]
 except AttributeError: pass
 
-# nir_op nir_op_vec(unsigned int num_components)
 try: (nir_op_vec:=dll.nir_op_vec).restype, nir_op_vec.argtypes = nir_op, [ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_op_is_vec(nir_op op)
 try: (nir_op_is_vec:=dll.nir_op_is_vec).restype, nir_op_is_vec.argtypes = ctypes.c_bool, [nir_op]
 except AttributeError: pass
 
@@ -1516,39 +1504,30 @@ struct_nir_alu_instr._fields_ = [
   ('src', (nir_alu_src * 0)),
 ]
 nir_alu_instr = struct_nir_alu_instr
-# void nir_alu_src_copy(nir_alu_src *dest, const nir_alu_src *src)
 try: (nir_alu_src_copy:=dll.nir_alu_src_copy).restype, nir_alu_src_copy.argtypes = None, [ctypes.POINTER(nir_alu_src), ctypes.POINTER(nir_alu_src)]
 except AttributeError: pass
 
-# nir_component_mask_t nir_alu_instr_src_read_mask(const nir_alu_instr *instr, unsigned int src)
 try: (nir_alu_instr_src_read_mask:=dll.nir_alu_instr_src_read_mask).restype, nir_alu_instr_src_read_mask.argtypes = nir_component_mask_t, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# unsigned int nir_ssa_alu_instr_src_components(const nir_alu_instr *instr, unsigned int src)
 try: (nir_ssa_alu_instr_src_components:=dll.nir_ssa_alu_instr_src_components).restype, nir_ssa_alu_instr_src_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_alu_instr_is_comparison(const nir_alu_instr *instr)
 try: (nir_alu_instr_is_comparison:=dll.nir_alu_instr_is_comparison).restype, nir_alu_instr_is_comparison.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr)]
 except AttributeError: pass
 
-# bool nir_const_value_negative_equal(nir_const_value c1, nir_const_value c2, nir_alu_type full_type)
 try: (nir_const_value_negative_equal:=dll.nir_const_value_negative_equal).restype, nir_const_value_negative_equal.argtypes = ctypes.c_bool, [nir_const_value, nir_const_value, nir_alu_type]
 except AttributeError: pass
 
-# bool nir_alu_srcs_equal(const nir_alu_instr *alu1, const nir_alu_instr *alu2, unsigned int src1, unsigned int src2)
 try: (nir_alu_srcs_equal:=dll.nir_alu_srcs_equal).restype, nir_alu_srcs_equal.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_alu_srcs_negative_equal_typed(const nir_alu_instr *alu1, const nir_alu_instr *alu2, unsigned int src1, unsigned int src2, nir_alu_type base_type)
 try: (nir_alu_srcs_negative_equal_typed:=dll.nir_alu_srcs_negative_equal_typed).restype, nir_alu_srcs_negative_equal_typed.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32, nir_alu_type]
 except AttributeError: pass
 
-# bool nir_alu_srcs_negative_equal(const nir_alu_instr *alu1, const nir_alu_instr *alu2, unsigned int src1, unsigned int src2)
 try: (nir_alu_srcs_negative_equal:=dll.nir_alu_srcs_negative_equal).restype, nir_alu_srcs_negative_equal.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_alu_src_is_trivial_ssa(const nir_alu_instr *alu, unsigned int srcn)
 try: (nir_alu_src_is_trivial_ssa:=dll.nir_alu_src_is_trivial_ssa).restype, nir_alu_src_is_trivial_ssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -1626,15 +1605,12 @@ struct_nir_deref_instr._fields_ = [
   ('def', nir_def),
 ]
 nir_deref_instr = struct_nir_deref_instr
-# bool nir_deref_cast_is_trivial(nir_deref_instr *cast)
 try: (nir_deref_cast_is_trivial:=dll.nir_deref_cast_is_trivial).restype, nir_deref_cast_is_trivial.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
-# bool nir_deref_instr_has_indirect(nir_deref_instr *instr)
 try: (nir_deref_instr_has_indirect:=dll.nir_deref_instr_has_indirect).restype, nir_deref_instr_has_indirect.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
-# bool nir_deref_instr_is_known_out_of_bounds(nir_deref_instr *instr)
 try: (nir_deref_instr_is_known_out_of_bounds:=dll.nir_deref_instr_is_known_out_of_bounds).restype, nir_deref_instr_is_known_out_of_bounds.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
@@ -1643,15 +1619,12 @@ nir_deref_instr_has_complex_use_allow_memcpy_src = nir_deref_instr_has_complex_u
 nir_deref_instr_has_complex_use_allow_memcpy_dst = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_dst', 2)
 nir_deref_instr_has_complex_use_allow_atomics = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_atomics', 4)
 
-# bool nir_deref_instr_has_complex_use(nir_deref_instr *instr, nir_deref_instr_has_complex_use_options opts)
 try: (nir_deref_instr_has_complex_use:=dll.nir_deref_instr_has_complex_use).restype, nir_deref_instr_has_complex_use.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr), nir_deref_instr_has_complex_use_options]
 except AttributeError: pass
 
-# bool nir_deref_instr_remove_if_unused(nir_deref_instr *instr)
 try: (nir_deref_instr_remove_if_unused:=dll.nir_deref_instr_remove_if_unused).restype, nir_deref_instr_remove_if_unused.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
-# unsigned int nir_deref_instr_array_stride(nir_deref_instr *instr)
 try: (nir_deref_instr_array_stride:=dll.nir_deref_instr_array_stride).restype, nir_deref_instr_array_stride.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
@@ -3072,7 +3045,6 @@ struct_nir_io_xfb._fields_ = [
   ('out', (struct_nir_io_xfb_out * 2)),
 ]
 nir_io_xfb = struct_nir_io_xfb
-# unsigned int nir_instr_xfb_write_mask(nir_intrinsic_instr *instr)
 try: (nir_instr_xfb_write_mask:=dll.nir_instr_xfb_write_mask).restype, nir_instr_xfb_write_mask.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
@@ -3093,39 +3065,30 @@ struct_nir_intrinsic_info._fields_ = [
 nir_intrinsic_info = struct_nir_intrinsic_info
 try: nir_intrinsic_infos = (nir_intrinsic_info * 732).in_dll(dll, 'nir_intrinsic_infos')
 except (ValueError,AttributeError): pass
-# unsigned int nir_intrinsic_src_components(const nir_intrinsic_instr *intr, unsigned int srcn)
 try: (nir_intrinsic_src_components:=dll.nir_intrinsic_src_components).restype, nir_intrinsic_src_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# unsigned int nir_intrinsic_dest_components(nir_intrinsic_instr *intr)
 try: (nir_intrinsic_dest_components:=dll.nir_intrinsic_dest_components).restype, nir_intrinsic_dest_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# nir_alu_type nir_intrinsic_instr_src_type(const nir_intrinsic_instr *intrin, unsigned int src)
 try: (nir_intrinsic_instr_src_type:=dll.nir_intrinsic_instr_src_type).restype, nir_intrinsic_instr_src_type.argtypes = nir_alu_type, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_alu_type nir_intrinsic_instr_dest_type(const nir_intrinsic_instr *intrin)
 try: (nir_intrinsic_instr_dest_type:=dll.nir_intrinsic_instr_dest_type).restype, nir_intrinsic_instr_dest_type.argtypes = nir_alu_type, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# void nir_intrinsic_copy_const_indices(nir_intrinsic_instr *dst, nir_intrinsic_instr *src)
 try: (nir_intrinsic_copy_const_indices:=dll.nir_intrinsic_copy_const_indices).restype, nir_intrinsic_copy_const_indices.argtypes = None, [ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# unsigned int nir_image_intrinsic_coord_components(const nir_intrinsic_instr *instr)
 try: (nir_image_intrinsic_coord_components:=dll.nir_image_intrinsic_coord_components).restype, nir_image_intrinsic_coord_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# void nir_rewrite_image_intrinsic(nir_intrinsic_instr *instr, nir_def *handle, bool bindless)
 try: (nir_rewrite_image_intrinsic:=dll.nir_rewrite_image_intrinsic).restype, nir_rewrite_image_intrinsic.argtypes = None, [ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_def), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_intrinsic_can_reorder(nir_intrinsic_instr *instr)
 try: (nir_intrinsic_can_reorder:=dll.nir_intrinsic_can_reorder).restype, nir_intrinsic_can_reorder.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# bool nir_intrinsic_writes_external_memory(const nir_intrinsic_instr *instr)
 try: (nir_intrinsic_writes_external_memory:=dll.nir_intrinsic_writes_external_memory).restype, nir_intrinsic_writes_external_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
@@ -3229,39 +3192,30 @@ struct_nir_tex_instr._fields_ = [
   ('backend_flags', uint32_t),
 ]
 nir_tex_instr = struct_nir_tex_instr
-# bool nir_tex_instr_need_sampler(const nir_tex_instr *instr)
 try: (nir_tex_instr_need_sampler:=dll.nir_tex_instr_need_sampler).restype, nir_tex_instr_need_sampler.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
-# unsigned int nir_tex_instr_result_size(const nir_tex_instr *instr)
 try: (nir_tex_instr_result_size:=dll.nir_tex_instr_result_size).restype, nir_tex_instr_result_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
-# bool nir_tex_instr_is_query(const nir_tex_instr *instr)
 try: (nir_tex_instr_is_query:=dll.nir_tex_instr_is_query).restype, nir_tex_instr_is_query.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
-# bool nir_tex_instr_has_implicit_derivative(const nir_tex_instr *instr)
 try: (nir_tex_instr_has_implicit_derivative:=dll.nir_tex_instr_has_implicit_derivative).restype, nir_tex_instr_has_implicit_derivative.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
-# nir_alu_type nir_tex_instr_src_type(const nir_tex_instr *instr, unsigned int src)
 try: (nir_tex_instr_src_type:=dll.nir_tex_instr_src_type).restype, nir_tex_instr_src_type.argtypes = nir_alu_type, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# unsigned int nir_tex_instr_src_size(const nir_tex_instr *instr, unsigned int src)
 try: (nir_tex_instr_src_size:=dll.nir_tex_instr_src_size).restype, nir_tex_instr_src_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# void nir_tex_instr_add_src(nir_tex_instr *tex, nir_tex_src_type src_type, nir_def *src)
 try: (nir_tex_instr_add_src:=dll.nir_tex_instr_add_src).restype, nir_tex_instr_add_src.argtypes = None, [ctypes.POINTER(nir_tex_instr), nir_tex_src_type, ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# void nir_tex_instr_remove_src(nir_tex_instr *tex, unsigned int src_idx)
 try: (nir_tex_instr_remove_src:=dll.nir_tex_instr_remove_src).restype, nir_tex_instr_remove_src.argtypes = None, [ctypes.POINTER(nir_tex_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_tex_instr_has_explicit_tg4_offsets(nir_tex_instr *tex)
 try: (nir_tex_instr_has_explicit_tg4_offsets:=dll.nir_tex_instr_has_explicit_tg4_offsets).restype, nir_tex_instr_has_explicit_tg4_offsets.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
@@ -3346,7 +3300,6 @@ struct_nir_scalar._fields_ = [
   ('comp', ctypes.c_uint32),
 ]
 nir_scalar = struct_nir_scalar
-# nir_scalar nir_scalar_chase_movs(nir_scalar s)
 try: (nir_scalar_chase_movs:=dll.nir_scalar_chase_movs).restype, nir_scalar_chase_movs.argtypes = nir_scalar, [nir_scalar]
 except AttributeError: pass
 
@@ -3361,15 +3314,12 @@ struct_nir_binding._fields_ = [
   ('read_first_invocation', ctypes.c_bool),
 ]
 nir_binding = struct_nir_binding
-# nir_binding nir_chase_binding(nir_src rsrc)
 try: (nir_chase_binding:=dll.nir_chase_binding).restype, nir_chase_binding.argtypes = nir_binding, [nir_src]
 except AttributeError: pass
 
-# nir_variable *nir_get_binding_variable(nir_shader *shader, nir_binding binding)
 try: (nir_get_binding_variable:=dll.nir_get_binding_variable).restype, nir_get_binding_variable.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_binding]
 except AttributeError: pass
 
-# bool nir_block_contains_work(nir_block *block)
 try: (nir_block_contains_work:=dll.nir_block_contains_work).restype, nir_block_contains_work.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
@@ -3472,160 +3422,121 @@ const_struct_nir_intrinsic_instr._fields_ = [
 ]
 nir_intrin_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_intrinsic_instr), ctypes.c_void_p)
 nir_vectorize_cb = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
-# void nir_remove_non_entrypoints(nir_shader *shader)
 try: (nir_remove_non_entrypoints:=dll.nir_remove_non_entrypoints).restype, nir_remove_non_entrypoints.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_remove_non_exported(nir_shader *shader)
 try: (nir_remove_non_exported:=dll.nir_remove_non_exported).restype, nir_remove_non_exported.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_remove_entrypoints(nir_shader *shader)
 try: (nir_remove_entrypoints:=dll.nir_remove_entrypoints).restype, nir_remove_entrypoints.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_fixup_is_exported(nir_shader *shader)
 try: (nir_fixup_is_exported:=dll.nir_fixup_is_exported).restype, nir_fixup_is_exported.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
 shader_info = struct_shader_info
-# nir_shader *nir_shader_create(void *mem_ctx, gl_shader_stage stage, const nir_shader_compiler_options *options, shader_info *si)
 try: (nir_shader_create:=dll.nir_shader_create).restype, nir_shader_create.argtypes = ctypes.POINTER(nir_shader), [ctypes.c_void_p, gl_shader_stage, ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(shader_info)]
 except AttributeError: pass
 
-# void nir_shader_add_variable(nir_shader *shader, nir_variable *var)
 try: (nir_shader_add_variable:=dll.nir_shader_add_variable).restype, nir_shader_add_variable.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_variable)]
 except AttributeError: pass
 
-# nir_variable *nir_variable_create(nir_shader *shader, nir_variable_mode mode, const struct glsl_type *type, const char *name)
 try: (nir_variable_create:=dll.nir_variable_create).restype, nir_variable_create.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# nir_variable *nir_local_variable_create(nir_function_impl *impl, const struct glsl_type *type, const char *name)
 try: (nir_local_variable_create:=dll.nir_local_variable_create).restype, nir_local_variable_create.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_function_impl), ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# nir_variable *nir_state_variable_create(nir_shader *shader, const struct glsl_type *type, const char *name, const gl_state_index16 tokens[4])
 try: (nir_state_variable_create:=dll.nir_state_variable_create).restype, nir_state_variable_create.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char), (gl_state_index16 * 4)]
 except AttributeError: pass
 
-# nir_variable *nir_get_variable_with_location(nir_shader *shader, nir_variable_mode mode, int location, const struct glsl_type *type)
 try: (nir_get_variable_with_location:=dll.nir_get_variable_with_location).restype, nir_get_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, ctypes.POINTER(struct_glsl_type)]
 except AttributeError: pass
 
-# nir_variable *nir_create_variable_with_location(nir_shader *shader, nir_variable_mode mode, int location, const struct glsl_type *type)
 try: (nir_create_variable_with_location:=dll.nir_create_variable_with_location).restype, nir_create_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, ctypes.POINTER(struct_glsl_type)]
 except AttributeError: pass
 
-# nir_variable *nir_find_variable_with_location(nir_shader *shader, nir_variable_mode mode, unsigned int location)
 try: (nir_find_variable_with_location:=dll.nir_find_variable_with_location).restype, nir_find_variable_with_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_variable *nir_find_variable_with_driver_location(nir_shader *shader, nir_variable_mode mode, unsigned int location)
 try: (nir_find_variable_with_driver_location:=dll.nir_find_variable_with_driver_location).restype, nir_find_variable_with_driver_location.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_variable *nir_find_state_variable(nir_shader *s, gl_state_index16 tokens[4])
 try: (nir_find_state_variable:=dll.nir_find_state_variable).restype, nir_find_state_variable.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), (gl_state_index16 * 4)]
 except AttributeError: pass
 
-# nir_variable *nir_find_sampler_variable_with_tex_index(nir_shader *shader, unsigned int texture_index)
 try: (nir_find_sampler_variable_with_tex_index:=dll.nir_find_sampler_variable_with_tex_index).restype, nir_find_sampler_variable_with_tex_index.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# void nir_sort_variables_with_modes(nir_shader *shader, int (*compar)(const nir_variable *, const nir_variable *), nir_variable_mode modes)
 try: (nir_sort_variables_with_modes:=dll.nir_sort_variables_with_modes).restype, nir_sort_variables_with_modes.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(nir_variable), ctypes.POINTER(nir_variable)), nir_variable_mode]
 except AttributeError: pass
 
-# nir_function *nir_function_create(nir_shader *shader, const char *name)
 try: (nir_function_create:=dll.nir_function_create).restype, nir_function_create.argtypes = ctypes.POINTER(nir_function), [ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# nir_function_impl *nir_function_impl_create(nir_function *func)
 try: (nir_function_impl_create:=dll.nir_function_impl_create).restype, nir_function_impl_create.argtypes = ctypes.POINTER(nir_function_impl), [ctypes.POINTER(nir_function)]
 except AttributeError: pass
 
-# nir_function_impl *nir_function_impl_create_bare(nir_shader *shader)
 try: (nir_function_impl_create_bare:=dll.nir_function_impl_create_bare).restype, nir_function_impl_create_bare.argtypes = ctypes.POINTER(nir_function_impl), [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_block *nir_block_create(nir_shader *shader)
 try: (nir_block_create:=dll.nir_block_create).restype, nir_block_create.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_if *nir_if_create(nir_shader *shader)
 try: (nir_if_create:=dll.nir_if_create).restype, nir_if_create.argtypes = ctypes.POINTER(nir_if), [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_loop *nir_loop_create(nir_shader *shader)
 try: (nir_loop_create:=dll.nir_loop_create).restype, nir_loop_create.argtypes = ctypes.POINTER(nir_loop), [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_function_impl *nir_cf_node_get_function(nir_cf_node *node)
 try: (nir_cf_node_get_function:=dll.nir_cf_node_get_function).restype, nir_cf_node_get_function.argtypes = ctypes.POINTER(nir_function_impl), [ctypes.POINTER(nir_cf_node)]
 except AttributeError: pass
 
-# void nir_metadata_require(nir_function_impl *impl, nir_metadata required, ...)
 try: (nir_metadata_require:=dll.nir_metadata_require).restype, nir_metadata_require.argtypes = None, [ctypes.POINTER(nir_function_impl), nir_metadata]
 except AttributeError: pass
 
-# void nir_shader_preserve_all_metadata(nir_shader *shader)
 try: (nir_shader_preserve_all_metadata:=dll.nir_shader_preserve_all_metadata).restype, nir_shader_preserve_all_metadata.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_metadata_invalidate(nir_shader *shader)
 try: (nir_metadata_invalidate:=dll.nir_metadata_invalidate).restype, nir_metadata_invalidate.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_progress(bool progress, nir_function_impl *impl, nir_metadata preserved)
 try: (nir_progress:=dll.nir_progress).restype, nir_progress.argtypes = ctypes.c_bool, [ctypes.c_bool, ctypes.POINTER(nir_function_impl), nir_metadata]
 except AttributeError: pass
 
-# nir_alu_instr *nir_alu_instr_create(nir_shader *shader, nir_op op)
 try: (nir_alu_instr_create:=dll.nir_alu_instr_create).restype, nir_alu_instr_create.argtypes = ctypes.POINTER(nir_alu_instr), [ctypes.POINTER(nir_shader), nir_op]
 except AttributeError: pass
 
-# nir_deref_instr *nir_deref_instr_create(nir_shader *shader, nir_deref_type deref_type)
 try: (nir_deref_instr_create:=dll.nir_deref_instr_create).restype, nir_deref_instr_create.argtypes = ctypes.POINTER(nir_deref_instr), [ctypes.POINTER(nir_shader), nir_deref_type]
 except AttributeError: pass
 
-# nir_jump_instr *nir_jump_instr_create(nir_shader *shader, nir_jump_type type)
 try: (nir_jump_instr_create:=dll.nir_jump_instr_create).restype, nir_jump_instr_create.argtypes = ctypes.POINTER(nir_jump_instr), [ctypes.POINTER(nir_shader), nir_jump_type]
 except AttributeError: pass
 
-# nir_load_const_instr *nir_load_const_instr_create(nir_shader *shader, unsigned int num_components, unsigned int bit_size)
 try: (nir_load_const_instr_create:=dll.nir_load_const_instr_create).restype, nir_load_const_instr_create.argtypes = ctypes.POINTER(nir_load_const_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_intrinsic_instr *nir_intrinsic_instr_create(nir_shader *shader, nir_intrinsic_op op)
 try: (nir_intrinsic_instr_create:=dll.nir_intrinsic_instr_create).restype, nir_intrinsic_instr_create.argtypes = ctypes.POINTER(nir_intrinsic_instr), [ctypes.POINTER(nir_shader), nir_intrinsic_op]
 except AttributeError: pass
 
-# nir_call_instr *nir_call_instr_create(nir_shader *shader, nir_function *callee)
 try: (nir_call_instr_create:=dll.nir_call_instr_create).restype, nir_call_instr_create.argtypes = ctypes.POINTER(nir_call_instr), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function)]
 except AttributeError: pass
 
-# nir_tex_instr *nir_tex_instr_create(nir_shader *shader, unsigned int num_srcs)
 try: (nir_tex_instr_create:=dll.nir_tex_instr_create).restype, nir_tex_instr_create.argtypes = ctypes.POINTER(nir_tex_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_phi_instr *nir_phi_instr_create(nir_shader *shader)
 try: (nir_phi_instr_create:=dll.nir_phi_instr_create).restype, nir_phi_instr_create.argtypes = ctypes.POINTER(nir_phi_instr), [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_phi_src *nir_phi_instr_add_src(nir_phi_instr *instr, nir_block *pred, nir_def *src)
 try: (nir_phi_instr_add_src:=dll.nir_phi_instr_add_src).restype, nir_phi_instr_add_src.argtypes = ctypes.POINTER(nir_phi_src), [ctypes.POINTER(nir_phi_instr), ctypes.POINTER(nir_block), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_parallel_copy_instr *nir_parallel_copy_instr_create(nir_shader *shader)
 try: (nir_parallel_copy_instr_create:=dll.nir_parallel_copy_instr_create).restype, nir_parallel_copy_instr_create.argtypes = ctypes.POINTER(nir_parallel_copy_instr), [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_undef_instr *nir_undef_instr_create(nir_shader *shader, unsigned int num_components, unsigned int bit_size)
 try: (nir_undef_instr_create:=dll.nir_undef_instr_create).restype, nir_undef_instr_create.argtypes = ctypes.POINTER(nir_undef_instr), [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_const_value nir_alu_binop_identity(nir_op binop, unsigned int bit_size)
 try: (nir_alu_binop_identity:=dll.nir_alu_binop_identity).restype, nir_alu_binop_identity.argtypes = nir_const_value, [nir_op, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -3647,185 +3558,140 @@ struct_nir_cursor._fields_ = [
   ('_0', struct_nir_cursor_0),
 ]
 nir_cursor = struct_nir_cursor
-# bool nir_cursors_equal(nir_cursor a, nir_cursor b)
 try: (nir_cursors_equal:=dll.nir_cursors_equal).restype, nir_cursors_equal.argtypes = ctypes.c_bool, [nir_cursor, nir_cursor]
 except AttributeError: pass
 
-# void nir_instr_insert(nir_cursor cursor, nir_instr *instr)
 try: (nir_instr_insert:=dll.nir_instr_insert).restype, nir_instr_insert.argtypes = None, [nir_cursor, ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# bool nir_instr_move(nir_cursor cursor, nir_instr *instr)
 try: (nir_instr_move:=dll.nir_instr_move).restype, nir_instr_move.argtypes = ctypes.c_bool, [nir_cursor, ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# void nir_instr_remove_v(nir_instr *instr)
 try: (nir_instr_remove_v:=dll.nir_instr_remove_v).restype, nir_instr_remove_v.argtypes = None, [ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# void nir_instr_free(nir_instr *instr)
 try: (nir_instr_free:=dll.nir_instr_free).restype, nir_instr_free.argtypes = None, [ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# void nir_instr_free_list(struct exec_list *list)
 try: (nir_instr_free_list:=dll.nir_instr_free_list).restype, nir_instr_free_list.argtypes = None, [ctypes.POINTER(struct_exec_list)]
 except AttributeError: pass
 
-# nir_cursor nir_instr_free_and_dce(nir_instr *instr)
 try: (nir_instr_free_and_dce:=dll.nir_instr_free_and_dce).restype, nir_instr_free_and_dce.argtypes = nir_cursor, [ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# nir_def *nir_instr_def(nir_instr *instr)
 try: (nir_instr_def:=dll.nir_instr_def).restype, nir_instr_def.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
 nir_foreach_def_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_def), ctypes.c_void_p)
 nir_foreach_src_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
-# bool nir_foreach_phi_src_leaving_block(nir_block *instr, nir_foreach_src_cb cb, void *state)
 try: (nir_foreach_phi_src_leaving_block:=dll.nir_foreach_phi_src_leaving_block).restype, nir_foreach_phi_src_leaving_block.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block), nir_foreach_src_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# nir_const_value *nir_src_as_const_value(nir_src src)
 try: (nir_src_as_const_value:=dll.nir_src_as_const_value).restype, nir_src_as_const_value.argtypes = ctypes.POINTER(nir_const_value), [nir_src]
 except AttributeError: pass
 
-# const char *nir_src_as_string(nir_src src)
 try: (nir_src_as_string:=dll.nir_src_as_string).restype, nir_src_as_string.argtypes = ctypes.POINTER(ctypes.c_char), [nir_src]
 except AttributeError: pass
 
-# bool nir_src_is_always_uniform(nir_src src)
 try: (nir_src_is_always_uniform:=dll.nir_src_is_always_uniform).restype, nir_src_is_always_uniform.argtypes = ctypes.c_bool, [nir_src]
 except AttributeError: pass
 
-# bool nir_srcs_equal(nir_src src1, nir_src src2)
 try: (nir_srcs_equal:=dll.nir_srcs_equal).restype, nir_srcs_equal.argtypes = ctypes.c_bool, [nir_src, nir_src]
 except AttributeError: pass
 
-# bool nir_instrs_equal(const nir_instr *instr1, const nir_instr *instr2)
 try: (nir_instrs_equal:=dll.nir_instrs_equal).restype, nir_instrs_equal.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# nir_block *nir_src_get_block(nir_src *src)
 try: (nir_src_get_block:=dll.nir_src_get_block).restype, nir_src_get_block.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_src)]
 except AttributeError: pass
 
-# void nir_instr_init_src(nir_instr *instr, nir_src *src, nir_def *def)
 try: (nir_instr_init_src:=dll.nir_instr_init_src).restype, nir_instr_init_src.argtypes = None, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_src), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# void nir_instr_clear_src(nir_instr *instr, nir_src *src)
 try: (nir_instr_clear_src:=dll.nir_instr_clear_src).restype, nir_instr_clear_src.argtypes = None, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_src)]
 except AttributeError: pass
 
-# void nir_instr_move_src(nir_instr *dest_instr, nir_src *dest, nir_src *src)
 try: (nir_instr_move_src:=dll.nir_instr_move_src).restype, nir_instr_move_src.argtypes = None, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_src), ctypes.POINTER(nir_src)]
 except AttributeError: pass
 
-# bool nir_instr_is_before(nir_instr *first, nir_instr *second)
 try: (nir_instr_is_before:=dll.nir_instr_is_before).restype, nir_instr_is_before.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# void nir_def_init(nir_instr *instr, nir_def *def, unsigned int num_components, unsigned int bit_size)
 try: (nir_def_init:=dll.nir_def_init).restype, nir_def_init.argtypes = None, [ctypes.POINTER(nir_instr), ctypes.POINTER(nir_def), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# void nir_def_rewrite_uses(nir_def *def, nir_def *new_ssa)
 try: (nir_def_rewrite_uses:=dll.nir_def_rewrite_uses).restype, nir_def_rewrite_uses.argtypes = None, [ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# void nir_def_rewrite_uses_src(nir_def *def, nir_src new_src)
 try: (nir_def_rewrite_uses_src:=dll.nir_def_rewrite_uses_src).restype, nir_def_rewrite_uses_src.argtypes = None, [ctypes.POINTER(nir_def), nir_src]
 except AttributeError: pass
 
-# void nir_def_rewrite_uses_after(nir_def *def, nir_def *new_ssa, nir_instr *after_me)
 try: (nir_def_rewrite_uses_after:=dll.nir_def_rewrite_uses_after).restype, nir_def_rewrite_uses_after.argtypes = None, [ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# nir_component_mask_t nir_src_components_read(const nir_src *src)
 try: (nir_src_components_read:=dll.nir_src_components_read).restype, nir_src_components_read.argtypes = nir_component_mask_t, [ctypes.POINTER(nir_src)]
 except AttributeError: pass
 
-# nir_component_mask_t nir_def_components_read(const nir_def *def)
 try: (nir_def_components_read:=dll.nir_def_components_read).restype, nir_def_components_read.argtypes = nir_component_mask_t, [ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# bool nir_def_all_uses_are_fsat(const nir_def *def)
 try: (nir_def_all_uses_are_fsat:=dll.nir_def_all_uses_are_fsat).restype, nir_def_all_uses_are_fsat.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# bool nir_def_all_uses_ignore_sign_bit(const nir_def *def)
 try: (nir_def_all_uses_ignore_sign_bit:=dll.nir_def_all_uses_ignore_sign_bit).restype, nir_def_all_uses_ignore_sign_bit.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# void nir_sort_unstructured_blocks(nir_function_impl *impl)
 try: (nir_sort_unstructured_blocks:=dll.nir_sort_unstructured_blocks).restype, nir_sort_unstructured_blocks.argtypes = None, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# nir_block *nir_block_unstructured_next(nir_block *block)
 try: (nir_block_unstructured_next:=dll.nir_block_unstructured_next).restype, nir_block_unstructured_next.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# nir_block *nir_unstructured_start_block(nir_function_impl *impl)
 try: (nir_unstructured_start_block:=dll.nir_unstructured_start_block).restype, nir_unstructured_start_block.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# nir_block *nir_block_cf_tree_next(nir_block *block)
 try: (nir_block_cf_tree_next:=dll.nir_block_cf_tree_next).restype, nir_block_cf_tree_next.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# nir_block *nir_block_cf_tree_prev(nir_block *block)
 try: (nir_block_cf_tree_prev:=dll.nir_block_cf_tree_prev).restype, nir_block_cf_tree_prev.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# nir_block *nir_cf_node_cf_tree_first(nir_cf_node *node)
 try: (nir_cf_node_cf_tree_first:=dll.nir_cf_node_cf_tree_first).restype, nir_cf_node_cf_tree_first.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_cf_node)]
 except AttributeError: pass
 
-# nir_block *nir_cf_node_cf_tree_last(nir_cf_node *node)
 try: (nir_cf_node_cf_tree_last:=dll.nir_cf_node_cf_tree_last).restype, nir_cf_node_cf_tree_last.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_cf_node)]
 except AttributeError: pass
 
-# nir_block *nir_cf_node_cf_tree_next(nir_cf_node *node)
 try: (nir_cf_node_cf_tree_next:=dll.nir_cf_node_cf_tree_next).restype, nir_cf_node_cf_tree_next.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_cf_node)]
 except AttributeError: pass
 
-# nir_block *nir_cf_node_cf_tree_prev(nir_cf_node *node)
 try: (nir_cf_node_cf_tree_prev:=dll.nir_cf_node_cf_tree_prev).restype, nir_cf_node_cf_tree_prev.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_cf_node)]
 except AttributeError: pass
 
-# nir_if *nir_block_get_following_if(nir_block *block)
 try: (nir_block_get_following_if:=dll.nir_block_get_following_if).restype, nir_block_get_following_if.argtypes = ctypes.POINTER(nir_if), [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# nir_loop *nir_block_get_following_loop(nir_block *block)
 try: (nir_block_get_following_loop:=dll.nir_block_get_following_loop).restype, nir_block_get_following_loop.argtypes = ctypes.POINTER(nir_loop), [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# nir_block **nir_block_get_predecessors_sorted(const nir_block *block, void *mem_ctx)
 try: (nir_block_get_predecessors_sorted:=dll.nir_block_get_predecessors_sorted).restype, nir_block_get_predecessors_sorted.argtypes = ctypes.POINTER(ctypes.POINTER(nir_block)), [ctypes.POINTER(nir_block), ctypes.c_void_p]
 except AttributeError: pass
 
-# void nir_index_ssa_defs(nir_function_impl *impl)
 try: (nir_index_ssa_defs:=dll.nir_index_ssa_defs).restype, nir_index_ssa_defs.argtypes = None, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# unsigned int nir_index_instrs(nir_function_impl *impl)
 try: (nir_index_instrs:=dll.nir_index_instrs).restype, nir_index_instrs.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# void nir_index_blocks(nir_function_impl *impl)
 try: (nir_index_blocks:=dll.nir_index_blocks).restype, nir_index_blocks.argtypes = None, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# void nir_shader_clear_pass_flags(nir_shader *shader)
 try: (nir_shader_clear_pass_flags:=dll.nir_shader_clear_pass_flags).restype, nir_shader_clear_pass_flags.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# unsigned int nir_shader_index_vars(nir_shader *shader, nir_variable_mode modes)
 try: (nir_shader_index_vars:=dll.nir_shader_index_vars).restype, nir_shader_index_vars.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# unsigned int nir_function_impl_index_vars(nir_function_impl *impl)
 try: (nir_function_impl_index_vars:=dll.nir_function_impl_index_vars).restype, nir_function_impl_index_vars.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
@@ -3869,23 +3735,18 @@ struct__IO_FILE._fields_ = [
   ('_mode', ctypes.c_int32),
   ('_unused2', (ctypes.c_char * 20)),
 ]
-# void nir_print_shader(nir_shader *shader, FILE *fp)
 try: (nir_print_shader:=dll.nir_print_shader).restype, nir_print_shader.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_print_function_body(nir_function_impl *impl, FILE *fp)
 try: (nir_print_function_body:=dll.nir_print_function_body).restype, nir_print_function_body.argtypes = None, [ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_print_shader_annotated(nir_shader *shader, FILE *fp, struct hash_table *errors)
 try: (nir_print_shader_annotated:=dll.nir_print_shader_annotated).restype, nir_print_shader_annotated.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(FILE), ctypes.POINTER(struct_hash_table)]
 except AttributeError: pass
 
-# void nir_print_instr(const nir_instr *instr, FILE *fp)
 try: (nir_print_instr:=dll.nir_print_instr).restype, nir_print_instr.argtypes = None, [ctypes.POINTER(nir_instr), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_print_deref(const nir_deref_instr *deref, FILE *fp)
 try: (nir_print_deref:=dll.nir_print_deref).restype, nir_print_deref.argtypes = None, [ctypes.POINTER(nir_deref_instr), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
@@ -3895,146 +3756,111 @@ MESA_LOG_WARN = enum_mesa_log_level.define('MESA_LOG_WARN', 1)
 MESA_LOG_INFO = enum_mesa_log_level.define('MESA_LOG_INFO', 2)
 MESA_LOG_DEBUG = enum_mesa_log_level.define('MESA_LOG_DEBUG', 3)
 
-# void nir_log_shader_annotated_tagged(enum mesa_log_level level, const char *tag, nir_shader *shader, struct hash_table *annotations)
 try: (nir_log_shader_annotated_tagged:=dll.nir_log_shader_annotated_tagged).restype, nir_log_shader_annotated_tagged.argtypes = None, [enum_mesa_log_level, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table)]
 except AttributeError: pass
 
-# char *nir_shader_as_str(nir_shader *nir, void *mem_ctx)
 try: (nir_shader_as_str:=dll.nir_shader_as_str).restype, nir_shader_as_str.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(nir_shader), ctypes.c_void_p]
 except AttributeError: pass
 
-# char *nir_shader_as_str_annotated(nir_shader *nir, struct hash_table *annotations, void *mem_ctx)
 try: (nir_shader_as_str_annotated:=dll.nir_shader_as_str_annotated).restype, nir_shader_as_str_annotated.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), ctypes.c_void_p]
 except AttributeError: pass
 
-# char *nir_instr_as_str(const nir_instr *instr, void *mem_ctx)
 try: (nir_instr_as_str:=dll.nir_instr_as_str).restype, nir_instr_as_str.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(nir_instr), ctypes.c_void_p]
 except AttributeError: pass
 
-# char *nir_shader_gather_debug_info(nir_shader *shader, const char *filename, uint32_t first_line)
 try: (nir_shader_gather_debug_info:=dll.nir_shader_gather_debug_info).restype, nir_shader_gather_debug_info.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char), uint32_t]
 except AttributeError: pass
 
-# nir_instr *nir_instr_clone(nir_shader *s, const nir_instr *orig)
 try: (nir_instr_clone:=dll.nir_instr_clone).restype, nir_instr_clone.argtypes = ctypes.POINTER(nir_instr), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# nir_instr *nir_instr_clone_deep(nir_shader *s, const nir_instr *orig, struct hash_table *remap_table)
 try: (nir_instr_clone_deep:=dll.nir_instr_clone_deep).restype, nir_instr_clone_deep.argtypes = ctypes.POINTER(nir_instr), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_instr), ctypes.POINTER(struct_hash_table)]
 except AttributeError: pass
 
-# nir_alu_instr *nir_alu_instr_clone(nir_shader *s, const nir_alu_instr *orig)
 try: (nir_alu_instr_clone:=dll.nir_alu_instr_clone).restype, nir_alu_instr_clone.argtypes = ctypes.POINTER(nir_alu_instr), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_alu_instr)]
 except AttributeError: pass
 
-# nir_shader *nir_shader_clone(void *mem_ctx, const nir_shader *s)
 try: (nir_shader_clone:=dll.nir_shader_clone).restype, nir_shader_clone.argtypes = ctypes.POINTER(nir_shader), [ctypes.c_void_p, ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_function *nir_function_clone(nir_shader *ns, const nir_function *fxn)
 try: (nir_function_clone:=dll.nir_function_clone).restype, nir_function_clone.argtypes = ctypes.POINTER(nir_function), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function)]
 except AttributeError: pass
 
-# nir_function_impl *nir_function_impl_clone(nir_shader *shader, const nir_function_impl *fi)
 try: (nir_function_impl_clone:=dll.nir_function_impl_clone).restype, nir_function_impl_clone.argtypes = ctypes.POINTER(nir_function_impl), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# nir_function_impl *nir_function_impl_clone_remap_globals(nir_shader *shader, const nir_function_impl *fi, struct hash_table *remap_table)
 try: (nir_function_impl_clone_remap_globals:=dll.nir_function_impl_clone_remap_globals).restype, nir_function_impl_clone_remap_globals.argtypes = ctypes.POINTER(nir_function_impl), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl), ctypes.POINTER(struct_hash_table)]
 except AttributeError: pass
 
-# nir_constant *nir_constant_clone(const nir_constant *c, nir_variable *var)
 try: (nir_constant_clone:=dll.nir_constant_clone).restype, nir_constant_clone.argtypes = ctypes.POINTER(nir_constant), [ctypes.POINTER(nir_constant), ctypes.POINTER(nir_variable)]
 except AttributeError: pass
 
-# nir_variable *nir_variable_clone(const nir_variable *c, nir_shader *shader)
 try: (nir_variable_clone:=dll.nir_variable_clone).restype, nir_variable_clone.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_shader_replace(nir_shader *dest, nir_shader *src)
 try: (nir_shader_replace:=dll.nir_shader_replace).restype, nir_shader_replace.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_shader_serialize_deserialize(nir_shader *s)
 try: (nir_shader_serialize_deserialize:=dll.nir_shader_serialize_deserialize).restype, nir_shader_serialize_deserialize.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_validate_shader(nir_shader *shader, const char *when)
 try: (nir_validate_shader:=dll.nir_validate_shader).restype, nir_validate_shader.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# void nir_validate_ssa_dominance(nir_shader *shader, const char *when)
 try: (nir_validate_ssa_dominance:=dll.nir_validate_ssa_dominance).restype, nir_validate_ssa_dominance.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# void nir_metadata_set_validation_flag(nir_shader *shader)
 try: (nir_metadata_set_validation_flag:=dll.nir_metadata_set_validation_flag).restype, nir_metadata_set_validation_flag.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_metadata_check_validation_flag(nir_shader *shader)
 try: (nir_metadata_check_validation_flag:=dll.nir_metadata_check_validation_flag).restype, nir_metadata_check_validation_flag.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_metadata_require_all(nir_shader *shader)
 try: (nir_metadata_require_all:=dll.nir_metadata_require_all).restype, nir_metadata_require_all.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
 nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
 class struct_nir_builder(Struct): pass
 nir_lower_instr_cb = ctypes.CFUNCTYPE(ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
-# bool nir_function_impl_lower_instructions(nir_function_impl *impl, nir_instr_filter_cb filter, nir_lower_instr_cb lower, void *cb_data)
 try: (nir_function_impl_lower_instructions:=dll.nir_function_impl_lower_instructions).restype, nir_function_impl_lower_instructions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_shader_lower_instructions(nir_shader *shader, nir_instr_filter_cb filter, nir_lower_instr_cb lower, void *cb_data)
 try: (nir_shader_lower_instructions:=dll.nir_shader_lower_instructions).restype, nir_shader_lower_instructions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# void nir_calc_dominance_impl(nir_function_impl *impl)
 try: (nir_calc_dominance_impl:=dll.nir_calc_dominance_impl).restype, nir_calc_dominance_impl.argtypes = None, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# void nir_calc_dominance(nir_shader *shader)
 try: (nir_calc_dominance:=dll.nir_calc_dominance).restype, nir_calc_dominance.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_block *nir_dominance_lca(nir_block *b1, nir_block *b2)
 try: (nir_dominance_lca:=dll.nir_dominance_lca).restype, nir_dominance_lca.argtypes = ctypes.POINTER(nir_block), [ctypes.POINTER(nir_block), ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# bool nir_block_dominates(nir_block *parent, nir_block *child)
 try: (nir_block_dominates:=dll.nir_block_dominates).restype, nir_block_dominates.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block), ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# bool nir_block_is_unreachable(nir_block *block)
 try: (nir_block_is_unreachable:=dll.nir_block_is_unreachable).restype, nir_block_is_unreachable.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# void nir_dump_dom_tree_impl(nir_function_impl *impl, FILE *fp)
 try: (nir_dump_dom_tree_impl:=dll.nir_dump_dom_tree_impl).restype, nir_dump_dom_tree_impl.argtypes = None, [ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_dump_dom_tree(nir_shader *shader, FILE *fp)
 try: (nir_dump_dom_tree:=dll.nir_dump_dom_tree).restype, nir_dump_dom_tree.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_dump_dom_frontier_impl(nir_function_impl *impl, FILE *fp)
 try: (nir_dump_dom_frontier_impl:=dll.nir_dump_dom_frontier_impl).restype, nir_dump_dom_frontier_impl.argtypes = None, [ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_dump_dom_frontier(nir_shader *shader, FILE *fp)
 try: (nir_dump_dom_frontier:=dll.nir_dump_dom_frontier).restype, nir_dump_dom_frontier.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_dump_cfg_impl(nir_function_impl *impl, FILE *fp)
 try: (nir_dump_cfg_impl:=dll.nir_dump_cfg_impl).restype, nir_dump_cfg_impl.argtypes = None, [ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_dump_cfg(nir_shader *shader, FILE *fp)
 try: (nir_dump_cfg:=dll.nir_dump_cfg).restype, nir_dump_cfg.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
-# void nir_gs_count_vertices_and_primitives(const nir_shader *shader, int *out_vtxcnt, int *out_prmcnt, int *out_decomposed_prmcnt, unsigned int num_streams)
 try: (nir_gs_count_vertices_and_primitives:=dll.nir_gs_count_vertices_and_primitives).restype, nir_gs_count_vertices_and_primitives.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -4042,112 +3868,85 @@ nir_load_grouping = CEnum(ctypes.c_uint32)
 nir_group_all = nir_load_grouping.define('nir_group_all', 0)
 nir_group_same_resource_only = nir_load_grouping.define('nir_group_same_resource_only', 1)
 
-# bool nir_group_loads(nir_shader *shader, nir_load_grouping grouping, unsigned int max_distance)
 try: (nir_group_loads:=dll.nir_group_loads).restype, nir_group_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_load_grouping, ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_shrink_vec_array_vars(nir_shader *shader, nir_variable_mode modes)
 try: (nir_shrink_vec_array_vars:=dll.nir_shrink_vec_array_vars).restype, nir_shrink_vec_array_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_split_array_vars(nir_shader *shader, nir_variable_mode modes)
 try: (nir_split_array_vars:=dll.nir_split_array_vars).restype, nir_split_array_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_split_var_copies(nir_shader *shader)
 try: (nir_split_var_copies:=dll.nir_split_var_copies).restype, nir_split_var_copies.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_split_per_member_structs(nir_shader *shader)
 try: (nir_split_per_member_structs:=dll.nir_split_per_member_structs).restype, nir_split_per_member_structs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_split_struct_vars(nir_shader *shader, nir_variable_mode modes)
 try: (nir_split_struct_vars:=dll.nir_split_struct_vars).restype, nir_split_struct_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_lower_returns_impl(nir_function_impl *impl)
 try: (nir_lower_returns_impl:=dll.nir_lower_returns_impl).restype, nir_lower_returns_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# bool nir_lower_returns(nir_shader *shader)
 try: (nir_lower_returns:=dll.nir_lower_returns).restype, nir_lower_returns.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
 nir_builder = struct_nir_builder
-# nir_def *nir_inline_function_impl(nir_builder *b, const nir_function_impl *impl, nir_def **params, struct hash_table *shader_var_remap)
 try: (nir_inline_function_impl:=dll.nir_inline_function_impl).restype, nir_inline_function_impl.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_function_impl), ctypes.POINTER(ctypes.POINTER(nir_def)), ctypes.POINTER(struct_hash_table)]
 except AttributeError: pass
 
-# bool nir_inline_functions(nir_shader *shader)
 try: (nir_inline_functions:=dll.nir_inline_functions).restype, nir_inline_functions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_cleanup_functions(nir_shader *shader)
 try: (nir_cleanup_functions:=dll.nir_cleanup_functions).restype, nir_cleanup_functions.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_link_shader_functions(nir_shader *shader, const nir_shader *link_shader)
 try: (nir_link_shader_functions:=dll.nir_link_shader_functions).restype, nir_link_shader_functions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_calls_to_builtins(nir_shader *s)
 try: (nir_lower_calls_to_builtins:=dll.nir_lower_calls_to_builtins).restype, nir_lower_calls_to_builtins.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_find_inlinable_uniforms(nir_shader *shader)
 try: (nir_find_inlinable_uniforms:=dll.nir_find_inlinable_uniforms).restype, nir_find_inlinable_uniforms.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_inline_uniforms(nir_shader *shader, unsigned int num_uniforms, const uint32_t *uniform_values, const uint16_t *uniform_dw_offsets)
 try: (nir_inline_uniforms:=dll.nir_inline_uniforms).restype, nir_inline_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint16_t)]
 except AttributeError: pass
 
-# bool nir_collect_src_uniforms(const nir_src *src, int component, uint32_t *uni_offsets, uint8_t *num_offsets, unsigned int max_num_bo, unsigned int max_offset)
 try: (nir_collect_src_uniforms:=dll.nir_collect_src_uniforms).restype, nir_collect_src_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_src), ctypes.c_int32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# void nir_add_inlinable_uniforms(const nir_src *cond, nir_loop_info *info, uint32_t *uni_offsets, uint8_t *num_offsets, unsigned int max_num_bo, unsigned int max_offset)
 try: (nir_add_inlinable_uniforms:=dll.nir_add_inlinable_uniforms).restype, nir_add_inlinable_uniforms.argtypes = None, [ctypes.POINTER(nir_src), ctypes.POINTER(nir_loop_info), ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_propagate_invariant(nir_shader *shader, bool invariant_prim)
 try: (nir_propagate_invariant:=dll.nir_propagate_invariant).restype, nir_propagate_invariant.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# void nir_lower_var_copy_instr(nir_intrinsic_instr *copy, nir_shader *shader)
 try: (nir_lower_var_copy_instr:=dll.nir_lower_var_copy_instr).restype, nir_lower_var_copy_instr.argtypes = None, [ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_lower_deref_copy_instr(nir_builder *b, nir_intrinsic_instr *copy)
 try: (nir_lower_deref_copy_instr:=dll.nir_lower_deref_copy_instr).restype, nir_lower_deref_copy_instr.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# bool nir_lower_var_copies(nir_shader *shader)
 try: (nir_lower_var_copies:=dll.nir_lower_var_copies).restype, nir_lower_var_copies.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_memcpy(nir_shader *shader)
 try: (nir_opt_memcpy:=dll.nir_opt_memcpy).restype, nir_opt_memcpy.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_memcpy(nir_shader *shader)
 try: (nir_lower_memcpy:=dll.nir_lower_memcpy).restype, nir_lower_memcpy.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_fixup_deref_modes(nir_shader *shader)
 try: (nir_fixup_deref_modes:=dll.nir_fixup_deref_modes).restype, nir_fixup_deref_modes.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_fixup_deref_types(nir_shader *shader)
 try: (nir_fixup_deref_types:=dll.nir_fixup_deref_types).restype, nir_fixup_deref_types.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_global_vars_to_local(nir_shader *shader)
 try: (nir_lower_global_vars_to_local:=dll.nir_lower_global_vars_to_local).restype, nir_lower_global_vars_to_local.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_lower_constant_to_temp(nir_shader *shader)
 try: (nir_lower_constant_to_temp:=dll.nir_lower_constant_to_temp).restype, nir_lower_constant_to_temp.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -4157,23 +3956,18 @@ nir_lower_indirect_array_deref_of_vec_load = nir_lower_array_deref_of_vec_option
 nir_lower_direct_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_store', 4)
 nir_lower_indirect_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_store', 8)
 
-# bool nir_lower_array_deref_of_vec(nir_shader *shader, nir_variable_mode modes, bool (*filter)(nir_variable *), nir_lower_array_deref_of_vec_options options)
 try: (nir_lower_array_deref_of_vec:=dll.nir_lower_array_deref_of_vec).restype, nir_lower_array_deref_of_vec.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(nir_variable)), nir_lower_array_deref_of_vec_options]
 except AttributeError: pass
 
-# bool nir_lower_indirect_derefs(nir_shader *shader, nir_variable_mode modes, uint32_t max_lower_array_len)
 try: (nir_lower_indirect_derefs:=dll.nir_lower_indirect_derefs).restype, nir_lower_indirect_derefs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, uint32_t]
 except AttributeError: pass
 
-# bool nir_lower_indirect_var_derefs(nir_shader *shader, const struct set *vars)
 try: (nir_lower_indirect_var_derefs:=dll.nir_lower_indirect_var_derefs).restype, nir_lower_indirect_var_derefs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_set)]
 except AttributeError: pass
 
-# bool nir_lower_locals_to_regs(nir_shader *shader, uint8_t bool_bitsize)
 try: (nir_lower_locals_to_regs:=dll.nir_lower_locals_to_regs).restype, nir_lower_locals_to_regs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), uint8_t]
 except AttributeError: pass
 
-# bool nir_lower_io_vars_to_temporaries(nir_shader *shader, nir_function_impl *entrypoint, bool outputs, bool inputs)
 try: (nir_lower_io_vars_to_temporaries:=dll.nir_lower_io_vars_to_temporaries).restype, nir_lower_io_vars_to_temporaries.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
@@ -4199,55 +3993,42 @@ const_struct_glsl_type._fields_ = [
   ('fields', struct_glsl_type_fields),
 ]
 glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(const_struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-# bool nir_lower_vars_to_scratch(nir_shader *shader, nir_variable_mode modes, int size_threshold, glsl_type_size_align_func variable_size_align, glsl_type_size_align_func scratch_layout_size_align)
 try: (nir_lower_vars_to_scratch:=dll.nir_lower_vars_to_scratch).restype, nir_lower_vars_to_scratch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func]
 except AttributeError: pass
 
-# bool nir_lower_scratch_to_var(nir_shader *nir)
 try: (nir_lower_scratch_to_var:=dll.nir_lower_scratch_to_var).restype, nir_lower_scratch_to_var.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_clip_halfz(nir_shader *shader)
 try: (nir_lower_clip_halfz:=dll.nir_lower_clip_halfz).restype, nir_lower_clip_halfz.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_shader_gather_info(nir_shader *shader, nir_function_impl *entrypoint)
 try: (nir_shader_gather_info:=dll.nir_shader_gather_info).restype, nir_shader_gather_info.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# void nir_gather_types(nir_function_impl *impl, unsigned int *float_types, unsigned int *int_types)
 try: (nir_gather_types:=dll.nir_gather_types).restype, nir_gather_types.argtypes = None, [ctypes.POINTER(nir_function_impl), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# bool nir_remove_unused_varyings(nir_shader *producer, nir_shader *consumer)
 try: (nir_remove_unused_varyings:=dll.nir_remove_unused_varyings).restype, nir_remove_unused_varyings.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_remove_unused_io_vars(nir_shader *shader, nir_variable_mode mode, uint64_t *used_by_other_stage, uint64_t *used_by_other_stage_patches)
 try: (nir_remove_unused_io_vars:=dll.nir_remove_unused_io_vars).restype, nir_remove_unused_io_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.POINTER(uint64_t), ctypes.POINTER(uint64_t)]
 except AttributeError: pass
 
-# void nir_compact_varyings(nir_shader *producer, nir_shader *consumer, bool default_to_smooth_interp)
 try: (nir_compact_varyings:=dll.nir_compact_varyings).restype, nir_compact_varyings.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# void nir_link_xfb_varyings(nir_shader *producer, nir_shader *consumer)
 try: (nir_link_xfb_varyings:=dll.nir_link_xfb_varyings).restype, nir_link_xfb_varyings.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_link_opt_varyings(nir_shader *producer, nir_shader *consumer)
 try: (nir_link_opt_varyings:=dll.nir_link_opt_varyings).restype, nir_link_opt_varyings.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_link_varying_precision(nir_shader *producer, nir_shader *consumer)
 try: (nir_link_varying_precision:=dll.nir_link_varying_precision).restype, nir_link_varying_precision.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_variable *nir_clone_uniform_variable(nir_shader *nir, nir_variable *uniform, bool spirv)
 try: (nir_clone_uniform_variable:=dll.nir_clone_uniform_variable).restype, nir_clone_uniform_variable.argtypes = ctypes.POINTER(nir_variable), [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_variable), ctypes.c_bool]
 except AttributeError: pass
 
-# nir_deref_instr *nir_clone_deref_instr(nir_builder *b, nir_variable *var, nir_deref_instr *deref)
 try: (nir_clone_deref_instr:=dll.nir_clone_deref_instr).restype, nir_clone_deref_instr.argtypes = ctypes.POINTER(nir_deref_instr), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_variable), ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
@@ -4255,7 +4036,6 @@ nir_opt_varyings_progress = CEnum(ctypes.c_uint32)
 nir_progress_producer = nir_opt_varyings_progress.define('nir_progress_producer', 1)
 nir_progress_consumer = nir_opt_varyings_progress.define('nir_progress_consumer', 2)
 
-# nir_opt_varyings_progress nir_opt_varyings(nir_shader *producer, nir_shader *consumer, bool spirv, unsigned int max_uniform_components, unsigned int max_ubos_per_stage, bool debug_no_algebraic)
 try: (nir_opt_varyings:=dll.nir_opt_varyings).restype, nir_opt_varyings.argtypes = nir_opt_varyings_progress, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool]
 except AttributeError: pass
 
@@ -4379,43 +4159,33 @@ VARYING_SLOT_VAR14_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR14_16BIT', 11
 VARYING_SLOT_VAR15_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR15_16BIT', 111)
 NUM_TOTAL_VARYING_SLOTS = gl_varying_slot.define('NUM_TOTAL_VARYING_SLOTS', 112)
 
-# bool nir_slot_is_sysval_output(gl_varying_slot slot, gl_shader_stage next_shader)
 try: (nir_slot_is_sysval_output:=dll.nir_slot_is_sysval_output).restype, nir_slot_is_sysval_output.argtypes = ctypes.c_bool, [gl_varying_slot, gl_shader_stage]
 except AttributeError: pass
 
-# bool nir_slot_is_varying(gl_varying_slot slot, gl_shader_stage next_shader)
 try: (nir_slot_is_varying:=dll.nir_slot_is_varying).restype, nir_slot_is_varying.argtypes = ctypes.c_bool, [gl_varying_slot, gl_shader_stage]
 except AttributeError: pass
 
-# bool nir_slot_is_sysval_output_and_varying(gl_varying_slot slot, gl_shader_stage next_shader)
 try: (nir_slot_is_sysval_output_and_varying:=dll.nir_slot_is_sysval_output_and_varying).restype, nir_slot_is_sysval_output_and_varying.argtypes = ctypes.c_bool, [gl_varying_slot, gl_shader_stage]
 except AttributeError: pass
 
-# bool nir_remove_varying(nir_intrinsic_instr *intr, gl_shader_stage next_shader)
 try: (nir_remove_varying:=dll.nir_remove_varying).restype, nir_remove_varying.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr), gl_shader_stage]
 except AttributeError: pass
 
-# bool nir_remove_sysval_output(nir_intrinsic_instr *intr, gl_shader_stage next_shader)
 try: (nir_remove_sysval_output:=dll.nir_remove_sysval_output).restype, nir_remove_sysval_output.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr), gl_shader_stage]
 except AttributeError: pass
 
-# bool nir_lower_amul(nir_shader *shader, int (*type_size)(const struct glsl_type *, bool))
 try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool)]
 except AttributeError: pass
 
-# bool nir_lower_ubo_vec4(nir_shader *shader)
 try: (nir_lower_ubo_vec4:=dll.nir_lower_ubo_vec4).restype, nir_lower_ubo_vec4.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_sort_variables_by_location(nir_shader *shader, nir_variable_mode mode)
 try: (nir_sort_variables_by_location:=dll.nir_sort_variables_by_location).restype, nir_sort_variables_by_location.argtypes = None, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# void nir_assign_io_var_locations(nir_shader *shader, nir_variable_mode mode, unsigned int *size, gl_shader_stage stage)
 try: (nir_assign_io_var_locations:=dll.nir_assign_io_var_locations).restype, nir_assign_io_var_locations.argtypes = None, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.POINTER(ctypes.c_uint32), gl_shader_stage]
 except AttributeError: pass
 
-# bool nir_opt_clip_cull_const(nir_shader *shader)
 try: (nir_opt_clip_cull_const:=dll.nir_opt_clip_cull_const).restype, nir_opt_clip_cull_const.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -4425,35 +4195,27 @@ nir_lower_io_lower_64bit_float_to_32 = nir_lower_io_options.define('nir_lower_io
 nir_lower_io_lower_64bit_to_32_new = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32_new', 4)
 nir_lower_io_use_interpolated_input_intrinsics = nir_lower_io_options.define('nir_lower_io_use_interpolated_input_intrinsics', 8)
 
-# bool nir_lower_io(nir_shader *shader, nir_variable_mode modes, int (*type_size)(const struct glsl_type *, bool), nir_lower_io_options)
 try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
 except AttributeError: pass
 
-# bool nir_io_add_const_offset_to_base(nir_shader *nir, nir_variable_mode modes)
 try: (nir_io_add_const_offset_to_base:=dll.nir_io_add_const_offset_to_base).restype, nir_io_add_const_offset_to_base.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# void nir_lower_io_passes(nir_shader *nir, bool renumber_vs_inputs)
 try: (nir_lower_io_passes:=dll.nir_lower_io_passes).restype, nir_lower_io_passes.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_io_add_intrinsic_xfb_info(nir_shader *nir)
 try: (nir_io_add_intrinsic_xfb_info:=dll.nir_io_add_intrinsic_xfb_info).restype, nir_io_add_intrinsic_xfb_info.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_io_indirect_loads(nir_shader *nir, nir_variable_mode modes)
 try: (nir_lower_io_indirect_loads:=dll.nir_lower_io_indirect_loads).restype, nir_lower_io_indirect_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_lower_vars_to_explicit_types(nir_shader *shader, nir_variable_mode modes, glsl_type_size_align_func type_info)
 try: (nir_lower_vars_to_explicit_types:=dll.nir_lower_vars_to_explicit_types).restype, nir_lower_vars_to_explicit_types.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, glsl_type_size_align_func]
 except AttributeError: pass
 
-# void nir_gather_explicit_io_initializers(nir_shader *shader, void *dst, size_t dst_size, nir_variable_mode mode)
 try: (nir_gather_explicit_io_initializers:=dll.nir_gather_explicit_io_initializers).restype, nir_gather_explicit_io_initializers.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.c_void_p, size_t, nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_lower_vec3_to_vec4(nir_shader *shader, nir_variable_mode modes)
 try: (nir_lower_vec3_to_vec4:=dll.nir_lower_vec3_to_vec4).restype, nir_lower_vec3_to_vec4.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
@@ -4471,47 +4233,36 @@ nir_address_format_32bit_offset = nir_address_format.define('nir_address_format_
 nir_address_format_32bit_offset_as_64bit = nir_address_format.define('nir_address_format_32bit_offset_as_64bit', 10)
 nir_address_format_logical = nir_address_format.define('nir_address_format_logical', 11)
 
-# unsigned int nir_address_format_bit_size(nir_address_format addr_format)
 try: (nir_address_format_bit_size:=dll.nir_address_format_bit_size).restype, nir_address_format_bit_size.argtypes = ctypes.c_uint32, [nir_address_format]
 except AttributeError: pass
 
-# unsigned int nir_address_format_num_components(nir_address_format addr_format)
 try: (nir_address_format_num_components:=dll.nir_address_format_num_components).restype, nir_address_format_num_components.argtypes = ctypes.c_uint32, [nir_address_format]
 except AttributeError: pass
 
-# const nir_const_value *nir_address_format_null_value(nir_address_format addr_format)
 try: (nir_address_format_null_value:=dll.nir_address_format_null_value).restype, nir_address_format_null_value.argtypes = ctypes.POINTER(nir_const_value), [nir_address_format]
 except AttributeError: pass
 
-# nir_def *nir_build_addr_iadd(nir_builder *b, nir_def *addr, nir_address_format addr_format, nir_variable_mode modes, nir_def *offset)
 try: (nir_build_addr_iadd:=dll.nir_build_addr_iadd).restype, nir_build_addr_iadd.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), nir_address_format, nir_variable_mode, ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_def *nir_build_addr_iadd_imm(nir_builder *b, nir_def *addr, nir_address_format addr_format, nir_variable_mode modes, int64_t offset)
 try: (nir_build_addr_iadd_imm:=dll.nir_build_addr_iadd_imm).restype, nir_build_addr_iadd_imm.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), nir_address_format, nir_variable_mode, int64_t]
 except AttributeError: pass
 
-# nir_def *nir_build_addr_ieq(nir_builder *b, nir_def *addr0, nir_def *addr1, nir_address_format addr_format)
 try: (nir_build_addr_ieq:=dll.nir_build_addr_ieq).restype, nir_build_addr_ieq.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), nir_address_format]
 except AttributeError: pass
 
-# nir_def *nir_build_addr_isub(nir_builder *b, nir_def *addr0, nir_def *addr1, nir_address_format addr_format)
 try: (nir_build_addr_isub:=dll.nir_build_addr_isub).restype, nir_build_addr_isub.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), nir_address_format]
 except AttributeError: pass
 
-# nir_def *nir_explicit_io_address_from_deref(nir_builder *b, nir_deref_instr *deref, nir_def *base_addr, nir_address_format addr_format)
 try: (nir_explicit_io_address_from_deref:=dll.nir_explicit_io_address_from_deref).restype, nir_explicit_io_address_from_deref.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_def), nir_address_format]
 except AttributeError: pass
 
-# bool nir_get_explicit_deref_align(nir_deref_instr *deref, bool default_to_type_align, uint32_t *align_mul, uint32_t *align_offset)
 try: (nir_get_explicit_deref_align:=dll.nir_get_explicit_deref_align).restype, nir_get_explicit_deref_align.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr), ctypes.c_bool, ctypes.POINTER(uint32_t), ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
-# void nir_lower_explicit_io_instr(nir_builder *b, nir_intrinsic_instr *io_instr, nir_def *addr, nir_address_format addr_format)
 try: (nir_lower_explicit_io_instr:=dll.nir_lower_explicit_io_instr).restype, nir_lower_explicit_io_instr.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_def), nir_address_format]
 except AttributeError: pass
 
-# bool nir_lower_explicit_io(nir_shader *shader, nir_variable_mode modes, nir_address_format)
 try: (nir_lower_explicit_io:=dll.nir_lower_explicit_io).restype, nir_lower_explicit_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, nir_address_format]
 except AttributeError: pass
 
@@ -4556,11 +4307,9 @@ struct_nir_lower_mem_access_bit_sizes_options._fields_ = [
   ('cb_data', ctypes.c_void_p),
 ]
 nir_lower_mem_access_bit_sizes_options = struct_nir_lower_mem_access_bit_sizes_options
-# bool nir_lower_mem_access_bit_sizes(nir_shader *shader, const nir_lower_mem_access_bit_sizes_options *options)
 try: (nir_lower_mem_access_bit_sizes:=dll.nir_lower_mem_access_bit_sizes).restype, nir_lower_mem_access_bit_sizes.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_mem_access_bit_sizes_options)]
 except AttributeError: pass
 
-# bool nir_lower_robust_access(nir_shader *s, nir_intrin_filter_cb filter, const void *data)
 try: (nir_lower_robust_access:=dll.nir_lower_robust_access).restype, nir_lower_robust_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -4574,11 +4323,9 @@ struct_nir_load_store_vectorize_options._fields_ = [
   ('has_shared2_amd', ctypes.c_bool),
 ]
 nir_load_store_vectorize_options = struct_nir_load_store_vectorize_options
-# bool nir_opt_load_store_vectorize(nir_shader *shader, const nir_load_store_vectorize_options *options)
 try: (nir_opt_load_store_vectorize:=dll.nir_opt_load_store_vectorize).restype, nir_opt_load_store_vectorize.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_load_store_vectorize_options)]
 except AttributeError: pass
 
-# bool nir_opt_load_store_update_alignments(nir_shader *shader)
 try: (nir_opt_load_store_update_alignments:=dll.nir_opt_load_store_update_alignments).restype, nir_opt_load_store_update_alignments.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -4594,63 +4341,48 @@ struct_nir_lower_shader_calls_options._fields_ = [
   ('should_remat_data', ctypes.c_void_p),
 ]
 nir_lower_shader_calls_options = struct_nir_lower_shader_calls_options
-# bool nir_lower_shader_calls(nir_shader *shader, const nir_lower_shader_calls_options *options, nir_shader ***resume_shaders_out, uint32_t *num_resume_shaders_out, void *mem_ctx)
 try: (nir_lower_shader_calls:=dll.nir_lower_shader_calls).restype, nir_lower_shader_calls.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_shader_calls_options), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(nir_shader))), ctypes.POINTER(uint32_t), ctypes.c_void_p]
 except AttributeError: pass
 
-# int nir_get_io_offset_src_number(const nir_intrinsic_instr *instr)
 try: (nir_get_io_offset_src_number:=dll.nir_get_io_offset_src_number).restype, nir_get_io_offset_src_number.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# int nir_get_io_index_src_number(const nir_intrinsic_instr *instr)
 try: (nir_get_io_index_src_number:=dll.nir_get_io_index_src_number).restype, nir_get_io_index_src_number.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# int nir_get_io_arrayed_index_src_number(const nir_intrinsic_instr *instr)
 try: (nir_get_io_arrayed_index_src_number:=dll.nir_get_io_arrayed_index_src_number).restype, nir_get_io_arrayed_index_src_number.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# nir_src *nir_get_io_offset_src(nir_intrinsic_instr *instr)
 try: (nir_get_io_offset_src:=dll.nir_get_io_offset_src).restype, nir_get_io_offset_src.argtypes = ctypes.POINTER(nir_src), [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# nir_src *nir_get_io_index_src(nir_intrinsic_instr *instr)
 try: (nir_get_io_index_src:=dll.nir_get_io_index_src).restype, nir_get_io_index_src.argtypes = ctypes.POINTER(nir_src), [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# nir_src *nir_get_io_arrayed_index_src(nir_intrinsic_instr *instr)
 try: (nir_get_io_arrayed_index_src:=dll.nir_get_io_arrayed_index_src).restype, nir_get_io_arrayed_index_src.argtypes = ctypes.POINTER(nir_src), [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# nir_src *nir_get_shader_call_payload_src(nir_intrinsic_instr *call)
 try: (nir_get_shader_call_payload_src:=dll.nir_get_shader_call_payload_src).restype, nir_get_shader_call_payload_src.argtypes = ctypes.POINTER(nir_src), [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# bool nir_is_output_load(nir_intrinsic_instr *intr)
 try: (nir_is_output_load:=dll.nir_is_output_load).restype, nir_is_output_load.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# bool nir_is_arrayed_io(const nir_variable *var, gl_shader_stage stage)
 try: (nir_is_arrayed_io:=dll.nir_is_arrayed_io).restype, nir_is_arrayed_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_variable), gl_shader_stage]
 except AttributeError: pass
 
-# bool nir_lower_reg_intrinsics_to_ssa_impl(nir_function_impl *impl)
 try: (nir_lower_reg_intrinsics_to_ssa_impl:=dll.nir_lower_reg_intrinsics_to_ssa_impl).restype, nir_lower_reg_intrinsics_to_ssa_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# bool nir_lower_reg_intrinsics_to_ssa(nir_shader *shader)
 try: (nir_lower_reg_intrinsics_to_ssa:=dll.nir_lower_reg_intrinsics_to_ssa).restype, nir_lower_reg_intrinsics_to_ssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_vars_to_ssa(nir_shader *shader)
 try: (nir_lower_vars_to_ssa:=dll.nir_lower_vars_to_ssa).restype, nir_lower_vars_to_ssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_remove_dead_derefs(nir_shader *shader)
 try: (nir_remove_dead_derefs:=dll.nir_remove_dead_derefs).restype, nir_remove_dead_derefs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_remove_dead_derefs_impl(nir_function_impl *impl)
 try: (nir_remove_dead_derefs_impl:=dll.nir_remove_dead_derefs_impl).restype, nir_remove_dead_derefs_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
@@ -4660,19 +4392,15 @@ struct_nir_remove_dead_variables_options._fields_ = [
   ('can_remove_var_data', ctypes.c_void_p),
 ]
 nir_remove_dead_variables_options = struct_nir_remove_dead_variables_options
-# bool nir_remove_dead_variables(nir_shader *shader, nir_variable_mode modes, const nir_remove_dead_variables_options *options)
 try: (nir_remove_dead_variables:=dll.nir_remove_dead_variables).restype, nir_remove_dead_variables.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.POINTER(nir_remove_dead_variables_options)]
 except AttributeError: pass
 
-# bool nir_lower_variable_initializers(nir_shader *shader, nir_variable_mode modes)
 try: (nir_lower_variable_initializers:=dll.nir_lower_variable_initializers).restype, nir_lower_variable_initializers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_zero_initialize_shared_memory(nir_shader *shader, const unsigned int shared_size, const unsigned int chunk_size)
 try: (nir_zero_initialize_shared_memory:=dll.nir_zero_initialize_shared_memory).restype, nir_zero_initialize_shared_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_clear_shared_memory(nir_shader *shader, const unsigned int shared_size, const unsigned int chunk_size)
 try: (nir_clear_shared_memory:=dll.nir_clear_shared_memory).restype, nir_clear_shared_memory.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -4681,19 +4409,15 @@ nir_move_to_entry_block_only = nir_opt_move_to_top_options.define('nir_move_to_e
 nir_move_to_top_input_loads = nir_opt_move_to_top_options.define('nir_move_to_top_input_loads', 2)
 nir_move_to_top_load_smem_amd = nir_opt_move_to_top_options.define('nir_move_to_top_load_smem_amd', 4)
 
-# bool nir_opt_move_to_top(nir_shader *nir, nir_opt_move_to_top_options options)
 try: (nir_opt_move_to_top:=dll.nir_opt_move_to_top).restype, nir_opt_move_to_top.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_opt_move_to_top_options]
 except AttributeError: pass
 
-# bool nir_move_vec_src_uses_to_dest(nir_shader *shader, bool skip_const_srcs)
 try: (nir_move_vec_src_uses_to_dest:=dll.nir_move_vec_src_uses_to_dest).restype, nir_move_vec_src_uses_to_dest.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_move_output_stores_to_end(nir_shader *nir)
 try: (nir_move_output_stores_to_end:=dll.nir_move_output_stores_to_end).restype, nir_move_output_stores_to_end.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_vec_to_regs(nir_shader *shader, nir_instr_writemask_filter_cb cb, const void *_data)
 try: (nir_lower_vec_to_regs:=dll.nir_lower_vec_to_regs).restype, nir_lower_vec_to_regs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_instr_writemask_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -4707,163 +4431,123 @@ COMPARE_FUNC_NOTEQUAL = enum_compare_func.define('COMPARE_FUNC_NOTEQUAL', 5)
 COMPARE_FUNC_GEQUAL = enum_compare_func.define('COMPARE_FUNC_GEQUAL', 6)
 COMPARE_FUNC_ALWAYS = enum_compare_func.define('COMPARE_FUNC_ALWAYS', 7)
 
-# bool nir_lower_alpha_test(nir_shader *shader, enum compare_func func, bool alpha_to_one, const gl_state_index16 *alpha_ref_state_tokens)
 try: (nir_lower_alpha_test:=dll.nir_lower_alpha_test).restype, nir_lower_alpha_test.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), enum_compare_func, ctypes.c_bool, ctypes.POINTER(gl_state_index16)]
 except AttributeError: pass
 
-# bool nir_lower_alpha_to_coverage(nir_shader *shader, uint8_t nr_samples, bool has_intrinsic)
 try: (nir_lower_alpha_to_coverage:=dll.nir_lower_alpha_to_coverage).restype, nir_lower_alpha_to_coverage.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), uint8_t, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_alpha_to_one(nir_shader *shader)
 try: (nir_lower_alpha_to_one:=dll.nir_lower_alpha_to_one).restype, nir_lower_alpha_to_one.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_alu(nir_shader *shader)
 try: (nir_lower_alu:=dll.nir_lower_alu).restype, nir_lower_alu.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_flrp(nir_shader *shader, unsigned int lowering_mask, bool always_precise)
 try: (nir_lower_flrp:=dll.nir_lower_flrp).restype, nir_lower_flrp.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_scale_fdiv(nir_shader *shader)
 try: (nir_scale_fdiv:=dll.nir_scale_fdiv).restype, nir_scale_fdiv.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_alu_to_scalar(nir_shader *shader, nir_instr_filter_cb cb, const void *data)
 try: (nir_lower_alu_to_scalar:=dll.nir_lower_alu_to_scalar).restype, nir_lower_alu_to_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_instr_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_lower_alu_width(nir_shader *shader, nir_vectorize_cb cb, const void *data)
 try: (nir_lower_alu_width:=dll.nir_lower_alu_width).restype, nir_lower_alu_width.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_vectorize_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_lower_alu_vec8_16_srcs(nir_shader *shader)
 try: (nir_lower_alu_vec8_16_srcs:=dll.nir_lower_alu_vec8_16_srcs).restype, nir_lower_alu_vec8_16_srcs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_bool_to_bitsize(nir_shader *shader)
 try: (nir_lower_bool_to_bitsize:=dll.nir_lower_bool_to_bitsize).restype, nir_lower_bool_to_bitsize.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_bool_to_float(nir_shader *shader, bool has_fcsel_ne)
 try: (nir_lower_bool_to_float:=dll.nir_lower_bool_to_float).restype, nir_lower_bool_to_float.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_bool_to_int32(nir_shader *shader)
 try: (nir_lower_bool_to_int32:=dll.nir_lower_bool_to_int32).restype, nir_lower_bool_to_int32.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_simplify_convert_alu_types(nir_shader *shader)
 try: (nir_opt_simplify_convert_alu_types:=dll.nir_opt_simplify_convert_alu_types).restype, nir_opt_simplify_convert_alu_types.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_const_arrays_to_uniforms(nir_shader *shader, unsigned int max_uniform_components)
 try: (nir_lower_const_arrays_to_uniforms:=dll.nir_lower_const_arrays_to_uniforms).restype, nir_lower_const_arrays_to_uniforms.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_lower_convert_alu_types(nir_shader *shader, bool (*should_lower)(nir_intrinsic_instr *))
 try: (nir_lower_convert_alu_types:=dll.nir_lower_convert_alu_types).restype, nir_lower_convert_alu_types.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(nir_intrinsic_instr))]
 except AttributeError: pass
 
-# bool nir_lower_constant_convert_alu_types(nir_shader *shader)
 try: (nir_lower_constant_convert_alu_types:=dll.nir_lower_constant_convert_alu_types).restype, nir_lower_constant_convert_alu_types.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_alu_conversion_to_intrinsic(nir_shader *shader)
 try: (nir_lower_alu_conversion_to_intrinsic:=dll.nir_lower_alu_conversion_to_intrinsic).restype, nir_lower_alu_conversion_to_intrinsic.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_int_to_float(nir_shader *shader)
 try: (nir_lower_int_to_float:=dll.nir_lower_int_to_float).restype, nir_lower_int_to_float.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_load_const_to_scalar(nir_shader *shader)
 try: (nir_lower_load_const_to_scalar:=dll.nir_lower_load_const_to_scalar).restype, nir_lower_load_const_to_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_read_invocation_to_scalar(nir_shader *shader)
 try: (nir_lower_read_invocation_to_scalar:=dll.nir_lower_read_invocation_to_scalar).restype, nir_lower_read_invocation_to_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_phis_to_scalar(nir_shader *shader, nir_vectorize_cb cb, const void *data)
 try: (nir_lower_phis_to_scalar:=dll.nir_lower_phis_to_scalar).restype, nir_lower_phis_to_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_vectorize_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_lower_all_phis_to_scalar(nir_shader *shader)
 try: (nir_lower_all_phis_to_scalar:=dll.nir_lower_all_phis_to_scalar).restype, nir_lower_all_phis_to_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_lower_io_array_vars_to_elements(nir_shader *producer, nir_shader *consumer)
 try: (nir_lower_io_array_vars_to_elements:=dll.nir_lower_io_array_vars_to_elements).restype, nir_lower_io_array_vars_to_elements.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_io_array_vars_to_elements_no_indirects(nir_shader *shader, bool outputs_only)
 try: (nir_lower_io_array_vars_to_elements_no_indirects:=dll.nir_lower_io_array_vars_to_elements_no_indirects).restype, nir_lower_io_array_vars_to_elements_no_indirects.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_io_to_scalar(nir_shader *shader, nir_variable_mode mask, nir_instr_filter_cb filter, void *filter_data)
 try: (nir_lower_io_to_scalar:=dll.nir_lower_io_to_scalar).restype, nir_lower_io_to_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, nir_instr_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_lower_io_vars_to_scalar(nir_shader *shader, nir_variable_mode mask)
 try: (nir_lower_io_vars_to_scalar:=dll.nir_lower_io_vars_to_scalar).restype, nir_lower_io_vars_to_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_opt_vectorize_io_vars(nir_shader *shader, nir_variable_mode mask)
 try: (nir_opt_vectorize_io_vars:=dll.nir_opt_vectorize_io_vars).restype, nir_opt_vectorize_io_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_lower_tess_level_array_vars_to_vec(nir_shader *shader)
 try: (nir_lower_tess_level_array_vars_to_vec:=dll.nir_lower_tess_level_array_vars_to_vec).restype, nir_lower_tess_level_array_vars_to_vec.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_shader *nir_create_passthrough_tcs_impl(const nir_shader_compiler_options *options, unsigned int *locations, unsigned int num_locations, uint8_t patch_vertices)
 try: (nir_create_passthrough_tcs_impl:=dll.nir_create_passthrough_tcs_impl).restype, nir_create_passthrough_tcs_impl.argtypes = ctypes.POINTER(nir_shader), [ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32, uint8_t]
 except AttributeError: pass
 
-# nir_shader *nir_create_passthrough_tcs(const nir_shader_compiler_options *options, const nir_shader *vs, uint8_t patch_vertices)
 try: (nir_create_passthrough_tcs:=dll.nir_create_passthrough_tcs).restype, nir_create_passthrough_tcs.argtypes = ctypes.POINTER(nir_shader), [ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(nir_shader), uint8_t]
 except AttributeError: pass
 
-# nir_shader *nir_create_passthrough_gs(const nir_shader_compiler_options *options, const nir_shader *prev_stage, enum mesa_prim primitive_type, enum mesa_prim output_primitive_type, bool emulate_edgeflags, bool force_line_strip_out, bool passthrough_prim_id)
 try: (nir_create_passthrough_gs:=dll.nir_create_passthrough_gs).restype, nir_create_passthrough_gs.argtypes = ctypes.POINTER(nir_shader), [ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(nir_shader), enum_mesa_prim, enum_mesa_prim, ctypes.c_bool, ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_fragcolor(nir_shader *shader, unsigned int max_cbufs)
 try: (nir_lower_fragcolor:=dll.nir_lower_fragcolor).restype, nir_lower_fragcolor.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_lower_fragcoord_wtrans(nir_shader *shader)
 try: (nir_lower_fragcoord_wtrans:=dll.nir_lower_fragcoord_wtrans).restype, nir_lower_fragcoord_wtrans.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_frag_coord_to_pixel_coord(nir_shader *shader)
 try: (nir_opt_frag_coord_to_pixel_coord:=dll.nir_opt_frag_coord_to_pixel_coord).restype, nir_opt_frag_coord_to_pixel_coord.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_frag_coord_to_pixel_coord(nir_shader *shader)
 try: (nir_lower_frag_coord_to_pixel_coord:=dll.nir_lower_frag_coord_to_pixel_coord).restype, nir_lower_frag_coord_to_pixel_coord.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_viewport_transform(nir_shader *shader)
 try: (nir_lower_viewport_transform:=dll.nir_lower_viewport_transform).restype, nir_lower_viewport_transform.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_uniforms_to_ubo(nir_shader *shader, bool dword_packed, bool load_vec4)
 try: (nir_lower_uniforms_to_ubo:=dll.nir_lower_uniforms_to_ubo).restype, nir_lower_uniforms_to_ubo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_is_helper_invocation(nir_shader *shader)
 try: (nir_lower_is_helper_invocation:=dll.nir_lower_is_helper_invocation).restype, nir_lower_is_helper_invocation.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_single_sampled(nir_shader *shader)
 try: (nir_lower_single_sampled:=dll.nir_lower_single_sampled).restype, nir_lower_single_sampled.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_atomics(nir_shader *shader, nir_instr_filter_cb filter)
 try: (nir_lower_atomics:=dll.nir_lower_atomics).restype, nir_lower_atomics.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_instr_filter_cb]
 except AttributeError: pass
 
@@ -4901,15 +4585,12 @@ struct_nir_lower_subgroups_options._fields_ = [
   ('lower_boolean_shuffle', ctypes.c_bool,1),
 ]
 nir_lower_subgroups_options = struct_nir_lower_subgroups_options
-# bool nir_lower_subgroups(nir_shader *shader, const nir_lower_subgroups_options *options)
 try: (nir_lower_subgroups:=dll.nir_lower_subgroups).restype, nir_lower_subgroups.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_subgroups_options)]
 except AttributeError: pass
 
-# bool nir_lower_system_values(nir_shader *shader)
 try: (nir_lower_system_values:=dll.nir_lower_system_values).restype, nir_lower_system_values.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_def *nir_build_lowered_load_helper_invocation(nir_builder *b)
 try: (nir_build_lowered_load_helper_invocation:=dll.nir_build_lowered_load_helper_invocation).restype, nir_build_lowered_load_helper_invocation.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder)]
 except AttributeError: pass
 
@@ -4927,7 +4608,6 @@ struct_nir_lower_compute_system_values_options._fields_ = [
   ('num_workgroups', (uint32_t * 3)),
 ]
 nir_lower_compute_system_values_options = struct_nir_lower_compute_system_values_options
-# bool nir_lower_compute_system_values(nir_shader *shader, const nir_lower_compute_system_values_options *options)
 try: (nir_lower_compute_system_values:=dll.nir_lower_compute_system_values).restype, nir_lower_compute_system_values.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_compute_system_values_options)]
 except AttributeError: pass
 
@@ -4938,7 +4618,6 @@ struct_nir_lower_sysvals_to_varyings_options._fields_ = [
   ('point_coord', ctypes.c_bool,1),
 ]
 nir_lower_sysvals_to_varyings_options = struct_nir_lower_sysvals_to_varyings_options
-# bool nir_lower_sysvals_to_varyings(nir_shader *shader, const nir_lower_sysvals_to_varyings_options *options)
 try: (nir_lower_sysvals_to_varyings:=dll.nir_lower_sysvals_to_varyings).restype, nir_lower_sysvals_to_varyings.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_sysvals_to_varyings_options)]
 except AttributeError: pass
 
@@ -5007,7 +4686,6 @@ struct_nir_lower_tex_options._fields_ = [
   ('callback_data', ctypes.c_void_p),
 ]
 nir_lower_tex_options = struct_nir_lower_tex_options
-# bool nir_lower_tex(nir_shader *shader, const nir_lower_tex_options *options)
 try: (nir_lower_tex:=dll.nir_lower_tex).restype, nir_lower_tex.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_tex_options)]
 except AttributeError: pass
 
@@ -5019,7 +4697,6 @@ struct_nir_lower_tex_shadow_swizzle._fields_ = [
   ('swizzle_a', ctypes.c_uint32,3),
 ]
 nir_lower_tex_shadow_swizzle = struct_nir_lower_tex_shadow_swizzle
-# bool nir_lower_tex_shadow(nir_shader *s, unsigned int n_states, enum compare_func *compare_func, nir_lower_tex_shadow_swizzle *tex_swizzles, bool is_fixed_point_format)
 try: (nir_lower_tex_shadow:=dll.nir_lower_tex_shadow).restype, nir_lower_tex_shadow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(enum_compare_func), ctypes.POINTER(nir_lower_tex_shadow_swizzle), ctypes.c_bool]
 except AttributeError: pass
 
@@ -5030,15 +4707,12 @@ struct_nir_lower_image_options._fields_ = [
   ('lower_image_samples_to_one', ctypes.c_bool),
 ]
 nir_lower_image_options = struct_nir_lower_image_options
-# bool nir_lower_image(nir_shader *nir, const nir_lower_image_options *options)
 try: (nir_lower_image:=dll.nir_lower_image).restype, nir_lower_image.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_image_options)]
 except AttributeError: pass
 
-# bool nir_lower_image_atomics_to_global(nir_shader *s, nir_intrin_filter_cb filter, const void *data)
 try: (nir_lower_image_atomics_to_global:=dll.nir_lower_image_atomics_to_global).restype, nir_lower_image_atomics_to_global.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_lower_readonly_images_to_tex(nir_shader *shader, bool per_variable)
 try: (nir_lower_readonly_images_to_tex:=dll.nir_lower_readonly_images_to_tex).restype, nir_lower_readonly_images_to_tex.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
@@ -5093,15 +4767,12 @@ struct_nir_lower_non_uniform_access_options._fields_ = [
   ('callback_data', ctypes.c_void_p),
 ]
 nir_lower_non_uniform_access_options = struct_nir_lower_non_uniform_access_options
-# bool nir_has_non_uniform_access(nir_shader *shader, enum nir_lower_non_uniform_access_type types)
 try: (nir_has_non_uniform_access:=dll.nir_has_non_uniform_access).restype, nir_has_non_uniform_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), enum_nir_lower_non_uniform_access_type]
 except AttributeError: pass
 
-# bool nir_opt_non_uniform_access(nir_shader *shader)
 try: (nir_opt_non_uniform_access:=dll.nir_opt_non_uniform_access).restype, nir_opt_non_uniform_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_non_uniform_access(nir_shader *shader, const nir_lower_non_uniform_access_options *options)
 try: (nir_lower_non_uniform_access:=dll.nir_lower_non_uniform_access).restype, nir_lower_non_uniform_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_non_uniform_access_options)]
 except AttributeError: pass
 
@@ -5110,7 +4781,6 @@ struct_nir_lower_idiv_options._fields_ = [
   ('allow_fp16', ctypes.c_bool),
 ]
 nir_lower_idiv_options = struct_nir_lower_idiv_options
-# bool nir_lower_idiv(nir_shader *shader, const nir_lower_idiv_options *options)
 try: (nir_lower_idiv:=dll.nir_lower_idiv).restype, nir_lower_idiv.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_idiv_options)]
 except AttributeError: pass
 
@@ -5124,59 +4794,45 @@ struct_nir_input_attachment_options._fields_ = [
   ('unscaled_input_attachment_ir3', uint32_t),
 ]
 nir_input_attachment_options = struct_nir_input_attachment_options
-# bool nir_lower_input_attachments(nir_shader *shader, const nir_input_attachment_options *options)
 try: (nir_lower_input_attachments:=dll.nir_lower_input_attachments).restype, nir_lower_input_attachments.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_input_attachment_options)]
 except AttributeError: pass
 
-# bool nir_lower_clip_vs(nir_shader *shader, unsigned int ucp_enables, bool use_vars, bool use_clipdist_array, const gl_state_index16 clipplane_state_tokens[][4])
 try: (nir_lower_clip_vs:=dll.nir_lower_clip_vs).restype, nir_lower_clip_vs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, ((gl_state_index16 * 4) * 0)]
 except AttributeError: pass
 
-# bool nir_lower_clip_gs(nir_shader *shader, unsigned int ucp_enables, bool use_clipdist_array, const gl_state_index16 clipplane_state_tokens[][4])
 try: (nir_lower_clip_gs:=dll.nir_lower_clip_gs).restype, nir_lower_clip_gs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ((gl_state_index16 * 4) * 0)]
 except AttributeError: pass
 
-# bool nir_lower_clip_fs(nir_shader *shader, unsigned int ucp_enables, bool use_clipdist_array, bool use_load_interp)
 try: (nir_lower_clip_fs:=dll.nir_lower_clip_fs).restype, nir_lower_clip_fs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_clip_cull_distance_to_vec4s(nir_shader *shader)
 try: (nir_lower_clip_cull_distance_to_vec4s:=dll.nir_lower_clip_cull_distance_to_vec4s).restype, nir_lower_clip_cull_distance_to_vec4s.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_clip_cull_distance_array_vars(nir_shader *nir)
 try: (nir_lower_clip_cull_distance_array_vars:=dll.nir_lower_clip_cull_distance_array_vars).restype, nir_lower_clip_cull_distance_array_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_clip_disable(nir_shader *shader, unsigned int clip_plane_enable)
 try: (nir_lower_clip_disable:=dll.nir_lower_clip_disable).restype, nir_lower_clip_disable.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_lower_point_size_mov(nir_shader *shader, const gl_state_index16 *pointsize_state_tokens)
 try: (nir_lower_point_size_mov:=dll.nir_lower_point_size_mov).restype, nir_lower_point_size_mov.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(gl_state_index16)]
 except AttributeError: pass
 
-# bool nir_lower_frexp(nir_shader *nir)
 try: (nir_lower_frexp:=dll.nir_lower_frexp).restype, nir_lower_frexp.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_two_sided_color(nir_shader *shader, bool face_sysval)
 try: (nir_lower_two_sided_color:=dll.nir_lower_two_sided_color).restype, nir_lower_two_sided_color.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_clamp_color_outputs(nir_shader *shader)
 try: (nir_lower_clamp_color_outputs:=dll.nir_lower_clamp_color_outputs).restype, nir_lower_clamp_color_outputs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_flatshade(nir_shader *shader)
 try: (nir_lower_flatshade:=dll.nir_lower_flatshade).restype, nir_lower_flatshade.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_passthrough_edgeflags(nir_shader *shader)
 try: (nir_lower_passthrough_edgeflags:=dll.nir_lower_passthrough_edgeflags).restype, nir_lower_passthrough_edgeflags.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_patch_vertices(nir_shader *nir, unsigned int static_count, const gl_state_index16 *uniform_state_tokens)
 try: (nir_lower_patch_vertices:=dll.nir_lower_patch_vertices).restype, nir_lower_patch_vertices.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(gl_state_index16)]
 except AttributeError: pass
 
@@ -5189,23 +4845,18 @@ struct_nir_lower_wpos_ytransform_options._fields_ = [
   ('fs_coord_pixel_center_half_integer', ctypes.c_bool,1),
 ]
 nir_lower_wpos_ytransform_options = struct_nir_lower_wpos_ytransform_options
-# bool nir_lower_wpos_ytransform(nir_shader *shader, const nir_lower_wpos_ytransform_options *options)
 try: (nir_lower_wpos_ytransform:=dll.nir_lower_wpos_ytransform).restype, nir_lower_wpos_ytransform.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_wpos_ytransform_options)]
 except AttributeError: pass
 
-# bool nir_lower_wpos_center(nir_shader *shader)
 try: (nir_lower_wpos_center:=dll.nir_lower_wpos_center).restype, nir_lower_wpos_center.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_pntc_ytransform(nir_shader *shader, const gl_state_index16 clipplane_state_tokens[][4])
 try: (nir_lower_pntc_ytransform:=dll.nir_lower_pntc_ytransform).restype, nir_lower_pntc_ytransform.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ((gl_state_index16 * 4) * 0)]
 except AttributeError: pass
 
-# bool nir_lower_wrmasks(nir_shader *shader, nir_instr_filter_cb cb, const void *data)
 try: (nir_lower_wrmasks:=dll.nir_lower_wrmasks).restype, nir_lower_wrmasks.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_instr_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_lower_fb_read(nir_shader *shader)
 try: (nir_lower_fb_read:=dll.nir_lower_fb_read).restype, nir_lower_fb_read.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5220,7 +4871,6 @@ struct_nir_lower_drawpixels_options._fields_ = [
   ('scale_and_bias', ctypes.c_bool,1),
 ]
 nir_lower_drawpixels_options = struct_nir_lower_drawpixels_options
-# bool nir_lower_drawpixels(nir_shader *shader, const nir_lower_drawpixels_options *options)
 try: (nir_lower_drawpixels:=dll.nir_lower_drawpixels).restype, nir_lower_drawpixels.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_drawpixels_options)]
 except AttributeError: pass
 
@@ -5230,11 +4880,9 @@ struct_nir_lower_bitmap_options._fields_ = [
   ('swizzle_xxxx', ctypes.c_bool),
 ]
 nir_lower_bitmap_options = struct_nir_lower_bitmap_options
-# bool nir_lower_bitmap(nir_shader *shader, const nir_lower_bitmap_options *options)
 try: (nir_lower_bitmap:=dll.nir_lower_bitmap).restype, nir_lower_bitmap.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_bitmap_options)]
 except AttributeError: pass
 
-# bool nir_lower_atomics_to_ssbo(nir_shader *shader, unsigned int offset_align_state)
 try: (nir_lower_atomics_to_ssbo:=dll.nir_lower_atomics_to_ssbo).restype, nir_lower_atomics_to_ssbo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -5244,15 +4892,12 @@ nir_lower_gs_intrinsics_count_primitives = nir_lower_gs_intrinsics_flags.define(
 nir_lower_gs_intrinsics_count_vertices_per_primitive = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_vertices_per_primitive', 4)
 nir_lower_gs_intrinsics_overwrite_incomplete = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_overwrite_incomplete', 8)
 
-# bool nir_lower_gs_intrinsics(nir_shader *shader, nir_lower_gs_intrinsics_flags options)
 try: (nir_lower_gs_intrinsics:=dll.nir_lower_gs_intrinsics).restype, nir_lower_gs_intrinsics.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_gs_intrinsics_flags]
 except AttributeError: pass
 
-# bool nir_lower_halt_to_return(nir_shader *nir)
 try: (nir_lower_halt_to_return:=dll.nir_lower_halt_to_return).restype, nir_lower_halt_to_return.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_tess_coord_z(nir_shader *shader, bool triangles)
 try: (nir_lower_tess_coord_z:=dll.nir_lower_tess_coord_z).restype, nir_lower_tess_coord_z.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
@@ -5263,16 +4908,13 @@ struct_nir_lower_task_shader_options._fields_ = [
   ('payload_offset_in_bytes', uint32_t),
 ]
 nir_lower_task_shader_options = struct_nir_lower_task_shader_options
-# bool nir_lower_task_shader(nir_shader *shader, nir_lower_task_shader_options options)
 try: (nir_lower_task_shader:=dll.nir_lower_task_shader).restype, nir_lower_task_shader.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_task_shader_options]
 except AttributeError: pass
 
 nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
-# bool nir_lower_bit_size(nir_shader *shader, nir_lower_bit_size_callback callback, void *callback_data)
 try: (nir_lower_bit_size:=dll.nir_lower_bit_size).restype, nir_lower_bit_size.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_lower_64bit_phis(nir_shader *shader)
 try: (nir_lower_64bit_phis:=dll.nir_lower_64bit_phis).restype, nir_lower_64bit_phis.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5283,55 +4925,42 @@ struct_nir_split_conversions_options._fields_ = [
   ('has_convert_alu_types', ctypes.c_bool),
 ]
 nir_split_conversions_options = struct_nir_split_conversions_options
-# bool nir_split_conversions(nir_shader *shader, const nir_split_conversions_options *options)
 try: (nir_split_conversions:=dll.nir_split_conversions).restype, nir_split_conversions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_split_conversions_options)]
 except AttributeError: pass
 
-# bool nir_split_64bit_vec3_and_vec4(nir_shader *shader)
 try: (nir_split_64bit_vec3_and_vec4:=dll.nir_split_64bit_vec3_and_vec4).restype, nir_split_64bit_vec3_and_vec4.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_lower_int64_options nir_lower_int64_op_to_options_mask(nir_op opcode)
 try: (nir_lower_int64_op_to_options_mask:=dll.nir_lower_int64_op_to_options_mask).restype, nir_lower_int64_op_to_options_mask.argtypes = nir_lower_int64_options, [nir_op]
 except AttributeError: pass
 
-# bool nir_lower_int64(nir_shader *shader)
 try: (nir_lower_int64:=dll.nir_lower_int64).restype, nir_lower_int64.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_int64_float_conversions(nir_shader *shader)
 try: (nir_lower_int64_float_conversions:=dll.nir_lower_int64_float_conversions).restype, nir_lower_int64_float_conversions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_lower_doubles_options nir_lower_doubles_op_to_options_mask(nir_op opcode)
 try: (nir_lower_doubles_op_to_options_mask:=dll.nir_lower_doubles_op_to_options_mask).restype, nir_lower_doubles_op_to_options_mask.argtypes = nir_lower_doubles_options, [nir_op]
 except AttributeError: pass
 
-# bool nir_lower_doubles(nir_shader *shader, const nir_shader *softfp64, nir_lower_doubles_options options)
 try: (nir_lower_doubles:=dll.nir_lower_doubles).restype, nir_lower_doubles.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), nir_lower_doubles_options]
 except AttributeError: pass
 
-# bool nir_lower_pack(nir_shader *shader)
 try: (nir_lower_pack:=dll.nir_lower_pack).restype, nir_lower_pack.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# nir_intrinsic_instr *nir_get_io_intrinsic(nir_instr *instr, nir_variable_mode modes, nir_variable_mode *out_mode)
 try: (nir_get_io_intrinsic:=dll.nir_get_io_intrinsic).restype, nir_get_io_intrinsic.argtypes = ctypes.POINTER(nir_intrinsic_instr), [ctypes.POINTER(nir_instr), nir_variable_mode, ctypes.POINTER(nir_variable_mode)]
 except AttributeError: pass
 
-# bool nir_recompute_io_bases(nir_shader *nir, nir_variable_mode modes)
 try: (nir_recompute_io_bases:=dll.nir_recompute_io_bases).restype, nir_recompute_io_bases.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_lower_mediump_vars(nir_shader *nir, nir_variable_mode modes)
 try: (nir_lower_mediump_vars:=dll.nir_lower_mediump_vars).restype, nir_lower_mediump_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_lower_mediump_io(nir_shader *nir, nir_variable_mode modes, uint64_t varying_mask, bool use_16bit_slots)
 try: (nir_lower_mediump_io:=dll.nir_lower_mediump_io).restype, nir_lower_mediump_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, uint64_t, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_clear_mediump_io_flag(nir_shader *nir)
 try: (nir_clear_mediump_io_flag:=dll.nir_clear_mediump_io_flag).restype, nir_clear_mediump_io_flag.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5353,7 +4982,6 @@ struct_nir_opt_16bit_tex_image_options._fields_ = [
   ('opt_srcs_options', ctypes.POINTER(nir_opt_tex_srcs_options)),
 ]
 nir_opt_16bit_tex_image_options = struct_nir_opt_16bit_tex_image_options
-# bool nir_opt_16bit_tex_image(nir_shader *nir, nir_opt_16bit_tex_image_options *options)
 try: (nir_opt_16bit_tex_image:=dll.nir_opt_16bit_tex_image).restype, nir_opt_16bit_tex_image.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_16bit_tex_image_options)]
 except AttributeError: pass
 
@@ -5365,23 +4993,18 @@ struct_nir_tex_src_type_constraint._fields_ = [
 ]
 nir_tex_src_type_constraint = struct_nir_tex_src_type_constraint
 nir_tex_src_type_constraints = (struct_nir_tex_src_type_constraint * 23)
-# bool nir_legalize_16bit_sampler_srcs(nir_shader *nir, nir_tex_src_type_constraints constraints)
 try: (nir_legalize_16bit_sampler_srcs:=dll.nir_legalize_16bit_sampler_srcs).restype, nir_legalize_16bit_sampler_srcs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_tex_src_type_constraints]
 except AttributeError: pass
 
-# bool nir_lower_point_size(nir_shader *shader, float min, float max)
 try: (nir_lower_point_size:=dll.nir_lower_point_size).restype, nir_lower_point_size.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_float, ctypes.c_float]
 except AttributeError: pass
 
-# bool nir_lower_default_point_size(nir_shader *nir)
 try: (nir_lower_default_point_size:=dll.nir_lower_default_point_size).restype, nir_lower_default_point_size.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_texcoord_replace(nir_shader *s, unsigned int coord_replace, bool point_coord_is_sysval, bool yinvert)
 try: (nir_lower_texcoord_replace:=dll.nir_lower_texcoord_replace).restype, nir_lower_texcoord_replace.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_texcoord_replace_late(nir_shader *s, unsigned int coord_replace, bool point_coord_is_sysval)
 try: (nir_lower_texcoord_replace_late:=dll.nir_lower_texcoord_replace_late).restype, nir_lower_texcoord_replace_late.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool]
 except AttributeError: pass
 
@@ -5392,7 +5015,6 @@ nir_lower_interpolation_centroid = nir_lower_interpolation_options.define('nir_l
 nir_lower_interpolation_pixel = nir_lower_interpolation_options.define('nir_lower_interpolation_pixel', 16)
 nir_lower_interpolation_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_sample', 32)
 
-# bool nir_lower_interpolation(nir_shader *shader, nir_lower_interpolation_options options)
 try: (nir_lower_interpolation:=dll.nir_lower_interpolation).restype, nir_lower_interpolation.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_interpolation_options]
 except AttributeError: pass
 
@@ -5401,23 +5023,18 @@ nir_lower_demote_if_to_cf = nir_lower_discard_if_options.define('nir_lower_demot
 nir_lower_terminate_if_to_cf = nir_lower_discard_if_options.define('nir_lower_terminate_if_to_cf', 2)
 nir_move_terminate_out_of_loops = nir_lower_discard_if_options.define('nir_move_terminate_out_of_loops', 4)
 
-# bool nir_lower_discard_if(nir_shader *shader, nir_lower_discard_if_options options)
 try: (nir_lower_discard_if:=dll.nir_lower_discard_if).restype, nir_lower_discard_if.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_discard_if_options]
 except AttributeError: pass
 
-# bool nir_lower_terminate_to_demote(nir_shader *nir)
 try: (nir_lower_terminate_to_demote:=dll.nir_lower_terminate_to_demote).restype, nir_lower_terminate_to_demote.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_memory_model(nir_shader *shader)
 try: (nir_lower_memory_model:=dll.nir_lower_memory_model).restype, nir_lower_memory_model.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_goto_ifs(nir_shader *shader)
 try: (nir_lower_goto_ifs:=dll.nir_lower_goto_ifs).restype, nir_lower_goto_ifs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_continue_constructs(nir_shader *shader)
 try: (nir_lower_continue_constructs:=dll.nir_lower_continue_constructs).restype, nir_lower_continue_constructs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5427,19 +5044,15 @@ struct_nir_lower_multiview_options._fields_ = [
   ('allowed_per_view_outputs', uint64_t),
 ]
 nir_lower_multiview_options = struct_nir_lower_multiview_options
-# bool nir_shader_uses_view_index(nir_shader *shader)
 try: (nir_shader_uses_view_index:=dll.nir_shader_uses_view_index).restype, nir_shader_uses_view_index.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_can_lower_multiview(nir_shader *shader, nir_lower_multiview_options options)
 try: (nir_can_lower_multiview:=dll.nir_can_lower_multiview).restype, nir_can_lower_multiview.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_multiview_options]
 except AttributeError: pass
 
-# bool nir_lower_multiview(nir_shader *shader, nir_lower_multiview_options options)
 try: (nir_lower_multiview:=dll.nir_lower_multiview).restype, nir_lower_multiview.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_multiview_options]
 except AttributeError: pass
 
-# bool nir_lower_view_index_to_device_index(nir_shader *shader)
 try: (nir_lower_view_index_to_device_index:=dll.nir_lower_view_index_to_device_index).restype, nir_lower_view_index_to_device_index.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5451,99 +5064,75 @@ nir_lower_fp16_rd = nir_lower_fp16_cast_options.define('nir_lower_fp16_rd', 8)
 nir_lower_fp16_all = nir_lower_fp16_cast_options.define('nir_lower_fp16_all', 15)
 nir_lower_fp16_split_fp64 = nir_lower_fp16_cast_options.define('nir_lower_fp16_split_fp64', 16)
 
-# bool nir_lower_fp16_casts(nir_shader *shader, nir_lower_fp16_cast_options options)
 try: (nir_lower_fp16_casts:=dll.nir_lower_fp16_casts).restype, nir_lower_fp16_casts.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_fp16_cast_options]
 except AttributeError: pass
 
-# bool nir_normalize_cubemap_coords(nir_shader *shader)
 try: (nir_normalize_cubemap_coords:=dll.nir_normalize_cubemap_coords).restype, nir_normalize_cubemap_coords.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_shader_supports_implicit_lod(nir_shader *shader)
 try: (nir_shader_supports_implicit_lod:=dll.nir_shader_supports_implicit_lod).restype, nir_shader_supports_implicit_lod.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_live_defs_impl(nir_function_impl *impl)
 try: (nir_live_defs_impl:=dll.nir_live_defs_impl).restype, nir_live_defs_impl.argtypes = None, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# const unsigned int *nir_get_live_defs(nir_cursor cursor, void *mem_ctx)
 try: (nir_get_live_defs:=dll.nir_get_live_defs).restype, nir_get_live_defs.argtypes = ctypes.POINTER(ctypes.c_uint32), [nir_cursor, ctypes.c_void_p]
 except AttributeError: pass
 
-# void nir_loop_analyze_impl(nir_function_impl *impl, nir_variable_mode indirect_mask, bool force_unroll_sampler_indirect)
 try: (nir_loop_analyze_impl:=dll.nir_loop_analyze_impl).restype, nir_loop_analyze_impl.argtypes = None, [ctypes.POINTER(nir_function_impl), nir_variable_mode, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_defs_interfere(nir_def *a, nir_def *b)
 try: (nir_defs_interfere:=dll.nir_defs_interfere).restype, nir_defs_interfere.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# bool nir_repair_ssa_impl(nir_function_impl *impl)
 try: (nir_repair_ssa_impl:=dll.nir_repair_ssa_impl).restype, nir_repair_ssa_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# bool nir_repair_ssa(nir_shader *shader)
 try: (nir_repair_ssa:=dll.nir_repair_ssa).restype, nir_repair_ssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_convert_loop_to_lcssa(nir_loop *loop)
 try: (nir_convert_loop_to_lcssa:=dll.nir_convert_loop_to_lcssa).restype, nir_convert_loop_to_lcssa.argtypes = None, [ctypes.POINTER(nir_loop)]
 except AttributeError: pass
 
-# bool nir_convert_to_lcssa(nir_shader *shader, bool skip_invariants, bool skip_bool_invariants)
 try: (nir_convert_to_lcssa:=dll.nir_convert_to_lcssa).restype, nir_convert_to_lcssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# void nir_divergence_analysis_impl(nir_function_impl *impl, nir_divergence_options options)
 try: (nir_divergence_analysis_impl:=dll.nir_divergence_analysis_impl).restype, nir_divergence_analysis_impl.argtypes = None, [ctypes.POINTER(nir_function_impl), nir_divergence_options]
 except AttributeError: pass
 
-# void nir_divergence_analysis(nir_shader *shader)
 try: (nir_divergence_analysis:=dll.nir_divergence_analysis).restype, nir_divergence_analysis.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_vertex_divergence_analysis(nir_shader *shader)
 try: (nir_vertex_divergence_analysis:=dll.nir_vertex_divergence_analysis).restype, nir_vertex_divergence_analysis.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_has_divergent_loop(nir_shader *shader)
 try: (nir_has_divergent_loop:=dll.nir_has_divergent_loop).restype, nir_has_divergent_loop.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# void nir_rewrite_uses_to_load_reg(nir_builder *b, nir_def *old, nir_def *reg)
 try: (nir_rewrite_uses_to_load_reg:=dll.nir_rewrite_uses_to_load_reg).restype, nir_rewrite_uses_to_load_reg.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# bool nir_convert_from_ssa(nir_shader *shader, bool phi_webs_only, bool consider_divergence)
 try: (nir_convert_from_ssa:=dll.nir_convert_from_ssa).restype, nir_convert_from_ssa.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_phis_to_regs_block(nir_block *block, bool place_writes_in_imm_preds)
 try: (nir_lower_phis_to_regs_block:=dll.nir_lower_phis_to_regs_block).restype, nir_lower_phis_to_regs_block.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_ssa_defs_to_regs_block(nir_block *block)
 try: (nir_lower_ssa_defs_to_regs_block:=dll.nir_lower_ssa_defs_to_regs_block).restype, nir_lower_ssa_defs_to_regs_block.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# bool nir_rematerialize_deref_in_use_blocks(nir_deref_instr *instr)
 try: (nir_rematerialize_deref_in_use_blocks:=dll.nir_rematerialize_deref_in_use_blocks).restype, nir_rematerialize_deref_in_use_blocks.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
-# bool nir_rematerialize_derefs_in_use_blocks_impl(nir_function_impl *impl)
 try: (nir_rematerialize_derefs_in_use_blocks_impl:=dll.nir_rematerialize_derefs_in_use_blocks_impl).restype, nir_rematerialize_derefs_in_use_blocks_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# bool nir_lower_samplers(nir_shader *shader)
 try: (nir_lower_samplers:=dll.nir_lower_samplers).restype, nir_lower_samplers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_cl_images(nir_shader *shader, bool lower_image_derefs, bool lower_sampler_derefs)
 try: (nir_lower_cl_images:=dll.nir_lower_cl_images).restype, nir_lower_cl_images.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_dedup_inline_samplers(nir_shader *shader)
 try: (nir_dedup_inline_samplers:=dll.nir_dedup_inline_samplers).restype, nir_dedup_inline_samplers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5553,11 +5142,9 @@ struct_nir_lower_ssbo_options._fields_ = [
   ('native_offset', ctypes.c_bool),
 ]
 nir_lower_ssbo_options = struct_nir_lower_ssbo_options
-# bool nir_lower_ssbo(nir_shader *shader, const nir_lower_ssbo_options *opts)
 try: (nir_lower_ssbo:=dll.nir_lower_ssbo).restype, nir_lower_ssbo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_ssbo_options)]
 except AttributeError: pass
 
-# bool nir_lower_helper_writes(nir_shader *shader, bool lower_plain_stores)
 try: (nir_lower_helper_writes:=dll.nir_lower_helper_writes).restype, nir_lower_helper_writes.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
@@ -5568,19 +5155,15 @@ struct_nir_lower_printf_options._fields_ = [
   ('hash_format_strings', ctypes.c_bool),
 ]
 nir_lower_printf_options = struct_nir_lower_printf_options
-# bool nir_lower_printf(nir_shader *nir, const nir_lower_printf_options *options)
 try: (nir_lower_printf:=dll.nir_lower_printf).restype, nir_lower_printf.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_printf_options)]
 except AttributeError: pass
 
-# bool nir_lower_printf_buffer(nir_shader *nir, uint64_t address, uint32_t size)
 try: (nir_lower_printf_buffer:=dll.nir_lower_printf_buffer).restype, nir_lower_printf_buffer.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), uint64_t, uint32_t]
 except AttributeError: pass
 
-# bool nir_opt_comparison_pre_impl(nir_function_impl *impl)
 try: (nir_opt_comparison_pre_impl:=dll.nir_opt_comparison_pre_impl).restype, nir_opt_comparison_pre_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# bool nir_opt_comparison_pre(nir_shader *shader)
 try: (nir_opt_comparison_pre:=dll.nir_opt_comparison_pre).restype, nir_opt_comparison_pre.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5589,44 +5172,34 @@ struct_nir_opt_access_options._fields_ = [
   ('is_vulkan', ctypes.c_bool),
 ]
 nir_opt_access_options = struct_nir_opt_access_options
-# bool nir_opt_access(nir_shader *shader, const nir_opt_access_options *options)
 try: (nir_opt_access:=dll.nir_opt_access).restype, nir_opt_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_access_options)]
 except AttributeError: pass
 
-# bool nir_opt_algebraic(nir_shader *shader)
 try: (nir_opt_algebraic:=dll.nir_opt_algebraic).restype, nir_opt_algebraic.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_algebraic_before_ffma(nir_shader *shader)
 try: (nir_opt_algebraic_before_ffma:=dll.nir_opt_algebraic_before_ffma).restype, nir_opt_algebraic_before_ffma.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_algebraic_before_lower_int64(nir_shader *shader)
 try: (nir_opt_algebraic_before_lower_int64:=dll.nir_opt_algebraic_before_lower_int64).restype, nir_opt_algebraic_before_lower_int64.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_algebraic_late(nir_shader *shader)
 try: (nir_opt_algebraic_late:=dll.nir_opt_algebraic_late).restype, nir_opt_algebraic_late.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_algebraic_distribute_src_mods(nir_shader *shader)
 try: (nir_opt_algebraic_distribute_src_mods:=dll.nir_opt_algebraic_distribute_src_mods).restype, nir_opt_algebraic_distribute_src_mods.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_algebraic_integer_promotion(nir_shader *shader)
 try: (nir_opt_algebraic_integer_promotion:=dll.nir_opt_algebraic_integer_promotion).restype, nir_opt_algebraic_integer_promotion.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_reassociate_matrix_mul(nir_shader *shader)
 try: (nir_opt_reassociate_matrix_mul:=dll.nir_opt_reassociate_matrix_mul).restype, nir_opt_reassociate_matrix_mul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_constant_folding(nir_shader *shader)
 try: (nir_opt_constant_folding:=dll.nir_opt_constant_folding).restype, nir_opt_constant_folding.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
 nir_combine_barrier_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
-# bool nir_opt_combine_barriers(nir_shader *shader, nir_combine_barrier_cb combine_cb, void *data)
 try: (nir_opt_combine_barriers:=dll.nir_opt_combine_barriers).restype, nir_opt_combine_barriers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_combine_barrier_cb, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -5639,83 +5212,63 @@ SCOPE_WORKGROUP = mesa_scope.define('SCOPE_WORKGROUP', 4)
 SCOPE_QUEUE_FAMILY = mesa_scope.define('SCOPE_QUEUE_FAMILY', 5)
 SCOPE_DEVICE = mesa_scope.define('SCOPE_DEVICE', 6)
 
-# bool nir_opt_acquire_release_barriers(nir_shader *shader, mesa_scope max_scope)
 try: (nir_opt_acquire_release_barriers:=dll.nir_opt_acquire_release_barriers).restype, nir_opt_acquire_release_barriers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), mesa_scope]
 except AttributeError: pass
 
-# bool nir_opt_barrier_modes(nir_shader *shader)
 try: (nir_opt_barrier_modes:=dll.nir_opt_barrier_modes).restype, nir_opt_barrier_modes.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_minimize_call_live_states(nir_shader *shader)
 try: (nir_minimize_call_live_states:=dll.nir_minimize_call_live_states).restype, nir_minimize_call_live_states.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_combine_stores(nir_shader *shader, nir_variable_mode modes)
 try: (nir_opt_combine_stores:=dll.nir_opt_combine_stores).restype, nir_opt_combine_stores.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
 except AttributeError: pass
 
-# bool nir_copy_prop_impl(nir_function_impl *impl)
 try: (nir_copy_prop_impl:=dll.nir_copy_prop_impl).restype, nir_copy_prop_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# bool nir_copy_prop(nir_shader *shader)
 try: (nir_copy_prop:=dll.nir_copy_prop).restype, nir_copy_prop.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_copy_prop_vars(nir_shader *shader)
 try: (nir_opt_copy_prop_vars:=dll.nir_opt_copy_prop_vars).restype, nir_opt_copy_prop_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_cse(nir_shader *shader)
 try: (nir_opt_cse:=dll.nir_opt_cse).restype, nir_opt_cse.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_dce(nir_shader *shader)
 try: (nir_opt_dce:=dll.nir_opt_dce).restype, nir_opt_dce.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_dead_cf(nir_shader *shader)
 try: (nir_opt_dead_cf:=dll.nir_opt_dead_cf).restype, nir_opt_dead_cf.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_dead_write_vars(nir_shader *shader)
 try: (nir_opt_dead_write_vars:=dll.nir_opt_dead_write_vars).restype, nir_opt_dead_write_vars.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_deref_impl(nir_function_impl *impl)
 try: (nir_opt_deref_impl:=dll.nir_opt_deref_impl).restype, nir_opt_deref_impl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl)]
 except AttributeError: pass
 
-# bool nir_opt_deref(nir_shader *shader)
 try: (nir_opt_deref:=dll.nir_opt_deref).restype, nir_opt_deref.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_find_array_copies(nir_shader *shader)
 try: (nir_opt_find_array_copies:=dll.nir_opt_find_array_copies).restype, nir_opt_find_array_copies.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_def_is_frag_coord_z(nir_def *def)
 try: (nir_def_is_frag_coord_z:=dll.nir_def_is_frag_coord_z).restype, nir_def_is_frag_coord_z.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# bool nir_opt_fragdepth(nir_shader *shader)
 try: (nir_opt_fragdepth:=dll.nir_opt_fragdepth).restype, nir_opt_fragdepth.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_gcm(nir_shader *shader, bool value_number)
 try: (nir_opt_gcm:=dll.nir_opt_gcm).restype, nir_opt_gcm.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_opt_generate_bfi(nir_shader *shader)
 try: (nir_opt_generate_bfi:=dll.nir_opt_generate_bfi).restype, nir_opt_generate_bfi.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_idiv_const(nir_shader *shader, unsigned int min_bit_size)
 try: (nir_opt_idiv_const:=dll.nir_opt_idiv_const).restype, nir_opt_idiv_const.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_opt_mqsad(nir_shader *shader)
 try: (nir_opt_mqsad:=dll.nir_opt_mqsad).restype, nir_opt_mqsad.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5723,27 +5276,21 @@ nir_opt_if_options = CEnum(ctypes.c_uint32)
 nir_opt_if_optimize_phi_true_false = nir_opt_if_options.define('nir_opt_if_optimize_phi_true_false', 1)
 nir_opt_if_avoid_64bit_phis = nir_opt_if_options.define('nir_opt_if_avoid_64bit_phis', 2)
 
-# bool nir_opt_if(nir_shader *shader, nir_opt_if_options options)
 try: (nir_opt_if:=dll.nir_opt_if).restype, nir_opt_if.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_opt_if_options]
 except AttributeError: pass
 
-# bool nir_opt_intrinsics(nir_shader *shader)
 try: (nir_opt_intrinsics:=dll.nir_opt_intrinsics).restype, nir_opt_intrinsics.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_large_constants(nir_shader *shader, glsl_type_size_align_func size_align, unsigned int threshold)
 try: (nir_opt_large_constants:=dll.nir_opt_large_constants).restype, nir_opt_large_constants.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), glsl_type_size_align_func, ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_opt_licm(nir_shader *shader)
 try: (nir_opt_licm:=dll.nir_opt_licm).restype, nir_opt_licm.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_loop(nir_shader *shader)
 try: (nir_opt_loop:=dll.nir_opt_loop).restype, nir_opt_loop.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_loop_unroll(nir_shader *shader)
 try: (nir_opt_loop_unroll:=dll.nir_opt_loop_unroll).restype, nir_opt_loop_unroll.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5758,15 +5305,12 @@ nir_move_load_uniform = nir_move_options.define('nir_move_load_uniform', 64)
 nir_move_alu = nir_move_options.define('nir_move_alu', 128)
 nir_dont_move_byte_word_vecs = nir_move_options.define('nir_dont_move_byte_word_vecs', 256)
 
-# bool nir_can_move_instr(nir_instr *instr, nir_move_options options)
 try: (nir_can_move_instr:=dll.nir_can_move_instr).restype, nir_can_move_instr.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_instr), nir_move_options]
 except AttributeError: pass
 
-# bool nir_opt_sink(nir_shader *shader, nir_move_options options)
 try: (nir_opt_sink:=dll.nir_opt_sink).restype, nir_opt_sink.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_move_options]
 except AttributeError: pass
 
-# bool nir_opt_move(nir_shader *shader, nir_move_options options)
 try: (nir_opt_move:=dll.nir_opt_move).restype, nir_opt_move.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_move_options]
 except AttributeError: pass
 
@@ -5782,7 +5326,6 @@ struct_nir_opt_offsets_options._fields_ = [
   ('allow_offset_wrap', ctypes.c_bool),
 ]
 nir_opt_offsets_options = struct_nir_opt_offsets_options
-# bool nir_opt_offsets(nir_shader *shader, const nir_opt_offsets_options *options)
 try: (nir_opt_offsets:=dll.nir_opt_offsets).restype, nir_opt_offsets.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_offsets_options)]
 except AttributeError: pass
 
@@ -5794,83 +5337,63 @@ struct_nir_opt_peephole_select_options._fields_ = [
   ('discard_ok', ctypes.c_bool),
 ]
 nir_opt_peephole_select_options = struct_nir_opt_peephole_select_options
-# bool nir_opt_peephole_select(nir_shader *shader, const nir_opt_peephole_select_options *options)
 try: (nir_opt_peephole_select:=dll.nir_opt_peephole_select).restype, nir_opt_peephole_select.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_peephole_select_options)]
 except AttributeError: pass
 
-# bool nir_opt_reassociate_bfi(nir_shader *shader)
 try: (nir_opt_reassociate_bfi:=dll.nir_opt_reassociate_bfi).restype, nir_opt_reassociate_bfi.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_rematerialize_compares(nir_shader *shader)
 try: (nir_opt_rematerialize_compares:=dll.nir_opt_rematerialize_compares).restype, nir_opt_rematerialize_compares.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_remove_phis(nir_shader *shader)
 try: (nir_opt_remove_phis:=dll.nir_opt_remove_phis).restype, nir_opt_remove_phis.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_remove_single_src_phis_block(nir_block *block)
 try: (nir_remove_single_src_phis_block:=dll.nir_remove_single_src_phis_block).restype, nir_remove_single_src_phis_block.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block)]
 except AttributeError: pass
 
-# bool nir_opt_phi_precision(nir_shader *shader)
 try: (nir_opt_phi_precision:=dll.nir_opt_phi_precision).restype, nir_opt_phi_precision.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_phi_to_bool(nir_shader *shader)
 try: (nir_opt_phi_to_bool:=dll.nir_opt_phi_to_bool).restype, nir_opt_phi_to_bool.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_shrink_stores(nir_shader *shader, bool shrink_image_store)
 try: (nir_opt_shrink_stores:=dll.nir_opt_shrink_stores).restype, nir_opt_shrink_stores.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_opt_shrink_vectors(nir_shader *shader, bool shrink_start)
 try: (nir_opt_shrink_vectors:=dll.nir_opt_shrink_vectors).restype, nir_opt_shrink_vectors.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_opt_undef(nir_shader *shader)
 try: (nir_opt_undef:=dll.nir_opt_undef).restype, nir_opt_undef.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_undef_to_zero(nir_shader *shader)
 try: (nir_lower_undef_to_zero:=dll.nir_lower_undef_to_zero).restype, nir_lower_undef_to_zero.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_uniform_atomics(nir_shader *shader, bool fs_atomics_predicated)
 try: (nir_opt_uniform_atomics:=dll.nir_opt_uniform_atomics).restype, nir_opt_uniform_atomics.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_opt_uniform_subgroup(nir_shader *shader, const nir_lower_subgroups_options *)
 try: (nir_opt_uniform_subgroup:=dll.nir_opt_uniform_subgroup).restype, nir_opt_uniform_subgroup.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_subgroups_options)]
 except AttributeError: pass
 
-# bool nir_opt_vectorize(nir_shader *shader, nir_vectorize_cb filter, void *data)
 try: (nir_opt_vectorize:=dll.nir_opt_vectorize).restype, nir_opt_vectorize.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_vectorize_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-# bool nir_opt_vectorize_io(nir_shader *shader, nir_variable_mode modes, bool allow_holes)
 try: (nir_opt_vectorize_io:=dll.nir_opt_vectorize_io).restype, nir_opt_vectorize_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_opt_move_discards_to_top(nir_shader *shader)
 try: (nir_opt_move_discards_to_top:=dll.nir_opt_move_discards_to_top).restype, nir_opt_move_discards_to_top.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_ray_queries(nir_shader *shader)
 try: (nir_opt_ray_queries:=dll.nir_opt_ray_queries).restype, nir_opt_ray_queries.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_ray_query_ranges(nir_shader *shader)
 try: (nir_opt_ray_query_ranges:=dll.nir_opt_ray_query_ranges).restype, nir_opt_ray_query_ranges.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_opt_tex_skip_helpers(nir_shader *shader, bool no_add_divergence)
 try: (nir_opt_tex_skip_helpers:=dll.nir_opt_tex_skip_helpers).restype, nir_opt_tex_skip_helpers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# void nir_sweep(nir_shader *shader)
 try: (nir_sweep:=dll.nir_sweep).restype, nir_sweep.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5976,11 +5499,9 @@ SYSTEM_VALUE_WARP_ID_NV = gl_system_value.define('SYSTEM_VALUE_WARP_ID_NV', 97)
 SYSTEM_VALUE_SM_ID_NV = gl_system_value.define('SYSTEM_VALUE_SM_ID_NV', 98)
 SYSTEM_VALUE_MAX = gl_system_value.define('SYSTEM_VALUE_MAX', 99)
 
-# nir_intrinsic_op nir_intrinsic_from_system_value(gl_system_value val)
 try: (nir_intrinsic_from_system_value:=dll.nir_intrinsic_from_system_value).restype, nir_intrinsic_from_system_value.argtypes = nir_intrinsic_op, [gl_system_value]
 except AttributeError: pass
 
-# gl_system_value nir_system_value_from_intrinsic(nir_intrinsic_op intrin)
 try: (nir_system_value_from_intrinsic:=dll.nir_system_value_from_intrinsic).restype, nir_system_value_from_intrinsic.argtypes = gl_system_value, [nir_intrinsic_op]
 except AttributeError: pass
 
@@ -5994,11 +5515,9 @@ struct_nir_unsigned_upper_bound_config._fields_ = [
   ('vertex_attrib_max', (uint32_t * 32)),
 ]
 nir_unsigned_upper_bound_config = struct_nir_unsigned_upper_bound_config
-# uint32_t nir_unsigned_upper_bound(nir_shader *shader, struct hash_table *range_ht, nir_scalar scalar, const nir_unsigned_upper_bound_config *config)
 try: (nir_unsigned_upper_bound:=dll.nir_unsigned_upper_bound).restype, nir_unsigned_upper_bound.argtypes = uint32_t, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.POINTER(nir_unsigned_upper_bound_config)]
 except AttributeError: pass
 
-# bool nir_addition_might_overflow(nir_shader *shader, struct hash_table *range_ht, nir_scalar ssa, unsigned int const_val, const nir_unsigned_upper_bound_config *config)
 try: (nir_addition_might_overflow:=dll.nir_addition_might_overflow).restype, nir_addition_might_overflow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.c_uint32, ctypes.POINTER(nir_unsigned_upper_bound_config)]
 except AttributeError: pass
 
@@ -6015,57 +5534,44 @@ struct_nir_opt_preamble_options._fields_ = [
   ('cb_data', ctypes.c_void_p),
 ]
 nir_opt_preamble_options = struct_nir_opt_preamble_options
-# bool nir_opt_preamble(nir_shader *shader, const nir_opt_preamble_options *options, unsigned int *size)
 try: (nir_opt_preamble:=dll.nir_opt_preamble).restype, nir_opt_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_preamble_options), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# nir_function_impl *nir_shader_get_preamble(nir_shader *shader)
 try: (nir_shader_get_preamble:=dll.nir_shader_get_preamble).restype, nir_shader_get_preamble.argtypes = ctypes.POINTER(nir_function_impl), [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# bool nir_lower_point_smooth(nir_shader *shader, bool set_barycentrics)
 try: (nir_lower_point_smooth:=dll.nir_lower_point_smooth).restype, nir_lower_point_smooth.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
-# bool nir_lower_poly_line_smooth(nir_shader *shader, unsigned int num_smooth_aa_sample)
 try: (nir_lower_poly_line_smooth:=dll.nir_lower_poly_line_smooth).restype, nir_lower_poly_line_smooth.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_mod_analysis(nir_scalar val, nir_alu_type val_type, unsigned int div, unsigned int *mod)
 try: (nir_mod_analysis:=dll.nir_mod_analysis).restype, nir_mod_analysis.argtypes = ctypes.c_bool, [nir_scalar, nir_alu_type, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# bool nir_remove_tex_shadow(nir_shader *shader, unsigned int textures_bitmask)
 try: (nir_remove_tex_shadow:=dll.nir_remove_tex_shadow).restype, nir_remove_tex_shadow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32]
 except AttributeError: pass
 
-# bool nir_trivialize_registers(nir_shader *s)
 try: (nir_trivialize_registers:=dll.nir_trivialize_registers).restype, nir_trivialize_registers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-# unsigned int nir_static_workgroup_size(const nir_shader *s)
 try: (nir_static_workgroup_size:=dll.nir_static_workgroup_size).restype, nir_static_workgroup_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
 class struct_nir_use_dominance_state(Struct): pass
 nir_use_dominance_state = struct_nir_use_dominance_state
-# nir_use_dominance_state *nir_calc_use_dominance_impl(nir_function_impl *impl, bool post_dominance)
 try: (nir_calc_use_dominance_impl:=dll.nir_calc_use_dominance_impl).restype, nir_calc_use_dominance_impl.argtypes = ctypes.POINTER(nir_use_dominance_state), [ctypes.POINTER(nir_function_impl), ctypes.c_bool]
 except AttributeError: pass
 
-# nir_instr *nir_get_immediate_use_dominator(nir_use_dominance_state *state, nir_instr *instr)
 try: (nir_get_immediate_use_dominator:=dll.nir_get_immediate_use_dominator).restype, nir_get_immediate_use_dominator.argtypes = ctypes.POINTER(nir_instr), [ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# nir_instr *nir_use_dominance_lca(nir_use_dominance_state *state, nir_instr *i1, nir_instr *i2)
 try: (nir_use_dominance_lca:=dll.nir_use_dominance_lca).restype, nir_use_dominance_lca.argtypes = ctypes.POINTER(nir_instr), [ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# bool nir_instr_dominates_use(nir_use_dominance_state *state, nir_instr *parent, nir_instr *child)
 try: (nir_instr_dominates_use:=dll.nir_instr_dominates_use).restype, nir_instr_dominates_use.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# void nir_print_use_dominators(nir_use_dominance_state *state, nir_instr **instructions, unsigned int num_instructions)
 try: (nir_print_use_dominators:=dll.nir_print_use_dominators).restype, nir_print_use_dominators.argtypes = None, [ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(ctypes.POINTER(nir_instr)), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -6078,11 +5584,9 @@ nir_output_deps_output._fields_ = [
 nir_output_deps._fields_ = [
   ('output', (nir_output_deps_output * 112)),
 ]
-# void nir_gather_output_dependencies(nir_shader *nir, nir_output_deps *deps)
 try: (nir_gather_output_dependencies:=dll.nir_gather_output_dependencies).restype, nir_gather_output_dependencies.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_output_deps)]
 except AttributeError: pass
 
-# void nir_free_output_dependencies(nir_output_deps *deps)
 try: (nir_free_output_dependencies:=dll.nir_free_output_dependencies).restype, nir_free_output_dependencies.argtypes = None, [ctypes.POINTER(nir_output_deps)]
 except AttributeError: pass
 
@@ -6097,11 +5601,9 @@ nir_input_to_output_deps_output._fields_ = [
 nir_input_to_output_deps._fields_ = [
   ('output', (nir_input_to_output_deps_output * 112)),
 ]
-# void nir_gather_input_to_output_dependencies(nir_shader *nir, nir_input_to_output_deps *out_deps)
 try: (nir_gather_input_to_output_dependencies:=dll.nir_gather_input_to_output_dependencies).restype, nir_gather_input_to_output_dependencies.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_input_to_output_deps)]
 except AttributeError: pass
 
-# void nir_print_input_to_output_deps(nir_input_to_output_deps *deps, nir_shader *nir, FILE *f)
 try: (nir_print_input_to_output_deps:=dll.nir_print_input_to_output_deps).restype, nir_print_input_to_output_deps.argtypes = None, [ctypes.POINTER(nir_input_to_output_deps), ctypes.POINTER(nir_shader), ctypes.POINTER(FILE)]
 except AttributeError: pass
 
@@ -6111,7 +5613,6 @@ nir_output_clipper_var_groups._fields_ = [
   ('var_only', (ctypes.c_uint32 * 28)),
   ('both', (ctypes.c_uint32 * 28)),
 ]
-# void nir_gather_output_clipper_var_groups(nir_shader *nir, nir_output_clipper_var_groups *groups)
 try: (nir_gather_output_clipper_var_groups:=dll.nir_gather_output_clipper_var_groups).restype, nir_gather_output_clipper_var_groups.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_output_clipper_var_groups)]
 except AttributeError: pass
 
@@ -6122,7 +5623,6 @@ struct_nir_builder._fields_ = [
   ('shader', ctypes.POINTER(nir_shader)),
   ('impl', ctypes.POINTER(nir_function_impl)),
 ]
-# nir_builder nir_builder_init_simple_shader(gl_shader_stage stage, const nir_shader_compiler_options *options, const char *name, ...)
 try: (nir_builder_init_simple_shader:=dll.nir_builder_init_simple_shader).restype, nir_builder_init_simple_shader.argtypes = nir_builder, [gl_shader_stage, ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -6131,123 +5631,93 @@ nir_intrinsic_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_ni
 nir_alu_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_void_p)
 nir_tex_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_tex_instr), ctypes.c_void_p)
 nir_phi_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_phi_instr), ctypes.c_void_p)
-# void nir_builder_instr_insert(nir_builder *build, nir_instr *instr)
 try: (nir_builder_instr_insert:=dll.nir_builder_instr_insert).restype, nir_builder_instr_insert.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# void nir_builder_instr_insert_at_top(nir_builder *build, nir_instr *instr)
 try: (nir_builder_instr_insert_at_top:=dll.nir_builder_instr_insert_at_top).restype, nir_builder_instr_insert_at_top.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-# nir_def *nir_build_alu(nir_builder *build, nir_op op, nir_def *src0, nir_def *src1, nir_def *src2, nir_def *src3)
 try: (nir_build_alu:=dll.nir_build_alu).restype, nir_build_alu.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_op, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_def *nir_build_alu1(nir_builder *build, nir_op op, nir_def *src0)
 try: (nir_build_alu1:=dll.nir_build_alu1).restype, nir_build_alu1.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_op, ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_def *nir_build_alu2(nir_builder *build, nir_op op, nir_def *src0, nir_def *src1)
 try: (nir_build_alu2:=dll.nir_build_alu2).restype, nir_build_alu2.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_op, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_def *nir_build_alu3(nir_builder *build, nir_op op, nir_def *src0, nir_def *src1, nir_def *src2)
 try: (nir_build_alu3:=dll.nir_build_alu3).restype, nir_build_alu3.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_op, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_def *nir_build_alu4(nir_builder *build, nir_op op, nir_def *src0, nir_def *src1, nir_def *src2, nir_def *src3)
 try: (nir_build_alu4:=dll.nir_build_alu4).restype, nir_build_alu4.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_op, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_def *nir_build_alu_src_arr(nir_builder *build, nir_op op, nir_def **srcs)
 try: (nir_build_alu_src_arr:=dll.nir_build_alu_src_arr).restype, nir_build_alu_src_arr.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_op, ctypes.POINTER(ctypes.POINTER(nir_def))]
 except AttributeError: pass
 
-# nir_def *nir_build_tex_deref_instr(nir_builder *build, nir_texop op, nir_deref_instr *texture, nir_deref_instr *sampler, unsigned int num_extra_srcs, const nir_tex_src *extra_srcs)
 try: (nir_build_tex_deref_instr:=dll.nir_build_tex_deref_instr).restype, nir_build_tex_deref_instr.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_texop, ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_deref_instr), ctypes.c_uint32, ctypes.POINTER(nir_tex_src)]
 except AttributeError: pass
 
-# void nir_builder_cf_insert(nir_builder *build, nir_cf_node *cf)
 try: (nir_builder_cf_insert:=dll.nir_builder_cf_insert).restype, nir_builder_cf_insert.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_cf_node)]
 except AttributeError: pass
 
-# bool nir_builder_is_inside_cf(nir_builder *build, nir_cf_node *cf_node)
 try: (nir_builder_is_inside_cf:=dll.nir_builder_is_inside_cf).restype, nir_builder_is_inside_cf.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_cf_node)]
 except AttributeError: pass
 
-# nir_if *nir_push_if(nir_builder *build, nir_def *condition)
 try: (nir_push_if:=dll.nir_push_if).restype, nir_push_if.argtypes = ctypes.POINTER(nir_if), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_if *nir_push_else(nir_builder *build, nir_if *nif)
 try: (nir_push_else:=dll.nir_push_else).restype, nir_push_else.argtypes = ctypes.POINTER(nir_if), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_if)]
 except AttributeError: pass
 
-# void nir_pop_if(nir_builder *build, nir_if *nif)
 try: (nir_pop_if:=dll.nir_pop_if).restype, nir_pop_if.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_if)]
 except AttributeError: pass
 
-# nir_def *nir_if_phi(nir_builder *build, nir_def *then_def, nir_def *else_def)
 try: (nir_if_phi:=dll.nir_if_phi).restype, nir_if_phi.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_loop *nir_push_loop(nir_builder *build)
 try: (nir_push_loop:=dll.nir_push_loop).restype, nir_push_loop.argtypes = ctypes.POINTER(nir_loop), [ctypes.POINTER(nir_builder)]
 except AttributeError: pass
 
-# nir_loop *nir_push_continue(nir_builder *build, nir_loop *loop)
 try: (nir_push_continue:=dll.nir_push_continue).restype, nir_push_continue.argtypes = ctypes.POINTER(nir_loop), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_loop)]
 except AttributeError: pass
 
-# void nir_pop_loop(nir_builder *build, nir_loop *loop)
 try: (nir_pop_loop:=dll.nir_pop_loop).restype, nir_pop_loop.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_loop)]
 except AttributeError: pass
 
-# nir_def *nir_builder_alu_instr_finish_and_insert(nir_builder *build, nir_alu_instr *instr)
 try: (nir_builder_alu_instr_finish_and_insert:=dll.nir_builder_alu_instr_finish_and_insert).restype, nir_builder_alu_instr_finish_and_insert.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_alu_instr)]
 except AttributeError: pass
 
-# nir_def *nir_build_alu_src_arr(nir_builder *build, nir_op op, nir_def **srcs)
 try: (nir_build_alu_src_arr:=dll.nir_build_alu_src_arr).restype, nir_build_alu_src_arr.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_op, ctypes.POINTER(ctypes.POINTER(nir_def))]
 except AttributeError: pass
 
-# nir_def *nir_load_system_value(nir_builder *build, nir_intrinsic_op op, int index, unsigned int num_components, unsigned int bit_size)
 try: (nir_load_system_value:=dll.nir_load_system_value).restype, nir_load_system_value.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), nir_intrinsic_op, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_def *nir_type_convert(nir_builder *b, nir_def *src, nir_alu_type src_type, nir_alu_type dest_type, nir_rounding_mode rnd)
 try: (nir_type_convert:=dll.nir_type_convert).restype, nir_type_convert.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), nir_alu_type, nir_alu_type, nir_rounding_mode]
 except AttributeError: pass
 
-# nir_def *nir_vec_scalars(nir_builder *build, nir_scalar *comp, unsigned int num_components)
 try: (nir_vec_scalars:=dll.nir_vec_scalars).restype, nir_vec_scalars.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_scalar), ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_def *nir_ssa_for_alu_src(nir_builder *build, nir_alu_instr *instr, unsigned int srcn)
 try: (nir_ssa_for_alu_src:=dll.nir_ssa_for_alu_src).restype, nir_ssa_for_alu_src.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32]
 except AttributeError: pass
 
-# nir_def *nir_build_string(nir_builder *build, const char *value)
 try: (nir_build_string:=dll.nir_build_string).restype, nir_build_string.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# nir_def *nir_compare_func(nir_builder *b, enum compare_func func, nir_def *src0, nir_def *src1)
 try: (nir_compare_func:=dll.nir_compare_func).restype, nir_compare_func.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), enum_compare_func, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# nir_def *nir_gen_rect_vertices(nir_builder *b, nir_def *z, nir_def *w)
 try: (nir_gen_rect_vertices:=dll.nir_gen_rect_vertices).restype, nir_gen_rect_vertices.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def)]
 except AttributeError: pass
 
-# void nir_printf_fmt(nir_builder *b, unsigned int ptr_bit_size, const char *fmt, ...)
 try: (nir_printf_fmt:=dll.nir_printf_fmt).restype, nir_printf_fmt.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# void nir_printf_fmt_at_px(nir_builder *b, unsigned int ptr_bit_size, unsigned int x, unsigned int y, const char *fmt, ...)
 try: (nir_printf_fmt_at_px:=dll.nir_printf_fmt_at_px).restype, nir_printf_fmt_at_px.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# nir_def *nir_call_serialized(nir_builder *build, const uint32_t *serialized, size_t serialized_size_B, nir_def **args)
 try: (nir_call_serialized:=dll.nir_call_serialized).restype, nir_call_serialized.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(uint32_t), size_t, ctypes.POINTER(ctypes.POINTER(nir_def))]
 except AttributeError: pass
 
@@ -6270,7 +5740,6 @@ struct_blob._fields_ = [
   ('fixed_allocation', ctypes.c_bool),
   ('out_of_memory', ctypes.c_bool),
 ]
-# void nir_serialize(struct blob *blob, const nir_shader *nir, _Bool strip)
 try: (nir_serialize:=dll.nir_serialize).restype, nir_serialize.argtypes = None, [ctypes.POINTER(struct_blob), ctypes.POINTER(nir_shader), ctypes.c_bool]
 except AttributeError: pass
 
@@ -6281,15 +5750,12 @@ struct_blob_reader._fields_ = [
   ('current', ctypes.POINTER(uint8_t)),
   ('overrun', ctypes.c_bool),
 ]
-# nir_shader *nir_deserialize(void *mem_ctx, const struct nir_shader_compiler_options *options, struct blob_reader *blob)
 try: (nir_deserialize:=dll.nir_deserialize).restype, nir_deserialize.argtypes = ctypes.POINTER(nir_shader), [ctypes.c_void_p, ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# void nir_serialize_function(struct blob *blob, const nir_function *fxn)
 try: (nir_serialize_function:=dll.nir_serialize_function).restype, nir_serialize_function.argtypes = None, [ctypes.POINTER(struct_blob), ctypes.POINTER(nir_function)]
 except AttributeError: pass
 
-# nir_function *nir_deserialize_function(void *mem_ctx, const struct nir_shader_compiler_options *options, struct blob_reader *blob)
 try: (nir_deserialize_function:=dll.nir_deserialize_function).restype, nir_deserialize_function.argtypes = ctypes.POINTER(nir_function), [ctypes.c_void_p, ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
@@ -6408,27 +5874,21 @@ struct_nv_device_info._fields_ = [
   ('bar_size_B', uint64_t),
 ]
 class struct_nak_compiler(Struct): pass
-# struct nak_compiler *nak_compiler_create(const struct nv_device_info *dev)
 try: (nak_compiler_create:=dll.nak_compiler_create).restype, nak_compiler_create.argtypes = ctypes.POINTER(struct_nak_compiler), [ctypes.POINTER(struct_nv_device_info)]
 except AttributeError: pass
 
-# void nak_compiler_destroy(struct nak_compiler *nak)
 try: (nak_compiler_destroy:=dll.nak_compiler_destroy).restype, nak_compiler_destroy.argtypes = None, [ctypes.POINTER(struct_nak_compiler)]
 except AttributeError: pass
 
-# uint64_t nak_debug_flags(const struct nak_compiler *nak)
 try: (nak_debug_flags:=dll.nak_debug_flags).restype, nak_debug_flags.argtypes = uint64_t, [ctypes.POINTER(struct_nak_compiler)]
 except AttributeError: pass
 
-# const struct nir_shader_compiler_options *nak_nir_options(const struct nak_compiler *nak)
 try: (nak_nir_options:=dll.nak_nir_options).restype, nak_nir_options.argtypes = ctypes.POINTER(struct_nir_shader_compiler_options), [ctypes.POINTER(struct_nak_compiler)]
 except AttributeError: pass
 
-# void nak_preprocess_nir(nir_shader *nir, const struct nak_compiler *nak)
 try: (nak_preprocess_nir:=dll.nak_preprocess_nir).restype, nak_preprocess_nir.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_nak_compiler)]
 except AttributeError: pass
 
-# bool nak_nir_lower_image_addrs(nir_shader *nir, const struct nak_compiler *nak)
 try: (nak_nir_lower_image_addrs:=dll.nak_nir_lower_image_addrs).restype, nak_nir_lower_image_addrs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_nak_compiler)]
 except AttributeError: pass
 
@@ -6450,7 +5910,6 @@ struct_nak_fs_key._fields_ = [
   ('sample_locations_offset', uint32_t),
   ('sample_masks_offset', uint32_t),
 ]
-# void nak_postprocess_nir(nir_shader *nir, const struct nak_compiler *nak, nir_variable_mode robust2_modes, const struct nak_fs_key *fs_key)
 try: (nak_postprocess_nir:=dll.nak_postprocess_nir).restype, nak_postprocess_nir.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_nak_compiler), nir_variable_mode, ctypes.POINTER(struct_nak_fs_key)]
 except AttributeError: pass
 
@@ -6544,11 +6003,9 @@ struct_nak_shader_bin._fields_ = [
   ('code', ctypes.c_void_p),
   ('asm_str', ctypes.POINTER(ctypes.c_char)),
 ]
-# void nak_shader_bin_destroy(struct nak_shader_bin *bin)
 try: (nak_shader_bin_destroy:=dll.nak_shader_bin_destroy).restype, nak_shader_bin_destroy.argtypes = None, [ctypes.POINTER(struct_nak_shader_bin)]
 except AttributeError: pass
 
-# struct nak_shader_bin *nak_compile_shader(nir_shader *nir, bool dump_asm, const struct nak_compiler *nak, nir_variable_mode robust2_modes, const struct nak_fs_key *fs_key)
 try: (nak_compile_shader:=dll.nak_compile_shader).restype, nak_compile_shader.argtypes = ctypes.POINTER(struct_nak_shader_bin), [ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.POINTER(struct_nak_compiler), nir_variable_mode, ctypes.POINTER(struct_nak_fs_key)]
 except AttributeError: pass
 
@@ -6567,11 +6024,9 @@ struct_nak_qmd_info._fields_ = [
   ('num_cbufs', uint32_t),
   ('cbufs', (struct_nak_qmd_cbuf * 8)),
 ]
-# uint32_t nak_qmd_size_B(const struct nv_device_info *dev)
 try: (nak_qmd_size_B:=dll.nak_qmd_size_B).restype, nak_qmd_size_B.argtypes = uint32_t, [ctypes.POINTER(struct_nv_device_info)]
 except AttributeError: pass
 
-# void nak_fill_qmd(const struct nv_device_info *dev, const struct nak_shader_info *info, const struct nak_qmd_info *qmd_info, void *qmd_out, size_t qmd_size)
 try: (nak_fill_qmd:=dll.nak_fill_qmd).restype, nak_fill_qmd.argtypes = None, [ctypes.POINTER(struct_nv_device_info), ctypes.POINTER(struct_nak_shader_info), ctypes.POINTER(struct_nak_qmd_info), ctypes.c_void_p, size_t]
 except AttributeError: pass
 
@@ -6584,7 +6039,6 @@ struct_nak_qmd_dispatch_size_layout._fields_ = [
   ('z_start', uint16_t),
   ('z_end', uint16_t),
 ]
-# struct nak_qmd_dispatch_size_layout nak_get_qmd_dispatch_size_layout(const struct nv_device_info *dev)
 try: (nak_get_qmd_dispatch_size_layout:=dll.nak_get_qmd_dispatch_size_layout).restype, nak_get_qmd_dispatch_size_layout.argtypes = struct_nak_qmd_dispatch_size_layout, [ctypes.POINTER(struct_nv_device_info)]
 except AttributeError: pass
 
@@ -6596,7 +6050,6 @@ struct_nak_qmd_cbuf_desc_layout._fields_ = [
   ('addr_hi_start', uint16_t),
   ('addr_hi_end', uint16_t),
 ]
-# struct nak_qmd_cbuf_desc_layout nak_get_qmd_cbuf_desc_layout(const struct nv_device_info *dev, uint8_t idx)
 try: (nak_get_qmd_cbuf_desc_layout:=dll.nak_get_qmd_cbuf_desc_layout).restype, nak_get_qmd_cbuf_desc_layout.argtypes = struct_nak_qmd_cbuf_desc_layout, [ctypes.POINTER(struct_nv_device_info), uint8_t]
 except AttributeError: pass
 
@@ -6611,17 +6064,14 @@ lp_context_ref = struct_lp_context_ref
 class struct_lp_passmgr(Struct): pass
 class struct_LLVMOpaqueModule(Struct): pass
 LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
-# _Bool lp_passmgr_create(LLVMModuleRef module, struct lp_passmgr **mgr)
 try: (lp_passmgr_create:=dll.lp_passmgr_create).restype, lp_passmgr_create.argtypes = ctypes.c_bool, [LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(struct_lp_passmgr))]
 except AttributeError: pass
 
 class struct_LLVMOpaqueTargetMachine(Struct): pass
 LLVMTargetMachineRef = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
-# void lp_passmgr_run(struct lp_passmgr *mgr, LLVMModuleRef module, LLVMTargetMachineRef tm, const char *module_name)
 try: (lp_passmgr_run:=dll.lp_passmgr_run).restype, lp_passmgr_run.argtypes = None, [ctypes.POINTER(struct_lp_passmgr), LLVMModuleRef, LLVMTargetMachineRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# void lp_passmgr_dispose(struct lp_passmgr *mgr)
 try: (lp_passmgr_dispose:=dll.lp_passmgr_dispose).restype, lp_passmgr_dispose.argtypes = None, [ctypes.POINTER(struct_lp_passmgr)]
 except AttributeError: pass
 
@@ -6635,19 +6085,15 @@ struct_lp_cached_code._fields_ = [
 class struct_lp_generated_code(Struct): pass
 class struct_LLVMOpaqueTargetLibraryInfotData(Struct): pass
 LLVMTargetLibraryInfoRef = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
-# extern LLVMTargetLibraryInfoRef gallivm_create_target_library_info(const char *triple)
 try: (gallivm_create_target_library_info:=dll.gallivm_create_target_library_info).restype, gallivm_create_target_library_info.argtypes = LLVMTargetLibraryInfoRef, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern void gallivm_dispose_target_library_info(LLVMTargetLibraryInfoRef library_info)
 try: (gallivm_dispose_target_library_info:=dll.gallivm_dispose_target_library_info).restype, gallivm_dispose_target_library_info.argtypes = None, [LLVMTargetLibraryInfoRef]
 except AttributeError: pass
 
-# extern void lp_set_target_options(void)
 try: (lp_set_target_options:=dll.lp_set_target_options).restype, lp_set_target_options.argtypes = None, []
 except AttributeError: pass
 
-# extern void lp_bld_init_native_targets()
 try: (lp_bld_init_native_targets:=dll.lp_bld_init_native_targets).restype, lp_bld_init_native_targets.argtypes = None, []
 except AttributeError: pass
 
@@ -6655,37 +6101,29 @@ class struct_LLVMOpaqueExecutionEngine(Struct): pass
 LLVMExecutionEngineRef = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
 class struct_LLVMOpaqueMCJITMemoryManager(Struct): pass
 LLVMMCJITMemoryManagerRef = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
-# extern int lp_build_create_jit_compiler_for_module(LLVMExecutionEngineRef *OutJIT, struct lp_generated_code **OutCode, struct lp_cached_code *cache_out, LLVMModuleRef M, LLVMMCJITMemoryManagerRef MM, unsigned int OptLevel, char **OutError)
 try: (lp_build_create_jit_compiler_for_module:=dll.lp_build_create_jit_compiler_for_module).restype, lp_build_create_jit_compiler_for_module.argtypes = ctypes.c_int32, [ctypes.POINTER(LLVMExecutionEngineRef), ctypes.POINTER(ctypes.POINTER(struct_lp_generated_code)), ctypes.POINTER(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# extern void lp_free_generated_code(struct lp_generated_code *code)
 try: (lp_free_generated_code:=dll.lp_free_generated_code).restype, lp_free_generated_code.argtypes = None, [ctypes.POINTER(struct_lp_generated_code)]
 except AttributeError: pass
 
-# extern LLVMMCJITMemoryManagerRef lp_get_default_memory_manager()
 try: (lp_get_default_memory_manager:=dll.lp_get_default_memory_manager).restype, lp_get_default_memory_manager.argtypes = LLVMMCJITMemoryManagerRef, []
 except AttributeError: pass
 
-# extern void lp_free_memory_manager(LLVMMCJITMemoryManagerRef memorymgr)
 try: (lp_free_memory_manager:=dll.lp_free_memory_manager).restype, lp_free_memory_manager.argtypes = None, [LLVMMCJITMemoryManagerRef]
 except AttributeError: pass
 
 class struct_LLVMOpaqueValue(Struct): pass
 LLVMValueRef = ctypes.POINTER(struct_LLVMOpaqueValue)
-# extern LLVMValueRef lp_get_called_value(LLVMValueRef call)
 try: (lp_get_called_value:=dll.lp_get_called_value).restype, lp_get_called_value.argtypes = LLVMValueRef, [LLVMValueRef]
 except AttributeError: pass
 
-# extern bool lp_is_function(LLVMValueRef v)
 try: (lp_is_function:=dll.lp_is_function).restype, lp_is_function.argtypes = ctypes.c_bool, [LLVMValueRef]
 except AttributeError: pass
 
-# void lp_free_objcache(void *objcache)
 try: (lp_free_objcache:=dll.lp_free_objcache).restype, lp_free_objcache.argtypes = None, [ctypes.c_void_p]
 except AttributeError: pass
 
-# void lp_set_module_stack_alignment_override(LLVMModuleRef M, unsigned int align)
 try: (lp_set_module_stack_alignment_override:=dll.lp_set_module_stack_alignment_override).restype, lp_set_module_stack_alignment_override.argtypes = None, [LLVMModuleRef, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -6717,51 +6155,39 @@ struct_lp_build_context._fields_ = [
   ('zero', LLVMValueRef),
   ('one', LLVMValueRef),
 ]
-# LLVMTypeRef lp_build_elem_type(const struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_elem_type:=dll.lp_build_elem_type).restype, lp_build_elem_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# LLVMTypeRef lp_build_vec_type(const struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_vec_type:=dll.lp_build_vec_type).restype, lp_build_vec_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# bool lp_check_elem_type(struct lp_type type, LLVMTypeRef elem_type)
 try: (lp_check_elem_type:=dll.lp_check_elem_type).restype, lp_check_elem_type.argtypes = ctypes.c_bool, [struct_lp_type, LLVMTypeRef]
 except AttributeError: pass
 
-# bool lp_check_vec_type(struct lp_type type, LLVMTypeRef vec_type)
 try: (lp_check_vec_type:=dll.lp_check_vec_type).restype, lp_check_vec_type.argtypes = ctypes.c_bool, [struct_lp_type, LLVMTypeRef]
 except AttributeError: pass
 
-# bool lp_check_value(struct lp_type type, LLVMValueRef val)
 try: (lp_check_value:=dll.lp_check_value).restype, lp_check_value.argtypes = ctypes.c_bool, [struct_lp_type, LLVMValueRef]
 except AttributeError: pass
 
-# LLVMTypeRef lp_build_int_elem_type(const struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_int_elem_type:=dll.lp_build_int_elem_type).restype, lp_build_int_elem_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# LLVMTypeRef lp_build_int_vec_type(const struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_int_vec_type:=dll.lp_build_int_vec_type).restype, lp_build_int_vec_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# struct lp_type lp_elem_type(struct lp_type type)
 try: (lp_elem_type:=dll.lp_elem_type).restype, lp_elem_type.argtypes = struct_lp_type, [struct_lp_type]
 except AttributeError: pass
 
-# struct lp_type lp_uint_type(struct lp_type type)
 try: (lp_uint_type:=dll.lp_uint_type).restype, lp_uint_type.argtypes = struct_lp_type, [struct_lp_type]
 except AttributeError: pass
 
-# struct lp_type lp_int_type(struct lp_type type)
 try: (lp_int_type:=dll.lp_int_type).restype, lp_int_type.argtypes = struct_lp_type, [struct_lp_type]
 except AttributeError: pass
 
-# struct lp_type lp_wider_type(struct lp_type type)
 try: (lp_wider_type:=dll.lp_wider_type).restype, lp_wider_type.argtypes = struct_lp_type, [struct_lp_type]
 except AttributeError: pass
 
-# unsigned int lp_sizeof_llvm_type(LLVMTypeRef t)
 try: (lp_sizeof_llvm_type:=dll.lp_sizeof_llvm_type).restype, lp_sizeof_llvm_type.argtypes = ctypes.c_uint32, [LLVMTypeRef]
 except AttributeError: pass
 
@@ -6787,19 +6213,15 @@ LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18)
 LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19)
 LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20)
 
-# const char *lp_typekind_name(LLVMTypeKind t)
 try: (lp_typekind_name:=dll.lp_typekind_name).restype, lp_typekind_name.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMTypeKind]
 except AttributeError: pass
 
-# void lp_dump_llvmtype(LLVMTypeRef t)
 try: (lp_dump_llvmtype:=dll.lp_dump_llvmtype).restype, lp_dump_llvmtype.argtypes = None, [LLVMTypeRef]
 except AttributeError: pass
 
-# void lp_build_context_init(struct lp_build_context *bld, struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_context_init:=dll.lp_build_context_init).restype, lp_build_context_init.argtypes = None, [ctypes.POINTER(struct_lp_build_context), ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# unsigned int lp_build_count_ir_module(LLVMModuleRef module)
 try: (lp_build_count_ir_module:=dll.lp_build_count_ir_module).restype, lp_build_count_ir_module.argtypes = ctypes.c_uint32, [LLVMModuleRef]
 except AttributeError: pass
 
@@ -6838,56 +6260,43 @@ struct_gallivm_state._fields_ = [
   ('texture_dynamic_state', ctypes.POINTER(struct_lp_jit_texture)),
   ('sampler_descriptor', LLVMValueRef),
 ]
-# unsigned int lp_build_init_native_width(void)
 try: (lp_build_init_native_width:=dll.lp_build_init_native_width).restype, lp_build_init_native_width.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# bool lp_build_init(void)
 try: (lp_build_init:=dll.lp_build_init).restype, lp_build_init.argtypes = ctypes.c_bool, []
 except AttributeError: pass
 
-# struct gallivm_state *gallivm_create(const char *name, lp_context_ref *context, struct lp_cached_code *cache)
 try: (gallivm_create:=dll.gallivm_create).restype, gallivm_create.argtypes = ctypes.POINTER(struct_gallivm_state), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(lp_context_ref), ctypes.POINTER(struct_lp_cached_code)]
 except AttributeError: pass
 
-# void gallivm_destroy(struct gallivm_state *gallivm)
 try: (gallivm_destroy:=dll.gallivm_destroy).restype, gallivm_destroy.argtypes = None, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
-# void gallivm_free_ir(struct gallivm_state *gallivm)
 try: (gallivm_free_ir:=dll.gallivm_free_ir).restype, gallivm_free_ir.argtypes = None, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
-# void gallivm_verify_function(struct gallivm_state *gallivm, LLVMValueRef func)
 try: (gallivm_verify_function:=dll.gallivm_verify_function).restype, gallivm_verify_function.argtypes = None, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
 except AttributeError: pass
 
-# void gallivm_add_global_mapping(struct gallivm_state *gallivm, LLVMValueRef sym, void *addr)
 try: (gallivm_add_global_mapping:=dll.gallivm_add_global_mapping).restype, gallivm_add_global_mapping.argtypes = None, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.c_void_p]
 except AttributeError: pass
 
-# void gallivm_compile_module(struct gallivm_state *gallivm)
 try: (gallivm_compile_module:=dll.gallivm_compile_module).restype, gallivm_compile_module.argtypes = None, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
 func_pointer = ctypes.CFUNCTYPE(None, )
-# func_pointer gallivm_jit_function(struct gallivm_state *gallivm, LLVMValueRef func, const char *func_name)
 try: (gallivm_jit_function:=dll.gallivm_jit_function).restype, gallivm_jit_function.argtypes = func_pointer, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# void gallivm_stub_func(struct gallivm_state *gallivm, LLVMValueRef func)
 try: (gallivm_stub_func:=dll.gallivm_stub_func).restype, gallivm_stub_func.argtypes = None, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
 except AttributeError: pass
 
-# unsigned int gallivm_get_perf_flags(void)
 try: (gallivm_get_perf_flags:=dll.gallivm_get_perf_flags).restype, gallivm_get_perf_flags.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# void lp_init_clock_hook(struct gallivm_state *gallivm)
 try: (lp_init_clock_hook:=dll.lp_init_clock_hook).restype, lp_init_clock_hook.argtypes = None, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
-# void lp_init_env_options(void)
 try: (lp_init_env_options:=dll.lp_init_env_options).restype, lp_init_env_options.argtypes = None, []
 except AttributeError: pass
 
@@ -7174,11 +6583,9 @@ struct_lp_build_tgsi_params._fields_ = [
   ('scratch_ptr', LLVMValueRef),
   ('call_context_ptr', LLVMValueRef),
 ]
-# void lp_build_nir_soa(struct gallivm_state *gallivm, struct nir_shader *shader, const struct lp_build_tgsi_params *params, LLVMValueRef (*outputs)[4])
 try: (lp_build_nir_soa:=dll.lp_build_nir_soa).restype, lp_build_nir_soa.argtypes = None, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_lp_build_tgsi_params), ctypes.POINTER((LLVMValueRef * 4))]
 except AttributeError: pass
 
-# void lp_build_nir_soa_func(struct gallivm_state *gallivm, struct nir_shader *shader, nir_function_impl *impl, const struct lp_build_tgsi_params *params, LLVMValueRef (*outputs)[4])
 try: (lp_build_nir_soa_func:=dll.lp_build_nir_soa_func).restype, lp_build_nir_soa_func.argtypes = None, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(nir_function_impl), ctypes.POINTER(struct_lp_build_tgsi_params), ctypes.POINTER((LLVMValueRef * 4))]
 except AttributeError: pass
 
@@ -7216,7 +6623,6 @@ LP_BLD_TEX_MODIFIER_LOD_ZERO = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MOD
 struct_lp_build_sampler_aos._fields_ = [
   ('emit_fetch_texel', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_sampler_aos), ctypes.POINTER(struct_lp_build_context), enum_tgsi_texture_type, ctypes.c_uint32, LLVMValueRef, struct_lp_derivatives, enum_lp_build_tex_modifier)),
 ]
-# void lp_build_nir_aos(struct gallivm_state *gallivm, struct nir_shader *shader, struct lp_type type, const unsigned char swizzles[4], LLVMValueRef consts_ptr, const LLVMValueRef *inputs, LLVMValueRef *outputs, const struct lp_build_sampler_aos *sampler)
 try: (lp_build_nir_aos:=dll.lp_build_nir_aos).restype, lp_build_nir_aos.argtypes = None, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), struct_lp_type, (ctypes.c_ubyte * 4), LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.POINTER(LLVMValueRef), ctypes.POINTER(struct_lp_build_sampler_aos)]
 except AttributeError: pass
 
@@ -7225,27 +6631,21 @@ struct_lp_build_fn._fields_ = [
   ('fn_type', LLVMTypeRef),
   ('fn', LLVMValueRef),
 ]
-# void lp_build_nir_soa_prepasses(struct nir_shader *nir)
 try: (lp_build_nir_soa_prepasses:=dll.lp_build_nir_soa_prepasses).restype, lp_build_nir_soa_prepasses.argtypes = None, [ctypes.POINTER(struct_nir_shader)]
 except AttributeError: pass
 
-# void lp_build_opt_nir(struct nir_shader *nir)
 try: (lp_build_opt_nir:=dll.lp_build_opt_nir).restype, lp_build_opt_nir.argtypes = None, [ctypes.POINTER(struct_nir_shader)]
 except AttributeError: pass
 
-# LLVMAtomicRMWBinOp lp_translate_atomic_op(nir_atomic_op op)
 try: (lp_translate_atomic_op:=dll.lp_translate_atomic_op).restype, lp_translate_atomic_op.argtypes = LLVMAtomicRMWBinOp, [nir_atomic_op]
 except AttributeError: pass
 
-# uint32_t lp_build_nir_sample_key(gl_shader_stage stage, nir_tex_instr *instr)
 try: (lp_build_nir_sample_key:=dll.lp_build_nir_sample_key).restype, lp_build_nir_sample_key.argtypes = uint32_t, [gl_shader_stage, ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
-# void lp_img_op_from_intrinsic(struct lp_img_params *params, nir_intrinsic_instr *instr)
 try: (lp_img_op_from_intrinsic:=dll.lp_img_op_from_intrinsic).restype, lp_img_op_from_intrinsic.argtypes = None, [ctypes.POINTER(struct_lp_img_params), ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
-# uint32_t lp_packed_img_op_from_intrinsic(nir_intrinsic_instr *instr)
 try: (lp_packed_img_op_from_intrinsic:=dll.lp_packed_img_op_from_intrinsic).restype, lp_packed_img_op_from_intrinsic.argtypes = uint32_t, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
@@ -7269,39 +6669,30 @@ LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1 = enum_lp_nir_call_context_args.define('LP_NIR_
 LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2', 16)
 LP_NIR_CALL_CONTEXT_MAX_ARGS = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_MAX_ARGS', 17)
 
-# LLVMTypeRef lp_build_cs_func_call_context(struct gallivm_state *gallivm, int length, LLVMTypeRef context_type, LLVMTypeRef resources_type)
 try: (lp_build_cs_func_call_context:=dll.lp_build_cs_func_call_context).restype, lp_build_cs_func_call_context.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_int32, LLVMTypeRef, LLVMTypeRef]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_struct_get_ptr2(struct gallivm_state *gallivm, LLVMTypeRef ptr_type, LLVMValueRef ptr, unsigned int member, const char *name)
 try: (lp_build_struct_get_ptr2:=dll.lp_build_struct_get_ptr2).restype, lp_build_struct_get_ptr2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_struct_get2(struct gallivm_state *gallivm, LLVMTypeRef ptr_type, LLVMValueRef ptr, unsigned int member, const char *name)
 try: (lp_build_struct_get2:=dll.lp_build_struct_get2).restype, lp_build_struct_get2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_array_get_ptr2(struct gallivm_state *gallivm, LLVMTypeRef array_type, LLVMValueRef ptr, LLVMValueRef index)
 try: (lp_build_array_get_ptr2:=dll.lp_build_array_get_ptr2).restype, lp_build_array_get_ptr2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_array_get2(struct gallivm_state *gallivm, LLVMTypeRef array_type, LLVMValueRef ptr, LLVMValueRef index)
 try: (lp_build_array_get2:=dll.lp_build_array_get2).restype, lp_build_array_get2.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_pointer_get2(LLVMBuilderRef builder, LLVMTypeRef ptr_type, LLVMValueRef ptr, LLVMValueRef index)
 try: (lp_build_pointer_get2:=dll.lp_build_pointer_get2).restype, lp_build_pointer_get2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_pointer_get_unaligned2(LLVMBuilderRef builder, LLVMTypeRef ptr_type, LLVMValueRef ptr, LLVMValueRef index, unsigned int alignment)
 try: (lp_build_pointer_get_unaligned2:=dll.lp_build_pointer_get_unaligned2).restype, lp_build_pointer_get_unaligned2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
-# void lp_build_pointer_set(LLVMBuilderRef builder, LLVMValueRef ptr, LLVMValueRef index, LLVMValueRef value)
 try: (lp_build_pointer_set:=dll.lp_build_pointer_set).restype, lp_build_pointer_set.argtypes = None, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_pointer_set_unaligned(LLVMBuilderRef builder, LLVMValueRef ptr, LLVMValueRef index, LLVMValueRef value, unsigned int alignment)
 try: (lp_build_pointer_set_unaligned:=dll.lp_build_pointer_set_unaligned).restype, lp_build_pointer_set_unaligned.argtypes = None, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -7342,15 +6733,12 @@ LP_JIT_BUFFER_BASE = _anonenum0.define('LP_JIT_BUFFER_BASE', 0)
 LP_JIT_BUFFER_NUM_ELEMENTS = _anonenum0.define('LP_JIT_BUFFER_NUM_ELEMENTS', 1)
 LP_JIT_BUFFER_NUM_FIELDS = _anonenum0.define('LP_JIT_BUFFER_NUM_FIELDS', 2)
 
-# LLVMValueRef lp_llvm_descriptor_base(struct gallivm_state *gallivm, LLVMValueRef buffers_ptr, LLVMValueRef index, unsigned int buffers_limit)
 try: (lp_llvm_descriptor_base:=dll.lp_llvm_descriptor_base).restype, lp_llvm_descriptor_base.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
-# LLVMValueRef lp_llvm_buffer_base(struct gallivm_state *gallivm, LLVMValueRef buffers_ptr, LLVMValueRef buffers_offset, unsigned int buffers_limit)
 try: (lp_llvm_buffer_base:=dll.lp_llvm_buffer_base).restype, lp_llvm_buffer_base.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
-# LLVMValueRef lp_llvm_buffer_num_elements(struct gallivm_state *gallivm, LLVMValueRef buffers_ptr, LLVMValueRef buffers_offset, unsigned int buffers_limit)
 try: (lp_llvm_buffer_num_elements:=dll.lp_llvm_buffer_num_elements).restype, lp_llvm_buffer_num_elements.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -7446,7 +6834,6 @@ LP_JIT_RES_SAMPLERS = _anonenum4.define('LP_JIT_RES_SAMPLERS', 3)
 LP_JIT_RES_IMAGES = _anonenum4.define('LP_JIT_RES_IMAGES', 4)
 LP_JIT_RES_COUNT = _anonenum4.define('LP_JIT_RES_COUNT', 5)
 
-# LLVMTypeRef lp_build_jit_resources_type(struct gallivm_state *gallivm)
 try: (lp_build_jit_resources_type:=dll.lp_build_jit_resources_type).restype, lp_build_jit_resources_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
@@ -7455,27 +6842,21 @@ LP_JIT_VERTEX_HEADER_VERTEX_ID = _anonenum5.define('LP_JIT_VERTEX_HEADER_VERTEX_
 LP_JIT_VERTEX_HEADER_CLIP_POS = _anonenum5.define('LP_JIT_VERTEX_HEADER_CLIP_POS', 1)
 LP_JIT_VERTEX_HEADER_DATA = _anonenum5.define('LP_JIT_VERTEX_HEADER_DATA', 2)
 
-# LLVMTypeRef lp_build_create_jit_vertex_header_type(struct gallivm_state *gallivm, int data_elems)
 try: (lp_build_create_jit_vertex_header_type:=dll.lp_build_create_jit_vertex_header_type).restype, lp_build_create_jit_vertex_header_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_int32]
 except AttributeError: pass
 
-# void lp_build_jit_fill_sampler_dynamic_state(struct lp_sampler_dynamic_state *state)
 try: (lp_build_jit_fill_sampler_dynamic_state:=dll.lp_build_jit_fill_sampler_dynamic_state).restype, lp_build_jit_fill_sampler_dynamic_state.argtypes = None, [ctypes.POINTER(struct_lp_sampler_dynamic_state)]
 except AttributeError: pass
 
-# void lp_build_jit_fill_image_dynamic_state(struct lp_sampler_dynamic_state *state)
 try: (lp_build_jit_fill_image_dynamic_state:=dll.lp_build_jit_fill_image_dynamic_state).restype, lp_build_jit_fill_image_dynamic_state.argtypes = None, [ctypes.POINTER(struct_lp_sampler_dynamic_state)]
 except AttributeError: pass
 
-# LLVMTypeRef lp_build_sample_function_type(struct gallivm_state *gallivm, uint32_t sample_key)
 try: (lp_build_sample_function_type:=dll.lp_build_sample_function_type).restype, lp_build_sample_function_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), uint32_t]
 except AttributeError: pass
 
-# LLVMTypeRef lp_build_size_function_type(struct gallivm_state *gallivm, const struct lp_sampler_size_query_params *params)
 try: (lp_build_size_function_type:=dll.lp_build_size_function_type).restype, lp_build_size_function_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_sampler_size_query_params)]
 except AttributeError: pass
 
-# LLVMTypeRef lp_build_image_function_type(struct gallivm_state *gallivm, const struct lp_img_params *params, bool ms, bool is64)
 try: (lp_build_image_function_type:=dll.lp_build_image_function_type).restype, lp_build_image_function_type.argtypes = LLVMTypeRef, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_img_params), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
@@ -7560,39 +6941,30 @@ struct_lp_descriptor._fields_ = [
   ('_0', struct_lp_descriptor_0),
   ('functions', ctypes.c_void_p),
 ]
-# void lp_build_flow_skip_begin(struct lp_build_skip_context *ctx, struct gallivm_state *gallivm)
 try: (lp_build_flow_skip_begin:=dll.lp_build_flow_skip_begin).restype, lp_build_flow_skip_begin.argtypes = None, [ctypes.POINTER(struct_lp_build_skip_context), ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
-# void lp_build_flow_skip_cond_break(struct lp_build_skip_context *ctx, LLVMValueRef cond)
 try: (lp_build_flow_skip_cond_break:=dll.lp_build_flow_skip_cond_break).restype, lp_build_flow_skip_cond_break.argtypes = None, [ctypes.POINTER(struct_lp_build_skip_context), LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_flow_skip_end(struct lp_build_skip_context *ctx)
 try: (lp_build_flow_skip_end:=dll.lp_build_flow_skip_end).restype, lp_build_flow_skip_end.argtypes = None, [ctypes.POINTER(struct_lp_build_skip_context)]
 except AttributeError: pass
 
-# void lp_build_mask_begin(struct lp_build_mask_context *mask, struct gallivm_state *gallivm, struct lp_type type, LLVMValueRef value)
 try: (lp_build_mask_begin:=dll.lp_build_mask_begin).restype, lp_build_mask_begin.argtypes = None, [ctypes.POINTER(struct_lp_build_mask_context), ctypes.POINTER(struct_gallivm_state), struct_lp_type, LLVMValueRef]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_mask_value(struct lp_build_mask_context *mask)
 try: (lp_build_mask_value:=dll.lp_build_mask_value).restype, lp_build_mask_value.argtypes = LLVMValueRef, [ctypes.POINTER(struct_lp_build_mask_context)]
 except AttributeError: pass
 
-# void lp_build_mask_update(struct lp_build_mask_context *mask, LLVMValueRef value)
 try: (lp_build_mask_update:=dll.lp_build_mask_update).restype, lp_build_mask_update.argtypes = None, [ctypes.POINTER(struct_lp_build_mask_context), LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_mask_force(struct lp_build_mask_context *mask, LLVMValueRef value)
 try: (lp_build_mask_force:=dll.lp_build_mask_force).restype, lp_build_mask_force.argtypes = None, [ctypes.POINTER(struct_lp_build_mask_context), LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_mask_check(struct lp_build_mask_context *mask)
 try: (lp_build_mask_check:=dll.lp_build_mask_check).restype, lp_build_mask_check.argtypes = None, [ctypes.POINTER(struct_lp_build_mask_context)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_mask_end(struct lp_build_mask_context *mask)
 try: (lp_build_mask_end:=dll.lp_build_mask_end).restype, lp_build_mask_end.argtypes = LLVMValueRef, [ctypes.POINTER(struct_lp_build_mask_context)]
 except AttributeError: pass
 
@@ -7604,19 +6976,15 @@ struct_lp_build_loop_state._fields_ = [
   ('counter_type', LLVMTypeRef),
   ('gallivm', ctypes.POINTER(struct_gallivm_state)),
 ]
-# void lp_build_loop_begin(struct lp_build_loop_state *state, struct gallivm_state *gallivm, LLVMValueRef start)
 try: (lp_build_loop_begin:=dll.lp_build_loop_begin).restype, lp_build_loop_begin.argtypes = None, [ctypes.POINTER(struct_lp_build_loop_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_loop_end(struct lp_build_loop_state *state, LLVMValueRef end, LLVMValueRef step)
 try: (lp_build_loop_end:=dll.lp_build_loop_end).restype, lp_build_loop_end.argtypes = None, [ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_loop_force_set_counter(struct lp_build_loop_state *state, LLVMValueRef end)
 try: (lp_build_loop_force_set_counter:=dll.lp_build_loop_force_set_counter).restype, lp_build_loop_force_set_counter.argtypes = None, [ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_loop_force_reload_counter(struct lp_build_loop_state *state)
 try: (lp_build_loop_force_reload_counter:=dll.lp_build_loop_force_reload_counter).restype, lp_build_loop_force_reload_counter.argtypes = None, [ctypes.POINTER(struct_lp_build_loop_state)]
 except AttributeError: pass
 
@@ -7632,7 +7000,6 @@ LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39)
 LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40)
 LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41)
 
-# void lp_build_loop_end_cond(struct lp_build_loop_state *state, LLVMValueRef end, LLVMValueRef step, LLVMIntPredicate cond)
 try: (lp_build_loop_end_cond:=dll.lp_build_loop_end_cond).restype, lp_build_loop_end_cond.argtypes = None, [ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef, LLVMIntPredicate]
 except AttributeError: pass
 
@@ -7649,11 +7016,9 @@ struct_lp_build_for_loop_state._fields_ = [
   ('end', LLVMValueRef),
   ('gallivm', ctypes.POINTER(struct_gallivm_state)),
 ]
-# void lp_build_for_loop_begin(struct lp_build_for_loop_state *state, struct gallivm_state *gallivm, LLVMValueRef start, LLVMIntPredicate llvm_cond, LLVMValueRef end, LLVMValueRef step)
 try: (lp_build_for_loop_begin:=dll.lp_build_for_loop_begin).restype, lp_build_for_loop_begin.argtypes = None, [ctypes.POINTER(struct_lp_build_for_loop_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMIntPredicate, LLVMValueRef, LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_for_loop_end(struct lp_build_for_loop_state *state)
 try: (lp_build_for_loop_end:=dll.lp_build_for_loop_end).restype, lp_build_for_loop_end.argtypes = None, [ctypes.POINTER(struct_lp_build_for_loop_state)]
 except AttributeError: pass
 
@@ -7666,139 +7031,105 @@ struct_lp_build_if_state._fields_ = [
   ('false_block', LLVMBasicBlockRef),
   ('merge_block', LLVMBasicBlockRef),
 ]
-# void lp_build_if(struct lp_build_if_state *ctx, struct gallivm_state *gallivm, LLVMValueRef condition)
 try: (lp_build_if:=dll.lp_build_if).restype, lp_build_if.argtypes = None, [ctypes.POINTER(struct_lp_build_if_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef]
 except AttributeError: pass
 
-# void lp_build_else(struct lp_build_if_state *ctx)
 try: (lp_build_else:=dll.lp_build_else).restype, lp_build_else.argtypes = None, [ctypes.POINTER(struct_lp_build_if_state)]
 except AttributeError: pass
 
-# void lp_build_endif(struct lp_build_if_state *ctx)
 try: (lp_build_endif:=dll.lp_build_endif).restype, lp_build_endif.argtypes = None, [ctypes.POINTER(struct_lp_build_if_state)]
 except AttributeError: pass
 
-# LLVMBasicBlockRef lp_build_insert_new_block(struct gallivm_state *gallivm, const char *name)
 try: (lp_build_insert_new_block:=dll.lp_build_insert_new_block).restype, lp_build_insert_new_block.argtypes = LLVMBasicBlockRef, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# LLVMBuilderRef lp_create_builder_at_entry(struct gallivm_state *gallivm)
 try: (lp_create_builder_at_entry:=dll.lp_create_builder_at_entry).restype, lp_create_builder_at_entry.argtypes = LLVMBuilderRef, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_alloca(struct gallivm_state *gallivm, LLVMTypeRef type, const char *name)
 try: (lp_build_alloca:=dll.lp_build_alloca).restype, lp_build_alloca.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_alloca_undef(struct gallivm_state *gallivm, LLVMTypeRef type, const char *name)
 try: (lp_build_alloca_undef:=dll.lp_build_alloca_undef).restype, lp_build_alloca_undef.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_array_alloca(struct gallivm_state *gallivm, LLVMTypeRef type, LLVMValueRef count, const char *name)
 try: (lp_build_array_alloca:=dll.lp_build_array_alloca).restype, lp_build_array_alloca.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# unsigned int lp_mantissa(struct lp_type type)
 try: (lp_mantissa:=dll.lp_mantissa).restype, lp_mantissa.argtypes = ctypes.c_uint32, [struct_lp_type]
 except AttributeError: pass
 
-# unsigned int lp_const_shift(struct lp_type type)
 try: (lp_const_shift:=dll.lp_const_shift).restype, lp_const_shift.argtypes = ctypes.c_uint32, [struct_lp_type]
 except AttributeError: pass
 
-# unsigned int lp_const_offset(struct lp_type type)
 try: (lp_const_offset:=dll.lp_const_offset).restype, lp_const_offset.argtypes = ctypes.c_uint32, [struct_lp_type]
 except AttributeError: pass
 
-# double lp_const_scale(struct lp_type type)
 try: (lp_const_scale:=dll.lp_const_scale).restype, lp_const_scale.argtypes = ctypes.c_double, [struct_lp_type]
 except AttributeError: pass
 
-# double lp_const_min(struct lp_type type)
 try: (lp_const_min:=dll.lp_const_min).restype, lp_const_min.argtypes = ctypes.c_double, [struct_lp_type]
 except AttributeError: pass
 
-# double lp_const_max(struct lp_type type)
 try: (lp_const_max:=dll.lp_const_max).restype, lp_const_max.argtypes = ctypes.c_double, [struct_lp_type]
 except AttributeError: pass
 
-# double lp_const_eps(struct lp_type type)
 try: (lp_const_eps:=dll.lp_const_eps).restype, lp_const_eps.argtypes = ctypes.c_double, [struct_lp_type]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_undef(struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_undef:=dll.lp_build_undef).restype, lp_build_undef.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_zero(struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_zero:=dll.lp_build_zero).restype, lp_build_zero.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_one(struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_one:=dll.lp_build_one).restype, lp_build_one.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_elem(struct gallivm_state *gallivm, struct lp_type type, double val)
 try: (lp_build_const_elem:=dll.lp_build_const_elem).restype, lp_build_const_elem.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_vec(struct gallivm_state *gallivm, struct lp_type type, double val)
 try: (lp_build_const_vec:=dll.lp_build_const_vec).restype, lp_build_const_vec.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_int_vec(struct gallivm_state *gallivm, struct lp_type type, long long val)
 try: (lp_build_const_int_vec:=dll.lp_build_const_int_vec).restype, lp_build_const_int_vec.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_int64]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_channel_vec(struct gallivm_state *gallivm, struct lp_type type)
 try: (lp_build_const_channel_vec:=dll.lp_build_const_channel_vec).restype, lp_build_const_channel_vec.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_aos(struct gallivm_state *gallivm, struct lp_type type, double r, double g, double b, double a, const unsigned char *swizzle)
 try: (lp_build_const_aos:=dll.lp_build_const_aos).restype, lp_build_const_aos.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_mask_aos(struct gallivm_state *gallivm, struct lp_type type, unsigned int mask, unsigned int channels)
 try: (lp_build_const_mask_aos:=dll.lp_build_const_mask_aos).restype, lp_build_const_mask_aos.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_mask_aos_swizzled(struct gallivm_state *gallivm, struct lp_type type, unsigned int mask, unsigned int channels, const unsigned char *swizzle)
 try: (lp_build_const_mask_aos_swizzled:=dll.lp_build_const_mask_aos_swizzled).restype, lp_build_const_mask_aos_swizzled.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_string(struct gallivm_state *gallivm, const char *str)
 try: (lp_build_const_string:=dll.lp_build_const_string).restype, lp_build_const_string.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_func_pointer(struct gallivm_state *gallivm, const void *ptr, LLVMTypeRef ret_type, LLVMTypeRef *arg_types, unsigned int num_args, const char *name)
 try: (lp_build_const_func_pointer:=dll.lp_build_const_func_pointer).restype, lp_build_const_func_pointer.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# LLVMValueRef lp_build_const_func_pointer_from_type(struct gallivm_state *gallivm, const void *ptr, LLVMTypeRef function_type, const char *name)
 try: (lp_build_const_func_pointer_from_type:=dll.lp_build_const_func_pointer_from_type).restype, lp_build_const_func_pointer_from_type.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern void glsl_type_singleton_init_or_ref(void)
 try: (glsl_type_singleton_init_or_ref:=dll.glsl_type_singleton_init_or_ref).restype, glsl_type_singleton_init_or_ref.argtypes = None, []
 except AttributeError: pass
 
-# extern void glsl_type_singleton_decref(void)
 try: (glsl_type_singleton_decref:=dll.glsl_type_singleton_decref).restype, glsl_type_singleton_decref.argtypes = None, []
 except AttributeError: pass
 
-# void encode_type_to_blob(struct blob *blob, const glsl_type *type)
 try: (encode_type_to_blob:=dll.encode_type_to_blob).restype, encode_type_to_blob.argtypes = None, [ctypes.POINTER(struct_blob), ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *decode_type_from_blob(struct blob_reader *blob)
 try: (decode_type_from_blob:=dll.decode_type_from_blob).restype, decode_type_from_blob.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# enum glsl_base_type glsl_apply_signedness_to_base_type(enum glsl_base_type type, bool signedness)
 try: (glsl_apply_signedness_to_base_type:=dll.glsl_apply_signedness_to_base_type).restype, glsl_apply_signedness_to_base_type.argtypes = enum_glsl_base_type, [enum_glsl_base_type, ctypes.c_bool]
 except AttributeError: pass
 
-# int glsl_get_sampler_dim_coordinate_components(enum glsl_sampler_dim dim)
 try: (glsl_get_sampler_dim_coordinate_components:=dll.glsl_get_sampler_dim_coordinate_components).restype, glsl_get_sampler_dim_coordinate_components.argtypes = ctypes.c_int32, [enum_glsl_sampler_dim]
 except AttributeError: pass
 
@@ -7819,255 +7150,192 @@ GLSL_CMAT_USE_A = enum_glsl_cmat_use.define('GLSL_CMAT_USE_A', 1)
 GLSL_CMAT_USE_B = enum_glsl_cmat_use.define('GLSL_CMAT_USE_B', 2)
 GLSL_CMAT_USE_ACCUMULATOR = enum_glsl_cmat_use.define('GLSL_CMAT_USE_ACCUMULATOR', 3)
 
-# const char *glsl_get_type_name(const glsl_type *type)
 try: (glsl_get_type_name:=dll.glsl_get_type_name).restype, glsl_get_type_name.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_is_vector(const glsl_type *t)
 try: (glsl_type_is_vector:=dll.glsl_type_is_vector).restype, glsl_type_is_vector.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_is_scalar(const glsl_type *t)
 try: (glsl_type_is_scalar:=dll.glsl_type_is_scalar).restype, glsl_type_is_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_is_vector_or_scalar(const glsl_type *t)
 try: (glsl_type_is_vector_or_scalar:=dll.glsl_type_is_vector_or_scalar).restype, glsl_type_is_vector_or_scalar.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_is_matrix(const glsl_type *t)
 try: (glsl_type_is_matrix:=dll.glsl_type_is_matrix).restype, glsl_type_is_matrix.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_is_array_or_matrix(const glsl_type *t)
 try: (glsl_type_is_array_or_matrix:=dll.glsl_type_is_array_or_matrix).restype, glsl_type_is_array_or_matrix.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_is_dual_slot(const glsl_type *t)
 try: (glsl_type_is_dual_slot:=dll.glsl_type_is_dual_slot).restype, glsl_type_is_dual_slot.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_is_leaf(const glsl_type *type)
 try: (glsl_type_is_leaf:=dll.glsl_type_is_leaf).restype, glsl_type_is_leaf.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_bare_type(const glsl_type *t)
 try: (glsl_get_bare_type:=dll.glsl_get_bare_type).restype, glsl_get_bare_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_scalar_type(const glsl_type *t)
 try: (glsl_get_scalar_type:=dll.glsl_get_scalar_type).restype, glsl_get_scalar_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_base_glsl_type(const glsl_type *t)
 try: (glsl_get_base_glsl_type:=dll.glsl_get_base_glsl_type).restype, glsl_get_base_glsl_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_get_length(const glsl_type *t)
 try: (glsl_get_length:=dll.glsl_get_length).restype, glsl_get_length.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_type_wrap_in_arrays(const glsl_type *t, const glsl_type *arrays)
 try: (glsl_type_wrap_in_arrays:=dll.glsl_type_wrap_in_arrays).restype, glsl_type_wrap_in_arrays.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_get_aoa_size(const glsl_type *t)
 try: (glsl_get_aoa_size:=dll.glsl_get_aoa_size).restype, glsl_get_aoa_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_array_element(const glsl_type *t)
 try: (glsl_get_array_element:=dll.glsl_get_array_element).restype, glsl_get_array_element.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_without_array(const glsl_type *t)
 try: (glsl_without_array:=dll.glsl_without_array).restype, glsl_without_array.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_without_array_or_matrix(const glsl_type *t)
 try: (glsl_without_array_or_matrix:=dll.glsl_without_array_or_matrix).restype, glsl_without_array_or_matrix.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_type_wrap_in_arrays(const glsl_type *t, const glsl_type *arrays)
 try: (glsl_type_wrap_in_arrays:=dll.glsl_type_wrap_in_arrays).restype, glsl_type_wrap_in_arrays.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_cmat_element(const glsl_type *t)
 try: (glsl_get_cmat_element:=dll.glsl_get_cmat_element).restype, glsl_get_cmat_element.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const struct glsl_cmat_description *glsl_get_cmat_description(const glsl_type *t)
 try: (glsl_get_cmat_description:=dll.glsl_get_cmat_description).restype, glsl_get_cmat_description.argtypes = ctypes.POINTER(struct_glsl_cmat_description), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_atomic_size(const glsl_type *type)
 try: (glsl_atomic_size:=dll.glsl_atomic_size).restype, glsl_atomic_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_contains_32bit(const glsl_type *t)
 try: (glsl_type_contains_32bit:=dll.glsl_type_contains_32bit).restype, glsl_type_contains_32bit.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_contains_64bit(const glsl_type *t)
 try: (glsl_type_contains_64bit:=dll.glsl_type_contains_64bit).restype, glsl_type_contains_64bit.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_contains_image(const glsl_type *t)
 try: (glsl_type_contains_image:=dll.glsl_type_contains_image).restype, glsl_type_contains_image.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_contains_atomic(const glsl_type *t)
 try: (glsl_contains_atomic:=dll.glsl_contains_atomic).restype, glsl_contains_atomic.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_contains_double(const glsl_type *t)
 try: (glsl_contains_double:=dll.glsl_contains_double).restype, glsl_contains_double.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_contains_integer(const glsl_type *t)
 try: (glsl_contains_integer:=dll.glsl_contains_integer).restype, glsl_contains_integer.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_contains_opaque(const glsl_type *t)
 try: (glsl_contains_opaque:=dll.glsl_contains_opaque).restype, glsl_contains_opaque.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_contains_sampler(const glsl_type *t)
 try: (glsl_contains_sampler:=dll.glsl_contains_sampler).restype, glsl_contains_sampler.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_contains_array(const glsl_type *t)
 try: (glsl_contains_array:=dll.glsl_contains_array).restype, glsl_contains_array.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_contains_subroutine(const glsl_type *t)
 try: (glsl_contains_subroutine:=dll.glsl_contains_subroutine).restype, glsl_contains_subroutine.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# int glsl_get_sampler_coordinate_components(const glsl_type *t)
 try: (glsl_get_sampler_coordinate_components:=dll.glsl_get_sampler_coordinate_components).restype, glsl_get_sampler_coordinate_components.argtypes = ctypes.c_int32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_type_compare_no_precision(const glsl_type *a, const glsl_type *b)
 try: (glsl_type_compare_no_precision:=dll.glsl_type_compare_no_precision).restype, glsl_type_compare_no_precision.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# bool glsl_record_compare(const glsl_type *a, const glsl_type *b, bool match_name, bool match_locations, bool match_precision)
 try: (glsl_record_compare:=dll.glsl_record_compare).restype, glsl_record_compare.argtypes = ctypes.c_bool, [ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.c_bool, ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_struct_field(const glsl_type *t, unsigned int index)
 try: (glsl_get_struct_field:=dll.glsl_get_struct_field).restype, glsl_get_struct_field.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_struct_field *glsl_get_struct_field_data(const glsl_type *t, unsigned int index)
 try: (glsl_get_struct_field_data:=dll.glsl_get_struct_field_data).restype, glsl_get_struct_field_data.argtypes = ctypes.POINTER(glsl_struct_field), [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
-# unsigned int glsl_get_struct_location_offset(const glsl_type *t, unsigned int length)
 try: (glsl_get_struct_location_offset:=dll.glsl_get_struct_location_offset).restype, glsl_get_struct_location_offset.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
-# int glsl_get_field_index(const glsl_type *t, const char *name)
 try: (glsl_get_field_index:=dll.glsl_get_field_index).restype, glsl_get_field_index.argtypes = ctypes.c_int32, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_field_type(const glsl_type *t, const char *name)
 try: (glsl_get_field_type:=dll.glsl_get_field_type).restype, glsl_get_field_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# const glsl_type *glsl_vec_type(unsigned int components)
 try: (glsl_vec_type:=dll.glsl_vec_type).restype, glsl_vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_f16vec_type(unsigned int components)
 try: (glsl_f16vec_type:=dll.glsl_f16vec_type).restype, glsl_f16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_bf16vec_type(unsigned int components)
 try: (glsl_bf16vec_type:=dll.glsl_bf16vec_type).restype, glsl_bf16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_e4m3fnvec_type(unsigned int components)
 try: (glsl_e4m3fnvec_type:=dll.glsl_e4m3fnvec_type).restype, glsl_e4m3fnvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_e5m2vec_type(unsigned int components)
 try: (glsl_e5m2vec_type:=dll.glsl_e5m2vec_type).restype, glsl_e5m2vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_dvec_type(unsigned int components)
 try: (glsl_dvec_type:=dll.glsl_dvec_type).restype, glsl_dvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_ivec_type(unsigned int components)
 try: (glsl_ivec_type:=dll.glsl_ivec_type).restype, glsl_ivec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_uvec_type(unsigned int components)
 try: (glsl_uvec_type:=dll.glsl_uvec_type).restype, glsl_uvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_bvec_type(unsigned int components)
 try: (glsl_bvec_type:=dll.glsl_bvec_type).restype, glsl_bvec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_i64vec_type(unsigned int components)
 try: (glsl_i64vec_type:=dll.glsl_i64vec_type).restype, glsl_i64vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_u64vec_type(unsigned int components)
 try: (glsl_u64vec_type:=dll.glsl_u64vec_type).restype, glsl_u64vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_i16vec_type(unsigned int components)
 try: (glsl_i16vec_type:=dll.glsl_i16vec_type).restype, glsl_i16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_u16vec_type(unsigned int components)
 try: (glsl_u16vec_type:=dll.glsl_u16vec_type).restype, glsl_u16vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_i8vec_type(unsigned int components)
 try: (glsl_i8vec_type:=dll.glsl_i8vec_type).restype, glsl_i8vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_u8vec_type(unsigned int components)
 try: (glsl_u8vec_type:=dll.glsl_u8vec_type).restype, glsl_u8vec_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_simple_explicit_type(unsigned int base_type, unsigned int rows, unsigned int columns, unsigned int explicit_stride, bool row_major, unsigned int explicit_alignment)
 try: (glsl_simple_explicit_type:=dll.glsl_simple_explicit_type).restype, glsl_simple_explicit_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_sampler_type(enum glsl_sampler_dim dim, bool shadow, bool array, enum glsl_base_type type)
 try: (glsl_sampler_type:=dll.glsl_sampler_type).restype, glsl_sampler_type.argtypes = ctypes.POINTER(glsl_type), [enum_glsl_sampler_dim, ctypes.c_bool, ctypes.c_bool, enum_glsl_base_type]
 except AttributeError: pass
 
-# const glsl_type *glsl_bare_sampler_type(void)
 try: (glsl_bare_sampler_type:=dll.glsl_bare_sampler_type).restype, glsl_bare_sampler_type.argtypes = ctypes.POINTER(glsl_type), []
 except AttributeError: pass
 
-# const glsl_type *glsl_bare_shadow_sampler_type(void)
 try: (glsl_bare_shadow_sampler_type:=dll.glsl_bare_shadow_sampler_type).restype, glsl_bare_shadow_sampler_type.argtypes = ctypes.POINTER(glsl_type), []
 except AttributeError: pass
 
-# const glsl_type *glsl_texture_type(enum glsl_sampler_dim dim, bool array, enum glsl_base_type type)
 try: (glsl_texture_type:=dll.glsl_texture_type).restype, glsl_texture_type.argtypes = ctypes.POINTER(glsl_type), [enum_glsl_sampler_dim, ctypes.c_bool, enum_glsl_base_type]
 except AttributeError: pass
 
-# const glsl_type *glsl_image_type(enum glsl_sampler_dim dim, bool array, enum glsl_base_type type)
 try: (glsl_image_type:=dll.glsl_image_type).restype, glsl_image_type.argtypes = ctypes.POINTER(glsl_type), [enum_glsl_sampler_dim, ctypes.c_bool, enum_glsl_base_type]
 except AttributeError: pass
 
-# const glsl_type *glsl_array_type(const glsl_type *element, unsigned int array_size, unsigned int explicit_stride)
 try: (glsl_array_type:=dll.glsl_array_type).restype, glsl_array_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_cmat_type(const struct glsl_cmat_description *desc)
 try: (glsl_cmat_type:=dll.glsl_cmat_type).restype, glsl_cmat_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(struct_glsl_cmat_description)]
 except AttributeError: pass
 
-# const glsl_type *glsl_struct_type_with_explicit_alignment(const glsl_struct_field *fields, unsigned int num_fields, const char *name, bool packed, unsigned int explicit_alignment)
 try: (glsl_struct_type_with_explicit_alignment:=dll.glsl_struct_type_with_explicit_alignment).restype, glsl_struct_type_with_explicit_alignment.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_struct_field), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_bool, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -8077,356 +7345,268 @@ GLSL_INTERFACE_PACKING_SHARED = enum_glsl_interface_packing.define('GLSL_INTERFA
 GLSL_INTERFACE_PACKING_PACKED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_PACKED', 2)
 GLSL_INTERFACE_PACKING_STD430 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD430', 3)
 
-# const glsl_type *glsl_interface_type(const glsl_struct_field *fields, unsigned int num_fields, enum glsl_interface_packing packing, bool row_major, const char *block_name)
 try: (glsl_interface_type:=dll.glsl_interface_type).restype, glsl_interface_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_struct_field), ctypes.c_uint32, enum_glsl_interface_packing, ctypes.c_bool, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# const glsl_type *glsl_subroutine_type(const char *subroutine_name)
 try: (glsl_subroutine_type:=dll.glsl_subroutine_type).restype, glsl_subroutine_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_row_type(const glsl_type *t)
 try: (glsl_get_row_type:=dll.glsl_get_row_type).restype, glsl_get_row_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_column_type(const glsl_type *t)
 try: (glsl_get_column_type:=dll.glsl_get_column_type).restype, glsl_get_column_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_explicit_type_for_size_align(const glsl_type *type, glsl_type_size_align_func type_info, unsigned int *size, unsigned int *alignment)
 try: (glsl_get_explicit_type_for_size_align:=dll.glsl_get_explicit_type_for_size_align).restype, glsl_get_explicit_type_for_size_align.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# const glsl_type *glsl_type_replace_vec3_with_vec4(const glsl_type *type)
 try: (glsl_type_replace_vec3_with_vec4:=dll.glsl_type_replace_vec3_with_vec4).restype, glsl_type_replace_vec3_with_vec4.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_float16_type(const glsl_type *t)
 try: (glsl_float16_type:=dll.glsl_float16_type).restype, glsl_float16_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_int16_type(const glsl_type *t)
 try: (glsl_int16_type:=dll.glsl_int16_type).restype, glsl_int16_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_uint16_type(const glsl_type *t)
 try: (glsl_uint16_type:=dll.glsl_uint16_type).restype, glsl_uint16_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_type_to_16bit(const glsl_type *old_type)
 try: (glsl_type_to_16bit:=dll.glsl_type_to_16bit).restype, glsl_type_to_16bit.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_replace_vector_type(const glsl_type *t, unsigned int components)
 try: (glsl_replace_vector_type:=dll.glsl_replace_vector_type).restype, glsl_replace_vector_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
-# const glsl_type *glsl_channel_type(const glsl_type *t)
 try: (glsl_channel_type:=dll.glsl_channel_type).restype, glsl_channel_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_mul_type(const glsl_type *type_a, const glsl_type *type_b)
 try: (glsl_get_mul_type:=dll.glsl_get_mul_type).restype, glsl_get_mul_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_type_get_sampler_count(const glsl_type *t)
 try: (glsl_type_get_sampler_count:=dll.glsl_type_get_sampler_count).restype, glsl_type_get_sampler_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_type_get_texture_count(const glsl_type *t)
 try: (glsl_type_get_texture_count:=dll.glsl_type_get_texture_count).restype, glsl_type_get_texture_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_type_get_image_count(const glsl_type *t)
 try: (glsl_type_get_image_count:=dll.glsl_type_get_image_count).restype, glsl_type_get_image_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_count_vec4_slots(const glsl_type *t, bool is_gl_vertex_input, bool is_bindless)
 try: (glsl_count_vec4_slots:=dll.glsl_count_vec4_slots).restype, glsl_count_vec4_slots.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_count_dword_slots(const glsl_type *t, bool is_bindless)
 try: (glsl_count_dword_slots:=dll.glsl_count_dword_slots).restype, glsl_count_dword_slots.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_get_component_slots(const glsl_type *t)
 try: (glsl_get_component_slots:=dll.glsl_get_component_slots).restype, glsl_get_component_slots.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_get_component_slots_aligned(const glsl_type *t, unsigned int offset)
 try: (glsl_get_component_slots_aligned:=dll.glsl_get_component_slots_aligned).restype, glsl_get_component_slots_aligned.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_uint32]
 except AttributeError: pass
 
-# unsigned int glsl_varying_count(const glsl_type *t)
 try: (glsl_varying_count:=dll.glsl_varying_count).restype, glsl_varying_count.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_type_uniform_locations(const glsl_type *t)
 try: (glsl_type_uniform_locations:=dll.glsl_type_uniform_locations).restype, glsl_type_uniform_locations.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_get_cl_size(const glsl_type *t)
 try: (glsl_get_cl_size:=dll.glsl_get_cl_size).restype, glsl_get_cl_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# unsigned int glsl_get_cl_alignment(const glsl_type *t)
 try: (glsl_get_cl_alignment:=dll.glsl_get_cl_alignment).restype, glsl_get_cl_alignment.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type)]
 except AttributeError: pass
 
-# void glsl_get_cl_type_size_align(const glsl_type *t, unsigned int *size, unsigned int *align)
 try: (glsl_get_cl_type_size_align:=dll.glsl_get_cl_type_size_align).restype, glsl_get_cl_type_size_align.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# enum glsl_interface_packing glsl_get_internal_ifc_packing(const glsl_type *t, bool std430_supported)
 try: (glsl_get_internal_ifc_packing:=dll.glsl_get_internal_ifc_packing).restype, glsl_get_internal_ifc_packing.argtypes = enum_glsl_interface_packing, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_get_std140_base_alignment(const glsl_type *t, bool row_major)
 try: (glsl_get_std140_base_alignment:=dll.glsl_get_std140_base_alignment).restype, glsl_get_std140_base_alignment.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_get_std140_size(const glsl_type *t, bool row_major)
 try: (glsl_get_std140_size:=dll.glsl_get_std140_size).restype, glsl_get_std140_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_get_std430_array_stride(const glsl_type *t, bool row_major)
 try: (glsl_get_std430_array_stride:=dll.glsl_get_std430_array_stride).restype, glsl_get_std430_array_stride.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_get_std430_base_alignment(const glsl_type *t, bool row_major)
 try: (glsl_get_std430_base_alignment:=dll.glsl_get_std430_base_alignment).restype, glsl_get_std430_base_alignment.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_get_std430_size(const glsl_type *t, bool row_major)
 try: (glsl_get_std430_size:=dll.glsl_get_std430_size).restype, glsl_get_std430_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# unsigned int glsl_get_explicit_size(const glsl_type *t, bool align_to_stride)
 try: (glsl_get_explicit_size:=dll.glsl_get_explicit_size).restype, glsl_get_explicit_size.argtypes = ctypes.c_uint32, [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_explicit_std140_type(const glsl_type *t, bool row_major)
 try: (glsl_get_explicit_std140_type:=dll.glsl_get_explicit_std140_type).restype, glsl_get_explicit_std140_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# const glsl_type *glsl_get_explicit_std430_type(const glsl_type *t, bool row_major)
 try: (glsl_get_explicit_std430_type:=dll.glsl_get_explicit_std430_type).restype, glsl_get_explicit_std430_type.argtypes = ctypes.POINTER(glsl_type), [ctypes.POINTER(glsl_type), ctypes.c_bool]
 except AttributeError: pass
 
-# void glsl_size_align_handle_array_and_structs(const glsl_type *type, glsl_type_size_align_func size_align, unsigned int *size, unsigned int *align)
 try: (glsl_size_align_handle_array_and_structs:=dll.glsl_size_align_handle_array_and_structs).restype, glsl_size_align_handle_array_and_structs.argtypes = None, [ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# void glsl_get_natural_size_align_bytes(const glsl_type *t, unsigned int *size, unsigned int *align)
 try: (glsl_get_natural_size_align_bytes:=dll.glsl_get_natural_size_align_bytes).restype, glsl_get_natural_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# void glsl_get_word_size_align_bytes(const glsl_type *type, unsigned int *size, unsigned int *align)
 try: (glsl_get_word_size_align_bytes:=dll.glsl_get_word_size_align_bytes).restype, glsl_get_word_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# void glsl_get_vec4_size_align_bytes(const glsl_type *type, unsigned int *size, unsigned int *align)
 try: (glsl_get_vec4_size_align_bytes:=dll.glsl_get_vec4_size_align_bytes).restype, glsl_get_vec4_size_align_bytes.argtypes = None, [ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# void blob_init(struct blob *blob)
 try: (blob_init:=dll.blob_init).restype, blob_init.argtypes = None, [ctypes.POINTER(struct_blob)]
 except AttributeError: pass
 
-# void blob_init_fixed(struct blob *blob, void *data, size_t size)
 try: (blob_init_fixed:=dll.blob_init_fixed).restype, blob_init_fixed.argtypes = None, [ctypes.POINTER(struct_blob), ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# void blob_finish_get_buffer(struct blob *blob, void **buffer, size_t *size)
 try: (blob_finish_get_buffer:=dll.blob_finish_get_buffer).restype, blob_finish_get_buffer.argtypes = None, [ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# _Bool blob_align(struct blob *blob, size_t alignment)
 try: (blob_align:=dll.blob_align).restype, blob_align.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), size_t]
 except AttributeError: pass
 
-# _Bool blob_write_bytes(struct blob *blob, const void *bytes, size_t to_write)
 try: (blob_write_bytes:=dll.blob_write_bytes).restype, blob_write_bytes.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), ctypes.c_void_p, size_t]
 except AttributeError: pass
 
 intptr_t = ctypes.c_int64
-# intptr_t blob_reserve_bytes(struct blob *blob, size_t to_write)
 try: (blob_reserve_bytes:=dll.blob_reserve_bytes).restype, blob_reserve_bytes.argtypes = intptr_t, [ctypes.POINTER(struct_blob), size_t]
 except AttributeError: pass
 
-# intptr_t blob_reserve_uint32(struct blob *blob)
 try: (blob_reserve_uint32:=dll.blob_reserve_uint32).restype, blob_reserve_uint32.argtypes = intptr_t, [ctypes.POINTER(struct_blob)]
 except AttributeError: pass
 
-# intptr_t blob_reserve_intptr(struct blob *blob)
 try: (blob_reserve_intptr:=dll.blob_reserve_intptr).restype, blob_reserve_intptr.argtypes = intptr_t, [ctypes.POINTER(struct_blob)]
 except AttributeError: pass
 
-# _Bool blob_overwrite_bytes(struct blob *blob, size_t offset, const void *bytes, size_t to_write)
 try: (blob_overwrite_bytes:=dll.blob_overwrite_bytes).restype, blob_overwrite_bytes.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), size_t, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# _Bool blob_write_uint8(struct blob *blob, uint8_t value)
 try: (blob_write_uint8:=dll.blob_write_uint8).restype, blob_write_uint8.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), uint8_t]
 except AttributeError: pass
 
-# _Bool blob_overwrite_uint8(struct blob *blob, size_t offset, uint8_t value)
 try: (blob_overwrite_uint8:=dll.blob_overwrite_uint8).restype, blob_overwrite_uint8.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), size_t, uint8_t]
 except AttributeError: pass
 
-# _Bool blob_write_uint16(struct blob *blob, uint16_t value)
 try: (blob_write_uint16:=dll.blob_write_uint16).restype, blob_write_uint16.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), uint16_t]
 except AttributeError: pass
 
-# _Bool blob_write_uint32(struct blob *blob, uint32_t value)
 try: (blob_write_uint32:=dll.blob_write_uint32).restype, blob_write_uint32.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), uint32_t]
 except AttributeError: pass
 
-# _Bool blob_overwrite_uint32(struct blob *blob, size_t offset, uint32_t value)
 try: (blob_overwrite_uint32:=dll.blob_overwrite_uint32).restype, blob_overwrite_uint32.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), size_t, uint32_t]
 except AttributeError: pass
 
-# _Bool blob_write_uint64(struct blob *blob, uint64_t value)
 try: (blob_write_uint64:=dll.blob_write_uint64).restype, blob_write_uint64.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), uint64_t]
 except AttributeError: pass
 
-# _Bool blob_write_intptr(struct blob *blob, intptr_t value)
 try: (blob_write_intptr:=dll.blob_write_intptr).restype, blob_write_intptr.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), intptr_t]
 except AttributeError: pass
 
-# _Bool blob_overwrite_intptr(struct blob *blob, size_t offset, intptr_t value)
 try: (blob_overwrite_intptr:=dll.blob_overwrite_intptr).restype, blob_overwrite_intptr.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), size_t, intptr_t]
 except AttributeError: pass
 
-# _Bool blob_write_string(struct blob *blob, const char *str)
 try: (blob_write_string:=dll.blob_write_string).restype, blob_write_string.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# void blob_reader_init(struct blob_reader *blob, const void *data, size_t size)
 try: (blob_reader_init:=dll.blob_reader_init).restype, blob_reader_init.argtypes = None, [ctypes.POINTER(struct_blob_reader), ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# void blob_reader_align(struct blob_reader *blob, size_t alignment)
 try: (blob_reader_align:=dll.blob_reader_align).restype, blob_reader_align.argtypes = None, [ctypes.POINTER(struct_blob_reader), size_t]
 except AttributeError: pass
 
-# const void *blob_read_bytes(struct blob_reader *blob, size_t size)
 try: (blob_read_bytes:=dll.blob_read_bytes).restype, blob_read_bytes.argtypes = ctypes.c_void_p, [ctypes.POINTER(struct_blob_reader), size_t]
 except AttributeError: pass
 
-# void blob_copy_bytes(struct blob_reader *blob, void *dest, size_t size)
 try: (blob_copy_bytes:=dll.blob_copy_bytes).restype, blob_copy_bytes.argtypes = None, [ctypes.POINTER(struct_blob_reader), ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# void blob_skip_bytes(struct blob_reader *blob, size_t size)
 try: (blob_skip_bytes:=dll.blob_skip_bytes).restype, blob_skip_bytes.argtypes = None, [ctypes.POINTER(struct_blob_reader), size_t]
 except AttributeError: pass
 
-# uint8_t blob_read_uint8(struct blob_reader *blob)
 try: (blob_read_uint8:=dll.blob_read_uint8).restype, blob_read_uint8.argtypes = uint8_t, [ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# uint16_t blob_read_uint16(struct blob_reader *blob)
 try: (blob_read_uint16:=dll.blob_read_uint16).restype, blob_read_uint16.argtypes = uint16_t, [ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# uint32_t blob_read_uint32(struct blob_reader *blob)
 try: (blob_read_uint32:=dll.blob_read_uint32).restype, blob_read_uint32.argtypes = uint32_t, [ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# uint64_t blob_read_uint64(struct blob_reader *blob)
 try: (blob_read_uint64:=dll.blob_read_uint64).restype, blob_read_uint64.argtypes = uint64_t, [ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# intptr_t blob_read_intptr(struct blob_reader *blob)
 try: (blob_read_intptr:=dll.blob_read_intptr).restype, blob_read_intptr.argtypes = intptr_t, [ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# char *blob_read_string(struct blob_reader *blob)
 try: (blob_read_string:=dll.blob_read_string).restype, blob_read_string.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(struct_blob_reader)]
 except AttributeError: pass
 
-# void *ralloc_context(const void *ctx)
 try: (ralloc_context:=dll.ralloc_context).restype, ralloc_context.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
 except AttributeError: pass
 
-# void *ralloc_size(const void *ctx, size_t size)
 try: (ralloc_size:=dll.ralloc_size).restype, ralloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# void *rzalloc_size(const void *ctx, size_t size)
 try: (rzalloc_size:=dll.rzalloc_size).restype, rzalloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# void *reralloc_size(const void *ctx, void *ptr, size_t size)
 try: (reralloc_size:=dll.reralloc_size).restype, reralloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# void *rerzalloc_size(const void *ctx, void *ptr, size_t old_size, size_t new_size)
 try: (rerzalloc_size:=dll.rerzalloc_size).restype, rerzalloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, size_t]
 except AttributeError: pass
 
-# void *ralloc_array_size(const void *ctx, size_t size, unsigned int count)
 try: (ralloc_array_size:=dll.ralloc_array_size).restype, ralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# void *rzalloc_array_size(const void *ctx, size_t size, unsigned int count)
 try: (rzalloc_array_size:=dll.rzalloc_array_size).restype, rzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# void *reralloc_array_size(const void *ctx, void *ptr, size_t size, unsigned int count)
 try: (reralloc_array_size:=dll.reralloc_array_size).restype, reralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# void *rerzalloc_array_size(const void *ctx, void *ptr, size_t size, unsigned int old_count, unsigned int new_count)
 try: (rerzalloc_array_size:=dll.rerzalloc_array_size).restype, rerzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# void ralloc_free(void *ptr)
 try: (ralloc_free:=dll.ralloc_free).restype, ralloc_free.argtypes = None, [ctypes.c_void_p]
 except AttributeError: pass
 
-# void ralloc_steal(const void *new_ctx, void *ptr)
 try: (ralloc_steal:=dll.ralloc_steal).restype, ralloc_steal.argtypes = None, [ctypes.c_void_p, ctypes.c_void_p]
 except AttributeError: pass
 
-# void ralloc_adopt(const void *new_ctx, void *old_ctx)
 try: (ralloc_adopt:=dll.ralloc_adopt).restype, ralloc_adopt.argtypes = None, [ctypes.c_void_p, ctypes.c_void_p]
 except AttributeError: pass
 
-# void *ralloc_parent(const void *ptr)
 try: (ralloc_parent:=dll.ralloc_parent).restype, ralloc_parent.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
 except AttributeError: pass
 
-# void ralloc_set_destructor(const void *ptr, void (*destructor)(void *))
 try: (ralloc_set_destructor:=dll.ralloc_set_destructor).restype, ralloc_set_destructor.argtypes = None, [ctypes.c_void_p, ctypes.CFUNCTYPE(None, ctypes.c_void_p)]
 except AttributeError: pass
 
-# void *ralloc_memdup(const void *ctx, const void *mem, size_t n)
 try: (ralloc_memdup:=dll.ralloc_memdup).restype, ralloc_memdup.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# char *ralloc_strdup(const void *ctx, const char *str)
 try: (ralloc_strdup:=dll.ralloc_strdup).restype, ralloc_strdup.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# char *ralloc_strndup(const void *ctx, const char *str, size_t n)
 try: (ralloc_strndup:=dll.ralloc_strndup).restype, ralloc_strndup.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# _Bool ralloc_strcat(char **dest, const char *str)
 try: (ralloc_strcat:=dll.ralloc_strcat).restype, ralloc_strcat.argtypes = ctypes.c_bool, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# _Bool ralloc_strncat(char **dest, const char *str, size_t n)
 try: (ralloc_strncat:=dll.ralloc_strncat).restype, ralloc_strncat.argtypes = ctypes.c_bool, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# _Bool ralloc_str_append(char **dest, const char *str, size_t existing_length, size_t str_size)
 try: (ralloc_str_append:=dll.ralloc_str_append).restype, ralloc_str_append.argtypes = ctypes.c_bool, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t, size_t]
 except AttributeError: pass
 
-# char *ralloc_asprintf(const void *ctx, const char *fmt, ...)
 try: (ralloc_asprintf:=dll.ralloc_asprintf).restype, ralloc_asprintf.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -8438,65 +7618,50 @@ struct___va_list_tag._fields_ = [
   ('reg_save_area', ctypes.c_void_p),
 ]
 va_list = (struct___va_list_tag * 1)
-# char *ralloc_vasprintf(const void *ctx, const char *fmt, va_list args)
 try: (ralloc_vasprintf:=dll.ralloc_vasprintf).restype, ralloc_vasprintf.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), va_list]
 except AttributeError: pass
 
-# _Bool ralloc_asprintf_rewrite_tail(char **str, size_t *start, const char *fmt, ...)
 try: (ralloc_asprintf_rewrite_tail:=dll.ralloc_asprintf_rewrite_tail).restype, ralloc_asprintf_rewrite_tail.argtypes = ctypes.c_bool, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# _Bool ralloc_vasprintf_rewrite_tail(char **str, size_t *start, const char *fmt, va_list args)
 try: (ralloc_vasprintf_rewrite_tail:=dll.ralloc_vasprintf_rewrite_tail).restype, ralloc_vasprintf_rewrite_tail.argtypes = ctypes.c_bool, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char), va_list]
 except AttributeError: pass
 
-# _Bool ralloc_asprintf_append(char **str, const char *fmt, ...)
 try: (ralloc_asprintf_append:=dll.ralloc_asprintf_append).restype, ralloc_asprintf_append.argtypes = ctypes.c_bool, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# _Bool ralloc_vasprintf_append(char **str, const char *fmt, va_list args)
 try: (ralloc_vasprintf_append:=dll.ralloc_vasprintf_append).restype, ralloc_vasprintf_append.argtypes = ctypes.c_bool, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
 except AttributeError: pass
 
-# size_t ralloc_total_size(const void *ptr)
 try: (ralloc_total_size:=dll.ralloc_total_size).restype, ralloc_total_size.argtypes = size_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# gc_ctx *gc_context(const void *parent)
 try: (gc_context:=dll.gc_context).restype, gc_context.argtypes = ctypes.POINTER(gc_ctx), [ctypes.c_void_p]
 except AttributeError: pass
 
-# void *gc_alloc_size(gc_ctx *ctx, size_t size, size_t alignment)
 try: (gc_alloc_size:=dll.gc_alloc_size).restype, gc_alloc_size.argtypes = ctypes.c_void_p, [ctypes.POINTER(gc_ctx), size_t, size_t]
 except AttributeError: pass
 
-# void *gc_zalloc_size(gc_ctx *ctx, size_t size, size_t alignment)
 try: (gc_zalloc_size:=dll.gc_zalloc_size).restype, gc_zalloc_size.argtypes = ctypes.c_void_p, [ctypes.POINTER(gc_ctx), size_t, size_t]
 except AttributeError: pass
 
-# void gc_free(void *ptr)
 try: (gc_free:=dll.gc_free).restype, gc_free.argtypes = None, [ctypes.c_void_p]
 except AttributeError: pass
 
-# gc_ctx *gc_get_context(void *ptr)
 try: (gc_get_context:=dll.gc_get_context).restype, gc_get_context.argtypes = ctypes.POINTER(gc_ctx), [ctypes.c_void_p]
 except AttributeError: pass
 
-# void gc_sweep_start(gc_ctx *ctx)
 try: (gc_sweep_start:=dll.gc_sweep_start).restype, gc_sweep_start.argtypes = None, [ctypes.POINTER(gc_ctx)]
 except AttributeError: pass
 
-# void gc_mark_live(gc_ctx *ctx, const void *mem)
 try: (gc_mark_live:=dll.gc_mark_live).restype, gc_mark_live.argtypes = None, [ctypes.POINTER(gc_ctx), ctypes.c_void_p]
 except AttributeError: pass
 
-# void gc_sweep_end(gc_ctx *ctx)
 try: (gc_sweep_end:=dll.gc_sweep_end).restype, gc_sweep_end.argtypes = None, [ctypes.POINTER(gc_ctx)]
 except AttributeError: pass
 
 class struct_linear_ctx(Struct): pass
 linear_ctx = struct_linear_ctx
-# void *linear_alloc_child(linear_ctx *ctx, unsigned int size)
 try: (linear_alloc_child:=dll.linear_alloc_child).restype, linear_alloc_child.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -8504,74 +7669,57 @@ class linear_opts(Struct): pass
 linear_opts._fields_ = [
   ('min_buffer_size', ctypes.c_uint32),
 ]
-# linear_ctx *linear_context(void *ralloc_ctx)
 try: (linear_context:=dll.linear_context).restype, linear_context.argtypes = ctypes.POINTER(linear_ctx), [ctypes.c_void_p]
 except AttributeError: pass
 
-# linear_ctx *linear_context_with_opts(void *ralloc_ctx, const linear_opts *opts)
 try: (linear_context_with_opts:=dll.linear_context_with_opts).restype, linear_context_with_opts.argtypes = ctypes.POINTER(linear_ctx), [ctypes.c_void_p, ctypes.POINTER(linear_opts)]
 except AttributeError: pass
 
-# void *linear_zalloc_child(linear_ctx *ctx, unsigned int size)
 try: (linear_zalloc_child:=dll.linear_zalloc_child).restype, linear_zalloc_child.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), ctypes.c_uint32]
 except AttributeError: pass
 
-# void linear_free_context(linear_ctx *ctx)
 try: (linear_free_context:=dll.linear_free_context).restype, linear_free_context.argtypes = None, [ctypes.POINTER(linear_ctx)]
 except AttributeError: pass
 
-# void ralloc_steal_linear_context(void *new_ralloc_ctx, linear_ctx *ctx)
 try: (ralloc_steal_linear_context:=dll.ralloc_steal_linear_context).restype, ralloc_steal_linear_context.argtypes = None, [ctypes.c_void_p, ctypes.POINTER(linear_ctx)]
 except AttributeError: pass
 
-# void *ralloc_parent_of_linear_context(linear_ctx *ctx)
 try: (ralloc_parent_of_linear_context:=dll.ralloc_parent_of_linear_context).restype, ralloc_parent_of_linear_context.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx)]
 except AttributeError: pass
 
-# void *linear_alloc_child_array(linear_ctx *ctx, size_t size, unsigned int count)
 try: (linear_alloc_child_array:=dll.linear_alloc_child_array).restype, linear_alloc_child_array.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# void *linear_zalloc_child_array(linear_ctx *ctx, size_t size, unsigned int count)
 try: (linear_zalloc_child_array:=dll.linear_zalloc_child_array).restype, linear_zalloc_child_array.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# char *linear_strdup(linear_ctx *ctx, const char *str)
 try: (linear_strdup:=dll.linear_strdup).restype, linear_strdup.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# char *linear_asprintf(linear_ctx *ctx, const char *fmt, ...)
 try: (linear_asprintf:=dll.linear_asprintf).restype, linear_asprintf.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# char *linear_vasprintf(linear_ctx *ctx, const char *fmt, va_list args)
 try: (linear_vasprintf:=dll.linear_vasprintf).restype, linear_vasprintf.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.c_char), va_list]
 except AttributeError: pass
 
-# _Bool linear_asprintf_append(linear_ctx *ctx, char **str, const char *fmt, ...)
 try: (linear_asprintf_append:=dll.linear_asprintf_append).restype, linear_asprintf_append.argtypes = ctypes.c_bool, [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# _Bool linear_vasprintf_append(linear_ctx *ctx, char **str, const char *fmt, va_list args)
 try: (linear_vasprintf_append:=dll.linear_vasprintf_append).restype, linear_vasprintf_append.argtypes = ctypes.c_bool, [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list]
 except AttributeError: pass
 
-# _Bool linear_asprintf_rewrite_tail(linear_ctx *ctx, char **str, size_t *start, const char *fmt, ...)
 try: (linear_asprintf_rewrite_tail:=dll.linear_asprintf_rewrite_tail).restype, linear_asprintf_rewrite_tail.argtypes = ctypes.c_bool, [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# _Bool linear_vasprintf_rewrite_tail(linear_ctx *ctx, char **str, size_t *start, const char *fmt, va_list args)
 try: (linear_vasprintf_rewrite_tail:=dll.linear_vasprintf_rewrite_tail).restype, linear_vasprintf_rewrite_tail.argtypes = ctypes.c_bool, [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char), va_list]
 except AttributeError: pass
 
-# _Bool linear_strcat(linear_ctx *ctx, char **dest, const char *str)
 try: (linear_strcat:=dll.linear_strcat).restype, linear_strcat.argtypes = ctypes.c_bool, [ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 _anonenum7 = CEnum(ctypes.c_uint32)
 RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ONLY', 1)
 
-# void ralloc_print_info(FILE *f, const void *p, unsigned int flags)
 try: (ralloc_print_info:=dll.ralloc_print_info).restype, ralloc_print_info.argtypes = None, [ctypes.POINTER(FILE), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
