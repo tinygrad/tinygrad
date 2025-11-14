@@ -197,7 +197,7 @@ const setMetadata = (data) => {
   const div = d3.create("div").classed("info", true);
   if (data.fmt === Formats.EXEC) {
     const [name, dur, ...rest] = data.tooltipText.split("\n");
-    div.append(() => tabulate([["Name", d3.create("span").html(name).node()], ["Duration", dur], ["Start Time", formatTime(data.st)]]).node());
+    div.append(() => tabulate([["Name", colored(name)], ["Duration", dur], ["Start Time", formatTime(data.st)]]).node());
     if (rest.length) div.append("p").style("white-space", "pre-wrap").text(rest.join("\n"));
     if (data.ctx != null) {
       div.append("a").text("View codegen rewrite").on("click", () => switchCtx(data.ctx, data.step));
@@ -205,7 +205,9 @@ const setMetadata = (data) => {
     }
   }
   if (data.fmt === Formats.BUFFER) {
-    div.append(() => d3.create("div").html(data.tooltipText).node());
+    const lines = data.tooltipText.split("\n");
+    const rows = ["DType", "Len", "Size", "Lifetime"].map((s,i) => ([s, lines[i]]));
+    div.append(() => tabulate(rows).node());
   }
   metadata.replaceChildren(div.node());
 }
@@ -282,7 +284,7 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const arg = {tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef};
+        const arg = {tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef};
         // tiny device events go straight to the rewrite rule
         if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${j}`; shapeMap.set(arg.key, arg) }
         if (e.key != null) shapeKeys.set(e.key, arg.key);
@@ -324,9 +326,7 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
-        if (users != null) rows.push(["Users", users.length]);
-        const arg = {tooltipText:tabulate(rows).node().outerHTML, fmt:Formats.BUFFER, users, key:`${k}-${num}`};
+        const arg = {tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\n${formatTime(dur)}`, fmt:Formats.BUFFER, users, key:`${k}-${num}`};
         shapeMap.set(arg.key, arg);
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
@@ -503,7 +503,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.innerHTML = foundRect.tooltipText;
+      tooltip.replaceChildren(colored(foundRect.tooltipText));
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
