@@ -2,7 +2,8 @@ import glob, importlib, pathlib, subprocess, tarfile
 from tinygrad.helpers import fetch, flatten, system
 
 root = (here:=pathlib.Path(__file__).parent).parents[2]
-nv_src = "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8ac3b9bdcc1d56827d116743892a5.tar.gz"
+nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8ac3b9bdcc1d56827d116743892a5.tar.gz",
+          "nv_580": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/2af9f1f0f7de4988432d4ae875b5858ffdb09cc2.tar.gz"}
 
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists():
@@ -30,8 +31,8 @@ def __getattr__(nm):
     case "nvrtc": return load("nvrtc", ["find_library('nvrtc')"], ["/usr/include/nvrtc.h"])
     case "nvjitlink": load("nvjitlink", ["find_library('nvJitLink')"], [root/"extra/nvJitLink.h"])
     case "kfd": return load("kfd", [], ["/usr/include/linux/kfd_ioctl.h"])
-    case "nv_gpu":
-      return load("nv_gpu", [], [
+    case "nv_570" | "nv_580":
+      return load(nm, [], [
         *[root/"extra/nv_gpu_driver"/s for s in ["clc6c0qmd.h","clcec0qmd.h"]], "{}/kernel-open/common/inc/nvmisc.h",
         *[f"{{}}/src/common/sdk/nvidia/inc/class/cl{s}.h" for s in ["0000", "0080", "2080", "2080_notification", "c56f", "c86f", "c96f", "c761",
                                                                     "83de", "c6c0", "cdc0"]],
@@ -45,7 +46,7 @@ def __getattr__(nm):
       ], args=[
         "-include", "{}/src/common/sdk/nvidia/inc/nvtypes.h", "-I{}/src/common/inc", "-I{}/kernel-open/nvidia-uvm", "-I{}/kernel-open/common/inc",
         "-I{}/src/common/sdk/nvidia/inc", "-I{}/src/nvidia/arch/nvalloc/unix/include", "-I{}/src/common/sdk/nvidia/inc/ctrl"
-      ], rules=[(r'MW\(([^:]+):(.+)\)',r'(\1, \2)')], tarball=nv_src, anon_names={"{}/kernel-open/common/inc/nvstatus.h:37":"nv_status_codes"})
+      ], rules=[(r'MW\(([^:]+):(.+)\)',r'(\1, \2)')], tarball=nv_src[nm], anon_names={"{}/kernel-open/common/inc/nvstatus.h:37":"nv_status_codes"})
     case "nv": return load("nv", [], [
       *[f"{{}}/src/nvidia/inc/kernel/gpu/{s}.h" for s in ["fsp/kern_fsp_cot_payload", "gsp/gsp_init_args"]],
       *[f"{{}}/src/nvidia/arch/nvalloc/common/inc/{s}.h" for s in ["gsp/gspifpub", "gsp/gsp_fw_wpr_meta", "gsp/gsp_fw_sr_meta", "rmRiscvUcode",
