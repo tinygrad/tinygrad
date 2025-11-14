@@ -27,7 +27,8 @@ def warp_perspective_tinygrad(src:Tensor, M_inv:Tensor) -> Tensor:
   y_nearest = tensor_round(y_src).clip(0, h_src - 1).cast('int')
 
   # TODO: make 2d indexing fast
-  dst = src[y_nearest, x_nearest]
+  idx = y_nearest*src.shape[1] + x_nearest
+  dst = src.flatten()[idx]
   return dst
 
 if __name__ == "__main__":
