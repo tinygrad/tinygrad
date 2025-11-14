@@ -153,7 +153,7 @@ class NVDriver(VirtDriver):
                  51059, 51069, 51071, 51632, 51639, 51639, 51706, 52019, 222, 50287, 50273, 50031, 50017] # from ada102
       params.numClasses = len(classes)
       if struct.cmd == nv_gpu.NV0080_CTRL_CMD_GPU_GET_CLASSLIST:
-        if params.classList != 0:
+        if params.classList and params.numClasses > 0:
           clslist = to_mv(params.classList, params.numClasses * 4).cast('I')
           for i,c in enumerate(classes): clslist[i] = c
         else: params.numClasses = len(classes)
