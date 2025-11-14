@@ -72,7 +72,7 @@ class _ROCParseCtx:
     inst_execs:list[InstExec] = []
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
-      inst_typ = rocprof.rocprofiler_thread_trace_decoder_inst_category_t__enumvalues[inst_ev.category]
+      inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst_ev.category)
       inst_disasm = self.disasms[(unwrap(self.active_kern), unwrap(inst_ev.pc.address))][0]
       inst_execs.append(InstExec(inst_typ, inst_disasm, inst_ev.stall, inst_ev.duration, inst_ev.time))
 
