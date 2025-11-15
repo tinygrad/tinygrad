@@ -149,7 +149,7 @@ function renderDag(graph, additions, recenter, layoutOpts) {
 
 // ** profiler graph
 
-function formatTime(ts, dur=ts) {
+function formatMicroseconds(ts, dur=ts) {
   if (dur<=1e3) return `${ts.toFixed(2)}us`;
   if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
   return `${(ts*1e-6).toFixed(2)}s`;
@@ -158,7 +158,7 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"],
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:["#3600f0"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -198,13 +198,15 @@ function focusShape(shape) {
   return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
 }
 
-async function renderProfiler() {
+async function renderProfiler(path, unit) {
   displaySelection("#profiler");
   metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
   // layout once!
-  if (data != null) return updateProgress({ start:false });
+  if (data != null && data.path === path) return updateProgress({ start:false });
+  // support non realtime x axis units
+  const formatTime = unit === "realtime" ? formatMicroseconds : (s) => `${s} ${unit}`;
   const profiler = d3.select("#profiler").html("");
-  const buf = await (await fetch("/get_profile")).arrayBuffer();
+  const buf = await (await fetch(path)).arrayBuffer();
   const view = new DataView(buf);
   let offset = 0;
   const u8 = () => { const ret = view.getUint8(offset); offset += 1; return ret; }
@@ -227,7 +229,7 @@ async function renderProfiler() {
   const colorMap = new Map();
   // map shapes by event key
   const shapeMap = new Map();
-  data = {tracks:new Map(), axes:{}};
+  data = {tracks:new Map(), axes:{}, path};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
@@ -479,6 +481,7 @@ async function renderProfiler() {
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
+  zoomLevel = d3.zoomIdentity;
   canvasZoom = d3.zoom().filter(vizZoomFilter).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
@@ -691,13 +694,14 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler();
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime");
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
   }
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
+    if (step.fmt === "timeline") return renderProfiler(ckey, "clk"); // cycles on the x axis
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
     displaySelection("#custom");
     metadata.innerHTML = "";
