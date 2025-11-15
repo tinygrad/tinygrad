@@ -1347,7 +1347,6 @@ MTLIOCompressionMethodLZMA = enum_MTLIOCompressionMethod.define('MTLIOCompressio
 MTLIOCompressionMethodLZBitmap = enum_MTLIOCompressionMethod.define('MTLIOCompressionMethodLZBitmap', 4)
 
 MTLIOCompressionMethod = enum_MTLIOCompressionMethod
-# __attribute__((visibility("default"))) extern id<MTLDevice>  _Nullable MTLCreateSystemDefaultDevice(void) __attribute__((ns_returns_retained)) __attribute__((availability(macos, introduced=10.11))) __attribute__((availability(ios, introduced=8.0)))
 try: (MTLCreateSystemDefaultDevice:=dll.MTLCreateSystemDefaultDevice).restype, MTLCreateSystemDefaultDevice.argtypes = MTLDevice, []
 except AttributeError: pass
 
@@ -1359,7 +1358,6 @@ try: MTLDeviceRemovalRequestedNotification = MTLDeviceNotificationName.in_dll(dl
 except (ValueError,AttributeError): pass
 try: MTLDeviceWasRemovedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasRemovedNotification')
 except (ValueError,AttributeError): pass
-# __attribute__((visibility("default"))) extern void MTLRemoveDeviceObserver(id<NSObject>  _Nonnull observer) __attribute__((availability(macos, introduced=10.13))) __attribute__((availability(ios, unavailable)))
 try: (MTLRemoveDeviceObserver:=dll.MTLRemoveDeviceObserver).restype, MTLRemoveDeviceObserver.argtypes = None, [NSObject]
 except AttributeError: pass
 
