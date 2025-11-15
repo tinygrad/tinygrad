@@ -15,13 +15,16 @@ class TestOuterworldReduce(unittest.TestCase):
 class TestOuterRange(unittest.TestCase):
   def test_simple_range(self):
     a = Tensor.randn(10)
-    acc = Tensor.zeros(11).contiguous()
+    #acc = Tensor.zeros(11).contiguous()
+    acc = Tensor.zeros().contiguous()
     Tensor.realize(a, acc)
 
-    # this is scan
+    # this is fold
     i = UOp.range(10, -1, AxisType.OUTER)
-    acc = Tensor(acc.uop.after(acc[i+1].uop.store(acc[i].uop + a[i].uop).end(i)))
-    acc.realize()
+    acc_i = acc.uop.after(i)
+    vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
+    out = Tensor(acc.uop.after(acc_i.store(acc_i + a[vi].uop).end(i)))
+    out.realize()
 
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
