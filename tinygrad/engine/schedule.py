@@ -1,4 +1,3 @@
-import itertools
 from typing import cast
 from dataclasses import dataclass, field, replace
 from collections import deque, defaultdict
@@ -14,6 +13,7 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
+  bound_ranges: tuple[UOp, ...] = ()
 
 # **** schedule linearizer
 
@@ -62,16 +62,13 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   for k,v in in_degree.items():
     if v == 0: queues[_heuristic(k)].append(k)
 
-  schedule: list[ScheduleItem] = []
-  in_ranges: list[UOp] = []
+  schedule: list[ScheduleItem|UOp] = []
   while last_queue or any(queues.values()):
     if not last_queue: last_heuristic, last_queue = min((it for it in queues.items() if it[1]), key=lambda x: abs(x[0]-last_heuristic))
     k = rk = last_queue.popleft()
     if k.op is Ops.END: k = k.src[0]
-    if k.op is Ops.RANGE:
-      in_ranges.append(k)
+    if k.op is Ops.RANGE: schedule.append(k)
     elif k.op is Ops.KERNEL:
-      local_schedule: list[ScheduleItem] = []
       ast = k.arg.ast
       # create subbuffers if needed
       if ast.op is Ops.BUFFER_VIEW:
@@ -79,34 +76,39 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         assert isinstance(base, Buffer), "base can't be MultiBuffer"
         buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
       ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
+      bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and s.src[1].op is Ops.RANGE)
       if any(isinstance(x, MultiBuffer) for x in ubufs):
         assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
         dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
         for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-          local_schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}))
+          schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}, bound_ranges=bound_ranges))
       else:
         # ONE -> ONE
-        local_schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
-      if not len(in_ranges):
-        # not in any ranges
-        schedule.extend(local_schedule)
-      else:
-        # apply the ranges here
-        for si in local_schedule:
-          for rngs in itertools.product(*[range(int(x.vmax)+1) for x in in_ranges]):
-            num_rngs = dict(zip(in_ranges, rngs))
-            fixedvars = si.fixedvars.copy()
-            for s in k.src:
-              if s.op is Ops.BIND and s.src[1].op is Ops.RANGE:
-                assert s.src[1] in num_rngs, "not in range"
-                fixedvars[s.src[0].arg[0]] = num_rngs[s.src[1]]
-            schedule.append(replace(si, fixedvars=fixedvars))
-      if rk.op is Ops.END:
-        for r in rk.src[1:]: in_ranges.remove(r)
+        schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata, bound_ranges=bound_ranges))
+      if rk.op is Ops.END: schedule.append(rk)
     else:
       raise RuntimeError(f"can't schedule {k.op}")
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queues[_heuristic(x)].append(x)
 
-  return schedule, var_vals
+  # expand the ranges in the schedule
+  real_schedule: list[ScheduleItem] = []
+  sched_ptr = 0
+  in_ranges = {}
+  range_ptrs = {}
+  while sched_ptr < len(schedule):
+    si = schedule[sched_ptr]
+    if isinstance(si, UOp):
+      if si.op is Ops.RANGE:
+        in_ranges[si] = 0
+        range_ptrs[si] = sched_ptr + 1
+      elif si.op is Ops.END:
+        if in_ranges[si.src[1]] < si.src[1].vmax:
+          in_ranges[si.src[1]] += 1
+          sched_ptr = range_ptrs[si.src[1]]
+          continue
+    else:
+      real_schedule.append(replace(si, fixedvars=si.fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in si.bound_ranges}, bound_ranges=()))
+    sched_ptr += 1
+  return real_schedule, var_vals
