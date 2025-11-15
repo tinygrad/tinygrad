@@ -364,12 +364,13 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
+    if dest.uop.is_contiguous() or dest.uop.is_realized: src = src.contiguous()
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
     # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
-    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
+    dest.copy_(torch.from_numpy(unwrap(src).realize().cast(cast_dtype).contiguous().numpy()))
   elif src.is_cpu and dest.is_tiny:
     to_device = _from_torch_device(dest.device)
     # TODO we need to properly match dest shape and strides, not blindly assign
@@ -678,7 +679,6 @@ def get_real_tinygrad_buffers():
   return res
 torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
 
-from torch.nn.modules import Module
 torch.nn.modules.module.register_module_module_registration_hook(lambda module, _name, _submodule: None)
 
 def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
