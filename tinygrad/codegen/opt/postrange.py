@@ -2,7 +2,8 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, axis_letters, axis_colors
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
@@ -11,10 +12,6 @@ from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
-
-# NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
-               AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
