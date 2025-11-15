@@ -176,8 +176,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
       case clang.CXType_ObjCId: return (objc:=True, "objc.id_")[1]
       case clang.CXType_ObjCObject:
         if basetype(t).kind != clang.CXType_ObjCId: raise NotImplementedError(f"generics unsupported: {nm(t)}")
-        ps = [proto(p) for p in protocols(t)]
-        if len(ps) == 0:
+        if len(ps:=[proto(p) for p in protocols(t)]) == 0:
           types[nm(t)] = "objc.id_", True
           return "objc.id_"
         if len(ps) == 1:
@@ -213,16 +212,16 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
     if dnm not in types: lines.append(f"class {dnm}(objc.Spec): pass")
     types[dnm] = dnm, is_defn
     if is_defn:
-      bases = [tname(clang.clang_getCursorType(b)) for b in children(decl) if b.kind in specs]
-      ims, cms = parse_objc_spec(decl, dnm, clang.CXCursor_ObjCClassMethodDecl), parse_objc_spec(decl, dnm, clang.CXCursor_ObjCInstanceMethodDecl)
+      bases = [proto(b) for b in children(decl) if b.kind==clang.CXCursor_ObjCProtocolRef and nm(b) != nm(decl)]
+      ims, cms = parse_objc_spec(decl, dnm, clang.CXCursor_ObjCInstanceMethodDecl), parse_objc_spec(decl, dnm, clang.CXCursor_ObjCClassMethodDecl)
       lines.extend([*([f"{dnm}._bases_ = [{', '.join(bases)}]"] if bases else []),
                     *([f"{dnm}._methods_ = [", *ims, "]"] if ims else []), *([f"{dnm}._classmethods_ = [", *cms, "]"] if cms else [])])
     return dnm
 
   for f in files:
     aa = ctypes.cast((ctypes.c_char_p * len(args))(*[x.encode() for x in args]), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) if len(args) else None
-    # FIXME: magic number detailed_preprocessing_record=1
-    tu = clang.clang_parseTranslationUnit(idx:=clang.clang_createIndex(False, 0), os.fspath(f).encode(), aa, len(args), None, 0, 1)
+    tu = clang.clang_parseTranslationUnit(idx:=clang.clang_createIndex(False, 0), os.fspath(f).encode(), aa, len(args), None, 0,
+                                          clang.CXTranslationUnit_DetailedPreprocessingRecord)
     # FIXME: deep walk is not neccesary...
     for c in walk(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))):
       if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)):
