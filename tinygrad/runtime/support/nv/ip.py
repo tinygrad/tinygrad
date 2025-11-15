@@ -76,6 +76,10 @@ class NVRpcQueue:
     raise RuntimeError(f"Timeout waiting for RPC response for command {cmd}")
 
 class NV_FLCN(NV_IP):
+  def wait_for_reset(self):
+    wait_cond(lambda _: self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05_PRIV_LEVEL_MASK.read_bitfields()['read_protection_level0'] == 1 and
+                        self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05[0].read() & 0xff == 0xff, "waiting for reset")
+
   def init_sw(self):
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_falcon_v4.h")
@@ -262,6 +266,10 @@ class NV_FLCN(NV_IP):
       self.nvdev.NV_PFALCON_FALCON_RM.with_base(base).write(self.nvdev.chip_id)
 
 class NV_FLCN_COT(NV_IP):
+  def wait_for_reset(self):
+    self.nvdev.include("src/common/inc/swref/published/blackwell/gb202/dev_therm.h")
+    wait_cond(lambda _: self.nvdev.NV_THERM_I2CS_SCRATCH.read() == 0xff, "waiting for reset")
+
   def init_sw(self):
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
     self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_falcon_v4.h")
