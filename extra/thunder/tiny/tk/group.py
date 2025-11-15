@@ -60,21 +60,33 @@ class Group:
     c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
+    if Device.DEFAULT == "AMD":
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+    else:
+      wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
         for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
-          wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+          if Device.DEFAULT == "AMD":
+            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(4)])
+            b_in = UOp.vectorize(*[b[inner, width, i] for i in range(4)])
+            d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
 
-          a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
-          b_in1 = UOp.vectorize(*([b[inner, width, i] for i in range(2)] + [b[inner, width, 4+i] for i in range(2)]))
-          c_out1 = UOp.vectorize(*[c[height, width, i] for i in range(4)])
-          b_in2 = UOp.vectorize(*([b[inner, width, 2+i] for i in range(2)] + [b[inner, width, 6+i] for i in range(2)]))
-          c_out2 = UOp.vectorize(*[c[height, width, 4+i] for i in range(4)])
+            out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+            c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+            c_store = UOp.group(*c_i).end(height, width, inner)
+          else:
+            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
+            b_in1 = UOp.vectorize(*([b[inner, width, i] for i in range(2)] + [b[inner, width, 4+i] for i in range(2)]))
+            d_in1 = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+            b_in2 = UOp.vectorize(*([b[inner, width, 2+i] for i in range(2)] + [b[inner, width, 6+i] for i in range(2)]))
+            d_in2 = UOp.vectorize(*[c[height, width, 4+i] for i in range(4)])
 
-          out1 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in1, c_out1), arg=wmma_arg)
-          out2 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in2, c_out2), arg=wmma_arg)
-          c_i = [c[height, width, i].store(out1.gep(i)) for i in range(4)] + [c[height, width, 4+i].store(out2.gep(i)) for i in range(4)]
-          c_store = UOp.group(*c_i).end(height, width, inner)
+            out1 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in1, d_in1), arg=wmma_arg)
+            out2 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in2, d_in2), arg=wmma_arg)
+            c_i = [c[height, width, i].store(out1.gep(i)) for i in range(4)] + [c[height, width, 4+i].store(out2.gep(i)) for i in range(4)]
+            c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
     return c.after(c_store).reshape(c.shape) if after else c_store
@@ -83,21 +95,33 @@ class Group:
     c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
+    if Device.DEFAULT == "AMD":
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+    else:
+      wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
         for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
-          wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+          if Device.DEFAULT == "AMD":
+            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(4)])
+            b_in = UOp.vectorize(*[b[width, inner, i] for i in range(4)])
+            d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
 
-          a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
-          b_in1 = UOp.vectorize(*([b[width, inner, i] for i in range(2)] + [b[width, inner, 4+i] for i in range(2)]))
-          c_out1 = UOp.vectorize(*[c[height, width, i] for i in range(4)])
-          b_in2 = UOp.vectorize(*([b[width, inner, 2+i] for i in range(2)] + [b[width, inner, 6+i] for i in range(2)]))
-          c_out2 = UOp.vectorize(*[c[height, width, 4+i] for i in range(4)])
+            out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+            c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+            c_store = UOp.group(*c_i).end(height, width, inner)
+          else:
+            a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
+            b_in1 = UOp.vectorize(*([b[width, inner, i] for i in range(2)] + [b[width, inner, 4+i] for i in range(2)]))
+            d_in1 = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+            b_in2 = UOp.vectorize(*([b[width, inner, 2+i] for i in range(2)] + [b[width, inner, 6+i] for i in range(2)]))
+            d_in2 = UOp.vectorize(*[c[height, width, 4+i] for i in range(4)])
 
-          out1 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in1, c_out1), arg=wmma_arg)
-          out2 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in2, c_out2), arg=wmma_arg)
-          c_i = [c[height, width, i].store(out1.gep(i)) for i in range(4)] + [c[height, width, 4+i].store(out2.gep(i)) for i in range(4)]
-          c_store = UOp.group(*c_i).end(height, width, inner)
+            out1 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in1, d_in1), arg=wmma_arg)
+            out2 = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in2, d_in2), arg=wmma_arg)
+            c_i = [c[height, width, i].store(out1.gep(i)) for i in range(4)] + [c[height, width, 4+i].store(out2.gep(i)) for i in range(4)]
+            c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
     return c.after(c_store).reshape(c.shape) if after else c_store
@@ -162,7 +186,7 @@ class Group:
 
   # ops that can work across multiple warps
 
-  LOAD_INNER = 8
+  LOAD_INNER = 4
   def load(self, dst:ALL_TILES, src:ALL_TILES, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
@@ -177,18 +201,35 @@ class Group:
       for height in self.ker.range(dst.shape[-3], track=False):
         for width in self.ker.range(dst.shape[-2], track=False):
           for inner in self.ker.range(RT.BASE_TILE_NEPT, track=False):
-            if not transpose:
-              row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS + (warp_laneid // 4)
-              col = width * RT.BASE_TILE_COLS + 2 * (warp_laneid % 4)
+            base_row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS
+            base_col = width * RT.BASE_TILE_COLS
 
-              row_offset = ((inner % 4) // 2) * 8
-              col_offset = (inner % 2) + (inner // 4) * 8
+            if Device.DEFAULT == "AMD":
+              if not transpose:
+                row = base_row + (warp_laneid % 16)
+                col = base_col + 4 * (warp_laneid // 16)
+
+                row_offset = 0
+                col_offset = inner
+              else:
+                row = base_row + 4 * (warp_laneid // 16)
+                col = base_col + (warp_laneid % 16)
+
+                row_offset = inner
+                col_offset = 0
             else:
-              row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS + 2 * (warp_laneid % 4)
-              col = width * RT.BASE_TILE_COLS + (warp_laneid // 4)
+              if not transpose:
+                row = base_row + (warp_laneid // 4)
+                col = base_col + 2 * (warp_laneid % 4)
 
-              row_offset = (inner % 2) + (inner // 4) * 8
-              col_offset = ((inner % 4) // 2) * 8
+                row_offset = ((inner % 4) // 2) * 8
+                col_offset = (inner % 2) + (inner // 4) * 8
+              else:
+                row = base_row + 2 * (warp_laneid % 4)
+                col = base_col + (warp_laneid // 4)
+
+                row_offset = (inner % 2) + (inner // 4) * 8
+                col_offset = ((inner % 4) // 2) * 8
 
             src_i_last = (row + row_offset) * src.shape[-1] + col + col_offset
 
@@ -222,8 +263,8 @@ class Group:
 
     return dst.after(dst_store.barrier()).reshape(dst.shape)
 
-  STORE_INNER = 8
-  def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
+  STORE_INNER = 4
+  def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, transpose:bool=False):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
     dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
@@ -237,11 +278,35 @@ class Group:
       for height in self.ker.range(src.shape[-3], track=False):
         for width in self.ker.range(src.shape[-2], track=False):
           for inner in self.ker.range(RT.BASE_TILE_NEPT, track=False):
-            row = (local_warpid * src.shape[-3] + height) * RT.BASE_TILE_ROWS + (warp_laneid // 4)
-            col = width * RT.BASE_TILE_COLS + 2 * (warp_laneid % 4)
+            base_row = (local_warpid * src.shape[-3] + height) * RT.BASE_TILE_ROWS
+            base_col = width * RT.BASE_TILE_COLS
 
-            row_offset = ((inner % 4) // 2) * 8
-            col_offset = (inner % 2) + (inner // 4) * 8
+            if Device.DEFAULT == "AMD":
+              if not transpose:
+                row = base_row + (warp_laneid % 16)
+                col = base_col + 4 * (warp_laneid // 16)
+
+                row_offset = 0
+                col_offset = inner
+              else:
+                row = base_row + 4 * (warp_laneid // 16)
+                col = base_col + (warp_laneid % 16)
+
+                row_offset = inner
+                col_offset = 0
+            else:
+              if not transpose:
+                row = base_row + (warp_laneid // 4)
+                col = base_col + 2 * (warp_laneid % 4)
+
+                row_offset = ((inner % 4) // 2) * 8
+                col_offset = (inner % 2) + (inner // 4) * 8
+              else:
+                row = base_row + 2 * (warp_laneid % 4)
+                col = base_col + (warp_laneid // 4)
+
+                row_offset = (inner % 2) + (inner // 4) * 8
+                col_offset = ((inner % 4) // 2) * 8
 
             dst_i_last = (row + row_offset) * dst.shape[-1] + col + col_offset
 
@@ -274,4 +339,4 @@ class Group:
       raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
 
     self.ker.push_store(dst_store, dst)
-    return dst.after(dst_store.barrier()).reshape(dst.shape) if after else dst_store
+    return dst.after(dst_store.barrier()).reshape(dst.shape)
