@@ -41,9 +41,11 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       elif s.op is Ops.BUFFER:
         pass  # a BUFFER is already realized, nothing to do here
       elif s.op is Ops.BIND:
-        var, val = s.unbind()
-        assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
-        var_vals[var.expr] = val
+        # for RANGE this is in fixedvars
+        if s.src[1].op is not Ops.RANGE:
+          var, val = s.unbind()
+          assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
+          var_vals[var.expr] = val
       else:
         raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
@@ -93,12 +95,12 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         for si in local_schedule:
           for rngs in itertools.product(*[range(int(x.vmax)+1) for x in in_ranges]):
             num_rngs = dict(zip(in_ranges, rngs))
-            fixedvars = si.fixedvars
+            fixedvars = si.fixedvars.copy()
             for s in k.src:
               if s.op is Ops.BIND and s.src[1].op is Ops.RANGE:
                 assert s.src[1] in num_rngs, "not in range"
                 fixedvars[s.src[0].arg[0]] = num_rngs[s.src[1]]
-            schedule.append(replace(si, fixedvars=si.fixedvars))
+            schedule.append(replace(si, fixedvars=fixedvars))
       if rk.op is Ops.END:
         for r in rk.src[1:]: in_ranges.remove(r)
     else:

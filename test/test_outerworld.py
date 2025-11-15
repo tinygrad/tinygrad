@@ -26,6 +26,35 @@ class TestOuterRange(unittest.TestCase):
     out.realize()
     assert out.item() == 10.0
 
+  def test_inner_range(self):
+    a = Tensor.ones(10, 10).contiguous()
+    acc = Tensor.zeros(10).contiguous()
+    Tensor.realize(a, acc)
+
+    # this is fold
+    i = UOp.range(10, -1, AxisType.OUTER)
+    acc_i = acc.uop.after(i)
+    vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
+    out = Tensor(acc.uop.after(acc_i.store(acc_i + a[:, vi].uop).end(i)))
+    out.realize()
+    assert all(x == 10.0 for x in out.tolist())
+
+  def test_range_matmul(self):
+    #vec = Tensor.ones(1, 10).contiguous().realize()
+    vec = Tensor.randn(1, 10).realize()
+    mats = Tensor.randn(3, 10, 10).realize()
+    #mats = Tensor.ones(3, 10, 10).contiguous().realize()
+    ref = ((vec @ mats[0]) @ mats[1]) @ mats[2]
+    ref.realize()
+
+    i = UOp.range(3, -1, AxisType.OUTER)
+    vec_i = Tensor(vec.uop.after(i))
+    vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
+    out = Tensor(vec.uop.after(vec_i.uop.store((vec_i @ mats[vi]).uop).end(i)))
+    out.realize()
+
+    assert Tensor.allclose(ref, out)
+
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
     t = Tensor.arange(100).reshape(10,10).realize()
