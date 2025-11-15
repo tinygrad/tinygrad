@@ -40,11 +40,8 @@ class TestOuterRange(unittest.TestCase):
     assert all(x == 10.0 for x in out.tolist())
 
   def test_range_matmul(self):
-    #vec = Tensor.randn(1, 10).realize()
-    #mats = Tensor.randn(3, 10, 10).realize()
-
-    vec = Tensor.ones(1, 10).contiguous().realize()
-    mats = Tensor.ones(3, 10, 10).contiguous().realize()
+    vec = Tensor.randn(1, 10).realize()
+    mats = Tensor.randn(3, 10, 10).realize()
 
     # 3 matmuls in "scan"
     ref = ((vec @ mats[0]) @ mats[1]) @ mats[2]
