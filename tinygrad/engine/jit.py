@@ -48,11 +48,19 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
       case ViewOp(): continue # ViewOps are just ignored
       case _: ji_graph_dev = None # Everything else is not graphed and flushes existing graph if it's being constructed
 
+    # Check if this is a copy from NPY (input data), which should break fusion boundaries
+    is_npy_copy = isinstance(ji.prg, BufferCopy) and len(ji.bufs) >= 2 and unwrap(ji.bufs[1]) is not None and unwrap(ji.bufs[1]).device == "NPY"
+    # Check if any buffers in this item are NPY buffers (input data), which should break fusion boundaries
+    has_npy_buffer = any(unwrap(b) is not None and unwrap(b).device == "NPY" for b in ji.bufs)
+    # Check if any input buffers are NPY, which should prevent batching
+    has_npy_input = any(b.device == "NPY" for b in input_rawbuffers if any(unwrap(b2) == b for b2 in ji.bufs))
+
     # Check if this jit item can be graphed at all, so check if a new graph supports the current item.
     can_be_graphed = ji_graph_dev is not None and ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_exec_item([ji_graph_dev], ji)
 
     # Check if the current batch can be extended with this item.
-    can_share_graph = can_be_graphed and len(current_batch_devs) > 0 and \
+    # Don't batch if this item uses NPY buffers or is a copy from NPY, as they should break fusion boundaries
+    can_share_graph = can_be_graphed and len(current_batch_devs) > 0 and not (is_npy_copy or has_npy_buffer or has_npy_input) and \
                       graph_class(current_batch_devs[0]).supports_exec_item(dedup(current_batch_devs + [ji_graph_dev]), ji)
     can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
 
@@ -339,3 +347,4 @@ class TinyJit(Generic[ReturnType]):
 
     self.cnt += 1
     return ret
+
