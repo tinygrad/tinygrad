@@ -469,7 +469,7 @@ pm_add_range_tags = PatternMatcher([
 ])
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
-  if len(x.ranges): return None
+  if len([r for r in x.ranges if r.arg[-1] != AxisType.OUTER]): return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
