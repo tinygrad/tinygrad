@@ -191,16 +191,58 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map();
+const Formats = Object.freeze({ EXEC:0, BUFFER:1 });
+const Modes = Object.freeze({ 0:"read", 1:"write", 2:"read+write" });
+const setMetadata = (data) => {
+  if (data?.fmt == null) { metadata.innerHTML = ""; return; }
+  const div = d3.create("div").classed("info", true);
+  if (data.fmt === Formats.EXEC) {
+    const [name, dur, ...rest] = data.tooltipText.split("\n");
+    div.append(() => tabulate([["Name", colored(name)], ["Duration", dur], ["Start Time", formatTime(data.st)]]).node());
+    if (rest.length) div.append("p").style("white-space", "pre-wrap").text(rest.join("\n"));
+    const args = div.append("div").classed("args", true);
+    const bufs = new Array(data.bufs.length);
+    for (let i=0; i<data.bufs.length; i++) {
+      const buf = shapeMap.get(data.bufs[i]);
+      const { num, mode } = buf.users.find(u => u.shape === data.key);
+      bufs[num] = d3.create("p").text(`${Modes[mode]}@data${num}`).style("cursor", "pointer").on("click", () => {
+        const device = document.getElementById(buf.key.split("-")[0]);
+        if (!isExpanded(device)) device.click();
+        focusShape(buf);
+      }).node();
+    }
+    for (const b of bufs) args.append(() => b);
+    if (data.ctx != null) {
+      div.append("a").text("View codegen rewrite").on("click", () => switchCtx(data.ctx, data.step));
+      div.append("a").text("View program").on("click", () => switchCtx(data.ctx, ctxs[data.ctx+1].steps.findIndex(s => s.name==="View Program")));
+    }
+  }
+  if (data.fmt === Formats.BUFFER) {
+    const lines = data.tooltipText.split("\n");
+    const rows = ["DType", "Len", "Size", "Lifetime"].map((s,i) => ([s, lines[i]]));
+    if (data.users != null) rows.push(["Users", data.users.length]);
+    div.append(() => tabulate(rows).node());
+    const kernels = div.append("div").classed("args", true);
+    for (let i=0; i<data.users?.length; i++) {
+      const { repr, num, mode, shape } = data.users[i];
+      const p = kernels.append("p").append(() => colored(`[${i}] ${repr} ${Modes[mode]}@data${num}`));
+      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape({key:shape}));
+    }
+  }
+  metadata.replaceChildren(div.node());
+}
+
+var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
+const shapeMap = new Map(), shapeKeys = new Map();
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+  return setMetadata(shapeMap.get(focusedShape));
 }
 
 async function renderProfiler() {
   displaySelection("#profiler");
-  metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+  setMetadata(shapeMap.get(focusedShape));
   // layout once!
   if (data != null) return updateProgress({ start:false });
   const profiler = d3.select("#profiler").html("");
@@ -225,8 +267,6 @@ async function renderProfiler() {
   const canvasTop = rect(canvas).top;
   // color by key (name/device)
   const colorMap = new Map();
-  // map shapes by event key
-  const shapeMap = new Map();
   data = {tracks:new Map(), axes:{}};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
@@ -264,19 +304,10 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const html = d3.create("div").classed("info", true);
-        html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
-        html.append("div").classed("args", true);
-        if (e.info != null) html.append("p").style("white-space", "pre-wrap").text(e.info);
-        if (shapeRef != null) {
-          html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
-          html.append("a").text("View program").on("click", () => switchCtx(shapeRef.ctx, ctxs[shapeRef.ctx+1].steps.findIndex(s => s.name==="View Program")));
-        }
+        const arg = {tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef};
         // tiny device events go straight to the rewrite rule
-        const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        if (key != null) shapeMetadata.set(key, html.node());
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
-        if (e.key != null) shapeMap.set(e.key, arg);
+        if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${j}`; arg.bufs = []; shapeMap.set(arg.key, arg) }
+        if (e.key != null) shapeKeys.set(e.key, arg.key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
       }
@@ -296,7 +327,7 @@ async function renderProfiler() {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({shape:shapeKeys.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -315,33 +346,12 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const html = d3.create("div").classed("info", true);
-        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
-        if (users != null) rows.push(["Users", users.length]);
-        const info = html.append(() => tabulate(rows).node());
-        const arg = {tooltipText:info.node().outerHTML, key:`${k}-${num}`};
-        const kernels = html.append("div").classed("args", true);
+        const arg = {tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\n${formatTime(dur)}`, fmt:Formats.BUFFER, users, key:`${k}-${num}`};
         for (let u=0; u<users?.length; u++) {
-          const { repr, num, mode, shape } = users[u];
-          const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
-          const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
-          const shapeTxt = shape?.tooltipText?.split("\n").at(-1);
-          if (shapeTxt != null) p.append("span").text(" "+shapeTxt);
-          if (shape != null) {
-            p.style("cursor", "pointer").on("click", () => focusShape(shape))
-            const args = shapeMetadata.get(shape.key).querySelector(".args");
-            const bufArg = d3.create("p").text(`${bufInfo} ${rows[2][1]}`).style("cursor", "pointer").on("click", () => {
-              const device = document.getElementById(k);
-              if (!isExpanded(device)) device.click();
-              focusShape(arg);
-            }).node();
-            bufArg.dataset.num = num;
-            let before = null;
-            for (const c of args.children) { if (+c.dataset.num > num) { before = c; break; } }
-            args.insertBefore(bufArg, before);
-          }
+          const shape = users[u].shape;
+          if (shape != null) shapeMap.get(shape).bufs.push(arg.key);
         }
-        shapeMetadata.set(arg.key, html.node())
+        shapeMap.set(arg.key, arg);
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -517,7 +527,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.innerHTML = foundRect.tooltipText;
+      tooltip.replaceChildren(colored(foundRect.tooltipText));
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
