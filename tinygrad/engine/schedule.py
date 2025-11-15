@@ -1,5 +1,6 @@
+import itertools
 from typing import cast
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from collections import deque, defaultdict
 from tinygrad.uop.ops import UOp, Ops, buffers
 from tinygrad.device import Device, Buffer, MultiBuffer
@@ -61,12 +62,10 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
 
   schedule: list[ScheduleItem] = []
   in_ranges: list[UOp] = []
-  print("SCHED")
   while last_queue or any(queues.values()):
     if not last_queue: last_heuristic, last_queue = min((it for it in queues.items() if it[1]), key=lambda x: abs(x[0]-last_heuristic))
     k = last_queue.popleft()
-    print(k.op)
-    ranges_to_remove = []
+    ranges_to_remove: tuple[UOp, ...] = tuple()
     if k.op is Ops.END:
       ranges_to_remove = k.src[1:]
       k = k.src[0]
@@ -88,8 +87,19 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       else:
         # ONE -> ONE
         si = ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata)
-      print(in_ranges, ast.variables())
-      schedule.append(si)
+      if not len(in_ranges):
+        # not in any ranges
+        schedule.append(si)
+      else:
+        # apply the ranges here
+        for rngs in itertools.product(*[range(x.vmax+1) for x in in_ranges]):
+          num_rngs = dict(zip(in_ranges, rngs))
+          fixedvars = si.fixedvars
+          for s in k.src:
+            if s.op is Ops.BIND and s.src[1].op is Ops.RANGE:
+              assert s.src[1] in num_rngs, "not in range"
+              fixedvars[s.src[0].arg[0]] = num_rngs[s.src[1]]
+          schedule.append(replace(si, fixedvars=si.fixedvars))
     else:
       raise RuntimeError(f"can't schedule {k.op}")
     for r in ranges_to_remove: in_ranges.remove(r)

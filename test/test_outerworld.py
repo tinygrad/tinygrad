@@ -14,8 +14,7 @@ class TestOuterworldReduce(unittest.TestCase):
 # TODO: delete test_outerworld_range?
 class TestOuterRange(unittest.TestCase):
   def test_simple_range(self):
-    a = Tensor.randn(10)
-    #acc = Tensor.zeros(11).contiguous()
+    a = Tensor.ones(10).contiguous()
     acc = Tensor.zeros().contiguous()
     Tensor.realize(a, acc)
 
@@ -25,6 +24,7 @@ class TestOuterRange(unittest.TestCase):
     vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
     out = Tensor(acc.uop.after(acc_i.store(acc_i + a[vi].uop).end(i)))
     out.realize()
+    assert out.item() == 10.0
 
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
