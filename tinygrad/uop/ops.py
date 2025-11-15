@@ -669,7 +669,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert self.arg[1] <= uval.vmin and uval.vmax <= self.arg[2], f"bind {val} not in range [{self.arg[1]}, {self.arg[2]}]"
     return UOp(Ops.BIND, self.dtype, (self, uval))
   def unbind(self) -> tuple[Variable, int]:
-    assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op is Ops.CONST, f"can't unbind {self}"
+    assert self.op is Ops.BIND and self.src[0].op is Ops.DEFINE_VAR and self.src[1].op in {Ops.CONST, Ops.RANGE}, f"can't unbind {self}"
     return self.src[0], self.src[1].arg
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     ret:dict[Variable, int] = {}

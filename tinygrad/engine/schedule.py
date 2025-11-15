@@ -25,7 +25,8 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     if u.op is not Ops.AFTER: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
     k = u.src[1]
     in_degree.setdefault(k, 0)
-    for s in k.src:
+    if k.op is Ops.RANGE: continue
+    for s in k.src[0].src if k.op is Ops.END else k.src:
       if s.op is Ops.AFTER:
         children[s.src[1]].append(k)
         in_degree[k] += 1
@@ -48,7 +49,8 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   # linearize KERNEL UOps into ScheduleItems in BFS order
 
   def _heuristic(k: UOp):
-    if k.arg.ast.op is Ops.COPY and not all_same([Device[cast(Buffer, s.buf_uop.buffer).device].group_id for s in k.src]): return 1000
+    if k.op is Ops.KERNEL and k.arg.ast.op is Ops.COPY and not all_same([Device[cast(Buffer, s.buf_uop.buffer).device].group_id for s in k.src]):
+      return 1000
     return 0
 
   last_heuristic: int = 0
@@ -58,24 +60,39 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     if v == 0: queues[_heuristic(k)].append(k)
 
   schedule: list[ScheduleItem] = []
+  in_ranges: list[UOp] = []
+  print("SCHED")
   while last_queue or any(queues.values()):
     if not last_queue: last_heuristic, last_queue = min((it for it in queues.items() if it[1]), key=lambda x: abs(x[0]-last_heuristic))
     k = last_queue.popleft()
-    ast = k.arg.ast
-    # create subbuffers if needed
-    if ast.op is Ops.BUFFER_VIEW:
-      base = k.src[1].buf_uop.buffer
-      assert isinstance(base, Buffer), "base can't be MultiBuffer"
-      buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
-    if any(isinstance(x, MultiBuffer) for x in ubufs):
-      assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
-      dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
-      for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-        schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}))
+    print(k.op)
+    ranges_to_remove = []
+    if k.op is Ops.END:
+      ranges_to_remove = k.src[1:]
+      k = k.src[0]
+    if k.op is Ops.RANGE:
+      in_ranges.append(k)
+    elif k.op is Ops.KERNEL:
+      ast = k.arg.ast
+      # create subbuffers if needed
+      if ast.op is Ops.BUFFER_VIEW:
+        base = k.src[1].buf_uop.buffer
+        assert isinstance(base, Buffer), "base can't be MultiBuffer"
+        buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+      ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
+      if any(isinstance(x, MultiBuffer) for x in ubufs):
+        assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+        dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
+        for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
+          si = ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {})
+      else:
+        # ONE -> ONE
+        si = ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata)
+      print(in_ranges, ast.variables())
+      schedule.append(si)
     else:
-      # ONE -> ONE
-      schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
+      raise RuntimeError(f"can't schedule {k.op}")
+    for r in ranges_to_remove: in_ranges.remove(r)
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queues[_heuristic(x)].append(x)
