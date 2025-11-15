@@ -15,14 +15,14 @@ class TestFold(unittest.TestCase):
     a_red = (init+a).fold(init).reshape(10)
     np.testing.assert_allclose(a_red.numpy(), a.numpy().sum(axis=1), atol=1e-6)
 
-  @unittest.skip("no outer fold yet")
+  #@unittest.skip("no outer fold yet")
   def test_fold_matmul(self):
     vec = Tensor.randn(1, 10).realize()
     mats = Tensor.randn(3, 10, 10).realize()
     np_mats = mats.numpy()
     np_ref = ((vec.numpy() @ np_mats[0]) @ np_mats[1]) @ np_mats[2]
 
-    i = UOp.range(3, -1, AxisType.FOLD)
+    i = UOp.range(3, -1, AxisType.OUTER)
     out = (vec @ mats[i]).contiguous().fold(vec, i)
 
     np.testing.assert_allclose(out.numpy(), np_ref, atol=1e-6)
