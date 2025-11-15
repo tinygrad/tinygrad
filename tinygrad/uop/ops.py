@@ -33,7 +33,7 @@ def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops
 # With True as the default, this matches the old symbolic behavior
 def resolve(x:UOp|bool, default:bool=True):
   if isinstance(x, bool): return x
-  assert x.dtype == dtypes.bool, "UOp in resolve must be bool"
+  assert x.dtype.scalar() == dtypes.bool, "UOp in resolve must be bool"
   # NOTE: generating the text for the exception is expensive, so we do this
   return bool(sx.vmin) if (sx:=x.simplify()).vmin == sx.vmax else default
 

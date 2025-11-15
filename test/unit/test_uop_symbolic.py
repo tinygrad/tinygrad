@@ -15,7 +15,7 @@ def check_uop_against_string(self, v:UOp, s:str):
   if isinstance(s_eval, int) and v.dtype==dtypes.index: s_eval = UOp.const(dtypes.index, s_eval)
   elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
   s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
-  self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v} for {s}")
+  self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval.render(False)} != {v.render(False)} for {s}")
 
 def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.index): return UOp.variable(name,min_val,max_val,dtype)
 def uconst(val): return UOp.const(dtypes.index, val)
@@ -686,6 +686,31 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+d*4<1).ne(True), 0, 1, "((((a*3)+(d*4))<1)!=True)")  # var can be negative, should not be simplified
     self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
     self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
+
+  def test_symbolic_range_lt(self):
+    a = Variable("in", 0, 254)
+    r0 = UOp.range(255-a, 0)
+    self.helper_test_variable((a+r0)<255, True, True, "True")
+
+  def test_symbolic_range_lt_with_multiplier_3(self):
+    a = Variable("a", 0, 50)
+    r0 = UOp.range(51-a, 0)
+    self.helper_test_variable((a*3+r0*3)<153, True, True, "True")
+
+  def test_symbolic_range_lt_with_negative_multiplier(self):
+    a = Variable("a", 0, 100)
+    r0 = UOp.range(50-a, 0)
+    self.helper_test_variable((a-r0*2)<100, False, True, "((a+(r0*-2))<100)")
+
+  def test_symbolic_range_lt_nonlinear_div(self):
+    a = Variable("a", 0, 100)
+    r0 = UOp.range(10-a, 0)
+    self.helper_test_variable((a+(r0//2))<100, False, True, "((a+(r0//2))<100)")
+
+  def test_symbolic_range_lt_nonlinear_mod(self):
+    a = Variable("a", 0, 100)
+    r0 = UOp.range(10-a, 0)
+    self.helper_test_variable((a+(r0%3))<100, False, True, "((a+(r0%3))<100)")
 
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
