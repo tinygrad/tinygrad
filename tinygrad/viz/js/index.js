@@ -701,7 +701,7 @@ async function main() {
   }
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
-    if (ckey.includes("counters") && state.currentStep === 0) return renderProfiler(ckey, "clk"); // cylces on the x axis
+    if (step.fmt === "timeline") return renderProfiler(ckey, "clk"); // cycles on the x axis
     if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
     displaySelection("#custom");
     metadata.innerHTML = "";

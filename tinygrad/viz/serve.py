@@ -217,7 +217,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   steps:list[dict] = []
   units:set[str] = set()
   events:list[ProfileEvent] = []
-  steps.append({"name":"AMD", "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "depth":0})
+  steps.append({"name":"AMD", "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "depth":0, "fmt":"timeline"})
   for name,waves in rctx.inst_execs.items():
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
     steps.append({"name":(pname:=prg.name if prg is not None else name), "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
