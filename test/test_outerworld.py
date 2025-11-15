@@ -40,13 +40,14 @@ class TestOuterRange(unittest.TestCase):
     assert all(x == 10.0 for x in out.tolist())
 
   def test_range_matmul(self):
-    #vec = Tensor.ones(1, 10).contiguous().realize()
     vec = Tensor.randn(1, 10).realize()
     mats = Tensor.randn(3, 10, 10).realize()
-    #mats = Tensor.ones(3, 10, 10).contiguous().realize()
+
+    # 3 matmuls in "scan"
     ref = ((vec @ mats[0]) @ mats[1]) @ mats[2]
     ref.realize()
 
+    # 3 matmuls with outer world range
     i = UOp.range(3, -1, AxisType.OUTER)
     vec_i = Tensor(vec.uop.after(i))
     vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
