@@ -54,7 +54,8 @@ class TestOuterRange(unittest.TestCase):
     out = Tensor(vec.uop.after(vec_i.uop.store((vec_i @ mats[vi]).uop).end(i)))
     out.realize()
 
-    assert Tensor.allclose(ref, out)
+    # TODO: testing allclose
+    assert Tensor.allclose(ref, out), f"{ref.numpy()=}, {out.numpy()=}"
 
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
