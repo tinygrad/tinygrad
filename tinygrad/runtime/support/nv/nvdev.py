@@ -121,7 +121,7 @@ class NVDev(PCIDevImplBase):
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
       self.pci_dev.reset()
-      time.sleep(0.1)
+      time.sleep(0.1) # wait until device can respond again
       wait_cond(lambda _: self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_05_PRIV_LEVEL_MASK").read_bitfields()['read_protection_level0'] == 1 and
                           self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_05")[0].read() & 0xff == 0xff, f"nv {self.devfmt}: waiting for reset")
 
