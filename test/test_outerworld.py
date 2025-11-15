@@ -11,6 +11,18 @@ class TestOuterworldReduce(unittest.TestCase):
     t = Tensor(UOp(Ops.REDUCE, dtype=out.uop.dtype, src=(out.uop, a), arg=Ops.ADD))
     self.assertListEqual(t.tolist(), [5.,5.,5.,5.,5.])
 
+# TODO: delete test_outerworld_range?
+class TestOuterRange(unittest.TestCase):
+  def test_simple_range(self):
+    a = Tensor.randn(10)
+    acc = Tensor.zeros(11).contiguous()
+    Tensor.realize(a, acc)
+
+    # this is scan
+    i = UOp.range(10, -1, AxisType.OUTER)
+    acc = Tensor(acc.uop.after(acc[i+1].uop.store(acc[i].uop + a[i].uop).end(i)))
+    acc.realize()
+
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
     t = Tensor.arange(100).reshape(10,10).realize()
