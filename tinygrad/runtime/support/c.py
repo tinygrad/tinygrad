@@ -6,9 +6,9 @@ from _ctypes import _SimpleCData
 if WIN:
   def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs): pass
 else:
-  import tinygrad.runtime.support.hcq as hcq, fcntl
+  import fcntl
   def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
-    ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
+    ioctl = functools.partial(fcntl.ioctl, __fd) if isinstance(__fd, int) else __fd.ioctl
     if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=(__payload or __struct(*args, **kwargs)))<<16)|(__base<<8)|__nr, out)):
       raise RuntimeError(f"ioctl returned {rc}")
     return out
