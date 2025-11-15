@@ -32,7 +32,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, extra="")
   src = src.replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   fxn = AMDProgram(DEV, "matmul", lib)
-  elapsed = fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True)
+  elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
   print(f"{instruction:<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
 
