@@ -1,7 +1,8 @@
 from contextlib import AbstractContextManager
-from tinygrad.uop.ops import UOp, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, KernelInfo, AxisType, AddrSpace
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
+from extra.thunder.tiny.tk.tiles import GL, ST, RT, RV
 
 class _tk_range:
   user_rid = 0
@@ -25,6 +26,11 @@ class Kernel(AbstractContextManager):
     self.range_stack = []
     self.store_stack = []
 
+    self.global_slot = 0
+    self.shared_slot = 0
+    self.register_slot = 0
+    self.allocs = {}
+
   @property
   def warpid(self): return self.threadIdx_x // WARP_THREADS
 
@@ -42,6 +48,31 @@ class Kernel(AbstractContextManager):
     if track: self.range_stack.append(rng)
     return rng
 
+  def alloc(self, shape, dtype, addrspace:AddrSpace, name:str|None=None):
+    match addrspace:
+      case AddrSpace.GLOBAL:
+        slot = self.global_slot
+        self.global_slot += 1
+      case AddrSpace.LOCAL:
+        slot = self.shared_slot
+        self.shared_slot += 1
+      case AddrSpace.REG:
+        slot = self.register_slot
+        self.register_slot += 1
+
+    uop = UOp.placeholder(shape, dtype, slot=slot, addrspace=addrspace)
+
+    if name:
+      if (name, shape) in self.allocs: return self.allocs[(name, shape)]
+      self.allocs[(name, shape)] = uop
+
+    return uop
+
+  def gl(self, shape, dtype): return GL.create(shape, dtype, self)
+  def st(self, shape, dtype): return ST.create(shape, dtype, self)
+  def rt(self, shape, dtype): return RT.create(shape, dtype, self)
+  def rv(self, length, dtype, layout="naive"): return RV.create(length, dtype, layout, self)
+
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
 
   def finish(self):
@@ -49,7 +80,7 @@ class Kernel(AbstractContextManager):
     rngs = []
     while self.range_stack: rngs.append(self.range_stack.pop(0)._rng)
 
-    return self.store_stack.pop()[0].end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
+    return self.store_stack.pop()[0]._uop.end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
   def endrange(self):
     last_store = self.store_stack.pop()

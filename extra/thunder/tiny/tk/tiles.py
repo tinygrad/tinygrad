@@ -1,52 +1,143 @@
-import math
-from typing import cast, Callable
-from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
-from tinygrad.dtype import AddrSpace, PtrDType
-from tinygrad.helpers import getenv, prod
+import functools
+from tinygrad.dtype import AddrSpace
+from tinygrad.mixin import MathMixin
+from tinygrad.uop.ops import UOp, Ops
 
 from extra.thunder.tiny.tk import WARP_THREADS
 
-class _Slots:
-  def __init__(self):
-    self.global_slot = 0
-    self.shared_slot = 0
-    self.register_slot = 0
-slots = _Slots()
+def unwrap(x):
+  if hasattr(x, "_uop"): return x._uop
+  if isinstance(x, (list, tuple)): return type(x)(unwrap(y) for y in x)
+  if isinstance(x, dict): return {k: unwrap(v) for k,v in x.items()}
+  return x
 
-def gl(shape, dtype):
-  slots.global_slot += 1
-  return UOp.placeholder(shape, dtype, slot=slots.global_slot-1)
+def wrap(x, ker, cls):
+  if isinstance(x, UOp): return cls(x, ker)
+  if isinstance(x, (list, tuple)): return type(x)(wrap(y, ker, cls) for y in x)
+  return x
 
-shared_slot = 0
-def st(shape, dtype):
-  slots.shared_slot += 1
-  return UOp.placeholder(shape, dtype, addrspace=AddrSpace.LOCAL, slot=slots.shared_slot-1)
+def autowrap(source_cls, blacklist=None):
+  if blacklist is None:
+    blacklist = {
+      "__init__", "__new__", "__str__", "__del__", "__repr__", "__dict__", "__getattribute__",
+      "__setattr__", "__delattr__", "__weakref__", "__slots__", "__class__",
+      "__reduce__", "__reduce_ex__", "__getstate__", "__setstate__", "__hash__"
+    }
 
-TILE_ROW_DIM, TILE_COL_DIM = 16, 16
-RT_BASE_TILE_NE = TILE_ROW_DIM * TILE_COL_DIM
-RT_BASE_TILE_NEPT = RT_BASE_TILE_NE // WARP_THREADS
-register_slot = 0
-def rt(shape, dtype):
-  assert len(shape) == 2
+  def decorator(cls):
+    def __getattr__(self, name):
+      uop = object.__getattribute__(self, "_uop")
+      val = getattr(uop, name)
+      if callable(val):
+        @functools.wraps(val)
+        def proxy(*args, **kwargs):
+          return wrap(val(*unwrap(args), **unwrap(kwargs)), self.ker, cls)
+        return proxy
+      if name in UOp.__slots__: return val
+      return wrap(val, self.ker, cls)
+    cls.__getattr__ = __getattr__
 
-  height = shape[0] // TILE_ROW_DIM
-  width = shape[1] // TILE_COL_DIM
+    for name in dir(source_cls):
+      if name in blacklist or not name.startswith("__"): continue
 
-  slots.register_slot += 1
-  return UOp.placeholder((height, width, RT_BASE_TILE_NEPT), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)
+      for base in cls.mro():
+        if base is source_cls: break
+        if name in base.__dict__: break
+      else:
+        original = getattr(source_cls, name)
+        if callable(original):
+          def make_proxy(op_name, func):
+            def proxy(self, *args, **kwargs):
+              return wrap(func(self._uop, *unwrap(args), **unwrap(kwargs)), self.ker, cls)
+            return proxy
+          setattr(cls, name, make_proxy(name, original))
 
-def rv(length, dtype, layout="naive"):
-  tiles = length // TILE_ROW_DIM
-  match layout:
-    case "naive":
-      inner_dim = 1
-      outer_dim = (tiles + 1) // 2
-    case "ortho":
-      inner_dim = 1
-      outer_dim = tiles
-    case _: raise NotImplementedError(f"rv layout {layout} not implemented")
+    return cls
+  return decorator
 
-  slots.register_slot += 1
-  return UOp.placeholder((outer_dim, inner_dim, 2), dtype, addrspace=AddrSpace.REG, slot=slots.register_slot-1)
+class TileMathMixin(MathMixin):
+  def alu(self, op, *src, inner_op=lambda x:x):
+    assert isinstance(self, (RT, RV))
+    if len(src) == 0:
+      if self._uop._shape is None: uop = UOp.alu(self._uop, op)
+      else: uop = self.ker.warp.map(self._uop, lambda x: UOp.alu(x, op))
+    elif len(src) == 1:
+      if self._uop._shape is None: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
+      elif isinstance(src[0], (int,float,bool)): uop = self.ker.warp.map(self._uop, lambda x: UOp.alu(x, op, inner_op(x.ufix(src[0]))))
+      elif src[0]._shape is None: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
+      else:
+        if isinstance(self, RT) and isinstance(src[0], RV): uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[idx[0], 0, (idx[2]%4)//2])))
+        else: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[*idx])))
+    else: raise NotImplementedError
+    return type(self)(uop, self.ker)
+  def const_like(self, b): return b
+
+  # override ops that do compute on the src uop
+  def sub(self, x, reverse=False):
+    return self.ufix(x).alu(Ops.ADD, self, inner_op=lambda y: -y) if reverse else self.alu(Ops.ADD, self.ufix(x), inner_op=lambda y: -y)
+  def div(self, x, reverse=False):
+    return self.ufix(x).alu(Ops.MUL, self, inner_op=lambda y: 1/y) if reverse else self.alu(Ops.MUL, self.ufix(x), inner_op=lambda y: 1/y)
+
+@autowrap(UOp)
+class GL:
+  def __init__(self, uop, ker):
+    self._uop, self.ker = uop, ker
+
+  @classmethod
+  def create(cls, shape, dtype, ker):
+    uop = ker.alloc(shape, dtype, AddrSpace.GLOBAL)
+    return cls(uop, ker)
+
+@autowrap(UOp)
+class ST:
+  def __init__(self, uop, ker):
+    self._uop, self.ker = uop, ker
+
+  @classmethod
+  def create(cls, shape, dtype, ker):
+    uop = ker.alloc(shape, dtype, AddrSpace.LOCAL)
+    return cls(uop, ker)
+
+@autowrap(UOp)
+class RT(TileMathMixin):
+  BASE_TILE_ROWS, BASE_TILE_COLS = 16, 16
+  BASE_TILE_NE = BASE_TILE_ROWS * BASE_TILE_COLS
+  BASE_TILE_NEPT = BASE_TILE_NE // WARP_THREADS
+
+  def __init__(self, uop, ker):
+    self._uop, self.ker = uop, ker
+
+  @classmethod
+  def create(cls, shape, dtype, ker):
+    assert len(shape) == 2
+    assert shape[0] % RT.BASE_TILE_ROWS == 0
+    assert shape[1] % RT.BASE_TILE_COLS == 0
+
+    height = shape[0] // RT.BASE_TILE_ROWS
+    width = shape[1] // RT.BASE_TILE_COLS
+
+    uop = ker.alloc((height, width, RT.BASE_TILE_NEPT), dtype, AddrSpace.REG)
+    return cls(uop, ker)
+
+@autowrap(UOp)
+class RV(TileMathMixin):
+  def __init__(self, uop, ker):
+    self._uop, self.ker = uop, ker
+
+  @classmethod
+  def create(cls, length, dtype, layout, ker):
+    tiles = length // RT.BASE_TILE_ROWS
+
+    match layout:
+      case "naive":
+        inner_dim = 1
+        outer_dim = (tiles + 1) // 2
+      case "ortho":
+        inner_dim = 1
+        outer_dim = tiles
+      case _: raise NotImplementedError(f"rv layout {layout} not implemented")
+
+    uop = ker.alloc((outer_dim, inner_dim, 2), dtype, AddrSpace.REG)
+    return RV(uop, ker)
+
+ALL_TILES = UOp | GL | ST | RT | RV
