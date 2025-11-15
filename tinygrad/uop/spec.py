@@ -40,6 +40,9 @@ shared_spec = PatternMatcher([
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
+
+  # FOLD, 2 ops + ranges
+  (UPat(Ops.FOLD, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[2:])),
 ])
 
 # ***** UOp spec in the Tensor graph *****
@@ -172,7 +175,7 @@ kernel_spec = PatternMatcher([
   # bufferize can be on anything
   (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
 
-  # reduce must be on ranges
+  # reduce/fold must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:])),
 ])+movement_ops+shared_codegen_spec+shared_spec
 
