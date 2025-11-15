@@ -132,8 +132,8 @@ jobs:
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
     - name: Verify libclang autogen
       run: |
-        mv tinygrad/runtime/autogen/libclang.py /tmp/libclang.py.bak
-        python3 -c "from tinygrad.runtime.autogen import libclang"
+        cp tinygrad/runtime/autogen/libclang.py /tmp/libclang.py.bak
+        REGEN=1 python3 -c "from tinygrad.runtime.autogen import libclang"
         diff /tmp/libclang.py.bak tinygrad/runtime/autogen/libclang.py
   autogen-mac:
     name: In-tree Autogen (macos)
