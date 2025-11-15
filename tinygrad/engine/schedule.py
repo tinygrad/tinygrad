@@ -64,14 +64,12 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   in_ranges: list[UOp] = []
   while last_queue or any(queues.values()):
     if not last_queue: last_heuristic, last_queue = min((it for it in queues.items() if it[1]), key=lambda x: abs(x[0]-last_heuristic))
-    k = last_queue.popleft()
-    ranges_to_remove: tuple[UOp, ...] = tuple()
-    if k.op is Ops.END:
-      ranges_to_remove = k.src[1:]
-      k = k.src[0]
+    k = rk = last_queue.popleft()
+    if k.op is Ops.END: k = k.src[0]
     if k.op is Ops.RANGE:
       in_ranges.append(k)
     elif k.op is Ops.KERNEL:
+      local_schedule: list[ScheduleItem] = []
       ast = k.arg.ast
       # create subbuffers if needed
       if ast.op is Ops.BUFFER_VIEW:
@@ -83,26 +81,28 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
         dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
         for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-          si = ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {})
+          local_schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}))
       else:
         # ONE -> ONE
-        si = ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata)
+        local_schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
       if not len(in_ranges):
         # not in any ranges
-        schedule.append(si)
+        schedule.extend(local_schedule)
       else:
         # apply the ranges here
-        for rngs in itertools.product(*[range(x.vmax+1) for x in in_ranges]):
-          num_rngs = dict(zip(in_ranges, rngs))
-          fixedvars = si.fixedvars
-          for s in k.src:
-            if s.op is Ops.BIND and s.src[1].op is Ops.RANGE:
-              assert s.src[1] in num_rngs, "not in range"
-              fixedvars[s.src[0].arg[0]] = num_rngs[s.src[1]]
-          schedule.append(replace(si, fixedvars=si.fixedvars))
+        for si in local_schedule:
+          for rngs in itertools.product(*[range(int(x.vmax)+1) for x in in_ranges]):
+            num_rngs = dict(zip(in_ranges, rngs))
+            fixedvars = si.fixedvars
+            for s in k.src:
+              if s.op is Ops.BIND and s.src[1].op is Ops.RANGE:
+                assert s.src[1] in num_rngs, "not in range"
+                fixedvars[s.src[0].arg[0]] = num_rngs[s.src[1]]
+            schedule.append(replace(si, fixedvars=si.fixedvars))
+      if rk.op is Ops.END:
+        for r in rk.src[1:]: in_ranges.remove(r)
     else:
       raise RuntimeError(f"can't schedule {k.op}")
-    for r in ranges_to_remove: in_ranges.remove(r)
     for x in children[k]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queues[_heuristic(x)].append(x)
