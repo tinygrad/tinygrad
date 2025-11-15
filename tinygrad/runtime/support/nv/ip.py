@@ -78,7 +78,7 @@ class NVRpcQueue:
 class NV_FLCN(NV_IP):
   def wait_for_reset(self):
     wait_cond(lambda _: self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05_PRIV_LEVEL_MASK.read_bitfields()['read_protection_level0'] == 1 and
-                        self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05[0].read() & 0xff == 0xff, f"waiting for reset")
+                        self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05[0].read() & 0xff == 0xff, "waiting for reset")
 
   def init_sw(self):
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
@@ -268,7 +268,7 @@ class NV_FLCN(NV_IP):
 class NV_FLCN_COT(NV_IP):
   def wait_for_reset(self):
     self.nvdev.include("src/common/inc/swref/published/blackwell/gb202/dev_therm.h")
-    wait_cond(lambda _: self.nvdev.NV_THERM_I2CS_SCRATCH.read() == 0xff, f"waiting for reset")
+    wait_cond(lambda _: self.nvdev.NV_THERM_I2CS_SCRATCH.read() == 0xff, "waiting for reset")
 
   def init_sw(self):
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")

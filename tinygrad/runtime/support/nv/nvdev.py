@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
-from tinygrad.helpers import getenv, DEBUG, fetch, getbits, wait_cond
+from tinygrad.helpers import getenv, DEBUG, fetch, getbits
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import System, PCIDevice, PCIDevImplBase
