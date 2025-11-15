@@ -267,9 +267,8 @@ class NV_FLCN(NV_IP):
 
 class NV_FLCN_COT(NV_IP):
   def wait_for_reset(self):
-    self.include("src/common/inc/swref/published/hopper/gh100/dev_therm.h")
-    self.include("src/common/inc/swref/published/hopper/gh100/dev_therm_addendum.h")
-    wait_cond(lambda _: self.nvdev.NV_THERM_I2CS_SCRATCH_FSP_BOOT_COMPLETE.read() & 0xff == 0xff, f"waiting for reset")
+    self.nvdev.include("src/common/inc/swref/published/blackwell/gb202/dev_therm.h")
+    wait_cond(lambda _: self.nvdev.NV_THERM_I2CS_SCRATCH.read() == 0xff, f"waiting for reset")
 
   def init_sw(self):
     self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
