@@ -446,8 +446,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert self.dtype.scalar() is dtypes.index, "Can only call get_valid on index dtype"
     return self.src[0] if self.op is Ops.WHERE and self.src[2].arg is Invalid else UOp.const(dtypes.bool, self.arg is not Invalid)
   def reduce(self, *src:UOp, **kwargs): return UOp(Ops.REDUCE, kwargs.pop('dtype', self.dtype), src=(self,)+src, **kwargs)
-
-  def fold(self, init:UOp): return UOp(Ops.FOLD, self.dtype, src=(self, init))
+  def fold(self, *src:UOp, **kwargs): return UOp(Ops.FOLD, self.dtype, (self,)+src, **kwargs)
 
   def is_contiguous(self):
     # TODO: this is is_realized
