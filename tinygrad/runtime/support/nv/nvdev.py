@@ -116,15 +116,16 @@ class NVDev(PCIDevImplBase):
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
+    self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
+    self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
     if self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0:
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
       self.pci_dev.reset()
-      time.sleep(0.5)
-      wait_cond(lambda: self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read(), value=0)
+      time.sleep(0.1)
+      wait_cond(lambda _: self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_05_PRIV_LEVEL_MASK").read_bitfields()['read_protection_level0'] == 1 and
+                          self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_05")[0].read() & 0xff == 0xff, f"nv {self.devfmt}: waiting for reset")
 
     self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
-    self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
-    self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
 
     # MMU Init
     self.reg_names.update(mmu_pd_names:=[f'NV_MMU_VER{self.mmu_ver}_PTE', f'NV_MMU_VER{self.mmu_ver}_PDE', f'NV_MMU_VER{self.mmu_ver}_DUAL_PDE'])
