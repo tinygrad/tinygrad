@@ -309,7 +309,7 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const arg = {tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef};
+        const arg = {fmt:Formats.EXEC, info:e.info, ctx:shapeRef?.ctx, step:shapeRef?.step};
         // tiny device events go straight to the rewrite rule
         if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${shapes.length}`; arg.bufs = []; }
         if (e.key != null) shapeKeys.set(e.key, arg.key);
@@ -351,7 +351,7 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = {tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\n${formatTime(dur)}`, fmt:Formats.BUFFER, users, key:`${k}-${shapes.length}`};
+        const arg = {fmt:Formats.BUFFER, sz, nbytes, dur, users, key:`${k}-${shapes.length}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -527,7 +527,7 @@ async function renderProfiler() {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.replaceChildren(colored(foundRect.tooltipText));
+      tooltip.replaceChildren(foundRect.tooltipText);
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
