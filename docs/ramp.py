@@ -137,6 +137,7 @@ print("******* PART 2 *******")
 
 # we redefine the same t here so this cell can run on it's own
 from tinygrad import Tensor
+from tinygrad.uop.ops import Ops
 t = Tensor([1,2,3,4])
 
 # what's above gives you enough of an understanding to go use tinygrad as a library
@@ -178,10 +179,12 @@ UOp(Ops.ASSIGN, dtypes.int, arg=None, src=(
       UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
        x2,)),)),))
 """
-# ASSIGN has two srcs, src[0] is the BUFFER that's assigned to, and src[1] is the thing to assign
-# src[1] is the GPU Kernel that's going to be run
+# ASSIGN has two srcs, src[0] is the BUFFER that's assigned to, and src[1] holds the work to execute
+# Graph rewrites can wrap that kernel (with AFTER/RESHAPE) so walk the graph to find the actual kernel AST
 # we can get the ast of the Kernel as follows
-kernel_ast = t_plus_3_plus_4.uop.src[1].arg.ast
+kernel_uop = next(u for u in t_plus_3_plus_4.uop.toposort()
+  if u.op is Ops.KERNEL and getattr(u.arg, "ast", None) is not None and u.arg.ast.op is Ops.SINK)
+kernel_ast = kernel_uop.arg.ast
 
 # almost everything in tinygrad functions as a rewrite of the UOps
 # the codegen rewrites the ast to a simplified form ready for "rendering"
@@ -239,7 +242,7 @@ print("******* PART 3 *******")
 # it's much simpler than what's in LLVM or MLIR
 
 from tinygrad import dtypes
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.uop.ops import UOp
 
 # first, we'll construct some const UOps
 a = UOp(Ops.CONST, dtypes.int, arg=2)
