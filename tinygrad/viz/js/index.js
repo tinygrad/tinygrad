@@ -233,16 +233,21 @@ const setMetadata = (data) => {
 }
 
 var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
-const shapeMap = new Map(), shapeKeys = new Map();
+const getShape = (key) => {
+  if (key == null) return null;
+  const [track, index] = key.split("-");
+  return data.tracks.get(track).shapes[index].arg;
+}
+const shapeKeys = new Map();
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return setMetadata(shapeMap.get(focusedShape));
+  return setMetadata(getShape(focusedShape));
 }
 
 async function renderProfiler() {
   displaySelection("#profiler");
-  setMetadata(shapeMap.get(focusedShape));
+  setMetadata(getShape(focusedShape));
   // layout once!
   if (data != null) return updateProgress({ start:false });
   const profiler = d3.select("#profiler").html("");
@@ -306,7 +311,7 @@ async function renderProfiler() {
         }
         const arg = {tooltipText:e.name+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), ...shapeRef};
         // tiny device events go straight to the rewrite rule
-        if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${j}`; arg.bufs = []; shapeMap.set(arg.key, arg) }
+        if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${shapes.length}`; arg.bufs = []; }
         if (e.key != null) shapeKeys.set(e.key, arg.key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -346,12 +351,7 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = {tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\n${formatTime(dur)}`, fmt:Formats.BUFFER, users, key:`${k}-${num}`};
-        for (let u=0; u<users?.length; u++) {
-          const shape = users[u].shape;
-          if (shape != null) shapeMap.get(shape).bufs.push(arg.key);
-        }
-        shapeMap.set(arg.key, arg);
+        const arg = {tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, "B")}\n${formatTime(dur)}`, fmt:Formats.BUFFER, users, key:`${k}-${shapes.length}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
