@@ -1,6 +1,35 @@
 import pickle
 from hexdump import hexdump
 from extra.sqtt.roc import decode, ProfileSQTTEvent
+from tinygrad.helpers import getenv
+
+OPCODE_NAMES = {
+    # --- "Real" instruction packets (one per ISA op, from empty vs plus diff) ---
+    0x01: "INST_VALU",          # vector ALU instructions (v_add, v_lshlrev, etc.)
+    0x02: "INST_FLAT",          # global/flat memory (global_load/store_b32)
+    0x03: "INST_SMEM_MSG",      # scalar mem + message (s_load*, s_sendmsg, s_endpgm)
+    0x04: "INST_IMM_CTRL",      # immed / scalar control (s_clause, s_waitcnt, s_nop, ...)
+
+    # --- Timing-ish packets ---
+    0x0F: "TS_SHORT_PLUS4",     # short timestamp, delta + 4 cycles
+    0x11: "TS_MEDIUM_DELTA",    # main medium/large time delta
+    0x14: "TICK_TINY_DELTA",    # generic tiny-delta per-instruction/per-counter tick
+    0x16: "TS_LONG_OR_MARKER",  # 36-bit long delta or marker payload
+    0x12: "EVENT_SHORT_STRUCT", # small structured event near interesting regions
+    0x18: "EVENT_PC_LANE",      # PC-ish / per-lane micro-event
+
+    # --- Pure markers / control-ish ---
+    0x09: "STATE_SNAPSHOT",     # Δ=0, state-change / side-band marker
+    0x15: "CONTROL_MARKER",     # Δ=0, begin/end sampled region / wave marker
+
+    # --- Fallback / unknowns ---
+    0x06: "UNK_SMALL_DELTA",
+    0x07: "UNK_DELTA",
+    0x08: "UNK_SPECIAL_TINY",
+    0x10: "PSEUDO_NEED_MORE_BITS",
+    0x17: "UNK_NO_DELTA",
+    0x19: "UNK_TINY_DELTA2",
+}
 
 # rocprof_trace_decoder_parse_data-0x11c6a0
 # parse_sqtt_180 = b *rocprof_trace_decoder_parse_data-0x11c6a0+0x110040
@@ -216,15 +245,17 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
                 time += delta
 
         # ONE-LINE PRINT PER PACKET
-        print(
-            f"{token_index:4d}  "
-            f"offB={off_bytes:4d}  "
-            f"op=0x{opcode:02x}  "
-            f"time={time_before:8d}->{time:8d}  "
-            f"delta={delta:8d}  "
-            f"{note:30s}  "
-            f"nibbles={packet_nibbles}"
-        )
+        BORING_OPCODES = {0xf, 0x11, 0x12, 0x14, 0x15, 0x16}
+        if opcode not in BORING_OPCODES or getenv("BORING"):
+            print(
+                f"{token_index:4d}  "
+                f"offB={off_bytes:4d}  "
+                f"op=0x{opcode:02x} {OPCODE_NAMES[opcode]:20s}  "
+                f"time={time_before:8d}->{time:8d}  "
+                f"delta={delta:8d}  "
+                f"{note:30s}  "
+                f"nibbles={packet_nibbles[-16:]}"
+            )
 
         token_index += 1
         # This real packet ends here; next one starts at current offset.
@@ -234,9 +265,9 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
     print(f"# done: tokens={token_index}, final_time={time}, flags=0x{flags:02x}")
 
 if __name__ == "__main__":
-    dat_sqtt = parse("extra/sqtt/examples/profile_empty_run_0.pkl")
+    #dat_sqtt = parse("extra/sqtt/examples/profile_empty_run_0.pkl")
     #dat_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
-    #dat_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
+    dat_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
     blob_0 = dat_sqtt[0].blob
     hexdump(blob_0[8:0x108])
     parse_sqtt_print_packets(blob_0[8:])
