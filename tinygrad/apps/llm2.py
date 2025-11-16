@@ -241,13 +241,23 @@ class Transformer:
     load_state_dict(model, weights, strict=False, consume=True)
     return model
 
+  def generate(self, tokens:list[int], max_new_tokens:int) -> int:
+    start_pos, prompt_len = 0, len(tokens)
+    t = Tensor([tokens[start_pos:]], dtype="int32")
+    while len(tokens) < min(self.max_context, max_new_tokens+prompt_len):
+      t = self(t, start_pos)
+      next_id = int(t.item())
+      tokens.append(next_id)
+      start_pos = len(tokens) - 1
+      yield next_id
+
 def main(args):
   if args.seed is not None: Tensor.manual_seed(args.seed)
 
   model_info = MODELS[args.size]
   model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"]) # type: ignore[arg-type]
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
-  expected = [12194,    11,  1495,   553,   481,    30,   357,   939,  8975,    13]
+  expected = [12194, 11, 1495, 553, 481, 30, 357, 939, 8975, 13]
 
   if getenv("TORCH"):
     print("Using torch, not tinygrad.")
@@ -258,7 +268,7 @@ def main(args):
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1]) # type: ignore[attr-defined]
     model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=device)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
-    generate_ids = model.generate(input_ids, max_new_tokens=args.count) # tensor([[12194,    11,   1495,   553,   481,    30]], device='cuda:0')
+    generate_ids = model.generate(input_ids, max_new_tokens=args.max_new_tokens) # tensor([[12194,    11,   1495,   553,   481,    30]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
     torch.testing.assert_close(generate_ids[0], torch.tensor(expected, device=device))
@@ -268,29 +278,13 @@ def main(args):
   with Timing("load weights: ", enabled=DEBUG >= 1):
     model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights) # type: ignore[arg-type]
 
-  outputted = args.prompt
-  start_pos, toks, tok_tensor = 0, tokenizer(outputted)["input_ids"], None
-  print(outputted, end="", flush=True)
-
   # generate text
-  for _ in range(args.count):
-    GlobalCounters.reset()
-    if DEBUG >= 1: print("")
-    next_tok = Tensor([toks[start_pos:]], dtype=dtypes.int64) if tok_tensor is None or len(toks)-start_pos > 1 else tok_tensor.reshape(1, 1) # type: ignore[unreachable,attr-defined]
-    tok_tensor = model(next_tok, start_pos)
-    tok = tok_tensor.item()
-
-    # update the kv cache
-    start_pos = len(toks)
-
-    # display
-    toks.append(tok)
-    cur = tokenizer.decode(toks, skip_special_tokens=True)
-    print(cur[len(outputted):], flush=True, end="")
-    outputted = cur
-  print()
-
-  assert toks == expected, f"generated {toks} but expected {expected}"
+  print(args.prompt, end="", flush=True)
+  ids = tokenizer(args.prompt)["input_ids"]
+  for next_id in model.generate(ids, args.max_new_tokens):
+    print(tokenizer.decode([next_id], skip_special_tokens=True), flush=True, end="")
+    if next_id == tokenizer.eos_token: break
+  print(flush=True)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -299,7 +293,7 @@ if __name__ == "__main__":
   parser.add_argument('--fakeweights',  action='store_true', help="Load fake weights")
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--prompt", type=str, default="Hi, how are you?", help="Phrase to start with")
-  parser.add_argument("--count", type=int, default=4, help="Max number of tokens to generate")
+  parser.add_argument("--max-new-tokens", type=int, default=4, help="Max number of tokens to generate")
   args = parser.parse_args()
 
   main(args)
