@@ -38,11 +38,7 @@ def save_sqtt():
     if isinstance(e, ProfileSQTTEvent):
       print(replace(e, blob=b''))
       if e.se == 0:
-        # 0xf is small time advance
-        # 0x11 is time advance
-        # 0x16 is big time advance + markers
-        # 0x14 is REG
-        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x16, 0x14] if getenv("FILTER", 1) else None)
+        parse_sqtt_print_packets(e.blob)
 
 template = """.text
 .globl matmul
@@ -100,6 +96,9 @@ def run_asm(src):
   fxn(buf._buf, global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True)
 
 if __name__ == "__main__":
+  with save_sqtt() as sqtt:
+    (Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
+  exit(0)
 
   with save_sqtt() as sqtt:
     # what's in v0?

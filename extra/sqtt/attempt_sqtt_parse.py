@@ -1,4 +1,5 @@
 import pickle
+from tinygrad.helpers import getenv
 from extra.sqtt.roc import decode, ProfileSQTTEvent
 
 # Instruction packets (one per ISA op)
@@ -12,23 +13,22 @@ OPCODE_NAMES = {
   0x03: "ALUEXEC",
   # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
   0x01: "VALUINST",
+  # gated by SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT
+  0x06: "WAVERDY",
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT
   0x08: "WAVEEND",
   0x09: "WAVESTART",
   # gated by SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT
-  0x04: "IMMEDIATE",
+  0x04: "IMMEDIATE_4",
+  0x05: "IMMEDIATE_5",
   # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there
   0x14: "REG",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
   0x12: "EVENT",
   # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
   0x18: "INST",
-
-  # ------------------------------------------------------------------------
-  # 0x01–0x06: small “meta + maybe tiny delta” packets
-  # ------------------------------------------------------------------------
-  0x05: "META_DESC24_TS_A",         # 24-bit descriptor-ish + delta field
-  0x06: "META_DESC24_TS_B",         # second flavour, 24-bit, delta field
+  # gated by SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT
+  0x19: "UTILCTR",
 
   # ------------------------------------------------------------------------
   # 0x07–0x0F: pure timestamp-ish deltas
@@ -52,7 +52,6 @@ OPCODE_NAMES = {
   0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
   0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
   0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
-  0x19: "EVT_SUMMARY_48B",          # 6-byte summary/aggregate metric
 }
 
 # these tables are from rocprof trace decoder
@@ -417,7 +416,14 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
 
   return ", ".join(fields)
 
-def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=None) -> None:
+# 0xd is time something
+# 0xf is small time advance
+# 0x11 is time advance
+# 0x16 is big time advance + markers
+# 0x14 is REG
+DEFAULT_FILTER = (0xd, 0xf, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else None
+
+def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAULT_FILTER) -> None:
   """
   Minimal debug: print ONE LINE per decoded token (packet).
 
@@ -530,7 +536,7 @@ def parse(fn:str):
 
 if __name__ == "__main__":
   #dat_sqtt = parse("extra/sqtt/examples/profile_empty_run_0.pkl")
-  dat_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
-  #dat_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
+  #dat_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
+  dat_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
   blob_0 = dat_sqtt[0].blob
   parse_sqtt_print_packets(blob_0[8:])
