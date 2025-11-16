@@ -330,7 +330,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
     state = reg & 0xFF
     opcode = STATE_TO_TOKEN[state]
 
-    # 3) Handle pseudo-token 0x10: need more bits, don't print
+    # 3) Handle pseudo-token 0x10: need more bits, don't print. Looks like a NOP.
     if opcode == 0x10:
       # "need more bits" pseudo-token: adjust nibble budget and continue
       nib_budget = 4
@@ -388,7 +388,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
     if extra: note = (note + " ; " + extra) if note else extra
 
     BORING_OPCODES = {0x11, 0x14}
-    if opcode not in BORING_OPCODES or getenv("BORING"):
+    if opcode not in BORING_OPCODES or getenv("BORING", 1):
       my_reg = reg
       my_reg &= (1 << nib_budget) - 1
       print(
@@ -397,7 +397,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
         f"op=0x{opcode:02x} "
         f"{OPCODE_NAMES[opcode]:24s} "
         f" time={time_before:8d}+{delta:8d}  "
-        f"{my_reg:16X} {nib_budget//4:<2d}  "
+        f"{my_reg:16X} "
         f"{note}"
       )
 
