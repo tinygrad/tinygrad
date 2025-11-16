@@ -86,7 +86,8 @@ class TestTiming(unittest.TestCase):
     with save_sqtt() as sqtt:
       for tc in dev.renderer.get_tensor_cores(dev.arch):
         M, K, N = tc.dims
-        a = Tensor.empty(M, K, dtype=tc.dtype_in)@Tensor.empty(K, N, dtype=tc.dtype_in)
+        s = 32
+        a = Tensor.empty(M*s, K*s, dtype=tc.dtype_in)@Tensor.empty(K*s, N*s, dtype=tc.dtype_in)
         a.realize()
         print(a)
     for p,waves in sqtt.items():
