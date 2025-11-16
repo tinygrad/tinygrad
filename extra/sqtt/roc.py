@@ -111,7 +111,6 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
-    if DEBUG >= 8: print(f"isa_cb {pc.address=} {pc.code_object_id=}")
     instr, mem_size_ptr[0] = ROCParseCtx.disasms[(unwrap(ROCParseCtx.active_kern), pc.address)]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
