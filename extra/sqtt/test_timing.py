@@ -91,7 +91,9 @@ class TestTiming(unittest.TestCase):
         print(a)
     for p,waves in sqtt.items():
       for e in waves[0].insts:
-        if (e.inst.startswith("v_wmma")): print(f"{e.inst.split(" ")[0]:<29} : {e.dur} cycles")
+        if (e.inst.startswith("v_wmma")):
+          instruction = e.inst.split(" ")[0]
+          print(f"{instruction:<29} : {e.dur} cycles")
 
   def test_sleep(self):
     n = 1
