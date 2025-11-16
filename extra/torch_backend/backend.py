@@ -188,6 +188,7 @@ def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
+  storage_offset = storage_offset or tensor.storage_offset()
   return aten.as_strided(tensor.cpu(), size, stride, storage_offset).tiny()
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
