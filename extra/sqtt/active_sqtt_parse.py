@@ -1,14 +1,34 @@
-import atexit
-from tinygrad import Device
+import os
+os.environ["PYTHONPATH"] = "."
+os.environ["SQTT"] = "1"
+if "DEV" not in os.environ: os.environ["DEV"] = "AMD"
+os.environ["PROFILE"] = "1"
+os.environ["AMD_LLVM"] = "0"
+
+import atexit, contextlib
 from tinygrad.helpers import system
-from extra.sqtt.test_timing import save_sqtt
 from tinygrad.runtime.ops_amd import AMDProgram
+from extra.sqtt.roc import decode, WaveExec
+from tinygrad.device import Device, ProfileDeviceEvent
 
 def set_power(x): system(f"sudo /opt/rocm/bin/amd-smi set -l {x}")
 @atexit.register
 def reset_power(): set_power("auto")
+set_power("stable_std")
 
-DEV = Device["AMD"]
+dev = Device["AMD"]
+
+@contextlib.contextmanager
+def save_sqtt():
+  # clear the old traces
+  dev.profile_events.clear()
+  sqtt:dict[str, list[WaveExec]] = {}
+  yield sqtt
+
+  rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
+  assert len(rctx.inst_execs) > 0, "empty sqtt output"
+  sqtt.update(rctx.inst_execs)
+
 
 template = """.text
 .globl matmul
@@ -50,11 +70,14 @@ def run_asm(src):
   NUM_WORKGROUPS = 1
   WAVE_SIZE = 32
   NUM_WAVES = 1
-  lib = DEV.compiler.compile(template.replace("INSTRUCTION", src))
-  fxn = AMDProgram(DEV, "matmul", lib)
+  lib = dev.compiler.compile(template.replace("INSTRUCTION", '\n'.join(src)))
+  dev.compiler.disassemble(lib)
+  fxn = AMDProgram(dev, "matmul", lib)
   fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True)
 
 if __name__ == "__main__":
-  set_power("stable_std")
   with save_sqtt() as sqtt:
-    run_asm("s_nop 1")
+    run_asm([
+      "v_add_f32_e32 v1 v0 v0",
+      "v_add_f32_e32 v2 v1 v1",
+    ])
