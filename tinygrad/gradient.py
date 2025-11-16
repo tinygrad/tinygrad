@@ -43,6 +43,17 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.KERNEL, name="k"), lambda ctx, k: k.arg.grad_fxn(ctx, k)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
+
+  # RANGE: loop index / axis, not a differentiable quantity
+  (UPat(Ops.RANGE), lambda: (None,)),
+
+  # STORE: buffer write. Gradient flows only into the value being stored.
+  # src layout is roughly (buffer, value, *axes_or_indices)
+  (UPat(Ops.STORE), lambda ctx: (None, ctx)),
+
+  # END: loop terminator / "end of range" node.
+  # Just pass the gradient into the body (first src), ignore the ranges.
+  (UPat(Ops.END, name="ret"), lambda ctx, ret: (ctx, *[None]*(len(ret.src) - 1))),
 ])
 
 def _deepwalk(root:UOp, targets:set[UOp]) -> list[UOp]:

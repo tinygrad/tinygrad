@@ -57,6 +57,41 @@ class TestOuterRange(unittest.TestCase):
     # TODO: testing allclose
     assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
 
+  def test_range_grad(self):
+    def range_matmul(vec, mats):
+      # vec: (1, 10), mats: (3, 10, 10)
+      # assume vec, mats already have requires_grad set however you like
+
+      i = UOp.range(3, -100, AxisType.OUTER)      # loop axis
+      vec_i = Tensor(vec.uop.after(i))            # "loop-carried" vector
+      vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
+
+      body = (vec_i.contiguous() @ mats[vi])      # matmul using loop index
+      out = Tensor(vec.uop.after(vec_i.uop.store(body.uop).end(i)))
+      return out
+
+    vec = Tensor.randn(1, 3, requires_grad=True)
+    mats = Tensor.randn(3, 3, 3, requires_grad=True)
+    Tensor.realize(vec, mats)
+
+    ref = ((vec @ mats[0]) @ mats[1]) @ mats[2]
+    loss = (1.0 - ref).square().mean()
+    loss.backward()
+    Tensor.realize(vec.grad, mats.grad)
+    print(vec.grad.numpy())
+    print(mats.grad.numpy())
+    vec.grad = None
+    mats.grad = None
+
+    out = range_matmul(vec, mats)
+    loss = (1.0 - out).square().mean()
+    loss.backward()
+    Tensor.realize(vec.grad, mats.grad)
+
+    print(vec.grad, mats.grad)   # should be non-None and finite
+    print(vec.grad.numpy())
+    print(mats.grad.numpy())
+
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
     t = Tensor.arange(100).reshape(10,10).realize()
