@@ -388,334 +388,252 @@ struct_libusb_init_option._fields_ = [
   ('option', enum_libusb_option),
   ('value', struct_libusb_init_option_value),
 ]
-# int libusb_init(libusb_context **ctx)
 try: (libusb_init:=dll.libusb_init).restype, libusb_init.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.POINTER(libusb_context))]
 except AttributeError: pass
 
-# int libusb_init_context(libusb_context **ctx, const struct libusb_init_option options[], int num_options)
 try: (libusb_init_context:=dll.libusb_init_context).restype, libusb_init_context.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.POINTER(libusb_context)), (struct_libusb_init_option * 0), ctypes.c_int32]
 except AttributeError: pass
 
-# void libusb_exit(libusb_context *ctx)
 try: (libusb_exit:=dll.libusb_exit).restype, libusb_exit.argtypes = None, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# void libusb_set_debug(libusb_context *ctx, int level)
 try: (libusb_set_debug:=dll.libusb_set_debug).restype, libusb_set_debug.argtypes = None, [ctypes.POINTER(libusb_context), ctypes.c_int32]
 except AttributeError: pass
 
-# void libusb_set_log_cb(libusb_context *ctx, libusb_log_cb cb, int mode)
 try: (libusb_set_log_cb:=dll.libusb_set_log_cb).restype, libusb_set_log_cb.argtypes = None, [ctypes.POINTER(libusb_context), libusb_log_cb, ctypes.c_int32]
 except AttributeError: pass
 
-# const struct libusb_version *libusb_get_version(void)
 try: (libusb_get_version:=dll.libusb_get_version).restype, libusb_get_version.argtypes = ctypes.POINTER(struct_libusb_version), []
 except AttributeError: pass
 
-# int libusb_has_capability(uint32_t capability)
 try: (libusb_has_capability:=dll.libusb_has_capability).restype, libusb_has_capability.argtypes = ctypes.c_int32, [uint32_t]
 except AttributeError: pass
 
-# const char *libusb_error_name(int errcode)
 try: (libusb_error_name:=dll.libusb_error_name).restype, libusb_error_name.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_setlocale(const char *locale)
 try: (libusb_setlocale:=dll.libusb_setlocale).restype, libusb_setlocale.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# const char *libusb_strerror(int errcode)
 try: (libusb_strerror:=dll.libusb_strerror).restype, libusb_strerror.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
 ssize_t = ctypes.c_int64
-# ssize_t libusb_get_device_list(libusb_context *ctx, libusb_device ***list)
 try: (libusb_get_device_list:=dll.libusb_get_device_list).restype, libusb_get_device_list.argtypes = ssize_t, [ctypes.POINTER(libusb_context), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(libusb_device)))]
 except AttributeError: pass
 
-# void libusb_free_device_list(libusb_device **list, int unref_devices)
 try: (libusb_free_device_list:=dll.libusb_free_device_list).restype, libusb_free_device_list.argtypes = None, [ctypes.POINTER(ctypes.POINTER(libusb_device)), ctypes.c_int32]
 except AttributeError: pass
 
-# libusb_device *libusb_ref_device(libusb_device *dev)
 try: (libusb_ref_device:=dll.libusb_ref_device).restype, libusb_ref_device.argtypes = ctypes.POINTER(libusb_device), [ctypes.POINTER(libusb_device)]
 except AttributeError: pass
 
-# void libusb_unref_device(libusb_device *dev)
 try: (libusb_unref_device:=dll.libusb_unref_device).restype, libusb_unref_device.argtypes = None, [ctypes.POINTER(libusb_device)]
 except AttributeError: pass
 
-# int libusb_get_configuration(libusb_device_handle *dev, int *config)
 try: (libusb_get_configuration:=dll.libusb_get_configuration).restype, libusb_get_configuration.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# int libusb_get_device_descriptor(libusb_device *dev, struct libusb_device_descriptor *desc)
 try: (libusb_get_device_descriptor:=dll.libusb_get_device_descriptor).restype, libusb_get_device_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.POINTER(struct_libusb_device_descriptor)]
 except AttributeError: pass
 
-# int libusb_get_active_config_descriptor(libusb_device *dev, struct libusb_config_descriptor **config)
 try: (libusb_get_active_config_descriptor:=dll.libusb_get_active_config_descriptor).restype, libusb_get_active_config_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))]
 except AttributeError: pass
 
-# int libusb_get_config_descriptor(libusb_device *dev, uint8_t config_index, struct libusb_config_descriptor **config)
 try: (libusb_get_config_descriptor:=dll.libusb_get_config_descriptor).restype, libusb_get_config_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))]
 except AttributeError: pass
 
-# int libusb_get_config_descriptor_by_value(libusb_device *dev, uint8_t bConfigurationValue, struct libusb_config_descriptor **config)
 try: (libusb_get_config_descriptor_by_value:=dll.libusb_get_config_descriptor_by_value).restype, libusb_get_config_descriptor_by_value.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))]
 except AttributeError: pass
 
-# void libusb_free_config_descriptor(struct libusb_config_descriptor *config)
 try: (libusb_free_config_descriptor:=dll.libusb_free_config_descriptor).restype, libusb_free_config_descriptor.argtypes = None, [ctypes.POINTER(struct_libusb_config_descriptor)]
 except AttributeError: pass
 
-# int libusb_get_ss_endpoint_companion_descriptor(libusb_context *ctx, const struct libusb_endpoint_descriptor *endpoint, struct libusb_ss_endpoint_companion_descriptor **ep_comp)
 try: (libusb_get_ss_endpoint_companion_descriptor:=dll.libusb_get_ss_endpoint_companion_descriptor).restype, libusb_get_ss_endpoint_companion_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_endpoint_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor))]
 except AttributeError: pass
 
-# void libusb_free_ss_endpoint_companion_descriptor(struct libusb_ss_endpoint_companion_descriptor *ep_comp)
 try: (libusb_free_ss_endpoint_companion_descriptor:=dll.libusb_free_ss_endpoint_companion_descriptor).restype, libusb_free_ss_endpoint_companion_descriptor.argtypes = None, [ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor)]
 except AttributeError: pass
 
-# int libusb_get_bos_descriptor(libusb_device_handle *dev_handle, struct libusb_bos_descriptor **bos)
 try: (libusb_get_bos_descriptor:=dll.libusb_get_bos_descriptor).restype, libusb_get_bos_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.POINTER(struct_libusb_bos_descriptor))]
 except AttributeError: pass
 
-# void libusb_free_bos_descriptor(struct libusb_bos_descriptor *bos)
 try: (libusb_free_bos_descriptor:=dll.libusb_free_bos_descriptor).restype, libusb_free_bos_descriptor.argtypes = None, [ctypes.POINTER(struct_libusb_bos_descriptor)]
 except AttributeError: pass
 
-# int libusb_get_usb_2_0_extension_descriptor(libusb_context *ctx, struct libusb_bos_dev_capability_descriptor *dev_cap, struct libusb_usb_2_0_extension_descriptor **usb_2_0_extension)
 try: (libusb_get_usb_2_0_extension_descriptor:=dll.libusb_get_usb_2_0_extension_descriptor).restype, libusb_get_usb_2_0_extension_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor))]
 except AttributeError: pass
 
-# void libusb_free_usb_2_0_extension_descriptor(struct libusb_usb_2_0_extension_descriptor *usb_2_0_extension)
 try: (libusb_free_usb_2_0_extension_descriptor:=dll.libusb_free_usb_2_0_extension_descriptor).restype, libusb_free_usb_2_0_extension_descriptor.argtypes = None, [ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor)]
 except AttributeError: pass
 
-# int libusb_get_ss_usb_device_capability_descriptor(libusb_context *ctx, struct libusb_bos_dev_capability_descriptor *dev_cap, struct libusb_ss_usb_device_capability_descriptor **ss_usb_device_cap)
 try: (libusb_get_ss_usb_device_capability_descriptor:=dll.libusb_get_ss_usb_device_capability_descriptor).restype, libusb_get_ss_usb_device_capability_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor))]
 except AttributeError: pass
 
-# void libusb_free_ss_usb_device_capability_descriptor(struct libusb_ss_usb_device_capability_descriptor *ss_usb_device_cap)
 try: (libusb_free_ss_usb_device_capability_descriptor:=dll.libusb_free_ss_usb_device_capability_descriptor).restype, libusb_free_ss_usb_device_capability_descriptor.argtypes = None, [ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor)]
 except AttributeError: pass
 
-# int libusb_get_container_id_descriptor(libusb_context *ctx, struct libusb_bos_dev_capability_descriptor *dev_cap, struct libusb_container_id_descriptor **container_id)
 try: (libusb_get_container_id_descriptor:=dll.libusb_get_container_id_descriptor).restype, libusb_get_container_id_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_container_id_descriptor))]
 except AttributeError: pass
 
-# void libusb_free_container_id_descriptor(struct libusb_container_id_descriptor *container_id)
 try: (libusb_free_container_id_descriptor:=dll.libusb_free_container_id_descriptor).restype, libusb_free_container_id_descriptor.argtypes = None, [ctypes.POINTER(struct_libusb_container_id_descriptor)]
 except AttributeError: pass
 
-# int libusb_get_platform_descriptor(libusb_context *ctx, struct libusb_bos_dev_capability_descriptor *dev_cap, struct libusb_platform_descriptor **platform_descriptor)
 try: (libusb_get_platform_descriptor:=dll.libusb_get_platform_descriptor).restype, libusb_get_platform_descriptor.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_platform_descriptor))]
 except AttributeError: pass
 
-# void libusb_free_platform_descriptor(struct libusb_platform_descriptor *platform_descriptor)
 try: (libusb_free_platform_descriptor:=dll.libusb_free_platform_descriptor).restype, libusb_free_platform_descriptor.argtypes = None, [ctypes.POINTER(struct_libusb_platform_descriptor)]
 except AttributeError: pass
 
-# uint8_t libusb_get_bus_number(libusb_device *dev)
 try: (libusb_get_bus_number:=dll.libusb_get_bus_number).restype, libusb_get_bus_number.argtypes = uint8_t, [ctypes.POINTER(libusb_device)]
 except AttributeError: pass
 
-# uint8_t libusb_get_port_number(libusb_device *dev)
 try: (libusb_get_port_number:=dll.libusb_get_port_number).restype, libusb_get_port_number.argtypes = uint8_t, [ctypes.POINTER(libusb_device)]
 except AttributeError: pass
 
-# int libusb_get_port_numbers(libusb_device *dev, uint8_t *port_numbers, int port_numbers_len)
 try: (libusb_get_port_numbers:=dll.libusb_get_port_numbers).restype, libusb_get_port_numbers.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.POINTER(uint8_t), ctypes.c_int32]
 except AttributeError: pass
 
-# __attribute__((deprecated(""))) int libusb_get_port_path(libusb_context *ctx, libusb_device *dev, uint8_t *path, uint8_t path_length)
 try: (libusb_get_port_path:=dll.libusb_get_port_path).restype, libusb_get_port_path.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(libusb_device), ctypes.POINTER(uint8_t), uint8_t]
 except AttributeError: pass
 
-# libusb_device *libusb_get_parent(libusb_device *dev)
 try: (libusb_get_parent:=dll.libusb_get_parent).restype, libusb_get_parent.argtypes = ctypes.POINTER(libusb_device), [ctypes.POINTER(libusb_device)]
 except AttributeError: pass
 
-# uint8_t libusb_get_device_address(libusb_device *dev)
 try: (libusb_get_device_address:=dll.libusb_get_device_address).restype, libusb_get_device_address.argtypes = uint8_t, [ctypes.POINTER(libusb_device)]
 except AttributeError: pass
 
-# int libusb_get_device_speed(libusb_device *dev)
 try: (libusb_get_device_speed:=dll.libusb_get_device_speed).restype, libusb_get_device_speed.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device)]
 except AttributeError: pass
 
-# int libusb_get_max_packet_size(libusb_device *dev, unsigned char endpoint)
 try: (libusb_get_max_packet_size:=dll.libusb_get_max_packet_size).restype, libusb_get_max_packet_size.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.c_ubyte]
 except AttributeError: pass
 
-# int libusb_get_max_iso_packet_size(libusb_device *dev, unsigned char endpoint)
 try: (libusb_get_max_iso_packet_size:=dll.libusb_get_max_iso_packet_size).restype, libusb_get_max_iso_packet_size.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.c_ubyte]
 except AttributeError: pass
 
-# int libusb_get_max_alt_packet_size(libusb_device *dev, int interface_number, int alternate_setting, unsigned char endpoint)
 try: (libusb_get_max_alt_packet_size:=dll.libusb_get_max_alt_packet_size).restype, libusb_get_max_alt_packet_size.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.c_int32, ctypes.c_int32, ctypes.c_ubyte]
 except AttributeError: pass
 
-# int libusb_get_interface_association_descriptors(libusb_device *dev, uint8_t config_index, struct libusb_interface_association_descriptor_array **iad_array)
 try: (libusb_get_interface_association_descriptors:=dll.libusb_get_interface_association_descriptors).restype, libusb_get_interface_association_descriptors.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_interface_association_descriptor_array))]
 except AttributeError: pass
 
-# int libusb_get_active_interface_association_descriptors(libusb_device *dev, struct libusb_interface_association_descriptor_array **iad_array)
 try: (libusb_get_active_interface_association_descriptors:=dll.libusb_get_active_interface_association_descriptors).restype, libusb_get_active_interface_association_descriptors.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.POINTER(ctypes.POINTER(struct_libusb_interface_association_descriptor_array))]
 except AttributeError: pass
 
-# void libusb_free_interface_association_descriptors(struct libusb_interface_association_descriptor_array *iad_array)
 try: (libusb_free_interface_association_descriptors:=dll.libusb_free_interface_association_descriptors).restype, libusb_free_interface_association_descriptors.argtypes = None, [ctypes.POINTER(struct_libusb_interface_association_descriptor_array)]
 except AttributeError: pass
 
 intptr_t = ctypes.c_int64
-# int libusb_wrap_sys_device(libusb_context *ctx, intptr_t sys_dev, libusb_device_handle **dev_handle)
 try: (libusb_wrap_sys_device:=dll.libusb_wrap_sys_device).restype, libusb_wrap_sys_device.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), intptr_t, ctypes.POINTER(ctypes.POINTER(libusb_device_handle))]
 except AttributeError: pass
 
-# int libusb_open(libusb_device *dev, libusb_device_handle **dev_handle)
 try: (libusb_open:=dll.libusb_open).restype, libusb_open.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device), ctypes.POINTER(ctypes.POINTER(libusb_device_handle))]
 except AttributeError: pass
 
-# void libusb_close(libusb_device_handle *dev_handle)
 try: (libusb_close:=dll.libusb_close).restype, libusb_close.argtypes = None, [ctypes.POINTER(libusb_device_handle)]
 except AttributeError: pass
 
-# libusb_device *libusb_get_device(libusb_device_handle *dev_handle)
 try: (libusb_get_device:=dll.libusb_get_device).restype, libusb_get_device.argtypes = ctypes.POINTER(libusb_device), [ctypes.POINTER(libusb_device_handle)]
 except AttributeError: pass
 
-# int libusb_set_configuration(libusb_device_handle *dev_handle, int configuration)
 try: (libusb_set_configuration:=dll.libusb_set_configuration).restype, libusb_set_configuration.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_claim_interface(libusb_device_handle *dev_handle, int interface_number)
 try: (libusb_claim_interface:=dll.libusb_claim_interface).restype, libusb_claim_interface.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_release_interface(libusb_device_handle *dev_handle, int interface_number)
 try: (libusb_release_interface:=dll.libusb_release_interface).restype, libusb_release_interface.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32]
 except AttributeError: pass
 
-# libusb_device_handle *libusb_open_device_with_vid_pid(libusb_context *ctx, uint16_t vendor_id, uint16_t product_id)
 try: (libusb_open_device_with_vid_pid:=dll.libusb_open_device_with_vid_pid).restype, libusb_open_device_with_vid_pid.argtypes = ctypes.POINTER(libusb_device_handle), [ctypes.POINTER(libusb_context), uint16_t, uint16_t]
 except AttributeError: pass
 
-# int libusb_set_interface_alt_setting(libusb_device_handle *dev_handle, int interface_number, int alternate_setting)
 try: (libusb_set_interface_alt_setting:=dll.libusb_set_interface_alt_setting).restype, libusb_set_interface_alt_setting.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_clear_halt(libusb_device_handle *dev_handle, unsigned char endpoint)
 try: (libusb_clear_halt:=dll.libusb_clear_halt).restype, libusb_clear_halt.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_ubyte]
 except AttributeError: pass
 
-# int libusb_reset_device(libusb_device_handle *dev_handle)
 try: (libusb_reset_device:=dll.libusb_reset_device).restype, libusb_reset_device.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle)]
 except AttributeError: pass
 
-# int libusb_alloc_streams(libusb_device_handle *dev_handle, uint32_t num_streams, unsigned char *endpoints, int num_endpoints)
 try: (libusb_alloc_streams:=dll.libusb_alloc_streams).restype, libusb_alloc_streams.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), uint32_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_free_streams(libusb_device_handle *dev_handle, unsigned char *endpoints, int num_endpoints)
 try: (libusb_free_streams:=dll.libusb_free_streams).restype, libusb_free_streams.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError: pass
 
 size_t = ctypes.c_uint64
-# unsigned char *libusb_dev_mem_alloc(libusb_device_handle *dev_handle, size_t length)
 try: (libusb_dev_mem_alloc:=dll.libusb_dev_mem_alloc).restype, libusb_dev_mem_alloc.argtypes = ctypes.POINTER(ctypes.c_ubyte), [ctypes.POINTER(libusb_device_handle), size_t]
 except AttributeError: pass
 
-# int libusb_dev_mem_free(libusb_device_handle *dev_handle, unsigned char *buffer, size_t length)
 try: (libusb_dev_mem_free:=dll.libusb_dev_mem_free).restype, libusb_dev_mem_free.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), size_t]
 except AttributeError: pass
 
-# int libusb_kernel_driver_active(libusb_device_handle *dev_handle, int interface_number)
 try: (libusb_kernel_driver_active:=dll.libusb_kernel_driver_active).restype, libusb_kernel_driver_active.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_detach_kernel_driver(libusb_device_handle *dev_handle, int interface_number)
 try: (libusb_detach_kernel_driver:=dll.libusb_detach_kernel_driver).restype, libusb_detach_kernel_driver.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_attach_kernel_driver(libusb_device_handle *dev_handle, int interface_number)
 try: (libusb_attach_kernel_driver:=dll.libusb_attach_kernel_driver).restype, libusb_attach_kernel_driver.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_set_auto_detach_kernel_driver(libusb_device_handle *dev_handle, int enable)
 try: (libusb_set_auto_detach_kernel_driver:=dll.libusb_set_auto_detach_kernel_driver).restype, libusb_set_auto_detach_kernel_driver.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_int32]
 except AttributeError: pass
 
-# struct libusb_transfer *libusb_alloc_transfer(int iso_packets)
 try: (libusb_alloc_transfer:=dll.libusb_alloc_transfer).restype, libusb_alloc_transfer.argtypes = ctypes.POINTER(struct_libusb_transfer), [ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_submit_transfer(struct libusb_transfer *transfer)
 try: (libusb_submit_transfer:=dll.libusb_submit_transfer).restype, libusb_submit_transfer.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError: pass
 
-# int libusb_cancel_transfer(struct libusb_transfer *transfer)
 try: (libusb_cancel_transfer:=dll.libusb_cancel_transfer).restype, libusb_cancel_transfer.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError: pass
 
-# void libusb_free_transfer(struct libusb_transfer *transfer)
 try: (libusb_free_transfer:=dll.libusb_free_transfer).restype, libusb_free_transfer.argtypes = None, [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError: pass
 
-# void libusb_transfer_set_stream_id(struct libusb_transfer *transfer, uint32_t stream_id)
 try: (libusb_transfer_set_stream_id:=dll.libusb_transfer_set_stream_id).restype, libusb_transfer_set_stream_id.argtypes = None, [ctypes.POINTER(struct_libusb_transfer), uint32_t]
 except AttributeError: pass
 
-# uint32_t libusb_transfer_get_stream_id(struct libusb_transfer *transfer)
 try: (libusb_transfer_get_stream_id:=dll.libusb_transfer_get_stream_id).restype, libusb_transfer_get_stream_id.argtypes = uint32_t, [ctypes.POINTER(struct_libusb_transfer)]
 except AttributeError: pass
 
-# int libusb_control_transfer(libusb_device_handle *dev_handle, uint8_t request_type, uint8_t bRequest, uint16_t wValue, uint16_t wIndex, unsigned char *data, uint16_t wLength, unsigned int timeout)
 try: (libusb_control_transfer:=dll.libusb_control_transfer).restype, libusb_control_transfer.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), uint8_t, uint8_t, uint16_t, uint16_t, ctypes.POINTER(ctypes.c_ubyte), uint16_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# int libusb_bulk_transfer(libusb_device_handle *dev_handle, unsigned char endpoint, unsigned char *data, int length, int *actual_length, unsigned int timeout)
 try: (libusb_bulk_transfer:=dll.libusb_bulk_transfer).restype, libusb_bulk_transfer.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError: pass
 
-# int libusb_interrupt_transfer(libusb_device_handle *dev_handle, unsigned char endpoint, unsigned char *data, int length, int *actual_length, unsigned int timeout)
 try: (libusb_interrupt_transfer:=dll.libusb_interrupt_transfer).restype, libusb_interrupt_transfer.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32]
 except AttributeError: pass
 
-# int libusb_get_string_descriptor_ascii(libusb_device_handle *dev_handle, uint8_t desc_index, unsigned char *data, int length)
 try: (libusb_get_string_descriptor_ascii:=dll.libusb_get_string_descriptor_ascii).restype, libusb_get_string_descriptor_ascii.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), uint8_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError: pass
 
-# int libusb_try_lock_events(libusb_context *ctx)
 try: (libusb_try_lock_events:=dll.libusb_try_lock_events).restype, libusb_try_lock_events.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# void libusb_lock_events(libusb_context *ctx)
 try: (libusb_lock_events:=dll.libusb_lock_events).restype, libusb_lock_events.argtypes = None, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# void libusb_unlock_events(libusb_context *ctx)
 try: (libusb_unlock_events:=dll.libusb_unlock_events).restype, libusb_unlock_events.argtypes = None, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# int libusb_event_handling_ok(libusb_context *ctx)
 try: (libusb_event_handling_ok:=dll.libusb_event_handling_ok).restype, libusb_event_handling_ok.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# int libusb_event_handler_active(libusb_context *ctx)
 try: (libusb_event_handler_active:=dll.libusb_event_handler_active).restype, libusb_event_handler_active.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# void libusb_interrupt_event_handler(libusb_context *ctx)
 try: (libusb_interrupt_event_handler:=dll.libusb_interrupt_event_handler).restype, libusb_interrupt_event_handler.argtypes = None, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# void libusb_lock_event_waiters(libusb_context *ctx)
 try: (libusb_lock_event_waiters:=dll.libusb_lock_event_waiters).restype, libusb_lock_event_waiters.argtypes = None, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# void libusb_unlock_event_waiters(libusb_context *ctx)
 try: (libusb_unlock_event_waiters:=dll.libusb_unlock_event_waiters).restype, libusb_unlock_event_waiters.argtypes = None, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
@@ -726,35 +644,27 @@ struct_timeval._fields_ = [
   ('tv_sec', ctypes.c_int64),
   ('tv_usec', ctypes.c_int64),
 ]
-# int libusb_wait_for_event(libusb_context *ctx, struct timeval *tv)
 try: (libusb_wait_for_event:=dll.libusb_wait_for_event).restype, libusb_wait_for_event.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
-# int libusb_handle_events_timeout(libusb_context *ctx, struct timeval *tv)
 try: (libusb_handle_events_timeout:=dll.libusb_handle_events_timeout).restype, libusb_handle_events_timeout.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
-# int libusb_handle_events_timeout_completed(libusb_context *ctx, struct timeval *tv, int *completed)
 try: (libusb_handle_events_timeout_completed:=dll.libusb_handle_events_timeout_completed).restype, libusb_handle_events_timeout_completed.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# int libusb_handle_events(libusb_context *ctx)
 try: (libusb_handle_events:=dll.libusb_handle_events).restype, libusb_handle_events.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# int libusb_handle_events_completed(libusb_context *ctx, int *completed)
 try: (libusb_handle_events_completed:=dll.libusb_handle_events_completed).restype, libusb_handle_events_completed.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# int libusb_handle_events_locked(libusb_context *ctx, struct timeval *tv)
 try: (libusb_handle_events_locked:=dll.libusb_handle_events_locked).restype, libusb_handle_events_locked.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
-# int libusb_pollfds_handle_timeouts(libusb_context *ctx)
 try: (libusb_pollfds_handle_timeouts:=dll.libusb_pollfds_handle_timeouts).restype, libusb_pollfds_handle_timeouts.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# int libusb_get_next_timeout(libusb_context *ctx, struct timeval *tv)
 try: (libusb_get_next_timeout:=dll.libusb_get_next_timeout).restype, libusb_get_next_timeout.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval)]
 except AttributeError: pass
 
@@ -765,15 +675,12 @@ struct_libusb_pollfd._fields_ = [
 ]
 libusb_pollfd_added_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int16, ctypes.c_void_p)
 libusb_pollfd_removed_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_void_p)
-# const struct libusb_pollfd **libusb_get_pollfds(libusb_context *ctx)
 try: (libusb_get_pollfds:=dll.libusb_get_pollfds).restype, libusb_get_pollfds.argtypes = ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd)), [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
-# void libusb_free_pollfds(const struct libusb_pollfd **pollfds)
 try: (libusb_free_pollfds:=dll.libusb_free_pollfds).restype, libusb_free_pollfds.argtypes = None, [ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd))]
 except AttributeError: pass
 
-# void libusb_set_pollfd_notifiers(libusb_context *ctx, libusb_pollfd_added_cb added_cb, libusb_pollfd_removed_cb removed_cb, void *user_data)
 try: (libusb_set_pollfd_notifiers:=dll.libusb_set_pollfd_notifiers).restype, libusb_set_pollfd_notifiers.argtypes = None, [ctypes.POINTER(libusb_context), libusb_pollfd_added_cb, libusb_pollfd_removed_cb, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -786,19 +693,15 @@ libusb_hotplug_flag = CEnum(ctypes.c_uint32)
 LIBUSB_HOTPLUG_ENUMERATE = libusb_hotplug_flag.define('LIBUSB_HOTPLUG_ENUMERATE', 1)
 
 libusb_hotplug_callback_fn = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_device), libusb_hotplug_event, ctypes.c_void_p)
-# int libusb_hotplug_register_callback(libusb_context *ctx, int events, int flags, int vendor_id, int product_id, int dev_class, libusb_hotplug_callback_fn cb_fn, void *user_data, libusb_hotplug_callback_handle *callback_handle)
 try: (libusb_hotplug_register_callback:=dll.libusb_hotplug_register_callback).restype, libusb_hotplug_register_callback.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, libusb_hotplug_callback_fn, ctypes.c_void_p, ctypes.POINTER(libusb_hotplug_callback_handle)]
 except AttributeError: pass
 
-# void libusb_hotplug_deregister_callback(libusb_context *ctx, libusb_hotplug_callback_handle callback_handle)
 try: (libusb_hotplug_deregister_callback:=dll.libusb_hotplug_deregister_callback).restype, libusb_hotplug_deregister_callback.argtypes = None, [ctypes.POINTER(libusb_context), libusb_hotplug_callback_handle]
 except AttributeError: pass
 
-# void *libusb_hotplug_get_user_data(libusb_context *ctx, libusb_hotplug_callback_handle callback_handle)
 try: (libusb_hotplug_get_user_data:=dll.libusb_hotplug_get_user_data).restype, libusb_hotplug_get_user_data.argtypes = ctypes.c_void_p, [ctypes.POINTER(libusb_context), libusb_hotplug_callback_handle]
 except AttributeError: pass
 
-# int libusb_set_option(libusb_context *ctx, enum libusb_option option, ...)
 try: (libusb_set_option:=dll.libusb_set_option).restype, libusb_set_option.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), enum_libusb_option]
 except AttributeError: pass
 
