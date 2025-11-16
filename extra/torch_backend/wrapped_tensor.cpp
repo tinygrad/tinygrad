@@ -43,7 +43,7 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
     (void)isHighPriority;
     return Stream(Stream::DEFAULT, Device(D, 0));
   }
-  Stream getNewStream(Device, int priority = 0) const override {
+  Stream getNewStream(Device, int priority = 0) const {
     // no-op
     (void)priority;
     return Stream(Stream::DEFAULT, Device(D, 0));
@@ -103,7 +103,7 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
 
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   // NOTE: no idea what this is
-  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { return true; }
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const { return true; }
 };
 
 int register_hook() {
@@ -112,16 +112,21 @@ int register_hook() {
 }
 int temp_register_hook = register_hook();
 
-at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceIndex device_index) {
+at::Tensor wrap_tensor(py::object &py_obj, py::object torch_dtype, c10::DeviceIndex device_index) {
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
 
-  py::list views = py_obj.attr("uop").attr("st").attr("views");
-  std::vector<int64_t> strides = views[views.size() - 1].attr("strides").cast<std::vector<int64_t>>();
+  // UOp no longer has .st attribute, compute strides from shape using strides_for_shape
+  py::object helpers = py::module::import("tinygrad.helpers");
+  py::object strides_for_shape = helpers.attr("strides_for_shape");
+  std::vector<int64_t> strides = strides_for_shape(py_obj.attr("shape")).cast<std::vector<int64_t>>();
   int64_t storage_offset = 0;
-  for (auto& v: views) {
-    storage_offset += v.attr("offset").cast<int64_t>(); // TODO: is this correct?
-  }
+
+  // Convert torch.dtype to at::ScalarType by creating a temporary tensor
+  py::object torch_module = py::module::import("torch");
+  py::object temp_tensor = torch_module.attr("tensor")(py::list(), py::arg("dtype")=torch_dtype);
+  at::Tensor temp_at_tensor = temp_tensor.cast<at::Tensor>();
+  at::ScalarType dtype = temp_at_tensor.scalar_type();
 
   return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
     at::DispatchKeySet(at::DispatchKey::PrivateUse1),

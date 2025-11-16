@@ -3,7 +3,6 @@
 # A002 Function argument `input` is shadowing a Python builtin
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
@@ -17,7 +16,10 @@ def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
-mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
+import platform
+extra_cflags = []
+if platform.machine() == 'arm64': extra_cflags = ['-arch', 'arm64']
+mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")], extra_cflags=extra_cflags, extra_ldflags=extra_cflags)
 def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
@@ -66,14 +68,10 @@ for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "p
 
 # in place operations with views
 def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.st.contiguous: self.replace(self.contiguous())
+  if not self.uop.contiguous: self.replace(self.contiguous())
   self.replace(self.clone().realize())
   for v in views:
-    if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
-    ret = self
-    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
-    v.replace(ret)
+    v.replace(v.contiguous().realize())
 def maybe_realize_storage(self: Tensor) -> bool:
   if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
   return realize
@@ -169,18 +167,18 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 @functools.cache
 def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-  return mops
-
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
+    from extra.to_movement_ops import to_movement_ops, MovementOps
+    mops = to_movement_ops(st)
+    if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
+    return mops
 
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
   # multiple as_strided do not compound
   base = canonical_base(tensor)
   # TODO: this is heavyweight
+  from tinygrad.shape.shapetracker import ShapeTracker, View
+  from extra.to_movement_ops import apply_mop
   st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
   ret = base
   if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
@@ -190,12 +188,11 @@ def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
-  storage_offset = storage_offset or tensor.storage_offset()
-  return _as_strided(tensor, size, stride, storage_offset)
+  return aten.as_strided(tensor.cpu(), size, stride, storage_offset).tiny()
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
 def _reshape_alias(tensor:torch.Tensor, size, stride):
-  return _as_strided(tensor, size, stride)
+  return aten._reshape_alias(tensor.cpu(), size, stride).tiny()
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
 def empty_strided(size, stride, dtype, layout=None, device=None, pin_memory=False):
@@ -329,7 +326,8 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
+    # Simplified: just check if realized instead of accessing .st
+    if dest.uop.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
   elif src.is_tiny and dest.is_cpu:
