@@ -181,9 +181,8 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
       mode = "other"
     val36 = (pkt >> 12) & ((1 << 36) - 1)
     fields.append(f"mode={mode}")
-    fields.append(f"val36=0x{val36:x}")
-    if mode == "delta":
-      fields.append(f"delta36={delta}")
+    if mode != "delta":
+      fields.append(f"val36=0x{val36:x}")
     return ", ".join(fields)
 
   # For 0x07, 0x0A–0x0E, we know they drive time (via DELTA_MAP_DEFAULT),
@@ -466,23 +465,17 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=None)
         flags |= 0x01
 
       # Common 36-bit field at bits [12..47]
-      val36 = (reg >> 12) & ((1 << 36) - 1)
 
       if (reg & 0x200) == 0:
         # delta mode: add 36-bit delta to time
-        delta = val36
+        delta = (reg >> 12) & ((1 << 36) - 1)
         time += delta
-        note = "0x16-delta"
       else:
         # marker / other modes: no time advance
-        if (reg & 0x100) == 0 and val36 != 0:
+        if (reg & 0x100) == 0:
           # real marker: bit9=1, bit8=0, non-zero payload
-          delta = 0
-          note = f"0x16-marker val=0x{val36:x}"
-        else:
           # "other" 0x16 variants, ignored for timing
           delta = 0
-          note = "0x16-other"
     else:
       # 6) Generic opcode (including 0x0F)
       shift, width = DELTA_MAP_DEFAULT[opcode]
@@ -492,19 +485,13 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=None)
       # TODO: add more opcode parsers here that add notes to other opcodes
       if opcode == 0x0F:
         delta_with_fix = delta + 4
-        note = f"0x0f (+4) raw_delta={delta}"
         time += delta_with_fix
         delta = delta_with_fix
       else:
         time += delta
 
-    # ONE-LINE PRINT PER PACKET
-    #assert last_real_offset%8 == 0
-    #assert (offset)%8 == 0, f"misalign offset {offset}"
-
     # Append extra decoded fields into the note string
-    extra = decode_packet_fields(opcode, reg, delta)
-    if extra: note = (note + " ; " + extra) if note else extra
+    note = decode_packet_fields(opcode, reg, delta)
 
     if filter is None or opcode not in filter:
       my_reg = reg
