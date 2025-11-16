@@ -3,15 +3,13 @@ from typing import TYPE_CHECKING
 from tinygrad.helpers import flatten, WIN
 from _ctypes import _SimpleCData
 
-if WIN:
-  def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs): pass
-else:
-  import fcntl
-  def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
-    ioctl = functools.partial(fcntl.ioctl, __fd) if isinstance(__fd, int) else __fd.ioctl
-    if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=(__payload or __struct(*args, **kwargs)))<<16)|(__base<<8)|__nr, out)):
-      raise RuntimeError(f"ioctl returned {rc}")
-    return out
+def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
+  assert not WIN, "ioctl not supported"
+  import tinygrad.runtime.support.hcq as hcq, fcntl
+  ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
+  if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=(__payload or __struct(*args, **kwargs)))<<16)|(__base<<8)|__nr, out)):
+    raise RuntimeError(f"ioctl returned {rc}")
+  return out
 
 def _IO(base, nr): return functools.partial(_do_ioctl, 0, ord(base) if isinstance(base, str) else base, nr, None)
 def _IOW(base, nr, typ): return functools.partial(_do_ioctl, 1, ord(base) if isinstance(base, str) else base, nr, typ)
