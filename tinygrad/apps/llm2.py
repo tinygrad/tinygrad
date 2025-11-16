@@ -14,7 +14,8 @@
 # https://cameronrwolfe.substack.com/p/gpt-oss
 
 from __future__ import annotations
-import argparse, math, os
+from typing import Generator
+import argparse, math, os, time
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
 from tinygrad.helpers import fetch, getenv, DEBUG, Timing, GlobalCounters
@@ -241,9 +242,9 @@ class Transformer:
     load_state_dict(model, weights, strict=False, consume=True)
     return model
 
-  def generate(self, tokens:list[int], max_new_tokens:int) -> int:
+  def generate(self, tokens:list[int], max_new_tokens:int) -> Generator[int, None, None]:
     start_pos, prompt_len = 0, len(tokens)
-    t = Tensor([tokens[start_pos:]], dtype="int32")
+    t = Tensor([tokens], dtype="int32")
     while len(tokens) < min(self.max_context, max_new_tokens+prompt_len):
       t = self(t, start_pos)
       next_id = int(t.item())
@@ -279,10 +280,13 @@ def main(args):
     model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights) # type: ignore[arg-type]
 
   # generate text
-  print(args.prompt, end="", flush=True)
+  print(args.prompt, end="\n" if args.timing else "", flush=True)
   ids = tokenizer(args.prompt)["input_ids"]
+  st = time.perf_counter()
   for next_id in model.generate(ids, args.max_new_tokens):
+    duration, st = time.perf_counter()-st, time.perf_counter()
     print(tokenizer.decode([next_id], skip_special_tokens=True), flush=True, end="")
+    if args.timing: print(f'\t{1/duration:.3f} tok/sec', end="\n")
     if next_id == tokenizer.eos_token: break
   print(flush=True)
 
@@ -294,6 +298,7 @@ if __name__ == "__main__":
   parser.add_argument("--seed", type=int, help="Random seed")
   parser.add_argument("--prompt", type=str, default="Hi, how are you?", help="Phrase to start with")
   parser.add_argument("--max-new-tokens", type=int, default=4, help="Max number of tokens to generate")
+  parser.add_argument("--timing", action="store_true", help="Print timing per token")
   args = parser.parse_args()
 
   main(args)
