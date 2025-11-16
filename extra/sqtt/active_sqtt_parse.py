@@ -88,7 +88,10 @@ def run_asm(src):
 if __name__ == "__main__":
   with save_sqtt() as sqtt:
     run_asm([
-      "v_add_f32_e32 v1 v0 v0",
-      #"s_nop 1"
+      "v_rcp_f32 v1, v0"
+      #"v_add_f32_e32 v1 v0 v0",
+      #"v_add_f32_e32 v1 v0 v0",
+      #"v_add_f32_e32 v3 v2 v2",
       #"v_add_f32_e32 v2 v1 v1",
-    ]*15)
+      #"s_nop 1"
+    ]*1)
