@@ -29,15 +29,15 @@ def save_sqtt():
   yield sqtt
   events = dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())]
 
+  rctx = decode(events)
+  assert len(rctx.inst_execs) > 0, "empty sqtt output"
+  sqtt.update(rctx.inst_execs)
+
   for e in events:
     if isinstance(e, ProfileSQTTEvent):
       print(replace(e, blob=b''))
       if e.se == 0:
-        parse_sqtt_print_packets(e.blob)
-
-  rctx = decode(events)
-  assert len(rctx.inst_execs) > 0, "empty sqtt output"
-  sqtt.update(rctx.inst_execs)
+        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x12, 0x14, 0x16])
 
 
 template = """.text
@@ -91,4 +91,4 @@ if __name__ == "__main__":
       "v_add_f32_e32 v1 v0 v0",
       #"s_nop 1"
       #"v_add_f32_e32 v2 v1 v1",
-    ])
+    ]*15)

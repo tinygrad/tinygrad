@@ -410,7 +410,7 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
 
   return ", ".join(fields)
 
-def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
+def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=None) -> None:
   """
   Minimal debug: print ONE LINE per decoded token (packet).
 
@@ -504,8 +504,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
     extra = decode_packet_fields(opcode, reg, delta)
     if extra: note = (note + " ; " + extra) if note else extra
 
-    BORING_OPCODES = {0x11, 0x14}
-    if opcode not in BORING_OPCODES or getenv("BORING", 1):
+    if filter is None or opcode not in filter:
       my_reg = reg
       my_reg &= (1 << nib_budget) - 1
       print(
