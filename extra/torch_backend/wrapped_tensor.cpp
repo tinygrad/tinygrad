@@ -43,7 +43,7 @@ struct CustomNoOpDeviceGuardImpl : public c10::impl::DeviceGuardImplInterface
     (void)isHighPriority;
     return Stream(Stream::DEFAULT, Device(D, 0));
   }
-  Stream getNewStream(Device, int priority = 0) const {
+  Stream getNewStream(Device, int priority = 0) const override {
     // no-op
     (void)priority;
     return Stream(Stream::DEFAULT, Device(D, 0));
@@ -103,7 +103,7 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
 
 struct OpenRegHooksInterface : public at::PrivateUse1HooksInterface {
   // NOTE: no idea what this is
-  bool hasPrimaryContext(c10::DeviceIndex device_index) const { return true; }
+  bool hasPrimaryContext(c10::DeviceIndex device_index) const override { return true; }
 };
 
 int register_hook() {

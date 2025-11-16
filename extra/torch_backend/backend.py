@@ -167,10 +167,10 @@ def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
 @functools.cache
 def cached_to_movement_ops(shape, st) -> list:
-    from extra.to_movement_ops import to_movement_ops, MovementOps
-    mops = to_movement_ops(st)
-    if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-    return mops
+  from extra.to_movement_ops import to_movement_ops, MovementOps
+  mops = to_movement_ops(st)
+  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
+  return mops
 
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
@@ -326,7 +326,6 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
     to_device = _from_torch_device(dest.device)
     src,dest = unwrap(src),unwrap(dest)
     # TODO we need to properly match dest shape and strides, not blindly assign
-    # Simplified: just check if realized instead of accessing .st
     if dest.uop.is_realized: src = src.contiguous() # this only solves some cases
     dest.assign(src.cast(cast_dtype).to(to_device))
     if realize: Tensor.realize(dest)
