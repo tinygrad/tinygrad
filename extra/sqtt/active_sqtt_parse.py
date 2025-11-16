@@ -5,11 +5,14 @@ if "DEV" not in os.environ: os.environ["DEV"] = "AMD"
 os.environ["PROFILE"] = "1"
 os.environ["AMD_LLVM"] = "0"
 
+from dataclasses import replace
 import atexit, contextlib
 from tinygrad.helpers import system
 from tinygrad.runtime.ops_amd import AMDProgram
-from extra.sqtt.roc import decode, WaveExec
+from extra.sqtt.roc import decode, WaveExec, ProfileSQTTEvent
 from tinygrad.device import Device, ProfileDeviceEvent
+
+from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
 
 def set_power(x): system(f"sudo /opt/rocm/bin/amd-smi set -l {x}")
 @atexit.register
@@ -24,8 +27,15 @@ def save_sqtt():
   dev.profile_events.clear()
   sqtt:dict[str, list[WaveExec]] = {}
   yield sqtt
+  events = dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())]
 
-  rctx = decode(dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())])
+  for e in events:
+    if isinstance(e, ProfileSQTTEvent):
+      print(replace(e, blob=b''))
+      if e.se == 0:
+        parse_sqtt_print_packets(e.blob)
+
+  rctx = decode(events)
   assert len(rctx.inst_execs) > 0, "empty sqtt output"
   sqtt.update(rctx.inst_execs)
 
@@ -79,5 +89,6 @@ if __name__ == "__main__":
   with save_sqtt() as sqtt:
     run_asm([
       "v_add_f32_e32 v1 v0 v0",
-      "v_add_f32_e32 v2 v1 v1",
+      #"s_nop 1"
+      #"v_add_f32_e32 v2 v1 v1",
     ])
