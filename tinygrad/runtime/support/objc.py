@@ -4,12 +4,14 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING: id_ = ctypes.c_void_p
 else:
   class id_(ctypes.c_void_p):
+    _is_finalizing = sys.is_finalizing # FIXME: why is this needed
+
     retain: bool = False
     # This prevents ctypes from converting response to plain int, and dict.fromkeys() can use it to dedup
     def __hash__(self): return hash(self.value)
     def __eq__(self, other): return self.value == other.value
     def __del__(self):
-      if self.retain and not sys.is_finalizing(): self.release()
+      if self.retain and not self._is_finalizing(): self.release()
     def release(self): msg("release")(self)
     def retained(self):
       setattr(self, 'retain', True)
