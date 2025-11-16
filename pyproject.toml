@@ -30,7 +30,6 @@ packages = [
   'tinygrad.runtime',
   'tinygrad.runtime.autogen',
   'tinygrad.runtime.autogen.am',
-  'tinygrad.runtime.autogen.nv',
   'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
@@ -162,7 +161,6 @@ exclude = [
   ".git/",
   "docs/",
   "extra/",
-  "tinygrad/runtime/autogen",
   "test/external/mlperf_resnet",
   "test/external/mlperf_unet3d",
 ]
@@ -228,6 +226,7 @@ select = [
   "F541",
   "F841",
 ]
+"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006"]
 
 [tool.ruff.format]
 exclude = ["*"]
