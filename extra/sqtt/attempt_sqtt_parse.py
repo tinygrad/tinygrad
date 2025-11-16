@@ -1,108 +1,215 @@
-import pickle, binascii, struct
+import pickle
 from hexdump import hexdump
-from tinygrad.helpers import colored
 from extra.sqtt.roc import decode, ProfileSQTTEvent
 
-def hexdiff(b0, b1, len=-1):
-  for i, (c0, c1) in enumerate(zip(b0, b1)):
-    if i == len: break
-    if i % 0x10 == 0: print(f"{i:8X}: ", end="")
-    print(colored(f"{c0:02X} ", "green" if c0 == c1 else "red"), end="\n" if i%0x10 == 0xf else "")
+# rocprof_trace_decoder_parse_data-0x11c6a0
+# parse_sqtt_180 = b *rocprof_trace_decoder_parse_data-0x11c6a0+0x110040
 
 def parse(fn:str):
-  dat = pickle.load(open(fn, "rb"))
-  ctx = decode(dat)
-  dat_sqtt = [x for x in dat if isinstance(x, ProfileSQTTEvent)]
-  print(f"got {len(dat_sqtt)} SQTT events in {fn}")
-  return dat_sqtt
+    dat = pickle.load(open(fn, "rb"))
+    ctx = decode(dat)
+    dat_sqtt = [x for x in dat if isinstance(x, ProfileSQTTEvent)]
+    print(f"got {len(dat_sqtt)} SQTT events in {fn}")
+    return dat_sqtt
 
-# fmt -> header length (bytes)
-FMT_TO_LEN = {
-  0x0: 2,  # class 0x10
-  0x1: 8,  # class 0x40
-  0x2: 8,  # class 0x40
-  0x3: 4,  # class 0x20
-  0x4: 2,  # class 0x10
-  0x5: 6,  # class 0x30
-  0x6: 2,  # class 0x10
-  0x7: 2,  # class 0x10
-  0x8: 2,  # class 0x10
-  0x9: 2,  # class 0x10
-  0xA: 2,  # class 0x10
-  0xB: 8,  # class 0x40
-  0xC: 6,  # class 0x30
-  0xD: 4,  # class 0x20
-  0xE: 8,  # class 0x40
-  0xF: 6,  # class 0x30
+from typing import Dict, Tuple, Optional
+
+# ---------- 1. local_138: 256-byte state->token table ----------
+
+_LOCAL_138_QWORDS = [
+    0x000c0b0501181610, 0x020304090118140f,
+    0x000d080601181710, 0x0203040a0118140f,
+    0x000c0b0501180710, 0x020304090118140f,
+    0x000d080601181910, 0x0203040a0118140f,
+    0x000c0b0501180010, 0x020304090118140f,
+    0x000d080601181110, 0x0203040a0118140f,
+    0x000c0b0501181210, 0x020304090118140f,
+    0x000d080601181510, 0x0203040a0118140f,
+    0x000c0b0501181610, 0x020304090118140f,
+    0x000d080601181710, 0x0203040a0118140f,
+    0x000c0b0501180710, 0x020304090118140f,
+    0x000d080601181910, 0x0203040a0118140f,
+    0x000c0b0501180010, 0x020304090118140f,
+    0x000d080601181110, 0x0203040a0118140f,
+    0x000c0b0501181310, 0x020304090118140f,
+    0x000d080601181510, 0x0203040a0118140f,
+]
+
+STATE_TO_TOKEN: bytes = b"".join(
+    q.to_bytes(8, "little") for q in _LOCAL_138_QWORDS
+)
+assert len(STATE_TO_TOKEN) == 256
+
+# ---------- 2. DAT_0012e280: nibble budget per opcode&0x1F ----------
+
+NIBBLE_BUDGET = [
+    0x08, 0x0C, 0x08, 0x08, 0x0C, 0x18, 0x18, 0x40,
+    0x14, 0x20, 0x30, 0x14, 0x34, 0x1C, 0x30, 0x08,
+    0x04, 0x18, 0x18, 0x20, 0x40, 0x40, 0x30, 0x40,
+    0x14, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]
+assert len(NIBBLE_BUDGET) == 32
+
+# ---------- 3. delta_map from your hash nodes ----------
+
+# opcode -> (shift, width)
+DELTA_MAP_DEFAULT = {
+    0x01: (3,  3),   # shift=3,  end=6
+    0x02: (4,  2),   # shift=4,  end=6
+    0x03: (4,  2),   # shift=4,  end=6
+    0x04: (4,  3),   # shift=4,  end=7
+    0x05: (5,  3),   # shift=5,  end=8
+    0x06: (5,  3),   # shift=5,  end=8
+    0x07: (8,  3),   # shift=8,  end=11
+    0x08: (5,  3),   # shift=5,  end=8
+    0x09: (5,  2),   # shift=5,  end=7
+    0x0A: (5,  2),   # shift=5,  end=7
+    0x0B: (5,  3),   # shift=5,  end=8
+    0x0C: (5,  3),   # shift=5,  end=8
+    0x0D: (5,  3),   # shift=5,  end=8
+    0x0E: (7,  2),   # shift=7,  end=9
+    0x0F: (4,  4),   # shift=4,  end=8
+    0x10: (0,  0),   # shift=0,  end=0  (no delta)
+    0x11: (7,  9),   # shift=7,  end=16
+    0x12: (8,  3),   # shift=8,  end=11
+    0x13: (8,  3),   # shift=8,  end=11
+    0x14: (4,  3),   # shift=4,  end=7
+    0x15: (7,  3),   # shift=7,  end=10
+    0x16: (12, 36),  # shift=12, end=48 (36-bit field, matches the 0x16 special-case)
+    0x17: (0,  0),   # shift=0,  end=0  (no delta)
+    0x18: (4,  3),   # shift=4,  end=7
+    0x19: (7,  2),   # shift=7,  end=9
 }
 
-def pktparse(s:bytes):
-  # start at 8, skip the header
-  ptr = 8
-  while ptr < len(s):
-    # the header is the first two bytes
-    pkt_hdr = struct.unpack("H", s[ptr:ptr+2])[0]
-    # this is the packet format
-    pkt_fmt = pkt_hdr & 0xF
-    event_id   = (pkt_hdr >> 4) & 0xFF   # matches `probably_packet_type = (uVar27 >> 4) & 0xff` etc.
-    se_id      = (pkt_hdr >> 12) & 0x3   # often top bits are shader engine / instance
 
-    raw = s[ptr:ptr + FMT_TO_LEN[pkt_fmt]]
-    print(f"{ptr:#06x}  {pkt_hdr=:#06x}  {pkt_fmt=:x}  {event_id=:02x}  {se_id=}  {raw.hex(' ')}")
-    ptr += len(raw)
+# ---------- 3. delta extraction hook (for generic opcodes) ----------
+
+def extract_delta(opcode: int, reg64: int) -> int:
+    """
+    Extract time delta bits for an opcode from reg64.
+
+    delta_map: opcode -> (shift, width).
+    If opcode missing, returns 0.
+    """
+    info = DELTA_MAP_DEFAULT.get(opcode)
+    if info is None:
+        return 0
+    shift, width = info
+    if width <= 0:
+        return 0
+    mask = (1 << width) - 1
+    return (reg64 >> shift) & mask
 
 
-"""
-pkt_lengths = {
-               #0x71: 8,
-               #0xc: 4, 0xd: 0xe,
-               #0x11: 3, 0x31: 3, 0x61: 3,
-               #0xd: 17,
-               # wrong?
-               0xc: 4,
-               0x31: 7,
-               # section header
-               0x1: 6,
-               # some 0x?1 == 3
-               0x51: 3, 0x61: 3, 0xd1: 3,
-               # 0x71
-               0x71: 8,
-               # all 0x?9 = 8
-               0x9: 8, 0x19: 8, 0x29: 8, 0x39: 8, 0x49: 8, 0x59: 8,
-               # all 0x?8 = 1, prefixes
-               0x28: 1, 0x58: 1, 0x98: 1, 0xa8: 1, 0xc8: 1, 0xe8: 1}
-"""
+# ---------- 4. One-line-per-packet parser ----------
+
+def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
+    """
+    Minimal debug: print ONE LINE per decoded token (packet).
+
+    Format (you can tweak the print() line):
+      idx  offB  op  state  time_before->after  delta  note  reg64
+
+    - Skips the pseudo-token 0x10 (need more bits).
+    - Handles opcode 0x16 (delta or marker) and 0x0F (+4) specially.
+    - Other opcodes use delta_map for their time delta (or 0 if unknown).
+    """
+    n = len(data)
+    time = 0
+    reg = 0          # shift register
+    offset = 0       # nibble index * 4
+    nib_budget = 0x40
+    flags = 0
+    token_index = 0
+
+    while (offset >> 3) < n and token_index < max_tokens:
+        cur = offset
+
+        # 1) Fill register with nibbles according to nib_budget
+        if nib_budget != 0:
+            target = cur + 4 + ((nib_budget - 1) & ~3)
+            while cur != target and (cur >> 3) < n:
+                byte_index = cur >> 3
+                byte = data[byte_index]
+                shift = 4 if (cur & 4) else 0  # low then high nibble
+                nib = (byte >> shift) & 0xF
+                reg = ((reg >> 4) | (nib << 60)) & ((1 << 64) - 1)
+                cur += 4
+            offset = cur
+
+        # 2) Decode token from low 8 bits
+        state = reg & 0xFF
+        opcode = STATE_TO_TOKEN[state]
+
+        # 3) Handle pseudo-token 0x10: need more bits, don't print
+        if opcode == 0x10:
+            # "need more bits" pseudo-token: adjust nibble budget and continue
+            nib_budget = 4
+            if (offset >> 3) >= n:
+                break
+            # do NOT count this as a real packet
+            continue
+
+        # 4) Set next nibble budget
+        nb_index = opcode & 0x1F
+        nib_budget = NIBBLE_BUDGET[nb_index]
+
+        off_bytes = offset >> 3
+        time_before = time
+        note = ""
+
+        # 5) Special opcode 0x16 (timestamp / marker)
+        if opcode == 0x16:
+            two_bits = (reg >> 8) & 0x3
+            if two_bits == 1:
+                flags |= 0x01
+
+            if (reg & 0x200) == 0:
+                # delta mode: 36-bit delta at bits [12..47]
+                delta = (reg >> 12) & ((1 << 36) - 1)
+                time += delta
+                note = "0x16-delta"
+            else:
+                # marker mode if bit9==1 and bit8==0
+                if (reg & 0x100) == 0:
+                    val = (reg >> 12) & ((1 << 36) - 1)
+                    delta = 0
+                    note = f"0x16-marker val=0x{val:x}"
+                else:
+                    delta = 0
+                    note = "0x16-other"
+        else:
+            # 6) Generic opcode (including 0x0F)
+            delta = extract_delta(opcode, reg)
+            if opcode == 0x0F:
+                delta_with_fix = delta + 4
+                note = f"0x0f (+4) raw_delta={delta}"
+                time += delta_with_fix
+                delta = delta_with_fix
+            else:
+                note = ""
+                time += delta
+
+        # ONE-LINE PRINT PER PACKET
+        print(
+            f"{token_index:4d}  "
+            f"offB={off_bytes:4d}  "
+            f"op=0x{opcode:02x}  "
+            f"state=0x{int(state):02x}  "
+            f"time={time_before:8d}->{time:8d}  "
+            f"delta={delta:8d}  "
+            f"{note:30s}  "
+            f"reg=0x{reg:016x}"
+        )
+
+        token_index += 1
+
+    # Optional summary at the end
+    print(f"# done: tokens={token_index}, final_time={time}, flags=0x{flags:02x}")
 
 if __name__ == "__main__":
-  dat_gemm_0_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
-  dat_gemm_1_sqtt = parse("extra/sqtt/examples/profile_gemm_run_1.pkl")
-  dat_plus_0_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
-  dat_plus_1_sqtt = parse("extra/sqtt/examples/profile_plus_run_1.pkl")
+    dat_plus_0_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
 
-  blob_0 = dat_plus_0_sqtt[0].blob
-  blob_1 = dat_plus_1_sqtt[0].blob
-  blob_2 = dat_gemm_0_sqtt[0].blob
-  blob_3 = dat_gemm_1_sqtt[0].blob
-
-  """
-  hexdiff(blob_0, blob_1, 0x300)
-  print("")
-  hexdiff(blob_1, blob_0, 0x300)
-  print("")
-  hexdiff(blob_2, blob_0, 0x200)
-  print("")
-  hexdiff(blob_3, blob_2, 0x200)
-  """
-  #hexdump(blob_1)
-
-  print("parse blob 0")
-  pktparse(blob_0)
-  #print("parse blob 1")
-  #pktparse(blob_1)
-  #hexdump(blob_2)
-  #print("parse blob 2")
-  #pktparse(blob_2)
-  """
-  print("parse blob 3")
-  pktparse(blob_3)
-  """
+    blob_0 = dat_plus_0_sqtt[1].blob
+    hexdump(blob_0[8:0x108])
+    parse_sqtt_print_packets(blob_0[8:])
