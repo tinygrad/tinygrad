@@ -113,5 +113,12 @@ class TestTiming(unittest.TestCase):
     # cycles = sleep dur + overhead of storing hi/lo REG_SHADER_CYCLES
     self.assertGreaterEqual(diff_hw_reg.item(), sleep.dur)
 
+  def test_nop(self):
+    with save_sqtt() as sqtt:
+      asm_kernel(["s_nop 1"]*10).realize()
+    wave = list(sqtt.values())[0][0]
+    for e in wave.insts:
+      print(f"{e.inst} {e.dur=} {e.stall=}")
+
 if __name__ == "__main__":
   unittest.main()
