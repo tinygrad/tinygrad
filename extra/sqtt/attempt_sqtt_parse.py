@@ -3,15 +3,30 @@ from extra.sqtt.roc import decode, ProfileSQTTEvent
 
 # Instruction packets (one per ISA op)
 # NOTE: these are bad guesses and may be wrong! feel free to update if you know better
+# some names were taken from SQ_TT_TOKEN_MASK_TOKEN_EXCLUDE_SHIFT
 
 OPCODE_NAMES = {
+  # gated by SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT
+  0x02: "VMEMEXEC",
+  # gated by SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT
+  0x03: "ALUEXEC",
+  # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
+  0x01: "VALUINST",
+  # gated by SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT
+  0x08: "WAVEEND",
+  0x09: "WAVESTART",
+  # gated by SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT
+  0x04: "IMMEDIATE",
+  # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there
+  0x14: "REG",
+  # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
+  0x12: "EVENT",
+  # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
+  0x18: "INST",
+
   # ------------------------------------------------------------------------
   # 0x01–0x06: small “meta + maybe tiny delta” packets
   # ------------------------------------------------------------------------
-  0x01: "META_ID12_TS_SMALL",       # 12-bit ID + 3-bit delta field
-  0x02: "META_FLAG8_TS_SMALL",      # 8-bit flag/mode + small delta
-  0x03: "META_SUBEVENT8_TS_SMALL",  # 8-bit subevent/class + small delta
-  0x04: "META_BASE_INDEX12_TS",     # 12-bit base index + small delta
   0x05: "META_DESC24_TS_A",         # 24-bit descriptor-ish + delta field
   0x06: "META_DESC24_TS_B",         # second flavour, 24-bit, delta field
 
@@ -19,8 +34,6 @@ OPCODE_NAMES = {
   # 0x07–0x0F: pure timestamp-ish deltas
   # ------------------------------------------------------------------------
   0x07: "TS_DELTA_S8_W3",           # shift=8,  width=3  (small delta)
-  0x08: "EVT_MATCH_SMALL",          # event-ish, see fields below
-  0x09: "PERF_ROUTE_CONFIG",        # routing/indirection config
   0x0A: "TS_DELTA_S5_W2_A",         # shift=5,  width=2
   0x0B: "TS_DELTA_S5_W3_A",         # shift=5,  width=3
   0x0C: "TS_DELTA_S5_W3_B",         # shift=5,  width=3 (different consumer)
@@ -34,14 +47,11 @@ OPCODE_NAMES = {
   0x10: "PSEUDO_NEED_MORE_BITS",    # not a real packet; decoder refill hint
 
   0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
-  0x12: "EVT_SECONDARY_METRIC24",   # 24-bit secondary timing/perf metric
   0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
 
-  0x14: "INST_EXEC_OR_CFG",         # instruction exec record / config write / COR marker
   0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
   0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
   0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
-  0x18: "PERF_EVENT_SELECT",        # packed selector → FUN_0010aba0
   0x19: "EVT_SUMMARY_48B",          # 6-byte summary/aggregate metric
 }
 
