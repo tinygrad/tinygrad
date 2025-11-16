@@ -18,7 +18,7 @@ from typing import Generator
 import argparse, math, os, time
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
-from tinygrad.helpers import fetch, getenv, DEBUG, Timing, GlobalCounters
+from tinygrad.helpers import fetch, getenv, DEBUG, Timing
 from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
 from transformers import AutoTokenizer
@@ -37,6 +37,9 @@ MODELS = {
 }
 
 # ***** model loading *****
+
+def to_bf16(weights:dict[str, Tensor]) -> dict[str, Tensor]:
+  return {k:v.cast(dtypes.bfloat16) if v.dtype != dtypes.bfloat16 else v for k,v in weights.items()}
 
 def download_weights(model:str, total_num_weights:int) -> Path:
   model_path = fetch(f"https://huggingface.co/{model}/resolve/main/model.safetensors.index.json",
@@ -238,7 +241,7 @@ class Transformer:
     weights = load(str(model_path / "model.safetensors.index.json"))
     weights = convert_from_huggingface(weights, num_blocks)
     weights = fix_mxfp4(weights, num_blocks)
-    # weights = fix_bf16(weights) # todo: do we need ??
+    weights = to_bf16(weights) # todo: do we need ??
     load_state_dict(model, weights, strict=False, consume=True)
     return model
 
