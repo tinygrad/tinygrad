@@ -141,22 +141,18 @@ def extract_delta(opcode: int, reg64: int) -> int:
 
 def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
     """
-    Very conservative decoding of a few well-understood packet types.
+    Conservative decoding of a few packet types.
 
-    IMPORTANT:
+    Rules:
       - We first mask the 64-bit shift register down to the actual packet
-        width using NIBBLE_BUDGET[opcode & 0x1F], so we never read past
-        the end of the packet.
-      - Only opcodes where we have a clear layout (from the C code) are
-        decoded in detail. Everything else either gets a tiny generic
-        view or nothing.
+        width using NIBBLE_BUDGET[opcode & 0x1F], so we never read bits
+        that aren't really part of the packet.
+      - Only layouts that are clearly visible from the decompiled C are
+        decoded, and names are kept generic (cfg_*, idx_*, id_*, etc).
     """
-
     # --- 0. Restrict to the real packet bits for this opcode -------------
-    nb_bits = NIBBLE_BUDGET[opcode & 0x1F]  # despite the name, this is in bits
-    if nb_bits <= 0:
-        pkt = reg & ((1 << 64) - 1)
-    elif nb_bits >= 64:
+    nb_bits = NIBBLE_BUDGET[opcode & 0x1F]  # this table is in bits
+    if nb_bits <= 0 or nb_bits >= 64:
         pkt = reg & ((1 << 64) - 1)
     else:
         pkt = reg & ((1 << nb_bits) - 1)
@@ -166,22 +162,20 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
     # --- 1. Timestamp-ish opcodes ----------------------------------------
 
     if opcode == 0x0F:  # TIME_SHORT_DELTA_PLUS4
-        # At this point `delta` is already "raw_delta + 4".
+        # By the time we get here, `delta` is already raw_delta+4.
         fields.append(f"ts_short_plus4={delta}")
         return ", ".join(fields)
 
     if opcode == 0x11:  # TIME_WAVE_STATE (medium/large delta)
-        # Layout from DELTA_MAP_DEFAULT: 9-bit delta starting at bit 7.
         shift, width = DELTA_MAP_DEFAULT[opcode]
         raw_delta = (pkt >> shift) & ((1 << width) - 1)
-        coarse = (pkt >> (shift + width)) & 0xFF  # next byte above delta
+        coarse    = (pkt >> (shift + width)) & 0xFF  # next byte above delta
         fields.append(f"raw_delta={raw_delta}")
         if coarse:
             fields.append(f"raw_coarse=0x{coarse:02x}")
         return ", ".join(fields)
 
     if opcode == 0x16:  # TIME_LONG_OR_MARKER
-        # Matches the C: 36-bit value at bits [12..47], plus mode bits.
         bit8 = bool(pkt & 0x100)
         bit9 = bool(pkt & 0x200)
         if not bit9:
@@ -195,74 +189,136 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
         fields.append(f"val36=0x{val36:x}")
         return ", ".join(fields)
 
-    # --- 2. Opcode 0x14: "execution/config record" -----------------------
-    #
-    # Based on the C:
-    #   u64 w = puVar58[1];
-    #   s16 subop = (short)(w >> 16);
-    #   u32 val32 = (uint)(w >> 32);
-    #   if ((char)(w >> 8) < 0) { ... config flavoured ... }
-    #   else if (subop == -0x3cbe) { ... COR vendor stream ... }
-    #
-    # We expose:
-    #   - subop     (bits 16..31)
-    #   - val32     (bits 32..63)
-    #   - slot      (bits 7..9 → (idx & 7))
-    #   - a couple of clearly-identified special cases.
-    #
+    # --- 2. Opcode 0x14: exec/config record ------------------------------
+
     if opcode == 0x14:
-        subop = (pkt >> 16) & 0xFFFF
-        val32 = (pkt >> 32) & 0xFFFFFFFF
-        slot = (pkt >> 7) & 0x7        # (idx & 4) + (idx & 3) == idx & 7
-        hi_byte = (pkt >> 8) & 0xFF    # byte at bits 8..15
+        subop   = (pkt >> 16) & 0xFFFF       # matches (short)(w >> 0x10)
+        val32   = (pkt >> 32) & 0xFFFFFFFF   # matches (uint)(w >> 0x20)
+        slot    = (pkt >> 7) & 0x7           # used as (idx & 4) + (idx & 3)
+        hi_byte = (pkt >> 8) & 0xFF
 
         fields.append(f"subop=0x{subop:04x}")
         fields.append(f"slot={slot}")
         fields.append(f"val32=0x{val32:08x}")
 
-        # "Config" flavour: (char)(w >> 8) < 0 in the C code
         if hi_byte & 0x80:
+            # "config" flavour, writes into local_168[...] etc.
             fields.append("kind=config")
             if subop == 0x000C:
-                #   if (sVar35 == 0xc) {
-                #       idx = (w >> 7);
-                #       local_168[(idx & 4) + (idx & 3)].lo = val32;
-                #   }
                 fields.append("cfg_target=local_168[slot].lo")
             elif subop == 0x000D:
-                #   else if (subop == 0xd) {
-                #       idx = (w >> 7);
-                #       local_168[(idx & 4) + (idx & 3)].hi = val32;
-                #   }
                 fields.append("cfg_target=local_168[slot].hi")
-            # Other subops in this branch exist but are less clearly mapped,
-            # so we just expose the raw values above.
         else:
-            # Non-config flavour. The decompiled code looks for:
-            #   subop == -0x3cbe  (0xC342) and val32 == 0x434f5200 ("COR\0")
-            # to drive a vendor-specific "COR" state machine.
+            # COR marker: subop 0xC342, val32==0x434F5200 ("COR\0")
             if subop == 0xC342:
                 fields.append("kind=cor_stream")
                 if val32 == 0x434F5200:
                     fields.append("cor_magic='COR\\0'")
-                # Further COR sub-stages depend on external state (local_3c),
-                # which we don't track here, so we stop at the raw values.
 
         return ", ".join(fields)
 
-    # --- 3. Generic tiny event-ish packets (layout still fuzzy) ----------
+    # --- 3. Opcode 0x17: mode/layout header ------------------------------
 
-    if opcode in (0x08, 0x12, 0x18, 0x19):
-        # These look like "event with small payload" records. The C code
-        # uses them in a variety of ways, but a safe generic view is:
-        event_id = (pkt >> 8) & 0x3F      # small ID
-        payload16 = (pkt >> 16) & 0xFFFF  # tiny payload
-        fields.append(f"event_id=0x{event_id:x}")
-        if payload16:
-            fields.append(f"payload16=0x{payload16:04x}")
+    if opcode == 0x17:
+        # From case 0x17:
+        #   layout = (w >> 7) & 0x3f
+        #   mode   = (w >> 0xd) & 3
+        #   group  = (w >> 0xf) & 7
+        #   sel_a  = (w >> 0x1c) & 0xf
+        #   sel_b  = (w >> 0x21) & 7
+        #   flag4  = (w >> 0x3b) & 1  (only meaningful when layout == 4)
+        layout = (pkt >> 7)  & 0x3F
+        mode   = (pkt >> 13) & 0x3
+        group  = (pkt >> 15) & 0x7
+        sel_a  = (pkt >> 0x1C) & 0xF
+        sel_b  = (pkt >> 0x21) & 0x7
+        flag4  = (pkt >> 0x3B) & 0x1
+
+        fields.append(f"layout={layout}")
+        fields.append(f"group={group}")
+        fields.append(f"mode={mode}")
+        fields.append(f"sel_a={sel_a}")
+        fields.append(f"sel_b={sel_b}")
+        if layout == 4:
+            fields.append(f"layout4_flag={flag4}")
+
         return ", ".join(fields)
 
-    # --- 4. Everything else: no extra decode -----------------------------
+    # --- 4. Opcode 0x09: state-ish / indirection record ------------------
+
+    if opcode == 0x09:
+        # From case 9 on puVar58[1] (here pkt):
+        #
+        #   uVar41 = (w & 0xffffffff) >> 7;  local_520 = uVar41 & 1
+        #   local_4a0 = (w >> 8) & 3;
+        #   local_4a8 = (w >> 10) & (7 or 0xf)   (depends on local_494)
+        #   uVar69    = (w >> 0xd) or (w >> 0xf) (depends on local_494)
+        #   local_518 = (w >> 0x19) & 0x7f;
+        #
+        # We *don’t* know local_494 here, so we just expose the raw slices.
+        flag7   = (pkt >> 7) & 0x1          # low bit of uVar41
+        cls2    = (pkt >> 8) & 0x3          # local_4a0
+        slot4   = (pkt >> 10) & 0xF         # superset of 3-bit local_4a8
+        idx_lo  = (pkt >> 13) & 0x1F        # matches uVar69&0x1F when layout<4
+        idx_hi  = (pkt >> 15) & 0x1F        # matches uVar69&0x1F when layout>=4
+        id7     = (pkt >> 0x19) & 0x7F      # local_518
+
+        fields.append(f"flag7={flag7}")
+        fields.append(f"cls2={cls2}")
+        fields.append(f"slot4=0x{slot4:x}")
+        fields.append(f"idx_lo5=0x{idx_lo:x}")
+        fields.append(f"idx_hi5=0x{idx_hi:x}")
+        fields.append(f"id7=0x{id7:x}")
+        return ", ".join(fields)
+
+    # --- 5. Opcode 0x18: perf/event trigger ------------------------------
+
+    if opcode == 0x18:
+        # From case 0x18:
+        #  - low 3 bits:    (w & 7)
+        #  - mid 3 bits:    (w >> 3) & 7   or (w >> 4) & 7  (layout–dependent)
+        #  - hi id:         (w >> 0xc) & 0xff   OR (w >> 0xd) & 0x7f
+        #  - flag bits at 6 / 7
+        #
+        # The *real* semantics depend on global local_494 and accumulated
+        # local_500, so we keep this as a raw view that’s still useful for
+        # debugging, but not layout-dependent.
+        low3     = pkt & 0x7
+        grp3_a   = (pkt >> 3) & 0x7
+        grp3_b   = (pkt >> 4) & 0x7
+        flag_b6  = (pkt >> 6) & 0x1
+        flag_b7  = (pkt >> 7) & 0x1
+        idx5_a   = (pkt >> 7) & 0x1F
+        idx5_b   = (pkt >> 8) & 0x1F
+        hi8      = (pkt >> 12) & 0xFF
+        hi7      = (pkt >> 13) & 0x7F
+
+        fields.append(f"low3=0x{low3:x}")
+        fields.append(f"grp3_a=0x{grp3_a:x}")
+        fields.append(f"grp3_b=0x{grp3_b:x}")
+        fields.append(f"flag_b6={flag_b6}")
+        fields.append(f"flag_b7={flag_b7}")
+        fields.append(f"idx5_a=0x{idx5_a:x}")
+        fields.append(f"idx5_b=0x{idx5_b:x}")
+        fields.append(f"hi8=0x{hi8:02x}")
+        fields.append(f"hi7=0x{hi7:02x}")
+        return ", ".join(fields)
+
+    # --- 6. Generic tiny event-ish packets -------------------------------
+
+    if opcode in (0x08, 0x12, 0x19):
+        # These are all "small event" style tokens. The exact layout depends
+        # on global state (local_494 etc), so we just show:
+        #   - low 8 bits as a kind/flag byte
+        #   - the rest as an opaque payload.
+        kind    = pkt & 0xFF
+        payload = pkt >> 8
+        fields.append(f"kind_byte=0x{kind:02x}")
+        if payload:
+            fields.append(f"payload=0x{payload:x}")
+        return ", ".join(fields)
+
+    # --- 7. Everything else: no extra decode -----------------------------
     return ""
 
 def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
