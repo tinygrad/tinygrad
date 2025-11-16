@@ -260,22 +260,8 @@ class AMDComputeQueue(HWQueue):
                             1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT | 1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT | \
                             1 << self.soc.SQ_TT_TOKEN_EXCLUDE_INST_SHIFT) if self.dev.target < (12,0,0) else 0x927
 
-        token_exclude = 0
-        token_exclude |= (1 << self.soc.SQ_TT_TOKEN_EXCLUDE_REG_SHIFT)
-        #token_exclude = (1<<0xc)-1
-        #token_exclude &= ~(1 << self.soc.SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT)
-        #token_exclude &= ~(1 << self.soc.SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT)
-        #token_exclude &= ~(1 << self.soc.SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT)
-
         self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=reg_include, token_exclude=token_exclude, bop_events_token_include=1,
                   **({} if self.dev.target < (12,0,0) else {'exclude_barrier_wait': 1}))
-
-        #token_exclude = 0
-
-        #reg_exclude = (1<<3)-1
-        #self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_include=0,
-        #          token_exclude=token_exclude, reg_exclude=reg_exclude,
-        #          bop_events_token_include=0)
         self.sqtt_config(tracing=True)
 
     self.set_grbm()

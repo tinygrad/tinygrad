@@ -41,7 +41,8 @@ def save_sqtt():
         # 0xf is small time advance
         # 0x11 is time advance
         # 0x16 is big time advance + markers
-        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x16] if getenv("FILTER", 1) else None)
+        # 0x14 is REG
+        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x16, 0x14] if getenv("FILTER", 1) else None)
 
 template = """.text
 .globl matmul
