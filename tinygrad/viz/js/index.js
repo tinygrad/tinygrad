@@ -192,51 +192,46 @@ function tabulate(rows) {
 }
 
 const Formats = Object.freeze({ EXEC:0, BUFFER:1 });
-const Modes = Object.freeze({ 0:"read", 1:"write", 2:"read+write" });
-const setMetadata = (data) => {
-  if (data?.fmt == null) { metadata.innerHTML = ""; return; }
-  const div = d3.create("div").classed("info", true);
-  if (data.fmt === Formats.EXEC) {
-    const [name, dur, ...rest] = data.tooltipText.split("\n");
-    div.append(() => tabulate([["Name", colored(name)], ["Duration", dur], ["Start Time", formatTime(data.st)]]).node());
-    if (rest.length) div.append("p").style("white-space", "pre-wrap").text(rest.join("\n"));
-    const args = div.append("div").classed("args", true);
-    const bufs = new Array(data.bufs.length);
-    for (let i=0; i<data.bufs.length; i++) {
-      const buf = shapeMap.get(data.bufs[i]);
-      const { num, mode } = buf.users.find(u => u.shape === data.key);
-      bufs[num] = d3.create("p").text(`${Modes[mode]}@data${num}`).style("cursor", "pointer").on("click", () => {
-        const device = document.getElementById(buf.key.split("-")[0]);
-        if (!isExpanded(device)) device.click();
-        focusShape(buf);
-      }).node();
-    }
-    for (const b of bufs) args.append(() => b);
-    if (data.ctx != null) {
-      div.append("a").text("View codegen rewrite").on("click", () => switchCtx(data.ctx, data.step));
-      div.append("a").text("View program").on("click", () => switchCtx(data.ctx, ctxs[data.ctx+1].steps.findIndex(s => s.name==="View Program")));
-    }
+
+const renderTooltip = Object.freeze({
+  [Formats.EXEC]: (e) => {
+    const div = d3.create("div");
+    div.append(() => colored(e.label));
+    div.append("p").text(formatTime(e.width));
+    if (e.arg.info != null) div.append("p").text(e.arg.info);
+    return div.node();
+  },
+  [Formats.BUFFER]: (e) => {
+    return tabulate([["DType", e.arg.dtype], ["Len", formatUnit(e.arg.sz)], ["Size", formatUnit(e.arg.nbytes, "B")], ["Lifetime", formatTime(e.arg.dur)]]).node();
   }
-  if (data.fmt === Formats.BUFFER) {
-    const lines = data.tooltipText.split("\n");
-    const rows = ["DType", "Len", "Size", "Lifetime"].map((s,i) => ([s, lines[i]]));
-    if (data.users != null) rows.push(["Users", data.users.length]);
+});
+
+const renderSiderbar = Object.freeze({
+  [Formats.EXEC]: (e) => {
+    const div = d3.create("div");
+    div.append(() => tabulate([["Name", colored(e.label)], ["Duration", e.width], ["Start Time", formatTime(e.x)]]).node());
+    return div.node();
+  },
+  [Formats.BUFFER]: (e) => {
+    const div = d3.create("div");
+    const rows = [["DType", e.arg.dtype], ["Len", formatUnit(e.arg.sz)], ["Size", formatUnit(e.arg.nbytes, "B")], ["Lifetime", formatTime(e.arg.dur)]];
+    if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
     div.append(() => tabulate(rows).node());
-    const kernels = div.append("div").classed("args", true);
-    for (let i=0; i<data.users?.length; i++) {
-      const { repr, num, mode, shape } = data.users[i];
-      const p = kernels.append("p").append(() => colored(`[${i}] ${repr} ${Modes[mode]}@data${num}`));
-      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape({key:shape}));
-    }
+    return div.node();
   }
-  metadata.replaceChildren(div.node());
+});
+
+const setMetadata = (data) => {
+  const sidebarFn = renderSiderbar[data?.arg.fmt];
+  if (sidebarFn == null) { metadata.innerHTML = ""; return; }
+  metadata.replaceChildren(sidebarFn(data));
 }
 
 var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
 const getShape = (key) => {
   if (key == null) return null;
   const [track, index] = key.split("-");
-  return data.tracks.get(track).shapes[index].arg;
+  return data.tracks.get(track).shapes[index];
 }
 const shapeKeys = new Map();
 function focusShape(shape) {
@@ -309,9 +304,7 @@ async function renderProfiler() {
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
         }
-        const arg = {fmt:Formats.EXEC, info:e.info, ctx:shapeRef?.ctx, step:shapeRef?.step};
-        // tiny device events go straight to the rewrite rule
-        if (!k.startsWith("TINY")) { arg.fmt = Formats.EXEC; arg.st = e.st; arg.key = `${k}-${shapes.length}`; arg.bufs = []; }
+        const arg = {fmt:Formats.EXEC, info:e.info, ctx:shapeRef?.ctx, step:shapeRef?.step, key:`${k}-${shapes.length}` };
         if (e.key != null) shapeKeys.set(e.key, arg.key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -351,7 +344,7 @@ async function renderProfiler() {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = {fmt:Formats.BUFFER, sz, nbytes, dur, users, key:`${k}-${shapes.length}`};
+        const arg = {fmt:Formats.BUFFER, dtype, sz, nbytes, dur, users, key:`${k}-${shapes.length}`};
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
       }
       // generic polygon merger
@@ -522,12 +515,13 @@ async function renderProfiler() {
 
   canvas.addEventListener("mousemove", e => {
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
-    if (foundRect?.tooltipText != null) {
+    const tooltipFn = renderTooltip[foundRect?.fmt];
+    if (tooltipFn != null) {
       const tooltip = document.getElementById("tooltip");
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
-      tooltip.replaceChildren(foundRect.tooltipText);
+      tooltip.replaceChildren(tooltipFn(getShape(foundRect.key)));
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");
@@ -686,7 +680,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
