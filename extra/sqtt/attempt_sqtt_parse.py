@@ -7,38 +7,47 @@ from tinygrad.helpers import getenv
 # NOTE: these are bad guesses and may be wrong! feel free to update if you know better
 
 OPCODE_NAMES = {
-  # Small metadata / structural packets (NOT ISA op kinds)
-  0x01: "META_SMALL_ID",          # 12-bit identifier / slot tag
-  0x02: "META_FLAG",              # 1-byte flag/mode (CF/AF/8F/DF...)
-  0x03: "META_SUBEVENT_CODE",     # 1-byte sub-event/classification code
-  0x04: "META_BASE_INDEX_TAG",    # 12-bit base index/tag (..D, 9D, 10D, 58D...)
+  # ---------------- Pseudo / internal control ----------------
+  0x10: "PSEUDO_EXTEND",          # "need more bits" / refills shift register
 
-  # Instruction / timing / timestamp packets
-  0x0F: "TIME_SHORT_DELTA_PLUS4", # short ts, raw_delta+4
-  0x11: "TIME_WAVE_STATE",        # compact wave timing/stall state record
-  0x14: "INST_EXEC_RECORD",       # per-instruction execution record
-  0x16: "TIME_LONG_OR_MARKER",    # long delta / marker with 6-byte payload
+  # ---------------- Timestamp / delta packets -----------------
+  0x0F: "TS_DELTA_SHORT_P4",      # short delta, you add +4
+  0x11: "TS_DELTA_WAVE_STATE",    # medium delta + compact wave/stall state
+  0x16: "TS_DELTA_LONG_OR_MARKER",# 36-bit delta or 36-bit marker payload
 
-  # State / control / perf snapshots
-  0x09: "CONTROL_CONFIG_32B",     # 32-bit control/config word (bursts of FE88..., C488...)
-  0x15: "PERFCOUNTER_SNAPSHOT",   # perf / TT configuration snapshot (8-byte)
+  # ---------------- Layout / mode headers ---------------------
+  0x17: "LAYOUT_MODE_HEADER",     # layout/mode/group/selector header
 
-  # Extra descriptors / events / metrics
-  0x06: "META_DESCRIPTOR_24B",    # 24-bit descriptor (seen in complex kernels like GEMM)
-  0x08: "EVENT_SMALL",            # small in-stream event (5-nibble payload)
-  0x12: "TIME_SECONDARY_METRIC",  # 3-byte secondary timing/latency/perf metric
-  0x18: "EVENT_SMALL_PAYLOAD",    # generic small side-band payload (5 nibbles)
-  0x19: "EVENT_SUMMARY_48B",      # rare 6-byte summary/aggregate metric
+  # ---------------- Execution / config / perf -----------------
+  0x14: "EXEC_RECORD_OR_CFG",     # per-inst exec record or config write / COR marker
+  0x09: "STATE_INDIRECT_CTRL",    # state/indirection record (cls2, slot4, idx_lo/hi, id7)
+  0x15: "PERF_SNAPSHOT_64B",      # 8-byte perf/TT snapshot
 
-  # Pseudo / unknown / not yet observed
-  0x07: "UNK_DELTA",              # unknown
-  0x0A: "UNK_DELTA2",             # unknown
-  0x0B: "UNK_DELTA3",             # unknown
-  0x0C: "UNK_DELTA4",             # unknown
-  0x0D: "UNK_DELTA5",             # unknown
-  0x0E: "UNK_DELTA6",             # unknown
-  0x10: "UNK_PSEUDO",             # not seen; pseudo/placeholder
-  0x17: "UNK_NO_DELTA",           # unknown, likely non-timing event
+  # ---------------- Small metadata / structural ---------------
+  0x01: "META_STREAM_ID12",       # 12-bit stream/slot identifier
+  0x02: "META_MODE_FLAG8",        # 8-bit flag/mode (CF/AF/8F/DF etc.)
+  0x03: "META_SUBEVENT8",         # 8-bit sub-event / classification code
+  0x04: "META_BASE_INDEX12",      # 12-bit base index/tag
+  0x06: "META_DESC24",            # 24-bit descriptor (seen in complex kernels)
+
+  # ---------------- Event / metric style packets --------------
+  0x08: "EVT_INLINE_SMALL",       # small event, 5-nibble payload
+  0x12: "EVT_METRIC_SECONDARY",   # secondary timing/latency/perf metric (3-byte)
+  0x18: "EVT_INLINE_SMALL_PAYLOAD", # small side-band payload (5 nibbles)
+  0x19: "EVT_SUMMARY_48B",        # rare 6-byte summary/aggregate metric
+
+  # ---------------- Unknown but shape-annotated ----------------
+  # These all advance time via DELTA_MAP_DEFAULT, so label them TS_*.
+  0x05: "UNK_META_DESC24_B",      # same 24-bit budget class as 0x06, but unknown role
+  0x07: "UNK_TS_DELTA_S8_W3",     # shift=8, width=3
+  0x0A: "UNK_TS_DELTA_S5_W2_A",   # shift=5, width=2
+  0x0B: "UNK_TS_DELTA_S5_W3_A",   # shift=5, width=3
+  0x0C: "UNK_TS_DELTA_S5_W3_B",   # shift=5, width=3 (variant)
+  0x0D: "UNK_TS_DELTA_S5_W3_C",   # shift=5, width=3 (variant)
+  0x0E: "UNK_TS_DELTA_S7_W2",     # shift=7, width=2
+
+  # Not yet observed in your comments, but present in DELTA_MAP_DEFAULT:
+  0x13: "UNK_EVT_SMALL_B",        # same general "small event" family as 0x08/0x12/0x19
 }
 
 # these tables are from rocprof trace decoder
