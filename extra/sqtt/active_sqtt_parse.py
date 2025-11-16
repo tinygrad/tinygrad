@@ -77,7 +77,7 @@ amdhsa.kernels:
 """
 
 def run_asm(src):
-  NUM_WORKGROUPS = 4
+  NUM_WORKGROUPS = 1
   WAVE_SIZE = 32
   NUM_WAVES = 1
   lib = dev.compiler.compile(template.replace("INSTRUCTION", '\n'.join(src)))
