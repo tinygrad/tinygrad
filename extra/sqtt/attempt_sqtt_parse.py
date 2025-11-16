@@ -4,6 +4,7 @@ from extra.sqtt.roc import decode, ProfileSQTTEvent
 from tinygrad.helpers import getenv
 
 # Instruction packets (one per ISA op)
+# NOTE: these are bad guesses and may be wrong! feel free to update if you know better
 OPCODE_NAMES = {
     0x01: "INST_VALU",          # vector ALU
     0x02: "INST_FLAT",          # global/flat mem
@@ -137,6 +138,90 @@ def extract_delta(opcode: int, reg64: int) -> int:
 
 # ---------- 4. One-line-per-packet parser ----------
 
+def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
+    """
+    Conservative decoding of useful low-level fields from the 64-bit register.
+
+    - Always reports the state (low 8 bits).
+    - Reports the exact bit slice used for delta.
+    - For a few special opcodes, exposes raw fields AMD clearly uses,
+      but keeps names generic (f0/f1/… or raw_*).
+    """
+    fields = []
+
+    """
+    # Common: low 8 bits are the FSM state index
+    state = reg & 0xFF
+    fields.append(f"state=0x{state:02x}")
+
+    # Delta bit slice (from your DELTA_MAP_DEFAULT)
+    info = DELTA_MAP_DEFAULT.get(opcode)
+    if info is not None:
+        shift, width = info
+        if width > 0:
+            raw_delta_bits = (reg >> shift) & ((1 << width) - 1)
+            fields.append(f"delta_bits=[{shift}:{shift+width})=0x{raw_delta_bits:x}")
+    """
+
+    # --- Special timestamp-ish opcodes -------------------------------------
+
+    if opcode == 0x0F:  # TS_SHORT_PLUS4
+        # delta here is already "delta + 4"
+        fields.append(f"ts_short_plus4={delta}")
+
+    elif opcode == 0x11:  # TS_MEDIUM_DELTA
+        shift, width = DELTA_MAP_DEFAULT[opcode]
+        raw_delta = (reg >> shift) & ((1 << width) - 1)
+        coarse = (reg >> (shift + width)) & 0xFF  # just above delta
+        fields.append(f"raw_delta={raw_delta}")
+        if coarse:
+            fields.append(f"raw_coarse=0x{coarse:02x}")
+
+    elif opcode == 0x16:  # TS_LONG_OR_MARKER
+        two_bits = (reg >> 8) & 0x3
+        bit9 = bool(reg & 0x200)
+        bit8 = bool(reg & 0x100)
+        val36 = (reg >> 12) & ((1 << 36) - 1)
+
+        if not bit9:
+            mode = "delta"
+        elif not bit8:
+            mode = "marker"
+        else:
+            mode = "other"
+
+        fields.append(f"mode={mode}")
+        fields.append(f"subbits=0b{two_bits:02b}")
+        fields.append(f"val36=0x{val36:x}")
+
+    # --- Snapshot / state-like ---------------------------------------------
+
+    elif opcode == 0x09:  # STATE_SNAPSHOT (we don't know exact layout)
+        # This is the one you saw at token 183:
+        #   reg = 0x00487001C488000C
+        # We can at least expose a couple of chunks without naming them too boldly.
+        f0 = (reg >> 8) & 0xFFFF
+        f1 = (reg >> 24) & 0xFFFF
+        fields.append(f"f0=0x{f0:04x}")
+        fields.append(f"f1=0x{f1:04x}")
+
+    # --- Tiny event / lane-ish opcodes -------------------------------------
+
+    elif opcode in (0x08, 0x12, 0x18, 0x19):
+        # These look like "event with payload" style tokens.
+        # We can take a small ID and a 16-bit payload; semantics TBD.
+        event_id = (reg >> 8) & 0x3F
+        payload16 = (reg >> 16) & 0xFFFF
+        fields.append(f"event_id=0x{event_id:x}")
+        if payload16:
+            fields.append(f"payload16=0x{payload16:04x}")
+
+    # You can add other opcode-specific slices here as you learn more,
+    # but it's safer to keep naming generic until confirmed.
+
+    return ", ".join(fields)
+
+
 def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
     """
     Minimal debug: print ONE LINE per decoded token (packet).
@@ -214,6 +299,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
         else:
             # 6) Generic opcode (including 0x0F)
             delta = extract_delta(opcode, reg)
+            # TODO: add more opcode parsers here that add notes to other opcodes
             if opcode == 0x0F:
                 delta_with_fix = delta + 4
                 note = f"0x0f (+4) raw_delta={delta}"
@@ -224,25 +310,24 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
 
         # ONE-LINE PRINT PER PACKET
         assert last_real_offset%8 == 0
+        assert (offset-last_real_offset)%8 == 0
+
+        # Append extra decoded fields into the note string
+        extra = decode_packet_fields(opcode, reg, delta)
+        if extra:
+            note = (note + " ; " + extra) if note else extra
+
         BORING_OPCODES = {0xf, 0x11, 0x12, 0x14, 0x15, 0x16}
         if opcode not in BORING_OPCODES or getenv("BORING"):
-            # get what's remaining in the reg
-            this_reg = reg
-            # no old packet
-            this_reg &= (1<<(offset-last_real_offset))-1
-            # no delta
-            dshift, dlen = DELTA_MAP_DEFAULT[opcode]
-            delta_mask = ((1<<dlen)-1)<<dshift
-            this_reg &= ~delta_mask
             print(
                 f"{token_index:4d}  "
-                f"offB={last_real_offset//8:4d}  "
+                f"offB={last_real_offset//8:4d}+{(offset-last_real_offset)//8:<2d} "
                 f"op=0x{opcode:02x} {OPCODE_NAMES[opcode]:20s}  "
                 f"time={time_before:8d}->{time:8d}  "
-                f"delta={delta:8d}  "
-                f"{note:30s}  "
-                f"{this_reg:16X}"
+                f"{reg:016X}  "
+                f"{note}"
             )
+            #f"delta={delta:8d}  "
 
         token_index += 1
         # This real packet ends here; next one starts at current offset.
