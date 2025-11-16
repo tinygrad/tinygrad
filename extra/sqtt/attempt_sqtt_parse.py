@@ -309,22 +309,24 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
                 time += delta
 
         # ONE-LINE PRINT PER PACKET
-        assert last_real_offset%8 == 0
-        assert (offset-last_real_offset)%8 == 0
+        #assert last_real_offset%8 == 0
+        #assert (offset)%8 == 0, f"misalign offset {offset}"
 
         # Append extra decoded fields into the note string
-        extra = decode_packet_fields(opcode, reg, delta)
-        if extra:
-            note = (note + " ; " + extra) if note else extra
+        #extra = decode_packet_fields(opcode, reg, delta)
+        #if extra: note = (note + " ; " + extra) if note else extra
 
-        BORING_OPCODES = {0xf, 0x11, 0x12, 0x14, 0x15, 0x16}
+        BORING_OPCODES = {0x11, 0x14}
+        #f"{OPCODE_NAMES[opcode]:20s}  "
         if opcode not in BORING_OPCODES or getenv("BORING"):
+            my_reg = reg
+            my_reg &= (1 << nib_budget) - 1
             print(
                 f"{token_index:4d}  "
-                f"offB={last_real_offset//8:4d}+{(offset-last_real_offset)//8:<2d} "
-                f"op=0x{opcode:02x} {OPCODE_NAMES[opcode]:20s}  "
-                f"time={time_before:8d}->{time:8d}  "
-                f"{reg:016X}  "
+                f"off={offset//4:5d}  "
+                f"op=0x{opcode:02x} "
+                f" time={time_before:8d}+{delta:8d}  "
+                f"{my_reg:16X} {nib_budget//4:<2d}  "
                 f"{note}"
             )
             #f"delta={delta:8d}  "
