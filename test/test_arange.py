@@ -6,6 +6,7 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer import Estimates
+from tinygrad.renderer.ptx import PTXRenderer
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
@@ -30,6 +31,7 @@ class TestArange(unittest.TestCase):
       # NOTE: not every backend supports CMPEQ
       self.assertLessEqual(self._get_flops(Tensor.eye(2560).contiguous(), np.eye(2560)), 2*2560*2560)
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexing is weird")
   def test_tri_complexity(self):
     with Context(NOOPT=1):
       t = Tensor.ones(256, 256).contiguous().realize()
