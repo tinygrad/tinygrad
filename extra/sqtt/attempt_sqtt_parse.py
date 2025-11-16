@@ -2,6 +2,38 @@ import pickle
 from hexdump import hexdump
 from extra.sqtt.roc import decode, ProfileSQTTEvent
 
+# Rough opcode semantics guessed from the SQTT traces we’ve looked at so far.
+# This is all empirical: based on deltas + patterns in reg/time, not an official spec.
+
+# 0x01 – tiny-delta timing packet (Δ 0–2 cycles), shows up with other “inst-ish” tokens;
+#        reg looks like packed PC/mask/etc. Generic small time advance.
+# 0x02 – same small-delta family as 0x01 (Δ always 0 in our traces), extremely rare; likely variant of 0x01.
+# 0x03 – tiny-delta timing packet (Δ 0–3), appears in short bursts; another generic “instruction group” token.
+# 0x04 – tiny-delta packet (Δ 0–3), rare; probably yet another variant of the 0x01/0x03 family.
+# 0x06 – small-delta packet (Δ 0–5), usually adjacent to 0x01/0x03/0x18/0x19; smells like a per-PC counter lane.
+# 0x08 – tiny-delta packet (Δ 0–7, 3-bit field); relatively rare, may correspond to a special pipeline event.
+# 0x09 – always Δ=0 in our traces; seems to just snapshot reg without advancing time
+#        (some kind of “state change” / side-band marker).
+# 0x0F – “short timestamp” packet: we decode a small delta from reg and then always add +4 cycles.
+#        Used for very short gaps between events.
+# 0x11 – mid/long-delta packet (Δ up to ~500 in our data); main workhorse for advancing time between
+#        clusters of tiny 0x14/0x18/0x19 packets. Generic “big-ish” time step.
+# 0x12 – small-delta packet (Δ 1–6), tends to show up near interesting regions (instrumented callbacks);
+#        likely encodes a group of VALU/MEM instructions or similar.
+# 0x14 – extremely common tiny-delta packet (Δ 0–5). This looks like the generic “per-instruction /
+#        per-counter tick” token, used to dribble time forward almost every cycle.
+# 0x15 – always Δ=0, and we only see it with state=0x71 in the sample; likely a control token
+#        (begin/end of some sampled region, or wave marker).
+# 0x16 – special timestamp / marker packet:
+#        - if bit9==0      → 36-bit time delta in bits [13..47] (“0x16-delta” in the debug print)
+#        - if bit9==1 & bit8==0 → 36-bit marker payload (“0x16-marker val=…”)
+#        - else            → “0x16-other” (reserved/unknown flavour).
+# 0x18 – small-delta packet (Δ 0–3) with PC-looking payload; appears interleaved with 0x01/0x03/0x19.
+#        Probably another “inst” flavour (e.g. different pipeline / SIMD).
+# 0x19 – tiny-delta packet (Δ 0–3) that often follows 0x16/0x18 bursts; looks like a second counter lane
+#        or sub-event (e.g. another unit reporting for the same PC).
+
+
 # rocprof_trace_decoder_parse_data-0x11c6a0
 # parse_sqtt_180 = b *rocprof_trace_decoder_parse_data-0x11c6a0+0x110040
 
@@ -11,8 +43,6 @@ def parse(fn:str):
     dat_sqtt = [x for x in dat if isinstance(x, ProfileSQTTEvent)]
     print(f"got {len(dat_sqtt)} SQTT events in {fn}")
     return dat_sqtt
-
-from typing import Dict, Tuple, Optional
 
 # ---------- 1. local_138: 256-byte state->token table ----------
 
@@ -103,31 +133,53 @@ def extract_delta(opcode: int, reg64: int) -> int:
 
 # ---------- 4. One-line-per-packet parser ----------
 
+def packet_nibbles_hex(data: bytes, start_bit: int, end_bit: int) -> str:
+    """
+    Return the hex nibble string from data[start_bit..end_bit) in 4-bit steps.
+    start_bit and end_bit are bit offsets, always multiples of 4 here.
+    """
+    cur = start_bit
+    n = len(data)
+    out = []
+
+    while cur < end_bit and (cur >> 3) < n:
+        byte_index = cur >> 3
+        byte = data[byte_index]
+        shift = 4 if (cur & 4) else 0  # same convention as the main loop
+        nib = (byte >> shift) & 0xF
+        out.append(f"{nib:x}")
+        cur += 4
+
+    return "".join(out)
+
+
 def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
     """
     Minimal debug: print ONE LINE per decoded token (packet).
 
-    Format (you can tweak the print() line):
-      idx  offB  op  state  time_before->after  delta  note  reg64
-
-    - Skips the pseudo-token 0x10 (need more bits).
-    - Handles opcode 0x16 (delta or marker) and 0x0F (+4) specially.
-    - Other opcodes use delta_map for their time delta (or 0 if unknown).
+    Now prints only the actual nibbles that belong to each packet, instead of
+    the full 64-bit shift register.
     """
     n = len(data)
     time = 0
     reg = 0          # shift register
-    offset = 0       # nibble index * 4
+    offset = 0       # bit offset, in steps of 4 (one nibble)
     nib_budget = 0x40
     flags = 0
     token_index = 0
 
+    # Bit offset at the end of the previous REAL packet (not counting 0x10).
+    last_real_offset = 0
+
     while (offset >> 3) < n and token_index < max_tokens:
-        cur = offset
+        # Remember where we started refilling for this step (bit offset),
+        # but the *logical* start of the current packet is last_real_offset.
+        refill_start = offset
 
         # 1) Fill register with nibbles according to nib_budget
         if nib_budget != 0:
-            target = cur + 4 + ((nib_budget - 1) & ~3)
+            target = refill_start + 4 + ((nib_budget - 1) & ~3)
+            cur = refill_start
             while cur != target and (cur >> 3) < n:
                 byte_index = cur >> 3
                 byte = data[byte_index]
@@ -147,14 +199,20 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
             nib_budget = 4
             if (offset >> 3) >= n:
                 break
-            # do NOT count this as a real packet
+            # Do NOT count this as a real packet; do not update last_real_offset.
             continue
 
         # 4) Set next nibble budget
         nb_index = opcode & 0x1F
         nib_budget = NIBBLE_BUDGET[nb_index]
 
-        off_bytes = offset >> 3
+        # For printing: the logical nibble range for THIS real packet is
+        # [last_real_offset, offset).
+        packet_start_bit = last_real_offset
+        packet_end_bit = offset
+        packet_nibbles = packet_nibbles_hex(data, packet_start_bit, packet_end_bit)
+
+        off_bytes = packet_start_bit >> 3  # starting byte of this packet in the stream
         time_before = time
         note = ""
 
@@ -187,7 +245,6 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
                 time += delta_with_fix
                 delta = delta_with_fix
             else:
-                note = ""
                 time += delta
 
         # ONE-LINE PRINT PER PACKET
@@ -195,21 +252,22 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
             f"{token_index:4d}  "
             f"offB={off_bytes:4d}  "
             f"op=0x{opcode:02x}  "
-            f"state=0x{int(state):02x}  "
             f"time={time_before:8d}->{time:8d}  "
             f"delta={delta:8d}  "
             f"{note:30s}  "
-            f"reg=0x{reg:016x}"
+            f"nibbles={packet_nibbles}"
         )
 
         token_index += 1
+        # This real packet ends here; next one starts at current offset.
+        last_real_offset = offset
 
     # Optional summary at the end
     print(f"# done: tokens={token_index}, final_time={time}, flags=0x{flags:02x}")
 
 if __name__ == "__main__":
-    dat_plus_0_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
-
-    blob_0 = dat_plus_0_sqtt[1].blob
+    dat_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
+    #dat_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
+    blob_0 = dat_sqtt[0].blob
     hexdump(blob_0[8:0x108])
     parse_sqtt_print_packets(blob_0[8:])
