@@ -2,38 +2,6 @@ import pickle
 from hexdump import hexdump
 from extra.sqtt.roc import decode, ProfileSQTTEvent
 
-# Rough opcode semantics guessed from the SQTT traces we’ve looked at so far.
-# This is all empirical: based on deltas + patterns in reg/time, not an official spec.
-
-# 0x01 – tiny-delta timing packet (Δ 0–2 cycles), shows up with other “inst-ish” tokens;
-#        reg looks like packed PC/mask/etc. Generic small time advance.
-# 0x02 – same small-delta family as 0x01 (Δ always 0 in our traces), extremely rare; likely variant of 0x01.
-# 0x03 – tiny-delta timing packet (Δ 0–3), appears in short bursts; another generic “instruction group” token.
-# 0x04 – tiny-delta packet (Δ 0–3), rare; probably yet another variant of the 0x01/0x03 family.
-# 0x06 – small-delta packet (Δ 0–5), usually adjacent to 0x01/0x03/0x18/0x19; smells like a per-PC counter lane.
-# 0x08 – tiny-delta packet (Δ 0–7, 3-bit field); relatively rare, may correspond to a special pipeline event.
-# 0x09 – always Δ=0 in our traces; seems to just snapshot reg without advancing time
-#        (some kind of “state change” / side-band marker).
-# 0x0F – “short timestamp” packet: we decode a small delta from reg and then always add +4 cycles.
-#        Used for very short gaps between events.
-# 0x11 – mid/long-delta packet (Δ up to ~500 in our data); main workhorse for advancing time between
-#        clusters of tiny 0x14/0x18/0x19 packets. Generic “big-ish” time step.
-# 0x12 – small-delta packet (Δ 1–6), tends to show up near interesting regions (instrumented callbacks);
-#        likely encodes a group of VALU/MEM instructions or similar.
-# 0x14 – extremely common tiny-delta packet (Δ 0–5). This looks like the generic “per-instruction /
-#        per-counter tick” token, used to dribble time forward almost every cycle.
-# 0x15 – always Δ=0, and we only see it with state=0x71 in the sample; likely a control token
-#        (begin/end of some sampled region, or wave marker).
-# 0x16 – special timestamp / marker packet:
-#        - if bit9==0      → 36-bit time delta in bits [13..47] (“0x16-delta” in the debug print)
-#        - if bit9==1 & bit8==0 → 36-bit marker payload (“0x16-marker val=…”)
-#        - else            → “0x16-other” (reserved/unknown flavour).
-# 0x18 – small-delta packet (Δ 0–3) with PC-looking payload; appears interleaved with 0x01/0x03/0x19.
-#        Probably another “inst” flavour (e.g. different pipeline / SIMD).
-# 0x19 – tiny-delta packet (Δ 0–3) that often follows 0x16/0x18 bursts; looks like a second counter lane
-#        or sub-event (e.g. another unit reporting for the same PC).
-
-
 # rocprof_trace_decoder_parse_data-0x11c6a0
 # parse_sqtt_180 = b *rocprof_trace_decoder_parse_data-0x11c6a0+0x110040
 
@@ -266,7 +234,8 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
     print(f"# done: tokens={token_index}, final_time={time}, flags=0x{flags:02x}")
 
 if __name__ == "__main__":
-    dat_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
+    dat_sqtt = parse("extra/sqtt/examples/profile_empty_run_0.pkl")
+    #dat_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
     #dat_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
     blob_0 = dat_sqtt[0].blob
     hexdump(blob_0[8:0x108])
