@@ -116,13 +116,11 @@ at::Tensor wrap_tensor(py::object &py_obj, py::object torch_dtype, c10::DeviceIn
   // TODO: we have to get the dtype and the shape from the tinygrad Tensor
   std::vector<int64_t> sizes = py_obj.attr("shape").cast<std::vector<int64_t>>();
 
-  // UOp no longer has .st attribute, compute strides from shape using strides_for_shape
   py::object helpers = py::module::import("tinygrad.helpers");
   py::object strides_for_shape = helpers.attr("strides_for_shape");
   std::vector<int64_t> strides = strides_for_shape(py_obj.attr("shape")).cast<std::vector<int64_t>>();
   int64_t storage_offset = 0;
 
-  // Convert torch.dtype to at::ScalarType by creating a temporary tensor
   py::object torch_module = py::module::import("torch");
   py::object temp_tensor = torch_module.attr("tensor")(py::list(), py::arg("dtype")=torch_dtype);
   at::Tensor temp_at_tensor = temp_tensor.cast<at::Tensor>();
