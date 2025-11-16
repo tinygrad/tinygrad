@@ -416,12 +416,13 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
 
   return ", ".join(fields)
 
+# 0xb is time something
 # 0xd is time something
 # 0xf is small time advance
 # 0x11 is time advance
 # 0x16 is big time advance + markers
 # 0x14 is REG
-DEFAULT_FILTER = (0xd, 0xf, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else None
+DEFAULT_FILTER = (0xb, 0xd, 0xf, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else None
 
 def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAULT_FILTER) -> None:
   """
