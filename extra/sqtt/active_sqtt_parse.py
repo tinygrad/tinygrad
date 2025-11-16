@@ -37,7 +37,7 @@ def save_sqtt():
     if isinstance(e, ProfileSQTTEvent):
       print(replace(e, blob=b''))
       if e.se == 0:
-        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x12, 0x14, 0x16])
+        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x12, 0x14])
 
 
 template = """.text
@@ -88,10 +88,10 @@ def run_asm(src):
 if __name__ == "__main__":
   with save_sqtt() as sqtt:
     run_asm([
-      "v_rcp_f32 v1, v0"
-      #"v_add_f32_e32 v1 v0 v0",
+      #"v_rcp_f32 v1, v0"
+      "v_add_f32_e32 v1 v0 v0",
       #"v_add_f32_e32 v1 v0 v0",
       #"v_add_f32_e32 v3 v2 v2",
       #"v_add_f32_e32 v2 v1 v1",
       #"s_nop 1"
-    ]*1)
+    ]*10)

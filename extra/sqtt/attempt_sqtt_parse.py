@@ -1,7 +1,5 @@
 import pickle
-from hexdump import hexdump
 from extra.sqtt.roc import decode, ProfileSQTTEvent
-from tinygrad.helpers import getenv
 
 # Instruction packets (one per ISA op)
 # NOTE: these are bad guesses and may be wrong! feel free to update if you know better
@@ -467,18 +465,22 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=None)
       if two_bits == 1:
         flags |= 0x01
 
+      # Common 36-bit field at bits [12..47]
+      val36 = (reg >> 12) & ((1 << 36) - 1)
+
       if (reg & 0x200) == 0:
-        # delta mode: 36-bit delta at bits [12..47]
-        delta = (reg >> 12) & ((1 << 36) - 1)
+        # delta mode: add 36-bit delta to time
+        delta = val36
         time += delta
         note = "0x16-delta"
       else:
-        # marker mode if bit9==1 and bit8==0
-        if (reg & 0x100) == 0:
-          val = (reg >> 12) & ((1 << 36) - 1)
+        # marker / other modes: no time advance
+        if (reg & 0x100) == 0 and val36 != 0:
+          # real marker: bit9=1, bit8=0, non-zero payload
           delta = 0
-          note = f"0x16-marker val=0x{val:x}"
+          note = f"0x16-marker val=0x{val36:x}"
         else:
+          # "other" 0x16 variants, ignored for timing
           delta = 0
           note = "0x16-other"
     else:

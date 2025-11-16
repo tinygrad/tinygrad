@@ -5,7 +5,8 @@ from typing import Generator
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, TRACK_MATCH_STATS, profile_matches
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker, VIZ
+from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
+from tinygrad.helpers import VIZ
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
