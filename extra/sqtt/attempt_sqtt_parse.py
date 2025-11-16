@@ -6,37 +6,38 @@ from tinygrad.helpers import getenv
 # Instruction packets (one per ISA op)
 # NOTE: these are bad guesses and may be wrong! feel free to update if you know better
 OPCODE_NAMES = {
-    0x01: "INST_VALU",          # vector ALU
-    0x02: "INST_FLAT",          # global/flat mem
-    0x03: "INST_SMEM_OR_MSG",   # scalar mem / msg
-    0x04: "INST_SCALAR_CTRL",   # scalar ctrl / immed
+    # Small metadata / structural packets (NOT ISA op kinds)
+    0x01: "META_SMALL_ID",          # 12-bit identifier / slot tag
+    0x02: "META_FLAG",              # 1-byte flag/mode (CF/AF/8F/DF...)
+    0x03: "META_SUBEVENT_CODE",     # 1-byte sub-event/classification code
+    0x04: "META_BASE_INDEX_TAG",    # 12-bit base index/tag (..D, 9D, 10D, 58D...)
 
-    # Timing / timestamp packets
-    0x0F: "TS_SHORT_PLUS4",     # short ts, delta+4
-    0x11: "TS_MEDIUM_DELTA",    # medium/large delta
-    0x14: "PC_TICK_TINY_DELTA", # tiny tick per PC
-    0x16: "TS_LONG_OR_MARKER",  # long delta / marker
+    # Instruction / timing / timestamp packets
+    0x0F: "TIME_SHORT_DELTA_PLUS4", # short ts, raw_delta+4
+    0x11: "TIME_WAVE_STATE",        # compact wave timing/stall state record
+    0x14: "INST_EXEC_RECORD",       # per-instruction execution record
+    0x16: "TIME_LONG_OR_MARKER",    # long delta / marker with 6-byte payload
 
-    # State / control / region markers
-    0x09: "STATE_SNAPSHOT",     # Δ=0 state dump
-    0x15: "CONTROL_REGION_MARK",# region / wave mark
+    # State / control / perf snapshots
+    0x09: "CONTROL_CONFIG_32B",     # 32-bit control/config word (bursts of FE88..., C488...)
+    0x15: "PERFCOUNTER_SNAPSHOT",   # perf / TT configuration snapshot (8-byte)
 
-    # Event / structured / PC-lane packets
-    0x06: "FIELD_SMALL_ZERO",   # extra per-inst field (spec)
-    0x08: "EVENT_TINY_SPECIAL", # tiny special-unit evt (spec)
-    0x12: "EVENT_SHORT_STRUCT", # short structured evt (spec)
-    0x18: "EVENT_PC_LANE",      # PC / lane micro-event
-    0x19: "EVENT_TINY_SECONDARY",# secondary tiny lane (spec)
+    # Extra descriptors / events / metrics
+    0x06: "META_DESCRIPTOR_24B",    # 24-bit descriptor (seen in complex kernels like GEMM)
+    0x08: "EVENT_SMALL",            # small in-stream event (5-nibble payload)
+    0x12: "TIME_SECONDARY_METRIC",  # 3-byte secondary timing/latency/perf metric
+    0x18: "EVENT_SMALL_PAYLOAD",    # generic small side-band payload (5 nibbles)
+    0x19: "EVENT_SUMMARY_48B",      # rare 6-byte summary/aggregate metric
 
-    # Pseudo / unknown framework bits
-    0x10: "PSEUDO_NEED_MORE_BITS", # pseudo, not real pkt
-    0x07: "UNK_DELTA",           # unknown delta
-    0x0A: "UNK_DELTA2",          # unknown
-    0x0B: "UNK_DELTA3",          # unknown
-    0x0C: "UNK_DELTA4",          # unknown
-    0x0D: "UNK_DELTA5",          # unknown
-    0x0E: "UNK_DELTA6",          # unknown
-    0x17: "UNK_NO_DELTA",        # unknown, no delta
+    # Pseudo / unknown / not yet observed
+    0x07: "UNK_DELTA",              # unknown
+    0x0A: "UNK_DELTA2",             # unknown
+    0x0B: "UNK_DELTA3",             # unknown
+    0x0C: "UNK_DELTA4",             # unknown
+    0x0D: "UNK_DELTA5",             # unknown
+    0x0E: "UNK_DELTA6",             # unknown
+    0x10: "UNK_PSEUDO",             # not seen; pseudo/placeholder
+    0x17: "UNK_NO_DELTA",           # unknown, likely non-timing event
 }
 
 # rocprof_trace_decoder_parse_data-0x11c6a0
@@ -317,7 +318,6 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
         #if extra: note = (note + " ; " + extra) if note else extra
 
         BORING_OPCODES = {0x11, 0x14}
-        #f"{OPCODE_NAMES[opcode]:20s}  "
         if opcode not in BORING_OPCODES or getenv("BORING"):
             my_reg = reg
             my_reg &= (1 << nib_budget) - 1
@@ -325,6 +325,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
                 f"{token_index:4d}  "
                 f"off={offset//4:5d}  "
                 f"op=0x{opcode:02x} "
+                f"{OPCODE_NAMES[opcode]:24s} "
                 f" time={time_before:8d}+{delta:8d}  "
                 f"{my_reg:16X} {nib_budget//4:<2d}  "
                 f"{note}"
@@ -332,8 +333,6 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000) -> None:
             #f"delta={delta:8d}  "
 
         token_index += 1
-        # This real packet ends here; next one starts at current offset.
-        last_real_offset = offset
 
     # Optional summary at the end
     print(f"# done: tokens={token_index}, final_time={time}, flags=0x{flags:02x}")
