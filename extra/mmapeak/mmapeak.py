@@ -44,8 +44,8 @@ if __name__=="__main__":
     raise RuntimeError("Error while initiating AMD device")
 
   COMPILER = HIPCompiler(DEV.arch)
-  if DEV.arch in {'gfx1100', 'gfx1103'}:
-    if DEV.arch == 'gfx1103':
+  if DEV.arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
+    if DEV.arch != 'gfx1100':
       NUM_WORKGROUPS = 8
     launchBenchmark("v_wmma_bf16_16x16x16_bf16", (7,8,15))
     launchBenchmark("v_wmma_f16_16x16x16_f16", (7,8,15))
