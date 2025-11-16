@@ -7,7 +7,7 @@ os.environ["AMD_LLVM"] = "0"
 
 from dataclasses import replace
 import atexit, contextlib
-from tinygrad.helpers import system
+from tinygrad.helpers import system, getenv
 from tinygrad.runtime.ops_amd import AMDProgram
 from extra.sqtt.roc import decode, WaveExec, ProfileSQTTEvent
 from tinygrad.device import Device, ProfileDeviceEvent
@@ -37,7 +37,7 @@ def save_sqtt():
     if isinstance(e, ProfileSQTTEvent):
       print(replace(e, blob=b''))
       if e.se == 0:
-        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x12, 0x14])
+        parse_sqtt_print_packets(e.blob, filter=[0xf, 0x11, 0x12, 0x14] if getenv("FILTER", 1) else None)
 
 
 template = """.text
@@ -77,7 +77,7 @@ amdhsa.kernels:
 """
 
 def run_asm(src):
-  NUM_WORKGROUPS = 1
+  NUM_WORKGROUPS = 4
   WAVE_SIZE = 32
   NUM_WAVES = 1
   lib = dev.compiler.compile(template.replace("INSTRUCTION", '\n'.join(src)))
@@ -90,8 +90,10 @@ if __name__ == "__main__":
     run_asm([
       #"v_rcp_f32 v1, v0"
       "v_add_f32_e32 v1 v0 v0",
+      "v_add_f32_e32 v3 v2 v2",
+      "v_add_f32_e32 v5 v4 v4",
+      "v_add_f32_e32 v7 v6 v6",
       #"v_add_f32_e32 v1 v0 v0",
-      #"v_add_f32_e32 v3 v2 v2",
       #"v_add_f32_e32 v2 v1 v1",
       #"s_nop 1"
-    ]*10)
+    ]*1)
