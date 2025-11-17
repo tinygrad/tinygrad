@@ -7,12 +7,9 @@ os.environ["AMD_LLVM"] = "0"
 
 import unittest
 import sys, contextlib
-from tinygrad import Tensor
-from tinygrad.dtype import dtypes
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv
-from tinygrad.renderer import ProgramSpec
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AddrSpace
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.roc import decode, WaveExec
@@ -76,7 +73,6 @@ class TestTiming(unittest.TestCase):
     inp = Tensor([-2.0]).realize()
     with save_sqtt() as sqtt:
       Tensor.custom_kernel(out, inp, fxn=custom_vrcp)[0].realize()
-
     wave = list(sqtt.values())[0][0]
     for i in range(len(wave.insts)):
       if wave.insts[i].inst.startswith("global_store"):
@@ -103,7 +99,7 @@ class TestTiming(unittest.TestCase):
       assert data0.dtype.base == dtypes.ulong
       op = custom("unsigned long long t0 = __builtin_readcyclecounter();")
       op = custom(f"__builtin_amdgcn_s_sleep({n});", op)
-      op = custom(f"unsigned long long t1 = __builtin_readcyclecounter();", op)
+      op = custom("unsigned long long t1 = __builtin_readcyclecounter();", op)
       op = custom(f"data0_{data0.size}[0] = t1 - t0;", op)
       return UOp.sink(data0, op, arg=KernelInfo(name=f"sleep_{n}"))
     diff_hw_reg = Tensor.empty(1, dtype=dtypes.ulong)
