@@ -72,7 +72,7 @@ def convert_from_huggingface(weights:dict[str, Tensor], num_blocks:int) -> dict[
   for k, v in weights.items():
     if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
-    if k not in keymap: # todo: remove
+    if k not in keymap:
       if DEBUG >= 1: print(f"WARNING: key {k} not in keymap")
       continue
     sd[keymap[k]] = v
