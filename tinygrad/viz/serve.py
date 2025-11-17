@@ -219,7 +219,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   for name,waves in rctx.inst_execs.items():
     events:list[ProfileEvent] = []
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append(first:={"name":(pname:=prg.name if prg is not None else name), "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+    steps.append(first:={"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
                          "depth":0, "fmt":"timeline"})
 
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
