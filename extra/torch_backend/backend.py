@@ -694,48 +694,8 @@ if TORCH_DEBUG:
       return func(*args, **(kwargs or {}))
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
-# NOTE: patch torch optimizer step to avoid continously growing the computation graph
-_torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
-def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
-def get_real_tinygrad_buffers():
-  res = set()
-  for mod in _torch_modules_with_buffers:
-    for _,b in mod.named_buffers(recurse=False):
-      if b is not None and b.is_tiny:
-        res.add(unwrap(b))
-  return res
-torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
-
-from torch.nn.modules import Module
-def param_hook(_grad):
-  if _grad is not None and _grad.is_tiny: Tensor.realize(unwrap(_grad))
-def module_hook(module:Module, _name, _submodule):
-  for param in _submodule.parameters(recurse=False):
-    if param.requires_grad: param.register_hook(param_hook)
-torch.nn.modules.module.register_module_module_registration_hook(module_hook)
-
-def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
-  tinygrad_tensors = []
-  for param_group in optimizer.param_groups:
-    for param in param_group["params"]:
-      if param is None: continue
-      tinygrad_tensors.append(param.data)
-  for state_dict in optimizer.state.values():
-    for _, value in state_dict.items():
-      if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if x.is_tiny]
-  real_tinygrad_tensors += get_real_tinygrad_buffers()
-  if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
-
-_optimizer_init = torch.optim.Optimizer.__init__
-def _optimizer_patched_init(self, *args, **kwargs):
-  _optimizer_init(self, *args, **kwargs)
-  self.register_step_post_hook(realize_optimizer_step)
-torch.optim.Optimizer.__init__ = _optimizer_patched_init
-
 # this implementation is needed to allow the batchnorm kernels to fuse
 # aten::native_batch_norm does more than Tensor.batchnorm
-# TODO: shoud this use maybe use tinygrad.nn.BatchNorm
 @torch.library.impl("aten::native_batch_norm", "privateuseone")
 def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
   input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
