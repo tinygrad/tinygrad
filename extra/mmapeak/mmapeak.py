@@ -1,37 +1,42 @@
-import pathlib
+import os, pathlib
+
+# TODO: there is a timing bug without this
+os.environ["AMD_AQL"] = "1"
+
 from tinygrad.device import Device
 from tinygrad.runtime.ops_amd import AMDProgram, HIPCompiler
-import time
-import os
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
 NUM_WAVES = 2
-FLOPS_PER_MATMUL =  16*16*16*2
-INTERNAL_LOOP  = 1_000_000
-INSTRUCTIONS_PER_LOOP = 1_000
+FLOPS_PER_MATMUL = 16*16*16*2
+INTERNAL_LOOP = 1_000_00
+INSTRUCTIONS_PER_LOOP = 200
+DIRECTIVE = ".amdhsa_wavefront_size32 1"
 
 assemblyTemplate = (pathlib.Path(__file__).parent / "template.s").read_text()
 
-def launchBenchmark(instruction, vgprIndices, dense = True):
-  if dense:
+def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, extra=""):
+  if accum:
+    instructions = "{} a[0:{}], v[{}:{}], v[{}:{}], 1{}\n".format(instruction, vgprIndices[0],
+                                                                vgprIndices[1], vgprIndices[2],
+                                                                vgprIndices[1], vgprIndices[2], extra)
+  elif dense:
     instructions = "{} v[0:{}], v[{}:{}], v[{}:{}], 1\n".format(instruction, vgprIndices[0],
                                                                 vgprIndices[1], vgprIndices[2],
-                                                                vgprIndices[1], vgprIndices[2]) * INSTRUCTIONS_PER_LOOP
+                                                                vgprIndices[1], vgprIndices[2])
   else:
     instructions = "{} v[0:{}], v[{}:{}], v[{}:{}], v{}\n".format(instruction, vgprIndices[0],
-                                                                vgprIndices[1], vgprIndices[2],
-                                                                vgprIndices[3], vgprIndices[4],
-                                                                vgprIndices[5]) * INSTRUCTIONS_PER_LOOP
-  src = assemblyTemplate.replace("INSTRUCTION", instructions)
+                                                                  vgprIndices[1], vgprIndices[2],
+                                                                  vgprIndices[3], vgprIndices[4],
+                                                                  vgprIndices[5])
+  src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", instructions*INSTRUCTIONS_PER_LOOP)
+  src = src.replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   fxn = AMDProgram(DEV, "matmul", lib)
-  start = time.perf_counter()
-  fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) #For some reason the returned time is very small after the first kernel execution
-  end = time.perf_counter()
-  elapsed = end-start
+  elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
-  print("{:<29} : {} T(FL)OPS".format(instruction, round(FLOPs/elapsed/10**12, 2)))
+  print(f"{instruction:<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
 
 if __name__=="__main__":
   DEVICENUM = os.getenv("DEVICENUM", "0")
@@ -40,18 +45,17 @@ if __name__=="__main__":
   except:
     raise RuntimeError("Error while initiating AMD device")
 
-  if (ARCH := DEV.arch) not in ['gfx1100', 'gfx1201']:
-    raise RuntimeError("only gfx1100 and gfx1201 supported")
-  COMPILER = HIPCompiler(ARCH)
-
-  if ARCH == 'gfx1100':
+  COMPILER = HIPCompiler(DEV.arch)
+  if DEV.arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
+    if DEV.arch == 'gfx1103': NUM_WORKGROUPS = 8
+    if DEV.arch == 'gfx1151': NUM_WORKGROUPS = 40
     launchBenchmark("v_wmma_bf16_16x16x16_bf16", (7,8,15))
     launchBenchmark("v_wmma_f16_16x16x16_f16", (7,8,15))
     launchBenchmark("v_wmma_f32_16x16x16_bf16", (7,8,15))
     launchBenchmark("v_wmma_f32_16x16x16_f16", (7,8,15))
     launchBenchmark("v_wmma_i32_16x16x16_iu4", (7,8,9))
     launchBenchmark("v_wmma_i32_16x16x16_iu8", (7,8,11))
-  if ARCH == 'gfx1201':
+  elif DEV.arch == 'gfx1201':
     NUM_WORKGROUPS = 64
     launchBenchmark("v_wmma_bf16_16x16x16_bf16", (3,4,7))
     launchBenchmark("v_wmma_f16_16x16x16_f16", (3,4,7))
@@ -77,3 +81,19 @@ if __name__=="__main__":
     launchBenchmark("v_swmmac_f32_16x16x32_bf8_bf8", (7,8,9,10,13,14), False)
     FLOPS_PER_MATMUL = 16*16*64*2
     launchBenchmark("v_swmmac_i32_16x16x64_iu4", (7,8,9,10,13,14), False)
+  elif DEV.arch == 'gfx950':
+    DIRECTIVE = ".amdhsa_accum_offset 4"
+    NUM_WORKGROUPS = 256
+    WAVE_SIZE = 64
+    NUM_WAVES = 4
+    launchBenchmark("v_mfma_f32_16x16x16_f16", (3,0,1), accum=True)
+    launchBenchmark("v_mfma_f32_16x16x16_bf16", (3,0,1), accum=True)
+    FLOPS_PER_MATMUL = 16*16*32*2
+    launchBenchmark("v_mfma_f32_16x16x32_f16", (3,0,3), accum=True)
+    launchBenchmark("v_mfma_f32_16x16x32_bf16", (3,0,3), accum=True)
+    FLOPS_PER_MATMUL = 16*16*128*2
+    launchBenchmark("v_mfma_f32_16x16x128_f8f6f4", (3,0,7), accum=True) # fp8
+    launchBenchmark("v_mfma_f32_16x16x128_f8f6f4", (3,0,5), accum=True, extra=", cbsz:2 blgp:2") # fp6
+    launchBenchmark("v_mfma_f32_16x16x128_f8f6f4", (3,0,3), accum=True, extra=", cbsz:4 blgp:4") # fp4
+  else:
+    raise RuntimeError(f"arch {DEV.arch} not supported.")

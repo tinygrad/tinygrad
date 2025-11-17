@@ -19,5 +19,6 @@ trap 'rm -f "$TMP"' EXIT
 EOF
   sed -n '/struct nir_shader_compiler_options/,/^}/{p;/^}/q}' $1/src/gallium/drivers/llvmpipe/lp_screen.c
   echo "int main(void) { write(1, &gallivm_nir_options, sizeof(gallivm_nir_options)); }"
-) | cc -x c -o $TMP - -I$1/src/compiler/nir -I$1/src -I$1/include && $TMP | gzip | base64 -w0
+) | cc -x c -o $TMP - -I$1/src/compiler/nir -I$1/src -I$1/include || exit 1
 
+printf 'lvp_nir_options = gzip.decompress(base64.b64decode("%s"))' $("$TMP" | gzip | base64 -w0)
