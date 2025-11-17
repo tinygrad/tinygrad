@@ -27,10 +27,8 @@ from transformers import AutoTokenizer
 MODELS = {
   "20B": {
     "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": getenv("GPT_OSS_LAYERS", 24),
-               "n_experts": 32,
-               "n_active_experts": 4, "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
-               "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
-               },
+               "n_experts": 32, "n_active_experts": 4, "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
+               "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},},
     "total_num_weights": 3,
     "model": "openai/gpt-oss-20b",
     "tokenizer": "openai/gpt-oss-20b",
@@ -112,7 +110,7 @@ def apply_rope(x:Tensor, start_pos:int|UOp, base:int=150_000, scale:float=32.0, 
   def rotate(x_pairs:Tensor, freqs:Tensor) -> Tensor:
     angles = ((Tensor.arange(T, dtype="float32") + t_start_pos)[:, None] * freqs[None, :]).reshape(1, 1, T, half)
     # contiguous here allows RoPE to be pruned in the JIT
-    cos, sin = angles.cos().cast(x_pairs.dtype).contiguous(), angles.sin().cast(x_pairs.dtype).contiguous() # todo: cast to float32 ??
+    cos, sin = angles.cos().cast(x_pairs.dtype).contiguous(), angles.sin().cast(x_pairs.dtype).contiguous()
     return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin, x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1)
 
   # rope https://arxiv.org/pdf/2104.09864
@@ -238,7 +236,7 @@ class Transformer:
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
     model = Transformer(**params) # type: ignore[arg-type]
-    if fakeweights:
+    if not fakeweights:
       num_blocks = len(model.blk)
       weights = load(str(model_path / "model.safetensors.index.json"))
       weights = convert_from_huggingface(weights, num_blocks)
@@ -266,11 +264,10 @@ def main(args):
   expected = [12194, 11, 1495, 553, 481, 30, 357, 939, 8975, 13]
 
   if getenv("TORCH"):
-    print("Using torch, not tinygrad.")
     import torch
     from transformers import GptOssForCausalLM
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
-    print(f"Using {device}")
+    print(f"Using torch {device}")
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1]) # type: ignore[attr-defined]
     model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=device)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
@@ -281,6 +278,7 @@ def main(args):
     return
 
   # build model
+  print(f"Using tinygrad {Device.DEFAULT}")
   with Timing("load weights: ", enabled=DEBUG >= 1):
     model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights) # type: ignore[arg-type]
 
