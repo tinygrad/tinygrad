@@ -120,5 +120,16 @@ class TestTiming(unittest.TestCase):
     for e in wave.insts:
       print(f"{e.inst} {e.dur=} {e.stall=}")
 
+  def test_wave_sched(self):
+    num_waves = 2
+    num_wgps = 10
+    with save_sqtt() as sqtt:
+      # 1 cycle decode, no stall
+      asm_kernel([f"v_mov_b32_e32 v1{i} {i}" for i in range(10)], l=32*num_waves, g=num_wgps).realize()
+    waves = list(sqtt.values())[0]
+    print(len(waves))
+    for w in waves:
+      print(f"{w.wave_id:<2} {w.simd=} {w.cu=} {w.se=} @ clk {w.begin_time}")
+
 if __name__ == "__main__":
   unittest.main()
