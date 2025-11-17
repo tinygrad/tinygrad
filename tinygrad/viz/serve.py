@@ -216,12 +216,11 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
   units:set[str] = set()
-  events:list[ProfileEvent] = []
-  steps.append({"name":"AMD", "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "depth":0, "fmt":"timeline"})
   for name,waves in rctx.inst_execs.items():
+    events:list[ProfileEvent] = []
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append({"name":(pname:=prg.name if prg is not None else name), "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                  "depth":1, "data":{"src":prg.src if prg is not None else name, "lang":"cpp"}})
+    steps.append(first:={"name":(pname:=prg.name if prg is not None else name), "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                         "depth":0, "fmt":"timeline"})
 
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
@@ -231,18 +230,18 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     for w in waves:
-      units.add(row:=f"SIMD:{w.simd} CU:{w.cu}")
-      events.append(ProfileRangeEvent(row, f"{pname} wave {w.wave_id}", Decimal(w.begin_time), Decimal(w.end_time)))
+      units.add(row:=f"SIMD:{w.simd} CU:{w.cu} SE:{w.se}")
+      events.append(ProfileRangeEvent(row, wave_name:=f"wave {w.wave_id}", Decimal(w.begin_time), Decimal(w.end_time)))
       rows, prev_instr = [], w.begin_time
       for i,e in enumerate(w.insts):
         rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
         prev_instr = max(prev_instr, e.time + e.dur)
       summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SIMD", "value":w.simd}, {"label":"CU", "value":w.cu},
                  {"label":"SE", "value":w.se}]
-      steps.append({"name":f"Wave {w.wave_id}", "depth":2, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+      steps.append({"name":wave_name, "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
                     "data":{"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}})
-  events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
-  steps[0]["data"] = {"value":get_profile(events), "content_type":"application/octet-stream"}
+    events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
+    first["data"] = {"value":get_profile(events), "content_type":"application/octet-stream"}
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
