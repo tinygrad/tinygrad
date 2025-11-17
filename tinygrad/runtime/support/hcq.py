@@ -372,7 +372,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
     self.prof_exec_recs:list[tuple[int, HCQSignal, HCQSignal, str, bool]] = []
-    self.prof_counter:int = itertools.count(0)
+    self.prof_counter = itertools.count(0)
 
     self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
