@@ -8,17 +8,19 @@ os.environ["AMD_LLVM"] = "0"
 from dataclasses import replace
 import atexit, contextlib
 from tinygrad import Tensor
-from tinygrad.helpers import system, getenv
+from tinygrad.helpers import system, OSX
 from tinygrad.runtime.ops_amd import AMDProgram
 from extra.sqtt.roc import decode, WaveExec, ProfileSQTTEvent
 from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
 
-def set_power(x): system(f"sudo /opt/rocm/bin/amd-smi set -l {x}")
-@atexit.register
-def reset_power(): set_power("auto")
-set_power("stable_std")
+# TODO: should really check for AM driver / USB
+if not OSX:
+  def set_power(x): system(f"sudo /opt/rocm/bin/amd-smi set -l {x}")
+  @atexit.register
+  def reset_power(): set_power("auto")
+  set_power("stable_std")
 
 dev = Device["AMD"]
 
@@ -30,9 +32,9 @@ def save_sqtt():
   yield sqtt
   events = dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())]
 
-  #rctx = decode(events)
-  #assert len(rctx.inst_execs) > 0, "empty sqtt output"
-  #sqtt.update(rctx.inst_execs)
+  rctx = decode(events)
+  assert len(rctx.inst_execs) > 0, "empty sqtt output"
+  sqtt.update(rctx.inst_execs)
 
   for e in events:
     if isinstance(e, ProfileSQTTEvent):
