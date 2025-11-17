@@ -2,7 +2,6 @@
 import ctypes, os
 from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-import clang.cindex as ci
 from ctypes.util import find_library
 def dll():
   try: return ctypes.CDLL(unwrap(os.getenv('LIBCLANG_PATH', find_library('clang-20'))))
@@ -47,11 +46,9 @@ CXCursor_ExceptionSpecificationKind_Uninstantiated = enum_CXCursor_ExceptionSpec
 CXCursor_ExceptionSpecificationKind_Unparsed = enum_CXCursor_ExceptionSpecificationKind.define('CXCursor_ExceptionSpecificationKind_Unparsed', 8)
 CXCursor_ExceptionSpecificationKind_NoThrow = enum_CXCursor_ExceptionSpecificationKind.define('CXCursor_ExceptionSpecificationKind_NoThrow', 9)
 
-# __attribute__((visibility("default"))) CXIndex clang_createIndex(int excludeDeclarationsFromPCH, int displayDiagnostics)
 try: (clang_createIndex:=dll.clang_createIndex).restype, clang_createIndex.argtypes = CXIndex, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeIndex(CXIndex index)
 try: (clang_disposeIndex:=dll.clang_disposeIndex).restype, clang_disposeIndex.argtypes = None, [CXIndex]
 except AttributeError: pass
 
@@ -79,33 +76,26 @@ struct_CXIndexOptions._fields_ = [
   ('InvocationEmissionPath', ctypes.POINTER(ctypes.c_char)),
 ]
 CXIndexOptions = struct_CXIndexOptions
-# __attribute__((visibility("default"))) CXIndex clang_createIndexWithOptions(const CXIndexOptions *options)
 try: (clang_createIndexWithOptions:=dll.clang_createIndexWithOptions).restype, clang_createIndexWithOptions.argtypes = CXIndex, [ctypes.POINTER(CXIndexOptions)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_CXIndex_setGlobalOptions(CXIndex, unsigned int options)
 try: (clang_CXIndex_setGlobalOptions:=dll.clang_CXIndex_setGlobalOptions).restype, clang_CXIndex_setGlobalOptions.argtypes = None, [CXIndex, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXIndex_getGlobalOptions(CXIndex)
 try: (clang_CXIndex_getGlobalOptions:=dll.clang_CXIndex_getGlobalOptions).restype, clang_CXIndex_getGlobalOptions.argtypes = ctypes.c_uint32, [CXIndex]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_CXIndex_setInvocationEmissionPathOption(CXIndex, const char *Path)
 try: (clang_CXIndex_setInvocationEmissionPathOption:=dll.clang_CXIndex_setInvocationEmissionPathOption).restype, clang_CXIndex_setInvocationEmissionPathOption.argtypes = None, [CXIndex, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 CXFile = ctypes.c_void_p
-# __attribute__((visibility("default"))) unsigned int clang_isFileMultipleIncludeGuarded(CXTranslationUnit tu, CXFile file)
 try: (clang_isFileMultipleIncludeGuarded:=dll.clang_isFileMultipleIncludeGuarded).restype, clang_isFileMultipleIncludeGuarded.argtypes = ctypes.c_uint32, [CXTranslationUnit, CXFile]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXFile clang_getFile(CXTranslationUnit tu, const char *file_name)
 try: (clang_getFile:=dll.clang_getFile).restype, clang_getFile.argtypes = CXFile, [CXTranslationUnit, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 size_t = ctypes.c_uint64
-# __attribute__((visibility("default"))) const char *clang_getFileContents(CXTranslationUnit tu, CXFile file, size_t *size)
 try: (clang_getFileContents:=dll.clang_getFileContents).restype, clang_getFileContents.argtypes = ctypes.POINTER(ctypes.c_char), [CXTranslationUnit, CXFile, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
@@ -114,11 +104,9 @@ CXSourceLocation._fields_ = [
   ('ptr_data', (ctypes.c_void_p * 2)),
   ('int_data', ctypes.c_uint32),
 ]
-# __attribute__((visibility("default"))) CXSourceLocation clang_getLocation(CXTranslationUnit tu, CXFile file, unsigned int line, unsigned int column)
 try: (clang_getLocation:=dll.clang_getLocation).restype, clang_getLocation.argtypes = CXSourceLocation, [CXTranslationUnit, CXFile, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceLocation clang_getLocationForOffset(CXTranslationUnit tu, CXFile file, unsigned int offset)
 try: (clang_getLocationForOffset:=dll.clang_getLocationForOffset).restype, clang_getLocationForOffset.argtypes = CXSourceLocation, [CXTranslationUnit, CXFile, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -133,37 +121,34 @@ CXSourceRangeList._fields_ = [
   ('count', ctypes.c_uint32),
   ('ranges', ctypes.POINTER(CXSourceRange)),
 ]
-# __attribute__((visibility("default"))) CXSourceRangeList *clang_getSkippedRanges(CXTranslationUnit tu, CXFile file)
 try: (clang_getSkippedRanges:=dll.clang_getSkippedRanges).restype, clang_getSkippedRanges.argtypes = ctypes.POINTER(CXSourceRangeList), [CXTranslationUnit, CXFile]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceRangeList *clang_getAllSkippedRanges(CXTranslationUnit tu)
 try: (clang_getAllSkippedRanges:=dll.clang_getAllSkippedRanges).restype, clang_getAllSkippedRanges.argtypes = ctypes.POINTER(CXSourceRangeList), [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_getNumDiagnostics(CXTranslationUnit Unit)
 try: (clang_getNumDiagnostics:=dll.clang_getNumDiagnostics).restype, clang_getNumDiagnostics.argtypes = ctypes.c_uint32, [CXTranslationUnit]
 except AttributeError: pass
 
 CXDiagnostic = ctypes.c_void_p
-# __attribute__((visibility("default"))) CXDiagnostic clang_getDiagnostic(CXTranslationUnit Unit, unsigned int Index)
 try: (clang_getDiagnostic:=dll.clang_getDiagnostic).restype, clang_getDiagnostic.argtypes = CXDiagnostic, [CXTranslationUnit, ctypes.c_uint32]
 except AttributeError: pass
 
 CXDiagnosticSet = ctypes.c_void_p
-# __attribute__((visibility("default"))) CXDiagnosticSet clang_getDiagnosticSetFromTU(CXTranslationUnit Unit)
 try: (clang_getDiagnosticSetFromTU:=dll.clang_getDiagnosticSetFromTU).restype, clang_getDiagnosticSetFromTU.argtypes = CXDiagnosticSet, [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getTranslationUnitSpelling(CXTranslationUnit CTUnit)
-try: (clang_getTranslationUnitSpelling:=dll.clang_getTranslationUnitSpelling).restype, clang_getTranslationUnitSpelling.argtypes = ci._CXString, [CXTranslationUnit]
+class CXString(Struct): pass
+CXString._fields_ = [
+  ('data', ctypes.c_void_p),
+  ('private_flags', ctypes.c_uint32),
+]
+try: (clang_getTranslationUnitSpelling:=dll.clang_getTranslationUnitSpelling).restype, clang_getTranslationUnitSpelling.argtypes = CXString, [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXTranslationUnit clang_createTranslationUnitFromSourceFile(CXIndex CIdx, const char *source_filename, int num_clang_command_line_args, const char *const *clang_command_line_args, unsigned int num_unsaved_files, struct CXUnsavedFile *unsaved_files)
 try: (clang_createTranslationUnitFromSourceFile:=dll.clang_createTranslationUnitFromSourceFile).restype, clang_createTranslationUnitFromSourceFile.argtypes = CXTranslationUnit, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_uint32, ctypes.POINTER(struct_CXUnsavedFile)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXTranslationUnit clang_createTranslationUnit(CXIndex CIdx, const char *ast_filename)
 try: (clang_createTranslationUnit:=dll.clang_createTranslationUnit).restype, clang_createTranslationUnit.argtypes = CXTranslationUnit, [CXIndex, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -174,7 +159,6 @@ CXError_Crashed = enum_CXErrorCode.define('CXError_Crashed', 2)
 CXError_InvalidArguments = enum_CXErrorCode.define('CXError_InvalidArguments', 3)
 CXError_ASTReadError = enum_CXErrorCode.define('CXError_ASTReadError', 4)
 
-# __attribute__((visibility("default"))) enum CXErrorCode clang_createTranslationUnit2(CXIndex CIdx, const char *ast_filename, CXTranslationUnit *out_TU)
 try: (clang_createTranslationUnit2:=dll.clang_createTranslationUnit2).restype, clang_createTranslationUnit2.argtypes = enum_CXErrorCode, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(CXTranslationUnit)]
 except AttributeError: pass
 
@@ -197,26 +181,21 @@ CXTranslationUnit_VisitImplicitAttributes = enum_CXTranslationUnit_Flags.define(
 CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles = enum_CXTranslationUnit_Flags.define('CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles', 16384)
 CXTranslationUnit_RetainExcludedConditionalBlocks = enum_CXTranslationUnit_Flags.define('CXTranslationUnit_RetainExcludedConditionalBlocks', 32768)
 
-# __attribute__((visibility("default"))) unsigned int clang_defaultEditingTranslationUnitOptions(void)
 try: (clang_defaultEditingTranslationUnitOptions:=dll.clang_defaultEditingTranslationUnitOptions).restype, clang_defaultEditingTranslationUnitOptions.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXTranslationUnit clang_parseTranslationUnit(CXIndex CIdx, const char *source_filename, const char *const *command_line_args, int num_command_line_args, struct CXUnsavedFile *unsaved_files, unsigned int num_unsaved_files, unsigned int options)
 try: (clang_parseTranslationUnit:=dll.clang_parseTranslationUnit).restype, clang_parseTranslationUnit.argtypes = CXTranslationUnit, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXErrorCode clang_parseTranslationUnit2(CXIndex CIdx, const char *source_filename, const char *const *command_line_args, int num_command_line_args, struct CXUnsavedFile *unsaved_files, unsigned int num_unsaved_files, unsigned int options, CXTranslationUnit *out_TU)
 try: (clang_parseTranslationUnit2:=dll.clang_parseTranslationUnit2).restype, clang_parseTranslationUnit2.argtypes = enum_CXErrorCode, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXErrorCode clang_parseTranslationUnit2FullArgv(CXIndex CIdx, const char *source_filename, const char *const *command_line_args, int num_command_line_args, struct CXUnsavedFile *unsaved_files, unsigned int num_unsaved_files, unsigned int options, CXTranslationUnit *out_TU)
 try: (clang_parseTranslationUnit2FullArgv:=dll.clang_parseTranslationUnit2FullArgv).restype, clang_parseTranslationUnit2FullArgv.argtypes = enum_CXErrorCode, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit)]
 except AttributeError: pass
 
 enum_CXSaveTranslationUnit_Flags = CEnum(ctypes.c_uint32)
 CXSaveTranslationUnit_None = enum_CXSaveTranslationUnit_Flags.define('CXSaveTranslationUnit_None', 0)
 
-# __attribute__((visibility("default"))) unsigned int clang_defaultSaveOptions(CXTranslationUnit TU)
 try: (clang_defaultSaveOptions:=dll.clang_defaultSaveOptions).restype, clang_defaultSaveOptions.argtypes = ctypes.c_uint32, [CXTranslationUnit]
 except AttributeError: pass
 
@@ -226,26 +205,21 @@ CXSaveError_Unknown = enum_CXSaveError.define('CXSaveError_Unknown', 1)
 CXSaveError_TranslationErrors = enum_CXSaveError.define('CXSaveError_TranslationErrors', 2)
 CXSaveError_InvalidTU = enum_CXSaveError.define('CXSaveError_InvalidTU', 3)
 
-# __attribute__((visibility("default"))) int clang_saveTranslationUnit(CXTranslationUnit TU, const char *FileName, unsigned int options)
 try: (clang_saveTranslationUnit:=dll.clang_saveTranslationUnit).restype, clang_saveTranslationUnit.argtypes = ctypes.c_int32, [CXTranslationUnit, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_suspendTranslationUnit(CXTranslationUnit)
 try: (clang_suspendTranslationUnit:=dll.clang_suspendTranslationUnit).restype, clang_suspendTranslationUnit.argtypes = ctypes.c_uint32, [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeTranslationUnit(CXTranslationUnit)
 try: (clang_disposeTranslationUnit:=dll.clang_disposeTranslationUnit).restype, clang_disposeTranslationUnit.argtypes = None, [CXTranslationUnit]
 except AttributeError: pass
 
 enum_CXReparse_Flags = CEnum(ctypes.c_uint32)
 CXReparse_None = enum_CXReparse_Flags.define('CXReparse_None', 0)
 
-# __attribute__((visibility("default"))) unsigned int clang_defaultReparseOptions(CXTranslationUnit TU)
 try: (clang_defaultReparseOptions:=dll.clang_defaultReparseOptions).restype, clang_defaultReparseOptions.argtypes = ctypes.c_uint32, [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_reparseTranslationUnit(CXTranslationUnit TU, unsigned int num_unsaved_files, struct CXUnsavedFile *unsaved_files, unsigned int options)
 try: (clang_reparseTranslationUnit:=dll.clang_reparseTranslationUnit).restype, clang_reparseTranslationUnit.argtypes = ctypes.c_int32, [CXTranslationUnit, ctypes.c_uint32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -269,7 +243,6 @@ CXTUResourceUsage_MEMORY_IN_BYTES_END = enum_CXTUResourceUsageKind.define('CXTUR
 CXTUResourceUsage_First = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_First', 1)
 CXTUResourceUsage_Last = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_Last', 14)
 
-# __attribute__((visibility("default"))) const char *clang_getTUResourceUsageName(enum CXTUResourceUsageKind kind)
 try: (clang_getTUResourceUsageName:=dll.clang_getTUResourceUsageName).restype, clang_getTUResourceUsageName.argtypes = ctypes.POINTER(ctypes.c_char), [enum_CXTUResourceUsageKind]
 except AttributeError: pass
 
@@ -286,27 +259,21 @@ struct_CXTUResourceUsage._fields_ = [
   ('entries', ctypes.POINTER(CXTUResourceUsageEntry)),
 ]
 CXTUResourceUsage = struct_CXTUResourceUsage
-# __attribute__((visibility("default"))) CXTUResourceUsage clang_getCXTUResourceUsage(CXTranslationUnit TU)
 try: (clang_getCXTUResourceUsage:=dll.clang_getCXTUResourceUsage).restype, clang_getCXTUResourceUsage.argtypes = CXTUResourceUsage, [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeCXTUResourceUsage(CXTUResourceUsage usage)
 try: (clang_disposeCXTUResourceUsage:=dll.clang_disposeCXTUResourceUsage).restype, clang_disposeCXTUResourceUsage.argtypes = None, [CXTUResourceUsage]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXTargetInfo clang_getTranslationUnitTargetInfo(CXTranslationUnit CTUnit)
 try: (clang_getTranslationUnitTargetInfo:=dll.clang_getTranslationUnitTargetInfo).restype, clang_getTranslationUnitTargetInfo.argtypes = CXTargetInfo, [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_TargetInfo_dispose(CXTargetInfo Info)
 try: (clang_TargetInfo_dispose:=dll.clang_TargetInfo_dispose).restype, clang_TargetInfo_dispose.argtypes = None, [CXTargetInfo]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_TargetInfo_getTriple(CXTargetInfo Info)
-try: (clang_TargetInfo_getTriple:=dll.clang_TargetInfo_getTriple).restype, clang_TargetInfo_getTriple.argtypes = ci._CXString, [CXTargetInfo]
+try: (clang_TargetInfo_getTriple:=dll.clang_TargetInfo_getTriple).restype, clang_TargetInfo_getTriple.argtypes = CXString, [CXTargetInfo]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_TargetInfo_getPointerWidth(CXTargetInfo Info)
 try: (clang_TargetInfo_getPointerWidth:=dll.clang_TargetInfo_getPointerWidth).restype, clang_TargetInfo_getPointerWidth.argtypes = ctypes.c_int32, [CXTargetInfo]
 except AttributeError: pass
 
@@ -616,71 +583,60 @@ CXCursor_FirstExtraDecl = enum_CXCursorKind.define('CXCursor_FirstExtraDecl', 60
 CXCursor_LastExtraDecl = enum_CXCursorKind.define('CXCursor_LastExtraDecl', 604)
 CXCursor_OverloadCandidate = enum_CXCursorKind.define('CXCursor_OverloadCandidate', 700)
 
-# __attribute__((visibility("default"))) CXCursor clang_getNullCursor(void)
-try: (clang_getNullCursor:=dll.clang_getNullCursor).restype, clang_getNullCursor.argtypes = ci.Cursor, []
+class CXCursor(Struct): pass
+CXCursor._fields_ = [
+  ('kind', enum_CXCursorKind),
+  ('xdata', ctypes.c_int32),
+  ('data', (ctypes.c_void_p * 3)),
+]
+try: (clang_getNullCursor:=dll.clang_getNullCursor).restype, clang_getNullCursor.argtypes = CXCursor, []
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getTranslationUnitCursor(CXTranslationUnit)
-try: (clang_getTranslationUnitCursor:=dll.clang_getTranslationUnitCursor).restype, clang_getTranslationUnitCursor.argtypes = ci.Cursor, [CXTranslationUnit]
+try: (clang_getTranslationUnitCursor:=dll.clang_getTranslationUnitCursor).restype, clang_getTranslationUnitCursor.argtypes = CXCursor, [CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_equalCursors(CXCursor, CXCursor)
-try: (clang_equalCursors:=dll.clang_equalCursors).restype, clang_equalCursors.argtypes = ctypes.c_uint32, [ci.Cursor, ci.Cursor]
+try: (clang_equalCursors:=dll.clang_equalCursors).restype, clang_equalCursors.argtypes = ctypes.c_uint32, [CXCursor, CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_Cursor_isNull(CXCursor cursor)
-try: (clang_Cursor_isNull:=dll.clang_Cursor_isNull).restype, clang_Cursor_isNull.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_Cursor_isNull:=dll.clang_Cursor_isNull).restype, clang_Cursor_isNull.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_hashCursor(CXCursor)
-try: (clang_hashCursor:=dll.clang_hashCursor).restype, clang_hashCursor.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_hashCursor:=dll.clang_hashCursor).restype, clang_hashCursor.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXCursorKind clang_getCursorKind(CXCursor)
-try: (clang_getCursorKind:=dll.clang_getCursorKind).restype, clang_getCursorKind.argtypes = enum_CXCursorKind, [ci.Cursor]
+try: (clang_getCursorKind:=dll.clang_getCursorKind).restype, clang_getCursorKind.argtypes = enum_CXCursorKind, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isDeclaration(enum CXCursorKind)
 try: (clang_isDeclaration:=dll.clang_isDeclaration).restype, clang_isDeclaration.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isInvalidDeclaration(CXCursor)
-try: (clang_isInvalidDeclaration:=dll.clang_isInvalidDeclaration).restype, clang_isInvalidDeclaration.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_isInvalidDeclaration:=dll.clang_isInvalidDeclaration).restype, clang_isInvalidDeclaration.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isReference(enum CXCursorKind)
 try: (clang_isReference:=dll.clang_isReference).restype, clang_isReference.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isExpression(enum CXCursorKind)
 try: (clang_isExpression:=dll.clang_isExpression).restype, clang_isExpression.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isStatement(enum CXCursorKind)
 try: (clang_isStatement:=dll.clang_isStatement).restype, clang_isStatement.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isAttribute(enum CXCursorKind)
 try: (clang_isAttribute:=dll.clang_isAttribute).restype, clang_isAttribute.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_hasAttrs(CXCursor C)
-try: (clang_Cursor_hasAttrs:=dll.clang_Cursor_hasAttrs).restype, clang_Cursor_hasAttrs.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_hasAttrs:=dll.clang_Cursor_hasAttrs).restype, clang_Cursor_hasAttrs.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isInvalid(enum CXCursorKind)
 try: (clang_isInvalid:=dll.clang_isInvalid).restype, clang_isInvalid.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isTranslationUnit(enum CXCursorKind)
 try: (clang_isTranslationUnit:=dll.clang_isTranslationUnit).restype, clang_isTranslationUnit.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isPreprocessing(enum CXCursorKind)
 try: (clang_isPreprocessing:=dll.clang_isPreprocessing).restype, clang_isPreprocessing.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isUnexposed(enum CXCursorKind)
 try: (clang_isUnexposed:=dll.clang_isUnexposed).restype, clang_isUnexposed.argtypes = ctypes.c_uint32, [enum_CXCursorKind]
 except AttributeError: pass
 
@@ -691,8 +647,7 @@ CXLinkage_Internal = enum_CXLinkageKind.define('CXLinkage_Internal', 2)
 CXLinkage_UniqueExternal = enum_CXLinkageKind.define('CXLinkage_UniqueExternal', 3)
 CXLinkage_External = enum_CXLinkageKind.define('CXLinkage_External', 4)
 
-# __attribute__((visibility("default"))) enum CXLinkageKind clang_getCursorLinkage(CXCursor cursor)
-try: (clang_getCursorLinkage:=dll.clang_getCursorLinkage).restype, clang_getCursorLinkage.argtypes = enum_CXLinkageKind, [ci.Cursor]
+try: (clang_getCursorLinkage:=dll.clang_getCursorLinkage).restype, clang_getCursorLinkage.argtypes = enum_CXLinkageKind, [CXCursor]
 except AttributeError: pass
 
 enum_CXVisibilityKind = CEnum(ctypes.c_uint32)
@@ -701,42 +656,35 @@ CXVisibility_Hidden = enum_CXVisibilityKind.define('CXVisibility_Hidden', 1)
 CXVisibility_Protected = enum_CXVisibilityKind.define('CXVisibility_Protected', 2)
 CXVisibility_Default = enum_CXVisibilityKind.define('CXVisibility_Default', 3)
 
-# __attribute__((visibility("default"))) enum CXVisibilityKind clang_getCursorVisibility(CXCursor cursor)
-try: (clang_getCursorVisibility:=dll.clang_getCursorVisibility).restype, clang_getCursorVisibility.argtypes = enum_CXVisibilityKind, [ci.Cursor]
+try: (clang_getCursorVisibility:=dll.clang_getCursorVisibility).restype, clang_getCursorVisibility.argtypes = enum_CXVisibilityKind, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXAvailabilityKind clang_getCursorAvailability(CXCursor cursor)
-try: (clang_getCursorAvailability:=dll.clang_getCursorAvailability).restype, clang_getCursorAvailability.argtypes = enum_CXAvailabilityKind, [ci.Cursor]
+try: (clang_getCursorAvailability:=dll.clang_getCursorAvailability).restype, clang_getCursorAvailability.argtypes = enum_CXAvailabilityKind, [CXCursor]
 except AttributeError: pass
 
 class struct_CXPlatformAvailability(Struct): pass
 struct_CXPlatformAvailability._fields_ = [
-  ('Platform', ci._CXString),
+  ('Platform', CXString),
   ('Introduced', CXVersion),
   ('Deprecated', CXVersion),
   ('Obsoleted', CXVersion),
   ('Unavailable', ctypes.c_int32),
-  ('Message', ci._CXString),
+  ('Message', CXString),
 ]
 CXPlatformAvailability = struct_CXPlatformAvailability
-# __attribute__((visibility("default"))) int clang_getCursorPlatformAvailability(CXCursor cursor, int *always_deprecated, CXString *deprecated_message, int *always_unavailable, CXString *unavailable_message, CXPlatformAvailability *availability, int availability_size)
-try: (clang_getCursorPlatformAvailability:=dll.clang_getCursorPlatformAvailability).restype, clang_getCursorPlatformAvailability.argtypes = ctypes.c_int32, [ci.Cursor, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ci._CXString), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ci._CXString), ctypes.POINTER(CXPlatformAvailability), ctypes.c_int32]
+try: (clang_getCursorPlatformAvailability:=dll.clang_getCursorPlatformAvailability).restype, clang_getCursorPlatformAvailability.argtypes = ctypes.c_int32, [CXCursor, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(CXString), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(CXString), ctypes.POINTER(CXPlatformAvailability), ctypes.c_int32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeCXPlatformAvailability(CXPlatformAvailability *availability)
 try: (clang_disposeCXPlatformAvailability:=dll.clang_disposeCXPlatformAvailability).restype, clang_disposeCXPlatformAvailability.argtypes = None, [ctypes.POINTER(CXPlatformAvailability)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_Cursor_getVarDeclInitializer(CXCursor cursor)
-try: (clang_Cursor_getVarDeclInitializer:=dll.clang_Cursor_getVarDeclInitializer).restype, clang_Cursor_getVarDeclInitializer.argtypes = ci.Cursor, [ci.Cursor]
+try: (clang_Cursor_getVarDeclInitializer:=dll.clang_Cursor_getVarDeclInitializer).restype, clang_Cursor_getVarDeclInitializer.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_Cursor_hasVarDeclGlobalStorage(CXCursor cursor)
-try: (clang_Cursor_hasVarDeclGlobalStorage:=dll.clang_Cursor_hasVarDeclGlobalStorage).restype, clang_Cursor_hasVarDeclGlobalStorage.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_Cursor_hasVarDeclGlobalStorage:=dll.clang_Cursor_hasVarDeclGlobalStorage).restype, clang_Cursor_hasVarDeclGlobalStorage.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_Cursor_hasVarDeclExternalStorage(CXCursor cursor)
-try: (clang_Cursor_hasVarDeclExternalStorage:=dll.clang_Cursor_hasVarDeclExternalStorage).restype, clang_Cursor_hasVarDeclExternalStorage.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_Cursor_hasVarDeclExternalStorage:=dll.clang_Cursor_hasVarDeclExternalStorage).restype, clang_Cursor_hasVarDeclExternalStorage.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
 enum_CXLanguageKind = CEnum(ctypes.c_uint32)
@@ -745,8 +693,7 @@ CXLanguage_C = enum_CXLanguageKind.define('CXLanguage_C', 1)
 CXLanguage_ObjC = enum_CXLanguageKind.define('CXLanguage_ObjC', 2)
 CXLanguage_CPlusPlus = enum_CXLanguageKind.define('CXLanguage_CPlusPlus', 3)
 
-# __attribute__((visibility("default"))) enum CXLanguageKind clang_getCursorLanguage(CXCursor cursor)
-try: (clang_getCursorLanguage:=dll.clang_getCursorLanguage).restype, clang_getCursorLanguage.argtypes = enum_CXLanguageKind, [ci.Cursor]
+try: (clang_getCursorLanguage:=dll.clang_getCursorLanguage).restype, clang_getCursorLanguage.argtypes = enum_CXLanguageKind, [CXCursor]
 except AttributeError: pass
 
 enum_CXTLSKind = CEnum(ctypes.c_uint32)
@@ -754,62 +701,48 @@ CXTLS_None = enum_CXTLSKind.define('CXTLS_None', 0)
 CXTLS_Dynamic = enum_CXTLSKind.define('CXTLS_Dynamic', 1)
 CXTLS_Static = enum_CXTLSKind.define('CXTLS_Static', 2)
 
-# __attribute__((visibility("default"))) enum CXTLSKind clang_getCursorTLSKind(CXCursor cursor)
-try: (clang_getCursorTLSKind:=dll.clang_getCursorTLSKind).restype, clang_getCursorTLSKind.argtypes = enum_CXTLSKind, [ci.Cursor]
+try: (clang_getCursorTLSKind:=dll.clang_getCursorTLSKind).restype, clang_getCursorTLSKind.argtypes = enum_CXTLSKind, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXTranslationUnit clang_Cursor_getTranslationUnit(CXCursor)
-try: (clang_Cursor_getTranslationUnit:=dll.clang_Cursor_getTranslationUnit).restype, clang_Cursor_getTranslationUnit.argtypes = CXTranslationUnit, [ci.Cursor]
+try: (clang_Cursor_getTranslationUnit:=dll.clang_Cursor_getTranslationUnit).restype, clang_Cursor_getTranslationUnit.argtypes = CXTranslationUnit, [CXCursor]
 except AttributeError: pass
 
 class struct_CXCursorSetImpl(Struct): pass
 CXCursorSet = ctypes.POINTER(struct_CXCursorSetImpl)
-# __attribute__((visibility("default"))) CXCursorSet clang_createCXCursorSet(void)
 try: (clang_createCXCursorSet:=dll.clang_createCXCursorSet).restype, clang_createCXCursorSet.argtypes = CXCursorSet, []
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeCXCursorSet(CXCursorSet cset)
 try: (clang_disposeCXCursorSet:=dll.clang_disposeCXCursorSet).restype, clang_disposeCXCursorSet.argtypes = None, [CXCursorSet]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXCursorSet_contains(CXCursorSet cset, CXCursor cursor)
-try: (clang_CXCursorSet_contains:=dll.clang_CXCursorSet_contains).restype, clang_CXCursorSet_contains.argtypes = ctypes.c_uint32, [CXCursorSet, ci.Cursor]
+try: (clang_CXCursorSet_contains:=dll.clang_CXCursorSet_contains).restype, clang_CXCursorSet_contains.argtypes = ctypes.c_uint32, [CXCursorSet, CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXCursorSet_insert(CXCursorSet cset, CXCursor cursor)
-try: (clang_CXCursorSet_insert:=dll.clang_CXCursorSet_insert).restype, clang_CXCursorSet_insert.argtypes = ctypes.c_uint32, [CXCursorSet, ci.Cursor]
+try: (clang_CXCursorSet_insert:=dll.clang_CXCursorSet_insert).restype, clang_CXCursorSet_insert.argtypes = ctypes.c_uint32, [CXCursorSet, CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getCursorSemanticParent(CXCursor cursor)
-try: (clang_getCursorSemanticParent:=dll.clang_getCursorSemanticParent).restype, clang_getCursorSemanticParent.argtypes = ci.Cursor, [ci.Cursor]
+try: (clang_getCursorSemanticParent:=dll.clang_getCursorSemanticParent).restype, clang_getCursorSemanticParent.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getCursorLexicalParent(CXCursor cursor)
-try: (clang_getCursorLexicalParent:=dll.clang_getCursorLexicalParent).restype, clang_getCursorLexicalParent.argtypes = ci.Cursor, [ci.Cursor]
+try: (clang_getCursorLexicalParent:=dll.clang_getCursorLexicalParent).restype, clang_getCursorLexicalParent.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_getOverriddenCursors(CXCursor cursor, CXCursor **overridden, unsigned int *num_overridden)
-try: (clang_getOverriddenCursors:=dll.clang_getOverriddenCursors).restype, clang_getOverriddenCursors.argtypes = None, [ci.Cursor, ctypes.POINTER(ctypes.POINTER(ci.Cursor)), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getOverriddenCursors:=dll.clang_getOverriddenCursors).restype, clang_getOverriddenCursors.argtypes = None, [CXCursor, ctypes.POINTER(ctypes.POINTER(CXCursor)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeOverriddenCursors(CXCursor *overridden)
-try: (clang_disposeOverriddenCursors:=dll.clang_disposeOverriddenCursors).restype, clang_disposeOverriddenCursors.argtypes = None, [ctypes.POINTER(ci.Cursor)]
+try: (clang_disposeOverriddenCursors:=dll.clang_disposeOverriddenCursors).restype, clang_disposeOverriddenCursors.argtypes = None, [ctypes.POINTER(CXCursor)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXFile clang_getIncludedFile(CXCursor cursor)
-try: (clang_getIncludedFile:=dll.clang_getIncludedFile).restype, clang_getIncludedFile.argtypes = CXFile, [ci.Cursor]
+try: (clang_getIncludedFile:=dll.clang_getIncludedFile).restype, clang_getIncludedFile.argtypes = CXFile, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getCursor(CXTranslationUnit, CXSourceLocation)
-try: (clang_getCursor:=dll.clang_getCursor).restype, clang_getCursor.argtypes = ci.Cursor, [CXTranslationUnit, CXSourceLocation]
+try: (clang_getCursor:=dll.clang_getCursor).restype, clang_getCursor.argtypes = CXCursor, [CXTranslationUnit, CXSourceLocation]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceLocation clang_getCursorLocation(CXCursor)
-try: (clang_getCursorLocation:=dll.clang_getCursorLocation).restype, clang_getCursorLocation.argtypes = CXSourceLocation, [ci.Cursor]
+try: (clang_getCursorLocation:=dll.clang_getCursorLocation).restype, clang_getCursorLocation.argtypes = CXSourceLocation, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceRange clang_getCursorExtent(CXCursor)
-try: (clang_getCursorExtent:=dll.clang_getCursorExtent).restype, clang_getCursorExtent.argtypes = CXSourceRange, [ci.Cursor]
+try: (clang_getCursorExtent:=dll.clang_getCursorExtent).restype, clang_getCursorExtent.argtypes = CXSourceRange, [CXCursor]
 except AttributeError: pass
 
 enum_CXTypeKind = CEnum(ctypes.c_uint32)
@@ -969,44 +902,39 @@ CXCallingConv_RISCVVectorCall = enum_CXCallingConv.define('CXCallingConv_RISCVVe
 CXCallingConv_Invalid = enum_CXCallingConv.define('CXCallingConv_Invalid', 100)
 CXCallingConv_Unexposed = enum_CXCallingConv.define('CXCallingConv_Unexposed', 200)
 
-# __attribute__((visibility("default"))) CXType clang_getCursorType(CXCursor C)
-try: (clang_getCursorType:=dll.clang_getCursorType).restype, clang_getCursorType.argtypes = ci.Type, [ci.Cursor]
+class CXType(Struct): pass
+CXType._fields_ = [
+  ('kind', enum_CXTypeKind),
+  ('data', (ctypes.c_void_p * 2)),
+]
+try: (clang_getCursorType:=dll.clang_getCursorType).restype, clang_getCursorType.argtypes = CXType, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getTypeSpelling(CXType CT)
-try: (clang_getTypeSpelling:=dll.clang_getTypeSpelling).restype, clang_getTypeSpelling.argtypes = ci._CXString, [ci.Type]
+try: (clang_getTypeSpelling:=dll.clang_getTypeSpelling).restype, clang_getTypeSpelling.argtypes = CXString, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getTypedefDeclUnderlyingType(CXCursor C)
-try: (clang_getTypedefDeclUnderlyingType:=dll.clang_getTypedefDeclUnderlyingType).restype, clang_getTypedefDeclUnderlyingType.argtypes = ci.Type, [ci.Cursor]
+try: (clang_getTypedefDeclUnderlyingType:=dll.clang_getTypedefDeclUnderlyingType).restype, clang_getTypedefDeclUnderlyingType.argtypes = CXType, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getEnumDeclIntegerType(CXCursor C)
-try: (clang_getEnumDeclIntegerType:=dll.clang_getEnumDeclIntegerType).restype, clang_getEnumDeclIntegerType.argtypes = ci.Type, [ci.Cursor]
+try: (clang_getEnumDeclIntegerType:=dll.clang_getEnumDeclIntegerType).restype, clang_getEnumDeclIntegerType.argtypes = CXType, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_getEnumConstantDeclValue(CXCursor C)
-try: (clang_getEnumConstantDeclValue:=dll.clang_getEnumConstantDeclValue).restype, clang_getEnumConstantDeclValue.argtypes = ctypes.c_int64, [ci.Cursor]
+try: (clang_getEnumConstantDeclValue:=dll.clang_getEnumConstantDeclValue).restype, clang_getEnumConstantDeclValue.argtypes = ctypes.c_int64, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned long long clang_getEnumConstantDeclUnsignedValue(CXCursor C)
-try: (clang_getEnumConstantDeclUnsignedValue:=dll.clang_getEnumConstantDeclUnsignedValue).restype, clang_getEnumConstantDeclUnsignedValue.argtypes = ctypes.c_uint64, [ci.Cursor]
+try: (clang_getEnumConstantDeclUnsignedValue:=dll.clang_getEnumConstantDeclUnsignedValue).restype, clang_getEnumConstantDeclUnsignedValue.argtypes = ctypes.c_uint64, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isBitField(CXCursor C)
-try: (clang_Cursor_isBitField:=dll.clang_Cursor_isBitField).restype, clang_Cursor_isBitField.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isBitField:=dll.clang_Cursor_isBitField).restype, clang_Cursor_isBitField.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_getFieldDeclBitWidth(CXCursor C)
-try: (clang_getFieldDeclBitWidth:=dll.clang_getFieldDeclBitWidth).restype, clang_getFieldDeclBitWidth.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_getFieldDeclBitWidth:=dll.clang_getFieldDeclBitWidth).restype, clang_getFieldDeclBitWidth.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_Cursor_getNumArguments(CXCursor C)
-try: (clang_Cursor_getNumArguments:=dll.clang_Cursor_getNumArguments).restype, clang_Cursor_getNumArguments.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_Cursor_getNumArguments:=dll.clang_Cursor_getNumArguments).restype, clang_Cursor_getNumArguments.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_Cursor_getArgument(CXCursor C, unsigned int i)
-try: (clang_Cursor_getArgument:=dll.clang_Cursor_getArgument).restype, clang_Cursor_getArgument.argtypes = ci.Cursor, [ci.Cursor, ctypes.c_uint32]
+try: (clang_Cursor_getArgument:=dll.clang_Cursor_getArgument).restype, clang_Cursor_getArgument.argtypes = CXCursor, [CXCursor, ctypes.c_uint32]
 except AttributeError: pass
 
 enum_CXTemplateArgumentKind = CEnum(ctypes.c_uint32)
@@ -1021,172 +949,130 @@ CXTemplateArgumentKind_Expression = enum_CXTemplateArgumentKind.define('CXTempla
 CXTemplateArgumentKind_Pack = enum_CXTemplateArgumentKind.define('CXTemplateArgumentKind_Pack', 8)
 CXTemplateArgumentKind_Invalid = enum_CXTemplateArgumentKind.define('CXTemplateArgumentKind_Invalid', 9)
 
-# __attribute__((visibility("default"))) int clang_Cursor_getNumTemplateArguments(CXCursor C)
-try: (clang_Cursor_getNumTemplateArguments:=dll.clang_Cursor_getNumTemplateArguments).restype, clang_Cursor_getNumTemplateArguments.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_Cursor_getNumTemplateArguments:=dll.clang_Cursor_getNumTemplateArguments).restype, clang_Cursor_getNumTemplateArguments.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXTemplateArgumentKind clang_Cursor_getTemplateArgumentKind(CXCursor C, unsigned int I)
-try: (clang_Cursor_getTemplateArgumentKind:=dll.clang_Cursor_getTemplateArgumentKind).restype, clang_Cursor_getTemplateArgumentKind.argtypes = enum_CXTemplateArgumentKind, [ci.Cursor, ctypes.c_uint32]
+try: (clang_Cursor_getTemplateArgumentKind:=dll.clang_Cursor_getTemplateArgumentKind).restype, clang_Cursor_getTemplateArgumentKind.argtypes = enum_CXTemplateArgumentKind, [CXCursor, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Cursor_getTemplateArgumentType(CXCursor C, unsigned int I)
-try: (clang_Cursor_getTemplateArgumentType:=dll.clang_Cursor_getTemplateArgumentType).restype, clang_Cursor_getTemplateArgumentType.argtypes = ci.Type, [ci.Cursor, ctypes.c_uint32]
+try: (clang_Cursor_getTemplateArgumentType:=dll.clang_Cursor_getTemplateArgumentType).restype, clang_Cursor_getTemplateArgumentType.argtypes = CXType, [CXCursor, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_Cursor_getTemplateArgumentValue(CXCursor C, unsigned int I)
-try: (clang_Cursor_getTemplateArgumentValue:=dll.clang_Cursor_getTemplateArgumentValue).restype, clang_Cursor_getTemplateArgumentValue.argtypes = ctypes.c_int64, [ci.Cursor, ctypes.c_uint32]
+try: (clang_Cursor_getTemplateArgumentValue:=dll.clang_Cursor_getTemplateArgumentValue).restype, clang_Cursor_getTemplateArgumentValue.argtypes = ctypes.c_int64, [CXCursor, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned long long clang_Cursor_getTemplateArgumentUnsignedValue(CXCursor C, unsigned int I)
-try: (clang_Cursor_getTemplateArgumentUnsignedValue:=dll.clang_Cursor_getTemplateArgumentUnsignedValue).restype, clang_Cursor_getTemplateArgumentUnsignedValue.argtypes = ctypes.c_uint64, [ci.Cursor, ctypes.c_uint32]
+try: (clang_Cursor_getTemplateArgumentUnsignedValue:=dll.clang_Cursor_getTemplateArgumentUnsignedValue).restype, clang_Cursor_getTemplateArgumentUnsignedValue.argtypes = ctypes.c_uint64, [CXCursor, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_equalTypes(CXType A, CXType B)
-try: (clang_equalTypes:=dll.clang_equalTypes).restype, clang_equalTypes.argtypes = ctypes.c_uint32, [ci.Type, ci.Type]
+try: (clang_equalTypes:=dll.clang_equalTypes).restype, clang_equalTypes.argtypes = ctypes.c_uint32, [CXType, CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getCanonicalType(CXType T)
-try: (clang_getCanonicalType:=dll.clang_getCanonicalType).restype, clang_getCanonicalType.argtypes = ci.Type, [ci.Type]
+try: (clang_getCanonicalType:=dll.clang_getCanonicalType).restype, clang_getCanonicalType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isConstQualifiedType(CXType T)
-try: (clang_isConstQualifiedType:=dll.clang_isConstQualifiedType).restype, clang_isConstQualifiedType.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_isConstQualifiedType:=dll.clang_isConstQualifiedType).restype, clang_isConstQualifiedType.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isMacroFunctionLike(CXCursor C)
-try: (clang_Cursor_isMacroFunctionLike:=dll.clang_Cursor_isMacroFunctionLike).restype, clang_Cursor_isMacroFunctionLike.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isMacroFunctionLike:=dll.clang_Cursor_isMacroFunctionLike).restype, clang_Cursor_isMacroFunctionLike.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isMacroBuiltin(CXCursor C)
-try: (clang_Cursor_isMacroBuiltin:=dll.clang_Cursor_isMacroBuiltin).restype, clang_Cursor_isMacroBuiltin.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isMacroBuiltin:=dll.clang_Cursor_isMacroBuiltin).restype, clang_Cursor_isMacroBuiltin.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isFunctionInlined(CXCursor C)
-try: (clang_Cursor_isFunctionInlined:=dll.clang_Cursor_isFunctionInlined).restype, clang_Cursor_isFunctionInlined.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isFunctionInlined:=dll.clang_Cursor_isFunctionInlined).restype, clang_Cursor_isFunctionInlined.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isVolatileQualifiedType(CXType T)
-try: (clang_isVolatileQualifiedType:=dll.clang_isVolatileQualifiedType).restype, clang_isVolatileQualifiedType.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_isVolatileQualifiedType:=dll.clang_isVolatileQualifiedType).restype, clang_isVolatileQualifiedType.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isRestrictQualifiedType(CXType T)
-try: (clang_isRestrictQualifiedType:=dll.clang_isRestrictQualifiedType).restype, clang_isRestrictQualifiedType.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_isRestrictQualifiedType:=dll.clang_isRestrictQualifiedType).restype, clang_isRestrictQualifiedType.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_getAddressSpace(CXType T)
-try: (clang_getAddressSpace:=dll.clang_getAddressSpace).restype, clang_getAddressSpace.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_getAddressSpace:=dll.clang_getAddressSpace).restype, clang_getAddressSpace.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getTypedefName(CXType CT)
-try: (clang_getTypedefName:=dll.clang_getTypedefName).restype, clang_getTypedefName.argtypes = ci._CXString, [ci.Type]
+try: (clang_getTypedefName:=dll.clang_getTypedefName).restype, clang_getTypedefName.argtypes = CXString, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getPointeeType(CXType T)
-try: (clang_getPointeeType:=dll.clang_getPointeeType).restype, clang_getPointeeType.argtypes = ci.Type, [ci.Type]
+try: (clang_getPointeeType:=dll.clang_getPointeeType).restype, clang_getPointeeType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getUnqualifiedType(CXType CT)
-try: (clang_getUnqualifiedType:=dll.clang_getUnqualifiedType).restype, clang_getUnqualifiedType.argtypes = ci.Type, [ci.Type]
+try: (clang_getUnqualifiedType:=dll.clang_getUnqualifiedType).restype, clang_getUnqualifiedType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getNonReferenceType(CXType CT)
-try: (clang_getNonReferenceType:=dll.clang_getNonReferenceType).restype, clang_getNonReferenceType.argtypes = ci.Type, [ci.Type]
+try: (clang_getNonReferenceType:=dll.clang_getNonReferenceType).restype, clang_getNonReferenceType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getTypeDeclaration(CXType T)
-try: (clang_getTypeDeclaration:=dll.clang_getTypeDeclaration).restype, clang_getTypeDeclaration.argtypes = ci.Cursor, [ci.Type]
+try: (clang_getTypeDeclaration:=dll.clang_getTypeDeclaration).restype, clang_getTypeDeclaration.argtypes = CXCursor, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getDeclObjCTypeEncoding(CXCursor C)
-try: (clang_getDeclObjCTypeEncoding:=dll.clang_getDeclObjCTypeEncoding).restype, clang_getDeclObjCTypeEncoding.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_getDeclObjCTypeEncoding:=dll.clang_getDeclObjCTypeEncoding).restype, clang_getDeclObjCTypeEncoding.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Type_getObjCEncoding(CXType type)
-try: (clang_Type_getObjCEncoding:=dll.clang_Type_getObjCEncoding).restype, clang_Type_getObjCEncoding.argtypes = ci._CXString, [ci.Type]
+try: (clang_Type_getObjCEncoding:=dll.clang_Type_getObjCEncoding).restype, clang_Type_getObjCEncoding.argtypes = CXString, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getTypeKindSpelling(enum CXTypeKind K)
-try: (clang_getTypeKindSpelling:=dll.clang_getTypeKindSpelling).restype, clang_getTypeKindSpelling.argtypes = ci._CXString, [enum_CXTypeKind]
+try: (clang_getTypeKindSpelling:=dll.clang_getTypeKindSpelling).restype, clang_getTypeKindSpelling.argtypes = CXString, [enum_CXTypeKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXCallingConv clang_getFunctionTypeCallingConv(CXType T)
-try: (clang_getFunctionTypeCallingConv:=dll.clang_getFunctionTypeCallingConv).restype, clang_getFunctionTypeCallingConv.argtypes = enum_CXCallingConv, [ci.Type]
+try: (clang_getFunctionTypeCallingConv:=dll.clang_getFunctionTypeCallingConv).restype, clang_getFunctionTypeCallingConv.argtypes = enum_CXCallingConv, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getResultType(CXType T)
-try: (clang_getResultType:=dll.clang_getResultType).restype, clang_getResultType.argtypes = ci.Type, [ci.Type]
+try: (clang_getResultType:=dll.clang_getResultType).restype, clang_getResultType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_getExceptionSpecificationType(CXType T)
-try: (clang_getExceptionSpecificationType:=dll.clang_getExceptionSpecificationType).restype, clang_getExceptionSpecificationType.argtypes = ctypes.c_int32, [ci.Type]
+try: (clang_getExceptionSpecificationType:=dll.clang_getExceptionSpecificationType).restype, clang_getExceptionSpecificationType.argtypes = ctypes.c_int32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_getNumArgTypes(CXType T)
-try: (clang_getNumArgTypes:=dll.clang_getNumArgTypes).restype, clang_getNumArgTypes.argtypes = ctypes.c_int32, [ci.Type]
+try: (clang_getNumArgTypes:=dll.clang_getNumArgTypes).restype, clang_getNumArgTypes.argtypes = ctypes.c_int32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getArgType(CXType T, unsigned int i)
-try: (clang_getArgType:=dll.clang_getArgType).restype, clang_getArgType.argtypes = ci.Type, [ci.Type, ctypes.c_uint32]
+try: (clang_getArgType:=dll.clang_getArgType).restype, clang_getArgType.argtypes = CXType, [CXType, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Type_getObjCObjectBaseType(CXType T)
-try: (clang_Type_getObjCObjectBaseType:=dll.clang_Type_getObjCObjectBaseType).restype, clang_Type_getObjCObjectBaseType.argtypes = ci.Type, [ci.Type]
+try: (clang_Type_getObjCObjectBaseType:=dll.clang_Type_getObjCObjectBaseType).restype, clang_Type_getObjCObjectBaseType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Type_getNumObjCProtocolRefs(CXType T)
-try: (clang_Type_getNumObjCProtocolRefs:=dll.clang_Type_getNumObjCProtocolRefs).restype, clang_Type_getNumObjCProtocolRefs.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_Type_getNumObjCProtocolRefs:=dll.clang_Type_getNumObjCProtocolRefs).restype, clang_Type_getNumObjCProtocolRefs.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_Type_getObjCProtocolDecl(CXType T, unsigned int i)
-try: (clang_Type_getObjCProtocolDecl:=dll.clang_Type_getObjCProtocolDecl).restype, clang_Type_getObjCProtocolDecl.argtypes = ci.Cursor, [ci.Type, ctypes.c_uint32]
+try: (clang_Type_getObjCProtocolDecl:=dll.clang_Type_getObjCProtocolDecl).restype, clang_Type_getObjCProtocolDecl.argtypes = CXCursor, [CXType, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Type_getNumObjCTypeArgs(CXType T)
-try: (clang_Type_getNumObjCTypeArgs:=dll.clang_Type_getNumObjCTypeArgs).restype, clang_Type_getNumObjCTypeArgs.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_Type_getNumObjCTypeArgs:=dll.clang_Type_getNumObjCTypeArgs).restype, clang_Type_getNumObjCTypeArgs.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Type_getObjCTypeArg(CXType T, unsigned int i)
-try: (clang_Type_getObjCTypeArg:=dll.clang_Type_getObjCTypeArg).restype, clang_Type_getObjCTypeArg.argtypes = ci.Type, [ci.Type, ctypes.c_uint32]
+try: (clang_Type_getObjCTypeArg:=dll.clang_Type_getObjCTypeArg).restype, clang_Type_getObjCTypeArg.argtypes = CXType, [CXType, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isFunctionTypeVariadic(CXType T)
-try: (clang_isFunctionTypeVariadic:=dll.clang_isFunctionTypeVariadic).restype, clang_isFunctionTypeVariadic.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_isFunctionTypeVariadic:=dll.clang_isFunctionTypeVariadic).restype, clang_isFunctionTypeVariadic.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getCursorResultType(CXCursor C)
-try: (clang_getCursorResultType:=dll.clang_getCursorResultType).restype, clang_getCursorResultType.argtypes = ci.Type, [ci.Cursor]
+try: (clang_getCursorResultType:=dll.clang_getCursorResultType).restype, clang_getCursorResultType.argtypes = CXType, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_getCursorExceptionSpecificationType(CXCursor C)
-try: (clang_getCursorExceptionSpecificationType:=dll.clang_getCursorExceptionSpecificationType).restype, clang_getCursorExceptionSpecificationType.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_getCursorExceptionSpecificationType:=dll.clang_getCursorExceptionSpecificationType).restype, clang_getCursorExceptionSpecificationType.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isPODType(CXType T)
-try: (clang_isPODType:=dll.clang_isPODType).restype, clang_isPODType.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_isPODType:=dll.clang_isPODType).restype, clang_isPODType.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getElementType(CXType T)
-try: (clang_getElementType:=dll.clang_getElementType).restype, clang_getElementType.argtypes = ci.Type, [ci.Type]
+try: (clang_getElementType:=dll.clang_getElementType).restype, clang_getElementType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_getNumElements(CXType T)
-try: (clang_getNumElements:=dll.clang_getNumElements).restype, clang_getNumElements.argtypes = ctypes.c_int64, [ci.Type]
+try: (clang_getNumElements:=dll.clang_getNumElements).restype, clang_getNumElements.argtypes = ctypes.c_int64, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getArrayElementType(CXType T)
-try: (clang_getArrayElementType:=dll.clang_getArrayElementType).restype, clang_getArrayElementType.argtypes = ci.Type, [ci.Type]
+try: (clang_getArrayElementType:=dll.clang_getArrayElementType).restype, clang_getArrayElementType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_getArraySize(CXType T)
-try: (clang_getArraySize:=dll.clang_getArraySize).restype, clang_getArraySize.argtypes = ctypes.c_int64, [ci.Type]
+try: (clang_getArraySize:=dll.clang_getArraySize).restype, clang_getArraySize.argtypes = ctypes.c_int64, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Type_getNamedType(CXType T)
-try: (clang_Type_getNamedType:=dll.clang_Type_getNamedType).restype, clang_Type_getNamedType.argtypes = ci.Type, [ci.Type]
+try: (clang_Type_getNamedType:=dll.clang_Type_getNamedType).restype, clang_Type_getNamedType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Type_isTransparentTagTypedef(CXType T)
-try: (clang_Type_isTransparentTagTypedef:=dll.clang_Type_isTransparentTagTypedef).restype, clang_Type_isTransparentTagTypedef.argtypes = ctypes.c_uint32, [ci.Type]
+try: (clang_Type_isTransparentTagTypedef:=dll.clang_Type_isTransparentTagTypedef).restype, clang_Type_isTransparentTagTypedef.argtypes = ctypes.c_uint32, [CXType]
 except AttributeError: pass
 
 enum_CXTypeNullabilityKind = CEnum(ctypes.c_uint32)
@@ -1196,8 +1082,7 @@ CXTypeNullability_Unspecified = enum_CXTypeNullabilityKind.define('CXTypeNullabi
 CXTypeNullability_Invalid = enum_CXTypeNullabilityKind.define('CXTypeNullability_Invalid', 3)
 CXTypeNullability_NullableResult = enum_CXTypeNullabilityKind.define('CXTypeNullability_NullableResult', 4)
 
-# __attribute__((visibility("default"))) enum CXTypeNullabilityKind clang_Type_getNullability(CXType T)
-try: (clang_Type_getNullability:=dll.clang_Type_getNullability).restype, clang_Type_getNullability.argtypes = enum_CXTypeNullabilityKind, [ci.Type]
+try: (clang_Type_getNullability:=dll.clang_Type_getNullability).restype, clang_Type_getNullability.argtypes = enum_CXTypeNullabilityKind, [CXType]
 except AttributeError: pass
 
 enum_CXTypeLayoutError = CEnum(ctypes.c_int32)
@@ -1208,44 +1093,34 @@ CXTypeLayoutError_NotConstantSize = enum_CXTypeLayoutError.define('CXTypeLayoutE
 CXTypeLayoutError_InvalidFieldName = enum_CXTypeLayoutError.define('CXTypeLayoutError_InvalidFieldName', -5)
 CXTypeLayoutError_Undeduced = enum_CXTypeLayoutError.define('CXTypeLayoutError_Undeduced', -6)
 
-# __attribute__((visibility("default"))) long long clang_Type_getAlignOf(CXType T)
-try: (clang_Type_getAlignOf:=dll.clang_Type_getAlignOf).restype, clang_Type_getAlignOf.argtypes = ctypes.c_int64, [ci.Type]
+try: (clang_Type_getAlignOf:=dll.clang_Type_getAlignOf).restype, clang_Type_getAlignOf.argtypes = ctypes.c_int64, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Type_getClassType(CXType T)
-try: (clang_Type_getClassType:=dll.clang_Type_getClassType).restype, clang_Type_getClassType.argtypes = ci.Type, [ci.Type]
+try: (clang_Type_getClassType:=dll.clang_Type_getClassType).restype, clang_Type_getClassType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_Type_getSizeOf(CXType T)
-try: (clang_Type_getSizeOf:=dll.clang_Type_getSizeOf).restype, clang_Type_getSizeOf.argtypes = ctypes.c_int64, [ci.Type]
+try: (clang_Type_getSizeOf:=dll.clang_Type_getSizeOf).restype, clang_Type_getSizeOf.argtypes = ctypes.c_int64, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_Type_getOffsetOf(CXType T, const char *S)
-try: (clang_Type_getOffsetOf:=dll.clang_Type_getOffsetOf).restype, clang_Type_getOffsetOf.argtypes = ctypes.c_int64, [ci.Type, ctypes.POINTER(ctypes.c_char)]
+try: (clang_Type_getOffsetOf:=dll.clang_Type_getOffsetOf).restype, clang_Type_getOffsetOf.argtypes = ctypes.c_int64, [CXType, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Type_getModifiedType(CXType T)
-try: (clang_Type_getModifiedType:=dll.clang_Type_getModifiedType).restype, clang_Type_getModifiedType.argtypes = ci.Type, [ci.Type]
+try: (clang_Type_getModifiedType:=dll.clang_Type_getModifiedType).restype, clang_Type_getModifiedType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Type_getValueType(CXType CT)
-try: (clang_Type_getValueType:=dll.clang_Type_getValueType).restype, clang_Type_getValueType.argtypes = ci.Type, [ci.Type]
+try: (clang_Type_getValueType:=dll.clang_Type_getValueType).restype, clang_Type_getValueType.argtypes = CXType, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_Cursor_getOffsetOfField(CXCursor C)
-try: (clang_Cursor_getOffsetOfField:=dll.clang_Cursor_getOffsetOfField).restype, clang_Cursor_getOffsetOfField.argtypes = ctypes.c_int64, [ci.Cursor]
+try: (clang_Cursor_getOffsetOfField:=dll.clang_Cursor_getOffsetOfField).restype, clang_Cursor_getOffsetOfField.argtypes = ctypes.c_int64, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isAnonymous(CXCursor C)
-try: (clang_Cursor_isAnonymous:=dll.clang_Cursor_isAnonymous).restype, clang_Cursor_isAnonymous.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isAnonymous:=dll.clang_Cursor_isAnonymous).restype, clang_Cursor_isAnonymous.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isAnonymousRecordDecl(CXCursor C)
-try: (clang_Cursor_isAnonymousRecordDecl:=dll.clang_Cursor_isAnonymousRecordDecl).restype, clang_Cursor_isAnonymousRecordDecl.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isAnonymousRecordDecl:=dll.clang_Cursor_isAnonymousRecordDecl).restype, clang_Cursor_isAnonymousRecordDecl.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isInlineNamespace(CXCursor C)
-try: (clang_Cursor_isInlineNamespace:=dll.clang_Cursor_isInlineNamespace).restype, clang_Cursor_isInlineNamespace.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isInlineNamespace:=dll.clang_Cursor_isInlineNamespace).restype, clang_Cursor_isInlineNamespace.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
 enum_CXRefQualifierKind = CEnum(ctypes.c_uint32)
@@ -1253,24 +1128,19 @@ CXRefQualifier_None = enum_CXRefQualifierKind.define('CXRefQualifier_None', 0)
 CXRefQualifier_LValue = enum_CXRefQualifierKind.define('CXRefQualifier_LValue', 1)
 CXRefQualifier_RValue = enum_CXRefQualifierKind.define('CXRefQualifier_RValue', 2)
 
-# __attribute__((visibility("default"))) int clang_Type_getNumTemplateArguments(CXType T)
-try: (clang_Type_getNumTemplateArguments:=dll.clang_Type_getNumTemplateArguments).restype, clang_Type_getNumTemplateArguments.argtypes = ctypes.c_int32, [ci.Type]
+try: (clang_Type_getNumTemplateArguments:=dll.clang_Type_getNumTemplateArguments).restype, clang_Type_getNumTemplateArguments.argtypes = ctypes.c_int32, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Type_getTemplateArgumentAsType(CXType T, unsigned int i)
-try: (clang_Type_getTemplateArgumentAsType:=dll.clang_Type_getTemplateArgumentAsType).restype, clang_Type_getTemplateArgumentAsType.argtypes = ci.Type, [ci.Type, ctypes.c_uint32]
+try: (clang_Type_getTemplateArgumentAsType:=dll.clang_Type_getTemplateArgumentAsType).restype, clang_Type_getTemplateArgumentAsType.argtypes = CXType, [CXType, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXRefQualifierKind clang_Type_getCXXRefQualifier(CXType T)
-try: (clang_Type_getCXXRefQualifier:=dll.clang_Type_getCXXRefQualifier).restype, clang_Type_getCXXRefQualifier.argtypes = enum_CXRefQualifierKind, [ci.Type]
+try: (clang_Type_getCXXRefQualifier:=dll.clang_Type_getCXXRefQualifier).restype, clang_Type_getCXXRefQualifier.argtypes = enum_CXRefQualifierKind, [CXType]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isVirtualBase(CXCursor)
-try: (clang_isVirtualBase:=dll.clang_isVirtualBase).restype, clang_isVirtualBase.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_isVirtualBase:=dll.clang_isVirtualBase).restype, clang_isVirtualBase.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_getOffsetOfBase(CXCursor Parent, CXCursor Base)
-try: (clang_getOffsetOfBase:=dll.clang_getOffsetOfBase).restype, clang_getOffsetOfBase.argtypes = ctypes.c_int64, [ci.Cursor, ci.Cursor]
+try: (clang_getOffsetOfBase:=dll.clang_getOffsetOfBase).restype, clang_getOffsetOfBase.argtypes = ctypes.c_int64, [CXCursor, CXCursor]
 except AttributeError: pass
 
 enum_CX_CXXAccessSpecifier = CEnum(ctypes.c_uint32)
@@ -1279,8 +1149,7 @@ CX_CXXPublic = enum_CX_CXXAccessSpecifier.define('CX_CXXPublic', 1)
 CX_CXXProtected = enum_CX_CXXAccessSpecifier.define('CX_CXXProtected', 2)
 CX_CXXPrivate = enum_CX_CXXAccessSpecifier.define('CX_CXXPrivate', 3)
 
-# __attribute__((visibility("default"))) enum CX_CXXAccessSpecifier clang_getCXXAccessSpecifier(CXCursor)
-try: (clang_getCXXAccessSpecifier:=dll.clang_getCXXAccessSpecifier).restype, clang_getCXXAccessSpecifier.argtypes = enum_CX_CXXAccessSpecifier, [ci.Cursor]
+try: (clang_getCXXAccessSpecifier:=dll.clang_getCXXAccessSpecifier).restype, clang_getCXXAccessSpecifier.argtypes = enum_CX_CXXAccessSpecifier, [CXCursor]
 except AttributeError: pass
 
 enum_CX_StorageClass = CEnum(ctypes.c_uint32)
@@ -1330,28 +1199,22 @@ CX_BO_OrAssign = enum_CX_BinaryOperatorKind.define('CX_BO_OrAssign', 32)
 CX_BO_Comma = enum_CX_BinaryOperatorKind.define('CX_BO_Comma', 33)
 CX_BO_LAST = enum_CX_BinaryOperatorKind.define('CX_BO_LAST', 33)
 
-# __attribute__((visibility("default"))) enum CX_BinaryOperatorKind clang_Cursor_getBinaryOpcode(CXCursor C)
-try: (clang_Cursor_getBinaryOpcode:=dll.clang_Cursor_getBinaryOpcode).restype, clang_Cursor_getBinaryOpcode.argtypes = enum_CX_BinaryOperatorKind, [ci.Cursor]
+try: (clang_Cursor_getBinaryOpcode:=dll.clang_Cursor_getBinaryOpcode).restype, clang_Cursor_getBinaryOpcode.argtypes = enum_CX_BinaryOperatorKind, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Cursor_getBinaryOpcodeStr(enum CX_BinaryOperatorKind Op)
-try: (clang_Cursor_getBinaryOpcodeStr:=dll.clang_Cursor_getBinaryOpcodeStr).restype, clang_Cursor_getBinaryOpcodeStr.argtypes = ci._CXString, [enum_CX_BinaryOperatorKind]
+try: (clang_Cursor_getBinaryOpcodeStr:=dll.clang_Cursor_getBinaryOpcodeStr).restype, clang_Cursor_getBinaryOpcodeStr.argtypes = CXString, [enum_CX_BinaryOperatorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CX_StorageClass clang_Cursor_getStorageClass(CXCursor)
-try: (clang_Cursor_getStorageClass:=dll.clang_Cursor_getStorageClass).restype, clang_Cursor_getStorageClass.argtypes = enum_CX_StorageClass, [ci.Cursor]
+try: (clang_Cursor_getStorageClass:=dll.clang_Cursor_getStorageClass).restype, clang_Cursor_getStorageClass.argtypes = enum_CX_StorageClass, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_getNumOverloadedDecls(CXCursor cursor)
-try: (clang_getNumOverloadedDecls:=dll.clang_getNumOverloadedDecls).restype, clang_getNumOverloadedDecls.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_getNumOverloadedDecls:=dll.clang_getNumOverloadedDecls).restype, clang_getNumOverloadedDecls.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getOverloadedDecl(CXCursor cursor, unsigned int index)
-try: (clang_getOverloadedDecl:=dll.clang_getOverloadedDecl).restype, clang_getOverloadedDecl.argtypes = ci.Cursor, [ci.Cursor, ctypes.c_uint32]
+try: (clang_getOverloadedDecl:=dll.clang_getOverloadedDecl).restype, clang_getOverloadedDecl.argtypes = CXCursor, [CXCursor, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_getIBOutletCollectionType(CXCursor)
-try: (clang_getIBOutletCollectionType:=dll.clang_getIBOutletCollectionType).restype, clang_getIBOutletCollectionType.argtypes = ci.Type, [ci.Cursor]
+try: (clang_getIBOutletCollectionType:=dll.clang_getIBOutletCollectionType).restype, clang_getIBOutletCollectionType.argtypes = CXType, [CXCursor]
 except AttributeError: pass
 
 enum_CXChildVisitResult = CEnum(ctypes.c_uint32)
@@ -1359,51 +1222,40 @@ CXChildVisit_Break = enum_CXChildVisitResult.define('CXChildVisit_Break', 0)
 CXChildVisit_Continue = enum_CXChildVisitResult.define('CXChildVisit_Continue', 1)
 CXChildVisit_Recurse = enum_CXChildVisitResult.define('CXChildVisit_Recurse', 2)
 
-CXCursorVisitor = ctypes.CFUNCTYPE(enum_CXChildVisitResult, ci.Cursor, ci.Cursor, ctypes.c_void_p)
-# __attribute__((visibility("default"))) unsigned int clang_visitChildren(CXCursor parent, CXCursorVisitor visitor, CXClientData client_data)
-try: (clang_visitChildren:=dll.clang_visitChildren).restype, clang_visitChildren.argtypes = ctypes.c_uint32, [ci.Cursor, CXCursorVisitor, CXClientData]
+CXCursorVisitor = ctypes.CFUNCTYPE(enum_CXChildVisitResult, CXCursor, CXCursor, ctypes.c_void_p)
+try: (clang_visitChildren:=dll.clang_visitChildren).restype, clang_visitChildren.argtypes = ctypes.c_uint32, [CXCursor, CXCursorVisitor, CXClientData]
 except AttributeError: pass
 
 class struct__CXChildVisitResult(Struct): pass
 CXCursorVisitorBlock = ctypes.POINTER(struct__CXChildVisitResult)
-# __attribute__((visibility("default"))) unsigned int clang_visitChildrenWithBlock(CXCursor parent, CXCursorVisitorBlock block)
-try: (clang_visitChildrenWithBlock:=dll.clang_visitChildrenWithBlock).restype, clang_visitChildrenWithBlock.argtypes = ctypes.c_uint32, [ci.Cursor, CXCursorVisitorBlock]
+try: (clang_visitChildrenWithBlock:=dll.clang_visitChildrenWithBlock).restype, clang_visitChildrenWithBlock.argtypes = ctypes.c_uint32, [CXCursor, CXCursorVisitorBlock]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCursorUSR(CXCursor)
-try: (clang_getCursorUSR:=dll.clang_getCursorUSR).restype, clang_getCursorUSR.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_getCursorUSR:=dll.clang_getCursorUSR).restype, clang_getCursorUSR.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_constructUSR_ObjCClass(const char *class_name)
-try: (clang_constructUSR_ObjCClass:=dll.clang_constructUSR_ObjCClass).restype, clang_constructUSR_ObjCClass.argtypes = ci._CXString, [ctypes.POINTER(ctypes.c_char)]
+try: (clang_constructUSR_ObjCClass:=dll.clang_constructUSR_ObjCClass).restype, clang_constructUSR_ObjCClass.argtypes = CXString, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_constructUSR_ObjCCategory(const char *class_name, const char *category_name)
-try: (clang_constructUSR_ObjCCategory:=dll.clang_constructUSR_ObjCCategory).restype, clang_constructUSR_ObjCCategory.argtypes = ci._CXString, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (clang_constructUSR_ObjCCategory:=dll.clang_constructUSR_ObjCCategory).restype, clang_constructUSR_ObjCCategory.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_constructUSR_ObjCProtocol(const char *protocol_name)
-try: (clang_constructUSR_ObjCProtocol:=dll.clang_constructUSR_ObjCProtocol).restype, clang_constructUSR_ObjCProtocol.argtypes = ci._CXString, [ctypes.POINTER(ctypes.c_char)]
+try: (clang_constructUSR_ObjCProtocol:=dll.clang_constructUSR_ObjCProtocol).restype, clang_constructUSR_ObjCProtocol.argtypes = CXString, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_constructUSR_ObjCIvar(const char *name, CXString classUSR)
-try: (clang_constructUSR_ObjCIvar:=dll.clang_constructUSR_ObjCIvar).restype, clang_constructUSR_ObjCIvar.argtypes = ci._CXString, [ctypes.POINTER(ctypes.c_char), ci._CXString]
+try: (clang_constructUSR_ObjCIvar:=dll.clang_constructUSR_ObjCIvar).restype, clang_constructUSR_ObjCIvar.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), CXString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_constructUSR_ObjCMethod(const char *name, unsigned int isInstanceMethod, CXString classUSR)
-try: (clang_constructUSR_ObjCMethod:=dll.clang_constructUSR_ObjCMethod).restype, clang_constructUSR_ObjCMethod.argtypes = ci._CXString, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ci._CXString]
+try: (clang_constructUSR_ObjCMethod:=dll.clang_constructUSR_ObjCMethod).restype, clang_constructUSR_ObjCMethod.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, CXString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_constructUSR_ObjCProperty(const char *property, CXString classUSR)
-try: (clang_constructUSR_ObjCProperty:=dll.clang_constructUSR_ObjCProperty).restype, clang_constructUSR_ObjCProperty.argtypes = ci._CXString, [ctypes.POINTER(ctypes.c_char), ci._CXString]
+try: (clang_constructUSR_ObjCProperty:=dll.clang_constructUSR_ObjCProperty).restype, clang_constructUSR_ObjCProperty.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), CXString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCursorSpelling(CXCursor)
-try: (clang_getCursorSpelling:=dll.clang_getCursorSpelling).restype, clang_getCursorSpelling.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_getCursorSpelling:=dll.clang_getCursorSpelling).restype, clang_getCursorSpelling.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceRange clang_Cursor_getSpellingNameRange(CXCursor, unsigned int pieceIndex, unsigned int options)
-try: (clang_Cursor_getSpellingNameRange:=dll.clang_Cursor_getSpellingNameRange).restype, clang_Cursor_getSpellingNameRange.argtypes = CXSourceRange, [ci.Cursor, ctypes.c_uint32, ctypes.c_uint32]
+try: (clang_Cursor_getSpellingNameRange:=dll.clang_Cursor_getSpellingNameRange).restype, clang_Cursor_getSpellingNameRange.argtypes = CXSourceRange, [CXCursor, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 CXPrintingPolicy = ctypes.c_void_p
@@ -1436,60 +1288,46 @@ CXPrintingPolicy_SuppressImplicitBase = enum_CXPrintingPolicyProperty.define('CX
 CXPrintingPolicy_FullyQualifiedName = enum_CXPrintingPolicyProperty.define('CXPrintingPolicy_FullyQualifiedName', 25)
 CXPrintingPolicy_LastProperty = enum_CXPrintingPolicyProperty.define('CXPrintingPolicy_LastProperty', 25)
 
-# __attribute__((visibility("default"))) unsigned int clang_PrintingPolicy_getProperty(CXPrintingPolicy Policy, enum CXPrintingPolicyProperty Property)
 try: (clang_PrintingPolicy_getProperty:=dll.clang_PrintingPolicy_getProperty).restype, clang_PrintingPolicy_getProperty.argtypes = ctypes.c_uint32, [CXPrintingPolicy, enum_CXPrintingPolicyProperty]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_PrintingPolicy_setProperty(CXPrintingPolicy Policy, enum CXPrintingPolicyProperty Property, unsigned int Value)
 try: (clang_PrintingPolicy_setProperty:=dll.clang_PrintingPolicy_setProperty).restype, clang_PrintingPolicy_setProperty.argtypes = None, [CXPrintingPolicy, enum_CXPrintingPolicyProperty, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXPrintingPolicy clang_getCursorPrintingPolicy(CXCursor)
-try: (clang_getCursorPrintingPolicy:=dll.clang_getCursorPrintingPolicy).restype, clang_getCursorPrintingPolicy.argtypes = CXPrintingPolicy, [ci.Cursor]
+try: (clang_getCursorPrintingPolicy:=dll.clang_getCursorPrintingPolicy).restype, clang_getCursorPrintingPolicy.argtypes = CXPrintingPolicy, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_PrintingPolicy_dispose(CXPrintingPolicy Policy)
 try: (clang_PrintingPolicy_dispose:=dll.clang_PrintingPolicy_dispose).restype, clang_PrintingPolicy_dispose.argtypes = None, [CXPrintingPolicy]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCursorPrettyPrinted(CXCursor Cursor, CXPrintingPolicy Policy)
-try: (clang_getCursorPrettyPrinted:=dll.clang_getCursorPrettyPrinted).restype, clang_getCursorPrettyPrinted.argtypes = ci._CXString, [ci.Cursor, CXPrintingPolicy]
+try: (clang_getCursorPrettyPrinted:=dll.clang_getCursorPrettyPrinted).restype, clang_getCursorPrettyPrinted.argtypes = CXString, [CXCursor, CXPrintingPolicy]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getTypePrettyPrinted(CXType CT, CXPrintingPolicy cxPolicy)
-try: (clang_getTypePrettyPrinted:=dll.clang_getTypePrettyPrinted).restype, clang_getTypePrettyPrinted.argtypes = ci._CXString, [ci.Type, CXPrintingPolicy]
+try: (clang_getTypePrettyPrinted:=dll.clang_getTypePrettyPrinted).restype, clang_getTypePrettyPrinted.argtypes = CXString, [CXType, CXPrintingPolicy]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCursorDisplayName(CXCursor)
-try: (clang_getCursorDisplayName:=dll.clang_getCursorDisplayName).restype, clang_getCursorDisplayName.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_getCursorDisplayName:=dll.clang_getCursorDisplayName).restype, clang_getCursorDisplayName.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getCursorReferenced(CXCursor)
-try: (clang_getCursorReferenced:=dll.clang_getCursorReferenced).restype, clang_getCursorReferenced.argtypes = ci.Cursor, [ci.Cursor]
+try: (clang_getCursorReferenced:=dll.clang_getCursorReferenced).restype, clang_getCursorReferenced.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getCursorDefinition(CXCursor)
-try: (clang_getCursorDefinition:=dll.clang_getCursorDefinition).restype, clang_getCursorDefinition.argtypes = ci.Cursor, [ci.Cursor]
+try: (clang_getCursorDefinition:=dll.clang_getCursorDefinition).restype, clang_getCursorDefinition.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_isCursorDefinition(CXCursor)
-try: (clang_isCursorDefinition:=dll.clang_isCursorDefinition).restype, clang_isCursorDefinition.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_isCursorDefinition:=dll.clang_isCursorDefinition).restype, clang_isCursorDefinition.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getCanonicalCursor(CXCursor)
-try: (clang_getCanonicalCursor:=dll.clang_getCanonicalCursor).restype, clang_getCanonicalCursor.argtypes = ci.Cursor, [ci.Cursor]
+try: (clang_getCanonicalCursor:=dll.clang_getCanonicalCursor).restype, clang_getCanonicalCursor.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_Cursor_getObjCSelectorIndex(CXCursor)
-try: (clang_Cursor_getObjCSelectorIndex:=dll.clang_Cursor_getObjCSelectorIndex).restype, clang_Cursor_getObjCSelectorIndex.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_Cursor_getObjCSelectorIndex:=dll.clang_Cursor_getObjCSelectorIndex).restype, clang_Cursor_getObjCSelectorIndex.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_Cursor_isDynamicCall(CXCursor C)
-try: (clang_Cursor_isDynamicCall:=dll.clang_Cursor_isDynamicCall).restype, clang_Cursor_isDynamicCall.argtypes = ctypes.c_int32, [ci.Cursor]
+try: (clang_Cursor_isDynamicCall:=dll.clang_Cursor_isDynamicCall).restype, clang_Cursor_isDynamicCall.argtypes = ctypes.c_int32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXType clang_Cursor_getReceiverType(CXCursor C)
-try: (clang_Cursor_getReceiverType:=dll.clang_Cursor_getReceiverType).restype, clang_Cursor_getReceiverType.argtypes = ci.Type, [ci.Cursor]
+try: (clang_Cursor_getReceiverType:=dll.clang_Cursor_getReceiverType).restype, clang_Cursor_getReceiverType.argtypes = CXType, [CXCursor]
 except AttributeError: pass
 
 CXObjCPropertyAttrKind = CEnum(ctypes.c_uint32)
@@ -1508,16 +1346,13 @@ CXObjCPropertyAttr_strong = CXObjCPropertyAttrKind.define('CXObjCPropertyAttr_st
 CXObjCPropertyAttr_unsafe_unretained = CXObjCPropertyAttrKind.define('CXObjCPropertyAttr_unsafe_unretained', 2048)
 CXObjCPropertyAttr_class = CXObjCPropertyAttrKind.define('CXObjCPropertyAttr_class', 4096)
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_getObjCPropertyAttributes(CXCursor C, unsigned int reserved)
-try: (clang_Cursor_getObjCPropertyAttributes:=dll.clang_Cursor_getObjCPropertyAttributes).restype, clang_Cursor_getObjCPropertyAttributes.argtypes = ctypes.c_uint32, [ci.Cursor, ctypes.c_uint32]
+try: (clang_Cursor_getObjCPropertyAttributes:=dll.clang_Cursor_getObjCPropertyAttributes).restype, clang_Cursor_getObjCPropertyAttributes.argtypes = ctypes.c_uint32, [CXCursor, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Cursor_getObjCPropertyGetterName(CXCursor C)
-try: (clang_Cursor_getObjCPropertyGetterName:=dll.clang_Cursor_getObjCPropertyGetterName).restype, clang_Cursor_getObjCPropertyGetterName.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_Cursor_getObjCPropertyGetterName:=dll.clang_Cursor_getObjCPropertyGetterName).restype, clang_Cursor_getObjCPropertyGetterName.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Cursor_getObjCPropertySetterName(CXCursor C)
-try: (clang_Cursor_getObjCPropertySetterName:=dll.clang_Cursor_getObjCPropertySetterName).restype, clang_Cursor_getObjCPropertySetterName.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_Cursor_getObjCPropertySetterName:=dll.clang_Cursor_getObjCPropertySetterName).restype, clang_Cursor_getObjCPropertySetterName.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
 CXObjCDeclQualifierKind = CEnum(ctypes.c_uint32)
@@ -1529,162 +1364,124 @@ CXObjCDeclQualifier_Bycopy = CXObjCDeclQualifierKind.define('CXObjCDeclQualifier
 CXObjCDeclQualifier_Byref = CXObjCDeclQualifierKind.define('CXObjCDeclQualifier_Byref', 16)
 CXObjCDeclQualifier_Oneway = CXObjCDeclQualifierKind.define('CXObjCDeclQualifier_Oneway', 32)
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_getObjCDeclQualifiers(CXCursor C)
-try: (clang_Cursor_getObjCDeclQualifiers:=dll.clang_Cursor_getObjCDeclQualifiers).restype, clang_Cursor_getObjCDeclQualifiers.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_getObjCDeclQualifiers:=dll.clang_Cursor_getObjCDeclQualifiers).restype, clang_Cursor_getObjCDeclQualifiers.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isObjCOptional(CXCursor C)
-try: (clang_Cursor_isObjCOptional:=dll.clang_Cursor_isObjCOptional).restype, clang_Cursor_isObjCOptional.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isObjCOptional:=dll.clang_Cursor_isObjCOptional).restype, clang_Cursor_isObjCOptional.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isVariadic(CXCursor C)
-try: (clang_Cursor_isVariadic:=dll.clang_Cursor_isVariadic).restype, clang_Cursor_isVariadic.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_Cursor_isVariadic:=dll.clang_Cursor_isVariadic).restype, clang_Cursor_isVariadic.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Cursor_isExternalSymbol(CXCursor C, CXString *language, CXString *definedIn, unsigned int *isGenerated)
-try: (clang_Cursor_isExternalSymbol:=dll.clang_Cursor_isExternalSymbol).restype, clang_Cursor_isExternalSymbol.argtypes = ctypes.c_uint32, [ci.Cursor, ctypes.POINTER(ci._CXString), ctypes.POINTER(ci._CXString), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_Cursor_isExternalSymbol:=dll.clang_Cursor_isExternalSymbol).restype, clang_Cursor_isExternalSymbol.argtypes = ctypes.c_uint32, [CXCursor, ctypes.POINTER(CXString), ctypes.POINTER(CXString), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceRange clang_Cursor_getCommentRange(CXCursor C)
-try: (clang_Cursor_getCommentRange:=dll.clang_Cursor_getCommentRange).restype, clang_Cursor_getCommentRange.argtypes = CXSourceRange, [ci.Cursor]
+try: (clang_Cursor_getCommentRange:=dll.clang_Cursor_getCommentRange).restype, clang_Cursor_getCommentRange.argtypes = CXSourceRange, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Cursor_getRawCommentText(CXCursor C)
-try: (clang_Cursor_getRawCommentText:=dll.clang_Cursor_getRawCommentText).restype, clang_Cursor_getRawCommentText.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_Cursor_getRawCommentText:=dll.clang_Cursor_getRawCommentText).restype, clang_Cursor_getRawCommentText.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Cursor_getBriefCommentText(CXCursor C)
-try: (clang_Cursor_getBriefCommentText:=dll.clang_Cursor_getBriefCommentText).restype, clang_Cursor_getBriefCommentText.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_Cursor_getBriefCommentText:=dll.clang_Cursor_getBriefCommentText).restype, clang_Cursor_getBriefCommentText.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Cursor_getMangling(CXCursor)
-try: (clang_Cursor_getMangling:=dll.clang_Cursor_getMangling).restype, clang_Cursor_getMangling.argtypes = ci._CXString, [ci.Cursor]
+try: (clang_Cursor_getMangling:=dll.clang_Cursor_getMangling).restype, clang_Cursor_getMangling.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
 class CXStringSet(Struct): pass
 CXStringSet._fields_ = [
-  ('Strings', ctypes.POINTER(ci._CXString)),
+  ('Strings', ctypes.POINTER(CXString)),
   ('Count', ctypes.c_uint32),
 ]
-# __attribute__((visibility("default"))) CXStringSet *clang_Cursor_getCXXManglings(CXCursor)
-try: (clang_Cursor_getCXXManglings:=dll.clang_Cursor_getCXXManglings).restype, clang_Cursor_getCXXManglings.argtypes = ctypes.POINTER(CXStringSet), [ci.Cursor]
+try: (clang_Cursor_getCXXManglings:=dll.clang_Cursor_getCXXManglings).restype, clang_Cursor_getCXXManglings.argtypes = ctypes.POINTER(CXStringSet), [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXStringSet *clang_Cursor_getObjCManglings(CXCursor)
-try: (clang_Cursor_getObjCManglings:=dll.clang_Cursor_getObjCManglings).restype, clang_Cursor_getObjCManglings.argtypes = ctypes.POINTER(CXStringSet), [ci.Cursor]
+try: (clang_Cursor_getObjCManglings:=dll.clang_Cursor_getObjCManglings).restype, clang_Cursor_getObjCManglings.argtypes = ctypes.POINTER(CXStringSet), [CXCursor]
 except AttributeError: pass
 
 CXModule = ctypes.c_void_p
-# __attribute__((visibility("default"))) CXModule clang_Cursor_getModule(CXCursor C)
-try: (clang_Cursor_getModule:=dll.clang_Cursor_getModule).restype, clang_Cursor_getModule.argtypes = CXModule, [ci.Cursor]
+try: (clang_Cursor_getModule:=dll.clang_Cursor_getModule).restype, clang_Cursor_getModule.argtypes = CXModule, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXModule clang_getModuleForFile(CXTranslationUnit, CXFile)
 try: (clang_getModuleForFile:=dll.clang_getModuleForFile).restype, clang_getModuleForFile.argtypes = CXModule, [CXTranslationUnit, CXFile]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXFile clang_Module_getASTFile(CXModule Module)
 try: (clang_Module_getASTFile:=dll.clang_Module_getASTFile).restype, clang_Module_getASTFile.argtypes = CXFile, [CXModule]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXModule clang_Module_getParent(CXModule Module)
 try: (clang_Module_getParent:=dll.clang_Module_getParent).restype, clang_Module_getParent.argtypes = CXModule, [CXModule]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Module_getName(CXModule Module)
-try: (clang_Module_getName:=dll.clang_Module_getName).restype, clang_Module_getName.argtypes = ci._CXString, [CXModule]
+try: (clang_Module_getName:=dll.clang_Module_getName).restype, clang_Module_getName.argtypes = CXString, [CXModule]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_Module_getFullName(CXModule Module)
-try: (clang_Module_getFullName:=dll.clang_Module_getFullName).restype, clang_Module_getFullName.argtypes = ci._CXString, [CXModule]
+try: (clang_Module_getFullName:=dll.clang_Module_getFullName).restype, clang_Module_getFullName.argtypes = CXString, [CXModule]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_Module_isSystem(CXModule Module)
 try: (clang_Module_isSystem:=dll.clang_Module_isSystem).restype, clang_Module_isSystem.argtypes = ctypes.c_int32, [CXModule]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_Module_getNumTopLevelHeaders(CXTranslationUnit, CXModule Module)
 try: (clang_Module_getNumTopLevelHeaders:=dll.clang_Module_getNumTopLevelHeaders).restype, clang_Module_getNumTopLevelHeaders.argtypes = ctypes.c_uint32, [CXTranslationUnit, CXModule]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXFile clang_Module_getTopLevelHeader(CXTranslationUnit, CXModule Module, unsigned int Index)
 try: (clang_Module_getTopLevelHeader:=dll.clang_Module_getTopLevelHeader).restype, clang_Module_getTopLevelHeader.argtypes = CXFile, [CXTranslationUnit, CXModule, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXConstructor_isConvertingConstructor(CXCursor C)
-try: (clang_CXXConstructor_isConvertingConstructor:=dll.clang_CXXConstructor_isConvertingConstructor).restype, clang_CXXConstructor_isConvertingConstructor.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXConstructor_isConvertingConstructor:=dll.clang_CXXConstructor_isConvertingConstructor).restype, clang_CXXConstructor_isConvertingConstructor.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXConstructor_isCopyConstructor(CXCursor C)
-try: (clang_CXXConstructor_isCopyConstructor:=dll.clang_CXXConstructor_isCopyConstructor).restype, clang_CXXConstructor_isCopyConstructor.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXConstructor_isCopyConstructor:=dll.clang_CXXConstructor_isCopyConstructor).restype, clang_CXXConstructor_isCopyConstructor.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXConstructor_isDefaultConstructor(CXCursor C)
-try: (clang_CXXConstructor_isDefaultConstructor:=dll.clang_CXXConstructor_isDefaultConstructor).restype, clang_CXXConstructor_isDefaultConstructor.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXConstructor_isDefaultConstructor:=dll.clang_CXXConstructor_isDefaultConstructor).restype, clang_CXXConstructor_isDefaultConstructor.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXConstructor_isMoveConstructor(CXCursor C)
-try: (clang_CXXConstructor_isMoveConstructor:=dll.clang_CXXConstructor_isMoveConstructor).restype, clang_CXXConstructor_isMoveConstructor.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXConstructor_isMoveConstructor:=dll.clang_CXXConstructor_isMoveConstructor).restype, clang_CXXConstructor_isMoveConstructor.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXField_isMutable(CXCursor C)
-try: (clang_CXXField_isMutable:=dll.clang_CXXField_isMutable).restype, clang_CXXField_isMutable.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXField_isMutable:=dll.clang_CXXField_isMutable).restype, clang_CXXField_isMutable.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isDefaulted(CXCursor C)
-try: (clang_CXXMethod_isDefaulted:=dll.clang_CXXMethod_isDefaulted).restype, clang_CXXMethod_isDefaulted.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isDefaulted:=dll.clang_CXXMethod_isDefaulted).restype, clang_CXXMethod_isDefaulted.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isDeleted(CXCursor C)
-try: (clang_CXXMethod_isDeleted:=dll.clang_CXXMethod_isDeleted).restype, clang_CXXMethod_isDeleted.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isDeleted:=dll.clang_CXXMethod_isDeleted).restype, clang_CXXMethod_isDeleted.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isPureVirtual(CXCursor C)
-try: (clang_CXXMethod_isPureVirtual:=dll.clang_CXXMethod_isPureVirtual).restype, clang_CXXMethod_isPureVirtual.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isPureVirtual:=dll.clang_CXXMethod_isPureVirtual).restype, clang_CXXMethod_isPureVirtual.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isStatic(CXCursor C)
-try: (clang_CXXMethod_isStatic:=dll.clang_CXXMethod_isStatic).restype, clang_CXXMethod_isStatic.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isStatic:=dll.clang_CXXMethod_isStatic).restype, clang_CXXMethod_isStatic.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isVirtual(CXCursor C)
-try: (clang_CXXMethod_isVirtual:=dll.clang_CXXMethod_isVirtual).restype, clang_CXXMethod_isVirtual.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isVirtual:=dll.clang_CXXMethod_isVirtual).restype, clang_CXXMethod_isVirtual.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isCopyAssignmentOperator(CXCursor C)
-try: (clang_CXXMethod_isCopyAssignmentOperator:=dll.clang_CXXMethod_isCopyAssignmentOperator).restype, clang_CXXMethod_isCopyAssignmentOperator.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isCopyAssignmentOperator:=dll.clang_CXXMethod_isCopyAssignmentOperator).restype, clang_CXXMethod_isCopyAssignmentOperator.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isMoveAssignmentOperator(CXCursor C)
-try: (clang_CXXMethod_isMoveAssignmentOperator:=dll.clang_CXXMethod_isMoveAssignmentOperator).restype, clang_CXXMethod_isMoveAssignmentOperator.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isMoveAssignmentOperator:=dll.clang_CXXMethod_isMoveAssignmentOperator).restype, clang_CXXMethod_isMoveAssignmentOperator.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isExplicit(CXCursor C)
-try: (clang_CXXMethod_isExplicit:=dll.clang_CXXMethod_isExplicit).restype, clang_CXXMethod_isExplicit.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isExplicit:=dll.clang_CXXMethod_isExplicit).restype, clang_CXXMethod_isExplicit.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXRecord_isAbstract(CXCursor C)
-try: (clang_CXXRecord_isAbstract:=dll.clang_CXXRecord_isAbstract).restype, clang_CXXRecord_isAbstract.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXRecord_isAbstract:=dll.clang_CXXRecord_isAbstract).restype, clang_CXXRecord_isAbstract.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_EnumDecl_isScoped(CXCursor C)
-try: (clang_EnumDecl_isScoped:=dll.clang_EnumDecl_isScoped).restype, clang_EnumDecl_isScoped.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_EnumDecl_isScoped:=dll.clang_EnumDecl_isScoped).restype, clang_EnumDecl_isScoped.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_CXXMethod_isConst(CXCursor C)
-try: (clang_CXXMethod_isConst:=dll.clang_CXXMethod_isConst).restype, clang_CXXMethod_isConst.argtypes = ctypes.c_uint32, [ci.Cursor]
+try: (clang_CXXMethod_isConst:=dll.clang_CXXMethod_isConst).restype, clang_CXXMethod_isConst.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXCursorKind clang_getTemplateCursorKind(CXCursor C)
-try: (clang_getTemplateCursorKind:=dll.clang_getTemplateCursorKind).restype, clang_getTemplateCursorKind.argtypes = enum_CXCursorKind, [ci.Cursor]
+try: (clang_getTemplateCursorKind:=dll.clang_getTemplateCursorKind).restype, clang_getTemplateCursorKind.argtypes = enum_CXCursorKind, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCursor clang_getSpecializedCursorTemplate(CXCursor C)
-try: (clang_getSpecializedCursorTemplate:=dll.clang_getSpecializedCursorTemplate).restype, clang_getSpecializedCursorTemplate.argtypes = ci.Cursor, [ci.Cursor]
+try: (clang_getSpecializedCursorTemplate:=dll.clang_getSpecializedCursorTemplate).restype, clang_getSpecializedCursorTemplate.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceRange clang_getCursorReferenceNameRange(CXCursor C, unsigned int NameFlags, unsigned int PieceIndex)
-try: (clang_getCursorReferenceNameRange:=dll.clang_getCursorReferenceNameRange).restype, clang_getCursorReferenceNameRange.argtypes = CXSourceRange, [ci.Cursor, ctypes.c_uint32, ctypes.c_uint32]
+try: (clang_getCursorReferenceNameRange:=dll.clang_getCursorReferenceNameRange).restype, clang_getCursorReferenceNameRange.argtypes = CXSourceRange, [CXCursor, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 enum_CXNameRefFlags = CEnum(ctypes.c_uint32)
@@ -1705,51 +1502,39 @@ CXToken._fields_ = [
   ('int_data', (ctypes.c_uint32 * 4)),
   ('ptr_data', ctypes.c_void_p),
 ]
-# __attribute__((visibility("default"))) CXToken *clang_getToken(CXTranslationUnit TU, CXSourceLocation Location)
 try: (clang_getToken:=dll.clang_getToken).restype, clang_getToken.argtypes = ctypes.POINTER(CXToken), [CXTranslationUnit, CXSourceLocation]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXTokenKind clang_getTokenKind(CXToken)
 try: (clang_getTokenKind:=dll.clang_getTokenKind).restype, clang_getTokenKind.argtypes = CXTokenKind, [CXToken]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getTokenSpelling(CXTranslationUnit, CXToken)
-try: (clang_getTokenSpelling:=dll.clang_getTokenSpelling).restype, clang_getTokenSpelling.argtypes = ci._CXString, [CXTranslationUnit, CXToken]
+try: (clang_getTokenSpelling:=dll.clang_getTokenSpelling).restype, clang_getTokenSpelling.argtypes = CXString, [CXTranslationUnit, CXToken]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceLocation clang_getTokenLocation(CXTranslationUnit, CXToken)
 try: (clang_getTokenLocation:=dll.clang_getTokenLocation).restype, clang_getTokenLocation.argtypes = CXSourceLocation, [CXTranslationUnit, CXToken]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceRange clang_getTokenExtent(CXTranslationUnit, CXToken)
 try: (clang_getTokenExtent:=dll.clang_getTokenExtent).restype, clang_getTokenExtent.argtypes = CXSourceRange, [CXTranslationUnit, CXToken]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_tokenize(CXTranslationUnit TU, CXSourceRange Range, CXToken **Tokens, unsigned int *NumTokens)
 try: (clang_tokenize:=dll.clang_tokenize).restype, clang_tokenize.argtypes = None, [CXTranslationUnit, CXSourceRange, ctypes.POINTER(ctypes.POINTER(CXToken)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_annotateTokens(CXTranslationUnit TU, CXToken *Tokens, unsigned int NumTokens, CXCursor *Cursors)
-try: (clang_annotateTokens:=dll.clang_annotateTokens).restype, clang_annotateTokens.argtypes = None, [CXTranslationUnit, ctypes.POINTER(CXToken), ctypes.c_uint32, ctypes.POINTER(ci.Cursor)]
+try: (clang_annotateTokens:=dll.clang_annotateTokens).restype, clang_annotateTokens.argtypes = None, [CXTranslationUnit, ctypes.POINTER(CXToken), ctypes.c_uint32, ctypes.POINTER(CXCursor)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeTokens(CXTranslationUnit TU, CXToken *Tokens, unsigned int NumTokens)
 try: (clang_disposeTokens:=dll.clang_disposeTokens).restype, clang_disposeTokens.argtypes = None, [CXTranslationUnit, ctypes.POINTER(CXToken), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCursorKindSpelling(enum CXCursorKind Kind)
-try: (clang_getCursorKindSpelling:=dll.clang_getCursorKindSpelling).restype, clang_getCursorKindSpelling.argtypes = ci._CXString, [enum_CXCursorKind]
+try: (clang_getCursorKindSpelling:=dll.clang_getCursorKindSpelling).restype, clang_getCursorKindSpelling.argtypes = CXString, [enum_CXCursorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_getDefinitionSpellingAndExtent(CXCursor, const char **startBuf, const char **endBuf, unsigned int *startLine, unsigned int *startColumn, unsigned int *endLine, unsigned int *endColumn)
-try: (clang_getDefinitionSpellingAndExtent:=dll.clang_getDefinitionSpellingAndExtent).restype, clang_getDefinitionSpellingAndExtent.argtypes = None, [ci.Cursor, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getDefinitionSpellingAndExtent:=dll.clang_getDefinitionSpellingAndExtent).restype, clang_getDefinitionSpellingAndExtent.argtypes = None, [CXCursor, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_enableStackTraces(void)
 try: (clang_enableStackTraces:=dll.clang_enableStackTraces).restype, clang_enableStackTraces.argtypes = None, []
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_executeOnThread(void (*fn)(void *), void *user_data, unsigned int stack_size)
 try: (clang_executeOnThread:=dll.clang_executeOnThread).restype, clang_executeOnThread.argtypes = None, [ctypes.CFUNCTYPE(None, ctypes.c_void_p), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -1782,48 +1567,37 @@ CXCompletionChunk_Equal = enum_CXCompletionChunkKind.define('CXCompletionChunk_E
 CXCompletionChunk_HorizontalSpace = enum_CXCompletionChunkKind.define('CXCompletionChunk_HorizontalSpace', 19)
 CXCompletionChunk_VerticalSpace = enum_CXCompletionChunkKind.define('CXCompletionChunk_VerticalSpace', 20)
 
-# __attribute__((visibility("default"))) enum CXCompletionChunkKind clang_getCompletionChunkKind(CXCompletionString completion_string, unsigned int chunk_number)
 try: (clang_getCompletionChunkKind:=dll.clang_getCompletionChunkKind).restype, clang_getCompletionChunkKind.argtypes = enum_CXCompletionChunkKind, [CXCompletionString, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCompletionChunkText(CXCompletionString completion_string, unsigned int chunk_number)
-try: (clang_getCompletionChunkText:=dll.clang_getCompletionChunkText).restype, clang_getCompletionChunkText.argtypes = ci._CXString, [CXCompletionString, ctypes.c_uint32]
+try: (clang_getCompletionChunkText:=dll.clang_getCompletionChunkText).restype, clang_getCompletionChunkText.argtypes = CXString, [CXCompletionString, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCompletionString clang_getCompletionChunkCompletionString(CXCompletionString completion_string, unsigned int chunk_number)
 try: (clang_getCompletionChunkCompletionString:=dll.clang_getCompletionChunkCompletionString).restype, clang_getCompletionChunkCompletionString.argtypes = CXCompletionString, [CXCompletionString, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_getNumCompletionChunks(CXCompletionString completion_string)
 try: (clang_getNumCompletionChunks:=dll.clang_getNumCompletionChunks).restype, clang_getNumCompletionChunks.argtypes = ctypes.c_uint32, [CXCompletionString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_getCompletionPriority(CXCompletionString completion_string)
 try: (clang_getCompletionPriority:=dll.clang_getCompletionPriority).restype, clang_getCompletionPriority.argtypes = ctypes.c_uint32, [CXCompletionString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXAvailabilityKind clang_getCompletionAvailability(CXCompletionString completion_string)
 try: (clang_getCompletionAvailability:=dll.clang_getCompletionAvailability).restype, clang_getCompletionAvailability.argtypes = enum_CXAvailabilityKind, [CXCompletionString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_getCompletionNumAnnotations(CXCompletionString completion_string)
 try: (clang_getCompletionNumAnnotations:=dll.clang_getCompletionNumAnnotations).restype, clang_getCompletionNumAnnotations.argtypes = ctypes.c_uint32, [CXCompletionString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCompletionAnnotation(CXCompletionString completion_string, unsigned int annotation_number)
-try: (clang_getCompletionAnnotation:=dll.clang_getCompletionAnnotation).restype, clang_getCompletionAnnotation.argtypes = ci._CXString, [CXCompletionString, ctypes.c_uint32]
+try: (clang_getCompletionAnnotation:=dll.clang_getCompletionAnnotation).restype, clang_getCompletionAnnotation.argtypes = CXString, [CXCompletionString, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCompletionParent(CXCompletionString completion_string, enum CXCursorKind *kind)
-try: (clang_getCompletionParent:=dll.clang_getCompletionParent).restype, clang_getCompletionParent.argtypes = ci._CXString, [CXCompletionString, ctypes.POINTER(enum_CXCursorKind)]
+try: (clang_getCompletionParent:=dll.clang_getCompletionParent).restype, clang_getCompletionParent.argtypes = CXString, [CXCompletionString, ctypes.POINTER(enum_CXCursorKind)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCompletionBriefComment(CXCompletionString completion_string)
-try: (clang_getCompletionBriefComment:=dll.clang_getCompletionBriefComment).restype, clang_getCompletionBriefComment.argtypes = ci._CXString, [CXCompletionString]
+try: (clang_getCompletionBriefComment:=dll.clang_getCompletionBriefComment).restype, clang_getCompletionBriefComment.argtypes = CXString, [CXCompletionString]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCompletionString clang_getCursorCompletionString(CXCursor cursor)
-try: (clang_getCursorCompletionString:=dll.clang_getCursorCompletionString).restype, clang_getCursorCompletionString.argtypes = CXCompletionString, [ci.Cursor]
+try: (clang_getCursorCompletionString:=dll.clang_getCursorCompletionString).restype, clang_getCursorCompletionString.argtypes = CXCompletionString, [CXCursor]
 except AttributeError: pass
 
 class CXCodeCompleteResults(Struct): pass
@@ -1831,12 +1605,10 @@ CXCodeCompleteResults._fields_ = [
   ('Results', ctypes.POINTER(CXCompletionResult)),
   ('NumResults', ctypes.c_uint32),
 ]
-# __attribute__((visibility("default"))) unsigned int clang_getCompletionNumFixIts(CXCodeCompleteResults *results, unsigned int completion_index)
 try: (clang_getCompletionNumFixIts:=dll.clang_getCompletionNumFixIts).restype, clang_getCompletionNumFixIts.argtypes = ctypes.c_uint32, [ctypes.POINTER(CXCodeCompleteResults), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getCompletionFixIt(CXCodeCompleteResults *results, unsigned int completion_index, unsigned int fixit_index, CXSourceRange *replacement_range)
-try: (clang_getCompletionFixIt:=dll.clang_getCompletionFixIt).restype, clang_getCompletionFixIt.argtypes = ci._CXString, [ctypes.POINTER(CXCodeCompleteResults), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(CXSourceRange)]
+try: (clang_getCompletionFixIt:=dll.clang_getCompletionFixIt).restype, clang_getCompletionFixIt.argtypes = CXString, [ctypes.POINTER(CXCodeCompleteResults), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(CXSourceRange)]
 except AttributeError: pass
 
 enum_CXCodeComplete_Flags = CEnum(ctypes.c_uint32)
@@ -1873,56 +1645,43 @@ CXCompletionContext_NaturalLanguage = enum_CXCompletionContext.define('CXComplet
 CXCompletionContext_IncludedFile = enum_CXCompletionContext.define('CXCompletionContext_IncludedFile', 4194304)
 CXCompletionContext_Unknown = enum_CXCompletionContext.define('CXCompletionContext_Unknown', 8388607)
 
-# __attribute__((visibility("default"))) unsigned int clang_defaultCodeCompleteOptions(void)
 try: (clang_defaultCodeCompleteOptions:=dll.clang_defaultCodeCompleteOptions).restype, clang_defaultCodeCompleteOptions.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXCodeCompleteResults *clang_codeCompleteAt(CXTranslationUnit TU, const char *complete_filename, unsigned int complete_line, unsigned int complete_column, struct CXUnsavedFile *unsaved_files, unsigned int num_unsaved_files, unsigned int options)
 try: (clang_codeCompleteAt:=dll.clang_codeCompleteAt).restype, clang_codeCompleteAt.argtypes = ctypes.POINTER(CXCodeCompleteResults), [CXTranslationUnit, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_sortCodeCompletionResults(CXCompletionResult *Results, unsigned int NumResults)
 try: (clang_sortCodeCompletionResults:=dll.clang_sortCodeCompletionResults).restype, clang_sortCodeCompletionResults.argtypes = None, [ctypes.POINTER(CXCompletionResult), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_disposeCodeCompleteResults(CXCodeCompleteResults *Results)
 try: (clang_disposeCodeCompleteResults:=dll.clang_disposeCodeCompleteResults).restype, clang_disposeCodeCompleteResults.argtypes = None, [ctypes.POINTER(CXCodeCompleteResults)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_codeCompleteGetNumDiagnostics(CXCodeCompleteResults *Results)
 try: (clang_codeCompleteGetNumDiagnostics:=dll.clang_codeCompleteGetNumDiagnostics).restype, clang_codeCompleteGetNumDiagnostics.argtypes = ctypes.c_uint32, [ctypes.POINTER(CXCodeCompleteResults)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXDiagnostic clang_codeCompleteGetDiagnostic(CXCodeCompleteResults *Results, unsigned int Index)
 try: (clang_codeCompleteGetDiagnostic:=dll.clang_codeCompleteGetDiagnostic).restype, clang_codeCompleteGetDiagnostic.argtypes = CXDiagnostic, [ctypes.POINTER(CXCodeCompleteResults), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned long long clang_codeCompleteGetContexts(CXCodeCompleteResults *Results)
 try: (clang_codeCompleteGetContexts:=dll.clang_codeCompleteGetContexts).restype, clang_codeCompleteGetContexts.argtypes = ctypes.c_uint64, [ctypes.POINTER(CXCodeCompleteResults)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXCursorKind clang_codeCompleteGetContainerKind(CXCodeCompleteResults *Results, unsigned int *IsIncomplete)
 try: (clang_codeCompleteGetContainerKind:=dll.clang_codeCompleteGetContainerKind).restype, clang_codeCompleteGetContainerKind.argtypes = enum_CXCursorKind, [ctypes.POINTER(CXCodeCompleteResults), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_codeCompleteGetContainerUSR(CXCodeCompleteResults *Results)
-try: (clang_codeCompleteGetContainerUSR:=dll.clang_codeCompleteGetContainerUSR).restype, clang_codeCompleteGetContainerUSR.argtypes = ci._CXString, [ctypes.POINTER(CXCodeCompleteResults)]
+try: (clang_codeCompleteGetContainerUSR:=dll.clang_codeCompleteGetContainerUSR).restype, clang_codeCompleteGetContainerUSR.argtypes = CXString, [ctypes.POINTER(CXCodeCompleteResults)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_codeCompleteGetObjCSelector(CXCodeCompleteResults *Results)
-try: (clang_codeCompleteGetObjCSelector:=dll.clang_codeCompleteGetObjCSelector).restype, clang_codeCompleteGetObjCSelector.argtypes = ci._CXString, [ctypes.POINTER(CXCodeCompleteResults)]
+try: (clang_codeCompleteGetObjCSelector:=dll.clang_codeCompleteGetObjCSelector).restype, clang_codeCompleteGetObjCSelector.argtypes = CXString, [ctypes.POINTER(CXCodeCompleteResults)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXString clang_getClangVersion(void)
-try: (clang_getClangVersion:=dll.clang_getClangVersion).restype, clang_getClangVersion.argtypes = ci._CXString, []
+try: (clang_getClangVersion:=dll.clang_getClangVersion).restype, clang_getClangVersion.argtypes = CXString, []
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_toggleCrashRecovery(unsigned int isEnabled)
 try: (clang_toggleCrashRecovery:=dll.clang_toggleCrashRecovery).restype, clang_toggleCrashRecovery.argtypes = None, [ctypes.c_uint32]
 except AttributeError: pass
 
 CXInclusionVisitor = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CXSourceLocation), ctypes.c_uint32, ctypes.c_void_p)
-# __attribute__((visibility("default"))) void clang_getInclusions(CXTranslationUnit tu, CXInclusionVisitor visitor, CXClientData client_data)
 try: (clang_getInclusions:=dll.clang_getInclusions).restype, clang_getInclusions.argtypes = None, [CXTranslationUnit, CXInclusionVisitor, CXClientData]
 except AttributeError: pass
 
@@ -1936,60 +1695,46 @@ CXEval_Other = CXEvalResultKind.define('CXEval_Other', 6)
 CXEval_UnExposed = CXEvalResultKind.define('CXEval_UnExposed', 0)
 
 CXEvalResult = ctypes.c_void_p
-# __attribute__((visibility("default"))) CXEvalResult clang_Cursor_Evaluate(CXCursor C)
-try: (clang_Cursor_Evaluate:=dll.clang_Cursor_Evaluate).restype, clang_Cursor_Evaluate.argtypes = CXEvalResult, [ci.Cursor]
+try: (clang_Cursor_Evaluate:=dll.clang_Cursor_Evaluate).restype, clang_Cursor_Evaluate.argtypes = CXEvalResult, [CXCursor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXEvalResultKind clang_EvalResult_getKind(CXEvalResult E)
 try: (clang_EvalResult_getKind:=dll.clang_EvalResult_getKind).restype, clang_EvalResult_getKind.argtypes = CXEvalResultKind, [CXEvalResult]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_EvalResult_getAsInt(CXEvalResult E)
 try: (clang_EvalResult_getAsInt:=dll.clang_EvalResult_getAsInt).restype, clang_EvalResult_getAsInt.argtypes = ctypes.c_int32, [CXEvalResult]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) long long clang_EvalResult_getAsLongLong(CXEvalResult E)
 try: (clang_EvalResult_getAsLongLong:=dll.clang_EvalResult_getAsLongLong).restype, clang_EvalResult_getAsLongLong.argtypes = ctypes.c_int64, [CXEvalResult]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_EvalResult_isUnsignedInt(CXEvalResult E)
 try: (clang_EvalResult_isUnsignedInt:=dll.clang_EvalResult_isUnsignedInt).restype, clang_EvalResult_isUnsignedInt.argtypes = ctypes.c_uint32, [CXEvalResult]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned long long clang_EvalResult_getAsUnsigned(CXEvalResult E)
 try: (clang_EvalResult_getAsUnsigned:=dll.clang_EvalResult_getAsUnsigned).restype, clang_EvalResult_getAsUnsigned.argtypes = ctypes.c_uint64, [CXEvalResult]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) double clang_EvalResult_getAsDouble(CXEvalResult E)
 try: (clang_EvalResult_getAsDouble:=dll.clang_EvalResult_getAsDouble).restype, clang_EvalResult_getAsDouble.argtypes = ctypes.c_double, [CXEvalResult]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const char *clang_EvalResult_getAsStr(CXEvalResult E)
 try: (clang_EvalResult_getAsStr:=dll.clang_EvalResult_getAsStr).restype, clang_EvalResult_getAsStr.argtypes = ctypes.POINTER(ctypes.c_char), [CXEvalResult]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_EvalResult_dispose(CXEvalResult E)
 try: (clang_EvalResult_dispose:=dll.clang_EvalResult_dispose).restype, clang_EvalResult_dispose.argtypes = None, [CXEvalResult]
 except AttributeError: pass
 
 CXRemapping = ctypes.c_void_p
-# __attribute__((visibility("default"))) CXRemapping clang_getRemappings(const char *path)
 try: (clang_getRemappings:=dll.clang_getRemappings).restype, clang_getRemappings.argtypes = CXRemapping, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXRemapping clang_getRemappingsFromFileList(const char **filePaths, unsigned int numFiles)
 try: (clang_getRemappingsFromFileList:=dll.clang_getRemappingsFromFileList).restype, clang_getRemappingsFromFileList.argtypes = CXRemapping, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_remap_getNumFiles(CXRemapping)
 try: (clang_remap_getNumFiles:=dll.clang_remap_getNumFiles).restype, clang_remap_getNumFiles.argtypes = ctypes.c_uint32, [CXRemapping]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_remap_getFilenames(CXRemapping, unsigned int index, CXString *original, CXString *transformed)
-try: (clang_remap_getFilenames:=dll.clang_remap_getFilenames).restype, clang_remap_getFilenames.argtypes = None, [CXRemapping, ctypes.c_uint32, ctypes.POINTER(ci._CXString), ctypes.POINTER(ci._CXString)]
+try: (clang_remap_getFilenames:=dll.clang_remap_getFilenames).restype, clang_remap_getFilenames.argtypes = None, [CXRemapping, ctypes.c_uint32, ctypes.POINTER(CXString), ctypes.POINTER(CXString)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_remap_dispose(CXRemapping)
 try: (clang_remap_dispose:=dll.clang_remap_dispose).restype, clang_remap_dispose.argtypes = None, [CXRemapping]
 except AttributeError: pass
 
@@ -2000,7 +1745,7 @@ CXVisit_Continue = enum_CXVisitorResult.define('CXVisit_Continue', 1)
 class struct_CXCursorAndRangeVisitor(Struct): pass
 struct_CXCursorAndRangeVisitor._fields_ = [
   ('context', ctypes.c_void_p),
-  ('visit', ctypes.CFUNCTYPE(enum_CXVisitorResult, ctypes.c_void_p, ci.Cursor, CXSourceRange)),
+  ('visit', ctypes.CFUNCTYPE(enum_CXVisitorResult, ctypes.c_void_p, CXCursor, CXSourceRange)),
 ]
 CXCursorAndRangeVisitor = struct_CXCursorAndRangeVisitor
 CXResult = CEnum(ctypes.c_uint32)
@@ -2008,21 +1753,17 @@ CXResult_Success = CXResult.define('CXResult_Success', 0)
 CXResult_Invalid = CXResult.define('CXResult_Invalid', 1)
 CXResult_VisitBreak = CXResult.define('CXResult_VisitBreak', 2)
 
-# __attribute__((visibility("default"))) CXResult clang_findReferencesInFile(CXCursor cursor, CXFile file, CXCursorAndRangeVisitor visitor)
-try: (clang_findReferencesInFile:=dll.clang_findReferencesInFile).restype, clang_findReferencesInFile.argtypes = CXResult, [ci.Cursor, CXFile, CXCursorAndRangeVisitor]
+try: (clang_findReferencesInFile:=dll.clang_findReferencesInFile).restype, clang_findReferencesInFile.argtypes = CXResult, [CXCursor, CXFile, CXCursorAndRangeVisitor]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXResult clang_findIncludesInFile(CXTranslationUnit TU, CXFile file, CXCursorAndRangeVisitor visitor)
 try: (clang_findIncludesInFile:=dll.clang_findIncludesInFile).restype, clang_findIncludesInFile.argtypes = CXResult, [CXTranslationUnit, CXFile, CXCursorAndRangeVisitor]
 except AttributeError: pass
 
 class struct__CXCursorAndRangeVisitorBlock(Struct): pass
 CXCursorAndRangeVisitorBlock = ctypes.POINTER(struct__CXCursorAndRangeVisitorBlock)
-# __attribute__((visibility("default"))) CXResult clang_findReferencesInFileWithBlock(CXCursor, CXFile, CXCursorAndRangeVisitorBlock)
-try: (clang_findReferencesInFileWithBlock:=dll.clang_findReferencesInFileWithBlock).restype, clang_findReferencesInFileWithBlock.argtypes = CXResult, [ci.Cursor, CXFile, CXCursorAndRangeVisitorBlock]
+try: (clang_findReferencesInFileWithBlock:=dll.clang_findReferencesInFileWithBlock).restype, clang_findReferencesInFileWithBlock.argtypes = CXResult, [CXCursor, CXFile, CXCursorAndRangeVisitorBlock]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXResult clang_findIncludesInFileWithBlock(CXTranslationUnit, CXFile, CXCursorAndRangeVisitorBlock)
 try: (clang_findIncludesInFileWithBlock:=dll.clang_findIncludesInFileWithBlock).restype, clang_findIncludesInFileWithBlock.argtypes = CXResult, [CXTranslationUnit, CXFile, CXCursorAndRangeVisitorBlock]
 except AttributeError: pass
 
@@ -2103,7 +1844,7 @@ CXIdxAttr_IBOutletCollection = CXIdxAttrKind.define('CXIdxAttr_IBOutletCollectio
 class CXIdxAttrInfo(Struct): pass
 CXIdxAttrInfo._fields_ = [
   ('kind', CXIdxAttrKind),
-  ('cursor', ci.Cursor),
+  ('cursor', CXCursor),
   ('loc', CXIdxLoc),
 ]
 class CXIdxEntityInfo(Struct): pass
@@ -2113,19 +1854,19 @@ CXIdxEntityInfo._fields_ = [
   ('lang', CXIdxEntityLanguage),
   ('name', ctypes.POINTER(ctypes.c_char)),
   ('USR', ctypes.POINTER(ctypes.c_char)),
-  ('cursor', ci.Cursor),
+  ('cursor', CXCursor),
   ('attributes', ctypes.POINTER(ctypes.POINTER(CXIdxAttrInfo))),
   ('numAttributes', ctypes.c_uint32),
 ]
 class CXIdxContainerInfo(Struct): pass
 CXIdxContainerInfo._fields_ = [
-  ('cursor', ci.Cursor),
+  ('cursor', CXCursor),
 ]
 class CXIdxIBOutletCollectionAttrInfo(Struct): pass
 CXIdxIBOutletCollectionAttrInfo._fields_ = [
   ('attrInfo', ctypes.POINTER(CXIdxAttrInfo)),
   ('objcClass', ctypes.POINTER(CXIdxEntityInfo)),
-  ('classCursor', ci.Cursor),
+  ('classCursor', CXCursor),
   ('classLoc', CXIdxLoc),
 ]
 CXIdxDeclInfoFlags = CEnum(ctypes.c_uint32)
@@ -2134,7 +1875,7 @@ CXIdxDeclFlag_Skipped = CXIdxDeclInfoFlags.define('CXIdxDeclFlag_Skipped', 1)
 class CXIdxDeclInfo(Struct): pass
 CXIdxDeclInfo._fields_ = [
   ('entityInfo', ctypes.POINTER(CXIdxEntityInfo)),
-  ('cursor', ci.Cursor),
+  ('cursor', CXCursor),
   ('loc', CXIdxLoc),
   ('semanticContainer', ctypes.POINTER(CXIdxContainerInfo)),
   ('lexicalContainer', ctypes.POINTER(CXIdxContainerInfo)),
@@ -2160,13 +1901,13 @@ CXIdxObjCContainerDeclInfo._fields_ = [
 class CXIdxBaseClassInfo(Struct): pass
 CXIdxBaseClassInfo._fields_ = [
   ('base', ctypes.POINTER(CXIdxEntityInfo)),
-  ('cursor', ci.Cursor),
+  ('cursor', CXCursor),
   ('loc', CXIdxLoc),
 ]
 class CXIdxObjCProtocolRefInfo(Struct): pass
 CXIdxObjCProtocolRefInfo._fields_ = [
   ('protocol', ctypes.POINTER(CXIdxEntityInfo)),
-  ('cursor', ci.Cursor),
+  ('cursor', CXCursor),
   ('loc', CXIdxLoc),
 ]
 class CXIdxObjCProtocolRefListInfo(Struct): pass
@@ -2184,7 +1925,7 @@ class CXIdxObjCCategoryDeclInfo(Struct): pass
 CXIdxObjCCategoryDeclInfo._fields_ = [
   ('containerInfo', ctypes.POINTER(CXIdxObjCContainerDeclInfo)),
   ('objcClass', ctypes.POINTER(CXIdxEntityInfo)),
-  ('classCursor', ci.Cursor),
+  ('classCursor', CXCursor),
   ('classLoc', CXIdxLoc),
   ('protocols', ctypes.POINTER(CXIdxObjCProtocolRefListInfo)),
 ]
@@ -2219,7 +1960,7 @@ CXSymbolRole_Implicit = CXSymbolRole.define('CXSymbolRole_Implicit', 256)
 class CXIdxEntityRefInfo(Struct): pass
 CXIdxEntityRefInfo._fields_ = [
   ('kind', CXIdxEntityRefKind),
-  ('cursor', ci.Cursor),
+  ('cursor', CXCursor),
   ('loc', CXIdxLoc),
   ('referencedEntity', ctypes.POINTER(CXIdxEntityInfo)),
   ('parentEntity', ctypes.POINTER(CXIdxEntityInfo)),
@@ -2237,60 +1978,46 @@ IndexerCallbacks._fields_ = [
   ('indexDeclaration', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxDeclInfo))),
   ('indexEntityReference', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxEntityRefInfo))),
 ]
-# __attribute__((visibility("default"))) int clang_index_isEntityObjCContainerKind(CXIdxEntityKind)
 try: (clang_index_isEntityObjCContainerKind:=dll.clang_index_isEntityObjCContainerKind).restype, clang_index_isEntityObjCContainerKind.argtypes = ctypes.c_int32, [CXIdxEntityKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const CXIdxObjCContainerDeclInfo *clang_index_getObjCContainerDeclInfo(const CXIdxDeclInfo *)
 try: (clang_index_getObjCContainerDeclInfo:=dll.clang_index_getObjCContainerDeclInfo).restype, clang_index_getObjCContainerDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCContainerDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const CXIdxObjCInterfaceDeclInfo *clang_index_getObjCInterfaceDeclInfo(const CXIdxDeclInfo *)
 try: (clang_index_getObjCInterfaceDeclInfo:=dll.clang_index_getObjCInterfaceDeclInfo).restype, clang_index_getObjCInterfaceDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCInterfaceDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const CXIdxObjCCategoryDeclInfo *clang_index_getObjCCategoryDeclInfo(const CXIdxDeclInfo *)
 try: (clang_index_getObjCCategoryDeclInfo:=dll.clang_index_getObjCCategoryDeclInfo).restype, clang_index_getObjCCategoryDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCCategoryDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const CXIdxObjCProtocolRefListInfo *clang_index_getObjCProtocolRefListInfo(const CXIdxDeclInfo *)
 try: (clang_index_getObjCProtocolRefListInfo:=dll.clang_index_getObjCProtocolRefListInfo).restype, clang_index_getObjCProtocolRefListInfo.argtypes = ctypes.POINTER(CXIdxObjCProtocolRefListInfo), [ctypes.POINTER(CXIdxDeclInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const CXIdxObjCPropertyDeclInfo *clang_index_getObjCPropertyDeclInfo(const CXIdxDeclInfo *)
 try: (clang_index_getObjCPropertyDeclInfo:=dll.clang_index_getObjCPropertyDeclInfo).restype, clang_index_getObjCPropertyDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCPropertyDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const CXIdxIBOutletCollectionAttrInfo *clang_index_getIBOutletCollectionAttrInfo(const CXIdxAttrInfo *)
 try: (clang_index_getIBOutletCollectionAttrInfo:=dll.clang_index_getIBOutletCollectionAttrInfo).restype, clang_index_getIBOutletCollectionAttrInfo.argtypes = ctypes.POINTER(CXIdxIBOutletCollectionAttrInfo), [ctypes.POINTER(CXIdxAttrInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) const CXIdxCXXClassDeclInfo *clang_index_getCXXClassDeclInfo(const CXIdxDeclInfo *)
 try: (clang_index_getCXXClassDeclInfo:=dll.clang_index_getCXXClassDeclInfo).restype, clang_index_getCXXClassDeclInfo.argtypes = ctypes.POINTER(CXIdxCXXClassDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXIdxClientContainer clang_index_getClientContainer(const CXIdxContainerInfo *)
 try: (clang_index_getClientContainer:=dll.clang_index_getClientContainer).restype, clang_index_getClientContainer.argtypes = CXIdxClientContainer, [ctypes.POINTER(CXIdxContainerInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_index_setClientContainer(const CXIdxContainerInfo *, CXIdxClientContainer)
 try: (clang_index_setClientContainer:=dll.clang_index_setClientContainer).restype, clang_index_setClientContainer.argtypes = None, [ctypes.POINTER(CXIdxContainerInfo), CXIdxClientContainer]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXIdxClientEntity clang_index_getClientEntity(const CXIdxEntityInfo *)
 try: (clang_index_getClientEntity:=dll.clang_index_getClientEntity).restype, clang_index_getClientEntity.argtypes = CXIdxClientEntity, [ctypes.POINTER(CXIdxEntityInfo)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_index_setClientEntity(const CXIdxEntityInfo *, CXIdxClientEntity)
 try: (clang_index_setClientEntity:=dll.clang_index_setClientEntity).restype, clang_index_setClientEntity.argtypes = None, [ctypes.POINTER(CXIdxEntityInfo), CXIdxClientEntity]
 except AttributeError: pass
 
 CXIndexAction = ctypes.c_void_p
-# __attribute__((visibility("default"))) CXIndexAction clang_IndexAction_create(CXIndex CIdx)
 try: (clang_IndexAction_create:=dll.clang_IndexAction_create).restype, clang_IndexAction_create.argtypes = CXIndexAction, [CXIndex]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_IndexAction_dispose(CXIndexAction)
 try: (clang_IndexAction_dispose:=dll.clang_IndexAction_dispose).restype, clang_IndexAction_dispose.argtypes = None, [CXIndexAction]
 except AttributeError: pass
 
@@ -2302,33 +2029,26 @@ CXIndexOpt_IndexImplicitTemplateInstantiations = CXIndexOptFlags.define('CXIndex
 CXIndexOpt_SuppressWarnings = CXIndexOptFlags.define('CXIndexOpt_SuppressWarnings', 8)
 CXIndexOpt_SkipParsedBodiesInSession = CXIndexOptFlags.define('CXIndexOpt_SkipParsedBodiesInSession', 16)
 
-# __attribute__((visibility("default"))) int clang_indexSourceFile(CXIndexAction, CXClientData client_data, IndexerCallbacks *index_callbacks, unsigned int index_callbacks_size, unsigned int index_options, const char *source_filename, const char *const *command_line_args, int num_command_line_args, struct CXUnsavedFile *unsaved_files, unsigned int num_unsaved_files, CXTranslationUnit *out_TU, unsigned int TU_options)
 try: (clang_indexSourceFile:=dll.clang_indexSourceFile).restype, clang_indexSourceFile.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, ctypes.POINTER(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_indexSourceFileFullArgv(CXIndexAction, CXClientData client_data, IndexerCallbacks *index_callbacks, unsigned int index_callbacks_size, unsigned int index_options, const char *source_filename, const char *const *command_line_args, int num_command_line_args, struct CXUnsavedFile *unsaved_files, unsigned int num_unsaved_files, CXTranslationUnit *out_TU, unsigned int TU_options)
 try: (clang_indexSourceFileFullArgv:=dll.clang_indexSourceFileFullArgv).restype, clang_indexSourceFileFullArgv.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, ctypes.POINTER(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) int clang_indexTranslationUnit(CXIndexAction, CXClientData client_data, IndexerCallbacks *index_callbacks, unsigned int index_callbacks_size, unsigned int index_options, CXTranslationUnit)
 try: (clang_indexTranslationUnit:=dll.clang_indexTranslationUnit).restype, clang_indexTranslationUnit.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, ctypes.POINTER(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, CXTranslationUnit]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) void clang_indexLoc_getFileLocation(CXIdxLoc loc, CXIdxClientFile *indexFile, CXFile *file, unsigned int *line, unsigned int *column, unsigned int *offset)
 try: (clang_indexLoc_getFileLocation:=dll.clang_indexLoc_getFileLocation).restype, clang_indexLoc_getFileLocation.argtypes = None, [CXIdxLoc, ctypes.POINTER(CXIdxClientFile), ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) CXSourceLocation clang_indexLoc_getCXSourceLocation(CXIdxLoc loc)
 try: (clang_indexLoc_getCXSourceLocation:=dll.clang_indexLoc_getCXSourceLocation).restype, clang_indexLoc_getCXSourceLocation.argtypes = CXSourceLocation, [CXIdxLoc]
 except AttributeError: pass
 
-CXFieldVisitor = ctypes.CFUNCTYPE(enum_CXVisitorResult, ci.Cursor, ctypes.c_void_p)
-# __attribute__((visibility("default"))) unsigned int clang_Type_visitFields(CXType T, CXFieldVisitor visitor, CXClientData client_data)
-try: (clang_Type_visitFields:=dll.clang_Type_visitFields).restype, clang_Type_visitFields.argtypes = ctypes.c_uint32, [ci.Type, CXFieldVisitor, CXClientData]
+CXFieldVisitor = ctypes.CFUNCTYPE(enum_CXVisitorResult, CXCursor, ctypes.c_void_p)
+try: (clang_Type_visitFields:=dll.clang_Type_visitFields).restype, clang_Type_visitFields.argtypes = ctypes.c_uint32, [CXType, CXFieldVisitor, CXClientData]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) unsigned int clang_visitCXXBaseClasses(CXType T, CXFieldVisitor visitor, CXClientData client_data)
-try: (clang_visitCXXBaseClasses:=dll.clang_visitCXXBaseClasses).restype, clang_visitCXXBaseClasses.argtypes = ctypes.c_uint32, [ci.Type, CXFieldVisitor, CXClientData]
+try: (clang_visitCXXBaseClasses:=dll.clang_visitCXXBaseClasses).restype, clang_visitCXXBaseClasses.argtypes = ctypes.c_uint32, [CXType, CXFieldVisitor, CXClientData]
 except AttributeError: pass
 
 enum_CXBinaryOperatorKind = CEnum(ctypes.c_uint32)
@@ -2367,12 +2087,10 @@ CXBinaryOperator_XorAssign = enum_CXBinaryOperatorKind.define('CXBinaryOperator_
 CXBinaryOperator_OrAssign = enum_CXBinaryOperatorKind.define('CXBinaryOperator_OrAssign', 32)
 CXBinaryOperator_Comma = enum_CXBinaryOperatorKind.define('CXBinaryOperator_Comma', 33)
 
-# __attribute__((visibility("default"))) CXString clang_getBinaryOperatorKindSpelling(enum CXBinaryOperatorKind kind)
-try: (clang_getBinaryOperatorKindSpelling:=dll.clang_getBinaryOperatorKindSpelling).restype, clang_getBinaryOperatorKindSpelling.argtypes = ci._CXString, [enum_CXBinaryOperatorKind]
+try: (clang_getBinaryOperatorKindSpelling:=dll.clang_getBinaryOperatorKindSpelling).restype, clang_getBinaryOperatorKindSpelling.argtypes = CXString, [enum_CXBinaryOperatorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXBinaryOperatorKind clang_getCursorBinaryOperatorKind(CXCursor cursor)
-try: (clang_getCursorBinaryOperatorKind:=dll.clang_getCursorBinaryOperatorKind).restype, clang_getCursorBinaryOperatorKind.argtypes = enum_CXBinaryOperatorKind, [ci.Cursor]
+try: (clang_getCursorBinaryOperatorKind:=dll.clang_getCursorBinaryOperatorKind).restype, clang_getCursorBinaryOperatorKind.argtypes = enum_CXBinaryOperatorKind, [CXCursor]
 except AttributeError: pass
 
 enum_CXUnaryOperatorKind = CEnum(ctypes.c_uint32)
@@ -2392,12 +2110,90 @@ CXUnaryOperator_Imag = enum_CXUnaryOperatorKind.define('CXUnaryOperator_Imag', 1
 CXUnaryOperator_Extension = enum_CXUnaryOperatorKind.define('CXUnaryOperator_Extension', 13)
 CXUnaryOperator_Coawait = enum_CXUnaryOperatorKind.define('CXUnaryOperator_Coawait', 14)
 
-# __attribute__((visibility("default"))) CXString clang_getUnaryOperatorKindSpelling(enum CXUnaryOperatorKind kind)
-try: (clang_getUnaryOperatorKindSpelling:=dll.clang_getUnaryOperatorKindSpelling).restype, clang_getUnaryOperatorKindSpelling.argtypes = ci._CXString, [enum_CXUnaryOperatorKind]
+try: (clang_getUnaryOperatorKindSpelling:=dll.clang_getUnaryOperatorKindSpelling).restype, clang_getUnaryOperatorKindSpelling.argtypes = CXString, [enum_CXUnaryOperatorKind]
 except AttributeError: pass
 
-# __attribute__((visibility("default"))) enum CXUnaryOperatorKind clang_getCursorUnaryOperatorKind(CXCursor cursor)
-try: (clang_getCursorUnaryOperatorKind:=dll.clang_getCursorUnaryOperatorKind).restype, clang_getCursorUnaryOperatorKind.argtypes = enum_CXUnaryOperatorKind, [ci.Cursor]
+try: (clang_getCursorUnaryOperatorKind:=dll.clang_getCursorUnaryOperatorKind).restype, clang_getCursorUnaryOperatorKind.argtypes = enum_CXUnaryOperatorKind, [CXCursor]
+except AttributeError: pass
+
+try: (clang_getCString:=dll.clang_getCString).restype, clang_getCString.argtypes = ctypes.POINTER(ctypes.c_char), [CXString]
+except AttributeError: pass
+
+try: (clang_disposeString:=dll.clang_disposeString).restype, clang_disposeString.argtypes = None, [CXString]
+except AttributeError: pass
+
+try: (clang_disposeStringSet:=dll.clang_disposeStringSet).restype, clang_disposeStringSet.argtypes = None, [ctypes.POINTER(CXStringSet)]
+except AttributeError: pass
+
+try: (clang_getNullLocation:=dll.clang_getNullLocation).restype, clang_getNullLocation.argtypes = CXSourceLocation, []
+except AttributeError: pass
+
+try: (clang_equalLocations:=dll.clang_equalLocations).restype, clang_equalLocations.argtypes = ctypes.c_uint32, [CXSourceLocation, CXSourceLocation]
+except AttributeError: pass
+
+try: (clang_isBeforeInTranslationUnit:=dll.clang_isBeforeInTranslationUnit).restype, clang_isBeforeInTranslationUnit.argtypes = ctypes.c_uint32, [CXSourceLocation, CXSourceLocation]
+except AttributeError: pass
+
+try: (clang_Location_isInSystemHeader:=dll.clang_Location_isInSystemHeader).restype, clang_Location_isInSystemHeader.argtypes = ctypes.c_int32, [CXSourceLocation]
+except AttributeError: pass
+
+try: (clang_Location_isFromMainFile:=dll.clang_Location_isFromMainFile).restype, clang_Location_isFromMainFile.argtypes = ctypes.c_int32, [CXSourceLocation]
+except AttributeError: pass
+
+try: (clang_getNullRange:=dll.clang_getNullRange).restype, clang_getNullRange.argtypes = CXSourceRange, []
+except AttributeError: pass
+
+try: (clang_getRange:=dll.clang_getRange).restype, clang_getRange.argtypes = CXSourceRange, [CXSourceLocation, CXSourceLocation]
+except AttributeError: pass
+
+try: (clang_equalRanges:=dll.clang_equalRanges).restype, clang_equalRanges.argtypes = ctypes.c_uint32, [CXSourceRange, CXSourceRange]
+except AttributeError: pass
+
+try: (clang_Range_isNull:=dll.clang_Range_isNull).restype, clang_Range_isNull.argtypes = ctypes.c_int32, [CXSourceRange]
+except AttributeError: pass
+
+try: (clang_getExpansionLocation:=dll.clang_getExpansionLocation).restype, clang_getExpansionLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError: pass
+
+try: (clang_getPresumedLocation:=dll.clang_getPresumedLocation).restype, clang_getPresumedLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXString), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError: pass
+
+try: (clang_getInstantiationLocation:=dll.clang_getInstantiationLocation).restype, clang_getInstantiationLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError: pass
+
+try: (clang_getSpellingLocation:=dll.clang_getSpellingLocation).restype, clang_getSpellingLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError: pass
+
+try: (clang_getFileLocation:=dll.clang_getFileLocation).restype, clang_getFileLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError: pass
+
+try: (clang_getRangeStart:=dll.clang_getRangeStart).restype, clang_getRangeStart.argtypes = CXSourceLocation, [CXSourceRange]
+except AttributeError: pass
+
+try: (clang_getRangeEnd:=dll.clang_getRangeEnd).restype, clang_getRangeEnd.argtypes = CXSourceLocation, [CXSourceRange]
+except AttributeError: pass
+
+try: (clang_disposeSourceRangeList:=dll.clang_disposeSourceRangeList).restype, clang_disposeSourceRangeList.argtypes = None, [ctypes.POINTER(CXSourceRangeList)]
+except AttributeError: pass
+
+try: (clang_getFileName:=dll.clang_getFileName).restype, clang_getFileName.argtypes = CXString, [CXFile]
+except AttributeError: pass
+
+time_t = ctypes.c_int64
+try: (clang_getFileTime:=dll.clang_getFileTime).restype, clang_getFileTime.argtypes = time_t, [CXFile]
+except AttributeError: pass
+
+class CXFileUniqueID(Struct): pass
+CXFileUniqueID._fields_ = [
+  ('data', (ctypes.c_uint64 * 3)),
+]
+try: (clang_getFileUniqueID:=dll.clang_getFileUniqueID).restype, clang_getFileUniqueID.argtypes = ctypes.c_int32, [CXFile, ctypes.POINTER(CXFileUniqueID)]
+except AttributeError: pass
+
+try: (clang_File_isEqual:=dll.clang_File_isEqual).restype, clang_File_isEqual.argtypes = ctypes.c_int32, [CXFile, CXFile]
+except AttributeError: pass
+
+try: (clang_File_tryGetRealPathName:=dll.clang_File_tryGetRealPathName).restype, clang_File_tryGetRealPathName.argtypes = CXString, [CXFile]
 except AttributeError: pass
 
 CINDEX_VERSION_MAJOR = 0

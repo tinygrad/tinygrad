@@ -24,8 +24,8 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
 pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize COPY/BUFFER_VIEW/CONTIGUOUS
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS}, name="tr"), realize),
+  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
   # realize srcs of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
@@ -51,21 +51,25 @@ class IndexingContext:
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.index, 0)
 
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
-  if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
-  if x.op is Ops.AFTER and x.src[1].op is Ops.KERNEL: return None
+  if x.op in {Ops.BUFFERIZE, Ops.INDEX, Ops.AFTER}: return None
   new_srcs = []
   for s in x.src:
     new_src = s
-    if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or (s.op is Ops.AFTER and s.src[1].op is Ops.KERNEL):
+    if s.op in {Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
       assert isinstance(realized_ranges, list), "realize map must contain range list"
       closed_ranges = tuple([r for i,r in enumerate(ctx.range_map[s][1]) if i in realized_ranges])
-      # None in the device assigns it a number later
-      opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
-      new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
-      if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
+      if s.op is Ops.STORE:
+        # add the ends if this is a store
+        new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
+        del ctx.realize_map[s]
+      else:
+        # None in the device assigns it a number later
+        opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
+        new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
+        if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
   # NOTE: do we need this?
   return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None

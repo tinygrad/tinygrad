@@ -357,6 +357,7 @@ class AMDComputeQueue(HWQueue):
 
   def timestamp(self, signal:AMDSignal):
     with self.pred_exec(xcc_mask=0b1):
+      self.release_mem(cache_flush=False) # ensure all prior writes are done
       self.release_mem(signal.timestamp_addr, 0, self.pm4.data_sel__mec_release_mem__send_gpu_clock_counter, self.pm4.int_sel__mec_release_mem__none)
       self.acquire_mem() # ensure timestamp is written
     return self

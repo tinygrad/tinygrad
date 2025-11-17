@@ -42,7 +42,6 @@ struct_rocprofiler_thread_trace_decoder_pc_t._fields_ = [
 ]
 rocprof_trace_decoder_isa_callback_t = ctypes.CFUNCTYPE(rocprofiler_thread_trace_decoder_status_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64), struct_rocprofiler_thread_trace_decoder_pc_t, ctypes.c_void_p)
 rocprof_trace_decoder_se_data_callback_t = ctypes.CFUNCTYPE(ctypes.c_uint64, ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)), ctypes.POINTER(ctypes.c_uint64), ctypes.c_void_p)
-# rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_parse_data(rocprof_trace_decoder_se_data_callback_t se_data_callback, rocprof_trace_decoder_trace_callback_t trace_callback, rocprof_trace_decoder_isa_callback_t isa_callback, void *userdata)
 try: (rocprof_trace_decoder_parse_data:=dll.rocprof_trace_decoder_parse_data).restype, rocprof_trace_decoder_parse_data.argtypes = rocprofiler_thread_trace_decoder_status_t, [rocprof_trace_decoder_se_data_callback_t, rocprof_trace_decoder_trace_callback_t, rocprof_trace_decoder_isa_callback_t, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -54,16 +53,13 @@ ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE = enum_rocprofiler_thread_
 ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST = enum_rocprofiler_thread_trace_decoder_info_t.define('ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST', 4)
 
 rocprofiler_thread_trace_decoder_info_t = enum_rocprofiler_thread_trace_decoder_info_t
-# const char *rocprof_trace_decoder_get_info_string(rocprofiler_thread_trace_decoder_info_t info)
 try: (rocprof_trace_decoder_get_info_string:=dll.rocprof_trace_decoder_get_info_string).restype, rocprof_trace_decoder_get_info_string.argtypes = ctypes.POINTER(ctypes.c_char), [rocprofiler_thread_trace_decoder_info_t]
 except AttributeError: pass
 
-# const char *rocprof_trace_decoder_get_status_string(rocprofiler_thread_trace_decoder_status_t status)
 try: (rocprof_trace_decoder_get_status_string:=dll.rocprof_trace_decoder_get_status_string).restype, rocprof_trace_decoder_get_status_string.argtypes = ctypes.POINTER(ctypes.c_char), [rocprofiler_thread_trace_decoder_status_t]
 except AttributeError: pass
 
 rocprofiler_thread_trace_decoder_debug_callback_t = ctypes.CFUNCTYPE(None, ctypes.c_int64, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_void_p)
-# rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_dump_data(const char *data, uint64_t data_size, rocprofiler_thread_trace_decoder_debug_callback_t cb, void *userdata)
 try: (rocprof_trace_decoder_dump_data:=dll.rocprof_trace_decoder_dump_data).restype, rocprof_trace_decoder_dump_data.argtypes = rocprofiler_thread_trace_decoder_status_t, [ctypes.POINTER(ctypes.c_char), uint64_t, rocprofiler_thread_trace_decoder_debug_callback_t, ctypes.c_void_p]
 except AttributeError: pass
 

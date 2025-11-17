@@ -5,7 +5,7 @@ from typing import Any, Generic, TypeVar, Iterator, Sequence, cast, Generator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, AMD_LLVM, select_first_inited
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, AMD_LLVM, select_first_inited, VIZ
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -355,8 +355,9 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
-    from tinygrad.uop.ops import launch_viz
-    launch_viz("PROFILE", fn)
+    if VIZ:
+      from tinygrad.uop.ops import launch_viz
+      launch_viz("PROFILE", fn)
 
 def enumerate_devices_str() -> Generator[str, None, None]:
   from tinygrad import Tensor, Device
