@@ -4,8 +4,8 @@ from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Sequence, cast, Generator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
-from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
-from tinygrad.helpers import unwrap_class_type
+from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, AMD_LLVM, select_first_inited, VIZ
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -54,7 +54,7 @@ atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices]
 
 @dataclass(frozen=True)
 class ProfileDeviceEvent(ProfileEvent):
-  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0) # noqa: E702
+  device:str; comp_tdiff:decimal.Decimal=decimal.Decimal(0); copy_tdiff:decimal.Decimal=decimal.Decimal(0); props:dict[str,Any]|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfileProgramEvent(ProfileEvent): device:str; name:str; lib:bytes|None; base:int|None # noqa: E702
@@ -163,6 +163,7 @@ class Buffer:
     return self._trace_num
   @property
   def nbytes(self): return self.size*self.dtype.itemsize
+  @suppress_finalizing
   def __del__(self): (not hasattr(self, '_buf')) or self.deallocate()
   def __repr__(self):
     return f"<buf real:{self.is_allocated()} device:{self.device} size:{self.size} dtype:{self.dtype}" + \
@@ -265,7 +266,7 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
 class CompileError(Exception): pass
 
 class Compiler:
-  def __init__(self, cachekey:str|None=None): self.cachekey = None if DISABLE_COMPILER_CACHE else cachekey
+  def __init__(self, cachekey:str|None=None): self.cachekey = cachekey if CCACHE else None
   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -290,18 +291,14 @@ class Compiled:
     if len(enable_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {enable_comps}")
     for _, comp_pair in disable_comps: self.compilers.remove(comp_pair)
 
-    try: self.renderer, self.compiler = next(self._get_available_compilers([list(enable_comps)[0][1]] if len(enable_comps) == 1 else self.compilers))
-    except StopIteration as exc: raise RuntimeError(f"no usable compilers for {self.device}") from exc
+    self.renderer, self.compiler = select_first_inited([list(enable_comps)[0][1]] if len(enable_comps) == 1 else self.compilers,
+                                                       f"No compiler for {self.device} is available")
 
     if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
 
   def _get_compiler_envvar(self, c):
     compiler_name = f"{unwrap_class_type(c).__name__.upper().removesuffix('COMPILER').removeprefix(devname:=self.device.split(':')[0].upper())}"
     return f"{devname}_{compiler_name if len(compiler_name) > 0 else unwrap_class_type(c).__name__.upper()}"
-
-  def _get_available_compilers(self, compilers) -> Iterator[tuple[Renderer, Compiler]]:
-    for renderer, compiler in compilers:
-      with contextlib.suppress(Exception): yield renderer(), compiler()
 
   def synchronize(self):
     """
@@ -330,7 +327,10 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX") and not getenv("NV_NAK")
     if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not getenv("CPU_LVP")
     return device in {"AMD", "PYTHON", "NULL"}
-  if dtype in dtypes.fp8s: return device in {"PYTHON", "NULL"}
+  if dtype in dtypes.fp8s:
+    if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX") and not getenv("NV_NAK")
+    if device == "AMD": return not CI and not AMD_LLVM and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
+    return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
   # for CI GPU and OSX, cl_khr_fp16 isn't supported
@@ -339,6 +339,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     if device == "CL": return not CI and not OSX
+    if device == "QCOM": return False # QCOM compiler is flaky with half
     if device in ["CUDA", "NV"]: return not CI
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
@@ -354,8 +355,9 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
-    from tinygrad.uop.ops import launch_viz
-    launch_viz("PROFILE", fn)
+    if VIZ:
+      from tinygrad.uop.ops import launch_viz
+      launch_viz("PROFILE", fn)
 
 def enumerate_devices_str() -> Generator[str, None, None]:
   from tinygrad import Tensor, Device

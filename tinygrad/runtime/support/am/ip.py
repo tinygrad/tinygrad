@@ -242,6 +242,7 @@ class AM_GFX(AM_IP):
       cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0, cp_hqd_aql_control=int(aql),
       cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
       cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2))
+    for se in range(8): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
     # Copy mqd into memory
     self.adev.vram.view(mqd.paddrs[0][0], ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
@@ -271,7 +272,7 @@ class AM_GFX(AM_IP):
     self.adev.regSDMA0_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
     self.adev.regSDMA1_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
 
-    self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=0, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
+    self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=1, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
       grbm_cgtt_sclk_override=0, rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0, gfxip_cgcg_override=0)
 
     self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1)
@@ -426,7 +427,7 @@ class AM_PSP(AM_IP):
 
     self._wait_for_bootloader()
 
-    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading sos component: {am.psp_fw_type__enumvalues[fw]}")
+    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading sos component: {am.enum_psp_fw_type.get(fw)}")
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.reg(f"{self.reg_pref}_36").write(self.msg1_addr >> 20)
@@ -481,7 +482,7 @@ class AM_PSP(AM_IP):
   def _load_ip_fw_cmd(self, fw_types:list[int], fw_bytes:memoryview):
     self._prep_msg1(fw_bytes)
     for fw_type in fw_types:
-      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[fw_type]}")
+      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.enum_psp_gfx_fw_type.get(fw_type)}")
       cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_IP_FW)
       cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.msg1_addr)
       cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)

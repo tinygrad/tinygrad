@@ -2,7 +2,7 @@ import random, operator
 import z3
 from tinygrad import Variable, dtypes
 from tinygrad.uop.ops import UOp
-from tinygrad.uop.spec import uops_to_z3
+from tinygrad.uop.validate import uops_to_z3
 from tinygrad.helpers import DEBUG, Context
 
 seed = random.randint(0, 100)
