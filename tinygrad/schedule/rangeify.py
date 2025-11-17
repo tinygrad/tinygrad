@@ -118,18 +118,13 @@ winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], 
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
 def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
-  """
-  Optimized Kronecker product for winograd matrices.
-  Factors out matrix constants instead of creating separate conditionals per output position.
-  This reduces kernel size by ~2.77× and improves performance.
-  """
   inner_shape = [ax.vmax+1 for ax in inner_axes]
   result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
   new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
 
   # Force bufferization of unbufferized sources to prevent inlining
   if source.op not in {Ops.BUFFER, Ops.BUFFERIZE}:
-    source = source.bufferize(*(outer_axes + inner_axes), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+    source = source.bufferize(*(inner_axes + outer_axes), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
   # Precompute matrix constants per dimension
   matrix_constants = []
@@ -144,7 +139,8 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
   # Build result: sum over all input positions of (matrix_factor * input_value)
   terms = []
   for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
-    input_val = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+    # Coalesced indexing: [inner, outer] layout
+    input_val = source.index(*[UOp.const(dtypes.index, i) for i in in_indices], *new_outer_axes)
     matrix_factor = UOp.const(dtypes.float, 1.0)
     for dim in range(len(inner_shape)):
       dim_sum = sum(matrix_constants[dim][out_idx][in_indices[dim]] for out_idx in range(len(matrix)))
@@ -152,7 +148,8 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
     terms.append(matrix_factor * input_val)
 
   result_expr = sum(terms) if terms else UOp.const(dtypes.float, 0.0)
-  return result_expr.bufferize(*(tuple(new_outer_axes)+tuple(result_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+  # Coalesced output layout: [result, outer] gives r_6_6_tiles grid for better memory coalescing
+  return result_expr.bufferize(*(tuple(result_axes)+tuple(new_outer_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
 def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
@@ -181,24 +178,26 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
   other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
 
-  # Transform activations (input tiles)
+  # Transform activations: X_tiled → XHAT with coalesced layout [6×6, cin, batch, tiles]
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
-  # Transform weights
+  # Transform weights: w_sub → GHAT with coalesced layout [6×6, cin, cout]
   w_sub = w_like.substitute({k: r for k, r in zip(k_axes, kranges)})
   GHAT = winograd_kron(w_sub, winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
 
-  # Hadamard multiply and reduce over cin (GHAT * XHAT order matters for buffer assignment)
-  mhat_redu = (GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1) *
-               XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
+  # Hadamard multiply and reduce over cin - indexing matches coalesced buffer layouts
+  mhat_redu = (GHAT.index(*inner6_1, *other_reduces, *other_loop_ranges_ghat) *
+               XHAT.index(*inner6_1, *other_reduces, *other_loop_ranges_xhat, *tile_ranges1)).reduce(*other_reduces, arg=Ops.ADD)
 
-  MHAT = mhat_redu.bufferize(*(tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat+inner6_1),
+  # Coalesced layout: inner6_1 first gives r_6_6_8 grid for better memory access
+  MHAT = mhat_redu.bufferize(*(inner6_1+tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat),
                               arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
-  # Output transform and indexing
-  return winograd_kron(MHAT, winograd_At, tile_ranges1+other_loop_ranges_xhat+other_loop_ranges_ghat, inner6_1, device, ctx)\
-    .index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes])
+  # Output transform: MHAT[inner6, tiles, cout, batch] → result[4×4, tiles, cout, batch]
+  # Index order matches buffer layout: [within_tile, tiles, cout, batch]
+  return winograd_kron(MHAT, winograd_At, tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat, inner6_1, device, ctx)\
+    .index(*[ox%4 for ox in o_axes], *[ox//4 for ox in o_axes], *other_loops_w, *other_loops_x)
 
 winograd_rewrite = PatternMatcher([
  ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))
