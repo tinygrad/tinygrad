@@ -2,6 +2,8 @@
 import unittest
 import torch
 import numpy as np
+import pathlib
+import warnings
 from tinygrad.helpers import getenv, GlobalCounters
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
@@ -759,6 +761,227 @@ class TestBackendHelpers(unittest.TestCase):
     sliced_cpu_3d = torch_cpu_3d[1:3, 2:4, 3:5]
     sliced_tiny_3d = torch_tiny_3d[1:3, 2:4, 3:5]
     np.testing.assert_equal(sliced_tiny_3d.cpu().numpy(), sliced_cpu_3d.numpy())
+
+class TestKernelFusionRegression(unittest.TestCase):
+  def _realize(self, t): _ = t.detach().cpu().numpy()
+
+  def _check_kernel_count(self, fn, expected_kernels):
+    torch.manual_seed(42)
+    GlobalCounters.reset()
+    fn().detach().cpu().numpy()
+    expectation = f"{GlobalCounters.kernel_count} vs {expected_kernels} expected."
+    if GlobalCounters.kernel_count < expected_kernels: warnings.warn(f"{expectation} Expectation can be lowered.", UserWarning)
+    self.assertLessEqual(GlobalCounters.kernel_count, expected_kernels, f"{expectation}")
+
+  def test_elementwise_fusion(self):
+    def fn():
+      x = torch.randn(128, 128, device=device)
+      return (x + 1.0) * 2.0 - 0.5
+    self._check_kernel_count(fn, 7)
+
+  def test_relu_fusion(self):
+    def fn():
+      x = torch.randn(1, 3, 32, 32, device=device)
+      conv = torch.nn.Conv2d(3, 16, 3, padding=1).to(device)
+      with torch.no_grad():
+        return torch.nn.functional.relu(conv(x))
+    self._check_kernel_count(fn, 9)
+
+  def test_batchnorm_fusion(self):
+    def fn():
+      x = torch.randn(2, 3, 16, 16, device=device)
+      conv = torch.nn.Conv2d(3, 8, 3, padding=1).to(device)
+      bn = torch.nn.BatchNorm2d(8).to(device)
+      bn.eval()
+      with torch.no_grad():
+        return torch.nn.functional.relu(bn(conv(x)))
+    self._check_kernel_count(fn, 17)
+
+  def test_reduce_fusion(self):
+    def fn():
+      x = torch.randn(64, 64, device=device)
+      return (x * 2.0).sum()
+    self._check_kernel_count(fn, 8)
+
+  def test_matmul_elementwise_fusion(self):
+    def fn():
+      x = torch.randn(32, 32, device=device)
+      w = torch.randn(32, 32, device=device)
+      return torch.nn.functional.relu(x @ w + 1.0)
+    self._check_kernel_count(fn, 8)
+
+  def test_pooling_fusion(self):
+    def fn():
+      x = torch.randn(1, 8, 16, 16, device=device)
+      return torch.nn.functional.max_pool2d(x * 2.0, 2)
+    self._check_kernel_count(fn, 6)
+
+  def test_residual_add_relu_fusion(self):
+    def fn():
+      x = torch.randn(1, 8, 16, 16, device=device)
+      identity = torch.randn(1, 8, 16, 16, device=device)
+      out = x + identity
+      return torch.nn.functional.relu(out)
+    self._check_kernel_count(fn, 8)
+
+  def test_inplace_add_relu_fusion(self):
+    def fn():
+      x = torch.randn(1, 16, 32, 32, device=device)
+      y = torch.randn(1, 16, 32, 32, device=device)
+      x += y
+      return torch.nn.functional.relu(x)
+    self._check_kernel_count(fn, 8)
+
+  def test_conv_bn_add_relu_fusion(self):
+    def fn():
+      x = torch.randn(1, 8, 16, 16, device=device)
+      identity = torch.randn(1, 8, 16, 16, device=device)
+      conv = torch.nn.Conv2d(8, 8, 3, padding=1, bias=False).to(device)
+      bn = torch.nn.BatchNorm2d(8).to(device)
+      bn.eval()
+      with torch.no_grad():
+        out = bn(conv(x))
+        out += identity
+        return torch.nn.functional.relu(out)
+    self._check_kernel_count(fn, 18)
+
+  def test_multiple_inplace_ops_fusion(self):
+    def fn():
+      x = torch.randn(64, 64, device=device)
+      x += 1.0
+      x *= 2.0
+      return torch.nn.functional.relu(x)
+    self._check_kernel_count(fn, 5)
+
+  def test_view_inplace_no_fusion_break(self):
+    def fn():
+      x = torch.randn(4, 64, device=device)
+      view = x[1:3]
+      view += 1.0
+      return x.sum()
+    self._check_kernel_count(fn, 10)
+
+  def test_batchnorm_running_stats_update(self):
+    def fn():
+      x = torch.randn(2, 8, 8, 8, device=device)
+      bn = torch.nn.BatchNorm2d(8).to(device)
+      bn.train()
+      with torch.no_grad():
+        return bn(x)
+    self._check_kernel_count(fn, 11)
+
+  # this is a minimal extra/other_mnist/beautiful_mnist_torch.py to cover fusion for training with optimizer
+  def test_mnist_training_fusion(self):
+    def fn():
+      model = torch.nn.Sequential(
+        torch.nn.Conv2d(1, 8, 3, padding=1),
+        torch.nn.ReLU(),
+        torch.nn.MaxPool2d(2),
+        torch.nn.Flatten(),
+        torch.nn.Linear(8*14*14, 10)
+      ).to(device)
+      optimizer = torch.optim.Adam(model.parameters(), 1e-3)
+      x = torch.randn(32, 1, 28, 28, device=device)
+      labels = torch.randint(0, 10, (32,), device=device)
+      out = model(x)
+      loss = torch.nn.functional.cross_entropy(out, labels)
+      optimizer.zero_grad()
+      loss.backward()
+      optimizer.step()
+      return loss
+    self._check_kernel_count(fn, 35)
+
+  # this is extra/torch_backend/example.py, check that kernels fuse nicely
+  def test_resnet18_kernel_count(self):
+    from PIL import Image
+    import torchvision
+    import torchvision.transforms as transforms
+
+    GlobalCounters.reset()
+    img = Image.open(pathlib.Path(__file__).parent.parent.parent / "test/models/efficientnet/Chicken.jpg").convert('RGB')
+    transform = transforms.Compose([
+      transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(),
+      transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    img = transform(img).unsqueeze(0).to(device)
+
+    model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.DEFAULT)
+    if getenv("EVAL", 1): model.eval()
+    model = model.to(device)
+    out = model(img).detach().cpu().numpy()
+
+    self.assertEqual(out.argmax(), 7, "ResNet18 output should be class 7 (cock)")
+
+    kernel_count = GlobalCounters.kernel_count
+    self.assertGreater(kernel_count, 0, "No kernels, test failed")
+    expected_kernels = 229
+    expectation = f"ResNet18 kernels are {kernel_count} vs {expected_kernels} expected."
+    if kernel_count < expected_kernels:
+      warnings.warn(f"{expectation} Expectation can be lowered.", UserWarning)
+    self.assertLessEqual(kernel_count, expected_kernels, f"{expectation}")
+
+class TestTorchBackendInplace(unittest.TestCase):
+  def test_zero(self):
+    a = torch.ones(4, device=device)
+    a.zero_()
+    np.testing.assert_equal(a.cpu().numpy(), [0,0,0,0])
+
+  def test_view_zero(self):
+    a = torch.ones(4, device=device)
+    a.view((2, 2)).zero_()
+    np.testing.assert_equal(a.cpu().numpy(), [0,0,0,0])
+
+  def test_slice_zero(self):
+    a = torch.ones(4, device=device)
+    a[2:].zero_()
+    np.testing.assert_equal(a.cpu().numpy(), [1,1,0,0])
+
+  def test_slice_permute_zero(self):
+    a = torch.ones((3,2), device=device)
+    a.permute(1,0)[1:].zero_()
+    np.testing.assert_equal(a.cpu().numpy(), [[1,0],[1,0],[1,0]])
+
+  def test_slice_fill(self):
+    a = torch.zeros(4, device=device)
+    a[2:].fill_(2)
+    np.testing.assert_equal(a.cpu().numpy(), [0,0,2,2])
+
+  def test_slice_mul(self):
+    a = torch.ones(4, device=device)
+    a[:2] *= 3
+    a[2:] *= 2
+    np.testing.assert_equal(a.cpu().numpy(), [3,3,2,2])
+
+  def test_stacked_mul(self):
+    a = torch.ones((3,3), device=device)
+    b = a[1:,1:].permute(1,0)
+    c = b[1:,:]
+    b *= 2
+    c *= 3
+    np.testing.assert_equal(a.cpu().numpy(), [[1,1,1],[1,2,6],[1,2,6]])
+
+  def test_flatten_reshape_add(self):
+    a = torch.zeros((2,2,12,32), device=device)
+    b = a.flatten()
+    c = b.reshape((48,32))
+    a += 1
+    b += 1
+    c += 1
+    np.testing.assert_equal(c.cpu().numpy(), torch.full((48,32),3).cpu().numpy())
+
+  def test_noncontig(self):
+    a = torch.empty_strided((4,4),(1,4), dtype=torch.int64, device=device)
+    # self.assertFalse(a.is_contiguous()) # TODO: we are contiguous when it's not required
+    a.zero_()
+    b = a.view((4,4))
+    b[1:3,:] += 1
+    np.testing.assert_equal(a.cpu().numpy(), [[0]*4,[1]*4,[1]*4,[0]*4])
+
+  def test_detach(self):
+    a = torch.zeros(4, device=device)
+    d = a.detach()
+    d += torch.arange(4, device=device)
+    np.testing.assert_array_equal(a.cpu(), torch.arange(4).cpu())
 
 if __name__ == "__main__":
   unittest.main()
