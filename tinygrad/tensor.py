@@ -5,13 +5,14 @@ from contextlib import ContextDecorator
 from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
-from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, FUSE_ATTENTION
+from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, SPEC, WINO_OLD
 from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
-from tinygrad.uop.mathtraits import MathTrait
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, srender
-from tinygrad.uop.spec import tensor_uop_spec, type_verify
+from tinygrad.mixin import OpMixin
+from tinygrad.mixin.movement import _align_left
+from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop
+from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.memory import memory_planner
@@ -63,10 +64,22 @@ def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
 
-def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
-  # unsqueeze left to make every shape same length
-  max_dim = max(len(shape) for shape in shapes)
-  return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
+def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...], dtype:DType) -> list[list[Tensor]]:
+  return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
+          for k in range(len(mat[0]))] for dim in range(dims)]
+
+# winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
+def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
+  # multiply mat_1 @ mat_2 @ t with foldable constants, where mat_i acts on vector t along dimension i; roughly kron(mat, mat) @ t
+  # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
+  t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
+  # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
+  matcols = _get_winograd_matcols(mat, dims, t_.shape[dims:], t_.device, t_.dtype)
+  # multiply each element of t_ by the corresponding stacked column of kron(mat, mat), producing only one view for each element of t
+  ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
+  assert isinstance(ret, Tensor), "sum didn't return a Tensor"
+  return ret
+
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
 
@@ -84,7 +97,7 @@ def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: r
 
 ReductionStr = Literal["mean", "sum", "none"]
 
-class Tensor(MathTrait):
+class Tensor(OpMixin):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
@@ -99,7 +112,7 @@ class Tensor(MathTrait):
   training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'np.ndarray'|pathlib.Path|None,  # type: ignore [name-defined] # noqa: F821
-               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None):
+               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
     _device:str|tuple[str, ...] = tuple(canonicalize_device(x) for x in device) if isinstance(device, (tuple, list)) else canonicalize_device(device)
@@ -122,8 +135,8 @@ class Tensor(MathTrait):
         # give the bound constant a device
         const = UOp.const(var.dtype, val, _device, ())
         data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
-    elif data is None: data = UOp.const(_dtype or dtypes.default_float, 0, _device, ())
-    elif isinstance(data, get_args(ConstType)): data = UOp.const(_dtype or dtypes.from_py(data), data, _device, ())
+    elif data is None: data = UOp.const(_dtype or dtypes.default_float, 0, _device, (), unique=_force_unique)
+    elif isinstance(data, get_args(ConstType)): data = UOp.const(_dtype or dtypes.from_py(data), data, _device, (), unique=_force_unique)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -134,7 +147,7 @@ class Tensor(MathTrait):
     elif is_numpy_ndarray(data):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
-      if data.shape == (): data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item(), _device, ())
+      if data.shape == (): data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item(), _device, (), unique=_force_unique)
       else: data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
       _dtype = _dtype or dtypes.uint8
@@ -159,7 +172,7 @@ class Tensor(MathTrait):
 
   def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
-    if (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
+    if (metadata:=_METADATA.get()) is not None and TRACEMETA >= 1: all_metadata[new_uop] = (metadata,)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
     return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
 
@@ -213,7 +226,7 @@ class Tensor(MathTrait):
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # verify Tensors match the spec
-    if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
+    if SPEC: type_verify(big_sink, tensor_spec)
 
     if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
       _apply_map_to_tensors(get_multi_map(big_sink), "Apply Multi Map")
@@ -222,6 +235,14 @@ class Tensor(MathTrait):
     becomes_map = get_rangeify_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
+
+  def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
+    """
+    Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
+
+    This API is alpha and may change.
+    """
+    return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[str, int]]:
     """
@@ -233,9 +254,9 @@ class Tensor(MathTrait):
     self.kernelize(*lst)
     sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
-    # remove all ASSIGNs, after scheduling, the tensors are just buffers
-    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.ASSIGN}
-    _apply_map_to_tensors(remove_assign_map, name="Remove Assigns")
+    # remove all AFTERs, after scheduling, the tensors are just buffers
+    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.AFTER}
+    _apply_map_to_tensors(remove_assign_map, name="Remove After")
 
     # create the schedule
     schedule, var_vals = create_schedule_with_vars(sink)
@@ -609,7 +630,7 @@ class Tensor(MathTrait):
     print(Tensor.full((2, 3), False).numpy())
     ```
     """
-    return Tensor(fill_value, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
+    return Tensor(fill_value, _force_unique=True, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
 
   @staticmethod
   def zeros(*shape, **kwargs) -> Tensor:
@@ -698,7 +719,7 @@ class Tensor(MathTrait):
     return (start + Tensor.arange(steps, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
 
   @staticmethod
-  def eye(n:int, m:int|None=None, **kwargs) -> Tensor:
+  def eye(n:int, m:int|None=None, dtype=None, device=None, requires_grad:bool|None=None) -> Tensor:
     """
     Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
 
@@ -713,9 +734,9 @@ class Tensor(MathTrait):
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    if n < 0 or (m is not None and m < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
-    x = Tensor.ones(n, **kwargs).diag()
-    return x if m is None else x.pad((None, (0, m-n))) if m > n else x.shrink((None, (0, m)))
+    if n < 0 or ((m := n if m is None else m) < 0): raise ValueError(f"cannot have negative {n=}, {m=}")
+    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m, device=device))
+    return t.cast(dtype or dtypes.default_float).requires_grad_(requires_grad)
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
@@ -1014,102 +1035,7 @@ class Tensor(MathTrait):
 
   # ***** movement low level ops *****
 
-  def view(self, shape:tuple[sint, ...], *args) -> Tensor:
-    """`.view` is an alias for `.reshape`."""
-    return self.reshape(shape, *args)
-
-  def reshape(self, shape, *args) -> Tensor:
-    """
-    Returns a tensor with the same data as the original tensor but with a different shape.
-    `shape` can be passed as a tuple or as separate arguments.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6)
-    print(t.reshape(2, 3).numpy())
-    ```
-    """
-    # resolve None and args
-    new_shape = tuple([s if s is not None else self.shape[i] for i,s in enumerate(argfix(shape, *args))])
-    # resolve -1
-    if (c := new_shape.count(-1)) > 1: raise RuntimeError(f"only one dimension can be inferred using -1, getting {new_shape}")
-    if c: new_shape = tuple([-prod(self.shape) // prod(new_shape) if s == -1 else s for s in new_shape])
-    if resolve(prod(self.shape) != prod(new_shape), True):
-      raise ValueError(f"size mismatch, can't reshape ({', '.join(srender(d) for d in self.shape)}) -> ({', '.join(srender(d) for d in new_shape)})")
-    return self._apply_uop(UOp.reshape, arg=new_shape) if new_shape != self.shape else self
-
-  def expand(self, shape, *args) -> Tensor:
-    """
-    Returns a tensor that is expanded to the shape that is specified.
-    Expand can also increase the number of dimensions that a tensor has.
-
-    Passing a `-1` or `None` to a dimension means that its size will not be changed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.expand(4, -1).numpy())
-    ```
-    """
-    new_shape = tuple(from_ if to == -1 or to is None else to for from_, to in zip(*(_align_left(self.shape, argfix(shape, *args)))))
-    return self._broadcast_to(new_shape)
-
-  def permute(self, order, *args) -> Tensor:
-    """
-    Returns a tensor that is a permutation of the original tensor.
-    The new tensor has the same data as the original tensor but with the dimensions permuted according to the order specified.
-    `order` can be passed as a tuple or as separate arguments.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.empty(2, 3, 5)
-    print(t.shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.permute(2, 0, 1).shape)
-    ```
-    """
-    order_arg = tuple(self._resolve_dim(x) for x in argfix(order, *args))
-    if sorted(order_arg) != list(range(self.ndim)): raise RuntimeError(f"order is not a valid permutation, getting {order_arg}")
-    return self._apply_uop(UOp.permute, arg=order_arg)
-
-  def flip(self, axis, *args) -> Tensor:
-    """
-    Returns a tensor that reverses the order of the original tensor along given `axis`.
-    `axis` can be passed as a tuple or as separate arguments.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.flip(0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.flip((0, 1)).numpy())
-    ```
-    """
-    axis_arg = tuple(self._resolve_dim(x) for x in argfix(axis, *args))
-    if len(axis_arg) != len(dedup(axis_arg)): raise RuntimeError(f"dim can appear at most once, getting {axis_arg}")
-    return self._apply_uop(UOp.flip, arg=tuple([i in axis_arg for i in range(len(self.shape))]))
-
-  def shrink(self, arg:tuple[tuple[sint, sint]|None, ...]) -> Tensor:
-    """
-    Returns a tensor that shrinks the each axis based on input arg.
-    `arg` must have the same length as `self.ndim`.
-    For each axis, it can be `None`, which means no shrink, or a tuple `(start, end)` that works the same as Python slice.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(3, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.shrink(((None, (1, 3)))).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.shrink((((0, 2), (0, 2)))).numpy())
-    ```
-    """
-    if self.ndim != len(arg): raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    if (shrink_arg:=[x if x is not None else (0,s) for x,s in zip(arg, self.shape)]) == [(0,s) for s in self.shape]: return self
-    return self._apply_uop(UOp.shrink, arg=tuple(shrink_arg))
+  def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
 
   def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Tensor:
     """
@@ -1178,8 +1104,6 @@ class Tensor(MathTrait):
   def pad_to(self, shape, *args):
     if len(new_shape := argfix(shape, *args)) != self.ndim: raise ValueError(f"dim mismatch, cannot pad {self.shape} to {new_shape}")
     return self.pad(tuple([None if ns is None else (0, ns-s) for s,ns in zip(self.shape, new_shape)]))
-  def shrink_to(self, shape, *args):
-    return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   # ***** movement high level ops *****
 
@@ -1399,44 +1323,6 @@ class Tensor(MathTrait):
     # checks for shapes and number of dimensions delegated to cat
     return Tensor.cat(*[t.unsqueeze(dim) for t in argfix(self, *args)], dim=dim)
 
-  def repeat_interleave(self, repeats:int, dim:int|None=None) -> Tensor:
-    """
-    Repeats elements of a tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.repeat_interleave(2).numpy())
-    ```
-    """
-    x, dim = (self.flatten(), 0) if dim is None else (self, self._resolve_dim(dim))
-    shp = x.shape
-    return x.reshape(*shp[:dim+1], 1, *shp[dim+1:]).expand(*shp[:dim+1], repeats, *shp[dim+1:]).reshape(*shp[:dim], shp[dim]*repeats, *shp[dim+1:])
-
-  def repeat(self, repeats, *args) -> Tensor:
-    """
-    Repeats tensor number of times along each dimension specified by `repeats`.
-    `repeats` can be passed as a tuple or as separate arguments.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.repeat(4, 2).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.repeat(4, 2, 1).shape)
-    ```
-    """
-    repeats = argfix(repeats, *args)
-    base_shape = _align_left(self.shape, repeats)[0]
-    unsqueezed_shape = flatten([[1, s] for s in base_shape])
-    expanded_shape = flatten([[r, s] for r,s in zip(repeats, base_shape)])
-    final_shape = [r*s for r,s in zip(repeats, base_shape)]
-    return self.reshape(unsqueezed_shape).expand(expanded_shape).reshape(final_shape)
-
-  def _resolve_dim(self, dim:int, *, extra:bool=False) -> int:
-    total = self.ndim + int(extra)
-    if not -max(1, total) <= dim <= max(1, total)-1: raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total)-1]}")
-    return dim + total if dim < 0 else dim
-
   def split(self, sizes:int|Sequence[int], dim:int=0) -> tuple[Tensor, ...]:
     """
     Splits the tensor into chunks along the dimension specified by `dim`.
@@ -1537,96 +1423,6 @@ class Tensor(MathTrait):
     output_shape = _broadcast_shape(*(t.shape for t in tensors))
     return tuple(t._broadcast_to(output_shape) for t in tensors)
 
-  def squeeze(self, dim:int|None=None) -> Tensor:
-    """
-    Returns a tensor with specified dimensions of input of size 1 removed.
-    If `dim` is not specified, all dimensions with size 1 are removed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.zeros(2, 1, 2, 1, 2)
-    print(t.squeeze().shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.squeeze(0).shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.squeeze(1).shape)
-    ```
-    """
-    if dim is None: return self.reshape(tuple(dim for dim in self.shape if dim != 1))
-    dim = self._resolve_dim(dim)
-    return self if not self.ndim or self.shape[dim] != 1 else self.reshape(self.shape[:dim] + self.shape[dim+1:])
-
-  def unsqueeze(self, dim:int) -> Tensor:
-    """
-    Returns a tensor with a new dimension of size 1 inserted at the specified `dim`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4])
-    print(t.unsqueeze(0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.unsqueeze(1).numpy())
-    ```
-    """
-    dim = self._resolve_dim(dim, extra=True)
-    return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
-
-  @property
-  def T(self) -> Tensor:
-    """`.T` is an alias for `.transpose()`."""
-    return self.transpose()
-
-  def transpose(self, dim0=1, dim1=0) -> Tensor:
-    """
-    Returns a tensor that is a transposed version of the original tensor.
-    The given dimensions `dim0` and `dim1` are swapped.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(6).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.transpose(0, 1).numpy())
-    ```
-    """
-    order = list(range(self.ndim))
-    order[dim0], order[dim1] = order[dim1], order[dim0]
-    return self.permute(order)
-
-  def flatten(self, start_dim=0, end_dim=-1) -> Tensor:
-    """
-    Flattens the tensor by reshaping it into a one-dimensional tensor.
-    If `start_dim` or `end_dim` are passed, only dimensions starting with `start_dim` and ending with `end_dim` are flattened.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(8).reshape(2, 2, 2)
-    print(t.flatten().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.flatten(start_dim=1).numpy())
-    ```
-    """
-    start_dim, end_dim = self._resolve_dim(start_dim), self._resolve_dim(end_dim)
-    return self.reshape(self.shape[:start_dim] + (prod(self.shape[start_dim:end_dim+1]), ) + self.shape[end_dim+1:])
-
-  def unflatten(self, dim:int, sizes:tuple[int,...]) -> Tensor:
-    """
-    Unflattens dimension `dim` of the tensor into multiple dimensions specified by `sizes`. `Tensor.flatten()` is the inverse of this function.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(3, 4, 1).unflatten(1, (2, 2)).shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(3, 4, 1).unflatten(1, (-1, 2)).shape)
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(5, 12, 3).unflatten(-2, (2, 2, 3, 1, 1)).shape)
-    ```
-    """
-    dim = self._resolve_dim(dim)
-    return self.reshape(self.shape[:dim] + sizes + self.shape[dim+1:])
-
   def diag(self) -> Tensor:
     """
     Returns a 2-D square tensor with the elements of input as the main diagonal.
@@ -1671,46 +1467,6 @@ class Tensor(MathTrait):
     if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
     for dim, shift in zip(dims, shifts): slices[dim] = slice(delta:=self.shape[dim]-shift%self.shape[dim], delta+self.shape[dim])
     return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim)))[slices]
-
-  def rearrange(self, formula:str, **sizes) -> Tensor:
-    """
-    Rearranges input according to formula
-
-    See: https://einops.rocks/api/rearrange/
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    x = Tensor([[1, 2], [3, 4]])
-    print(Tensor.rearrange(x, "batch channel -> (batch channel)").numpy())
-    ```
-    """
-    def parse_formula(formula: str):
-      tokens = f" {formula} ".replace("…", "...").replace("(", " ( ").replace(")", " ) ").replace(" ", "  ").replace(" 1 ", " ( ) ").split()
-      lparens, rparens = map(lambda x: [i for i, ch in enumerate(tokens) if ch == x], ("(", ")"))
-      pairs = list(zip(lparens, rparens))
-      assert len(lparens) == len(rparens) and sorted(flatten(pairs)) == flatten(pairs), "bracket mismatch"
-      return [name for name in tokens if name not in ("(", ")")], [(s - 2*i, e - 1 - 2*i) for i, (s, e) in enumerate(pairs)]
-
-    assert formula.count("->") == 1, 'need exactly one "->" in formula'
-
-    (lhs, unflatten_dims), (rhs, flatten_dims) = map(parse_formula, formula.split("->"))
-
-    for name in sizes: assert name in lhs, f"axis {name} is not used in transform"
-    assert sorted(lhs) == sorted(rhs) and len(lhs) == len(set(lhs)), f"name mismatch in {formula}"
-    for name in flatten((lhs, rhs)): assert name == "..." or (name.isidentifier() and "_" not in (name[0], name[-1])), f"invalid axis name {name}"
-    assert "..." not in flatten([lhs[s:e] for s, e in unflatten_dims]), f"cannot have collapsed ellipsis (...) in lhs of {formula}"
-    assert lhs.count("...") <= 1, f"too many ellipses in {formula}"
-
-    # resolve ellipsis
-    if "..." in lhs: ell_len = len(self.shape) - len(lhs) + 1 + sum(e - s - 1 for s, e in unflatten_dims)
-    lhs, rhs = map(lambda l: l[:(i:=l.index("..."))] + [f"...{j}" for j in range(ell_len)] + l[i + 1:] if "..." in l else l, (lhs, rhs))
-    unflatten_dims = [(s + (ell_len - 1 if "...0" in lhs[:s] else 0), e + (ell_len - 1 if "...0" in lhs[:e] else 0)) for s, e in unflatten_dims]
-    flatten_dims = [(s + (ell_len - 1 if "...0" in rhs[:s] else 0), e + (ell_len - 1 if "...0" in rhs[:e] else 0)) for s, e in flatten_dims]
-
-    # apply movement ops in order unflatten -> permute -> flatten/unsqueeze
-    t = functools.reduce(lambda x, dims: x.unflatten(dims[0], tuple(sizes.get(lhs[d], -1) for d in range(*dims))), unflatten_dims, self)
-    for i, name in enumerate(lhs): assert (name not in sizes) or sizes[name] == t.shape[i], f"size provided for dimension {name} incorrect"
-    t = t.permute([lhs.index(name) for name in rhs])
-    return functools.reduce(lambda x, dims: x.flatten(dims[0], dims[1] - 1) if dims[0]<dims[1] else x.unsqueeze(dims[0]), reversed(flatten_dims), t)
 
   def masked_select(self, mask):
     """
@@ -1924,6 +1680,12 @@ class Tensor(MathTrait):
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
 
+  def allclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> bool:
+    """
+    Check if all self and other are close. Return True or False.
+    """
+    return bool(self.isclose(other, rtol=rtol, atol=atol, equal_nan=equal_nan).all().item())
+
   def mean(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
     """
     Returns the mean value of the tensor along the specified axis or axes.
@@ -2074,7 +1836,7 @@ class Tensor(MathTrait):
 
     state = Tensor.zeros(bs, 25, device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
-      state = state.bitwise_xor(data[:,k].reshape(bs, 25))
+      state = state ^ data.shrink((None, (k, k+1), None)).squeeze(1)
       for i in range(24): # f1600
         # θ step
         p = state.reshape(bs, 5, 5).transpose(2, 1)
@@ -2128,7 +1890,7 @@ class Tensor(MathTrait):
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None, _single_kernel=getenv("SINGLE_KERNEL_SOFTMAX")) -> Tensor:
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -2148,9 +1910,6 @@ class Tensor(MathTrait):
     print(t.softmax(axis=0).numpy())
     ```
     """
-    if _single_kernel:
-      _, e, ss = self.contiguous()._softmax(axis, dtype)
-      return e.div(ss).fuse()
     _, e, ss = self._softmax(axis, dtype)
     return e.div(ss)
 
@@ -2334,31 +2093,6 @@ class Tensor(MathTrait):
 
   # ***** processing ops *****
 
-  def _pool(self, k_:tuple[sint, ...], stride:int|tuple[int, ...]=1, dilation:int|tuple[int, ...]=1) -> Tensor:
-    assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
-    s_, d_ = make_tuple(stride, len(k_)), make_tuple(dilation, len(k_))
-    assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
-    noop, i_ = [None] * (self.ndim-len(k_)), self.shape[-len(k_):]
-    assert all(resolve(d*(k-1)+1 <= i) for k,d,i in zip(k_,d_,i_)), "kernel size cannot be greater than actual input size"
-    o_ = [ceildiv(i-d*(k-1), s) for i,d,k,s in zip(i_,d_,k_,s_)]
-    if any(resolve(k > s) for k,s in zip(k_,s_)) or any(d != 1 for d in d_):
-      # input size scaling factor to make sure shrink for stride is possible
-      f_ = [1 + int(resolve(o*s > (i - d*(k-1)))) for o,s,i,d,k in zip(o_,s_,i_,d_,k_)]
-      # # repeats such that we don't need padding
-      x = self.repeat([1]*len(noop) + [ceildiv(k*(i*f+d),i) for k,i,d,f in zip(k_,i_,d_,f_)])
-      # handle dilation
-      x = x.shrink(tuple(noop + [(0,k*(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)])).reshape(noop + flatten((k,(i*f+d)) for k,i,d,f in zip(k_,i_,d_,f_)))
-      # handle stride
-      x = x.shrink(tuple(noop + flatten(((0,k), (0,o*s)) for k,o,s in zip(k_,o_,s_)))).reshape(noop + flatten((k,o,s) for k,o,s in zip(k_,o_,s_)))
-      x = x.shrink(tuple(noop + flatten(((0,k), (0,o), (0,1)) for k,o in zip(k_,o_)))).reshape(noop + flatten((k,o) for k,o in zip(k_,o_)))
-      # permute to move reduce to the end
-      return x.permute(*range(len(noop)), *[len(noop)+i*2+1 for i in range(len(i_))], *[len(noop)+i*2 for i in range(len(i_))])
-    # TODO: once the shapetracker can optimize well, remove this alternative implementation
-    x = self.pad(tuple(noop + [(0, max(0,o*s-i)) for i,o,s in zip(i_,o_,s_)])).shrink(tuple(noop + [(0,o*s) for o,s in zip(o_,s_)]))
-    x = x.reshape(noop + flatten(((o,s) for o,s in zip(o_,s_))))
-    x = x.shrink(tuple(noop + flatten(((0,o), (0,k)) for o,k in zip(o_,k_))))
-    return x.permute(*range(len(noop)), *[len(noop)+i*2 for i in range(len(i_))], *[len(noop)+i*2+1 for i in range(len(i_))])
-
   def _resolve_pool_pads(self, padding:int|Sequence[int], dims:int) -> Sequence[int]:
     if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
       raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} for {self.shape=} with {dims=}.")
@@ -2535,14 +2269,48 @@ class Tensor(MathTrait):
     # conv2d is a pooling op (with padding)
     x = self.pad(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
+    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO_OLD:
+      # normal conv
+      x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW)\
+        .permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
 
-    x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW)\
-      .permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
+      # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
+      ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW))\
+        .sum([-1-i for i in range(1+len(oyx))], keepdim=True, dtype=dtype).reshape(bs, cout, *oyx)
+      return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
 
-    # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-    ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW))\
-      .sum([-1-i for i in range(1+len(oyx))], keepdim=True, dtype=dtype).reshape(bs, cout, *oyx)
-    return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
+    HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
+    winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
+    winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
+    winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]] # applying At in pre-order doubles compile time
+
+    # TODO: stride == dilation
+    # use padding to round up to 4x4 output tiles
+    # (bs, cin_, tyx, HWI)
+    pads = [[padding_[i*2], padding_[i*2+1] + (-(dim + sum(padding_[i * 2:(i + 1) * 2]) - 2) % 4)] for i, dim in enumerate(self.shape[-len(HW):])]
+    d = self.pad(sum(pads, []))._pool(HWI, HWO)
+    # move HW to the front: # (HWI, bs, cin_, tyx)
+    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))
+    tyx = d.shape[-len(HWI):]  # dim of tiling
+
+    g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
+
+    # compute 6x6 winograd tiles: GgGt, BtdB
+    # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
+    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
+    # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
+    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).reshape(*HWI, bs, groups, 1, cin, *tyx)
+
+    # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
+    ret = _apply_winograd_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW), dtype=dtype), len(HW))
+
+    # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
+    ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])
+    # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
+    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink(tuple((0, s) for s in [bs, cout, *oyx]))
+
+    return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
+
 
   def conv_transpose2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
     """
@@ -2689,14 +2457,9 @@ class Tensor(MathTrait):
     return self._split_cumalu(axis, Ops.MAX)
 
   @staticmethod
-  def _tri(r:sint, c:sint, diagonal:int=0, **kwargs) -> Tensor:
+  def _tri(r:sint, c:sint, diagonal:int=0, device=None, requires_grad:bool|None=None) -> Tensor:
     assert isinstance(r, int) and isinstance(c, int), f"does not support symbolic, getting {r=}, {c=}"
-    if r == 0 or c == 0 or diagonal >= c: return Tensor.zeros(r,c,**kwargs)
-    if r+diagonal <= 0: return Tensor.ones(r,c,**kwargs)
-    s = r+c-1
-    # build a (s, s) upper triangle
-    t = Tensor.ones(s,s,**kwargs).pad((None,(0,s))).flatten().shrink(((0,s*(2*s-1)),)).reshape(s,-1).shrink((None,(0,s)))
-    return t[:r,-diagonal:c-diagonal] if diagonal <= 0 else t[diagonal:r+diagonal,:c]
+    return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)
 
   def triu(self, diagonal:int=0) -> Tensor:
     """
@@ -2719,7 +2482,7 @@ class Tensor(MathTrait):
     print(t.triu(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device, dtype=dtypes.bool).where(self, self.zeros_like())
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device).where(self, self.zeros_like())
 
   def tril(self, diagonal:int=0) -> Tensor:
     """
@@ -2742,7 +2505,7 @@ class Tensor(MathTrait):
     print(t.tril(diagonal=-1).numpy())
     ```
     """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device, dtype=dtypes.bool).where(self.zeros_like(), self)
+    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device).where(self.zeros_like(), self)
 
   def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
@@ -2977,15 +2740,6 @@ class Tensor(MathTrait):
     Returns a contiguous tensor.
     """
     return self._apply_uop(UOp.contiguous, extra_args=args, **kwargs)
-
-  def fuse(self) -> Tensor:
-    """
-    Makes this a single kernel back to Ops.CONTIGUOUS on the inputs.
-
-    Useful for single kernel softmax and flash attention.
-    Careful, this can break codegen or make kernels really slow.
-    """
-    return self._apply_uop(UOp.fuse)
 
   def contiguous_backward(self) -> Tensor:
     """
@@ -3571,18 +3325,8 @@ class Tensor(MathTrait):
     return self / (1 + self.abs())
 
   # ***** broadcasted elementwise ops *****
-  def _broadcast_to(self, new_shape:tuple[sint, ...]) -> Tensor:
-    if self.shape == new_shape: return self
-    if self.ndim > len(new_shape): raise ValueError(f"cannot broadcast tensor to fewer dimensions. shape={self.shape} to {new_shape=}")
-    # first unsqueeze left with 1s https://data-apis.org/array-api/latest/API_specification/broadcasting.html
-    shape, _ = _align_left(self.shape, new_shape)
-    # for each dimension, check either dim is 1, or it does not change
-    if not all(resolve(s == ns) or resolve(s == 1) for s,ns in zip(shape, new_shape)):
-      raise ValueError(f"cannot broadcast {self.shape} to {new_shape=}")
-    # NOTE: this cast is no-op in forward and uses sum_acc_dtype in the backward sum
-    return self.reshape(shape).cast(sum_acc_dtype(self.dtype))._apply_uop(UOp.expand, arg=new_shape).cast(self.dtype)
 
-  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True) -> tuple[Tensor, Tensor]:
+  def _broadcasted(self, y:Tensor|ConstType|UOp, reverse:bool=False, match_dtype:bool=True, backward_cast:bool=True) -> tuple[Tensor, Tensor]:
     x: Tensor = self
     if not isinstance(y, Tensor):
       # make y a Tensor
@@ -3598,8 +3342,13 @@ class Tensor(MathTrait):
 
     if reverse: x, y = y, x
 
+    # compute the output shape
+    out_shape = _broadcast_shape(x.shape, y.shape)
+
     # broadcast
-    return x._broadcast_to(out_shape:=_broadcast_shape(x.shape, y.shape)), y._broadcast_to(out_shape)
+    # NOTE: the backward cast is no-op in forward and uses sum_acc_dtype in the backward sum
+    return x.cast(sum_acc_dtype(x.dtype) if backward_cast else x.dtype)._broadcast_to(out_shape).cast(x.dtype), \
+           y.cast(sum_acc_dtype(y.dtype) if backward_cast else y.dtype)._broadcast_to(out_shape).cast(y.dtype)
 
   def sub(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
@@ -3966,9 +3715,7 @@ class Tensor(MathTrait):
       key = key.repeat_interleave(self.shape[-3] // key.shape[-3], dim=-3)
       value = value.repeat_interleave(self.shape[-3] // value.shape[-3], dim=-3)
 
-    if FUSE_ATTENTION: q, key, value = self.contiguous(), key.contiguous(), value.contiguous()
-    else: q = self
-
+    q = self
     qk = q.matmul(key.transpose(-2,-1), dtype=least_upper_dtype(q.dtype, key.dtype, dtypes.float32)) / math.sqrt(q.shape[-1])
     # handle attention mask
     if is_causal:
@@ -3977,8 +3724,7 @@ class Tensor(MathTrait):
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
-    attn = qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-    return attn.fuse() if FUSE_ATTENTION else attn
+    return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
     if reduction not in get_args(ReductionStr): raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
@@ -4100,10 +3846,10 @@ class Tensor(MathTrait):
     ```
     """
     assert self.ndim > 1, "NS only works for two or more dims"
+    if self.shape[-2] > self.shape[-1]: return self.transpose(-2, -1).newton_schulz(steps, params, eps).transpose(-2, -1)
     G = self / (self.square().sum(axis=(-2, -1), keepdim=True).sqrt() + eps)
-    if (swap := self.shape[-2] > self.shape[-1]): G = G.transpose(-2, -1)
     for _ in range(steps): G = sum(p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G]*i, G) for i,p in enumerate(params))
-    return G.transpose(-2, -1) if swap else G
+    return G
 
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
@@ -4172,29 +3918,6 @@ class Tensor(MathTrait):
     return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   # ***** Tensor Properties *****
-
-  @property
-  def ndim(self) -> int:
-    """
-    Returns the number of dimensions in the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2], [3, 4]])
-    print(t.ndim)
-    ```
-    """
-    return len(self.shape)
-
-  def numel(self) -> sint:
-    """
-    Returns the total number of elements in the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
-    print(t.numel())
-    ```
-    """
-    return prod(self.shape)
 
   def element_size(self) -> int:
     """
@@ -4365,18 +4088,17 @@ class Tensor(MathTrait):
 
   def image_dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     # NOTE: we use a 1x1 conv2d to do the matmul. mxk @ kxn = (1,k,m,1).conv2d(n,k,1,1)
-    x, dx, dw = self, self.ndim, w.ndim
-    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
-    if x.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {x.shape} and {w.shape}")
+    if not (self.ndim > 0 and w.ndim > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {self.ndim=}, {w.ndim=}")
+    if self.shape[-1] != w.shape[-min(w.ndim, 2)]: raise RuntimeError(f"cannot image_dot {self.shape} and {w.shape}")
 
     bs, groups, cin, cout = prod(self.shape[0:-2]), prod(w.shape[0:-2]), w.shape[-2], w.shape[-1]
-    out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout, )
+    out_shape_t = self.shape[0:-2] + (cout,-1) if len(self.shape) > 1 else (cout,)
 
     # NOTE: with NHWC we can remove the transposes
     # bs x groups*cin x H x W
-    cx = self.transpose(self.ndim-1, self.ndim-2).reshape((bs//groups, groups*cin, -1, 1))
+    cx = self.transpose(self.ndim-1, self.ndim-2).reshape(bs//groups, groups*cin, -1, 1)
     # groups*cout x cin x H, W
-    cw = w.transpose(w.ndim-1, w.ndim-2).reshape((groups*cout, cin, 1, 1))
+    cw = w.transpose(w.ndim-1, w.ndim-2).reshape(groups*cout, cin, 1, 1)
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
@@ -4389,10 +4111,9 @@ class Tensor(MathTrait):
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
       x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
       added_input_channels = 4 - (cin % 4)
-      w = w.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(w.ndim)))
-      x = x.pad(tuple((0, added_input_channels) if i == 2 else None for i in range(x.ndim)))
       cin = cin + added_input_channels
-      x = x.reshape(bs, groups*cin, iy, ix)
+      w = w.pad_to(None, None, cin, None, None)
+      x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
 
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
@@ -4400,7 +4121,7 @@ class Tensor(MathTrait):
       added_output_channels = 4 - (rcout % 4)
       rcout += added_output_channels
       cout = groups * rcout
-      w = w.pad(tuple((0, added_output_channels) if i == 1 else None for i in range(w.ndim)))
+      w = w.pad_to(None, rcout, None, None, None)
 
     # packed (note: flipping bs and iy would make the auto-padding work)
     x = x.permute(0,2,3,1)
@@ -4414,18 +4135,18 @@ class Tensor(MathTrait):
     x, w = x.contiguous(), w.contiguous()
 
     # expand out
-    rcin_hi, rcin_lo = cin//4 if cin >= 4 else 1, 4 if cin >= 4 else 1
-    cout_expand = [groups//4 if cin == 1 else groups, 4 if cin == 1 else 1, rcout//4 if rcout >= 4 else 1, 4 if rcout >= 4 else 1]
+    rcin_hi, rcin_lo = (cin//4, 4) if cin >= 4 else (1, 1)
+    group_shape, rcout_expand = (groups//4, 4) if cin == 1 else (groups, 1), (rcout//4, 4) if rcout >= 4 else (1, 1)
     x = x.reshape(bs, iy, ix, groups, rcin_hi, rcin_lo)
     if cin_last: w = w.reshape(cout//4, H, rcin_hi, W, 4, rcin_lo)
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
     # prepare input
     x = x.permute(0,3,4,5,1,2).pad(self._resolve_pool_pads(padding,2))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
-    x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *cout_expand[0:2], 1, 1, rcin_hi, rcin_lo, H, W)
+    x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *group_shape, 1, 1, rcin_hi, rcin_lo, H, W)
 
     # prepare weights
-    w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *cout_expand, rcin_hi, rcin_lo, H, W))
+    w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
     # the conv!
     ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
@@ -4453,7 +4174,7 @@ _METADATA: _ContextVar[Metadata|None] = _ContextVar(default=None)
 
 def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
   def _wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-    if _METADATA.get() is not None: return fn(*args, **kwargs)
+    if TRACEMETA < 1 or _METADATA.get() is not None: return fn(*args, **kwargs)
 
     if TRACEMETA >= 2:
       caller_frame = sys._getframe(frame := 1)

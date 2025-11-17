@@ -1,14 +1,12 @@
-from functools import reduce
-from itertools import product
-from operator import mul
-from typing import cast
 from dataclasses import dataclass, field
+import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType
-from tinygrad.uop.symbolic import symbolic_simple
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, REAL_SUBSTITUTE, Metadata, WINO
-from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_unparented
+from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags
+from tinygrad.uop.symbolic import symbolic
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
+from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap, disable_gc
+from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
 
@@ -19,7 +17,11 @@ sys.setrecursionlimit(10000)
 # movement op on INDEX as a PatternMatcher
 pm_mops = PatternMatcher([
   (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),  # type: ignore
+   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)),
+  # move movement ops after AFTER
+  (UPat(GroupOp.Movement, name="r").after(name="a", allow_any_len=True),
+   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:], tag=None),)+r.src[1:], r.arg, tag=a.tag)),
+  (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
 ])
 
 # *****************
@@ -63,7 +65,7 @@ mop_cleanup = PatternMatcher([
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE), name="x"), lambda x: x.src[0]),
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
@@ -117,62 +119,39 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
-def close_buffer(branch, outer_axes, inner_axes, device, ctx:IndexingContext):
-  closing_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
-  return branch.substitute({R: r for R, r in zip(outer_axes, closing_outer_axes)})\
-  .bufferize(*closing_outer_axes, *inner_axes, arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
-
-def replace_loops(branch, outer_axes, ctx:IndexingContext):
-  closing_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
-  return branch.substitute({R: r for R, r in zip(outer_axes, closing_outer_axes)})
-
-def kron(buf, B, outer_axes, device, ctx):
-  outer_axes_shape = tuple((ax.vmax+1 for ax in outer_axes)) #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
-  inner_shape = buf.shape[len(outer_axes_shape):]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
-  T = [buf.index(*outer_axes, *[UOp.const(dtypes.index, i) for i in I]) for I in product(*(range(s) for s in inner_shape))]
-  #convert to flat index
-  def idx(I, S): return sum(i * prod(S[j+1:]) for j, i in enumerate(I))
-  def tensordot(T, S, k, M): #k-mode tensor product
-    pre, post = S[:k], S[k+1:]
-    contract = lambda pr, j, su: sum(T[idx((*pr, i, *su), S)] * M[j][i] for i in range(S[k]))
-    return ([contract(pr, j, su) for pr in product(*map(range, pre)) for j in range(len(M)) for su in product(*map(range, post))], pre + (len(M),) + post)
-  #apply B/A/G along all dimensions - kron or n-mode product
-  acc, shp = T, tuple(inner_shape)
-  for k in range(len(inner_shape)): acc, shp = tensordot(acc, shp, k, B)
-  axes = [ctx.new_range(s, AxisType.LOOP) for s in shp]
-  #mask to correspond each coordinate asked by the buffer to the transformed element
-  def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0) #have to double check
-  #sum all wheres together, and return buffer
-  expr = sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))
-  print("EXPR", expr.ranges)
-  return expr.bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL)), outer_axes, axes, expr
-  return sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))\
-    .bufferize(*(tuple(outer_axes)+tuple(axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
-
-
-def kron_nobuff(node, B, outer_axes, axes, device, ctx):
-  #outer_axes_shape = tuple((ax.vmax+1 for ax in outer_axes)) #infer buffer shape and split it into outer and inner - by convention here we decide outer is first
-  #inner_shape = buf.shape[len(outer_axes_shape):]; outer_axes = [ctx.new_range(s, AxisType.LOOP) for s in outer_axes_shape]
+def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
+  inner_shape = [ax.vmax+1 for ax in inner_axes]
+  result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
   new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
-  inner_shape = [ax.vmax+1 for ax in axes]
-  T = [UOp(Ops.SUBSTITUTE, dtype=node.dtype, src=(node, UOp(Ops.NOOP, src=tuple(outer_axes+axes)),UOp(Ops.NOOP, src=tuple(new_outer_axes+[UOp.const(dtypes.index, i) for i in I])))) \
-    for I in product(*(range(s) for s in inner_shape))]
-  #convert to flat index
-  def idx(I, S): return sum(i * prod(S[j+1:]) for j, i in enumerate(I))
-  def tensordot(T, S, k, M): #k-mode tensor product
-    pre, post = S[:k], S[k+1:]
-    contract = lambda pr, j, su: sum(T[idx((*pr, i, *su), S)] * M[j][i] for i in range(S[k]))
-    return ([contract(pr, j, su) for pr in product(*map(range, pre)) for j in range(len(M)) for su in product(*map(range, post))], pre + (len(M),) + post)
-  #apply B/A/G along all dimensions - kron or n-mode product
-  acc, shp = T, tuple(inner_shape)
-  for k in range(len(inner_shape)): acc, shp = tensordot(acc, shp, k, B)
-  axes = [ctx.new_range(s, AxisType.LOOP) for s in shp] #we need new axes to do conditionals on
-  
-  #mask to correspond each coordinate asked by the buffer to the transformed element
-  def onehot(A, I): return reduce(mul, (ax.eq(UOp.const(dtypes.index, i)).where(UOp.const(dtypes.float, 1.0), 0.0) for ax, i in zip(A, I)), 1.0) #have to double check
-  #sum all wheres together, and return buffer
-  expr = sum(acc[idx(I,shp)] * onehot(axes, I) for I in product(*(range(s) for s in shp)))
-  return expr.bufferize(*(tuple(new_outer_axes)+tuple(axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL)), new_outer_axes, axes, expr
+
+  # Force bufferization of unbufferized sources to prevent inlining
+  if source.op not in {Ops.BUFFER, Ops.BUFFERIZE}:
+    source = source.bufferize(*(inner_axes + outer_axes), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+
+  # Precompute matrix constants per dimension
+  matrix_constants = []
+  for dim in range(len(inner_shape)):
+    dim_constants = []
+    for out_idx in range(len(matrix)):
+      cond = result_axes[dim].eq(UOp.const(dtypes.index, out_idx))
+      row_constants = [cond.where(UOp.const(dtypes.float, matrix[out_idx][in_idx]), 0.0) for in_idx in range(inner_shape[dim])]
+      dim_constants.append(row_constants)
+    matrix_constants.append(dim_constants)
+
+  # Build result: sum over all input positions of (matrix_factor * input_value)
+  terms = []
+  for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
+    # Coalesced indexing: [inner, outer] layout
+    input_val = source.index(*[UOp.const(dtypes.index, i) for i in in_indices], *new_outer_axes)
+    matrix_factor = UOp.const(dtypes.float, 1.0)
+    for dim in range(len(inner_shape)):
+      dim_sum = sum(matrix_constants[dim][out_idx][in_indices[dim]] for out_idx in range(len(matrix)))
+      matrix_factor = matrix_factor * dim_sum
+    terms.append(matrix_factor * input_val)
+
+  result_expr = sum(terms) if terms else UOp.const(dtypes.float, 0.0)
+  # Coalesced output layout: [result, outer] gives r_6_6_tiles grid for better memory coalescing
+  return result_expr.bufferize(*(tuple(result_axes)+tuple(new_outer_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
 def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
@@ -192,37 +171,35 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   if not (g := winoguard(lhs, rhs, redu)): return None
   act_like, w_like, k_axes, o_axes, o_adds = g
   reduce_ranges = list(redu.src[1:]); device = redu.device
-  other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges] #cin and other reduction axes that are not *really* spatial
-  other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes] #all loop like axes not tied to our core conv
+  other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges]
+  other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes]
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
   tile_ranges, tile_ranges1 = [[ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_axes] for _ in range(2)]
   inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_axes] for _ in range(2)]
-  other_loop_ranges_xhat, other_loop_ranges_ghat = [[ctx.new_range(r.vmax+1, AxisType.LOOP) for r in rs] for rs in (other_loops_x, other_loops_w)]
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
-  #Create input tiles by adding tile and inner tile axes and applying n-mode tensor product
-  X_vu = close_buffer(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, device, ctx)
-  XHAT, xhat_outer_axes, xhat_axes, xhat_expr = kron(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, device, ctx)
-  print("XHAT", XHAT.shape)
-  print("XHAT ranges", *[f"\n{k}" for k in xhat_expr.ranges])
-  # X_vu = replace_loops(act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)}), other_reduces+other_loops_x, tile_ranges+inner6, device, ctx)
-  # XHAT = kron_nobuff(X_vu, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
-  #process kernel tiles
-  w = close_buffer(w_like.substitute({k: r for k, r in zip(k_axes, kranges)}), other_reduces+other_loops_w, kranges, device, ctx)
-  GHAT, ghat_outer_axes, ghat_axes, ghat_expr = kron(w, winograd_G, other_reduces+other_loops_w, device, ctx)
-  #hadamard multiply and reduce over other ranges like cin
-  mhat_redu = (XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1) * GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1))# .reduce(*other_reduces, arg=Ops.ADD) - will bring it back when the time is right
-  mhat_expr = xhat_expr * ghat_expr
-  mhat_expr = mhat_expr.substitute({R: r for R, r in zip(xhat_axes, inner6_1)} | {R: r for R, r in zip(ghat_axes, inner6_1)})
-  print("XHAT ranges", *[f"\n{k}" for k in xhat_expr.ranges])
-  print("GHAT ranges", *[f"\n{k}" for k in ghat_expr.ranges])
-  miracle, miracle_outer_axes, miracle_axes, miracle_expr = kron_nobuff(mhat_expr, winograd_At, xhat_outer_axes, inner6_1, device, ctx)
+  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
+  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
 
-  MHAT = (mhat_redu).bufferize(*other_loop_ranges_xhat, *other_loop_ranges_ghat, *tile_ranges1, *inner6_1, arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL)) # which loops come first?
-  #output transform (inferring tile shape from tile_ranges_1 is a hack cuz those ranges are "dead")
-  print("MIRACLE", miracle.shape)
-  return miracle.index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes])
-  #return kron(MHAT, winograd_At, other_loops_x+other_loops_w+tile_ranges1, device, ctx)\
-    #.index(*other_loops_x, *other_loops_w, *[ox//4 for ox in o_axes], *[ox%4 for ox in o_axes]) #bring back the original loops like cout (Do we need to use simplify?)
+  # Transform activations: X_tiled → XHAT with coalesced layout [6×6, cin, batch, tiles]
+  X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
+  XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
+
+  # Transform weights: w_sub → GHAT with coalesced layout [6×6, cin, cout]
+  w_sub = w_like.substitute({k: r for k, r in zip(k_axes, kranges)})
+  GHAT = winograd_kron(w_sub, winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
+
+  # Hadamard multiply and reduce over cin - indexing matches coalesced buffer layouts
+  mhat_redu = (GHAT.index(*inner6_1, *other_reduces, *other_loop_ranges_ghat) *
+               XHAT.index(*inner6_1, *other_reduces, *other_loop_ranges_xhat, *tile_ranges1)).reduce(*other_reduces, arg=Ops.ADD)
+
+  # Coalesced layout: inner6_1 first gives r_6_6_8 grid for better memory access
+  MHAT = mhat_redu.bufferize(*(inner6_1+tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat),
+                              arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+
+  # Output transform: MHAT[inner6, tiles, cout, batch] → result[4×4, tiles, cout, batch]
+  # Index order matches buffer layout: [within_tile, tiles, cout, batch]
+  return winograd_kron(MHAT, winograd_At, tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat, inner6_1, device, ctx)\
+    .index(*[ox%4 for ox in o_axes], *[ox//4 for ox in o_axes], *other_loops_w, *other_loops_x)
 
 winograd_rewrite = PatternMatcher([
  ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))
@@ -255,6 +232,9 @@ def cleanup_dead_axes(b:UOp):
     # move the tag to the expand. NOTE: this expand tag might not survive
     return b.replace(src=b.src[0:1]+tuple(new_rng), tag=None).reshape(tuple(reshape)).expand(b.shape).replace(tag=b.tag)
 
+def gate_substitute(ctx, b:UOp) -> None:
+  if not any(r in b.ranges for r in ctx.keys()): raise BottomUpGate()
+pm_gate_substitute = PatternMatcher([(UPat(GroupOp.All, name="b"), gate_substitute)], compiled=False)
 # if a buffer is being stored just for permutes or something, remove it
 # we want to reexpress the indexes of idx2 in terms of the implied b1
 def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
@@ -271,18 +251,24 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     # if we return None, the bufferize is kept
 
     accessed_buffers: list[UOp] = []
+    indexes: list[UOp] = []
     reduces: list[UOp] = []
     def red_gate(x:UOp):
-      if x.op is Ops.INDEX:
+      if x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL:
         accessed_buffers.append(x)
         return False
+      if x.op is Ops.BUFFER:
+        accessed_buffers.append(x)
+      if x.op is Ops.INDEX:
+        indexes.append(x)
       if x.op is Ops.REDUCE: reduces.append(x)
       return True
     src.toposort(gate=red_gate)
     del red_gate
+    accessed_buffers = dedup(accessed_buffers)
 
     # if this is generated from multiple buffers, don't remove this buffer
-    if len(dedup([x.src[0] for x in accessed_buffers])) > 2: return None
+    if len(accessed_buffers) > 2 and not (PCONTIG > 2): return None
 
     # if any reduces access a buffer, don't remove this buffer
     buffer_in_reduce = False
@@ -292,6 +278,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
       return not buffer_in_reduce
     UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
     del buf_gate
+<<<<<<< HEAD
     if buffer_in_reduce: return None
   # if it makes it here, the bufferize is removed
   # this is the ranges replaced
@@ -306,42 +293,80 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     #   print("REPLACES", *[f"\n{k}" for k in replaces])
     #   print("SUBSTITUTE", UOp(Ops.SUBSTITUTE, dtype=src.dtype, src=(src, UOp(Ops.NOOP, src=tuple(replaces[0::2])), UOp(Ops.NOOP, src=tuple(replaces[1::2])))))
     return UOp(Ops.SUBSTITUTE, dtype=src.dtype, src=(src, UOp(Ops.NOOP, src=tuple(replaces[0::2])), UOp(Ops.NOOP, src=tuple(replaces[1::2]))))
+=======
+    if buffer_in_reduce:
+      if PCONTIG > 2:
+        out_in_ratio = (prod(buf.shape)+1) / (sum([x.size for x in accessed_buffers])+1)
+        if out_in_ratio < 10: return None
+        # here we have to check the indexes, we might do a partial contig here
+        local_indexes = [x for x in indexes if x.src[0].op is Ops.BUFFERIZE and x.src[0].arg.addrspace == AddrSpace.LOCAL]
+        exclude_ranges = UOp.group(*[UOp.group(*x.src[1:]) for x in local_indexes]).ranges
+        subs = [(k,v) for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST]
+        # if it's bufferized or a reduce, it's pcontig
+        is_pcontig, is_subs = partition(subs, lambda x: x[0] in exclude_ranges or any([r.arg[-1] == AxisType.REDUCE for r in x[1].ranges]))
+        if not len(is_subs):
+          return None
+        if len(is_pcontig):
+          ret = src.substitute(dict(is_subs), extra_pm=pm_gate_substitute)
+          return ret.bufferize(*[x[0] for x in is_pcontig], arg=BufferizeOpts(None, AddrSpace.LOCAL)).index(*[x[1] for x in is_pcontig])
+      else:
+        return None
 
-def pre_bufferize(b:UOp, x:UOp, copy:UOp):
-  nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
-  return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
+  # if it makes it here, the bufferize is removed
+  # this is the ranges replaced
+  # NOTE: if buf src is a const, we don't replace it
+  return src.substitute({k:v for k,v in zip(buf.src[1:], idx.src[1:]) if k.op is not Ops.CONST}, extra_pm=pm_gate_substitute)
+>>>>>>> upstream/master
 
-pm_cleanups = pm_mops+PatternMatcher([
+def remove_noop_bufferize(idx,b2):
+  if idx.src[1:] != b2.src[1:] or idx.src[0].op is Ops.BUFFER_VIEW: return None
+  new_tag = (idx.src[0].tag or ()) + (b2.tag or ()) or None
+  return idx.src[0].rtag(new_tag).shrink(tuple((0, s) for s in b2.shape)) if b2.shape else idx.src[0].rtag(new_tag)
+
+pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
   (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
     and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
   # remove noop buffers. if we look at the next index we can remove even more of these
-  # NOTE: this is mostly the same case as below, but if there's no INDEX this gets more
-  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"),
-   lambda idx,b2: idx.src[0].replace(tag=nt if len(nt:=(idx.src[0].tag or ()) + (b2.tag or ())) else None) if idx.src[1:] == b2.src[1:] \
-       and idx.src[0].op is not Ops.BUFFER_VIEW else None),
-  # remove reindexing with cost function
-  (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+  (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
+  # dont bufferize an arange
+  (UPat.any((r:=UPat(dtype=dtypes.index).cast()).named("src"), r.eq(UPat()).named("src")).f(Ops.BUFFERIZE,
+    allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
+  # indexing a const is a const
+  (UPat(Ops.INDEX, src=(UPat(Ops.CONST, name="c"),),), lambda c: c),
   # copy on CONST is CONST
   (UPat(Ops.COPY, src=(UPat.cvar("x"), UPat()), name="copy"), lambda copy,x: copy.const_like(x.arg)),
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
-                       .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  # hack if a noop turned to a const
+  (UPat.cvar("c").f(Ops.NOOP).f(Ops.BUFFERIZE, allow_any_len=True, name="buf"), lambda c,buf: buf.replace(src=(c,)+buf.src[1:])),
   # mstack on CONST is CONST
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
 ])
 
+def pre_bufferize(b:UOp, x:UOp, copy:UOp):
+  nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
+  return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
+pm_remove_bufferize = PatternMatcher([
+  # hack so remove_bufferize doesnt remove the buffer before a copy
+  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
+                      .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
+  # remove reindexing with cost function
+  (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+])
+
 def late_buffer_view(t:UOp, b:UOp):
   if isinstance(b.device, str) and (b.device.startswith("DISK") or b.device.startswith("TINYFS")):
-    rngs = b.src[1:]
-    size = prod(shape := [int(r.vmax+1) for r in rngs])
+    shape = b.shape
+    size = prod(shape)
 
     # walk up for the INDEX
     x = t
-    while not any(u.op is Ops.INDEX for u in x.src): x = x.src[0]
+    while not any(u.op is Ops.INDEX for u in x.src):
+      assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
+      x = x.src[0]
     x = next(u for u in x.src if u.op is Ops.INDEX)
 
     if len(shape) == 0: offset = x.src[1].arg
@@ -363,7 +388,7 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
   bufs: set[UOp] = set()
   def gate_input(u:UOp):
     # TODO: add cache to fix n^2
-    if is_load:=(u.op in {Ops.BUFFERIZE, Ops.ASSIGN, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
+    if is_load:=(u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
     return not is_load
   root.toposort(gate=gate_input)
 
@@ -386,11 +411,11 @@ pm_limit_bufs = PatternMatcher([(UPat(set.union(GroupOp.Binary, GroupOp.Ternary)
 # BUFFERIZE returns the BUFFER ready for INDEXing (doing this will make splitting a lot easier)
 # NOTE: this has been fixed up a bit
 
-def bufferize_to_store(x:UOp):
-  rngs = x.src[1:]
-  shape = tuple([int(r.vmax+1) for r in rngs])
-  size = prod(shape)
-  assert size > 0, f"no zero sized buffers {shape}"
+def bufferize_to_store(ctx:itertools.count|None, x:UOp, idx:UOp, allow_locals=True):
+  #assert isinstance(x.tag, Flat), "bufferize must be flat"
+  size = prod(x.shape)
+  rngs = sorted(idx.ranges, key=lambda x: x.arg)
+  assert size > 0 and isinstance(size, int), f"no zero sized or symbolic sized buffers {size}"
 
   sdtype = x.dtype.ptr(size=size, addrspace=x.arg.addrspace)
   if x.src[0].op is Ops.ASSIGN:
@@ -398,40 +423,53 @@ def bufferize_to_store(x:UOp):
     assert assign_target.op is Ops.INDEX, f"{assign_target.op} is not index"
     # in assign, this is the buffer size, not the bufferize size
     # TODO: assign_mops here
-    ret = assign_target.replace(dtype=sdtype).store(assign_src, *rngs, dtype=x.dtype).replace(tag=x.tag)
+    do_store = assign_target.replace(dtype=sdtype).store(assign_src, tag=x.tag).end(*rngs)
+    ret = assign_target.src[0].after(do_store)
     mops = []
     walk = assign_mops
     while walk is not assign_mops.base:
       mops.append((walk.op, walk.marg))
       walk = walk.src[0]
     for m in mops[::-1]: ret = ret._mop(*m)
-    return ret.forced_reshape(shape).replace(tag=x.tag)
+    return ret
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
-    ret = buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=x.dtype).replace(tag=x.tag)
-    ret = ret.forced_reshape(shape)
-    # TODO: is this right? what if it's offset
-    if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
-      sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
-      ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
-    return ret.replace(tag=x.tag)
+    do_store = buf.index(idx, dtype=sdtype).store(x.src[0], tag=x.tag).end(*rngs)
+    return buf.after(do_store)
 
-  # handle locals
-  tag = x.arg.device
-  if tag is None: tag = UOp.unique().arg # TODO: hack
-  buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=tag)
-  # store has the other dtype here
-  # TODO: how is this unified?
-  return buf.reshape(shape).index(*rngs, dtype=sdtype).store(x.src[0], *rngs, dtype=sdtype).reshape(shape)
+  if allow_locals:
+    # handle locals
+    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=next(unwrap(ctx)))
+    do_store = buf.broadcast(x.src[1].dtype.count).index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
+    return buf.after(do_store.barrier())
 
-pm_add_buffers = pm_mops+to_bufferview+PatternMatcher([
-  (UPat(Ops.BUFFERIZE, name="x"), bufferize_to_store),
+# collapse any BUFFERIZE to single input BUFFERIZE. move the tag to a reshape
+def flatten_bufferize(x:UOp):
+  if x.tag is None and len(x.src) == 2: return None
+  ret = x.replace(tag=None, src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
+  rngs = x.src[1:]
+  ret = ret.forced_reshape(x.shape)
+  if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
+    sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
+    ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
+  return ret.rtag(x.tag)
+pm_flatten_bufferize = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
+
+pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), lambda x, idx: bufferize_to_store(None, x, idx, allow_locals=False)),
 
   # move RESHAPEs through MSELECT/MSTACK
   (UPat((Ops.MSELECT, Ops.MSTACK), src=UPat(Ops.RESHAPE), name="m"),
    lambda m: m.replace(src=tuple([x.src[0].base for x in m.src]), tag=None).reshape(m.shape).rtag(m.tag)),
+
+  # remove any RESHAPEs on KERNEL
+  (UPat(Ops.KERNEL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
+])
+
+pm_add_buffers_local = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
+  (UPat(Ops.BUFFERIZE, src=(UPat(), UPat(name="idx")), name="x"), bufferize_to_store),
 ])
 
 # *****************
@@ -456,22 +494,23 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   ctx.vars[b] = None
   return b.src[0]
 
-def handle_assign(ctx:LocalAddBufferContext, assign:UOp):
-  buf = assign.as_buf()
+def handle_after(ctx:LocalAddBufferContext, after:UOp):
+  if isinstance(after.dtype, PtrDType) and after.ptrdtype.addrspace == AddrSpace.LOCAL: return None
+  buf = after.as_buf()
   # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
   if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
   assert buf not in ctx.map
-  ctx.map[buf] = assign
+  ctx.map[buf] = after
   return buf
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
-  if r.tag is not None: return None
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=())
+  if r.tag != (): return None
+  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
 
 def find_bufs(x:UOp):
-  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.ASSIGN) if s.op is Ops.INDEX]
+  idxs = [s for s in x.toposort(gate=lambda x: x.op is not Ops.AFTER) if s.op is Ops.INDEX]
   read_from: dict[UOp, Ops] = {}
   if any((buf:=idx.as_buf()).op is Ops.BUFFER and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
     raise RuntimeError(f"cycle detected while indexing {buf}")
@@ -480,7 +519,7 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.BIND, name="b"), unbind_kernel),
-  (UPat((Ops.ASSIGN, Ops.MSTACK, Ops.MSELECT), name="assign"), handle_assign),
+  (UPat((Ops.MSTACK, Ops.MSELECT, Ops.AFTER), name="after"), handle_after),
 
   # HACK in case any CONSTs were replaced
   # this is only needed if you are using symbolic
@@ -509,39 +548,39 @@ rangeify_codegen = PatternMatcher([
 
   # add loads to non ptr indexes
   # TODO: this can be moved into codegen?
-  (UPat((Ops.DEFINE_GLOBAL, Ops.STORE), name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
-   lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
+  #(UPat.any(UPat(Ops.DEFINE_GLOBAL, name="dg"), UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True, name="dg"))
+  # .f(Ops.INDEX, name="idx", allow_any_len=True),
+  #  lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else idx.replace(dtype=dg.dtype, arg=None).load()),
 
-  # TODO: this can be moved into codegen
-  (UPat(Ops.STORE, name="store").f(Ops.INDEX, allow_any_len=True, name="idx").f(Ops.LOAD),
-    lambda store,idx: idx.replace(src=(store.as_buf(),)+idx.src[1:]).load(store if idx.dtype.addrspace != AddrSpace.LOCAL else store.barrier())),
-
-  # TODO: hack for group for reduce
-  (UPat(Ops.IF, src=(UPat.var("gate"), UPat(Ops.LOAD, src=(UPat.var("src"), UPat.var("barrier"))),)),
-   lambda src, barrier, gate: src.load(UOp(Ops.IF, src=(gate, barrier)))),
+  # fix broadcast dtype
+  (UPat(Ops.AFTER, name="a").broadcast(name="b"), lambda a,b: a.broadcast(len(b.src))),
+  (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).broadcast(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
+    lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
+      idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
+  (UPat(Ops.AFTER, name="a").gep(name="b"), lambda a,b: a.gep(b.arg)),
+  (UPat(Ops.DEFINE_LOCAL).f(Ops.AFTER, allow_any_len=True).gep(name="dg").f(Ops.INDEX, name="idx", allow_any_len=True),
+    lambda dg,idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
+      idx.replace(dtype=dg.dtype, arg=None).load(dtype=dg.dtype.base.scalar().vec(dg.dtype.vcount))),
 ])
 
 def remove_metadata_tags(ctx:LocalAddBufferContext, x:UOp):
   if x.tag is None or x.tag == (): return None
-  ctx.parent_tags += list(x.tag)
+  if isinstance(x.tag, tuple): ctx.parent_tags += list(x.tag)
   return x.replace(tag=None)
 
 pm_remove_tags = PatternMatcher([
-  # remove all the tags
   (UPat(GroupOp.All, name="x"), remove_metadata_tags),
 ])
 
-@dataclass(frozen=True)
-class Kernel:
-  ast: UOp
-  metadata: tuple[Metadata, ...] = ()
-  def __repr__(self):
-    ast_rep = f"SINK{tuple(s.op for s in self.ast.src)}" if self.ast.op is Ops.SINK else repr(self.ast.op)
-    return f"<Kernel {len(list(self.ast.toposort()))} {ast_rep} {self.metadata}>"
+pm_add_range_tags = PatternMatcher([
+  (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(())),
+])
 
-def split_store(ctx:list[UOp], x:UOp):
-  if len(x.ranges): return None
-  if x.src[0].ptrdtype.addrspace is AddrSpace.LOCAL: return None
+def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
+  if len([r for r in x.ranges if r.arg[-1] != AxisType.OUTER]): return None
+
+  # ends of outer range don't go in kernels
+  if x.op is Ops.END and x.src[1].op is Ops.RANGE and x.src[1].arg[-1] == AxisType.OUTER: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
@@ -551,16 +590,22 @@ def split_store(ctx:list[UOp], x:UOp):
   metadatas = [ctx[y].metadata for y in lctx.parent_tags]
 
   # NOTE: the hack for COPY is here
-  ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None) \
-    if ret.src[1].op not in {Ops.COPY, Ops.BUFFER_VIEW} else ret.src[1]
+  for u in ret.toposort():
+    # TODO: this can be wrong if there's multiple of these
+    if u.op in {Ops.COPY, Ops.BUFFER_VIEW}:
+      ret = u
+      break
+  else:
+    ret = ret.sink(arg=KernelInfo(opts_to_apply=lctx.opts) if lctx.opts is not None else None)
+
   kernel_arg = Kernel(ret,tuple(dedup(flatten([x for x in metadatas if x is not None])))[::-1])
   kernel = UOp(Ops.KERNEL, src=tuple(lctx.map.values())+tuple(lctx.vars.keys()), arg=kernel_arg)
   if ret.op is Ops.SINK and not all_same([x.device for x in kernel.src if x.op is not Ops.BIND]):
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in kernel.src)}")
-  return x.as_buf().assign(kernel)
+  return kernel
 
 split_kernels = PatternMatcher([
-  (UPat(Ops.STORE, name="x"), split_store),
+  (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
 def tag_uop(ctx:list[UOp], x:UOp):
@@ -570,7 +615,7 @@ def tag_uop(ctx:list[UOp], x:UOp):
   return x.replace(tag=(len(ctx)-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
-  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND,
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL, Ops.END,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
   (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
 ])
@@ -591,76 +636,68 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-def do_sub_recurse(s:UOp):
-  x,keys,values = s.src[0], s.src[1].src, s.src[2].src
-  # SUBSTITUTE applied to SUBSTITUTE runs the child SUB on the parents. though this is probably wrong in the generic case
-  if x.op is Ops.SUBSTITUTE:
-    sub_k = UOp(Ops.SUBSTITUTE, src=(x.src[1],)+s.src[1:])
-    sub_v = UOp(Ops.SUBSTITUTE, src=(x.src[2],)+s.src[1:])
-    return UOp(Ops.SUBSTITUTE, dtype=x.dtype, src=(x.src[0], sub_k, sub_v))
-  # here we actually do the SUBSTITUTE
-  if x in keys: return values[keys.index(x)]
-  # we filter any keys where the ranges don't overlap. this keeps the algorithm O(output graph size)
-  x_ranges = x.ranges
-  new_kv = {k:v for k,v in zip(keys,values) if any(r in x_ranges for r in k.ranges)}
-  # if there's no SUBSTITUTEs left, we can just return x
-  if len(new_kv) == 0: return x
-  # then we add SUBSTITUTE to all parents
-  uop_keys, uop_values = UOp(Ops.NOOP, src=tuple(new_kv.keys())), UOp(Ops.NOOP, src=tuple(new_kv.values()))
-  return x.replace(src=tuple([UOp(Ops.SUBSTITUTE, dtype=y.dtype, src=(y,uop_keys,uop_values)) for y in x.src]))
-pm_substitute_recurse = PatternMatcher([(UPat(Ops.SUBSTITUTE, src=(UPat(), UPat(Ops.NOOP), UPat(Ops.NOOP)), name="s"), do_sub_recurse)])
-
+@disable_gc()
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
 
-  tsink = graph_rewrite(tsink, earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
   # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, getenv("DEBUG_RANGEIFY", 0))
+  tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
+<<<<<<< HEAD
   if WINO: tsink = graph_rewrite(tsink, winograd_rewrite, ctx=rctx, name="winograd")
   # NOTE: sym (vs symbolic_simple) breaks things here because ranges with len 1 aren't handled right
   tsink = graph_rewrite(tsink, symbolic_simple+pm_reduce_unparented, name="symbolic")  # this supports const folding
   tsink = graph_rewrite(tsink, pm_cleanups, bottom_up=True, name="remove costly buffers")
   # TODO: can you substitute and remove costly buffers at the same time?
   tsink = graph_rewrite(tsink, pm_substitute_recurse, bottom_up=True, name="run substitutes")
+=======
+  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding, name="symbolic+reduce_collapse")  # this does const folding
+  tsink = graph_rewrite(tsink, pm_remove_bufferize, bottom_up=True, name="remove bufferize with cost function")
+  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding, name="symbolic+reduce_collapse pt 2")
+>>>>>>> upstream/master
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
   # MSTACK stacks multiple BUFFERIZEs in one tagged tensor
   # if it's not tagged by here, it's out
-  tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER} and \
+  tsink = UOp.sink(*[x for x in tsink.backward_slice if x.base.op in {Ops.BUFFERIZE, Ops.MSTACK, Ops.CONST, Ops.BUFFER, Ops.AFTER} and \
                      x.tag is not None and len(x.tag)])
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Tagged Rangeify")
 
   # bufferize -> store
-  tsink = graph_rewrite(tsink, pm_add_buffers, bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
   # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
   kernel_assign: dict[UOp, UOp] = {}
   assign_rep: dict[UOp, UOp] = {}
   for u in tsink.toposort():
-    if u.op is not Ops.ASSIGN: continue
+    if u.op is not Ops.AFTER: continue
     kernel_assign[u.buf_uop] = u
     for s in u.src[1].src:
       # TODO: this is probably broken for MSELECT/MSTACK
       if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
-      if any(x.op is Ops.ASSIGN and x.buf_uop is s for x in u.toposort()):
-        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on ASSIGN or BUFFER")
+      if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
+        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
+  # TODO: we can probably get this earlier
+  sink_tags = [s.tag for s in tsink.src]
+  tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
+
   becomes_map: dict[UOp, UOp] = {}
-  for s in tsink.src:
-    assert s.tag is not None
-    for a in s.tag:
+  for tag, s in zip(sink_tags, tsink.src):
+    assert tag is not None
+    for a in tag:
       if a is None: continue
-      becomes_map[uop_list[cast(int, a)]] = s.replace(tag=None)
+      becomes_map[uop_list[int(a)]] = s
   return becomes_map

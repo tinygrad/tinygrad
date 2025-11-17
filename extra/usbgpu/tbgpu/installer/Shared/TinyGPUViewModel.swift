@@ -119,14 +119,7 @@ extension TinyGPUViewModel: OSSystemExtensionRequestDelegate {
 
 		os_log("sysex actionForReplacingExtension: %@ %@", existing, ext)
 
-		// Add appropriate logic here to determine whether to replace the extension
-		// with the new extension. Common things to check for include
-		// testing whether the new extension's version number is newer than
-		// the current version number, or whether the bundleIdentifier is different.
-		// For simplicity, this sample always replaces the current extension
-		// with the new one.
 		replacementAction = .replace
-
 		self.state = .activating
 		return replacementAction
 	}

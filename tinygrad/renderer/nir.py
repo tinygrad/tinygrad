@@ -1,11 +1,11 @@
-from typing import Callable, cast
+from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
-from tinygrad.helpers import DEBUG, OSX, unwrap
+from tinygrad.helpers import DEBUG, OSX, unwrap, charptr
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat
-import tinygrad.runtime.autogen.mesa as mesa
-import base64, ctypes, ctypes.util, struct, functools, inspect
+from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
+from tinygrad.runtime.autogen import mesa
+import base64, contextlib, ctypes, ctypes.util, struct, functools, inspect
 
 def g(s:str): return getattr(mesa, s)
 def nsrc(d:mesa.nir_def) -> mesa.nir_src: return mesa.nir_src(ssa=ctypes.pointer(d))
@@ -21,7 +21,7 @@ def glsl_type(t:DType) -> mesa.struct_glsl_type:
 u_aop = { Ops.ADD: "iadd", Ops.MUL: "imul", Ops.IDIV: "udiv", Ops.MOD: "umod", Ops.CMPLT: "ult", Ops.CMPNE: "ine", Ops.CMPEQ: "ieq", Ops.OR: "ior",
           Ops.AND: "iand", Ops.XOR: "ixor", Ops.WHERE: "bcsel", Ops.MAX: "umax"}
 s_aop = {**u_aop, Ops.CMPLT: "ilt", Ops.IDIV: "idiv", Ops.MOD: "irem", Ops.MAX: "imax"}
-f_aop = { Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "flt", Ops.CMPNE: "fneu", Ops.CMPEQ: "feq", Ops.FDIV: "fdiv", Ops.RECIP: "frcp",
+f_aop = { Ops.ADD: "fadd", Ops.MUL: "fmul", Ops.CMPLT: "flt", Ops.CMPNE: "fneu", Ops.CMPEQ: "feq", Ops.FDIV: "fdiv", Ops.RECIPROCAL: "frcp",
           Ops.MAX: "fmax", Ops.TRUNC: "ftrunc", Ops.SIN: "fsin", Ops.EXP2: "fexp2", Ops.LOG2: "flog2"}
 aop = {**{x:u_aop for x in (dtypes.bool,)+dtypes.uints}, **{x:s_aop for x in dtypes.sints}, **{x:f_aop for x in dtypes.floats}}
 
@@ -51,7 +51,7 @@ def nir_instr(nc=1, bs=lambda: None, intrins=None, srcs=None, has_def=True, df=N
       instr = f(*args, **kwargs)
       if has_def: mesa.nir_def_init(instr.contents.instr, getattr(instr.contents, "def"), go(nc), go(bs))
       for k, v in go(intrins or {}).items():
-        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic].index_map[g(f"NIR_INTRINSIC_{k}")]
+        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic.value].index_map[g(f"NIR_INTRINSIC_{k}")]
         assert idx > 0
         instr.contents.const_index[idx - 1] = go(v)
       for i, src in enumerate(go(srcs or [])): ctypes.cast(instr.contents.src, ctypes.POINTER(mesa.nir_src))[i] = go(src)
@@ -148,7 +148,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, name="x"), lambda ctx,x: ncast(ctx.b, ctx.r[x.src[0]], x.src[0].dtype, x.dtype)),
     (UPat(Ops.BITCAST, src=(UPat.var("a"),), allow_any_len=True), lambda ctx,a: ctx.r[a]),
     (UPat(Ops.GEP, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: nchannel(ctx.b, ctx.r[a], x.arg[0])),
-    (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x:mesa.nir_local_variable_create(ctx.b.impl, glsl_type(x.dtype), f"acc{x.arg[0]}".encode()).contents),
+    (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x:mesa.nir_local_variable_create(ctx.b.impl, glsl_type(x.dtype), f"acc{x.arg}".encode()).contents),
     (UPat(Ops.BARRIER), lambda ctx: nbarrier(ctx.b)),
     (UPat(Ops.IF, name="x"), lambda ctx,x: mesa.nir_push_if(ctx.b, ctx.r[x.src[0]])),
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: (lambda _: mesa.nir_def())(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
@@ -157,8 +157,7 @@ class NIRRenderer(Renderer):
   def __init__(self): mesa.glsl_type_singleton_init_or_ref()
 
   def __del__(self):
-    try: mesa.glsl_type_singleton_decref()
-    except FileNotFoundError: pass
+    with contextlib.suppress(AttributeError):mesa.glsl_type_singleton_decref()
 
   @property
   def nir_options(self): raise NotImplementedError("needs nir_options")
@@ -169,23 +168,30 @@ class NIRRenderer(Renderer):
   def render(self, uops:list[UOp]):
     self.prerender(uops)
     for u in [u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]: self.b.shader.contents.info.workgroup_size[int(u.arg[-1])] = u.src[0].arg
-    self.r, self.param_idx, ranges = {}, 0, []
+    self.r: dict[UOp, Any] = {}
+    self.param_idx, ranges = 0, []
 
     for u in uops:
-      if u.op == Ops.NOOP or u.op == Ops.INDEX: pass
+      if u.op in {Ops.NOOP, Ops.GROUP, Ops.INDEX}: pass
+      elif u.op is Ops.AFTER:
+        self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
-        if u.arg is not None: self.b.shader.contents.info.name = mesa.char_pointer_cast(u.arg.function_name)
+        if u.arg is not None: self.b.shader.contents.info.name = charptr(u.arg.function_name.encode())
       elif u.op == Ops.DEFINE_LOCAL:
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.dtype.nbytes()
       elif u.op == Ops.RANGE:
-        ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{u.arg[0]}".encode()).contents))
+        ranges.append(i:=deref_var(self.b, mesa.nir_local_variable_create(self.b.impl, glsl_type(u.dtype), f"idx{range_str(u)}".encode()).contents))
         nstore(self.b, AddrSpace.REG, i, nimm(self.b, 0, u.dtype), u.dtype)
         mesa.nir_push_loop(self.b)
         self.r[u] = nload(self.b, AddrSpace.REG, i, u.dtype)
-      elif u.op == Ops.ENDRANGE:
-        nif(self.b, nalu(self.b, "ilt", x:=nalu(self.b, "iadd", self.r[u.src[0]], nimm(self.b, 1, u.src[0].dtype)), self.r[u.src[0].src[0]]),
-            functools.partial(nstore, self.b, AddrSpace.REG, ranges.pop(), x, u.src[0].dtype), lambda: njump(self.b, mesa.nir_jump_break))
+        nif(self.b, nalu(self.b, "ilt", self.r[u], self.r[u.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+      elif u.op == Ops.END:
+        r = u.src[1]
+        next_i = nalu(self.b, "iadd", self.r[r], nimm(self.b, 1, r.dtype))
+        # TODO: this nif should be removable ... but TestMultiTensor.test_double_matmul_shard_W_0 segfaults with it gone
+        nif(self.b, nalu(self.b, "ilt", next_i, self.r[r.src[0]]), lambda: None, lambda: njump(self.b, mesa.nir_jump_break))
+        nstore(self.b, AddrSpace.REG, ranges.pop(), next_i, r.dtype),
         mesa.nir_pop_loop(self.b, None)
       else:
         if (d:=self.def_rewrite.rewrite(u, ctx=self)) is None: raise RuntimeError(f"failed to render {u.op} srcs {[x.dtype for x in u.src]}")
