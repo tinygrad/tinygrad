@@ -6,6 +6,8 @@ from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 try: from tinygrad.runtime.autogen import llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
+def rzalloc(typ, ctx=None): return ctypes.cast(mesa.rzalloc_size(ctypes.cast(ctx, ctypes.c_void_p), ctypes.sizeof(typ)), ctypes.POINTER(typ))
+
 def deserialize(enc_src, opts):
   blobreader = mesa.struct_blob_reader()
   mesa.blob_reader_init(blobreader, src:=base64.b64decode(enc_src), len(src))
@@ -100,8 +102,15 @@ class IR3Compiler(NIRCompiler):
     nir_shader = deserialize(src, self.nir_options)
     shader = mesa.ir3_shader_from_nir(self.cc, nir_shader, mesa.struct_ir3_shader_options(), None).contents
     input(f"shader.nir.info: {ctypes.addressof(shader.nir.contents.info):X}\nshader: {ctypes.addressof(shader):X}")
-    v = mesa.struct_ir3_shader_variant(shader_id=shader.id, key=mesa.struct_ir3_shader_key(), type=shader.type, shader_options=shader.options,
-      compiler=self.cc, mergedregs=self.cc.mergedregs, num_ssbos=(info:=shader.nir.contents.info).num_ssbos, num_uavs=info.num_ssbos+info.num_images)
-    v.cs.req_local_mem = shader.cs.req_local_mem
-    assert mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
-    return ctypes.string_at(mesa.ir3_shader_assemble(v), v.contents.info.size)
+    v = rzalloc(mesa.struct_ir3_shader_variant).contents
+    v.shader_id, v.key, v.type, v.shader_options = shader.id, mesa.struct_ir3_shader_key(), shader.type, shader.options,
+    v.compiler, v.mergedregs, v.num_ssbos = ctypes.pointer(self.cc), self.cc.mergedregs, (info:=shader.nir.contents.info).num_ssbos,
+    v.num_uavs, v.cs.req_local_mem, = info.num_ssbos+info.num_images, shader.cs.req_local_mem
+    v.const_state = rzalloc(mesa.struct_ir3_const_state, ctypes.pointer(v))
+    print("alloced")
+    (cs:=v.const_state.contents).allocs, cs.push_consts_type, cs.consts_ubo.idx = shader.options.const_allocs, shader.options.push_consts_type, -1
+    cs.driver_params_ubo.idx, cs.primitive_map_ubo.idx, cs.primitive_param_ubo.idx = -1, -1, -1
+    assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
+    bin_ = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
+    mesa.ir3_shader_disasm(v, bin_, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
+    return ctypes.string_at(mesa.ir3_shader_assemble(v), v.info.size)
