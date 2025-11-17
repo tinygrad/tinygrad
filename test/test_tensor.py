@@ -80,6 +80,14 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(xgrad2.numpy(), xgrad.numpy() * 2., atol=1e-6)
     np.testing.assert_allclose(wgrad2.numpy(), wgrad.numpy() * 2., atol=1e-6)
 
+  def test_max_backward_half_many_equal_maxima(self):
+    t = Tensor.ones(70000, dtype=dtypes.half, requires_grad=True).contiguous()
+    t.max().backward()
+    grad = t.grad.numpy()
+    self.assertTrue(np.isfinite(grad).all())
+    self.assertGreater(grad.max(), 0)
+    self.assertAlmostEqual(float(grad.sum()), 1.0, places=2)
+
   def test_second_order_backward_pass(self):
     def test_pytorch():
       x_val = torch.tensor([2.0], requires_grad=True)
