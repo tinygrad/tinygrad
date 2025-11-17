@@ -122,6 +122,9 @@ jobs:
       run: TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
     - name: Test multi-gpu
       run: CPU=1 CPU_LLVM=1 GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
+    - name: Test kernel fusion
+      run: python3 extra/torch_backend/test_kernel_fusion.py
+
 
   torchbackendmore:
     name: Torch Backend Tests More
