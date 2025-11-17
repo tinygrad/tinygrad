@@ -794,7 +794,6 @@ struct_ibv_async_event._fields_ = [
   ('element', struct_ibv_async_event_element),
   ('event_type', enum_ibv_event_type),
 ]
-# const char *ibv_wc_status_str(enum ibv_wc_status status)
 try: (ibv_wc_status_str:=dll.ibv_wc_status_str).restype, ibv_wc_status_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_wc_status]
 except AttributeError: pass
 
@@ -916,19 +915,15 @@ IBV_RATE_600_GBPS = enum_ibv_rate.define('IBV_RATE_600_GBPS', 22)
 IBV_RATE_800_GBPS = enum_ibv_rate.define('IBV_RATE_800_GBPS', 23)
 IBV_RATE_1200_GBPS = enum_ibv_rate.define('IBV_RATE_1200_GBPS', 24)
 
-# __attribute__((const)) int ibv_rate_to_mult(enum ibv_rate rate)
 try: (ibv_rate_to_mult:=dll.ibv_rate_to_mult).restype, ibv_rate_to_mult.argtypes = ctypes.c_int32, [enum_ibv_rate]
 except AttributeError: pass
 
-# __attribute__((const)) enum ibv_rate mult_to_ibv_rate(int mult)
 try: (mult_to_ibv_rate:=dll.mult_to_ibv_rate).restype, mult_to_ibv_rate.argtypes = enum_ibv_rate, [ctypes.c_int32]
 except AttributeError: pass
 
-# __attribute__((const)) int ibv_rate_to_mbps(enum ibv_rate rate)
 try: (ibv_rate_to_mbps:=dll.ibv_rate_to_mbps).restype, ibv_rate_to_mbps.argtypes = ctypes.c_int32, [enum_ibv_rate]
 except AttributeError: pass
 
-# __attribute__((const)) enum ibv_rate mbps_to_ibv_rate(int mbps)
 try: (mbps_to_ibv_rate:=dll.mbps_to_ibv_rate).restype, mbps_to_ibv_rate.argtypes = enum_ibv_rate, [ctypes.c_int32]
 except AttributeError: pass
 
@@ -1200,7 +1195,6 @@ struct_ibv_qp_rate_limit_attr._fields_ = [
   ('typical_pkt_sz', uint16_t),
   ('comp_mask', uint32_t),
 ]
-# const char *ibv_wr_opcode_str(enum ibv_wr_opcode opcode)
 try: (ibv_wr_opcode_str:=dll.ibv_wr_opcode_str).restype, ibv_wr_opcode_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_wr_opcode]
 except AttributeError: pass
 
@@ -1284,7 +1278,6 @@ struct_ibv_qp_ex._fields_ = [
   ('wr_atomic_write', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_void_p)),
   ('wr_flush', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, size_t, uint8_t, uint8_t)),
 ]
-# struct ibv_qp_ex *ibv_qp_to_qp_ex(struct ibv_qp *qp)
 try: (ibv_qp_to_qp_ex:=dll.ibv_qp_to_qp_ex).restype, ibv_qp_to_qp_ex.argtypes = ctypes.POINTER(struct_ibv_qp_ex), [ctypes.POINTER(struct_ibv_qp)]
 except AttributeError: pass
 
@@ -1739,120 +1732,91 @@ struct_verbs_context._fields_ = [
   ('sz', size_t),
   ('context', struct_ibv_context),
 ]
-# struct ibv_device **ibv_get_device_list(int *num_devices)
 try: (ibv_get_device_list:=dll.ibv_get_device_list).restype, ibv_get_device_list.argtypes = ctypes.POINTER(ctypes.POINTER(struct_ibv_device)), [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# void ibv_free_device_list(struct ibv_device **list)
 try: (ibv_free_device_list:=dll.ibv_free_device_list).restype, ibv_free_device_list.argtypes = None, [ctypes.POINTER(ctypes.POINTER(struct_ibv_device))]
 except AttributeError: pass
 
-# const char *ibv_get_device_name(struct ibv_device *device)
 try: (ibv_get_device_name:=dll.ibv_get_device_name).restype, ibv_get_device_name.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
-# int ibv_get_device_index(struct ibv_device *device)
 try: (ibv_get_device_index:=dll.ibv_get_device_index).restype, ibv_get_device_index.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
-# __be64 ibv_get_device_guid(struct ibv_device *device)
 try: (ibv_get_device_guid:=dll.ibv_get_device_guid).restype, ibv_get_device_guid.argtypes = ctypes.c_uint64, [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
-# struct ibv_context *ibv_open_device(struct ibv_device *device)
 try: (ibv_open_device:=dll.ibv_open_device).restype, ibv_open_device.argtypes = ctypes.POINTER(struct_ibv_context), [ctypes.POINTER(struct_ibv_device)]
 except AttributeError: pass
 
-# int ibv_close_device(struct ibv_context *context)
 try: (ibv_close_device:=dll.ibv_close_device).restype, ibv_close_device.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context)]
 except AttributeError: pass
 
-# struct ibv_context *ibv_import_device(int cmd_fd)
 try: (ibv_import_device:=dll.ibv_import_device).restype, ibv_import_device.argtypes = ctypes.POINTER(struct_ibv_context), [ctypes.c_int32]
 except AttributeError: pass
 
-# struct ibv_pd *ibv_import_pd(struct ibv_context *context, uint32_t pd_handle)
 try: (ibv_import_pd:=dll.ibv_import_pd).restype, ibv_import_pd.argtypes = ctypes.POINTER(struct_ibv_pd), [ctypes.POINTER(struct_ibv_context), uint32_t]
 except AttributeError: pass
 
-# void ibv_unimport_pd(struct ibv_pd *pd)
 try: (ibv_unimport_pd:=dll.ibv_unimport_pd).restype, ibv_unimport_pd.argtypes = None, [ctypes.POINTER(struct_ibv_pd)]
 except AttributeError: pass
 
-# struct ibv_mr *ibv_import_mr(struct ibv_pd *pd, uint32_t mr_handle)
 try: (ibv_import_mr:=dll.ibv_import_mr).restype, ibv_import_mr.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), uint32_t]
 except AttributeError: pass
 
-# void ibv_unimport_mr(struct ibv_mr *mr)
 try: (ibv_unimport_mr:=dll.ibv_unimport_mr).restype, ibv_unimport_mr.argtypes = None, [ctypes.POINTER(struct_ibv_mr)]
 except AttributeError: pass
 
-# struct ibv_dm *ibv_import_dm(struct ibv_context *context, uint32_t dm_handle)
 try: (ibv_import_dm:=dll.ibv_import_dm).restype, ibv_import_dm.argtypes = ctypes.POINTER(struct_ibv_dm), [ctypes.POINTER(struct_ibv_context), uint32_t]
 except AttributeError: pass
 
-# void ibv_unimport_dm(struct ibv_dm *dm)
 try: (ibv_unimport_dm:=dll.ibv_unimport_dm).restype, ibv_unimport_dm.argtypes = None, [ctypes.POINTER(struct_ibv_dm)]
 except AttributeError: pass
 
-# int ibv_get_async_event(struct ibv_context *context, struct ibv_async_event *event)
 try: (ibv_get_async_event:=dll.ibv_get_async_event).restype, ibv_get_async_event.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_async_event)]
 except AttributeError: pass
 
-# void ibv_ack_async_event(struct ibv_async_event *event)
 try: (ibv_ack_async_event:=dll.ibv_ack_async_event).restype, ibv_ack_async_event.argtypes = None, [ctypes.POINTER(struct_ibv_async_event)]
 except AttributeError: pass
 
-# int ibv_query_device(struct ibv_context *context, struct ibv_device_attr *device_attr)
 try: (ibv_query_device:=dll.ibv_query_device).restype, ibv_query_device.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr)]
 except AttributeError: pass
 
-# int ibv_query_port(struct ibv_context *context, uint8_t port_num, struct _compat_ibv_port_attr *port_attr)
 try: (ibv_query_port:=dll.ibv_query_port).restype, ibv_query_port.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr)]
 except AttributeError: pass
 
-# int ibv_query_gid(struct ibv_context *context, uint8_t port_num, int index, union ibv_gid *gid)
 try: (ibv_query_gid:=dll.ibv_query_gid).restype, ibv_query_gid.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int32, ctypes.POINTER(union_ibv_gid)]
 except AttributeError: pass
 
-# int _ibv_query_gid_ex(struct ibv_context *context, uint32_t port_num, uint32_t gid_index, struct ibv_gid_entry *entry, uint32_t flags, size_t entry_size)
 try: (_ibv_query_gid_ex:=dll._ibv_query_gid_ex).restype, _ibv_query_gid_ex.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), uint32_t, uint32_t, ctypes.POINTER(struct_ibv_gid_entry), uint32_t, size_t]
 except AttributeError: pass
 
 ssize_t = ctypes.c_int64
-# ssize_t _ibv_query_gid_table(struct ibv_context *context, struct ibv_gid_entry *entries, size_t max_entries, uint32_t flags, size_t entry_size)
 try: (_ibv_query_gid_table:=dll._ibv_query_gid_table).restype, _ibv_query_gid_table.argtypes = ssize_t, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_gid_entry), size_t, uint32_t, size_t]
 except AttributeError: pass
 
-# int ibv_query_pkey(struct ibv_context *context, uint8_t port_num, int index, __be16 *pkey)
 try: (ibv_query_pkey:=dll.ibv_query_pkey).restype, ibv_query_pkey.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int32, ctypes.POINTER(ctypes.c_uint16)]
 except AttributeError: pass
 
-# int ibv_get_pkey_index(struct ibv_context *context, uint8_t port_num, __be16 pkey)
 try: (ibv_get_pkey_index:=dll.ibv_get_pkey_index).restype, ibv_get_pkey_index.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_uint16]
 except AttributeError: pass
 
-# struct ibv_pd *ibv_alloc_pd(struct ibv_context *context)
 try: (ibv_alloc_pd:=dll.ibv_alloc_pd).restype, ibv_alloc_pd.argtypes = ctypes.POINTER(struct_ibv_pd), [ctypes.POINTER(struct_ibv_context)]
 except AttributeError: pass
 
-# int ibv_dealloc_pd(struct ibv_pd *pd)
 try: (ibv_dealloc_pd:=dll.ibv_dealloc_pd).restype, ibv_dealloc_pd.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_pd)]
 except AttributeError: pass
 
-# struct ibv_mr *ibv_reg_mr_iova2(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, unsigned int access)
 try: (ibv_reg_mr_iova2:=dll.ibv_reg_mr_iova2).restype, ibv_reg_mr_iova2.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# struct ibv_mr *ibv_reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access)
 try: (ibv_reg_mr:=dll.ibv_reg_mr).restype, ibv_reg_mr.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# struct ibv_mr *ibv_reg_mr_iova(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access)
 try: (ibv_reg_mr_iova:=dll.ibv_reg_mr_iova).restype, ibv_reg_mr_iova.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_int32]
 except AttributeError: pass
 
-# struct ibv_mr *ibv_reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access)
 try: (ibv_reg_dmabuf_mr:=dll.ibv_reg_dmabuf_mr).restype, ibv_reg_dmabuf_mr.argtypes = ctypes.POINTER(struct_ibv_mr), [ctypes.POINTER(struct_ibv_pd), uint64_t, size_t, uint64_t, ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
@@ -1863,131 +1827,99 @@ IBV_REREG_MR_ERR_DO_FORK_OLD = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_E
 IBV_REREG_MR_ERR_CMD = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD', -4)
 IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW', -5)
 
-# int ibv_rereg_mr(struct ibv_mr *mr, int flags, struct ibv_pd *pd, void *addr, size_t length, int access)
 try: (ibv_rereg_mr:=dll.ibv_rereg_mr).restype, ibv_rereg_mr.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_mr), ctypes.c_int32, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# int ibv_dereg_mr(struct ibv_mr *mr)
 try: (ibv_dereg_mr:=dll.ibv_dereg_mr).restype, ibv_dereg_mr.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_mr)]
 except AttributeError: pass
 
-# struct ibv_comp_channel *ibv_create_comp_channel(struct ibv_context *context)
 try: (ibv_create_comp_channel:=dll.ibv_create_comp_channel).restype, ibv_create_comp_channel.argtypes = ctypes.POINTER(struct_ibv_comp_channel), [ctypes.POINTER(struct_ibv_context)]
 except AttributeError: pass
 
-# int ibv_destroy_comp_channel(struct ibv_comp_channel *channel)
 try: (ibv_destroy_comp_channel:=dll.ibv_destroy_comp_channel).restype, ibv_destroy_comp_channel.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_comp_channel)]
 except AttributeError: pass
 
-# struct ibv_cq *ibv_create_cq(struct ibv_context *context, int cqe, void *cq_context, struct ibv_comp_channel *channel, int comp_vector)
 try: (ibv_create_cq:=dll.ibv_create_cq).restype, ibv_create_cq.argtypes = ctypes.POINTER(struct_ibv_cq), [ctypes.POINTER(struct_ibv_context), ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(struct_ibv_comp_channel), ctypes.c_int32]
 except AttributeError: pass
 
-# int ibv_resize_cq(struct ibv_cq *cq, int cqe)
 try: (ibv_resize_cq:=dll.ibv_resize_cq).restype, ibv_resize_cq.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_cq), ctypes.c_int32]
 except AttributeError: pass
 
-# int ibv_destroy_cq(struct ibv_cq *cq)
 try: (ibv_destroy_cq:=dll.ibv_destroy_cq).restype, ibv_destroy_cq.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_cq)]
 except AttributeError: pass
 
-# int ibv_get_cq_event(struct ibv_comp_channel *channel, struct ibv_cq **cq, void **cq_context)
 try: (ibv_get_cq_event:=dll.ibv_get_cq_event).restype, ibv_get_cq_event.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_comp_channel), ctypes.POINTER(ctypes.POINTER(struct_ibv_cq)), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
-# void ibv_ack_cq_events(struct ibv_cq *cq, unsigned int nevents)
 try: (ibv_ack_cq_events:=dll.ibv_ack_cq_events).restype, ibv_ack_cq_events.argtypes = None, [ctypes.POINTER(struct_ibv_cq), ctypes.c_uint32]
 except AttributeError: pass
 
-# struct ibv_srq *ibv_create_srq(struct ibv_pd *pd, struct ibv_srq_init_attr *srq_init_attr)
 try: (ibv_create_srq:=dll.ibv_create_srq).restype, ibv_create_srq.argtypes = ctypes.POINTER(struct_ibv_srq), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_srq_init_attr)]
 except AttributeError: pass
 
-# int ibv_modify_srq(struct ibv_srq *srq, struct ibv_srq_attr *srq_attr, int srq_attr_mask)
 try: (ibv_modify_srq:=dll.ibv_modify_srq).restype, ibv_modify_srq.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr), ctypes.c_int32]
 except AttributeError: pass
 
-# int ibv_query_srq(struct ibv_srq *srq, struct ibv_srq_attr *srq_attr)
 try: (ibv_query_srq:=dll.ibv_query_srq).restype, ibv_query_srq.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr)]
 except AttributeError: pass
 
-# int ibv_destroy_srq(struct ibv_srq *srq)
 try: (ibv_destroy_srq:=dll.ibv_destroy_srq).restype, ibv_destroy_srq.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_srq)]
 except AttributeError: pass
 
-# struct ibv_qp *ibv_create_qp(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr)
 try: (ibv_create_qp:=dll.ibv_create_qp).restype, ibv_create_qp.argtypes = ctypes.POINTER(struct_ibv_qp), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_qp_init_attr)]
 except AttributeError: pass
 
-# int ibv_modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask)
 try: (ibv_modify_qp:=dll.ibv_modify_qp).restype, ibv_modify_qp.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int32]
 except AttributeError: pass
 
-# int ibv_query_qp_data_in_order(struct ibv_qp *qp, enum ibv_wr_opcode op, uint32_t flags)
 try: (ibv_query_qp_data_in_order:=dll.ibv_query_qp_data_in_order).restype, ibv_query_qp_data_in_order.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp), enum_ibv_wr_opcode, uint32_t]
 except AttributeError: pass
 
-# int ibv_query_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask, struct ibv_qp_init_attr *init_attr)
 try: (ibv_query_qp:=dll.ibv_query_qp).restype, ibv_query_qp.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int32, ctypes.POINTER(struct_ibv_qp_init_attr)]
 except AttributeError: pass
 
-# int ibv_destroy_qp(struct ibv_qp *qp)
 try: (ibv_destroy_qp:=dll.ibv_destroy_qp).restype, ibv_destroy_qp.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp)]
 except AttributeError: pass
 
-# struct ibv_ah *ibv_create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr)
 try: (ibv_create_ah:=dll.ibv_create_ah).restype, ibv_create_ah.argtypes = ctypes.POINTER(struct_ibv_ah), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_ah_attr)]
 except AttributeError: pass
 
-# int ibv_init_ah_from_wc(struct ibv_context *context, uint8_t port_num, struct ibv_wc *wc, struct ibv_grh *grh, struct ibv_ah_attr *ah_attr)
 try: (ibv_init_ah_from_wc:=dll.ibv_init_ah_from_wc).restype, ibv_init_ah_from_wc.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), ctypes.POINTER(struct_ibv_ah_attr)]
 except AttributeError: pass
 
-# struct ibv_ah *ibv_create_ah_from_wc(struct ibv_pd *pd, struct ibv_wc *wc, struct ibv_grh *grh, uint8_t port_num)
 try: (ibv_create_ah_from_wc:=dll.ibv_create_ah_from_wc).restype, ibv_create_ah_from_wc.argtypes = ctypes.POINTER(struct_ibv_ah), [ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), uint8_t]
 except AttributeError: pass
 
-# int ibv_destroy_ah(struct ibv_ah *ah)
 try: (ibv_destroy_ah:=dll.ibv_destroy_ah).restype, ibv_destroy_ah.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_ah)]
 except AttributeError: pass
 
-# int ibv_attach_mcast(struct ibv_qp *qp, const union ibv_gid *gid, uint16_t lid)
 try: (ibv_attach_mcast:=dll.ibv_attach_mcast).restype, ibv_attach_mcast.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t]
 except AttributeError: pass
 
-# int ibv_detach_mcast(struct ibv_qp *qp, const union ibv_gid *gid, uint16_t lid)
 try: (ibv_detach_mcast:=dll.ibv_detach_mcast).restype, ibv_detach_mcast.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t]
 except AttributeError: pass
 
-# int ibv_fork_init(void)
 try: (ibv_fork_init:=dll.ibv_fork_init).restype, ibv_fork_init.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# enum ibv_fork_status ibv_is_fork_initialized(void)
 try: (ibv_is_fork_initialized:=dll.ibv_is_fork_initialized).restype, ibv_is_fork_initialized.argtypes = enum_ibv_fork_status, []
 except AttributeError: pass
 
-# const char *ibv_node_type_str(enum ibv_node_type node_type)
 try: (ibv_node_type_str:=dll.ibv_node_type_str).restype, ibv_node_type_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_node_type]
 except AttributeError: pass
 
-# const char *ibv_port_state_str(enum ibv_port_state port_state)
 try: (ibv_port_state_str:=dll.ibv_port_state_str).restype, ibv_port_state_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_port_state]
 except AttributeError: pass
 
-# const char *ibv_event_type_str(enum ibv_event_type event)
 try: (ibv_event_type_str:=dll.ibv_event_type_str).restype, ibv_event_type_str.argtypes = ctypes.POINTER(ctypes.c_char), [enum_ibv_event_type]
 except AttributeError: pass
 
-# int ibv_resolve_eth_l2_from_gid(struct ibv_context *context, struct ibv_ah_attr *attr, uint8_t eth_mac[6], uint16_t *vid)
 try: (ibv_resolve_eth_l2_from_gid:=dll.ibv_resolve_eth_l2_from_gid).restype, ibv_resolve_eth_l2_from_gid.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_ah_attr), (uint8_t * 6), ctypes.POINTER(uint16_t)]
 except AttributeError: pass
 
-# int ibv_set_ece(struct ibv_qp *qp, struct ibv_ece *ece)
 try: (ibv_set_ece:=dll.ibv_set_ece).restype, ibv_set_ece.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece)]
 except AttributeError: pass
 
-# int ibv_query_ece(struct ibv_qp *qp, struct ibv_ece *ece)
 try: (ibv_query_ece:=dll.ibv_query_ece).restype, ibv_query_ece.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece)]
 except AttributeError: pass
 
