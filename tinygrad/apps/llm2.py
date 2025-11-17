@@ -26,7 +26,8 @@ from transformers import AutoTokenizer
 # adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 MODELS = {
   "20B": {
-    "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": 24, "n_experts": 32,
+    "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": getenv("GPT_OSS_LAYERS", 24),
+               "n_experts": 32,
                "n_active_experts": 4, "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
                "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},
                },
@@ -237,12 +238,13 @@ class Transformer:
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
     model = Transformer(**params) # type: ignore[arg-type]
-    num_blocks = len(model.blk)
-    weights = load(str(model_path / "model.safetensors.index.json"))
-    weights = convert_from_huggingface(weights, num_blocks)
-    weights = fix_mxfp4(weights, num_blocks)
-    weights = to_bf16(weights) # todo: do we need ??
-    load_state_dict(model, weights, strict=False, consume=True)
+    if fakeweights:
+      num_blocks = len(model.blk)
+      weights = load(str(model_path / "model.safetensors.index.json"))
+      weights = convert_from_huggingface(weights, num_blocks)
+      weights = fix_mxfp4(weights, num_blocks)
+      weights = to_bf16(weights)
+      load_state_dict(model, weights, strict=False, consume=True)
     return model
 
   def generate(self, tokens:list[int], max_new_tokens:int) -> Generator[int, None, None]:
