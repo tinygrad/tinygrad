@@ -124,6 +124,7 @@ class PM4Executor(AMDQueue):
     elif mem_data_sel == 3:
       if mem_event_type == CACHE_FLUSH_AND_INV_TS_EVENT: ptr.cast('Q')[0] = int(time.perf_counter() * 1e8)
       else: raise RuntimeError(f"Unknown {mem_data_sel=} {mem_event_type=}")
+    elif mem_data_sel == 0: pass # no write
     else: raise RuntimeError(f"Unknown {mem_data_sel=}")
 
   def _exec_copy_data(self, n):
