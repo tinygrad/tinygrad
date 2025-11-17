@@ -32,6 +32,7 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
     def __eq__(self, other): return self.value == other
     def __repr__(self): return self.get(self) if self.value in self.__class__._val_to_name_ else str(self.value)
+    def __hash__(self): return hash(self.value)
 
   return _CEnum
 

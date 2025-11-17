@@ -177,15 +177,18 @@ class Group:
       for height in self.ker.range(dst.shape[-3], track=False):
         for width in self.ker.range(dst.shape[-2], track=False):
           for inner in self.ker.range(RT.BASE_TILE_NEPT, track=False):
+            base_row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS
+            base_col = width * RT.BASE_TILE_COLS
+
             if not transpose:
-              row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS + (warp_laneid // 4)
-              col = width * RT.BASE_TILE_COLS + 2 * (warp_laneid % 4)
+              row = base_row + (warp_laneid // 4)
+              col = base_col + 2 * (warp_laneid % 4)
 
               row_offset = ((inner % 4) // 2) * 8
               col_offset = (inner % 2) + (inner // 4) * 8
             else:
-              row = (local_warpid * dst.shape[-3] + height) * RT.BASE_TILE_ROWS + 2 * (warp_laneid % 4)
-              col = width * RT.BASE_TILE_COLS + (warp_laneid // 4)
+              row = base_row + 2 * (warp_laneid % 4)
+              col = base_col + (warp_laneid // 4)
 
               row_offset = (inner % 2) + (inner // 4) * 8
               col_offset = ((inner % 4) // 2) * 8
@@ -223,7 +226,7 @@ class Group:
     return dst.after(dst_store.barrier()).reshape(dst.shape)
 
   STORE_INNER = 8
-  def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis=0, after=True):
+  def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
     dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
@@ -237,11 +240,21 @@ class Group:
       for height in self.ker.range(src.shape[-3], track=False):
         for width in self.ker.range(src.shape[-2], track=False):
           for inner in self.ker.range(RT.BASE_TILE_NEPT, track=False):
-            row = (local_warpid * src.shape[-3] + height) * RT.BASE_TILE_ROWS + (warp_laneid // 4)
-            col = width * RT.BASE_TILE_COLS + 2 * (warp_laneid % 4)
+            base_row = (local_warpid * src.shape[-3] + height) * RT.BASE_TILE_ROWS
+            base_col = width * RT.BASE_TILE_COLS
 
-            row_offset = ((inner % 4) // 2) * 8
-            col_offset = (inner % 2) + (inner // 4) * 8
+            if not transpose:
+              row = base_row + (warp_laneid // 4)
+              col = base_col + 2 * (warp_laneid % 4)
+
+              row_offset = ((inner % 4) // 2) * 8
+              col_offset = (inner % 2) + (inner // 4) * 8
+            else:
+              row = base_row + 2 * (warp_laneid % 4)
+              col = base_col + (warp_laneid // 4)
+
+              row_offset = (inner % 2) + (inner // 4) * 8
+              col_offset = ((inner % 4) // 2) * 8
 
             dst_i_last = (row + row_offset) * dst.shape[-1] + col + col_offset
 
@@ -274,4 +287,4 @@ class Group:
       raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
 
     self.ker.push_store(dst_store, dst)
-    return dst.after(dst_store.barrier()).reshape(dst.shape) if after else dst_store
+    return dst.after(dst_store.barrier()).reshape(dst.shape)

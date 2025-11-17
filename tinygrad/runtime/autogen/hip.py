@@ -96,11 +96,9 @@ class ihipStream_t(Struct): pass
 hipStream_t = ctypes.POINTER(ihipStream_t)
 class ihipEvent_t(Struct): pass
 hipEvent_t = ctypes.POINTER(ihipEvent_t)
-# __attribute__((visibility("default"))) hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void **kernelParams, void **extra, hipEvent_t startEvent = __null, hipEvent_t stopEvent = __null, uint32_t flags = 0)
 try: (hipExtModuleLaunchKernel:=dll.hipExtModuleLaunchKernel).restype, hipExtModuleLaunchKernel.argtypes = hipError_t, [hipFunction_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, size_t, hipStream_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p), hipEvent_t, hipEvent_t, uint32_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("use hipExtModuleLaunchKernel instead"))) __attribute__((visibility("default"))) hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX, uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ, uint32_t localWorkSizeX, uint32_t localWorkSizeY, uint32_t localWorkSizeZ, size_t sharedMemBytes, hipStream_t hStream, void **kernelParams, void **extra, hipEvent_t startEvent = __null, hipEvent_t stopEvent = __null)
 try: (hipHccModuleLaunchKernel:=dll.hipHccModuleLaunchKernel).restype, hipHccModuleLaunchKernel.argtypes = hipError_t, [hipFunction_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, size_t, hipStream_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p), hipEvent_t, hipEvent_t]
 except AttributeError: pass
 
@@ -110,7 +108,6 @@ dim3._fields_ = [
   ('y', uint32_t),
   ('z', uint32_t),
 ]
-# hipError_t hipExtLaunchKernel(const void *function_address, dim3 numBlocks, dim3 dimBlocks, void **args, size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags)
 try: (hipExtLaunchKernel:=dll.hipExtLaunchKernel).restype, hipExtLaunchKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int32]
 except AttributeError: pass
 
@@ -174,77 +171,59 @@ HIPRTC_JIT_NUM_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_INPUT_TYP
 
 class ihiprtcLinkState(Struct): pass
 hiprtcLinkState = ctypes.POINTER(ihiprtcLinkState)
-# const char *hiprtcGetErrorString(hiprtcResult result)
 try: (hiprtcGetErrorString:=dll.hiprtcGetErrorString).restype, hiprtcGetErrorString.argtypes = ctypes.POINTER(ctypes.c_char), [hiprtcResult]
 except AttributeError: pass
 
-# hiprtcResult hiprtcVersion(int *major, int *minor)
 try: (hiprtcVersion:=dll.hiprtcVersion).restype, hiprtcVersion.argtypes = hiprtcResult, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
 class _hiprtcProgram(Struct): pass
 hiprtcProgram = ctypes.POINTER(_hiprtcProgram)
-# hiprtcResult hiprtcAddNameExpression(hiprtcProgram prog, const char *name_expression)
 try: (hiprtcAddNameExpression:=dll.hiprtcAddNameExpression).restype, hiprtcAddNameExpression.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char **options)
 try: (hiprtcCompileProgram:=dll.hiprtcCompileProgram).restype, hiprtcCompileProgram.argtypes = hiprtcResult, [hiprtcProgram, ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# hiprtcResult hiprtcCreateProgram(hiprtcProgram *prog, const char *src, const char *name, int numHeaders, const char **headers, const char **includeNames)
 try: (hiprtcCreateProgram:=dll.hiprtcCreateProgram).restype, hiprtcCreateProgram.argtypes = hiprtcResult, [ctypes.POINTER(hiprtcProgram), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# hiprtcResult hiprtcDestroyProgram(hiprtcProgram *prog)
 try: (hiprtcDestroyProgram:=dll.hiprtcDestroyProgram).restype, hiprtcDestroyProgram.argtypes = hiprtcResult, [ctypes.POINTER(hiprtcProgram)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcGetLoweredName(hiprtcProgram prog, const char *name_expression, const char **lowered_name)
 try: (hiprtcGetLoweredName:=dll.hiprtcGetLoweredName).restype, hiprtcGetLoweredName.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# hiprtcResult hiprtcGetProgramLog(hiprtcProgram prog, char *log)
 try: (hiprtcGetProgramLog:=dll.hiprtcGetProgramLog).restype, hiprtcGetProgramLog.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcGetProgramLogSize(hiprtcProgram prog, size_t *logSizeRet)
 try: (hiprtcGetProgramLogSize:=dll.hiprtcGetProgramLogSize).restype, hiprtcGetProgramLogSize.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcGetCode(hiprtcProgram prog, char *code)
 try: (hiprtcGetCode:=dll.hiprtcGetCode).restype, hiprtcGetCode.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcGetCodeSize(hiprtcProgram prog, size_t *codeSizeRet)
 try: (hiprtcGetCodeSize:=dll.hiprtcGetCodeSize).restype, hiprtcGetCodeSize.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcGetBitcode(hiprtcProgram prog, char *bitcode)
 try: (hiprtcGetBitcode:=dll.hiprtcGetBitcode).restype, hiprtcGetBitcode.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcGetBitcodeSize(hiprtcProgram prog, size_t *bitcode_size)
 try: (hiprtcGetBitcodeSize:=dll.hiprtcGetBitcodeSize).restype, hiprtcGetBitcodeSize.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option *option_ptr, void **option_vals_pptr, hiprtcLinkState *hip_link_state_ptr)
 try: (hiprtcLinkCreate:=dll.hiprtcLinkCreate).restype, hiprtcLinkCreate.argtypes = hiprtcResult, [ctypes.c_uint32, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(hiprtcLinkState)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcLinkAddFile(hiprtcLinkState hip_link_state, hiprtcJITInputType input_type, const char *file_path, unsigned int num_options, hiprtcJIT_option *options_ptr, void **option_values)
 try: (hiprtcLinkAddFile:=dll.hiprtcLinkAddFile).restype, hiprtcLinkAddFile.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputType input_type, void *image, size_t image_size, const char *name, unsigned int num_options, hiprtcJIT_option *options_ptr, void **option_values)
 try: (hiprtcLinkAddData:=dll.hiprtcLinkAddData).restype, hiprtcLinkAddData.argtypes = hiprtcResult, [hiprtcLinkState, hiprtcJITInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(hiprtcJIT_option), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcLinkComplete(hiprtcLinkState hip_link_state, void **bin_out, size_t *size_out)
 try: (hiprtcLinkComplete:=dll.hiprtcLinkComplete).restype, hiprtcLinkComplete.argtypes = hiprtcResult, [hiprtcLinkState, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hiprtcResult hiprtcLinkDestroy(hiprtcLinkState hip_link_state)
 try: (hiprtcLinkDestroy:=dll.hiprtcLinkDestroy).restype, hiprtcLinkDestroy.argtypes = hiprtcResult, [hiprtcLinkState]
 except AttributeError: pass
 
@@ -543,7 +522,6 @@ hipGPUDirectRDMAWritesOrderingNone = hipGPUDirectRDMAWritesOrdering.define('hipG
 hipGPUDirectRDMAWritesOrderingOwner = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingOwner', 100)
 hipGPUDirectRDMAWritesOrderingAllDevices = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingAllDevices', 200)
 
-# hipError_t hip_init()
 try: (hip_init:=dll.hip_init).restype, hip_init.argtypes = hipError_t, []
 except AttributeError: pass
 
@@ -881,7 +859,6 @@ hipExternalSemaphoreWaitParams_st._fields_ = [
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
 hipExternalSemaphoreWaitParams = hipExternalSemaphoreWaitParams_st
-# void __hipGetPCH(const char **pch, unsigned int *size)
 try: (__hipGetPCH:=dll.__hipGetPCH).restype, __hipGetPCH.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
@@ -1262,293 +1239,221 @@ hipGraphEdgeData._fields_ = [
   ('to_port', ctypes.c_ubyte),
   ('type', ctypes.c_ubyte),
 ]
-# hipError_t hipInit(unsigned int flags)
 try: (hipInit:=dll.hipInit).restype, hipInit.argtypes = hipError_t, [ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipDriverGetVersion(int *driverVersion)
 try: (hipDriverGetVersion:=dll.hipDriverGetVersion).restype, hipDriverGetVersion.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# hipError_t hipRuntimeGetVersion(int *runtimeVersion)
 try: (hipRuntimeGetVersion:=dll.hipRuntimeGetVersion).restype, hipRuntimeGetVersion.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# hipError_t hipDeviceGet(hipDevice_t *device, int ordinal)
 try: (hipDeviceGet:=dll.hipDeviceGet).restype, hipDeviceGet.argtypes = hipError_t, [ctypes.POINTER(hipDevice_t), ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceComputeCapability(int *major, int *minor, hipDevice_t device)
 try: (hipDeviceComputeCapability:=dll.hipDeviceComputeCapability).restype, hipDeviceComputeCapability.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), hipDevice_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetName(char *name, int len, hipDevice_t device)
 try: (hipDeviceGetName:=dll.hipDeviceGetName).restype, hipDeviceGetName.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, hipDevice_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetUuid(hipUUID *uuid, hipDevice_t device)
 try: (hipDeviceGetUuid:=dll.hipDeviceGetUuid).restype, hipDeviceGetUuid.argtypes = hipError_t, [ctypes.POINTER(hipUUID), hipDevice_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetP2PAttribute(int *value, hipDeviceP2PAttr attr, int srcDevice, int dstDevice)
 try: (hipDeviceGetP2PAttribute:=dll.hipDeviceGetP2PAttribute).restype, hipDeviceGetP2PAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipDeviceP2PAttr, ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetPCIBusId(char *pciBusId, int len, int device)
 try: (hipDeviceGetPCIBusId:=dll.hipDeviceGetPCIBusId).restype, hipDeviceGetPCIBusId.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetByPCIBusId(int *device, const char *pciBusId)
 try: (hipDeviceGetByPCIBusId:=dll.hipDeviceGetByPCIBusId).restype, hipDeviceGetByPCIBusId.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hipError_t hipDeviceTotalMem(size_t *bytes, hipDevice_t device)
 try: (hipDeviceTotalMem:=dll.hipDeviceTotalMem).restype, hipDeviceTotalMem.argtypes = hipError_t, [ctypes.POINTER(size_t), hipDevice_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceSynchronize()
 try: (hipDeviceSynchronize:=dll.hipDeviceSynchronize).restype, hipDeviceSynchronize.argtypes = hipError_t, []
 except AttributeError: pass
 
-# hipError_t hipDeviceReset()
 try: (hipDeviceReset:=dll.hipDeviceReset).restype, hipDeviceReset.argtypes = hipError_t, []
 except AttributeError: pass
 
-# hipError_t hipSetDevice(int deviceId)
 try: (hipSetDevice:=dll.hipSetDevice).restype, hipSetDevice.argtypes = hipError_t, [ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipSetValidDevices(int *device_arr, int len)
 try: (hipSetValidDevices:=dll.hipSetValidDevices).restype, hipSetValidDevices.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipGetDevice(int *deviceId)
 try: (hipGetDevice:=dll.hipGetDevice).restype, hipGetDevice.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# hipError_t hipGetDeviceCount(int *count)
 try: (hipGetDeviceCount:=dll.hipGetDeviceCount).restype, hipGetDeviceCount.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetAttribute(int *pi, hipDeviceAttribute_t attr, int deviceId)
 try: (hipDeviceGetAttribute:=dll.hipDeviceGetAttribute).restype, hipDeviceGetAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipDeviceAttribute_t, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t *mem_pool, int device)
 try: (hipDeviceGetDefaultMemPool:=dll.hipDeviceGetDefaultMemPool).restype, hipDeviceGetDefaultMemPool.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceSetMemPool(int device, hipMemPool_t mem_pool)
 try: (hipDeviceSetMemPool:=dll.hipDeviceSetMemPool).restype, hipDeviceSetMemPool.argtypes = hipError_t, [ctypes.c_int32, hipMemPool_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetMemPool(hipMemPool_t *mem_pool, int device)
 try: (hipDeviceGetMemPool:=dll.hipDeviceGetMemPool).restype, hipDeviceGetMemPool.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *prop, int deviceId)
 try: (hipGetDevicePropertiesR0600:=dll.hipGetDevicePropertiesR0600).restype, hipGetDevicePropertiesR0600.argtypes = hipError_t, [ctypes.POINTER(hipDeviceProp_tR0600), ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceSetCacheConfig(hipFuncCache_t cacheConfig)
 try: (hipDeviceSetCacheConfig:=dll.hipDeviceSetCacheConfig).restype, hipDeviceSetCacheConfig.argtypes = hipError_t, [hipFuncCache_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetCacheConfig(hipFuncCache_t *cacheConfig)
 try: (hipDeviceGetCacheConfig:=dll.hipDeviceGetCacheConfig).restype, hipDeviceGetCacheConfig.argtypes = hipError_t, [ctypes.POINTER(hipFuncCache_t)]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetLimit(size_t *pValue, enum hipLimit_t limit)
 try: (hipDeviceGetLimit:=dll.hipDeviceGetLimit).restype, hipDeviceGetLimit.argtypes = hipError_t, [ctypes.POINTER(size_t), hipLimit_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceSetLimit(enum hipLimit_t limit, size_t value)
 try: (hipDeviceSetLimit:=dll.hipDeviceSetLimit).restype, hipDeviceSetLimit.argtypes = hipError_t, [hipLimit_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig *pConfig)
 try: (hipDeviceGetSharedMemConfig:=dll.hipDeviceGetSharedMemConfig).restype, hipDeviceGetSharedMemConfig.argtypes = hipError_t, [ctypes.POINTER(hipSharedMemConfig)]
 except AttributeError: pass
 
-# hipError_t hipGetDeviceFlags(unsigned int *flags)
 try: (hipGetDeviceFlags:=dll.hipGetDeviceFlags).restype, hipGetDeviceFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config)
 try: (hipDeviceSetSharedMemConfig:=dll.hipDeviceSetSharedMemConfig).restype, hipDeviceSetSharedMemConfig.argtypes = hipError_t, [hipSharedMemConfig]
 except AttributeError: pass
 
-# hipError_t hipSetDeviceFlags(unsigned int flags)
 try: (hipSetDeviceFlags:=dll.hipSetDeviceFlags).restype, hipSetDeviceFlags.argtypes = hipError_t, [ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipChooseDeviceR0600(int *device, const hipDeviceProp_tR0600 *prop)
 try: (hipChooseDeviceR0600:=dll.hipChooseDeviceR0600).restype, hipChooseDeviceR0600.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(hipDeviceProp_tR0600)]
 except AttributeError: pass
 
-# hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t *linktype, uint32_t *hopcount)
 try: (hipExtGetLinkTypeAndHopCount:=dll.hipExtGetLinkTypeAndHopCount).restype, hipExtGetLinkTypeAndHopCount.argtypes = hipError_t, [ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
-# hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t *handle, void *devPtr)
 try: (hipIpcGetMemHandle:=dll.hipIpcGetMemHandle).restype, hipIpcGetMemHandle.argtypes = hipError_t, [ctypes.POINTER(hipIpcMemHandle_t), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipIpcOpenMemHandle(void **devPtr, hipIpcMemHandle_t handle, unsigned int flags)
 try: (hipIpcOpenMemHandle:=dll.hipIpcOpenMemHandle).restype, hipIpcOpenMemHandle.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), hipIpcMemHandle_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipIpcCloseMemHandle(void *devPtr)
 try: (hipIpcCloseMemHandle:=dll.hipIpcCloseMemHandle).restype, hipIpcCloseMemHandle.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t *handle, hipEvent_t event)
 try: (hipIpcGetEventHandle:=dll.hipIpcGetEventHandle).restype, hipIpcGetEventHandle.argtypes = hipError_t, [ctypes.POINTER(hipIpcEventHandle_t), hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipIpcOpenEventHandle(hipEvent_t *event, hipIpcEventHandle_t handle)
 try: (hipIpcOpenEventHandle:=dll.hipIpcOpenEventHandle).restype, hipIpcOpenEventHandle.argtypes = hipError_t, [ctypes.POINTER(hipEvent_t), hipIpcEventHandle_t]
 except AttributeError: pass
 
-# hipError_t hipFuncSetAttribute(const void *func, hipFuncAttribute attr, int value)
 try: (hipFuncSetAttribute:=dll.hipFuncSetAttribute).restype, hipFuncSetAttribute.argtypes = hipError_t, [ctypes.c_void_p, hipFuncAttribute, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipFuncSetCacheConfig(const void *func, hipFuncCache_t config)
 try: (hipFuncSetCacheConfig:=dll.hipFuncSetCacheConfig).restype, hipFuncSetCacheConfig.argtypes = hipError_t, [ctypes.c_void_p, hipFuncCache_t]
 except AttributeError: pass
 
-# hipError_t hipFuncSetSharedMemConfig(const void *func, hipSharedMemConfig config)
 try: (hipFuncSetSharedMemConfig:=dll.hipFuncSetSharedMemConfig).restype, hipFuncSetSharedMemConfig.argtypes = hipError_t, [ctypes.c_void_p, hipSharedMemConfig]
 except AttributeError: pass
 
-# hipError_t hipGetLastError()
 try: (hipGetLastError:=dll.hipGetLastError).restype, hipGetLastError.argtypes = hipError_t, []
 except AttributeError: pass
 
-# hipError_t hipExtGetLastError()
 try: (hipExtGetLastError:=dll.hipExtGetLastError).restype, hipExtGetLastError.argtypes = hipError_t, []
 except AttributeError: pass
 
-# hipError_t hipPeekAtLastError()
 try: (hipPeekAtLastError:=dll.hipPeekAtLastError).restype, hipPeekAtLastError.argtypes = hipError_t, []
 except AttributeError: pass
 
-# const char *hipGetErrorName(hipError_t hip_error)
 try: (hipGetErrorName:=dll.hipGetErrorName).restype, hipGetErrorName.argtypes = ctypes.POINTER(ctypes.c_char), [hipError_t]
 except AttributeError: pass
 
-# const char *hipGetErrorString(hipError_t hipError)
 try: (hipGetErrorString:=dll.hipGetErrorString).restype, hipGetErrorString.argtypes = ctypes.POINTER(ctypes.c_char), [hipError_t]
 except AttributeError: pass
 
-# hipError_t hipDrvGetErrorName(hipError_t hipError, const char **errorString)
 try: (hipDrvGetErrorName:=dll.hipDrvGetErrorName).restype, hipDrvGetErrorName.argtypes = hipError_t, [hipError_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# hipError_t hipDrvGetErrorString(hipError_t hipError, const char **errorString)
 try: (hipDrvGetErrorString:=dll.hipDrvGetErrorString).restype, hipDrvGetErrorString.argtypes = hipError_t, [hipError_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# hipError_t hipStreamCreate(hipStream_t *stream)
 try: (hipStreamCreate:=dll.hipStreamCreate).restype, hipStreamCreate.argtypes = hipError_t, [ctypes.POINTER(hipStream_t)]
 except AttributeError: pass
 
-# hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags)
 try: (hipStreamCreateWithFlags:=dll.hipStreamCreateWithFlags).restype, hipStreamCreateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipStream_t), ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipStreamCreateWithPriority(hipStream_t *stream, unsigned int flags, int priority)
 try: (hipStreamCreateWithPriority:=dll.hipStreamCreateWithPriority).restype, hipStreamCreateWithPriority.argtypes = hipError_t, [ctypes.POINTER(hipStream_t), ctypes.c_uint32, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetStreamPriorityRange(int *leastPriority, int *greatestPriority)
 try: (hipDeviceGetStreamPriorityRange:=dll.hipDeviceGetStreamPriorityRange).restype, hipDeviceGetStreamPriorityRange.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# hipError_t hipStreamDestroy(hipStream_t stream)
 try: (hipStreamDestroy:=dll.hipStreamDestroy).restype, hipStreamDestroy.argtypes = hipError_t, [hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipStreamQuery(hipStream_t stream)
 try: (hipStreamQuery:=dll.hipStreamQuery).restype, hipStreamQuery.argtypes = hipError_t, [hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipStreamSynchronize(hipStream_t stream)
 try: (hipStreamSynchronize:=dll.hipStreamSynchronize).restype, hipStreamSynchronize.argtypes = hipError_t, [hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags = 0)
 try: (hipStreamWaitEvent:=dll.hipStreamWaitEvent).restype, hipStreamWaitEvent.argtypes = hipError_t, [hipStream_t, hipEvent_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int *flags)
 try: (hipStreamGetFlags:=dll.hipStreamGetFlags).restype, hipStreamGetFlags.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# hipError_t hipStreamGetPriority(hipStream_t stream, int *priority)
 try: (hipStreamGetPriority:=dll.hipStreamGetPriority).restype, hipStreamGetPriority.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t *device)
 try: (hipStreamGetDevice:=dll.hipStreamGetDevice).restype, hipStreamGetDevice.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipDevice_t)]
 except AttributeError: pass
 
-# hipError_t hipExtStreamCreateWithCUMask(hipStream_t *stream, uint32_t cuMaskSize, const uint32_t *cuMask)
 try: (hipExtStreamCreateWithCUMask:=dll.hipExtStreamCreateWithCUMask).restype, hipExtStreamCreateWithCUMask.argtypes = hipError_t, [ctypes.POINTER(hipStream_t), uint32_t, ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
-# hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32_t *cuMask)
 try: (hipExtStreamGetCUMask:=dll.hipExtStreamGetCUMask).restype, hipExtStreamGetCUMask.argtypes = hipError_t, [hipStream_t, uint32_t, ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
 hipStreamCallback_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(ihipStream_t), hipError_t, ctypes.c_void_p)
-# hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void *userData, unsigned int flags)
 try: (hipStreamAddCallback:=dll.hipStreamAddCallback).restype, hipStreamAddCallback.argtypes = hipError_t, [hipStream_t, hipStreamCallback_t, ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipStreamWaitValue32(hipStream_t stream, void *ptr, uint32_t value, unsigned int flags, uint32_t mask = 4294967295U)
 try: (hipStreamWaitValue32:=dll.hipStreamWaitValue32).restype, hipStreamWaitValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint32, uint32_t]
 except AttributeError: pass
 
 uint64_t = ctypes.c_uint64
-# hipError_t hipStreamWaitValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags, uint64_t mask = 18446744073709551615UL)
 try: (hipStreamWaitValue64:=dll.hipStreamWaitValue64).restype, hipStreamWaitValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint32, uint64_t]
 except AttributeError: pass
 
-# hipError_t hipStreamWriteValue32(hipStream_t stream, void *ptr, uint32_t value, unsigned int flags)
 try: (hipStreamWriteValue32:=dll.hipStreamWriteValue32).restype, hipStreamWriteValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipStreamWriteValue64(hipStream_t stream, void *ptr, uint64_t value, unsigned int flags)
 try: (hipStreamWriteValue64:=dll.hipStreamWriteValue64).restype, hipStreamWriteValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipEventCreateWithFlags(hipEvent_t *event, unsigned int flags)
 try: (hipEventCreateWithFlags:=dll.hipEventCreateWithFlags).restype, hipEventCreateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipEvent_t), ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipEventCreate(hipEvent_t *event)
 try: (hipEventCreate:=dll.hipEventCreate).restype, hipEventCreate.argtypes = hipError_t, [ctypes.POINTER(hipEvent_t)]
 except AttributeError: pass
 
-# hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream = __null)
 try: (hipEventRecord:=dll.hipEventRecord).restype, hipEventRecord.argtypes = hipError_t, [hipEvent_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipEventDestroy(hipEvent_t event)
 try: (hipEventDestroy:=dll.hipEventDestroy).restype, hipEventDestroy.argtypes = hipError_t, [hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipEventSynchronize(hipEvent_t event)
 try: (hipEventSynchronize:=dll.hipEventSynchronize).restype, hipEventSynchronize.argtypes = hipError_t, [hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipEventElapsedTime(float *ms, hipEvent_t start, hipEvent_t stop)
 try: (hipEventElapsedTime:=dll.hipEventElapsedTime).restype, hipEventElapsedTime.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_float), hipEvent_t, hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipEventQuery(hipEvent_t event)
 try: (hipEventQuery:=dll.hipEventQuery).restype, hipEventQuery.argtypes = hipError_t, [hipEvent_t]
 except AttributeError: pass
 
@@ -1571,340 +1476,256 @@ HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE = hipPointer_attribute.define('
 HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS', 16)
 HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE', 17)
 
-# hipError_t hipPointerSetAttribute(const void *value, hipPointer_attribute attribute, hipDeviceptr_t ptr)
 try: (hipPointerSetAttribute:=dll.hipPointerSetAttribute).restype, hipPointerSetAttribute.argtypes = hipError_t, [ctypes.c_void_p, hipPointer_attribute, hipDeviceptr_t]
 except AttributeError: pass
 
-# hipError_t hipPointerGetAttributes(hipPointerAttribute_t *attributes, const void *ptr)
 try: (hipPointerGetAttributes:=dll.hipPointerGetAttributes).restype, hipPointerGetAttributes.argtypes = hipError_t, [ctypes.POINTER(hipPointerAttribute_t), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipPointerGetAttribute(void *data, hipPointer_attribute attribute, hipDeviceptr_t ptr)
 try: (hipPointerGetAttribute:=dll.hipPointerGetAttribute).restype, hipPointerGetAttribute.argtypes = hipError_t, [ctypes.c_void_p, hipPointer_attribute, hipDeviceptr_t]
 except AttributeError: pass
 
-# hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_attribute *attributes, void **data, hipDeviceptr_t ptr)
 try: (hipDrvPointerGetAttributes:=dll.hipDrvPointerGetAttributes).restype, hipDrvPointerGetAttributes.argtypes = hipError_t, [ctypes.c_uint32, ctypes.POINTER(hipPointer_attribute), ctypes.POINTER(ctypes.c_void_p), hipDeviceptr_t]
 except AttributeError: pass
 
-# hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t *extSem_out, const hipExternalSemaphoreHandleDesc *semHandleDesc)
 try: (hipImportExternalSemaphore:=dll.hipImportExternalSemaphore).restype, hipImportExternalSemaphore.argtypes = hipError_t, [ctypes.POINTER(hipExternalSemaphore_t), ctypes.POINTER(hipExternalSemaphoreHandleDesc)]
 except AttributeError: pass
 
-# hipError_t hipSignalExternalSemaphoresAsync(const hipExternalSemaphore_t *extSemArray, const hipExternalSemaphoreSignalParams *paramsArray, unsigned int numExtSems, hipStream_t stream)
 try: (hipSignalExternalSemaphoresAsync:=dll.hipSignalExternalSemaphoresAsync).restype, hipSignalExternalSemaphoresAsync.argtypes = hipError_t, [ctypes.POINTER(hipExternalSemaphore_t), ctypes.POINTER(hipExternalSemaphoreSignalParams), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t *extSemArray, const hipExternalSemaphoreWaitParams *paramsArray, unsigned int numExtSems, hipStream_t stream)
 try: (hipWaitExternalSemaphoresAsync:=dll.hipWaitExternalSemaphoresAsync).restype, hipWaitExternalSemaphoresAsync.argtypes = hipError_t, [ctypes.POINTER(hipExternalSemaphore_t), ctypes.POINTER(hipExternalSemaphoreWaitParams), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem)
 try: (hipDestroyExternalSemaphore:=dll.hipDestroyExternalSemaphore).restype, hipDestroyExternalSemaphore.argtypes = hipError_t, [hipExternalSemaphore_t]
 except AttributeError: pass
 
-# hipError_t hipImportExternalMemory(hipExternalMemory_t *extMem_out, const hipExternalMemoryHandleDesc *memHandleDesc)
 try: (hipImportExternalMemory:=dll.hipImportExternalMemory).restype, hipImportExternalMemory.argtypes = hipError_t, [ctypes.POINTER(hipExternalMemory_t), ctypes.POINTER(hipExternalMemoryHandleDesc)]
 except AttributeError: pass
 
-# hipError_t hipExternalMemoryGetMappedBuffer(void **devPtr, hipExternalMemory_t extMem, const hipExternalMemoryBufferDesc *bufferDesc)
 try: (hipExternalMemoryGetMappedBuffer:=dll.hipExternalMemoryGetMappedBuffer).restype, hipExternalMemoryGetMappedBuffer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), hipExternalMemory_t, ctypes.POINTER(hipExternalMemoryBufferDesc)]
 except AttributeError: pass
 
-# hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem)
 try: (hipDestroyExternalMemory:=dll.hipDestroyExternalMemory).restype, hipDestroyExternalMemory.argtypes = hipError_t, [hipExternalMemory_t]
 except AttributeError: pass
 
 hipMipmappedArray_t = ctypes.POINTER(hipMipmappedArray)
-# hipError_t hipExternalMemoryGetMappedMipmappedArray(hipMipmappedArray_t *mipmap, hipExternalMemory_t extMem, const hipExternalMemoryMipmappedArrayDesc *mipmapDesc)
 try: (hipExternalMemoryGetMappedMipmappedArray:=dll.hipExternalMemoryGetMappedMipmappedArray).restype, hipExternalMemoryGetMappedMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), hipExternalMemory_t, ctypes.POINTER(hipExternalMemoryMipmappedArrayDesc)]
 except AttributeError: pass
 
-# hipError_t hipMalloc(void **ptr, size_t size)
 try: (hipMalloc:=dll.hipMalloc).restype, hipMalloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t]
 except AttributeError: pass
 
-# hipError_t hipExtMallocWithFlags(void **ptr, size_t sizeBytes, unsigned int flags)
 try: (hipExtMallocWithFlags:=dll.hipExtMallocWithFlags).restype, hipExtMallocWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((deprecated("use hipHostMalloc instead"))) hipError_t hipMallocHost(void **ptr, size_t size)
 try: (hipMallocHost:=dll.hipMallocHost).restype, hipMallocHost.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("use hipHostMalloc instead"))) hipError_t hipMemAllocHost(void **ptr, size_t size)
 try: (hipMemAllocHost:=dll.hipMemAllocHost).restype, hipMemAllocHost.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t]
 except AttributeError: pass
 
-# hipError_t hipHostMalloc(void **ptr, size_t size, unsigned int flags)
 try: (hipHostMalloc:=dll.hipHostMalloc).restype, hipHostMalloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipMallocManaged(void **dev_ptr, size_t size, unsigned int flags = 1)
 try: (hipMallocManaged:=dll.hipMallocManaged).restype, hipMallocManaged.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipMemPrefetchAsync(const void *dev_ptr, size_t count, int device, hipStream_t stream = 0)
 try: (hipMemPrefetchAsync:=dll.hipMemPrefetchAsync).restype, hipMemPrefetchAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int32, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemAdvise(const void *dev_ptr, size_t count, hipMemoryAdvise advice, int device)
 try: (hipMemAdvise:=dll.hipMemAdvise).restype, hipMemAdvise.argtypes = hipError_t, [ctypes.c_void_p, size_t, hipMemoryAdvise, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipMemRangeGetAttribute(void *data, size_t data_size, hipMemRangeAttribute attribute, const void *dev_ptr, size_t count)
 try: (hipMemRangeGetAttribute:=dll.hipMemRangeGetAttribute).restype, hipMemRangeGetAttribute.argtypes = hipError_t, [ctypes.c_void_p, size_t, hipMemRangeAttribute, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemRangeGetAttributes(void **data, size_t *data_sizes, hipMemRangeAttribute *attributes, size_t num_attributes, const void *dev_ptr, size_t count)
 try: (hipMemRangeGetAttributes:=dll.hipMemRangeGetAttributes).restype, hipMemRangeGetAttributes.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t), ctypes.POINTER(hipMemRangeAttribute), size_t, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# hipError_t hipStreamAttachMemAsync(hipStream_t stream, void *dev_ptr, size_t length = 0, unsigned int flags = 4)
 try: (hipStreamAttachMemAsync:=dll.hipStreamAttachMemAsync).restype, hipStreamAttachMemAsync.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipMallocAsync(void **dev_ptr, size_t size, hipStream_t stream)
 try: (hipMallocAsync:=dll.hipMallocAsync).restype, hipMallocAsync.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipFreeAsync(void *dev_ptr, hipStream_t stream)
 try: (hipFreeAsync:=dll.hipFreeAsync).restype, hipFreeAsync.argtypes = hipError_t, [ctypes.c_void_p, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemPoolTrimTo(hipMemPool_t mem_pool, size_t min_bytes_to_hold)
 try: (hipMemPoolTrimTo:=dll.hipMemPoolTrimTo).restype, hipMemPoolTrimTo.argtypes = hipError_t, [hipMemPool_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemPoolSetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void *value)
 try: (hipMemPoolSetAttribute:=dll.hipMemPoolSetAttribute).restype, hipMemPoolSetAttribute.argtypes = hipError_t, [hipMemPool_t, hipMemPoolAttr, ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipMemPoolGetAttribute(hipMemPool_t mem_pool, hipMemPoolAttr attr, void *value)
 try: (hipMemPoolGetAttribute:=dll.hipMemPoolGetAttribute).restype, hipMemPoolGetAttribute.argtypes = hipError_t, [hipMemPool_t, hipMemPoolAttr, ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipMemPoolSetAccess(hipMemPool_t mem_pool, const hipMemAccessDesc *desc_list, size_t count)
 try: (hipMemPoolSetAccess:=dll.hipMemPoolSetAccess).restype, hipMemPoolSetAccess.argtypes = hipError_t, [hipMemPool_t, ctypes.POINTER(hipMemAccessDesc), size_t]
 except AttributeError: pass
 
-# hipError_t hipMemPoolGetAccess(hipMemAccessFlags *flags, hipMemPool_t mem_pool, hipMemLocation *location)
 try: (hipMemPoolGetAccess:=dll.hipMemPoolGetAccess).restype, hipMemPoolGetAccess.argtypes = hipError_t, [ctypes.POINTER(hipMemAccessFlags), hipMemPool_t, ctypes.POINTER(hipMemLocation)]
 except AttributeError: pass
 
-# hipError_t hipMemPoolCreate(hipMemPool_t *mem_pool, const hipMemPoolProps *pool_props)
 try: (hipMemPoolCreate:=dll.hipMemPoolCreate).restype, hipMemPoolCreate.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.POINTER(hipMemPoolProps)]
 except AttributeError: pass
 
-# hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool)
 try: (hipMemPoolDestroy:=dll.hipMemPoolDestroy).restype, hipMemPoolDestroy.argtypes = hipError_t, [hipMemPool_t]
 except AttributeError: pass
 
-# hipError_t hipMallocFromPoolAsync(void **dev_ptr, size_t size, hipMemPool_t mem_pool, hipStream_t stream)
 try: (hipMallocFromPoolAsync:=dll.hipMallocFromPoolAsync).restype, hipMallocFromPoolAsync.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, hipMemPool_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemPoolExportToShareableHandle(void *shared_handle, hipMemPool_t mem_pool, hipMemAllocationHandleType handle_type, unsigned int flags)
 try: (hipMemPoolExportToShareableHandle:=dll.hipMemPoolExportToShareableHandle).restype, hipMemPoolExportToShareableHandle.argtypes = hipError_t, [ctypes.c_void_p, hipMemPool_t, hipMemAllocationHandleType, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t *mem_pool, void *shared_handle, hipMemAllocationHandleType handle_type, unsigned int flags)
 try: (hipMemPoolImportFromShareableHandle:=dll.hipMemPoolImportFromShareableHandle).restype, hipMemPoolImportFromShareableHandle.argtypes = hipError_t, [ctypes.POINTER(hipMemPool_t), ctypes.c_void_p, hipMemAllocationHandleType, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData *export_data, void *dev_ptr)
 try: (hipMemPoolExportPointer:=dll.hipMemPoolExportPointer).restype, hipMemPoolExportPointer.argtypes = hipError_t, [ctypes.POINTER(hipMemPoolPtrExportData), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipMemPoolImportPointer(void **dev_ptr, hipMemPool_t mem_pool, hipMemPoolPtrExportData *export_data)
 try: (hipMemPoolImportPointer:=dll.hipMemPoolImportPointer).restype, hipMemPoolImportPointer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), hipMemPool_t, ctypes.POINTER(hipMemPoolPtrExportData)]
 except AttributeError: pass
 
-# __attribute__((deprecated("use hipHostMalloc instead"))) hipError_t hipHostAlloc(void **ptr, size_t size, unsigned int flags)
 try: (hipHostAlloc:=dll.hipHostAlloc).restype, hipHostAlloc.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipHostGetDevicePointer(void **devPtr, void *hstPtr, unsigned int flags)
 try: (hipHostGetDevicePointer:=dll.hipHostGetDevicePointer).restype, hipHostGetDevicePointer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipHostGetFlags(unsigned int *flagsPtr, void *hostPtr)
 try: (hipHostGetFlags:=dll.hipHostGetFlags).restype, hipHostGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipHostRegister(void *hostPtr, size_t sizeBytes, unsigned int flags)
 try: (hipHostRegister:=dll.hipHostRegister).restype, hipHostRegister.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipHostUnregister(void *hostPtr)
 try: (hipHostUnregister:=dll.hipHostUnregister).restype, hipHostUnregister.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipMallocPitch(void **ptr, size_t *pitch, size_t width, size_t height)
 try: (hipMallocPitch:=dll.hipMallocPitch).restype, hipMallocPitch.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t), size_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemAllocPitch(hipDeviceptr_t *dptr, size_t *pitch, size_t widthInBytes, size_t height, unsigned int elementSizeBytes)
 try: (hipMemAllocPitch:=dll.hipMemAllocPitch).restype, hipMemAllocPitch.argtypes = hipError_t, [ctypes.POINTER(hipDeviceptr_t), ctypes.POINTER(size_t), size_t, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipFree(void *ptr)
 try: (hipFree:=dll.hipFree).restype, hipFree.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# __attribute__((deprecated("use hipHostFree instead"))) hipError_t hipFreeHost(void *ptr)
 try: (hipFreeHost:=dll.hipFreeHost).restype, hipFreeHost.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipHostFree(void *ptr)
 try: (hipHostFree:=dll.hipHostFree).restype, hipHostFree.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipMemcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind)
 try: (hipMemcpy:=dll.hipMemcpy).restype, hipMemcpy.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipMemcpyWithStream(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream)
 try: (hipMemcpyWithStream:=dll.hipMemcpyWithStream).restype, hipMemcpyWithStream.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyHtoD(hipDeviceptr_t dst, void *src, size_t sizeBytes)
 try: (hipMemcpyHtoD:=dll.hipMemcpyHtoD).restype, hipMemcpyHtoD.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyDtoH(void *dst, hipDeviceptr_t src, size_t sizeBytes)
 try: (hipMemcpyDtoH:=dll.hipMemcpyDtoH).restype, hipMemcpyDtoH.argtypes = hipError_t, [ctypes.c_void_p, hipDeviceptr_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyDtoD(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes)
 try: (hipMemcpyDtoD:=dll.hipMemcpyDtoD).restype, hipMemcpyDtoD.argtypes = hipError_t, [hipDeviceptr_t, hipDeviceptr_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray, size_t srcOffset, size_t ByteCount)
 try: (hipMemcpyAtoD:=dll.hipMemcpyAtoD).restype, hipMemcpyAtoD.argtypes = hipError_t, [hipDeviceptr_t, hipArray_t, size_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset, hipDeviceptr_t srcDevice, size_t ByteCount)
 try: (hipMemcpyDtoA:=dll.hipMemcpyDtoA).restype, hipMemcpyDtoA.argtypes = hipError_t, [hipArray_t, size_t, hipDeviceptr_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyAtoA(hipArray_t dstArray, size_t dstOffset, hipArray_t srcArray, size_t srcOffset, size_t ByteCount)
 try: (hipMemcpyAtoA:=dll.hipMemcpyAtoA).restype, hipMemcpyAtoA.argtypes = hipError_t, [hipArray_t, size_t, hipArray_t, size_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dst, void *src, size_t sizeBytes, hipStream_t stream)
 try: (hipMemcpyHtoDAsync:=dll.hipMemcpyHtoDAsync).restype, hipMemcpyHtoDAsync.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_void_p, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyDtoHAsync(void *dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream)
 try: (hipMemcpyDtoHAsync:=dll.hipMemcpyDtoHAsync).restype, hipMemcpyDtoHAsync.argtypes = hipError_t, [ctypes.c_void_p, hipDeviceptr_t, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dst, hipDeviceptr_t src, size_t sizeBytes, hipStream_t stream)
 try: (hipMemcpyDtoDAsync:=dll.hipMemcpyDtoDAsync).restype, hipMemcpyDtoDAsync.argtypes = hipError_t, [hipDeviceptr_t, hipDeviceptr_t, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyAtoHAsync(void *dstHost, hipArray_t srcArray, size_t srcOffset, size_t ByteCount, hipStream_t stream)
 try: (hipMemcpyAtoHAsync:=dll.hipMemcpyAtoHAsync).restype, hipMemcpyAtoHAsync.argtypes = hipError_t, [ctypes.c_void_p, hipArray_t, size_t, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset, const void *srcHost, size_t ByteCount, hipStream_t stream)
 try: (hipMemcpyHtoAAsync:=dll.hipMemcpyHtoAAsync).restype, hipMemcpyHtoAAsync.argtypes = hipError_t, [hipArray_t, size_t, ctypes.c_void_p, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipModuleGetGlobal(hipDeviceptr_t *dptr, size_t *bytes, hipModule_t hmod, const char *name)
 try: (hipModuleGetGlobal:=dll.hipModuleGetGlobal).restype, hipModuleGetGlobal.argtypes = hipError_t, [ctypes.POINTER(hipDeviceptr_t), ctypes.POINTER(size_t), hipModule_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hipError_t hipGetSymbolAddress(void **devPtr, const void *symbol)
 try: (hipGetSymbolAddress:=dll.hipGetSymbolAddress).restype, hipGetSymbolAddress.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipGetSymbolSize(size_t *size, const void *symbol)
 try: (hipGetSymbolSize:=dll.hipGetSymbolSize).restype, hipGetSymbolSize.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipGetProcAddress(const char *symbol, void **pfn, int hipVersion, uint64_t flags, hipDriverProcAddressQueryResult *symbolStatus)
 try: (hipGetProcAddress:=dll.hipGetProcAddress).restype, hipGetProcAddress.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_void_p), ctypes.c_int32, uint64_t, ctypes.POINTER(hipDriverProcAddressQueryResult)]
 except AttributeError: pass
 
-# hipError_t hipMemcpyToSymbol(const void *symbol, const void *src, size_t sizeBytes, size_t offset = 0, hipMemcpyKind kind = hipMemcpyHostToDevice)
 try: (hipMemcpyToSymbol:=dll.hipMemcpyToSymbol).restype, hipMemcpyToSymbol.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipMemcpyToSymbolAsync(const void *symbol, const void *src, size_t sizeBytes, size_t offset, hipMemcpyKind kind, hipStream_t stream = 0)
 try: (hipMemcpyToSymbolAsync:=dll.hipMemcpyToSymbolAsync).restype, hipMemcpyToSymbolAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyFromSymbol(void *dst, const void *symbol, size_t sizeBytes, size_t offset = 0, hipMemcpyKind kind = hipMemcpyDeviceToHost)
 try: (hipMemcpyFromSymbol:=dll.hipMemcpyFromSymbol).restype, hipMemcpyFromSymbol.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipMemcpyFromSymbolAsync(void *dst, const void *symbol, size_t sizeBytes, size_t offset, hipMemcpyKind kind, hipStream_t stream = 0)
 try: (hipMemcpyFromSymbolAsync:=dll.hipMemcpyFromSymbolAsync).restype, hipMemcpyFromSymbolAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyAsync(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind, hipStream_t stream = 0)
 try: (hipMemcpyAsync:=dll.hipMemcpyAsync).restype, hipMemcpyAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemset(void *dst, int value, size_t sizeBytes)
 try: (hipMemset:=dll.hipMemset).restype, hipMemset.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemsetD8(hipDeviceptr_t dest, unsigned char value, size_t count)
 try: (hipMemsetD8:=dll.hipMemsetD8).restype, hipMemsetD8.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_ubyte, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemsetD8Async(hipDeviceptr_t dest, unsigned char value, size_t count, hipStream_t stream = 0)
 try: (hipMemsetD8Async:=dll.hipMemsetD8Async).restype, hipMemsetD8Async.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_ubyte, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemsetD16(hipDeviceptr_t dest, unsigned short value, size_t count)
 try: (hipMemsetD16:=dll.hipMemsetD16).restype, hipMemsetD16.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_uint16, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemsetD16Async(hipDeviceptr_t dest, unsigned short value, size_t count, hipStream_t stream = 0)
 try: (hipMemsetD16Async:=dll.hipMemsetD16Async).restype, hipMemsetD16Async.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_uint16, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemsetD32(hipDeviceptr_t dest, int value, size_t count)
 try: (hipMemsetD32:=dll.hipMemsetD32).restype, hipMemsetD32.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemsetAsync(void *dst, int value, size_t sizeBytes, hipStream_t stream = 0)
 try: (hipMemsetAsync:=dll.hipMemsetAsync).restype, hipMemsetAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStream_t stream = 0)
 try: (hipMemsetD32Async:=dll.hipMemsetD32Async).restype, hipMemsetD32Async.argtypes = hipError_t, [hipDeviceptr_t, ctypes.c_int32, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemset2D(void *dst, size_t pitch, int value, size_t width, size_t height)
 try: (hipMemset2D:=dll.hipMemset2D).restype, hipMemset2D.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int32, size_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemset2DAsync(void *dst, size_t pitch, int value, size_t width, size_t height, hipStream_t stream = 0)
 try: (hipMemset2DAsync:=dll.hipMemset2DAsync).restype, hipMemset2DAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_int32, size_t, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent)
 try: (hipMemset3D:=dll.hipMemset3D).restype, hipMemset3D.argtypes = hipError_t, [hipPitchedPtr, ctypes.c_int32, hipExtent]
 except AttributeError: pass
 
-# hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent, hipStream_t stream = 0)
 try: (hipMemset3DAsync:=dll.hipMemset3DAsync).restype, hipMemset3DAsync.argtypes = hipError_t, [hipPitchedPtr, ctypes.c_int32, hipExtent, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemGetInfo(size_t *free, size_t *total)
 try: (hipMemGetInfo:=dll.hipMemGetInfo).restype, hipMemGetInfo.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipMemPtrGetInfo(void *ptr, size_t *size)
 try: (hipMemPtrGetInfo:=dll.hipMemPtrGetInfo).restype, hipMemPtrGetInfo.argtypes = hipError_t, [ctypes.c_void_p, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipMallocArray(hipArray_t *array, const hipChannelFormatDesc *desc, size_t width, size_t height = 0, unsigned int flags = 0)
 try: (hipMallocArray:=dll.hipMallocArray).restype, hipMallocArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(hipChannelFormatDesc), size_t, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -1915,11 +1736,9 @@ HIP_ARRAY_DESCRIPTOR._fields_ = [
   ('Format', hipArray_Format),
   ('NumChannels', ctypes.c_uint32),
 ]
-# hipError_t hipArrayCreate(hipArray_t *pHandle, const HIP_ARRAY_DESCRIPTOR *pAllocateArray)
 try: (hipArrayCreate:=dll.hipArrayCreate).restype, hipArrayCreate.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(HIP_ARRAY_DESCRIPTOR)]
 except AttributeError: pass
 
-# hipError_t hipArrayDestroy(hipArray_t array)
 try: (hipArrayDestroy:=dll.hipArrayDestroy).restype, hipArrayDestroy.argtypes = hipError_t, [hipArray_t]
 except AttributeError: pass
 
@@ -1932,35 +1751,27 @@ HIP_ARRAY3D_DESCRIPTOR._fields_ = [
   ('NumChannels', ctypes.c_uint32),
   ('Flags', ctypes.c_uint32),
 ]
-# hipError_t hipArray3DCreate(hipArray_t *array, const HIP_ARRAY3D_DESCRIPTOR *pAllocateArray)
 try: (hipArray3DCreate:=dll.hipArray3DCreate).restype, hipArray3DCreate.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR)]
 except AttributeError: pass
 
-# hipError_t hipMalloc3D(hipPitchedPtr *pitchedDevPtr, hipExtent extent)
 try: (hipMalloc3D:=dll.hipMalloc3D).restype, hipMalloc3D.argtypes = hipError_t, [ctypes.POINTER(hipPitchedPtr), hipExtent]
 except AttributeError: pass
 
-# hipError_t hipFreeArray(hipArray_t array)
 try: (hipFreeArray:=dll.hipFreeArray).restype, hipFreeArray.argtypes = hipError_t, [hipArray_t]
 except AttributeError: pass
 
-# hipError_t hipMalloc3DArray(hipArray_t *array, const struct hipChannelFormatDesc *desc, struct hipExtent extent, unsigned int flags)
 try: (hipMalloc3DArray:=dll.hipMalloc3DArray).restype, hipMalloc3DArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(hipChannelFormatDesc), hipExtent, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipArrayGetInfo(hipChannelFormatDesc *desc, hipExtent *extent, unsigned int *flags, hipArray_t array)
 try: (hipArrayGetInfo:=dll.hipArrayGetInfo).restype, hipArrayGetInfo.argtypes = hipError_t, [ctypes.POINTER(hipChannelFormatDesc), ctypes.POINTER(hipExtent), ctypes.POINTER(ctypes.c_uint32), hipArray_t]
 except AttributeError: pass
 
-# hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR *pArrayDescriptor, hipArray_t array)
 try: (hipArrayGetDescriptor:=dll.hipArrayGetDescriptor).restype, hipArrayGetDescriptor.argtypes = hipError_t, [ctypes.POINTER(HIP_ARRAY_DESCRIPTOR), hipArray_t]
 except AttributeError: pass
 
-# hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR *pArrayDescriptor, hipArray_t array)
 try: (hipArray3DGetDescriptor:=dll.hipArray3DGetDescriptor).restype, hipArray3DGetDescriptor.argtypes = hipError_t, [ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR), hipArray_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpy2D(void *dst, size_t dpitch, const void *src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind)
 try: (hipMemcpy2D:=dll.hipMemcpy2D).restype, hipMemcpy2D.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
@@ -1983,61 +1794,47 @@ hip_Memcpy2D._fields_ = [
   ('WidthInBytes', size_t),
   ('Height', size_t),
 ]
-# hipError_t hipMemcpyParam2D(const hip_Memcpy2D *pCopy)
 try: (hipMemcpyParam2D:=dll.hipMemcpyParam2D).restype, hipMemcpyParam2D.argtypes = hipError_t, [ctypes.POINTER(hip_Memcpy2D)]
 except AttributeError: pass
 
-# hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D *pCopy, hipStream_t stream = 0)
 try: (hipMemcpyParam2DAsync:=dll.hipMemcpyParam2DAsync).restype, hipMemcpyParam2DAsync.argtypes = hipError_t, [ctypes.POINTER(hip_Memcpy2D), hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpy2DAsync(void *dst, size_t dpitch, const void *src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream = 0)
 try: (hipMemcpy2DAsync:=dll.hipMemcpy2DAsync).restype, hipMemcpy2DAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind)
 try: (hipMemcpy2DToArray:=dll.hipMemcpy2DToArray).restype, hipMemcpy2DToArray.argtypes = hipError_t, [hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream = 0)
 try: (hipMemcpy2DToArrayAsync:=dll.hipMemcpy2DToArrayAsync).restype, hipMemcpy2DToArrayAsync.argtypes = hipError_t, [hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
 class const_hipArray(Struct): pass
 hipArray_const_t = ctypes.POINTER(const_hipArray)
-# hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst, size_t hOffsetDst, hipArray_const_t src, size_t wOffsetSrc, size_t hOffsetSrc, size_t width, size_t height, hipMemcpyKind kind)
 try: (hipMemcpy2DArrayToArray:=dll.hipMemcpy2DArrayToArray).restype, hipMemcpy2DArrayToArray.argtypes = hipError_t, [hipArray_t, size_t, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t count, hipMemcpyKind kind)
 try: (hipMemcpyToArray:=dll.hipMemcpyToArray).restype, hipMemcpyToArray.argtypes = hipError_t, [hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipMemcpyFromArray(void *dst, hipArray_const_t srcArray, size_t wOffset, size_t hOffset, size_t count, hipMemcpyKind kind)
 try: (hipMemcpyFromArray:=dll.hipMemcpyFromArray).restype, hipMemcpyFromArray.argtypes = hipError_t, [ctypes.c_void_p, hipArray_const_t, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipMemcpy2DFromArray(void *dst, size_t dpitch, hipArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, hipMemcpyKind kind)
 try: (hipMemcpy2DFromArray:=dll.hipMemcpy2DFromArray).restype, hipMemcpy2DFromArray.argtypes = hipError_t, [ctypes.c_void_p, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipMemcpy2DFromArrayAsync(void *dst, size_t dpitch, hipArray_const_t src, size_t wOffset, size_t hOffset, size_t width, size_t height, hipMemcpyKind kind, hipStream_t stream = 0)
 try: (hipMemcpy2DFromArrayAsync:=dll.hipMemcpy2DFromArrayAsync).restype, hipMemcpy2DFromArrayAsync.argtypes = hipError_t, [ctypes.c_void_p, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyAtoH(void *dst, hipArray_t srcArray, size_t srcOffset, size_t count)
 try: (hipMemcpyAtoH:=dll.hipMemcpyAtoH).restype, hipMemcpyAtoH.argtypes = hipError_t, [ctypes.c_void_p, hipArray_t, size_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset, const void *srcHost, size_t count)
 try: (hipMemcpyHtoA:=dll.hipMemcpyHtoA).restype, hipMemcpyHtoA.argtypes = hipError_t, [hipArray_t, size_t, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpy3D(const struct hipMemcpy3DParms *p)
 try: (hipMemcpy3D:=dll.hipMemcpy3D).restype, hipMemcpy3D.argtypes = hipError_t, [ctypes.POINTER(hipMemcpy3DParms)]
 except AttributeError: pass
 
-# hipError_t hipMemcpy3DAsync(const struct hipMemcpy3DParms *p, hipStream_t stream = 0)
 try: (hipMemcpy3DAsync:=dll.hipMemcpy3DAsync).restype, hipMemcpy3DAsync.argtypes = hipError_t, [ctypes.POINTER(hipMemcpy3DParms), hipStream_t]
 except AttributeError: pass
 
@@ -2067,135 +1864,102 @@ HIP_MEMCPY3D._fields_ = [
   ('Height', size_t),
   ('Depth', size_t),
 ]
-# hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D *pCopy)
 try: (hipDrvMemcpy3D:=dll.hipDrvMemcpy3D).restype, hipDrvMemcpy3D.argtypes = hipError_t, [ctypes.POINTER(HIP_MEMCPY3D)]
 except AttributeError: pass
 
-# hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D *pCopy, hipStream_t stream)
 try: (hipDrvMemcpy3DAsync:=dll.hipDrvMemcpy3DAsync).restype, hipDrvMemcpy3DAsync.argtypes = hipError_t, [ctypes.POINTER(HIP_MEMCPY3D), hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipDeviceCanAccessPeer(int *canAccessPeer, int deviceId, int peerDeviceId)
 try: (hipDeviceCanAccessPeer:=dll.hipDeviceCanAccessPeer).restype, hipDeviceCanAccessPeer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags)
 try: (hipDeviceEnablePeerAccess:=dll.hipDeviceEnablePeerAccess).restype, hipDeviceEnablePeerAccess.argtypes = hipError_t, [ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipDeviceDisablePeerAccess(int peerDeviceId)
 try: (hipDeviceDisablePeerAccess:=dll.hipDeviceDisablePeerAccess).restype, hipDeviceDisablePeerAccess.argtypes = hipError_t, [ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipMemGetAddressRange(hipDeviceptr_t *pbase, size_t *psize, hipDeviceptr_t dptr)
 try: (hipMemGetAddressRange:=dll.hipMemGetAddressRange).restype, hipMemGetAddressRange.argtypes = hipError_t, [ctypes.POINTER(hipDeviceptr_t), ctypes.POINTER(size_t), hipDeviceptr_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyPeer(void *dst, int dstDeviceId, const void *src, int srcDeviceId, size_t sizeBytes)
 try: (hipMemcpyPeer:=dll.hipMemcpyPeer).restype, hipMemcpyPeer.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemcpyPeerAsync(void *dst, int dstDeviceId, const void *src, int srcDevice, size_t sizeBytes, hipStream_t stream = 0)
 try: (hipMemcpyPeerAsync:=dll.hipMemcpyPeerAsync).restype, hipMemcpyPeerAsync.argtypes = hipError_t, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, size_t, hipStream_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxCreate(hipCtx_t *ctx, unsigned int flags, hipDevice_t device)
 try: (hipCtxCreate:=dll.hipCtxCreate).restype, hipCtxCreate.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t), ctypes.c_uint32, hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDestroy(hipCtx_t ctx)
 try: (hipCtxDestroy:=dll.hipCtxDestroy).restype, hipCtxDestroy.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxPopCurrent(hipCtx_t *ctx)
 try: (hipCtxPopCurrent:=dll.hipCtxPopCurrent).restype, hipCtxPopCurrent.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxPushCurrent(hipCtx_t ctx)
 try: (hipCtxPushCurrent:=dll.hipCtxPushCurrent).restype, hipCtxPushCurrent.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetCurrent(hipCtx_t ctx)
 try: (hipCtxSetCurrent:=dll.hipCtxSetCurrent).restype, hipCtxSetCurrent.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetCurrent(hipCtx_t *ctx)
 try: (hipCtxGetCurrent:=dll.hipCtxGetCurrent).restype, hipCtxGetCurrent.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetDevice(hipDevice_t *device)
 try: (hipCtxGetDevice:=dll.hipCtxGetDevice).restype, hipCtxGetDevice.argtypes = hipError_t, [ctypes.POINTER(hipDevice_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetApiVersion(hipCtx_t ctx, int *apiVersion)
 try: (hipCtxGetApiVersion:=dll.hipCtxGetApiVersion).restype, hipCtxGetApiVersion.argtypes = hipError_t, [hipCtx_t, ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetCacheConfig(hipFuncCache_t *cacheConfig)
 try: (hipCtxGetCacheConfig:=dll.hipCtxGetCacheConfig).restype, hipCtxGetCacheConfig.argtypes = hipError_t, [ctypes.POINTER(hipFuncCache_t)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetCacheConfig(hipFuncCache_t cacheConfig)
 try: (hipCtxSetCacheConfig:=dll.hipCtxSetCacheConfig).restype, hipCtxSetCacheConfig.argtypes = hipError_t, [hipFuncCache_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config)
 try: (hipCtxSetSharedMemConfig:=dll.hipCtxSetSharedMemConfig).restype, hipCtxSetSharedMemConfig.argtypes = hipError_t, [hipSharedMemConfig]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig *pConfig)
 try: (hipCtxGetSharedMemConfig:=dll.hipCtxGetSharedMemConfig).restype, hipCtxGetSharedMemConfig.argtypes = hipError_t, [ctypes.POINTER(hipSharedMemConfig)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxSynchronize()
 try: (hipCtxSynchronize:=dll.hipCtxSynchronize).restype, hipCtxSynchronize.argtypes = hipError_t, []
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxGetFlags(unsigned int *flags)
 try: (hipCtxGetFlags:=dll.hipCtxGetFlags).restype, hipCtxGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags)
 try: (hipCtxEnablePeerAccess:=dll.hipCtxEnablePeerAccess).restype, hipCtxEnablePeerAccess.argtypes = hipError_t, [hipCtx_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx)
 try: (hipCtxDisablePeerAccess:=dll.hipCtxDisablePeerAccess).restype, hipCtxDisablePeerAccess.argtypes = hipError_t, [hipCtx_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int *flags, int *active)
 try: (hipDevicePrimaryCtxGetState:=dll.hipDevicePrimaryCtxGetState).restype, hipDevicePrimaryCtxGetState.argtypes = hipError_t, [hipDevice_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_int32)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev)
 try: (hipDevicePrimaryCtxRelease:=dll.hipDevicePrimaryCtxRelease).restype, hipDevicePrimaryCtxRelease.argtypes = hipError_t, [hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxRetain(hipCtx_t *pctx, hipDevice_t dev)
 try: (hipDevicePrimaryCtxRetain:=dll.hipDevicePrimaryCtxRetain).restype, hipDevicePrimaryCtxRetain.argtypes = hipError_t, [ctypes.POINTER(hipCtx_t), hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev)
 try: (hipDevicePrimaryCtxReset:=dll.hipDevicePrimaryCtxReset).restype, hipDevicePrimaryCtxReset.argtypes = hipError_t, [hipDevice_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags)
 try: (hipDevicePrimaryCtxSetFlags:=dll.hipDevicePrimaryCtxSetFlags).restype, hipDevicePrimaryCtxSetFlags.argtypes = hipError_t, [hipDevice_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipModuleLoad(hipModule_t *module, const char *fname)
 try: (hipModuleLoad:=dll.hipModuleLoad).restype, hipModuleLoad.argtypes = hipError_t, [ctypes.POINTER(hipModule_t), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hipError_t hipModuleUnload(hipModule_t module)
 try: (hipModuleUnload:=dll.hipModuleUnload).restype, hipModuleUnload.argtypes = hipError_t, [hipModule_t]
 except AttributeError: pass
 
-# hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t module, const char *kname)
 try: (hipModuleGetFunction:=dll.hipModuleGetFunction).restype, hipModuleGetFunction.argtypes = hipError_t, [ctypes.POINTER(hipFunction_t), hipModule_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attr, const void *func)
 try: (hipFuncGetAttributes:=dll.hipFuncGetAttributes).restype, hipFuncGetAttributes.argtypes = hipError_t, [ctypes.POINTER(hipFuncAttributes), ctypes.c_void_p]
 except AttributeError: pass
 
@@ -2212,11 +1976,9 @@ HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES = hipFunction_attribute.define(
 HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT', 9)
 HIP_FUNC_ATTRIBUTE_MAX = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX', 10)
 
-# hipError_t hipFuncGetAttribute(int *value, hipFunction_attribute attrib, hipFunction_t hfunc)
 try: (hipFuncGetAttribute:=dll.hipFuncGetAttribute).restype, hipFuncGetAttribute.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipFunction_attribute, hipFunction_t]
 except AttributeError: pass
 
-# hipError_t hipGetFuncBySymbol(hipFunction_t *functionPtr, const void *symbolPtr)
 try: (hipGetFuncBySymbol:=dll.hipGetFuncBySymbol).restype, hipGetFuncBySymbol.argtypes = hipError_t, [ctypes.POINTER(hipFunction_t), ctypes.c_void_p]
 except AttributeError: pass
 
@@ -2253,111 +2015,84 @@ textureReference._fields_ = [
   ('numChannels', ctypes.c_int32),
   ('format', hipArray_Format),
 ]
-# hipError_t hipModuleGetTexRef(textureReference **texRef, hipModule_t hmod, const char *name)
 try: (hipModuleGetTexRef:=dll.hipModuleGetTexRef).restype, hipModuleGetTexRef.argtypes = hipError_t, [ctypes.POINTER(ctypes.POINTER(textureReference)), hipModule_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# hipError_t hipModuleLoadData(hipModule_t *module, const void *image)
 try: (hipModuleLoadData:=dll.hipModuleLoadData).restype, hipModuleLoadData.argtypes = hipError_t, [ctypes.POINTER(hipModule_t), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipModuleLoadDataEx(hipModule_t *module, const void *image, unsigned int numOptions, hipJitOption *options, void **optionValues)
 try: (hipModuleLoadDataEx:=dll.hipModuleLoadDataEx).restype, hipModuleLoadDataEx.argtypes = hipError_t, [ctypes.POINTER(hipModule_t), ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(hipJitOption), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
-# hipError_t hipModuleLaunchKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void **kernelParams, void **extra)
 try: (hipModuleLaunchKernel:=dll.hipModuleLaunchKernel).restype, hipModuleLaunchKernel.argtypes = hipError_t, [hipFunction_t, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, hipStream_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
-# hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDimX, unsigned int gridDimY, unsigned int gridDimZ, unsigned int blockDimX, unsigned int blockDimY, unsigned int blockDimZ, unsigned int sharedMemBytes, hipStream_t stream, void **kernelParams)
 try: (hipModuleLaunchCooperativeKernel:=dll.hipModuleLaunchCooperativeKernel).restype, hipModuleLaunchCooperativeKernel.argtypes = hipError_t, [hipFunction_t, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, hipStream_t, ctypes.POINTER(ctypes.c_void_p)]
 except AttributeError: pass
 
-# hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams *launchParamsList, unsigned int numDevices, unsigned int flags)
 try: (hipModuleLaunchCooperativeKernelMultiDevice:=dll.hipModuleLaunchCooperativeKernelMultiDevice).restype, hipModuleLaunchCooperativeKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipFunctionLaunchParams), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipLaunchCooperativeKernel(const void *f, dim3 gridDim, dim3 blockDimX, void **kernelParams, unsigned int sharedMemBytes, hipStream_t stream)
 try: (hipLaunchCooperativeKernel:=dll.hipLaunchCooperativeKernel).restype, hipLaunchCooperativeKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams *launchParamsList, int numDevices, unsigned int flags)
 try: (hipLaunchCooperativeKernelMultiDevice:=dll.hipLaunchCooperativeKernelMultiDevice).restype, hipLaunchCooperativeKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipLaunchParams), ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams *launchParamsList, int numDevices, unsigned int flags)
 try: (hipExtLaunchMultiKernelMultiDevice:=dll.hipExtLaunchMultiKernelMultiDevice).restype, hipExtLaunchMultiKernelMultiDevice.argtypes = hipError_t, [ctypes.POINTER(hipLaunchParams), ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipModuleOccupancyMaxPotentialBlockSize(int *gridSize, int *blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit)
 try: (hipModuleOccupancyMaxPotentialBlockSize:=dll.hipModuleOccupancyMaxPotentialBlockSize).restype, hipModuleOccupancyMaxPotentialBlockSize.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), hipFunction_t, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int *gridSize, int *blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit, unsigned int flags)
 try: (hipModuleOccupancyMaxPotentialBlockSizeWithFlags:=dll.hipModuleOccupancyMaxPotentialBlockSizeWithFlags).restype, hipModuleOccupancyMaxPotentialBlockSizeWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), hipFunction_t, size_t, ctypes.c_int32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk)
 try: (hipModuleOccupancyMaxActiveBlocksPerMultiprocessor:=dll.hipModuleOccupancyMaxActiveBlocksPerMultiprocessor).restype, hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipFunction_t, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags)
 try: (hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:=dll.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags).restype, hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), hipFunction_t, ctypes.c_int32, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks, const void *f, int blockSize, size_t dynSharedMemPerBlk)
 try: (hipOccupancyMaxActiveBlocksPerMultiprocessor:=dll.hipOccupancyMaxActiveBlocksPerMultiprocessor).restype, hipOccupancyMaxActiveBlocksPerMultiprocessor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *numBlocks, const void *f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags = 0)
 try: (hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:=dll.hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags).restype, hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.c_void_p, ctypes.c_int32, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipOccupancyMaxPotentialBlockSize(int *gridSize, int *blockSize, const void *f, size_t dynSharedMemPerBlk, int blockSizeLimit)
 try: (hipOccupancyMaxPotentialBlockSize:=dll.hipOccupancyMaxPotentialBlockSize).restype, hipOccupancyMaxPotentialBlockSize.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# __attribute__((deprecated("use roctracer/rocTX instead"))) hipError_t hipProfilerStart()
 try: (hipProfilerStart:=dll.hipProfilerStart).restype, hipProfilerStart.argtypes = hipError_t, []
 except AttributeError: pass
 
-# __attribute__((deprecated("use roctracer/rocTX instead"))) hipError_t hipProfilerStop()
 try: (hipProfilerStop:=dll.hipProfilerStop).restype, hipProfilerStop.argtypes = hipError_t, []
 except AttributeError: pass
 
-# hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem = 0, hipStream_t stream = 0)
 try: (hipConfigureCall:=dll.hipConfigureCall).restype, hipConfigureCall.argtypes = hipError_t, [dim3, dim3, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipSetupArgument(const void *arg, size_t size, size_t offset)
 try: (hipSetupArgument:=dll.hipSetupArgument).restype, hipSetupArgument.argtypes = hipError_t, [ctypes.c_void_p, size_t, size_t]
 except AttributeError: pass
 
-# hipError_t hipLaunchByPtr(const void *func)
 try: (hipLaunchByPtr:=dll.hipLaunchByPtr).restype, hipLaunchByPtr.argtypes = hipError_t, [ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem = 0, hipStream_t stream = 0)
 try: (__hipPushCallConfiguration:=dll.__hipPushCallConfiguration).restype, __hipPushCallConfiguration.argtypes = hipError_t, [dim3, dim3, size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t __hipPopCallConfiguration(dim3 *gridDim, dim3 *blockDim, size_t *sharedMem, hipStream_t *stream)
 try: (__hipPopCallConfiguration:=dll.__hipPopCallConfiguration).restype, __hipPopCallConfiguration.argtypes = hipError_t, [ctypes.POINTER(dim3), ctypes.POINTER(dim3), ctypes.POINTER(size_t), ctypes.POINTER(hipStream_t)]
 except AttributeError: pass
 
-# hipError_t hipLaunchKernel(const void *function_address, dim3 numBlocks, dim3 dimBlocks, void **args, size_t sharedMemBytes = 0, hipStream_t stream = 0)
 try: (hipLaunchKernel:=dll.hipLaunchKernel).restype, hipLaunchKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void *userData)
 try: (hipLaunchHostFunc:=dll.hipLaunchHostFunc).restype, hipLaunchHostFunc.argtypes = hipError_t, [hipStream_t, hipHostFn_t, ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipDrvMemcpy2DUnaligned(const hip_Memcpy2D *pCopy)
 try: (hipDrvMemcpy2DUnaligned:=dll.hipDrvMemcpy2DUnaligned).restype, hipDrvMemcpy2DUnaligned.argtypes = hipError_t, [ctypes.POINTER(hip_Memcpy2D)]
 except AttributeError: pass
 
-# hipError_t hipExtLaunchKernel(const void *function_address, dim3 numBlocks, dim3 dimBlocks, void **args, size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent, hipEvent_t stopEvent, int flags)
 try: (hipExtLaunchKernel:=dll.hipExtLaunchKernel).restype, hipExtLaunchKernel.argtypes = hipError_t, [ctypes.c_void_p, dim3, dim3, ctypes.POINTER(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int32]
 except AttributeError: pass
 
@@ -2457,27 +2192,21 @@ hipResourceViewDesc._fields_ = [
   ('firstLayer', ctypes.c_uint32),
   ('lastLayer', ctypes.c_uint32),
 ]
-# hipError_t hipCreateTextureObject(hipTextureObject_t *pTexObject, const hipResourceDesc *pResDesc, const hipTextureDesc *pTexDesc, const struct hipResourceViewDesc *pResViewDesc)
 try: (hipCreateTextureObject:=dll.hipCreateTextureObject).restype, hipCreateTextureObject.argtypes = hipError_t, [ctypes.POINTER(hipTextureObject_t), ctypes.POINTER(hipResourceDesc), ctypes.POINTER(hipTextureDesc), ctypes.POINTER(hipResourceViewDesc)]
 except AttributeError: pass
 
-# hipError_t hipDestroyTextureObject(hipTextureObject_t textureObject)
 try: (hipDestroyTextureObject:=dll.hipDestroyTextureObject).restype, hipDestroyTextureObject.argtypes = hipError_t, [hipTextureObject_t]
 except AttributeError: pass
 
-# hipError_t hipGetChannelDesc(hipChannelFormatDesc *desc, hipArray_const_t array)
 try: (hipGetChannelDesc:=dll.hipGetChannelDesc).restype, hipGetChannelDesc.argtypes = hipError_t, [ctypes.POINTER(hipChannelFormatDesc), hipArray_const_t]
 except AttributeError: pass
 
-# hipError_t hipGetTextureObjectResourceDesc(hipResourceDesc *pResDesc, hipTextureObject_t textureObject)
 try: (hipGetTextureObjectResourceDesc:=dll.hipGetTextureObjectResourceDesc).restype, hipGetTextureObjectResourceDesc.argtypes = hipError_t, [ctypes.POINTER(hipResourceDesc), hipTextureObject_t]
 except AttributeError: pass
 
-# hipError_t hipGetTextureObjectResourceViewDesc(struct hipResourceViewDesc *pResViewDesc, hipTextureObject_t textureObject)
 try: (hipGetTextureObjectResourceViewDesc:=dll.hipGetTextureObjectResourceViewDesc).restype, hipGetTextureObjectResourceViewDesc.argtypes = hipError_t, [ctypes.POINTER(hipResourceViewDesc), hipTextureObject_t]
 except AttributeError: pass
 
-# hipError_t hipGetTextureObjectTextureDesc(hipTextureDesc *pTexDesc, hipTextureObject_t textureObject)
 try: (hipGetTextureObjectTextureDesc:=dll.hipGetTextureObjectTextureDesc).restype, hipGetTextureObjectTextureDesc.argtypes = hipError_t, [ctypes.POINTER(hipTextureDesc), hipTextureObject_t]
 except AttributeError: pass
 
@@ -2608,31 +2337,24 @@ HIP_RESOURCE_VIEW_DESC_st._fields_ = [
   ('lastLayer', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-# hipError_t hipTexObjectCreate(hipTextureObject_t *pTexObject, const HIP_RESOURCE_DESC *pResDesc, const HIP_TEXTURE_DESC *pTexDesc, const HIP_RESOURCE_VIEW_DESC *pResViewDesc)
 try: (hipTexObjectCreate:=dll.hipTexObjectCreate).restype, hipTexObjectCreate.argtypes = hipError_t, [ctypes.POINTER(hipTextureObject_t), ctypes.POINTER(HIP_RESOURCE_DESC), ctypes.POINTER(HIP_TEXTURE_DESC), ctypes.POINTER(HIP_RESOURCE_VIEW_DESC)]
 except AttributeError: pass
 
-# hipError_t hipTexObjectDestroy(hipTextureObject_t texObject)
 try: (hipTexObjectDestroy:=dll.hipTexObjectDestroy).restype, hipTexObjectDestroy.argtypes = hipError_t, [hipTextureObject_t]
 except AttributeError: pass
 
-# hipError_t hipTexObjectGetResourceDesc(HIP_RESOURCE_DESC *pResDesc, hipTextureObject_t texObject)
 try: (hipTexObjectGetResourceDesc:=dll.hipTexObjectGetResourceDesc).restype, hipTexObjectGetResourceDesc.argtypes = hipError_t, [ctypes.POINTER(HIP_RESOURCE_DESC), hipTextureObject_t]
 except AttributeError: pass
 
-# hipError_t hipTexObjectGetResourceViewDesc(HIP_RESOURCE_VIEW_DESC *pResViewDesc, hipTextureObject_t texObject)
 try: (hipTexObjectGetResourceViewDesc:=dll.hipTexObjectGetResourceViewDesc).restype, hipTexObjectGetResourceViewDesc.argtypes = hipError_t, [ctypes.POINTER(HIP_RESOURCE_VIEW_DESC), hipTextureObject_t]
 except AttributeError: pass
 
-# hipError_t hipTexObjectGetTextureDesc(HIP_TEXTURE_DESC *pTexDesc, hipTextureObject_t texObject)
 try: (hipTexObjectGetTextureDesc:=dll.hipTexObjectGetTextureDesc).restype, hipTexObjectGetTextureDesc.argtypes = hipError_t, [ctypes.POINTER(HIP_TEXTURE_DESC), hipTextureObject_t]
 except AttributeError: pass
 
-# hipError_t hipMallocMipmappedArray(hipMipmappedArray_t *mipmappedArray, const struct hipChannelFormatDesc *desc, struct hipExtent extent, unsigned int numLevels, unsigned int flags = 0)
 try: (hipMallocMipmappedArray:=dll.hipMallocMipmappedArray).restype, hipMallocMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(hipChannelFormatDesc), hipExtent, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray)
 try: (hipFreeMipmappedArray:=dll.hipFreeMipmappedArray).restype, hipFreeMipmappedArray.argtypes = hipError_t, [hipMipmappedArray_t]
 except AttributeError: pass
 
@@ -2651,625 +2373,470 @@ const_hipMipmappedArray._fields_ = [
   ('num_channels', ctypes.c_uint32),
 ]
 hipMipmappedArray_const_t = ctypes.POINTER(const_hipMipmappedArray)
-# hipError_t hipGetMipmappedArrayLevel(hipArray_t *levelArray, hipMipmappedArray_const_t mipmappedArray, unsigned int level)
 try: (hipGetMipmappedArrayLevel:=dll.hipGetMipmappedArrayLevel).restype, hipGetMipmappedArrayLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_const_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t *pHandle, HIP_ARRAY3D_DESCRIPTOR *pMipmappedArrayDesc, unsigned int numMipmapLevels)
 try: (hipMipmappedArrayCreate:=dll.hipMipmappedArrayCreate).restype, hipMipmappedArrayCreate.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR), ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipMipmappedArrayDestroy(hipMipmappedArray_t hMipmappedArray)
 try: (hipMipmappedArrayDestroy:=dll.hipMipmappedArrayDestroy).restype, hipMipmappedArrayDestroy.argtypes = hipError_t, [hipMipmappedArray_t]
 except AttributeError: pass
 
-# hipError_t hipMipmappedArrayGetLevel(hipArray_t *pLevelArray, hipMipmappedArray_t hMipMappedArray, unsigned int level)
 try: (hipMipmappedArrayGetLevel:=dll.hipMipmappedArrayGetLevel).restype, hipMipmappedArrayGetLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTextureToMipmappedArray(const textureReference *tex, hipMipmappedArray_const_t mipmappedArray, const hipChannelFormatDesc *desc)
 try: (hipBindTextureToMipmappedArray:=dll.hipBindTextureToMipmappedArray).restype, hipBindTextureToMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipMipmappedArray_const_t, ctypes.POINTER(hipChannelFormatDesc)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipGetTextureReference(const textureReference **texref, const void *symbol)
 try: (hipGetTextureReference:=dll.hipGetTextureReference).restype, hipGetTextureReference.argtypes = hipError_t, [ctypes.POINTER(ctypes.POINTER(textureReference)), ctypes.c_void_p]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetBorderColor(float *pBorderColor, const textureReference *texRef)
 try: (hipTexRefGetBorderColor:=dll.hipTexRefGetBorderColor).restype, hipTexRefGetBorderColor.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetArray(hipArray_t *pArray, const textureReference *texRef)
 try: (hipTexRefGetArray:=dll.hipTexRefGetArray).restype, hipTexRefGetArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddressMode(textureReference *texRef, int dim, enum hipTextureAddressMode am)
 try: (hipTexRefSetAddressMode:=dll.hipTexRefSetAddressMode).restype, hipTexRefSetAddressMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_int32, hipTextureAddressMode]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetArray(textureReference *tex, hipArray_const_t array, unsigned int flags)
 try: (hipTexRefSetArray:=dll.hipTexRefSetArray).restype, hipTexRefSetArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_const_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFilterMode(textureReference *texRef, enum hipTextureFilterMode fm)
 try: (hipTexRefSetFilterMode:=dll.hipTexRefSetFilterMode).restype, hipTexRefSetFilterMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipTextureFilterMode]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFlags(textureReference *texRef, unsigned int Flags)
 try: (hipTexRefSetFlags:=dll.hipTexRefSetFlags).restype, hipTexRefSetFlags.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetFormat(textureReference *texRef, hipArray_Format fmt, int NumPackedComponents)
 try: (hipTexRefSetFormat:=dll.hipTexRefSetFormat).restype, hipTexRefSetFormat.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_Format, ctypes.c_int32]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTexture(size_t *offset, const textureReference *tex, const void *devPtr, const hipChannelFormatDesc *desc, size_t size = (2147483647 * 2U + 1U))
 try: (hipBindTexture:=dll.hipBindTexture).restype, hipBindTexture.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference), ctypes.c_void_p, ctypes.POINTER(hipChannelFormatDesc), size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTexture2D(size_t *offset, const textureReference *tex, const void *devPtr, const hipChannelFormatDesc *desc, size_t width, size_t height, size_t pitch)
 try: (hipBindTexture2D:=dll.hipBindTexture2D).restype, hipBindTexture2D.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference), ctypes.c_void_p, ctypes.POINTER(hipChannelFormatDesc), size_t, size_t, size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipBindTextureToArray(const textureReference *tex, hipArray_const_t array, const hipChannelFormatDesc *desc)
 try: (hipBindTextureToArray:=dll.hipBindTextureToArray).restype, hipBindTextureToArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipArray_const_t, ctypes.POINTER(hipChannelFormatDesc)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipGetTextureAlignmentOffset(size_t *offset, const textureReference *texref)
 try: (hipGetTextureAlignmentOffset:=dll.hipGetTextureAlignmentOffset).restype, hipGetTextureAlignmentOffset.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipUnbindTexture(const textureReference *tex)
 try: (hipUnbindTexture:=dll.hipUnbindTexture).restype, hipUnbindTexture.argtypes = hipError_t, [ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetAddress(hipDeviceptr_t *dev_ptr, const textureReference *texRef)
 try: (hipTexRefGetAddress:=dll.hipTexRefGetAddress).restype, hipTexRefGetAddress.argtypes = hipError_t, [ctypes.POINTER(hipDeviceptr_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetAddressMode(enum hipTextureAddressMode *pam, const textureReference *texRef, int dim)
 try: (hipTexRefGetAddressMode:=dll.hipTexRefGetAddressMode).restype, hipTexRefGetAddressMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureAddressMode), ctypes.POINTER(textureReference), ctypes.c_int32]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
 try: (hipTexRefGetFilterMode:=dll.hipTexRefGetFilterMode).restype, hipTexRefGetFilterMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureFilterMode), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFlags(unsigned int *pFlags, const textureReference *texRef)
 try: (hipTexRefGetFlags:=dll.hipTexRefGetFlags).restype, hipTexRefGetFlags.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetFormat(hipArray_Format *pFormat, int *pNumChannels, const textureReference *texRef)
 try: (hipTexRefGetFormat:=dll.hipTexRefGetFormat).restype, hipTexRefGetFormat.argtypes = hipError_t, [ctypes.POINTER(hipArray_Format), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMaxAnisotropy(int *pmaxAnsio, const textureReference *texRef)
 try: (hipTexRefGetMaxAnisotropy:=dll.hipTexRefGetMaxAnisotropy).restype, hipTexRefGetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapFilterMode(enum hipTextureFilterMode *pfm, const textureReference *texRef)
 try: (hipTexRefGetMipmapFilterMode:=dll.hipTexRefGetMipmapFilterMode).restype, hipTexRefGetMipmapFilterMode.argtypes = hipError_t, [ctypes.POINTER(hipTextureFilterMode), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapLevelBias(float *pbias, const textureReference *texRef)
 try: (hipTexRefGetMipmapLevelBias:=dll.hipTexRefGetMipmapLevelBias).restype, hipTexRefGetMipmapLevelBias.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipmapLevelClamp(float *pminMipmapLevelClamp, float *pmaxMipmapLevelClamp, const textureReference *texRef)
 try: (hipTexRefGetMipmapLevelClamp:=dll.hipTexRefGetMipmapLevelClamp).restype, hipTexRefGetMipmapLevelClamp.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefGetMipMappedArray(hipMipmappedArray_t *pArray, const textureReference *texRef)
 try: (hipTexRefGetMipMappedArray:=dll.hipTexRefGetMipMappedArray).restype, hipTexRefGetMipMappedArray.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), ctypes.POINTER(textureReference)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddress(size_t *ByteOffset, textureReference *texRef, hipDeviceptr_t dptr, size_t bytes)
 try: (hipTexRefSetAddress:=dll.hipTexRefSetAddress).restype, hipTexRefSetAddress.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(textureReference), hipDeviceptr_t, size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetAddress2D(textureReference *texRef, const HIP_ARRAY_DESCRIPTOR *desc, hipDeviceptr_t dptr, size_t Pitch)
 try: (hipTexRefSetAddress2D:=dll.hipTexRefSetAddress2D).restype, hipTexRefSetAddress2D.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(HIP_ARRAY_DESCRIPTOR), hipDeviceptr_t, size_t]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMaxAnisotropy(textureReference *texRef, unsigned int maxAniso)
 try: (hipTexRefSetMaxAnisotropy:=dll.hipTexRefSetMaxAnisotropy).restype, hipTexRefSetMaxAnisotropy.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_uint32]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetBorderColor(textureReference *texRef, float *pBorderColor)
 try: (hipTexRefSetBorderColor:=dll.hipTexRefSetBorderColor).restype, hipTexRefSetBorderColor.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(ctypes.c_float)]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapFilterMode(textureReference *texRef, enum hipTextureFilterMode fm)
 try: (hipTexRefSetMipmapFilterMode:=dll.hipTexRefSetMipmapFilterMode).restype, hipTexRefSetMipmapFilterMode.argtypes = hipError_t, [ctypes.POINTER(textureReference), hipTextureFilterMode]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapLevelBias(textureReference *texRef, float bias)
 try: (hipTexRefSetMipmapLevelBias:=dll.hipTexRefSetMipmapLevelBias).restype, hipTexRefSetMipmapLevelBias.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_float]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmapLevelClamp(textureReference *texRef, float minMipMapLevelClamp, float maxMipMapLevelClamp)
 try: (hipTexRefSetMipmapLevelClamp:=dll.hipTexRefSetMipmapLevelClamp).restype, hipTexRefSetMipmapLevelClamp.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.c_float, ctypes.c_float]
 except AttributeError: pass
 
-# __attribute__((deprecated("This API is marked as deprecated and may not be supported in future releases. For more details please refer https://github.com/ROCm/HIP/blob/develop/docs/reference/deprecated_api_list.md"))) hipError_t hipTexRefSetMipmappedArray(textureReference *texRef, struct hipMipmappedArray *mipmappedArray, unsigned int Flags)
 try: (hipTexRefSetMipmappedArray:=dll.hipTexRefSetMipmappedArray).restype, hipTexRefSetMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(textureReference), ctypes.POINTER(hipMipmappedArray), ctypes.c_uint32]
 except AttributeError: pass
 
-# const char *hipApiName(uint32_t id)
 try: (hipApiName:=dll.hipApiName).restype, hipApiName.argtypes = ctypes.POINTER(ctypes.c_char), [uint32_t]
 except AttributeError: pass
 
-# const char *hipKernelNameRef(const hipFunction_t f)
 try: (hipKernelNameRef:=dll.hipKernelNameRef).restype, hipKernelNameRef.argtypes = ctypes.POINTER(ctypes.c_char), [hipFunction_t]
 except AttributeError: pass
 
-# const char *hipKernelNameRefByPtr(const void *hostFunction, hipStream_t stream)
 try: (hipKernelNameRefByPtr:=dll.hipKernelNameRefByPtr).restype, hipKernelNameRefByPtr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_void_p, hipStream_t]
 except AttributeError: pass
 
-# int hipGetStreamDeviceId(hipStream_t stream)
 try: (hipGetStreamDeviceId:=dll.hipGetStreamDeviceId).restype, hipGetStreamDeviceId.argtypes = ctypes.c_int32, [hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode)
 try: (hipStreamBeginCapture:=dll.hipStreamBeginCapture).restype, hipStreamBeginCapture.argtypes = hipError_t, [hipStream_t, hipStreamCaptureMode]
 except AttributeError: pass
 
-# hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph, const hipGraphNode_t *dependencies, const hipGraphEdgeData *dependencyData, size_t numDependencies, hipStreamCaptureMode mode)
 try: (hipStreamBeginCaptureToGraph:=dll.hipStreamBeginCaptureToGraph).restype, hipStreamBeginCaptureToGraph.argtypes = hipError_t, [hipStream_t, hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(hipGraphEdgeData), size_t, hipStreamCaptureMode]
 except AttributeError: pass
 
-# hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t *pGraph)
 try: (hipStreamEndCapture:=dll.hipStreamEndCapture).restype, hipStreamEndCapture.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipGraph_t)]
 except AttributeError: pass
 
-# hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptureStatus *pCaptureStatus, unsigned long long *pId)
 try: (hipStreamGetCaptureInfo:=dll.hipStreamGetCaptureInfo).restype, hipStreamGetCaptureInfo.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipStreamCaptureStatus), ctypes.POINTER(ctypes.c_uint64)]
 except AttributeError: pass
 
-# hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus *captureStatus_out, unsigned long long *id_out = 0, hipGraph_t *graph_out = 0, const hipGraphNode_t **dependencies_out = 0, size_t *numDependencies_out = 0)
 try: (hipStreamGetCaptureInfo_v2:=dll.hipStreamGetCaptureInfo_v2).restype, hipStreamGetCaptureInfo_v2.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipStreamCaptureStatus), ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(hipGraph_t), ctypes.POINTER(ctypes.POINTER(hipGraphNode_t)), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus *pCaptureStatus)
 try: (hipStreamIsCapturing:=dll.hipStreamIsCapturing).restype, hipStreamIsCapturing.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipStreamCaptureStatus)]
 except AttributeError: pass
 
-# hipError_t hipStreamUpdateCaptureDependencies(hipStream_t stream, hipGraphNode_t *dependencies, size_t numDependencies, unsigned int flags = 0)
 try: (hipStreamUpdateCaptureDependencies:=dll.hipStreamUpdateCaptureDependencies).restype, hipStreamUpdateCaptureDependencies.argtypes = hipError_t, [hipStream_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode *mode)
 try: (hipThreadExchangeStreamCaptureMode:=dll.hipThreadExchangeStreamCaptureMode).restype, hipThreadExchangeStreamCaptureMode.argtypes = hipError_t, [ctypes.POINTER(hipStreamCaptureMode)]
 except AttributeError: pass
 
-# hipError_t hipGraphCreate(hipGraph_t *pGraph, unsigned int flags)
 try: (hipGraphCreate:=dll.hipGraphCreate).restype, hipGraphCreate.argtypes = hipError_t, [ctypes.POINTER(hipGraph_t), ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipGraphDestroy(hipGraph_t graph)
 try: (hipGraphDestroy:=dll.hipGraphDestroy).restype, hipGraphDestroy.argtypes = hipError_t, [hipGraph_t]
 except AttributeError: pass
 
-# hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t *from, const hipGraphNode_t *to, size_t numDependencies)
 try: (hipGraphAddDependencies:=dll.hipGraphAddDependencies).restype, hipGraphAddDependencies.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(hipGraphNode_t), size_t]
 except AttributeError: pass
 
-# hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t *from, const hipGraphNode_t *to, size_t numDependencies)
 try: (hipGraphRemoveDependencies:=dll.hipGraphRemoveDependencies).restype, hipGraphRemoveDependencies.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(hipGraphNode_t), size_t]
 except AttributeError: pass
 
-# hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t *from, hipGraphNode_t *to, size_t *numEdges)
 try: (hipGraphGetEdges:=dll.hipGraphGetEdges).restype, hipGraphGetEdges.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t *nodes, size_t *numNodes)
 try: (hipGraphGetNodes:=dll.hipGraphGetNodes).restype, hipGraphGetNodes.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t *pRootNodes, size_t *pNumRootNodes)
 try: (hipGraphGetRootNodes:=dll.hipGraphGetRootNodes).restype, hipGraphGetRootNodes.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t *pDependencies, size_t *pNumDependencies)
 try: (hipGraphNodeGetDependencies:=dll.hipGraphNodeGetDependencies).restype, hipGraphNodeGetDependencies.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t *pDependentNodes, size_t *pNumDependentNodes)
 try: (hipGraphNodeGetDependentNodes:=dll.hipGraphNodeGetDependentNodes).restype, hipGraphNodeGetDependentNodes.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(size_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType *pType)
 try: (hipGraphNodeGetType:=dll.hipGraphNodeGetType).restype, hipGraphNodeGetType.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipGraphNodeType)]
 except AttributeError: pass
 
-# hipError_t hipGraphDestroyNode(hipGraphNode_t node)
 try: (hipGraphDestroyNode:=dll.hipGraphDestroyNode).restype, hipGraphDestroyNode.argtypes = hipError_t, [hipGraphNode_t]
 except AttributeError: pass
 
-# hipError_t hipGraphClone(hipGraph_t *pGraphClone, hipGraph_t originalGraph)
 try: (hipGraphClone:=dll.hipGraphClone).restype, hipGraphClone.argtypes = hipError_t, [ctypes.POINTER(hipGraph_t), hipGraph_t]
 except AttributeError: pass
 
-# hipError_t hipGraphNodeFindInClone(hipGraphNode_t *pNode, hipGraphNode_t originalNode, hipGraph_t clonedGraph)
 try: (hipGraphNodeFindInClone:=dll.hipGraphNodeFindInClone).restype, hipGraphNodeFindInClone.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraphNode_t, hipGraph_t]
 except AttributeError: pass
 
-# hipError_t hipGraphInstantiate(hipGraphExec_t *pGraphExec, hipGraph_t graph, hipGraphNode_t *pErrorNode, char *pLogBuffer, size_t bufferSize)
 try: (hipGraphInstantiate:=dll.hipGraphInstantiate).restype, hipGraphInstantiate.argtypes = hipError_t, [ctypes.POINTER(hipGraphExec_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# hipError_t hipGraphInstantiateWithFlags(hipGraphExec_t *pGraphExec, hipGraph_t graph, unsigned long long flags)
 try: (hipGraphInstantiateWithFlags:=dll.hipGraphInstantiateWithFlags).restype, hipGraphInstantiateWithFlags.argtypes = hipError_t, [ctypes.POINTER(hipGraphExec_t), hipGraph_t, ctypes.c_uint64]
 except AttributeError: pass
 
-# hipError_t hipGraphInstantiateWithParams(hipGraphExec_t *pGraphExec, hipGraph_t graph, hipGraphInstantiateParams *instantiateParams)
 try: (hipGraphInstantiateWithParams:=dll.hipGraphInstantiateWithParams).restype, hipGraphInstantiateWithParams.argtypes = hipError_t, [ctypes.POINTER(hipGraphExec_t), hipGraph_t, ctypes.POINTER(hipGraphInstantiateParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream)
 try: (hipGraphLaunch:=dll.hipGraphLaunch).restype, hipGraphLaunch.argtypes = hipError_t, [hipGraphExec_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream)
 try: (hipGraphUpload:=dll.hipGraphUpload).restype, hipGraphUpload.argtypes = hipError_t, [hipGraphExec_t, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipGraphAddNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, hipGraphNodeParams *nodeParams)
 try: (hipGraphAddNode:=dll.hipGraphAddNode).restype, hipGraphAddNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipGraphNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecDestroy(hipGraphExec_t graphExec)
 try: (hipGraphExecDestroy:=dll.hipGraphExecDestroy).restype, hipGraphExecDestroy.argtypes = hipError_t, [hipGraphExec_t]
 except AttributeError: pass
 
-# hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph, hipGraphNode_t *hErrorNode_out, hipGraphExecUpdateResult *updateResult_out)
 try: (hipGraphExecUpdate:=dll.hipGraphExecUpdate).restype, hipGraphExecUpdate.argtypes = hipError_t, [hipGraphExec_t, hipGraph_t, ctypes.POINTER(hipGraphNode_t), ctypes.POINTER(hipGraphExecUpdateResult)]
 except AttributeError: pass
 
-# hipError_t hipGraphAddKernelNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const hipKernelNodeParams *pNodeParams)
 try: (hipGraphAddKernelNode:=dll.hipGraphAddKernelNode).restype, hipGraphAddKernelNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipKernelNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphKernelNodeGetParams(hipGraphNode_t node, hipKernelNodeParams *pNodeParams)
 try: (hipGraphKernelNodeGetParams:=dll.hipGraphKernelNodeGetParams).restype, hipGraphKernelNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipKernelNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphKernelNodeSetParams(hipGraphNode_t node, const hipKernelNodeParams *pNodeParams)
 try: (hipGraphKernelNodeSetParams:=dll.hipGraphKernelNodeSetParams).restype, hipGraphKernelNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipKernelNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipKernelNodeParams *pNodeParams)
 try: (hipGraphExecKernelNodeSetParams:=dll.hipGraphExecKernelNodeSetParams).restype, hipGraphExecKernelNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipKernelNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipDrvGraphAddMemcpyNode(hipGraphNode_t *phGraphNode, hipGraph_t hGraph, const hipGraphNode_t *dependencies, size_t numDependencies, const HIP_MEMCPY3D *copyParams, hipCtx_t ctx)
 try: (hipDrvGraphAddMemcpyNode:=dll.hipDrvGraphAddMemcpyNode).restype, hipDrvGraphAddMemcpyNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(HIP_MEMCPY3D), hipCtx_t]
 except AttributeError: pass
 
-# hipError_t hipGraphAddMemcpyNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const hipMemcpy3DParms *pCopyParams)
 try: (hipGraphAddMemcpyNode:=dll.hipGraphAddMemcpyNode).restype, hipGraphAddMemcpyNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipMemcpy3DParms)]
 except AttributeError: pass
 
-# hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node, hipMemcpy3DParms *pNodeParams)
 try: (hipGraphMemcpyNodeGetParams:=dll.hipGraphMemcpyNodeGetParams).restype, hipGraphMemcpyNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipMemcpy3DParms)]
 except AttributeError: pass
 
-# hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node, const hipMemcpy3DParms *pNodeParams)
 try: (hipGraphMemcpyNodeSetParams:=dll.hipGraphMemcpyNodeSetParams).restype, hipGraphMemcpyNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipMemcpy3DParms)]
 except AttributeError: pass
 
-# hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t hNode, hipLaunchAttributeID attr, const hipLaunchAttributeValue *value)
 try: (hipGraphKernelNodeSetAttribute:=dll.hipGraphKernelNodeSetAttribute).restype, hipGraphKernelNodeSetAttribute.argtypes = hipError_t, [hipGraphNode_t, hipLaunchAttributeID, ctypes.POINTER(hipLaunchAttributeValue)]
 except AttributeError: pass
 
-# hipError_t hipGraphKernelNodeGetAttribute(hipGraphNode_t hNode, hipLaunchAttributeID attr, hipLaunchAttributeValue *value)
 try: (hipGraphKernelNodeGetAttribute:=dll.hipGraphKernelNodeGetAttribute).restype, hipGraphKernelNodeGetAttribute.argtypes = hipError_t, [hipGraphNode_t, hipLaunchAttributeID, ctypes.POINTER(hipLaunchAttributeValue)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, hipMemcpy3DParms *pNodeParams)
 try: (hipGraphExecMemcpyNodeSetParams:=dll.hipGraphExecMemcpyNodeSetParams).restype, hipGraphExecMemcpyNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipMemcpy3DParms)]
 except AttributeError: pass
 
-# hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, void *dst, const void *src, size_t count, hipMemcpyKind kind)
 try: (hipGraphAddMemcpyNode1D:=dll.hipGraphAddMemcpyNode1D).restype, hipGraphAddMemcpyNode1D.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void *dst, const void *src, size_t count, hipMemcpyKind kind)
 try: (hipGraphMemcpyNodeSetParams1D:=dll.hipGraphMemcpyNodeSetParams1D).restype, hipGraphMemcpyNodeSetParams1D.argtypes = hipError_t, [hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t hGraphExec, hipGraphNode_t node, void *dst, const void *src, size_t count, hipMemcpyKind kind)
 try: (hipGraphExecMemcpyNodeSetParams1D:=dll.hipGraphExecMemcpyNodeSetParams1D).restype, hipGraphExecMemcpyNodeSetParams1D.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphAddMemcpyNodeFromSymbol(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, void *dst, const void *symbol, size_t count, size_t offset, hipMemcpyKind kind)
 try: (hipGraphAddMemcpyNodeFromSymbol:=dll.hipGraphAddMemcpyNodeFromSymbol).restype, hipGraphAddMemcpyNodeFromSymbol.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphMemcpyNodeSetParamsFromSymbol(hipGraphNode_t node, void *dst, const void *symbol, size_t count, size_t offset, hipMemcpyKind kind)
 try: (hipGraphMemcpyNodeSetParamsFromSymbol:=dll.hipGraphMemcpyNodeSetParamsFromSymbol).restype, hipGraphMemcpyNodeSetParamsFromSymbol.argtypes = hipError_t, [hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphExecMemcpyNodeSetParamsFromSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node, void *dst, const void *symbol, size_t count, size_t offset, hipMemcpyKind kind)
 try: (hipGraphExecMemcpyNodeSetParamsFromSymbol:=dll.hipGraphExecMemcpyNodeSetParamsFromSymbol).restype, hipGraphExecMemcpyNodeSetParamsFromSymbol.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const void *symbol, const void *src, size_t count, size_t offset, hipMemcpyKind kind)
 try: (hipGraphAddMemcpyNodeToSymbol:=dll.hipGraphAddMemcpyNodeToSymbol).restype, hipGraphAddMemcpyNodeToSymbol.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphMemcpyNodeSetParamsToSymbol(hipGraphNode_t node, const void *symbol, const void *src, size_t count, size_t offset, hipMemcpyKind kind)
 try: (hipGraphMemcpyNodeSetParamsToSymbol:=dll.hipGraphMemcpyNodeSetParamsToSymbol).restype, hipGraphMemcpyNodeSetParamsToSymbol.argtypes = hipError_t, [hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphExecMemcpyNodeSetParamsToSymbol(hipGraphExec_t hGraphExec, hipGraphNode_t node, const void *symbol, const void *src, size_t count, size_t offset, hipMemcpyKind kind)
 try: (hipGraphExecMemcpyNodeSetParamsToSymbol:=dll.hipGraphExecMemcpyNodeSetParamsToSymbol).restype, hipGraphExecMemcpyNodeSetParamsToSymbol.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
-# hipError_t hipGraphAddMemsetNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const hipMemsetParams *pMemsetParams)
 try: (hipGraphAddMemsetNode:=dll.hipGraphAddMemsetNode).restype, hipGraphAddMemsetNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipMemsetParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphMemsetNodeGetParams(hipGraphNode_t node, hipMemsetParams *pNodeParams)
 try: (hipGraphMemsetNodeGetParams:=dll.hipGraphMemsetNodeGetParams).restype, hipGraphMemsetNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipMemsetParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphMemsetNodeSetParams(hipGraphNode_t node, const hipMemsetParams *pNodeParams)
 try: (hipGraphMemsetNodeSetParams:=dll.hipGraphMemsetNodeSetParams).restype, hipGraphMemsetNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipMemsetParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipMemsetParams *pNodeParams)
 try: (hipGraphExecMemsetNodeSetParams:=dll.hipGraphExecMemsetNodeSetParams).restype, hipGraphExecMemsetNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipMemsetParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphAddHostNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const hipHostNodeParams *pNodeParams)
 try: (hipGraphAddHostNode:=dll.hipGraphAddHostNode).restype, hipGraphAddHostNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipHostNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphHostNodeGetParams(hipGraphNode_t node, hipHostNodeParams *pNodeParams)
 try: (hipGraphHostNodeGetParams:=dll.hipGraphHostNodeGetParams).restype, hipGraphHostNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipHostNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphHostNodeSetParams(hipGraphNode_t node, const hipHostNodeParams *pNodeParams)
 try: (hipGraphHostNodeSetParams:=dll.hipGraphHostNodeSetParams).restype, hipGraphHostNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipHostNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecHostNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, const hipHostNodeParams *pNodeParams)
 try: (hipGraphExecHostNodeSetParams:=dll.hipGraphExecHostNodeSetParams).restype, hipGraphExecHostNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipHostNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphAddChildGraphNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, hipGraph_t childGraph)
 try: (hipGraphAddChildGraphNode:=dll.hipGraphAddChildGraphNode).restype, hipGraphAddChildGraphNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, hipGraph_t]
 except AttributeError: pass
 
-# hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t *pGraph)
 try: (hipGraphChildGraphNodeGetGraph:=dll.hipGraphChildGraphNodeGetGraph).restype, hipGraphChildGraphNodeGetGraph.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipGraph_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecChildGraphNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node, hipGraph_t childGraph)
 try: (hipGraphExecChildGraphNodeSetParams:=dll.hipGraphExecChildGraphNodeSetParams).restype, hipGraphExecChildGraphNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, hipGraph_t]
 except AttributeError: pass
 
-# hipError_t hipGraphAddEmptyNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies)
 try: (hipGraphAddEmptyNode:=dll.hipGraphAddEmptyNode).restype, hipGraphAddEmptyNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t]
 except AttributeError: pass
 
-# hipError_t hipGraphAddEventRecordNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, hipEvent_t event)
 try: (hipGraphAddEventRecordNode:=dll.hipGraphAddEventRecordNode).restype, hipGraphAddEventRecordNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipGraphEventRecordNodeGetEvent(hipGraphNode_t node, hipEvent_t *event_out)
 try: (hipGraphEventRecordNodeGetEvent:=dll.hipGraphEventRecordNodeGetEvent).restype, hipGraphEventRecordNodeGetEvent.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipEvent_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphEventRecordNodeSetEvent(hipGraphNode_t node, hipEvent_t event)
 try: (hipGraphEventRecordNodeSetEvent:=dll.hipGraphEventRecordNodeSetEvent).restype, hipGraphEventRecordNodeSetEvent.argtypes = hipError_t, [hipGraphNode_t, hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipGraphExecEventRecordNodeSetEvent(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, hipEvent_t event)
 try: (hipGraphExecEventRecordNodeSetEvent:=dll.hipGraphExecEventRecordNodeSetEvent).restype, hipGraphExecEventRecordNodeSetEvent.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipGraphAddEventWaitNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, hipEvent_t event)
 try: (hipGraphAddEventWaitNode:=dll.hipGraphAddEventWaitNode).restype, hipGraphAddEventWaitNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipGraphEventWaitNodeGetEvent(hipGraphNode_t node, hipEvent_t *event_out)
 try: (hipGraphEventWaitNodeGetEvent:=dll.hipGraphEventWaitNodeGetEvent).restype, hipGraphEventWaitNodeGetEvent.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipEvent_t)]
 except AttributeError: pass
 
-# hipError_t hipGraphEventWaitNodeSetEvent(hipGraphNode_t node, hipEvent_t event)
 try: (hipGraphEventWaitNodeSetEvent:=dll.hipGraphEventWaitNodeSetEvent).restype, hipGraphEventWaitNodeSetEvent.argtypes = hipError_t, [hipGraphNode_t, hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipGraphExecEventWaitNodeSetEvent(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, hipEvent_t event)
 try: (hipGraphExecEventWaitNodeSetEvent:=dll.hipGraphExecEventWaitNodeSetEvent).restype, hipGraphExecEventWaitNodeSetEvent.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, hipEvent_t]
 except AttributeError: pass
 
-# hipError_t hipGraphAddMemAllocNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, hipMemAllocNodeParams *pNodeParams)
 try: (hipGraphAddMemAllocNode:=dll.hipGraphAddMemAllocNode).restype, hipGraphAddMemAllocNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipMemAllocNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphMemAllocNodeGetParams(hipGraphNode_t node, hipMemAllocNodeParams *pNodeParams)
 try: (hipGraphMemAllocNodeGetParams:=dll.hipGraphMemAllocNodeGetParams).restype, hipGraphMemAllocNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipMemAllocNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphAddMemFreeNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, void *dev_ptr)
 try: (hipGraphAddMemFreeNode:=dll.hipGraphAddMemFreeNode).restype, hipGraphAddMemFreeNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node, void *dev_ptr)
 try: (hipGraphMemFreeNodeGetParams:=dll.hipGraphMemFreeNodeGetParams).restype, hipGraphMemFreeNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void *value)
 try: (hipDeviceGetGraphMemAttribute:=dll.hipDeviceGetGraphMemAttribute).restype, hipDeviceGetGraphMemAttribute.argtypes = hipError_t, [ctypes.c_int32, hipGraphMemAttributeType, ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void *value)
 try: (hipDeviceSetGraphMemAttribute:=dll.hipDeviceSetGraphMemAttribute).restype, hipDeviceSetGraphMemAttribute.argtypes = hipError_t, [ctypes.c_int32, hipGraphMemAttributeType, ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipDeviceGraphMemTrim(int device)
 try: (hipDeviceGraphMemTrim:=dll.hipDeviceGraphMemTrim).restype, hipDeviceGraphMemTrim.argtypes = hipError_t, [ctypes.c_int32]
 except AttributeError: pass
 
-# hipError_t hipUserObjectCreate(hipUserObject_t *object_out, void *ptr, hipHostFn_t destroy, unsigned int initialRefcount, unsigned int flags)
 try: (hipUserObjectCreate:=dll.hipUserObjectCreate).restype, hipUserObjectCreate.argtypes = hipError_t, [ctypes.POINTER(hipUserObject_t), ctypes.c_void_p, hipHostFn_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count = 1)
 try: (hipUserObjectRelease:=dll.hipUserObjectRelease).restype, hipUserObjectRelease.argtypes = hipError_t, [hipUserObject_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipUserObjectRetain(hipUserObject_t object, unsigned int count = 1)
 try: (hipUserObjectRetain:=dll.hipUserObjectRetain).restype, hipUserObjectRetain.argtypes = hipError_t, [hipUserObject_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count = 1, unsigned int flags = 0)
 try: (hipGraphRetainUserObject:=dll.hipGraphRetainUserObject).restype, hipGraphRetainUserObject.argtypes = hipError_t, [hipGraph_t, hipUserObject_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count = 1)
 try: (hipGraphReleaseUserObject:=dll.hipGraphReleaseUserObject).restype, hipGraphReleaseUserObject.argtypes = hipError_t, [hipGraph_t, hipUserObject_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipGraphDebugDotPrint(hipGraph_t graph, const char *path, unsigned int flags)
 try: (hipGraphDebugDotPrint:=dll.hipGraphDebugDotPrint).restype, hipGraphDebugDotPrint.argtypes = hipError_t, [hipGraph_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst)
 try: (hipGraphKernelNodeCopyAttributes:=dll.hipGraphKernelNodeCopyAttributes).restype, hipGraphKernelNodeCopyAttributes.argtypes = hipError_t, [hipGraphNode_t, hipGraphNode_t]
 except AttributeError: pass
 
-# hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, unsigned int isEnabled)
 try: (hipGraphNodeSetEnabled:=dll.hipGraphNodeSetEnabled).restype, hipGraphNodeSetEnabled.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, unsigned int *isEnabled)
 try: (hipGraphNodeGetEnabled:=dll.hipGraphNodeGetEnabled).restype, hipGraphNodeGetEnabled.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
-# hipError_t hipGraphAddExternalSemaphoresWaitNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const hipExternalSemaphoreWaitNodeParams *nodeParams)
 try: (hipGraphAddExternalSemaphoresWaitNode:=dll.hipGraphAddExternalSemaphoresWaitNode).restype, hipGraphAddExternalSemaphoresWaitNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphAddExternalSemaphoresSignalNode(hipGraphNode_t *pGraphNode, hipGraph_t graph, const hipGraphNode_t *pDependencies, size_t numDependencies, const hipExternalSemaphoreSignalNodeParams *nodeParams)
 try: (hipGraphAddExternalSemaphoresSignalNode:=dll.hipGraphAddExternalSemaphoresSignalNode).restype, hipGraphAddExternalSemaphoresSignalNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExternalSemaphoresSignalNodeSetParams(hipGraphNode_t hNode, const hipExternalSemaphoreSignalNodeParams *nodeParams)
 try: (hipGraphExternalSemaphoresSignalNodeSetParams:=dll.hipGraphExternalSemaphoresSignalNodeSetParams).restype, hipGraphExternalSemaphoresSignalNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExternalSemaphoresWaitNodeSetParams(hipGraphNode_t hNode, const hipExternalSemaphoreWaitNodeParams *nodeParams)
 try: (hipGraphExternalSemaphoresWaitNodeSetParams:=dll.hipGraphExternalSemaphoresWaitNodeSetParams).restype, hipGraphExternalSemaphoresWaitNodeSetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExternalSemaphoresSignalNodeGetParams(hipGraphNode_t hNode, hipExternalSemaphoreSignalNodeParams *params_out)
 try: (hipGraphExternalSemaphoresSignalNodeGetParams:=dll.hipGraphExternalSemaphoresSignalNodeGetParams).restype, hipGraphExternalSemaphoresSignalNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExternalSemaphoresWaitNodeGetParams(hipGraphNode_t hNode, hipExternalSemaphoreWaitNodeParams *params_out)
 try: (hipGraphExternalSemaphoresWaitNodeGetParams:=dll.hipGraphExternalSemaphoresWaitNodeGetParams).restype, hipGraphExternalSemaphoresWaitNodeGetParams.argtypes = hipError_t, [hipGraphNode_t, ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecExternalSemaphoresSignalNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipExternalSemaphoreSignalNodeParams *nodeParams)
 try: (hipGraphExecExternalSemaphoresSignalNodeSetParams:=dll.hipGraphExecExternalSemaphoresSignalNodeSetParams).restype, hipGraphExecExternalSemaphoresSignalNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipGraphExecExternalSemaphoresWaitNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode, const hipExternalSemaphoreWaitNodeParams *nodeParams)
 try: (hipGraphExecExternalSemaphoresWaitNodeSetParams:=dll.hipGraphExecExternalSemaphoresWaitNodeSetParams).restype, hipGraphExecExternalSemaphoresWaitNodeSetParams.argtypes = hipError_t, [hipGraphExec_t, hipGraphNode_t, ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)]
 except AttributeError: pass
 
-# hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t *phGraphNode, hipGraph_t hGraph, const hipGraphNode_t *dependencies, size_t numDependencies, const HIP_MEMSET_NODE_PARAMS *memsetParams, hipCtx_t ctx)
 try: (hipDrvGraphAddMemsetNode:=dll.hipDrvGraphAddMemsetNode).restype, hipDrvGraphAddMemsetNode.argtypes = hipError_t, [ctypes.POINTER(hipGraphNode_t), hipGraph_t, ctypes.POINTER(hipGraphNode_t), size_t, ctypes.POINTER(HIP_MEMSET_NODE_PARAMS), hipCtx_t]
 except AttributeError: pass
 
-# hipError_t hipMemAddressFree(void *devPtr, size_t size)
 try: (hipMemAddressFree:=dll.hipMemAddressFree).restype, hipMemAddressFree.argtypes = hipError_t, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# hipError_t hipMemAddressReserve(void **ptr, size_t size, size_t alignment, void *addr, unsigned long long flags)
 try: (hipMemAddressReserve:=dll.hipMemAddressReserve).restype, hipMemAddressReserve.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), size_t, size_t, ctypes.c_void_p, ctypes.c_uint64]
 except AttributeError: pass
 
-# hipError_t hipMemCreate(hipMemGenericAllocationHandle_t *handle, size_t size, const hipMemAllocationProp *prop, unsigned long long flags)
 try: (hipMemCreate:=dll.hipMemCreate).restype, hipMemCreate.argtypes = hipError_t, [ctypes.POINTER(hipMemGenericAllocationHandle_t), size_t, ctypes.POINTER(hipMemAllocationProp), ctypes.c_uint64]
 except AttributeError: pass
 
-# hipError_t hipMemExportToShareableHandle(void *shareableHandle, hipMemGenericAllocationHandle_t handle, hipMemAllocationHandleType handleType, unsigned long long flags)
 try: (hipMemExportToShareableHandle:=dll.hipMemExportToShareableHandle).restype, hipMemExportToShareableHandle.argtypes = hipError_t, [ctypes.c_void_p, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, ctypes.c_uint64]
 except AttributeError: pass
 
-# hipError_t hipMemGetAccess(unsigned long long *flags, const hipMemLocation *location, void *ptr)
 try: (hipMemGetAccess:=dll.hipMemGetAccess).restype, hipMemGetAccess.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(hipMemLocation), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipMemGetAllocationGranularity(size_t *granularity, const hipMemAllocationProp *prop, hipMemAllocationGranularity_flags option)
 try: (hipMemGetAllocationGranularity:=dll.hipMemGetAllocationGranularity).restype, hipMemGetAllocationGranularity.argtypes = hipError_t, [ctypes.POINTER(size_t), ctypes.POINTER(hipMemAllocationProp), hipMemAllocationGranularity_flags]
 except AttributeError: pass
 
-# hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp *prop, hipMemGenericAllocationHandle_t handle)
 try: (hipMemGetAllocationPropertiesFromHandle:=dll.hipMemGetAllocationPropertiesFromHandle).restype, hipMemGetAllocationPropertiesFromHandle.argtypes = hipError_t, [ctypes.POINTER(hipMemAllocationProp), hipMemGenericAllocationHandle_t]
 except AttributeError: pass
 
-# hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t *handle, void *osHandle, hipMemAllocationHandleType shHandleType)
 try: (hipMemImportFromShareableHandle:=dll.hipMemImportFromShareableHandle).restype, hipMemImportFromShareableHandle.argtypes = hipError_t, [ctypes.POINTER(hipMemGenericAllocationHandle_t), ctypes.c_void_p, hipMemAllocationHandleType]
 except AttributeError: pass
 
-# hipError_t hipMemMap(void *ptr, size_t size, size_t offset, hipMemGenericAllocationHandle_t handle, unsigned long long flags)
 try: (hipMemMap:=dll.hipMemMap).restype, hipMemMap.argtypes = hipError_t, [ctypes.c_void_p, size_t, size_t, hipMemGenericAllocationHandle_t, ctypes.c_uint64]
 except AttributeError: pass
 
-# hipError_t hipMemMapArrayAsync(hipArrayMapInfo *mapInfoList, unsigned int count, hipStream_t stream)
 try: (hipMemMapArrayAsync:=dll.hipMemMapArrayAsync).restype, hipMemMapArrayAsync.argtypes = hipError_t, [ctypes.POINTER(hipArrayMapInfo), ctypes.c_uint32, hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)
 try: (hipMemRelease:=dll.hipMemRelease).restype, hipMemRelease.argtypes = hipError_t, [hipMemGenericAllocationHandle_t]
 except AttributeError: pass
 
-# hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t *handle, void *addr)
 try: (hipMemRetainAllocationHandle:=dll.hipMemRetainAllocationHandle).restype, hipMemRetainAllocationHandle.argtypes = hipError_t, [ctypes.POINTER(hipMemGenericAllocationHandle_t), ctypes.c_void_p]
 except AttributeError: pass
 
-# hipError_t hipMemSetAccess(void *ptr, size_t size, const hipMemAccessDesc *desc, size_t count)
 try: (hipMemSetAccess:=dll.hipMemSetAccess).restype, hipMemSetAccess.argtypes = hipError_t, [ctypes.c_void_p, size_t, ctypes.POINTER(hipMemAccessDesc), size_t]
 except AttributeError: pass
 
-# hipError_t hipMemUnmap(void *ptr, size_t size)
 try: (hipMemUnmap:=dll.hipMemUnmap).restype, hipMemUnmap.argtypes = hipError_t, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t *resources, hipStream_t stream = 0)
 try: (hipGraphicsMapResources:=dll.hipGraphicsMapResources).restype, hipGraphicsMapResources.argtypes = hipError_t, [ctypes.c_int32, ctypes.POINTER(hipGraphicsResource_t), hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t *array, hipGraphicsResource_t resource, unsigned int arrayIndex, unsigned int mipLevel)
 try: (hipGraphicsSubResourceGetMappedArray:=dll.hipGraphicsSubResourceGetMappedArray).restype, hipGraphicsSubResourceGetMappedArray.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipGraphicsResource_t, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# hipError_t hipGraphicsResourceGetMappedPointer(void **devPtr, size_t *size, hipGraphicsResource_t resource)
 try: (hipGraphicsResourceGetMappedPointer:=dll.hipGraphicsResourceGetMappedPointer).restype, hipGraphicsResourceGetMappedPointer.argtypes = hipError_t, [ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t), hipGraphicsResource_t]
 except AttributeError: pass
 
-# hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t *resources, hipStream_t stream = 0)
 try: (hipGraphicsUnmapResources:=dll.hipGraphicsUnmapResources).restype, hipGraphicsUnmapResources.argtypes = hipError_t, [ctypes.c_int32, ctypes.POINTER(hipGraphicsResource_t), hipStream_t]
 except AttributeError: pass
 
-# hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource)
 try: (hipGraphicsUnregisterResource:=dll.hipGraphicsUnregisterResource).restype, hipGraphicsUnregisterResource.argtypes = hipError_t, [hipGraphicsResource_t]
 except AttributeError: pass
 
 class __hip_surface(Struct): pass
 hipSurfaceObject_t = ctypes.POINTER(__hip_surface)
-# hipError_t hipCreateSurfaceObject(hipSurfaceObject_t *pSurfObject, const hipResourceDesc *pResDesc)
 try: (hipCreateSurfaceObject:=dll.hipCreateSurfaceObject).restype, hipCreateSurfaceObject.argtypes = hipError_t, [ctypes.POINTER(hipSurfaceObject_t), ctypes.POINTER(hipResourceDesc)]
 except AttributeError: pass
 
-# hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject)
 try: (hipDestroySurfaceObject:=dll.hipDestroySurfaceObject).restype, hipDestroySurfaceObject.argtypes = hipError_t, [hipSurfaceObject_t]
 except AttributeError: pass
 
