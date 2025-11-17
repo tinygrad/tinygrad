@@ -1,5 +1,6 @@
-import ctypes, ctypes.util, functools, sys
+import ctypes, functools, sys
 from typing import TYPE_CHECKING, Any
+from tinygrad.helpers import findlib
 
 if TYPE_CHECKING: id_ = ctypes.c_void_p
 else:
@@ -19,7 +20,7 @@ else:
 
 def returns_retained(f): return functools.wraps(f)(lambda *args, **kwargs: f(*args, **kwargs).retained())
 
-lib = ctypes.CDLL(ctypes.util.find_library('objc'))
+lib = ctypes.CDLL(findlib('objc'))
 lib.sel_registerName.restype = id_
 getsel = functools.cache(lib.sel_registerName)
 lib.objc_getClass.restype = id_

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, ctypes.util, sysconfig
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -426,6 +426,26 @@ def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
   return CStruct
 def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
+
+def findlib(nm:str, extra_paths:list[str]=[], emsg="", env="") -> str:
+  # sometimes we find linker scripts
+  def is_lib(p):
+    if not p.is_file(): return False
+    if OSX: return True # frameworks are weird
+    try:
+      with open(p, 'rb') as f: return f.read(4) == b'\x7FELF'
+    except Exception: return False
+
+  libpaths = {"posix": ["/usr/lib", "/usr/local/lib"], "nt": os.environ['PATH'].split(os.pathsep), # os.name
+              "darwin": ["/opt/homebrew/lib"], 'linux': ['/lib', f"/lib/{sysconfig.get_config_var('MULTIARCH')}"]} # sys.platform
+  libnames = [f"lib{nm}.dylib", f"{nm}.dylib", f"{nm}.framework/{nm}"] if OSX else [f"{nm}.dll"] if WIN else [re.compile(f"lib{nm}\\.so\\.?[0-9]+")]
+  if not pathlib.Path(ret:=getenv(env or f"{nm.replace('-', '_').upper()}_PATH", '')).is_file():
+    for d, f in itertools.product(libpaths.get(os.name, []) + libpaths.get(sys.platform, []) + extra_paths, libnames):
+      if ret:=next((str(p) for p in pathlib.Path(d).iterdir() if (p.name==f if isinstance(f, str) else f.match(p.name)) and is_lib(p)), None): break
+    else: ret = ctypes.util.find_library(nm)
+  if ret is None: raise FileNotFoundError(f"failed to find library {nm}: " + (emsg or f"try setting {env or nm.upper()+'_PATH'}?"))
+  if DEBUG >= 3: print(f'Using {nm} at {repr(ret)}')
+  return ret
 
 # *** tqdm
 
