@@ -582,7 +582,7 @@ class AMDProgram(HCQProgram):
       cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
                                                           .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
       self.dev.allocator._copyout(pmc_buf:=memoryview(bytearray(self.dev.pmc_buffer.size)), self.dev.pmc_buffer)
-      Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.name, self.dev.pmc_sched, bytes(pmc_buf), self.dev.prof_exec_recs[-1][0])]
+      Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.name, self.dev.pmc_sched, bytes(pmc_buf), self.dev.prof_exec_counter)]
     if self.dev.sqtt_enabled:
       cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).sqtt_stop(self.dev.sqtt_wptrs) \
                                                           .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
@@ -602,7 +602,7 @@ class AMDProgram(HCQProgram):
         self.dev.allocator._copyout(sqtt_mv:=memoryview(bytearray(wptr)), buf)
         resbuf = (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + bytes(sqtt_mv)) if self.dev.target[0] == 9 else bytes(sqtt_mv)
         Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, self.name, se, resbuf, bool((SQTT_ITRACE_SE_MASK.value >> se) & 1),
-                                                     self.dev.prof_exec_recs[-1][0])]
+                                                     self.dev.prof_exec_counter)]
     return res
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
