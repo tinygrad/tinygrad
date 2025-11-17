@@ -161,9 +161,15 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
     need, ks, ox, os = set(three), [], [], []
     for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):
       for loop, red in ((a, b), (b, a)):  #could be made nicer with UPat
-        if red in need and loop.op is Ops.RANGE and loop not in need: ks.append(red); ox.append(loop); os.append(n); need.remove(red); break
+        if red in need and loop.op is Ops.RANGE and loop not in need:
+          ks.append(red)
+          ox.append(loop)
+          os.append(n)
+          need.remove(red)
+          break
     return ks, ox, os #we dont allow the case where output axes are shared between activations and weights
-  kL, oxl, oL = collect(lhs); kR, oxr, oR = collect(rhs)
+  kL, oxl, oL = collect(lhs)
+  kR, oxr, oR = collect(rhs)
   #identify activation and weight if they exist
   return (lhs, rhs, kL, oxl, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oxr, oR) if (len(kR) >= 2 and not oL) else None)
 
@@ -171,7 +177,8 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
   if not (g := winoguard(lhs, rhs, redu)): return None
   act_like, w_like, k_axes, o_axes, o_adds = g
-  reduce_ranges = list(redu.src[1:]); device = redu.device
+  reduce_ranges = list(redu.src[1:])
+  device = redu.device
   other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges]
   other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes]
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
@@ -186,7 +193,7 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
   # Transform weights: w_sub → GHAT with coalesced layout [6×6, cin, cout]
-  w_sub = w_like.substitute({k: r for k, r in zip(k_axes, kranges)})
+  w_sub = w_like.substitute(dict(zip(k_axes, kranges)))
   GHAT = winograd_kron(w_sub, winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
 
   # Hadamard multiply and reduce over cin - indexing matches coalesced buffer layouts
