@@ -41,6 +41,7 @@ class WaveExec:
   wave_id:int
   cu:int
   simd:int
+  se:int
   begin_time:int
   end_time:int
   insts:list[InstExec]
@@ -78,7 +79,8 @@ class _ROCParseCtx:
       if DEBUG >= 8: print(inst_execs[-1])
 
     if ev.instructions_size > 0:
-      self.inst_execs.setdefault(unwrap(self.active_kern), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, ev.begin_time, ev.end_time, inst_execs))
+      self.inst_execs.setdefault(unwrap(self.active_kern), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
+                                                                               ev.end_time, inst_execs))
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}

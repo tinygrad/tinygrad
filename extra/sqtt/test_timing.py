@@ -9,6 +9,7 @@ import unittest
 import sys, contextlib
 from tinygrad import Tensor
 from tinygrad.dtype import dtypes
+from tinygrad.helpers import getenv
 from tinygrad.renderer import ProgramSpec
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AddrSpace
 from tinygrad.engine.realize import CompiledRunner
@@ -119,6 +120,18 @@ class TestTiming(unittest.TestCase):
     wave = list(sqtt.values())[0][0]
     for e in wave.insts:
       print(f"{e.inst} {e.dur=} {e.stall=}")
+
+  def test_wave_sched(self):
+    num_waves = getenv("NUM_WAVES", 16)
+    num_wgps = getenv("NUM_WGPS", 2)
+    num_vgpr = getenv("NUM_VGPR", 256)
+    with save_sqtt() as sqtt:
+      # 1 cycle decode, no stall
+      asm_kernel([f"v_mov_b32_e32 v{i} {i}" for i in range(num_vgpr)], l=32*num_waves, g=num_wgps).realize()
+    waves = list(sqtt.values())[0]
+    print(len(waves), "waves decoded")
+    for w in waves:
+      print(f"{w.wave_id:<2} {w.simd=} {w.cu=} {w.se=} @ clk {w.begin_time}")
 
 if __name__ == "__main__":
   unittest.main()
