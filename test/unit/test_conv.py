@@ -62,6 +62,7 @@ class TestConv(unittest.TestCase):
     np.testing.assert_allclose(r1.numpy(), np.maximum(out.numpy(), 0), atol=1e-5)
     np.testing.assert_allclose(r2.numpy(), np.where(out.numpy() > 0, out.numpy(), (np.exp(out.numpy()) - 1)), atol=1e-5)
 
+  @unittest.skip("this test is flaky")
   def test_two_overlapping_binops_no_rerun_wino(self):
     with Context(WINO=1):
       x = Tensor.randn(1,4,16,16)

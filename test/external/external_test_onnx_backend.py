@@ -112,7 +112,6 @@ backend_test.exclude('test_dequantizelinear_e5m2_cpu')
 backend_test.exclude('test_dequantizelinear_float4e2m1_cpu')
 
 # we don't support indexes
-backend_test.exclude('test_nonzero_*')
 
 # no support for int pow
 backend_test.exclude('test_pow_types_int32_int32_cpu')

@@ -64,3 +64,5 @@ profile_stats
 target
 .mypy_cache
 winograd_investigation_reference
+mutants
+.mutmut-cache
