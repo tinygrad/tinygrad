@@ -92,7 +92,7 @@ def warp_perspective_numpy(src, M_inv, dst_shape):
     ones = np.ones_like(xs)
     dst_hom = np.stack([xs, ys, ones], axis=0).reshape(3, -1)
 
-    src_hom = M_inv @ dst_hom 
+    src_hom = M_inv @ dst_hom
     src_hom /= src_hom[2:3, :]
 
     src_x = np.clip(np.round(src_hom[0, :]).astype(int), 0, w_src - 1)
@@ -147,16 +147,20 @@ if __name__ == "__main__":
   # run 20 times
   step_times = []
   for _ in range(20):
-    
+
     # make inputs
-    img_inputs = [full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(), Tensor.randn(3,3).contiguous().realize()]
-    big_img_inputs = [big_full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(), Tensor.randn(3,3).contiguous().realize()]
+    img_inputs = [full_buffer,
+                  (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(),
+                  Tensor.randn(3,3).contiguous().realize()]
+    big_img_inputs = [big_full_buffer,
+                      (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(),
+                      Tensor.randn(3,3).contiguous().realize()]
     inputs = img_inputs + big_img_inputs
     Device.default.synchronize()
     inputs_np = [x.numpy() for x in inputs]
     inputs_np[0] = full_buffer_np
     inputs_np[3] = big_full_buffer_np
-    
+
     # do warp
     st = time.perf_counter()
     out = update_img_jit(*inputs)
@@ -176,3 +180,26 @@ if __name__ == "__main__":
       mismatch_percent = sum(mismatch.flatten()) / len(mismatch.flatten()) * 100
       mismatch_percent_tol = 1e-2
       assert mismatch_percent < mismatch_percent_tol, f"input mismatch percent {mismatch_percent} exceeds tolerance {mismatch_percent_tol}"
+
+
+
+  # Test saving and loading the compiled function
+  import pickle
+  WARP_PKL_PATH = '/tmp/warp_tinygrad.pkl'
+  pickle.dump(update_img_jit, open(WARP_PKL_PATH, "wb"))
+
+  from tinygrad.tensor import Tensor
+  
+  with open(WARP_PKL_PATH, "rb") as f:
+    update_imgs = pickle.load(f)
+
+  test_inputs_small = [Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize(),
+                       (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(),
+                       Tensor.randn(3,3).contiguous().realize()]
+  test_inputs_small2 = [Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize(),
+                        (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(),
+                        Tensor.randn(3,3).contiguous().realize()]
+  # test function before saving
+  out = update_img_jit(*(test_inputs_small + test_inputs_small2))
+  # test function after loading
+  out2 = update_imgs(*(test_inputs_small + test_inputs_small2))
