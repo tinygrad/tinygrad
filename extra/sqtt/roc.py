@@ -82,13 +82,13 @@ class _ROCParseCtx:
       self.inst_execs.setdefault(unwrap(self.active_kern), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
                                                                                ev.end_time, inst_execs))
 
-def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
+def decode(profile:list[ProfileEvent], kernel:str|None=None) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}
   sqtt_events:list[ProfileSQTTEvent] = []
   prog_events:list[ProfileProgramEvent] = []
   for e in profile:
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
-    if isinstance(e, ProfileSQTTEvent): sqtt_events.append(e)
+    if isinstance(e, ProfileSQTTEvent) and (kernel is None or e.kern == kernel): sqtt_events.append(e)
     if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD"): prog_events.append(e)
 
   ROCParseCtx = _ROCParseCtx(dev_events, sqtt_events, prog_events)
@@ -136,10 +136,11 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--kernel', type=str, help='Optionally specify a kernel for decoding', default=None)
   args = parser.parse_args()
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
-  rctx = decode(profile)
+  rctx = decode(profile, kernel=args.kernel)
   print('SQTT:', rctx.inst_execs.keys())
 
   for ev in profile:
